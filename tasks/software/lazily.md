@@ -473,6 +473,25 @@ The plan now contains seven repository-relative, zero-context diffs. All seven p
 The inventory confirms every remaining automated publish path uses a repository secret or OIDC and no workflow sources the root `.env`. It also records the existing broken root `instruction-files` path as a separate application gate, Bun/npm write-plus-2FA requirements, ignored-file handling, fake-publisher success/failure proofs, fresh-shell absence checks, asymmetric rollback, and per-repository commit recording.
 
 No `passage` command was evaluated, no credential value was printed, no publish was attempted, and application plus credential rotations remain operator-only.
+
+### Re: #lzdurableipgate — gpt-5 · 2026-09-25T15:54-04:00
+
+> **Queue prompt:**
+>
+> do [#lzdurableipgate]
+
+
+Recorded and committed the durable-runtime public-pattern and provenance gate in `tasks/software/plan-lazily-postgres-nats-valkey.md` (`ec25dba50`).
+
+The gate now cites official sources for Event Sourcing, CQRS, transactional outbox, transactional inbox/idempotent consumers, at-least-once delivery, JetStream ACK/redelivery, PostgreSQL queue claiming, transaction retry, locking, and crash-durability premises. The derived contract is explicit: commit the stable inbox identity, accepted transition, state/events, and outbox atomically; publish after commit; ACK only after the durable commit; and absorb redelivery through the committed identity/outcome.
+
+The PostgreSQL plan no longer overclaims `SKIP LOCKED`: it is an inconsistent-view contention primitive, not FIFO, completeness, a durable lease, or exactly-once. Durable claims/fences must be persisted separately; ordering needs a unique tiebreaker; lock waits and retries are bounded; and commit-before-ACK crash safety requires logged authority tables, `fsync=on`, and `synchronous_commit` not `off`.
+
+The license intake records current and candidate platform/client licenses without selecting a client. A fresh locked all-features metadata check resolved 354 packages, 25 distinct license expressions, and zero missing declarations; none of the planned Postgres/NATS/Valkey client families is present yet. The plan requires a machine-readable transitive inventory on the first durable dependency change and flags the unresolved Apache-2.0 family-direction versus mixed current metadata before durable publication.
+
+Independent authorship and exclusions are now mandatory: synthetic names/values only; no Haiven names, schemas, events, policies, incidents, fixtures, credentials, logs, or code; no third-party source used as transformation input; and per-change provenance plus license deltas.
+
+The public-source/provenance record is complete, but employer-related implementation remains externally gated. No written boundary is recorded in this public repository. The plan now requires a private agreement plus a public-safe attestation containing date, authority, scope, private reference, and digest before such work begins. The review gate itself records that condition, so no additional backlog follow-up is needed.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -482,7 +501,7 @@ No `passage` command was evaluated, no credential value was printed, no publish 
 - ~~⏭️ do [#lzktbindpending]~~
 - ~~do [#lzmiseusepatch]~~
 - ~~do [#lzsimlicense]: use Apache2 across all Lazily packages.~~
-- do [#lzdurableipgate]
+- ~~do [#lzdurableipgate]~~
 - do [#lzdurablespec]
 - do [#lzdurablepg]
 - do [#lzdurablejetstream]
@@ -497,7 +516,6 @@ No `passage` command was evaluated, no credential value was printed, no publish 
 - [ ] [#lzprojectionracecorpus] [lazily-go,simulation][blocked-by:lzprojectionbarrier] Extend SimConsumerTestkit with an independently authored, generic projection-maintenance history family: materialized append/amend/retract events interleaved with full rebuild, bounded lock timeout, retry, cancellation, and crash windows. Reuse one production reducer across an in-memory reference adapter and an explicitly selected real PostgreSQL adapter; causally shrink failures and assert no accepted update is lost plus final complete-history replay equivalence. Derive techniques only from cited public primary sources such as official Go fuzzing and PostgreSQL documentation; use synthetic nouns and exclude all consumer names, schemas, events, policies, incidents, data, fixtures, and code.
 - [ ] [#lzconcurrencyscope] [lazily-go,lazily-spec] Make concurrency scope explicit and machine-checkable across Lazily surfaces: classify single-goroutine, single-process lock/channel serialized, durable cross-process, and distributed/fenced capabilities; document that ThreadSafeContext, AsyncContext, queues, and the in-memory LatestDurableProjection core do not provide database atomicity or cross-replica exclusion; and add negative conformance tests that prevent an in-process capability from being advertised as a projection-maintenance barrier. Use independently authored neutral examples and public Go/PostgreSQL terminology only.
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
-- [ ] [#lzdurableipgate] [lazily family] Before durable-runtime implementation, record the public-pattern and provenance gate for tasks/software/plan-lazily-postgres-nats-valkey.md: cite Event Sourcing and CQRS, transactional inbox/outbox, idempotent consumers, at-least-once delivery, Postgres queue claiming, and JetStream ACK/redelivery semantics from public primary or official sources; inventory dependency licenses; require independently authored Lazily APIs and conformance fixtures; exclude Haiven names, schemas, events, policies, incidents, and code; and obtain the written prior-work and employer boundary described by the plan before employer-related implementation.
 - [ ] [#lzdurablespec] [lazily-spec, lazily-rs] Implement Phase 0 of tasks/software/plan-lazily-postgres-nats-valkey.md: backend-neutral durable-owner contracts for ordered event history or snapshot state, monotonic positions, optimistic fencing, schema and codec versions, inbox identities, outbox effect identities, and durable receipts. Add canonical crash, replay, deduplication, and projection-fingerprint fixtures, and explicitly distinguish complete-history projections from LatestDurableProjection conflation.
 - [ ] [#lzdurablepg] [lazily-rs] Implement the Rust reference Postgres durable host from tasks/software/plan-lazily-postgres-nats-valkey.md: one transaction claims the inbox identity and persists accepted events or state, projection version, outbox intents, timer changes, fences, and local receipts; relay workers claim rows with FOR UPDATE SKIP LOCKED. Prove rollback, serialization retry, crash-after-commit-before-ACK, publish-before-receipt retry, stable idempotency, and full history rebuild with deterministic integration tests.
 - [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, stable publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.
@@ -508,6 +526,7 @@ No `passage` command was evaluated, no credential value was printed, no publish 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzdurableipgate] [lazily family] Before durable-runtime implementation, record the public-pattern and provenance gate for tasks/software/plan-lazily-postgres-nats-valkey.md: cite Event Sourcing and CQRS, transactional inbox/outbox, idempotent consumers, at-least-once delivery, Postgres queue claiming, and JetStream ACK/redelivery semantics from public primary or official sources; inventory dependency licenses; require independently authored Lazily APIs and conformance fixtures; exclude Haiven names, schemas, events, policies, incidents, and code; and obtain the written prior-work and employer boundary described by the plan before employer-related implementation.
 - [/] [#lzmacosrunner] [operator-decision, lazily-py/agent-doc] Billing audit found no cost-saving requirement: public standard macOS runner gross usage is fully discounted and billed zero. Keep hosted runners by default. Never remove the macOS deliverables: any local replacement must reproduce both agent-doc Darwin archives and the lazily-py macOS wheels before hosted macOS jobs are removed. If local control, gross-meter reduction, or runner availability is still desired, prefer SSH-driven builds; blocked until the operator provides the Mac hostname/IP, SSH username, architecture, and dedicated build-account confirmation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Existing 3,304 nonexpired Actions artifacts total about 53.5 GB and continue accruing storage cost until expiry or deletion. New transient release/wheel artifacts now retain for one day in agent-doc 9fbda092c. NEXT: authorize deletion of old Actions artifacts after verifying durable GitHub Release and PyPI copies; destructive cleanup was not performed in this cycle.

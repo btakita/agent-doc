@@ -555,13 +555,31 @@ Implemented and published the Rust reference PostgreSQL durable host in `lazily-
 - Added an isolated local PostgreSQL test harness plus `make check` and hosted-CI wiring, including the exact CI-reachability pins.
 
 Verification is green: focused PostgreSQL integration tests, all-features clippy, the complete `make check` matrix, and hosted CI run `36198963519` all passed. Commit `e093e32` (`feat: add Postgres durable owner host`) is pushed to `lazily-rs/main`.
+
+### Re: #lzprojectionbarrier — gpt-5 · 2026-09-25T20:37:24-04:00
+
+> **Queue prompt:**
+>
+> do [#lzprojectionbarrier]
+
+
+Implemented and published the generic PostgreSQL projection-maintenance barrier in `lazily-go`.
+
+- Added the explicit `DatabaseProjectionMaintenanceBarrier` capability and `PostgresProjectionBarrier`, backed by ordered transaction-scoped advisory locks. `ThreadSafeLatestDurableProjection` and `AsyncLatestDurableProjection` intentionally do not satisfy the capability.
+- Added transaction-local `lock_timeout`, context cancellation, bounded complete-transaction retries for SQLSTATE `40001` and `40P01`, and typed timeout/retry exhaustion errors.
+- Added `MaintainPostgresProjection`, whose typed scan and replacement callbacks execute inside one `SERIALIZABLE` transaction and are both rerun after serialization failure.
+- Documented the choice among table locks, transaction-scoped advisory locks, and `SERIALIZABLE` retry using only PostgreSQL's official [explicit-locking](https://www.postgresql.org/docs/current/explicit-locking.html), [`LOCK TABLE`](https://www.postgresql.org/docs/current/sql-lock.html), [transaction-isolation](https://www.postgresql.org/docs/current/transaction-iso.html), and [`lock_timeout`](https://www.postgresql.org/docs/current/runtime-config-client.html) documentation.
+- Added deterministic real-PostgreSQL tests with separate connection pools and barrier hosts proving ordered multi-key acquisition, one-transaction scan-and-replace, no lost accepted source write across a concurrent rebuild, bounded lock timeout, cancellation, and whole-callback retry after a real `40001`.
+- Added the isolated local PostgreSQL harness, `make check` gate, hosted PostgreSQL service, and exact CI-reachability pin.
+
+Verification passed with the focused PostgreSQL suite, the exact Go 1.24 toolchain compile, and the complete `make check` matrix (format, vet, build, tests, race detector, interop, conformance, ordering, and reachability). Commit `ade9169` (`feat: add Postgres projection barrier`) is pushed to `lazily-go/main`; hosted CI run `36205518626` was queued at closeout.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzprojectionbarrier]
+- ~~do [#lzprojectionbarrier]~~
 - do [#lzprojectionracecorpus]
 - do [#lzconcurrencyscope]
 - do [#lzsimlicense]
@@ -574,7 +592,6 @@ Verification is green: focused PostgreSQL integration tests, all-features clippy
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzprojectionbarrier] [lazily-go,postgres][blocked-by:lzdurablepg] Specify and implement a generic database-owned projection-maintenance barrier using only independently authored APIs and the official PostgreSQL explicit-locking, transaction-isolation, lock_timeout, and advisory-lock documentation as conceptual sources. Compare table locks, transaction-scoped advisory locks, and SERIALIZABLE retry; require documented lock ordering, bounded wait/cancellation, one-transaction scan-and-replace semantics, and two-connection plus multi-host conformance proving accepted source writes are never lost. In-process ThreadSafe/Async primitives must not satisfy this capability. Use only synthetic projection names and values.
 - [ ] [#lzprojectionracecorpus] [lazily-go,simulation][blocked-by:lzprojectionbarrier] Extend SimConsumerTestkit with an independently authored, generic projection-maintenance history family: materialized append/amend/retract events interleaved with full rebuild, bounded lock timeout, retry, cancellation, and crash windows. Reuse one production reducer across an in-memory reference adapter and an explicitly selected real PostgreSQL adapter; causally shrink failures and assert no accepted update is lost plus final complete-history replay equivalence. Derive techniques only from cited public primary sources such as official Go fuzzing and PostgreSQL documentation; use synthetic nouns and exclude all consumer names, schemas, events, policies, incidents, data, fixtures, and code.
 - [ ] [#lzconcurrencyscope] [lazily-go,lazily-spec] Make concurrency scope explicit and machine-checkable across Lazily surfaces: classify single-goroutine, single-process lock/channel serialized, durable cross-process, and distributed/fenced capabilities; document that ThreadSafeContext, AsyncContext, queues, and the in-memory LatestDurableProjection core do not provide database atomicity or cross-replica exclusion; and add negative conformance tests that prevent an in-process capability from being advertised as a projection-maintenance barrier. Use independently authored neutral examples and public Go/PostgreSQL terminology only.
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.

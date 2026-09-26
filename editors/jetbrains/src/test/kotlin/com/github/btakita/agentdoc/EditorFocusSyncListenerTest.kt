@@ -8,7 +8,7 @@ import java.nio.file.Paths
 
 class EditorFocusSyncListenerTest {
     @Test
-    fun `split editor activation is driven by mouse presses as well as focus gained`() {
+    fun `split editor activation observes mouse and global focus ingress`() {
         val listenerPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorFocusSyncListener.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorFocusSyncListener.kt"),
@@ -21,8 +21,17 @@ class EditorFocusSyncListenerTest {
         assertTrue(listener.contains("factory.eventMulticaster.addEditorMouseListener(mouseListener, this)"))
         assertTrue(listener.contains("if (editor.project != project) return"))
         assertTrue(!listener.contains("editorEx.addEditorMouseListener"))
-        assertTrue(listener.contains("AWTEvent.MOUSE_EVENT_MASK"))
+        assertTrue(
+            listener.contains("AWTEvent.MOUSE_EVENT_MASK or AWTEvent.FOCUS_EVENT_MASK"),
+        )
+        assertTrue(listener.contains("is FocusEvent"))
+        assertTrue(listener.contains("event.id != FocusEvent.FOCUS_GAINED"))
         assertTrue(listener.contains("SwingUtilities.isDescendingFrom(component, root)"))
+        assertTrue(
+            listener.contains("FileEditorManagerEx.getInstanceEx(project).splitters as? Container"),
+        )
+        assertTrue(listener.contains("KeyboardFocusManager.getCurrentKeyboardFocusManager()"))
+        assertTrue(listener.contains("permanentFocusOwner"))
         assertTrue(listener.contains("IdeFocusManager.getInstance(project).doWhenFocusSettlesDown"))
         assertTrue(!listener.contains("scheduleNextEdt"))
         assertTrue(listener.contains("removeAWTEventListener(editorTreeMouseListener)"))

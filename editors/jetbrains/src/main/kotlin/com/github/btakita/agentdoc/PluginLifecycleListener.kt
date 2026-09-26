@@ -69,7 +69,10 @@ class PluginLifecycleListener : ProjectManagerListener {
                 FileEditorManagerListener.FILE_EDITOR_MANAGER,
                 editorTabSync,
         )
-        editorTabSync.onEditorLayoutChanged(project)
+        // Install focus ingress before seeding the already-selected split. Dynamic reload and
+        // project startup do not replay the event that selected it.
+        EditorFocusSyncListener.install(project, editorTabSync)
+        editorTabSync.onIdeActivated(project)
         // An i3 workspace switch can recreate or resize the embedded terminal surface without
         // changing editor selection/layout. Republish the settled editor surface when this IDE
         // frame becomes active so the normal controller projection repairs tmux automatically.
@@ -89,7 +92,6 @@ class PluginLifecycleListener : ProjectManagerListener {
         // Drive tmux pane focus on split-editor focus changes (#panefocussplit):
         // selectionChanged does not fire for focus movement between existing
         // splits, so this reuses editorTabSync's reconcile from focus events.
-        EditorFocusSyncListener.install(project, editorTabSync)
         // Mirror Project Controller-owned tmux focus back into editor selection.
         // TmuxPaneFocusSync keeps an actually focused editor authoritative, permits
         // embedded-terminal focus changes, and suppresses hidden cross-root targets.

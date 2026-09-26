@@ -21,6 +21,7 @@ import com.intellij.openapi.wm.WindowManager
 import java.awt.AWTEvent
 import java.awt.Component
 import java.awt.Container
+import java.awt.KeyboardFocusManager
 import java.awt.Toolkit
 import java.awt.event.AWTEventListener
 import java.awt.event.FocusEvent
@@ -119,10 +120,27 @@ class EditorFocusSyncListener private constructor(
 
     private val editorTreeMouseListener = AWTEventListener { event ->
         if (disposed.get() || project.isDisposed) return@AWTEventListener
-        val mouseEvent = event as? MouseEvent ?: return@AWTEventListener
-        if (mouseEvent.id != MouseEvent.MOUSE_PRESSED) return@AWTEventListener
-        val component = mouseEvent.source as? Component ?: return@AWTEventListener
-        val root = editorsRoot.get() ?: return@AWTEventListener
+        val component =
+            when (event) {
+                is MouseEvent -> {
+                    if (event.id != MouseEvent.MOUSE_PRESSED) return@AWTEventListener
+                    event.source as? Component
+                }
+
+                is FocusEvent -> {
+                    if (event.id != FocusEvent.FOCUS_GAINED) return@AWTEventListener
+                    event.component
+                }
+
+                else -> null
+            } ?: return@AWTEventListener
+        // Editor splitters can be replaced while restoring a layout or reloading the plugin.
+        // Resolve the current tree at the event edge instead of trusting the startup component.
+        val root =
+            (FileEditorManagerEx.getInstanceEx(project).splitters as? Container)
+                ?: editorsRoot.get()
+                ?: return@AWTEventListener
+        editorsRoot.set(root)
         val belongsToEditorTree =
             component === root || SwingUtilities.isDescendingFrom(component, root)
         settledTreeFocusProbe.observeMousePress(belongsToEditorTree)
@@ -167,8 +185,20 @@ class EditorFocusSyncListener private constructor(
             editorsRoot.set(root)
             if (listenerInstalled.compareAndSet(false, true)) {
                 Toolkit.getDefaultToolkit()
-                    .addAWTEventListener(editorTreeMouseListener, AWTEvent.MOUSE_EVENT_MASK)
+                    .addAWTEventListener(
+                        editorTreeMouseListener,
+                        AWTEvent.MOUSE_EVENT_MASK or AWTEvent.FOCUS_EVENT_MASK,
+                    )
             }
+            // Hot reload and project startup do not replay the focus event that established the
+            // already-selected split. Seed that existing focus through the same settled,
+            // generation-fenced ingress instead of waiting for the operator to click again.
+            val focusOwner =
+                KeyboardFocusManager.getCurrentKeyboardFocusManager().permanentFocusOwner
+            settledTreeFocusProbe.observeMousePress(
+                focusOwner != null &&
+                    (focusOwner === root || SwingUtilities.isDescendingFrom(focusOwner, root)),
+            )
         }
         if (SwingUtilities.isEventDispatchThread()) {
             attach.run()

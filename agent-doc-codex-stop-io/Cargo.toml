@@ -14,6 +14,7 @@ name = "agent_doc_codex_stop_io"
 agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.418" }
 agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.35.418" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.418" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.418" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.418" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.418" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.418" }
@@ -32,6 +33,7 @@ agent-doc-repair-runtime-io = { path = "../agent-doc-repair-runtime-io", version
 agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.418" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.418" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.35.418" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.418" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.418" }
 agent-doc-write-runtime-io = { path = "../agent-doc-write-runtime-io", version = "0.35.418" }
 anyhow = "1"

@@ -1305,15 +1305,33 @@ requiredFocusGeneration = requestedFocusGeneration,
      * window may have been rebuilt while the IDE was hidden.
      */
     fun onIdeActivated(project: Project) {
-        log("ideActivated: settled surface projection queued")
-        requestObservation(
-            PendingSurfaceObservation(
-                project = project,
-                preferredFile = null,
-                forceReconcile = false,
-                authority = ObservationAuthority.IdeActivation,
-            ),
-        )
+        val activationGeneration = selectionFocusProbeGeneration.incrementAndGet()
+        IdeFocusManager.getInstance(project).doWhenFocusSettlesDown {
+            if (closed || project.isDisposed) return@doWhenFocusSettlesDown
+            if (selectionFocusProbeGeneration.get() != activationGeneration) {
+                return@doWhenFocusSettlesDown
+            }
+            val selectedFile =
+                FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile
+            if (
+                WindowManager.getInstance().getFrame(project)?.isActive == true &&
+                    selectedFile != null &&
+                    AgentDocSessionFiles.isSessionDocument(selectedFile)
+            ) {
+                log("ideActivated: selected session file=${selectedFile.name}; focus projection queued")
+                onEditorFocusGained(project, selectedFile)
+                return@doWhenFocusSettlesDown
+            }
+            log("ideActivated: settled surface projection queued")
+            requestObservation(
+                PendingSurfaceObservation(
+                    project = project,
+                    preferredFile = null,
+                    forceReconcile = false,
+                    authority = ObservationAuthority.IdeActivation,
+                ),
+            )
+        }
     }
 
     /**

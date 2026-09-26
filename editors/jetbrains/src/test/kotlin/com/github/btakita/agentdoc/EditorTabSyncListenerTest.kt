@@ -1198,4 +1198,24 @@ previousSelectionPath = "/repo/tasks/tsift.md",
             )
         }
     }
+
+    @Test
+    fun `IDE activation promotes the selected session document to explicit focus`() {
+        val sourcePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(sourcePath)
+        val activation =
+            source.substringAfter("fun onIdeActivated(project: Project)")
+                .substringBefore("fun onEditorFocusGained")
+
+        assertTrue(activation.contains("doWhenFocusSettlesDown"))
+        assertTrue(activation.contains("activationGeneration"))
+        assertTrue(activation.contains("selectionFocusProbeGeneration.get() != activationGeneration"))
+        assertTrue(activation.contains("currentWindow?.selectedFile"))
+        assertTrue(activation.contains("getFrame(project)?.isActive == true"))
+        assertTrue(activation.contains("AgentDocSessionFiles.isSessionDocument(selectedFile)"))
+        assertTrue(activation.contains("onEditorFocusGained(project, selectedFile)"))
+    }
 }

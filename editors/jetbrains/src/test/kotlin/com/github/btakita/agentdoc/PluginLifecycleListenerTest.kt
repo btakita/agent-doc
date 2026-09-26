@@ -8,6 +8,19 @@ import java.nio.file.Paths
 import org.junit.Test
 
 class PluginLifecycleListenerTest {
+    @Test
+    fun `startup installs focus ingress before seeding selected editor focus`() {
+        val sourcePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(sourcePath)
+        val install = source.indexOf("EditorFocusSyncListener.install(project, editorTabSync)")
+        val seed = source.indexOf("editorTabSync.onIdeActivated(project)")
+
+        assertTrue(install >= 0)
+        assertTrue(seed > install)
+    }
 
     @Test
     fun `startup does not run automatic resync audit`() {

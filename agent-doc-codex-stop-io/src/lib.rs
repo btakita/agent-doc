@@ -110,6 +110,27 @@ enum StopCloseAttempt {
     NotPossible,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StopPaneIdentity {
+    Ambient,
+    AuthoritativeActor(String),
+}
+
+fn stop_pane_identity(
+    identity_origin: agent_doc_codex_hook_io::SessionIdentityOrigin,
+    actor: Option<&agent_doc_controller::actor::ActorRecord>,
+) -> StopPaneIdentity {
+    if identity_origin != agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook {
+        return StopPaneIdentity::Ambient;
+    }
+    match actor {
+        Some(actor) if actor.state != agent_doc_controller::actor::ActorState::Closed => {
+            StopPaneIdentity::AuthoritativeActor(actor.pane_id.clone())
+        }
+        _ => StopPaneIdentity::Ambient,
+    }
+}
+
 /// Inner wall-clock budget for one Codex Stop hook invocation.
 ///
 /// The route-owned supervisor owns long-lived closeout retries. A hook is an
@@ -461,34 +482,69 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         return Ok(StopResponse::Continue { continue_: true });
     }
 
+    // Codex runs hooks from its harness hook executor. That executor can carry the tmux pane
+    // currently active in the shared window rather than the pane that owns this exact Codex
+    // thread. The hook binding has already identified the document; delegate the remaining
+    // status/closeout effect to its authoritative actor just like a controller-owned effect.
+    // `pane_execution_authority` still re-proves pane liveness and exact process ownership at
+    // every mutation boundary, so a stale or foreign actor remains fail-closed.
+    let project_root = agent_doc_project_root_io::project_root_containing(&file);
+    let actor = project_root
+        .as_deref()
+        .map(|root| {
+            agent_doc_controller_io::project_controller::authoritative_actor_binding(root, &file)
+        })
+        .transpose()?
+        .flatten();
+    if let StopPaneIdentity::AuthoritativeActor(pane_id) =
+        stop_pane_identity(state.identity_origin, actor.as_ref())
+    {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "codex_stop_actor_identity_bound pane={} source=exact_thread_document_actor",
+                pane_id
+            ),
+        );
+        return agent_doc_tmux_io::with_current_pane_id_override(&pane_id, || {
+            apply_bound_stop(input, &loaded_root, &state, &file, &cleanup_roots)
+        });
+    }
+
+    apply_bound_stop(input, &loaded_root, &state, &file, &cleanup_roots)
+}
+
+fn apply_bound_stop(
+    input: &StopInput,
+    loaded_root: &Path,
+    state: &SessionState,
+    file: &Path,
+    cleanup_roots: &[PathBuf],
+) -> Result<StopResponse> {
     stop_phase("session_check_inspect");
     match agent_doc_session_check_io::inspect(
-        &file,
+        file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )? {
         agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {
             stop_phase("auto_queue_continuation");
-            if let Some(response) = auto_queue_continuation_response(
-                &file,
-                &cleanup_roots,
-                &loaded_root,
-                &state,
-                input,
-            )? {
+            if let Some(response) =
+                auto_queue_continuation_response(file, cleanup_roots, loaded_root, state, input)?
+            {
                 return Ok(response);
             }
             stop_phase("active_session_prompt_writeback");
             if let Some(response) = active_session_prompt_requires_writeback(
-                &file,
-                &cleanup_roots,
-                &loaded_root,
-                &state,
+                file,
+                cleanup_roots,
+                loaded_root,
+                state,
                 input,
             )? {
                 return Ok(response);
             }
             stop_phase("settle_session_binding");
-            settle_session_binding(&file, &cleanup_roots, &loaded_root, &state)?;
+            settle_session_binding(file, cleanup_roots, loaded_root, state)?;
             Ok(StopResponse::Continue { continue_: true })
         }
         agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
@@ -504,14 +560,11 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             // existing keyed capture here as the version-independent liveness
             // boundary; strict repair preserves editor authority and never
             // recaptures or elects force-disk.
-            if try_resume_captured_finalize_in_hook(&file) {
+            if try_resume_captured_finalize_in_hook(file) {
                 return apply_stop(input);
             }
             if binary_owned_closeout_pending {
-                agent_doc_ops_log_io::log_op(
-                    &file,
-                    "codex_stop_binary_owned_closeout_pending",
-                );
+                agent_doc_ops_log_io::log_op(file, "codex_stop_binary_owned_closeout_pending");
                 let display = file.display();
                 let message = format!(
                     "agent-doc Stop hook found a binary-owned closeout still converging for {display}. {reason} The captured response is retained and the agent-doc binary/supervisor owns the keyed editor/CRDT retry and terminal commit. Do not recapture the response, rerun finalize, kill the controller, or use `--force-disk`; only re-check session status after the binary reports recovery, unless it explicitly reports `needs_operator`. Do not send the final answer yet."
@@ -535,7 +588,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             // reopen/capture/closeout path as the first Stop invocation.
             let recursive_post_commit_prompt = input.stop_hook_active
                 && is_committed_prompt_diff_interruption(&reason)
-                && agent_doc_flow_io::closeout::cycle_already_committed(&file).is_some()
+                && agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
                 && matches!(
                     agent_doc_template::replay_guard::classify_replay_payload(
                         &input.last_assistant_message
@@ -543,11 +596,11 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
                     agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
                 );
             if !input.stop_hook_active || recursive_post_commit_prompt {
-                let stop_closeout = match attempt_stop_closeout(&file, &state, input) {
+                let stop_closeout = match attempt_stop_closeout(file, state, input) {
                     Ok(stop_closeout) => stop_closeout,
                     Err(err) => {
                         agent_doc_ops_log_io::log_op(
-                            &file,
+                            file,
                             &format!("codex_stop_auto_close_failed err={err}"),
                         );
                         return Ok(StopResponse::Block {
@@ -565,20 +618,20 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
                     StopCloseAttempt::Closed => {
                         if recursive_post_commit_prompt {
                             agent_doc_ops_log_io::log_op(
-                                &file,
+                                file,
                                 "codex_stop_post_commit_prompt_auto_closed source=recursive_stop",
                             );
                         }
                         if let Some(response) = auto_queue_continuation_response(
-                            &file,
-                            &cleanup_roots,
-                            &loaded_root,
-                            &state,
+                            file,
+                            cleanup_roots,
+                            loaded_root,
+                            state,
                             input,
                         )? {
                             return Ok(response);
                         }
-                        settle_session_binding(&file, &cleanup_roots, &loaded_root, &state)?;
+                        settle_session_binding(file, cleanup_roots, loaded_root, state)?;
                         return Ok(StopResponse::Continue { continue_: true });
                     }
                     StopCloseAttempt::StillOpen { note } => {
@@ -601,11 +654,11 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             let capture_note = if input.stop_hook_active {
                 String::new()
             } else {
-                capture_assistant_text(&file, &state, input)
+                capture_assistant_text(file, state, input)
             };
             let display = file.display();
             if input.stop_hook_active {
-                if let Some(response) = committed_prompt_diff_stop_response(&file, &reason)? {
+                if let Some(response) = committed_prompt_diff_stop_response(file, &reason)? {
                     return Ok(response);
                 }
                 return Ok(StopResponse::Stop {
@@ -1801,6 +1854,66 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn actor(
+        state: agent_doc_controller::actor::ActorState,
+    ) -> agent_doc_controller::actor::ActorRecord {
+        agent_doc_controller::actor::ActorRecord {
+            document_id: "doc".to_string(),
+            session_id: "session".to_string(),
+            generation: 7,
+            pane_id: "%218".to_string(),
+            window_id: "@0".to_string(),
+            harness: "codex".to_string(),
+            state,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "test".to_string(),
+                timestamp: 1,
+                prior_generation: 6,
+                new_generation: 7,
+            },
+        }
+    }
+
+    #[test]
+    fn harness_stop_uses_the_non_closed_document_actor_identity() {
+        let actor = actor(agent_doc_controller::actor::ActorState::Ready);
+        assert_eq!(
+            stop_pane_identity(
+                agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+                Some(&actor),
+            ),
+            StopPaneIdentity::AuthoritativeActor("%218".to_string()),
+        );
+    }
+
+    #[test]
+    fn stop_actor_delegation_stays_closed_for_external_or_closed_bindings() {
+        let ready = actor(agent_doc_controller::actor::ActorState::Ready);
+        let closed = actor(agent_doc_controller::actor::ActorState::Closed);
+        assert_eq!(
+            stop_pane_identity(
+                agent_doc_codex_hook_io::SessionIdentityOrigin::ExternalPrompt,
+                Some(&ready),
+            ),
+            StopPaneIdentity::Ambient,
+        );
+        assert_eq!(
+            stop_pane_identity(
+                agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+                Some(&closed),
+            ),
+            StopPaneIdentity::Ambient,
+        );
+        assert_eq!(
+            stop_pane_identity(
+                agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+                None,
+            ),
+            StopPaneIdentity::Ambient,
+        );
+    }
 
     /// `#loopreentrynoop`: the continuation instruction must remain actionable
     /// after the first iteration.

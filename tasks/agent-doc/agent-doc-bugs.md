@@ -451,6 +451,33 @@ Fix agent-doc root causes of devops.md. Note that devops.md had recently Claim F
 `agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`
 
 Run it from the owning pane `%215`.
+
+### Re: Response
+
+Implemented, verified, installed, committed, and pushed the pane/session/runtime fixes.
+
+The runtime now handles the reported failure classes as follows:
+
+- Stale inherited tmux identities are validated before admission. A daemon carrying the replaced pane `%195` no longer overrides the live document owner `%215`, and a refused preflight binding cannot leak into later Stop-hook work.
+- Tmux auto-focus now requires current process-tree proof for actor and registry candidates. A stale but still-focusable actor can no longer move the client to the wrong pane.
+- Ctrl+D continuation now resumes the exact document conversation instead of creating a fresh session. Ctrl+C remains the explicit fresh-restart path.
+- Recursive Codex Stop handling now reopens and closes fresh post-commit prompt work through the binary-owned path. It no longer instructs `finalize` to operate on a terminal predecessor.
+- Foreground writes now consume the controller's exact cross-process visible-delivery receipt. The receipt includes the target content hash and strict projection bit, so editor-backed writes such as the reported `devops.md` operation complete instead of returning a false retained-write error after convergence; stale receipts cannot authorize a newer write.
+- The retained-write ownership classifier no longer labels a converging binary-owned write as stranded when a live owner still exists.
+
+The live document cases were repaired without forcing or stealing their sessions:
+
+- `tasks/devops.md`: cycle `cycle-1790384186614` is committed, `#wayfixroot` is reaped, and editor/disk authority converges.
+- `src/haiven-dev/tasks/api.md`: the historical, already-completed `#review` item was restored, marked done, and archived. Preflight admission now succeeds; review of PR #567 remains the legitimate current prompt.
+- `tasks/agent-doc/agent-doc-bugs.md`: the old interrupted cycle is terminal, and this response is being closed through the live owner pane rather than claiming or moving it.
+
+Verification:
+
+- Focused regressions pass for stale-pane focus rejection, exact controller delivery receipts, recursive Stop reopen/closeout, Ctrl+D exact resume, and pane authority.
+- Full `make check` passed.
+- `make install` passed and installed agent-doc 0.35.418 plus the current native/editor integrations.
+- Source commits `f6afa6491` (`fix: recover pane and session continuity`) and `9d705fd0c` (`fix: settle recursive hooks and editor receipts`) are pushed to `origin/main`.
+- The one-shot post-push CI query found no run registered yet for `9d705fd0c`; local verification is complete.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

@@ -2445,7 +2445,20 @@ pub fn detect_orchestration_request(diff: &str) -> Option<OrchestrationRequest> 
             continue;
         }
 
-        let trigger_lines: Vec<&str> = block
+        // A batch directive PRECEDES the list it governs. Prose that FOLLOWS the
+        // list is commentary about the work, not an instruction on how to run it.
+        // Scanning the whole block let a pasted status report whose narrative
+        // happened to mention "a concurrent Codex session" resolve as
+        // `--mode parallel`, and `plan` then emitted that fan-out as a required
+        // command: three quoted diff lines became three git worktrees and three
+        // `claude -p` panes. Only the preamble is a batch-level instruction.
+        let Some(first_task_index) = block
+            .iter()
+            .position(|line| parse_markdown_list_item(line).is_some())
+        else {
+            continue;
+        };
+        let trigger_lines: Vec<&str> = block[..first_task_index]
             .iter()
             .map(|line| line.trim())
             .filter(|line| !line.is_empty() && parse_markdown_list_item(line).is_none())
@@ -2936,7 +2949,10 @@ fn detect_orchestration_mode(text: &str) -> Option<OrchestrationRequestMode> {
         &lower,
         &[
             "fan out",
-            "concurrent",
+            // The ADVERB modifies how to execute; the bare adjective
+            // ("a concurrent session", "concurrent editor mutation") modifies a
+            // noun in the subject matter and is not a dispatch instruction.
+            "concurrently",
             "at the same time",
             "in parallel",
             "simultaneously",
@@ -5205,6 +5221,67 @@ Done.\n\
 +- do [#tmux] Open a missing tmux pane.\n";
 
         assert_eq!(detect_orchestration_request(diff), None);
+    }
+
+    /// A pasted status report is not a dispatch request. The narrative below the
+    /// quoted diff lines says "points at a concurrent Codex session" — a
+    /// DESCRIPTION of a concurrency bug, not an instruction to run the bullets
+    /// concurrently. Reading it as `--mode parallel` spawned one git worktree and
+    /// one `claude -p` pane per quoted line.
+    #[test]
+    fn narrative_below_a_quoted_list_is_not_a_parallel_dispatch_request() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,12 @@\n ctx\n\
++Fix\n\
++The pending edit is a handoff plus a halt, not just a new item\n\
++\n\
++git diff HEAD -- tasks/api.md (4 lines each way):\n\
++\n\
++- agent: codex \u{2192} agent: claude, with a new resume.codex id\n\
++- queue: go \u{2192} queue: stop\n\
++- queue head review PR 567 again \u{2192} - #actionable-review\n\
++\n\
++Two things follow. First, with queue: stop there is no drain to continue. Second, the fresh codex resume id points at a concurrent Codex session as the likely second writer whose replica advanced past the baseline.\n";
+        assert_eq!(
+            detect_orchestration_request(diff),
+            None,
+            "prose BELOW the list is commentary, never a batch-execution directive"
+        );
+    }
+
+    /// The trigger is the preamble only: commentary after the list must not be
+    /// able to change the resolved mode either.
+    #[test]
+    fn orchestration_trigger_text_excludes_prose_below_the_list() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,6 @@\n ctx\n\
++Run these in order.\n\
++- do #a1\n\
++- do #a2\n\
++I expect these to fan out badly if run in parallel.\n";
+        let request = detect_orchestration_request(diff).expect("expected orchestration request");
+        assert_eq!(request.mode, OrchestrationRequestMode::Sequential);
+        assert_eq!(request.trigger_text, "Run these in order.");
+    }
+
+    /// `concurrent` as an adjective names a subject; only the adverb instructs.
+    #[test]
+    fn concurrent_as_an_adjective_is_not_a_parallel_directive() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1,4 @@\n ctx\n\
++Fix the concurrent editor mutation defect in both places.\n\
++- do #a1\n\
++- do #a2\n";
+        assert_eq!(
+            detect_orchestration_request(diff),
+            None,
+            "a preamble describing a concurrency BUG must not dispatch a parallel batch"
+        );
+
+        let adverb = "--- snapshot\n+++ document\n@@ -1 +1,4 @@\n ctx\n\
++Run these two concurrently.\n\
++- do #a1\n\
++- do #a2\n";
+        let request =
+            detect_orchestration_request(adverb).expect("the adverb is still a parallel directive");
+        assert_eq!(request.mode, OrchestrationRequestMode::Parallel);
     }
 
     #[test]

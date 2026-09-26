@@ -304,8 +304,14 @@ pub fn stale_plugin_message(kind: &str, running: &str, expected: &str) -> String
         Some(StaleGenerationSide::Plugin) => format!(
             "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The live editor may run pre-fix IPC/plugin code (a known source of live_prompt_drift / content_ours merge regressions). Install/update the {kind} plugin (JetBrains: update to {expected} and restart/reload the IDE; VS Code: reinstall the extension and reload the window). `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot replace Kotlin/TypeScript plugin code or change the reported plugin version. A later live registration at {expected} or newer supersedes this warning."
         ),
+        // `#staleinstallremedyowner`: this warning reaches EVERY document session,
+        // most of which must not run `make install` — a mid-session install against
+        // a live supervisor strands attached editor replicas, and only the cycle
+        // that owns agent-doc development/release owns the rebuild. The remedy used
+        // to read as an unconditional instruction, so sessions doing unrelated work
+        // had to reason their way out of it every turn. Name the owner instead.
         Some(StaleGenerationSide::Binary) => format!(
-            "stale agent-doc binary: a live {kind} plugin reports version {running}, newer than the {expected} build this agent-doc binary ships with. The plugin is NOT the stale half — do not reinstall or restart it, that would reinstall a build that is already live. Rebuild and reinstall the CLI (`make install`) so the controller ships generation {running}. `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot change which plugin build this binary expects. A rebuilt binary shipping {running} supersedes this warning."
+            "stale agent-doc binary: a live {kind} plugin reports version {running}, newer than the {expected} build this agent-doc binary ships with. The plugin is NOT the stale half — do not reinstall or restart it, that would reinstall a build that is already live. This warning is ADVISORY: continue the current document task on this binary. The rebuild (`make install`, so the controller ships generation {running}) belongs to the cycle that owns agent-doc development/release — if this session's work is not that, do NOT install from here, because a mid-session install against a live supervisor strands attached editor replicas. `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot change which plugin build this binary expects. A rebuilt binary shipping {running} supersedes this warning."
         ),
         None => format!(
             "editor plugin generation mismatch: a live {kind} plugin reports version {running} while this agent-doc binary ships {expected}, and neither is a dotted numeric generation, so which half is behind cannot be determined. Reconcile the pair by hand before relying on editor delivery ACKs; `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib and changes neither side."
@@ -895,12 +901,16 @@ mod tests {
             warning.message
         );
         assert!(
-            warning.message.contains("Re-run the plugin installation once"),
+            warning
+                .message
+                .contains("Re-run the plugin installation once"),
             "the first recovery must invoke the dynamic replacement path: {}",
             warning.message
         );
         assert!(
-            warning.message.contains("Do not repeat status checks or reopen document tabs"),
+            warning
+                .message
+                .contains("Do not repeat status checks or reopen document tabs"),
             "passive checks cannot repair loaded bytes: {}",
             warning.message
         );
@@ -1103,12 +1113,29 @@ mod tests {
             "the direction must be stated as measured: {message}"
         );
         assert!(
-            message.contains("Rebuild and reinstall the CLI"),
-            "the remedy must target the stale half: {message}"
+            message.contains("`make install`"),
+            "the remedy must target the stale half — the CLI rebuild: {message}"
         );
         assert!(
             !message.contains("Install/update the jetbrains plugin"),
             "the newer half must never be sent for reinstallation: {message}"
+        );
+        // `#staleinstallremedyowner`: naming the stale half is not the same as
+        // ordering THIS session to rebuild it. The warning reaches every document
+        // session, and a mid-session install against a live supervisor strands
+        // attached editor replicas, so the remedy must name its owner and say the
+        // warning is advisory for everyone else.
+        assert!(
+            message.contains("ADVISORY"),
+            "a session doing unrelated work must be told it can continue: {message}"
+        );
+        assert!(
+            message.contains("owns agent-doc development/release"),
+            "the rebuild must name its owning cycle: {message}"
+        );
+        assert!(
+            message.contains("strands attached editor replicas"),
+            "the reason a non-owner must not install must be stated: {message}"
         );
         assert_eq!(
             stale_generation_side("0.2.426", "0.2.422"),

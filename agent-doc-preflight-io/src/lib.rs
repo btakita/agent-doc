@@ -2798,11 +2798,26 @@ fn disk_edit_newer_than_registered_authority(
     if authority == baseline {
         return Ok(Some(disk));
     }
+    // Shared with `session-check` through `agent_doc_document::admission_divergence`
+    // so the refusal and the remedy printed for it cannot drift apart. The refusal
+    // used to state the condition and three hashes and stop there, leaving every
+    // consumer — the hook's `reason:` line included — with nothing actionable.
+    debug_assert!(
+        agent_doc_document::admission_divergence::classify(
+            Some(&baseline),
+            Some(authority),
+            &disk,
+        )
+        .refuses_admission()
+    );
     Err(QueueAuthorityUnavailable::new(format!(
-        "disk and registered editor authority both advanced from the recorded baseline; refusing to choose a winner (baseline_hash={}, authority_hash={}, disk_hash={})",
+        "disk and registered editor authority both advanced from the recorded baseline; refusing to choose a winner (baseline_hash={}, authority_hash={}, disk_hash={}). {}",
         agent_doc_hash::short_content_hash(&baseline),
         agent_doc_hash::short_content_hash(authority),
         agent_doc_hash::short_content_hash(&disk),
+        agent_doc_document::admission_divergence::unmergeable_split_remedy(
+            &file.display().to_string()
+        ),
     ))
     .into())
 }

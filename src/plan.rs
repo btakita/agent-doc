@@ -317,6 +317,28 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         handoff = HandoffTarget::Compact;
     }
 
+    // `#noparallelfanoutwhennotparallelizable`: one contract must not order what
+    // it has itself judged impossible. `required_commands` is mandatory for the
+    // skill, so a `--mode parallel` handoff emitted next to
+    // `parallelizable: false` (this turn has a single repo action, so there is no
+    // batch to split) is an instruction to fan out nothing. Observed cost: a
+    // pasted status report resolved as `Parallel`, plan ordered the fan-out, and
+    // `orchestrate` created three git worktrees and three `claude -p` panes, one
+    // per quoted diff line. When the plan sees no parallel batch, it emits no
+    // parallel dispatch — the turn falls through to ordinary response + finalize.
+    let orchestration_request = orchestration_request.filter(|request| {
+        let refuse = request.mode == agent_doc_diff::OrchestrationRequestMode::Parallel
+            && !routing.parallelizable;
+        if refuse {
+            warnings.push(format!(
+                "declined a `--mode parallel` orchestration handoff: this plan resolved {} repo action(s) and parallelizable=false, so there is no batch to fan out. Trigger text: {:?}",
+                repo_actions.len(),
+                request.trigger_text.chars().take(160).collect::<String>(),
+            ));
+        }
+        !refuse
+    });
+
     if let Some(request) = orchestration_request {
         let task_source = if queue_prompt.is_some() {
             "--from-queue"
@@ -1076,6 +1098,98 @@ mod tests {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         dir
+    }
+
+    /// `#noparallelfanoutwhennotparallelizable`: the plan must not order a
+    /// `--mode parallel` fan-out in the same contract that reports
+    /// `parallelizable: false`. `required_commands` is mandatory for the skill, so
+    /// emitting one made `orchestrate` create a git worktree and a `claude -p`
+    /// pane per list line for a turn that has a single repo action.
+    #[test]
+    fn build_plan_declines_a_parallel_handoff_it_judged_not_parallelizable() {
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Pending
+
+<!-- agent:pending -->
+- [ ] [#1g42] Add the post-preflight dispatch phase
+<!-- /agent:pending -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+
+Fix these concurrently
+- agent: codex -> agent: claude
+- queue: go -> queue: stop
+<!-- /agent:exchange -->
+
+## Pending
+
+<!-- agent:pending -->
+- [ ] [#1g42] Add the post-preflight dispatch phase
+<!-- /agent:pending -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            !plan.parallelizable,
+            "precondition: this turn must resolve as non-parallelizable"
+        );
+        assert_ne!(
+            plan.handoff,
+            HandoffTarget::Orchestrate,
+            "a non-parallelizable turn must not hand off to orchestrate: {:?}",
+            plan.required_commands
+        );
+        assert!(
+            plan.required_commands
+                .iter()
+                .all(|cmd| !cmd.contains("--mode parallel")),
+            "no parallel fan-out may be ordered: {:?}",
+            plan.required_commands
+        );
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|warning| warning.contains("declined a `--mode parallel`")),
+            "the declined fan-out must be visible, not silent: {:?}",
+            plan.warnings
+        );
     }
 
     #[test]

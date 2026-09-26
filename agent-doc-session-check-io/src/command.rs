@@ -471,10 +471,56 @@ fn continuation_guidance_for(file: &Path) -> String {
 /// agent this exact instruction is what prevents the thrash loop (repeated
 /// preflight/finalize, empty cycles, force-disk clobbers).
 fn realtime_steering_closeout_guidance(file: &Path) -> String {
+    // `#steeringremedydeadlock`: never prescribe a trigger the admission gate is
+    // about to refuse. When baseline/authority/disk have split three ways, the
+    // `UserPromptSubmit` hook's preflight refuses `agent-doc <FILE>`, so telling
+    // the agent to run it produced a closed loop — refuse, re-advise, refuse —
+    // with nothing naming the operator-side action that converges the planes. The
+    // split is classified by the SAME shared predicate preflight refuses on.
+    if let Some(remedy) = unmergeable_split_steering_remedy(file) {
+        return remedy;
+    }
     format!(
         "This is realtime operator steering, not a failed closeout — your prior response is already committed in HEAD. Address the operator prompt above in your CURRENT turn: run `agent-doc {}` to continue and finalize a response for it. Do NOT re-run finalize on the prior response, do NOT use `--force-disk` (that clobbers the operator's live edits), and do NOT re-answer any prompt already committed in HEAD (the realtime replica reconciles your committed response back into the live buffer).",
         file.display()
     )
+}
+
+/// The steering remedy for a document whose next admission will refuse.
+///
+/// Returns `None` whenever the planes are resolvable, whenever no live editor is
+/// registered, or whenever any plane cannot be observed — an unobservable plane
+/// is not evidence of a split, so the ordinary steering guidance stands.
+fn unmergeable_split_steering_remedy(file: &Path) -> Option<String> {
+    let baseline = agent_doc_snapshot_io::load_document_baseline(file).ok().flatten()?;
+    let disk = crate::resolve_disk_document_content(file, "session_check_steering_admission").ok()?;
+    let authority =
+        crate::resolve_current_document_content(file, "session_check_steering_admission").ok()?;
+    if !agent_doc_document::admission_divergence::classify(
+        Some(&baseline),
+        Some(&authority),
+        &disk,
+    )
+    .refuses_admission()
+    {
+        return None;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_check_steering_admission_refused file={} baseline_hash={} authority_hash={} disk_hash={} remedy=operator_editor_convergence (#steeringremedydeadlock)",
+            file.display(),
+            agent_doc_hash::short_content_hash(&baseline),
+            agent_doc_hash::short_content_hash(&authority),
+            agent_doc_hash::short_content_hash(&disk),
+        ),
+    );
+    Some(format!(
+        "This is realtime operator steering, not a failed closeout — your prior response is already committed in HEAD, and the operator prompt above is NOT yet answerable from this session. {}",
+        agent_doc_document::admission_divergence::unmergeable_split_remedy(
+            &file.display().to_string()
+        ),
+    ))
 }
 
 fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
@@ -2934,6 +2980,52 @@ mod terminal_convergence_tests {
         assert_eq!(
             retained_write_gate_status(existing.clone(), true, Path::new("/tmp/doc.md")),
             existing,
+        );
+    }
+
+    /// `#steeringremedydeadlock`: the steering guidance used to prescribe
+    /// `run agent-doc <FILE> to continue` unconditionally. When the planes have
+    /// split three ways the `UserPromptSubmit` hook's preflight refuses exactly
+    /// that trigger, so the advice closed a loop — refuse, re-advise, refuse — and
+    /// never named the operator-side convergence that clears it. The split
+    /// predicate and the remedy are shared with preflight, so assert against the
+    /// shared source rather than restating either string here.
+    #[test]
+    fn steering_guidance_must_not_prescribe_a_trigger_admission_refuses() {
+        use agent_doc_document::admission_divergence::{
+            AdmissionDivergence, classify, unmergeable_split_remedy,
+        };
+
+        assert_eq!(
+            classify(Some("base"), Some("live"), "disk"),
+            AdmissionDivergence::UnmergeableThreeWaySplit,
+            "three distinct planes are the state preflight refuses on"
+        );
+
+        let remedy = unmergeable_split_remedy("tasks/api.md");
+        assert!(
+            !remedy.contains("to continue"),
+            "the refused-admission remedy must not repeat the deadlocking phrasing: {remedy}"
+        );
+        assert!(
+            remedy.contains("will keep refusing"),
+            "it must say re-invoking stays refused: {remedy}"
+        );
+        assert!(
+            remedy.contains("save or close this document's editor tab"),
+            "it must name the operator-side convergence: {remedy}"
+        );
+
+        // The resolvable case keeps the ordinary steering instruction, which IS the
+        // `run agent-doc <FILE> to continue` form.
+        assert!(
+            !classify(Some("base"), Some("base"), "disk").refuses_admission(),
+            "a single advanced branch must not suppress ordinary steering guidance"
+        );
+        let ordinary = realtime_steering_closeout_guidance(std::path::Path::new("tasks/api.md"));
+        assert!(
+            ordinary.contains("to continue"),
+            "with no observable split the ordinary steering guidance stands: {ordinary}"
         );
     }
 

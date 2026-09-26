@@ -1200,6 +1200,91 @@ fn keys_unique(children: &[KeyedChild]) -> bool {
     children.iter().all(|c| seen.insert(c.key.as_str()))
 }
 
+/// Detect the ambiguous id-less queue-edit shape where both sides introduced
+/// different free-text children into the same anchored insertion gap while the
+/// merge base still predates both spellings. In that shape text-derived keys
+/// cannot distinguish a progressive operator edit from independent additions.
+/// Queue text is operator-authored, so the live/editor (`theirs`) run owns that
+/// gap; agent-authored durable work must carry a `#id`.
+fn operator_free_text_revision_gaps(
+    base: &[KeyedChild],
+    ours: &[KeyedChild],
+    theirs: &[KeyedChild],
+) -> std::collections::HashSet<(Option<String>, Option<String>)> {
+    let ours_keys: std::collections::HashSet<&str> =
+        ours.iter().map(|child| child.key.as_str()).collect();
+    let theirs_keys: std::collections::HashSet<&str> =
+        theirs.iter().map(|child| child.key.as_str()).collect();
+    let base_keys: std::collections::HashSet<&str> =
+        base.iter().map(|child| child.key.as_str()).collect();
+    let shared_anchors: std::collections::HashSet<&str> =
+        ours_keys.intersection(&theirs_keys).copied().collect();
+
+    theirs
+        .iter()
+        .enumerate()
+        .filter(|(_, child)| {
+            child.key.starts_with("txt:")
+                && !base_keys.contains(child.key.as_str())
+                && !ours_keys.contains(child.key.as_str())
+        })
+        .map(|(index, _)| child_anchor_gap(theirs, index, &shared_anchors))
+        .collect()
+}
+
+fn child_anchor_gap(
+    children: &[KeyedChild],
+    index: usize,
+    anchors: &std::collections::HashSet<&str>,
+) -> (Option<String>, Option<String>) {
+    let before = children[..index]
+        .iter()
+        .rev()
+        .find(|child| anchors.contains(child.key.as_str()))
+        .map(|child| child.key.clone());
+    let after = children[index + 1..]
+        .iter()
+        .find(|child| anchors.contains(child.key.as_str()))
+        .map(|child| child.key.clone());
+    (before, after)
+}
+
+/// Whether queue reconciliation must apply the operator-authoritative id-less
+/// revision rule. Exposed to the document-cell seam so both production merge
+/// paths use the same policy owner instead of independently interpreting keys.
+pub(crate) fn has_operator_free_text_queue_revision(
+    base_body: Option<&str>,
+    ours_body: &str,
+    theirs_body: &str,
+) -> bool {
+    let Some(ours) = split_list_children(ours_body) else {
+        return false;
+    };
+    let Some(theirs) = split_list_children(theirs_body) else {
+        return false;
+    };
+    let base = base_body.and_then(split_list_children).unwrap_or_default();
+    let gaps = operator_free_text_revision_gaps(&base, &ours, &theirs);
+    if gaps.is_empty() {
+        return false;
+    }
+    let theirs_keys: std::collections::HashSet<&str> =
+        theirs.iter().map(|child| child.key.as_str()).collect();
+    let base_keys: std::collections::HashSet<&str> =
+        base.iter().map(|child| child.key.as_str()).collect();
+    let shared_anchors: std::collections::HashSet<&str> = ours
+        .iter()
+        .map(|child| child.key.as_str())
+        .filter(|key| theirs_keys.contains(key))
+        .collect();
+    ours.iter().enumerate().any(|(index, child)| {
+        child.key.starts_with("txt:")
+            && !base_keys.contains(child.key.as_str())
+            && !theirs_keys.contains(child.key.as_str())
+            && gaps.contains(&child_anchor_gap(&ours, index, &shared_anchors))
+    })
+}
+
 /// Frame a single-component node `text` into `(open_marker, body, close_marker)`
 /// where `body` is the content between the markers. `None` when the text does
 /// not parse as a component (caller falls back to flat merge).
@@ -1341,7 +1426,7 @@ fn reconcile_component_body(
             split_list_children(b)
         }
     };
-    let ours_children = split(ours_body)?;
+    let mut ours_children = split(ours_body)?;
     let theirs_children = split(theirs_body)?;
     let base_children = base_body.and_then(split).unwrap_or_default();
 
@@ -1350,6 +1435,42 @@ fn reconcile_component_body(
         || !keys_unique(&base_children)
     {
         return None;
+    }
+
+    // An id-less queue child's text is its fallback key. While the operator is
+    // progressively rewriting a newly-added line, a stale base can therefore
+    // make each spelling look like an independent insert and retain every
+    // intermediate draft. Within the same shared-anchor gap, prefer the live
+    // operator run and discard only OURS-only, base-unbacked free-text keys.
+    // Explicit `#id` children and additions in different gaps remain independent.
+    if name == "queue" && has_operator_free_text_queue_revision(base_body, ours_body, theirs_body) {
+        let gaps =
+            operator_free_text_revision_gaps(&base_children, &ours_children, &theirs_children);
+        let theirs_keys: std::collections::HashSet<&str> = theirs_children
+            .iter()
+            .map(|child| child.key.as_str())
+            .collect();
+        let base_keys: std::collections::HashSet<&str> = base_children
+            .iter()
+            .map(|child| child.key.as_str())
+            .collect();
+        let shared_anchors: std::collections::HashSet<&str> = ours_children
+            .iter()
+            .map(|child| child.key.as_str())
+            .filter(|key| theirs_keys.contains(key))
+            .collect();
+        let stale_revision_keys: std::collections::HashSet<String> = ours_children
+            .iter()
+            .enumerate()
+            .filter(|(index, child)| {
+                child.key.starts_with("txt:")
+                    && !base_keys.contains(child.key.as_str())
+                    && !theirs_keys.contains(child.key.as_str())
+                    && gaps.contains(&child_anchor_gap(&ours_children, *index, &shared_anchors))
+            })
+            .map(|(_, child)| child.key.clone())
+            .collect();
+        ours_children.retain(|child| !stale_revision_keys.contains(&child.key));
     }
 
     let ours_map: std::collections::HashMap<&str, &KeyedChild> =
@@ -4252,6 +4373,42 @@ Second answer line three.
             merged.contains("agent touched"),
             "concurrent agent item edit lost:\n{merged}"
         );
+    }
+
+    #[test]
+    fn reconcile_queue_progressive_free_text_revisions_keep_live_operator_text() {
+        // The base predates a newly typed free-text line. A retained agent cut
+        // has two intermediate spellings while the live editor has the final
+        // spelling. Text-derived keys must not turn those drafts into siblings.
+        let base = doc_with_exchange_queue("Q.", "- do [#anchor]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc_with_exchange_queue(
+            "Q.",
+            "- do [#anchor]\n- draft request\n- refined draft request",
+        );
+        let theirs = doc_with_exchange_queue("Q.", "- do [#anchor]\n- final operator request");
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        let queue_body = body_of(&merged, "queue");
+        assert_eq!(queue_body.matches("final operator request").count(), 1);
+        assert!(!queue_body.contains("draft request"), "{queue_body}");
+        assert!(
+            !queue_body.contains("refined draft request"),
+            "{queue_body}"
+        );
+    }
+
+    #[test]
+    fn reconcile_queue_keeps_free_text_additions_in_distinct_anchor_gaps() {
+        // Ambiguity is local to one anchored gap. Independent additions on
+        // opposite sides of a durable item remain separate work.
+        let body_base = "\n- do [#left]\n- do [#right]\n";
+        let body_ours = "\n- do [#left]\n- agent note\n- do [#right]\n";
+        let body_theirs = "\n- do [#left]\n- do [#right]\n- operator note\n";
+        let merged = reconcile_component_body("queue", Some(body_base), body_ours, body_theirs)
+            .expect("queue should reconcile");
+        assert!(merged.contains("agent note"), "{merged}");
+        assert!(merged.contains("operator note"), "{merged}");
     }
 
     #[test]

@@ -16,6 +16,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.WindowManager
 import java.awt.AWTEvent
 import java.awt.Component
@@ -33,12 +34,13 @@ import javax.swing.SwingUtilities
 /**
  * Latest-wins settled selection probe used by editor-tree mouse ingress.
  *
- * IDEA applies a tab/split click over more than one EDT turn. The clicked component cannot be
- * trusted to identify the destination document, so the callback reads the authoritative selected
- * file on the next turn. A newer press or disposal makes every older callback inert.
+ * IDEA applies a tab/split click over an unbounded number of EDT turns while its focus manager is
+ * still transferring ownership. The clicked component cannot be trusted to identify the
+ * destination document, so the callback reads the authoritative selected file only after IDEA
+ * reports settled focus. A newer press or disposal makes every older callback inert.
  */
 internal class SettledEditorTreeFocusProbe<T>(
-    private val scheduleNextEdt: ((() -> Unit) -> Unit),
+    private val scheduleWhenFocusSettles: ((() -> Unit) -> Unit),
     private val selectedValue: () -> T?,
     private val isActive: () -> Boolean,
     private val isEligible: (T) -> Boolean,
@@ -50,15 +52,15 @@ internal class SettledEditorTreeFocusProbe<T>(
     fun observeMousePress(belongsToEditorTree: Boolean) {
         if (closed.get() || !belongsToEditorTree) return
         val requestedGeneration = generation.incrementAndGet()
-        scheduleNextEdt {
+        scheduleWhenFocusSettles {
             if (
                 closed.get() ||
                     generation.get() != requestedGeneration ||
                     !isActive()
             ) {
-                return@scheduleNextEdt
+                return@scheduleWhenFocusSettles
             }
-            val selected = selectedValue() ?: return@scheduleNextEdt
+            val selected = selectedValue() ?: return@scheduleWhenFocusSettles
             if (isEligible(selected)) emit(selected)
         }
     }
@@ -100,8 +102,8 @@ class EditorFocusSyncListener private constructor(
 
     private val settledTreeFocusProbe =
         SettledEditorTreeFocusProbe<VirtualFile>(
-            scheduleNextEdt = { callback ->
-                ApplicationManager.getApplication().invokeLater(callback)
+            scheduleWhenFocusSettles = { callback ->
+                IdeFocusManager.getInstance(project).doWhenFocusSettlesDown(Runnable(callback))
             },
             selectedValue = {
                 FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile

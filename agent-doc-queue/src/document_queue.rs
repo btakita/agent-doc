@@ -2644,7 +2644,7 @@ pub fn dedup_free_text_heads(
 
 /// Collapse a contiguous sequence of progressive, single-line free-text prompt
 /// snapshots when each prompt is a strict textual extension of the previous
-/// one.
+/// one, or when a later synthesis contains every earlier draft in the raced run.
 ///
 /// This is deliberately narrower than ordinary queue deduplication. It models
 /// the progressive editor snapshots that can become visible when an agent CP
@@ -2657,7 +2657,11 @@ pub fn dedup_free_text_heads(
 /// shape produced when a turn starts while the operator is still typing. Two
 /// fresh items, two snapshot-authored items, and snapshot-authored duplicates
 /// remain untouched because they are plausible independent operator intent;
-/// three fresh monotonic snapshots remain the corruption signature.
+/// three fresh monotonic snapshots remain the corruption signature. A
+/// non-monotonic three-snapshot run is also repairable when its final spelling
+/// contains every earlier spelling (case/whitespace normalized): this covers a
+/// line rewritten in pieces before its final edit combines those pieces, without
+/// treating arbitrary adjacent prompts as revisions.
 pub fn collapse_progressive_free_text_heads(
     entries: &[QueueEntry],
     snapshot_entries: &[QueueEntry],
@@ -2699,10 +2703,50 @@ pub fn collapse_progressive_free_text_heads(
             next += 1;
         }
 
+        // A progressive rewrite is not necessarily a prefix chain. For example,
+        // an operator can replace the first half, then finish by combining the
+        // replacement with the original tail. With causal raced-projection proof
+        // at the caller, three or more contiguous fresh spellings are one line
+        // when the final spelling contains every earlier spelling. Stop at the
+        // first synthesis; unrelated adjacent prompts remain untouched.
+        let mut synthesis_survivor = None;
+        let mut revision_texts = entries[index..=survivor]
+            .iter()
+            .filter_map(progressive_free_text_prompt)
+            .map(|(_, revision)| revision)
+            .collect::<Vec<_>>();
+        let mut candidate = survivor + 1;
+        while candidate < entries.len() {
+            let Some((candidate_prompt, candidate_text)) =
+                progressive_free_text_prompt(&entries[candidate])
+            else {
+                break;
+            };
+            if snapshot_counts.contains_key(&candidate_text)
+                || candidate_prompt.indent != prompt.indent
+                || candidate_prompt.ordered_marker != prompt.ordered_marker
+            {
+                break;
+            }
+            revision_texts.push(candidate_text.clone());
+            if candidate >= index + 2
+                && snapshot_seed_count <= 1
+                && revision_texts[..revision_texts.len() - 1]
+                    .iter()
+                    .all(|revision| progressive_revision_contains(&candidate_text, revision))
+            {
+                synthesis_survivor = Some(candidate);
+                break;
+            }
+            candidate += 1;
+        }
+
         let progressive_snapshot_chain = survivor >= index + 2;
         let baseline_version_superseded = survivor == index + 1 && snapshot_seed_count == 1;
-        if progressive_snapshot_chain || baseline_version_superseded {
+        if progressive_snapshot_chain || baseline_version_superseded || synthesis_survivor.is_some()
+        {
             changed = true;
+            survivor = synthesis_survivor.unwrap_or(survivor);
             collapsed.push(entries[survivor].clone());
         } else {
             collapsed.extend(entries[index..=survivor].iter().cloned());
@@ -2711,6 +2755,18 @@ pub fn collapse_progressive_free_text_heads(
     }
 
     changed.then_some(collapsed)
+}
+
+fn progressive_revision_contains(candidate: &str, revision: &str) -> bool {
+    let normalize = |text: &str| {
+        text.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    };
+    let candidate = normalize(candidate);
+    let revision = normalize(revision);
+    !revision.is_empty() && candidate.contains(&revision)
 }
 
 fn progressive_free_text_prompt(entry: &QueueEntry) -> Option<(&QueuePrompt, String)> {
@@ -4438,6 +4494,25 @@ mod tests {
             render(&collapsed),
             "- Does the API return the generic forbidden message?\n"
         );
+    }
+
+    #[test]
+    fn progressive_free_text_heads_collapse_non_prefix_rewrite_synthesis() {
+        let entries = parse(concat!(
+            "- Refresh fixture 42\n",
+            "- Prepare sample\n",
+            "- Prepare sample and refresh fixture 42\n",
+        ))
+        .unwrap();
+        let collapsed = collapse_progressive_free_text_heads(&entries, &[])
+            .expect("the final synthesis should supersede both raced drafts");
+        assert_eq!(render(&collapsed), "- Prepare sample and refresh fixture 42\n");
+    }
+
+    #[test]
+    fn progressive_free_text_heads_preserve_non_synthesized_fresh_prompts() {
+        let entries = parse("- refresh 42\n- rebase\n- publish release\n").unwrap();
+        assert!(collapse_progressive_free_text_heads(&entries, &[]).is_none());
     }
 
     #[test]

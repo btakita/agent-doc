@@ -143,6 +143,13 @@ level deeper, inside any component whose body is a sequence of keyed children:
   queue addition is never dropped) or a **delete** (key in base, the other side unchanged — honored
   for list items; **never** for committed `exchange` blocks, the per-block `#ipc-crdt-response-drift`
   guard). A modify-vs-delete conflict keeps the surviving content.
+- **Id-less queue revisions with a stale base** → when both sides have different, base-unbacked
+  free-text keys in the same gap between shared anchors, the live/operator (`theirs`) run owns that
+  gap. This is the only reliable interpretation of a progressive edit because the fallback identity
+  is the text itself. Explicit `#id` items and id-less additions in different anchor gaps remain
+  independent, so ordinary concurrent queue work is still preserved. The separate, causally gated
+  raced-projection repair can also collapse a non-prefix rewrite chain when its final spelling
+  contains every earlier draft; arbitrary adjacent prompts do not satisfy that proof.
 - Order is `order_union`: ours' order is the spine, theirs-only inserts woven in after their nearest
   placed theirs-predecessor — deterministic for the common append/insert-on-one-side cases.
 

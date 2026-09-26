@@ -1593,6 +1593,54 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                         &base_holder
                     }
                 };
+                // Free-text queue revisions have text-derived identities. When
+                // the base predates a progressive operator rewrite, the generic
+                // cell projection sees every draft as an unrelated insertion.
+                // Delegate that exact ambiguous shape to the queue policy owner
+                // in `crdt`, which treats the live/editor run in one anchored gap
+                // as authoritative while preserving durable-id and other-gap
+                // additions.
+                if o_occ.component == "queue" {
+                    let ours_body: String = o_occ
+                        .items
+                        .iter()
+                        .map(|(_, value)| value.as_str())
+                        .collect();
+                    let theirs_body: String = t_occ
+                        .items
+                        .iter()
+                        .map(|(_, value)| value.as_str())
+                        .collect();
+                    let base_body = base_occ.map(|occ| {
+                        occ.items
+                            .iter()
+                            .map(|(_, value)| value.as_str())
+                            .collect::<String>()
+                    });
+                    if crate::crdt::has_operator_free_text_queue_revision(
+                        base_body.as_deref(),
+                        &ours_body,
+                        &theirs_body,
+                    ) {
+                        let ours_component = render_occurrence(o_framing, o_occ);
+                        let theirs_component = render_occurrence(t_framing, t_occ);
+                        let base_component = base_occ
+                            .zip(base_framing)
+                            .map(|(occ, framing)| render_occurrence(framing, occ));
+                        match crate::crdt::merge_one_component(
+                            &o_occ.component,
+                            base_component.as_deref(),
+                            &ours_component,
+                            &theirs_component,
+                        ) {
+                            Ok(merged_component) => {
+                                out.push_str(&merged_component);
+                                continue;
+                            }
+                            Err(_) => return CellMergeOutcome::fallback(),
+                        }
+                    }
+                }
                 // Duplicate keys ⇒ keyed reconciliation unsound ⇒ fall back whole-doc.
                 if !keys_unique(o_occ) || !keys_unique(t_occ) || !keys_unique(base_ref) {
                     return CellMergeOutcome::fallback();
@@ -3497,6 +3545,19 @@ working on it
             "operator body edit lost: {}",
             out.merged_text
         );
+    }
+
+    #[test]
+    fn merge_3way_collapses_progressive_idless_queue_revisions() {
+        let base = "<!-- agent:queue -->\n- do [#anchor]\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- do [#anchor]\n- initial draft\n- revised draft\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:queue -->\n- do [#anchor]\n- final operator wording\n<!-- /agent:queue -->\n";
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back, "should not fall back: {out:?}");
+        assert_eq!(out.merged_text.matches("final operator wording").count(), 1);
+        assert!(!out.merged_text.contains("initial draft"), "{out:?}");
+        assert!(!out.merged_text.contains("revised draft"), "{out:?}");
     }
 
     /// (a) End-to-end with the opcapture gate ON: two DISJOINT-region edits to the

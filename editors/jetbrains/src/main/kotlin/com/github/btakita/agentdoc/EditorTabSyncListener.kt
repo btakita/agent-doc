@@ -10,6 +10,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.WindowManager
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -1245,7 +1246,8 @@ requiredFocusGeneration = requestedFocusGeneration,
     /**
      * A tab-chrome click can emit [selectionChanged] before IDEA moves [FileEditorManagerEx.currentWindow]
      * to the clicked split, and it need not emit an editor-component focus event afterward. Re-check
-     * once on the next EDT turn and claim focus only if that exact selection is now authoritative.
+     * after IDEA's focus manager settles and claim focus only if that exact selection is now
+     * authoritative. A generic next-EDT callback is too early on real split/tab transfers.
      * The selection generation prevents an older callback from stealing focus after a newer tab edge.
      */
     private fun scheduleSettledSelectionFocusProbe(
@@ -1253,8 +1255,8 @@ requiredFocusGeneration = requestedFocusGeneration,
         file: VirtualFile,
         requestedGeneration: Long,
     ) {
-        ApplicationManager.getApplication().invokeLater {
-            if (closed || project.isDisposed) return@invokeLater
+        IdeFocusManager.getInstance(project).doWhenFocusSettlesDown {
+            if (closed || project.isDisposed) return@doWhenFocusSettlesDown
             val activeWindowPath =
                 FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile?.path
             val projectWindowActive =
@@ -1268,7 +1270,7 @@ requiredFocusGeneration = requestedFocusGeneration,
                     projectWindowActive = projectWindowActive,
                 )
             ) {
-                return@invokeLater
+                return@doWhenFocusSettlesDown
             }
             log("selectionChanged: settled active-split newFile=${file.name}; focus projection queued")
             onEditorFocusGained(project, file)

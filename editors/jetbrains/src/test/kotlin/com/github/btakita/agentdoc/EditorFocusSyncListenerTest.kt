@@ -23,11 +23,13 @@ class EditorFocusSyncListenerTest {
         assertTrue(!listener.contains("editorEx.addEditorMouseListener"))
         assertTrue(listener.contains("AWTEvent.MOUSE_EVENT_MASK"))
         assertTrue(listener.contains("SwingUtilities.isDescendingFrom(component, root)"))
+        assertTrue(listener.contains("IdeFocusManager.getInstance(project).doWhenFocusSettlesDown"))
+        assertTrue(!listener.contains("scheduleNextEdt"))
         assertTrue(listener.contains("removeAWTEventListener(editorTreeMouseListener)"))
     }
 
     @Test
-    fun `editor-tree click emits next-EDT selected file rather than stale pre-click file`() {
+    fun `editor-tree click emits focus-settled selected file rather than stale pre-click file`() {
         val callbacks = mutableListOf<() -> Unit>()
         val emitted = mutableListOf<String>()
         var selected = "left.md"
@@ -130,7 +132,7 @@ class EditorFocusSyncListenerTest {
         active: () -> Boolean = { true },
     ): SettledEditorTreeFocusProbe<String> =
         SettledEditorTreeFocusProbe(
-            scheduleNextEdt = callbacks::add,
+            scheduleWhenFocusSettles = callbacks::add,
             selectedValue = selected,
             isActive = active,
             isEligible = { it.endsWith(".md") },

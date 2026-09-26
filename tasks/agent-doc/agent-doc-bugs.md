@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -270,6 +270,26 @@ That is the same class as the other two fixes this session: code-owned guidance 
 **What I did not do.** `tasks/infra.md` resolves to `src/haiven-dev/tasks/infra.md`, owned by a live busy pane (`%214`, pid 2121103, `state=alive-busy`, `current_command=agent-doc`). Compacting another pane's live document from here is the non-owner hazard, so the compact offer stays with that session — say the word there and it will run.
 
 **Verification.** `make check`: exit 0, runner-native **9797 tests run, 9797 passed, 259 skipped** (nextest's own summary, independently asserted). Four mutations across the two fixes, all detected, clean M0 each side: dropping the preset ids from both known universes reddens one test per guard site; scanning a preset key verbatim instead of through the tag grammar loses unhashed keys; dropping the crossed-measure clause reddens both accretion tests; naming the line count unconditionally reddens the under-threshold direction. Both commits used `--only` with explicit paths — the tree still holds another session's work in `agent-doc-commit-io`, `agent-doc-controller-io`, `agent-doc-queue`, and `src/plugin_activation.rs`, and none of it was taken.
+
+### Re: #orchworktreeleak — orchestrate now owns the lifetime of the worktrees it creates — opus-5 · 2026-09-26T18:40-04:00
+
+> **Queue prompt:** do [#orchworktreeleak]
+
+Fixed, mutation-checked, suite-green, pushed as `1b9b8e27b` (pointer `e9f340d61`).
+
+**The missing call was the whole bug.** `worktree::remove` and `cleanup_session` already existed — as dead code, and the module doc asserted `remove()` was "used by the parallel task lifecycle", which was simply not true. `parallel::run` collected results at step 5 and returned, so every `--mode parallel` run left one directory and one branch per task behind.
+
+**The rule is a pure predicate**, so it is testable without a repo. `classify_worktree_residue` removes a worktree holding nothing but orchestrate's own scaffolding and retains one holding work the task authored — uncommitted tracked changes, a non-scaffolding untracked path, or a commit on its branch — naming the specific reason, the path, and the branch. Deleting a task's only copy of its output silently would be worse than the leak being fixed.
+
+**Two measurements the obvious implementation gets wrong.** A task that *committed* its work has an empty `git diff HEAD`, so a diff-only check reads it as scratch and deletes exactly the worktree most worth keeping; `create` now records `base_commit` and disposal counts commits since it. And scaffolding is filtered at classification rather than at collection, so a retain reason can never cite a file orchestrate itself wrote — `git status --porcelain` answers tracked and untracked state in one call.
+
+**Both leak paths, not just the one reported.** The timeout path already breaks into collection rather than returning, so a killed task reaches the same decision as a finished one — no second cleanup site to drift. The abort path did need new code: a fan-out that fails at worktree creation, the prompt write, pane creation, or send-keys now unwinds every worktree it has already created, including the in-flight one. That is where the "content-free ones from an earlier run" came from.
+
+**Verification.** `make check`: exit 0, runner-native **9807 tests run, 9807 passed, 259 skipped**. Six mutations, all detected, clean M0 each side — rule: tracked changes no longer retain (reddens 2), scaffolding counts as authored work (3), commits no longer retain (2), `create` stops recording the base (1); wiring: the disposal loop does nothing (1), abort skips the in-flight worktree (1). The wiring mutations are the ones that matter here, because a missing call is precisely what shipped. `.agent-doc/worktrees/` is empty and `git worktree list` shows no `deep/` entries.
+
+**CI.** Runs `36277005969` (this commit) and `36275902770` were both still in progress when I checked, so this closes out on local evidence as the runbook prescribes.
+
+That drains the queue. Three fixes this session — `#quotedpreset`, `#coinedpresetid`, `#accretionthreshold` — plus this one, and all four are the same class: code-owned behaviour that misdescribes itself. Two of them were *found* by that class biting during this session, which is the argument for keeping the dogfood loop pointed at its own instrument.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -278,15 +298,11 @@ That is the same class as the other two fixes this session: code-owned guidance 
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#quotedpreset]~~
-- ~~do [#coinedpresetid]~~
-- do [#orchworktreeleak]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#orchworktreeleak] `orchestrate --mode parallel` never removes the git worktrees or branches it creates. Seven were left in `.agent-doc/worktrees/` from two runs (`deep/3f069c68/0-2`, `deep/b26b9957/0-3`), each holding only orchestrate scaffolding (`.agent-doc-prompt.txt`, `.agent-doc-result.json`, `.agent-doc-result.log`). src/parallel.rs collects results at step 5 and returns without cleanup, and the timeout path only kills panes. Remove each worktree + branch after result collection and on the timeout path; keep them only when the task left real uncommitted work, and say so.
 <!-- /agent:backlog -->
 
 ## Review

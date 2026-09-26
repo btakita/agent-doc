@@ -1,10 +1,10 @@
 # Plan: Lazily deterministic simulation and property testing
 
-**Status:** Provenance gate and private backend-neutral v1 contract recorded;
-publication through `lazily-spec` remains blocked by the license decision below
+**Status:** Apache-2.0 selected by the owner; repository metadata, dependency
+inventory, and fixture provenance gates implemented in `lazily-spec`
 **Created:** 2026-09-25
 **Session:** `tasks/software/lazily.md`
-**Backlog:** `#lzsimipgate`, followed by `#lzsimlicense`
+**Backlog:** `#lzsimipgate` and `#lzsimlicense` completed
 
 ## Goal
 
@@ -21,9 +21,8 @@ independently from Lazily's own semantics.
 ## Gate decision
 
 - Public-source research and private architectural planning may proceed.
-- Do not implement or publish simulation contracts or fixtures in
-  `lazily-spec` until `#lzsimlicense` records an authorized repository-license
-  decision and a fixture provenance policy.
+- Simulation contracts and fixtures may be published through `lazily-spec`
+  under Apache-2.0 when they satisfy the enforced fixture provenance policy.
 - `lazily-go` implementation must remain independently authored and stdlib-only
   unless a later review adds a dependency to this inventory before its use.
 - Do not begin consumer- or employer-related simulation work until the written
@@ -66,6 +65,11 @@ version or commit, license, notice obligations, intended use, and approval.
 ### `lazily-spec` development tooling
 
 `lazily-spec` is a private/dev-only Python package for schema and corpus checks.
+The owner selected Apache-2.0 for the Lazily package family; `lazily-spec`
+declares it in `LICENSE` and `pyproject.toml`, with `NOTICE` preserving the
+project attribution. `third-party/uv-lock-licenses.json` is generated from the
+exact `uv.lock` package set and checked by `make check`; a new or removed locked
+package requires an explicit SPDX/source review before the inventory regenerates.
 Its direct development dependencies are `jsonschema`, `referencing`, and
 `pytest`; `uv.lock` resolves the following complete package set as of this gate:
 
@@ -93,14 +97,14 @@ imports.
 
 Before adding a dependency, update this table with its exact version/commit,
 SPDX expression, source, notice/attribution requirements, purpose, and approval.
-The future public repository should generate a machine-readable third-party
-inventory from its lock files rather than relying only on this private plan.
+The public repository's generated inventory is authoritative; this table is the
+historical intake record.
 
 ## Fixture provenance and license inventory
 
 ### Current corpus
 
-- `src/lazily-spec/conformance/` contains 156 tracked JSON fixtures. Repository
+- `src/lazily-spec/conformance/` contains 160 tracked JSON fixtures. Repository
   history attributes the corpus and its local generators to Brian Takita, and
   the audit found no external-source URLs in the corpus or generator scripts.
   That is evidence of first-party authorship, not a substitute for a license.
@@ -110,29 +114,29 @@ inventory from its lock files rather than relying only on this private plan.
   do not declare their generator. No fixture declares a license, copyright,
   origin, or external provenance field.
 - `src/lazily-go/test/conformance/` contains nine vendored JSON fixtures, all
-  byte-identical to their canonical `lazily-spec` counterparts at the time of
-  this audit. The drift test and sync script record their operational origin,
-  but there is no per-copy license or notice trail.
-- No simulation fixture or external simulation corpus has been imported.
+  byte-identical to their canonical `lazily-spec` counterparts. The provenance
+  ledger now records each copy's canonical path, digest, and Apache-2.0 source
+  license in addition to the existing drift/sync checks.
+- No external simulation corpus has been imported.
+- `src/lazily-spec/provenance/fixtures.json` records every canonical fixture and
+  all nine byte-identical Go copies by path, SHA-256, origin, and Apache-2.0
+  license. Its generator is part of `make check`, so additions, deletions, byte
+  drift, and unreviewed vendored copies fail closed.
 
-### Blocking license gap
+### License decision and reuse terms
 
-`src/lazily-spec` has no tracked `LICENSE`, `LICENCE`, `COPYING`, or `NOTICE`
-file, and its `pyproject.toml` has no project-license metadata. GitHub's repository
-license endpoint also reports no license. Public readability is not a reuse
-license. Therefore:
+On 2026-09-25 the owner selected Apache License 2.0 for the Lazily package
+family. `lazily-spec` now carries the full license, matching project metadata,
+NOTICE, the generated locked-dependency inventory, and exact fixture provenance
+ledger. Canonical specifications, schemas, and fixtures may be reused under
+Apache-2.0 unless a file says otherwise. Vendored copies preserve that source
+license and canonical origin.
 
-- do not publish new simulation specs or fixtures through `lazily-spec`;
-- do not copy canonical fixtures into another binding on the assumption that
-  the destination repository's license cures the source ambiguity;
-- do not use the existing corpus as generated-action or fuzz seeds; and
-- resolve `#lzsimlicense` before `#lzsimspec` begins repository implementation.
-
-The authorized follow-up should choose and add the intended repository license,
-add matching project metadata, preserve or add required notices, record the
-provenance/license chain for all 156 canonical fixtures and nine vendored Go
-copies, and define mandatory `generator` plus `origin` metadata for new generated
-simulation fixtures.
+New generated simulation fixtures must live under `conformance/simulation/` and
+declare `schema_version`, `origin`, `license`, `seed`, and generator path/version.
+Imported material additionally requires exact upstream identity, license,
+notices, and reviewer approval. The generator rejects missing metadata before
+the provenance ledger can be updated.
 
 ## Independent-authorship rules
 

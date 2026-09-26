@@ -263,6 +263,7 @@ One trap worth naming, because I walked into it: a caller holding the mask must 
 
 
 <!-- agent:backlog -->
+- [ ] [#coinedpresetid] session-check's coined-id guard does not count a REGISTERED prompt-preset name as a tracked id: a response that names `#actionable-review` or `#next-steps` (both keys in this document's `prompt_presets:` frontmatter) warns "response coins new id(s) ... that are not in agent:backlog, agent:queue, agent:done, or agent:review" and hints to file a backlog item for each. A registered preset name resolves to its frontmatter body, so it is not a dangling id. Observed 2026-09-26 on the #quotedpreset response, which quoted both names while explaining where they were matched. Fix: read `prompt_presets` keys as a fourth resolution source in the coined-id check; mutation-check that an unregistered `#id` still warns.
 - [ ] [#orchworktreeleak] `orchestrate --mode parallel` never removes the git worktrees or branches it creates. Seven were left in `.agent-doc/worktrees/` from two runs (`deep/3f069c68/0-2`, `deep/b26b9957/0-3`), each holding only orchestrate scaffolding (`.agent-doc-prompt.txt`, `.agent-doc-result.json`, `.agent-doc-result.log`). src/parallel.rs collects results at step 5 and returns without cleanup, and the timeout path only kills panes. Remove each worktree + branch after result collection and on the timeout path; keep them only when the task left real uncommitted work, and say so.
 <!-- /agent:backlog -->
 

@@ -152,9 +152,15 @@ class PluginLifecycleListener : ProjectManagerListener {
          * [ProjectManagerListener.projectOpened] is not replayed for the replacement
          * classloader. The attach bridge calls this entry point after the new descriptor
          * is live, then waits for every eligible open document to own a new CRDT replica.
+         *
+         * `#jbupgradereattach`: returns a one-line receipt instead of raising on a
+         * shortfall. Re-registration converges against whichever controller owns each
+         * document's own project root, so it is not a property of this upgrade -- a
+         * document from an unrelated open project can stay pending while the replacement
+         * bytes are correct and live. Each pending path keeps its own bounded retry armed.
          */
         @JvmStatic
-        fun initializeOpenProjectsAfterDynamicLoad(): Int {
+        fun initializeOpenProjectsAfterDynamicLoad(): String {
             check(!javax.swing.SwingUtilities.isEventDispatchThread()) {
                 "dynamic plugin initialization must wait off the EDT"
             }
@@ -164,12 +170,35 @@ class PluginLifecycleListener : ProjectManagerListener {
                 openProjects.forEach { project -> PluginLifecycleListener().projectOpened(project) }
                 projects.set(openProjects)
             }
-            return projects.get().sumOf { project ->
-                CrdtReplicaManager.ensureOpenDocumentReplicasAndWait(
-                    project,
-                    "dynamic-plugin-load",
+            val report = mergeReplicaRestartReports(
+                projects.get().map { project ->
+                    // Scoped per project so one project that cannot produce a receipt neither
+                    // erases the others' nor reads as a converged reattach.
+                    try {
+                        CrdtReplicaManager.ensureOpenDocumentReplicasAndWait(
+                            project,
+                            "dynamic-plugin-load",
+                        )
+                    } catch (failure: Exception) {
+                        val label = project.basePath ?: project.name
+                        LOG.warn(
+                            "[plugin-lifecycle] dynamic plugin load could not take a replica " +
+                                "receipt for $label",
+                            failure,
+                        )
+                        nativeReloadReplicaRestartReport(listOf(label), emptyList())
+                    }
+                },
+            )
+            if (!report.converged) {
+                LOG.warn(
+                    "[plugin-lifecycle] dynamic plugin load left ${report.failedPaths.size} open " +
+                        "document(s) awaiting replica re-registration: " +
+                        "${report.failedPaths.joinToString()}; the replacement generation is live " +
+                        "and each document keeps its own bounded retry armed",
                 )
             }
+            return dynamicLoadReattachReceipt(report)
         }
 
         /**

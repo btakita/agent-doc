@@ -789,6 +789,42 @@ fn java_executable() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("java"))
 }
 
+/// `#jbupgradereattach`: the dynamic upgrade verdict is the `ok:` status itself.
+///
+/// The IDE only writes `ok:<version>` after the replacement package is installed and a
+/// fresh descriptor of that version owns a new classloader. Its trailing `documents=` /
+/// `pending=` / `reattach_error=` fields are a receipt for open-document replica
+/// re-registration, which converges against whichever controller owns each document's own
+/// project root -- a property this install does not own. A shortfall there is therefore a
+/// warning and never an install failure: the replacement bytes are already live, and the
+/// editor keeps a bounded per-document retry armed. Aborting on it used to fail the whole
+/// `make install` after the upgrade had landed, and the immediate retry then reported the
+/// package byte-identical with no restart required.
+fn jetbrains_upgrade_reattach_warning(pid: u32, status_line: &str) -> Option<String> {
+    let receipt = status_line.trim();
+    if let Some((_, error)) = receipt.split_once("reattach_error=") {
+        return Some(format!(
+            "JetBrains pid {pid} loaded the replacement plugin, but its open-document \
+             reattach receipt was unavailable: {}. The upgrade is installed and live; \
+             reopen an editor tab if one of its documents stops syncing.",
+            error.trim()
+        ));
+    }
+    // Pending paths are the receipt's last field, so a path containing `:` stays intact.
+    let pending = receipt.split_once(":pending=")?.1.trim();
+    let paths: Vec<&str> = pending.split(',').filter(|path| !path.is_empty()).collect();
+    if paths.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "JetBrains pid {pid} loaded the replacement plugin, but {} open document(s) had not \
+         re-registered a replica yet: {}. The upgrade is installed and live; the editor \
+         retries each document on its own bounded schedule.",
+        paths.len(),
+        paths.join(", ")
+    ))
+}
+
 #[cfg(not(test))]
 fn try_hot_upgrade_jetbrains(
     zip_path: &Path,
@@ -832,8 +868,11 @@ fn try_hot_upgrade_jetbrains(
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        if stdout.lines().any(|line| line.starts_with("ok:")) {
+        if let Some(status) = stdout.lines().find(|line| line.starts_with("ok:")) {
             upgraded += 1;
+            if let Some(warning) = jetbrains_upgrade_reattach_warning(pid, status) {
+                eprintln!("WARNING: {warning}");
+            }
         }
     }
     Ok((upgraded > 0).then_some(upgraded))
@@ -1189,8 +1228,9 @@ mod tests {
         install_jetbrains_local_zip_into, installed_jetbrains_plugin_version,
         is_jetbrains_ide_data_dir, jetbrains_ide_pids_from_jcmd, jetbrains_install_success_message,
         jetbrains_local_zip_matches_installation, jetbrains_plugin_dirs_in_roots,
-        jetbrains_upgrade_launcher_has_main_manifest, jetbrains_version_cmp,
-        local_jetbrains_zip_in, local_jetbrains_zip_version, release_version, releases_page_url,
+        jetbrains_upgrade_launcher_has_main_manifest, jetbrains_upgrade_reattach_warning,
+        jetbrains_version_cmp, local_jetbrains_zip_in, local_jetbrains_zip_version,
+        release_version, releases_page_url,
     };
     use serde_json::json;
     use std::cmp::Ordering as CmpOrdering;
@@ -1635,6 +1675,75 @@ mod tests {
         assert_eq!(
             jetbrains_version_cmp("0.2.420", "0.2.419").unwrap(),
             CmpOrdering::Greater
+        );
+    }
+
+    /// `#jbupgradereattach`: a converged receipt is silent -- the operator sees nothing
+    /// extra when the upgrade landed and every open document re-registered.
+    #[test]
+    fn a_converged_reattach_receipt_emits_no_warning() {
+        assert_eq!(
+            jetbrains_upgrade_reattach_warning(4242, "ok:0.2.427:documents=3/3"),
+            None,
+        );
+        assert_eq!(
+            jetbrains_upgrade_reattach_warning(4242, "ok:0.2.427:documents=0/0"),
+            None,
+        );
+        assert_eq!(jetbrains_upgrade_reattach_warning(4242, "ok:0.2.427"), None);
+    }
+
+    /// The exact shape measured 2026-09-26: one open document from an unrelated project
+    /// stayed pending while the replacement bytes were installed and live. It must warn
+    /// and name the document, and it must NOT be representable as an install failure.
+    #[test]
+    fn a_pending_document_warns_and_names_it_without_failing_the_install() {
+        let warning = jetbrains_upgrade_reattach_warning(
+            3129637,
+            "ok:0.2.427:documents=1/2:pending=/repo/src/boost-client/tasks/monsterrodholders.md",
+        )
+        .expect("a pending document must be reported");
+        assert!(warning.contains("3129637"), "{warning}");
+        assert!(
+            warning.contains("/repo/src/boost-client/tasks/monsterrodholders.md"),
+            "the operator needs the exact pending document: {warning}"
+        );
+        assert!(
+            warning.contains("installed and live"),
+            "the receipt must not read as a failed upgrade: {warning}"
+        );
+    }
+
+    /// Pending paths are the receipt's last field, so a path containing `:` survives
+    /// verbatim instead of being split into another field.
+    #[test]
+    fn pending_paths_keep_colons_and_are_counted() {
+        let warning = jetbrains_upgrade_reattach_warning(
+            7,
+            "ok:0.2.427:documents=0/2:pending=/a/od:d/x.md,/b/y.md",
+        )
+        .expect("two pending documents must be reported");
+        assert!(warning.contains("/a/od:d/x.md"), "{warning}");
+        assert!(warning.contains("/b/y.md"), "{warning}");
+        assert!(warning.contains("2 open document(s)"), "{warning}");
+    }
+
+    /// An unreachable receipt is still a landed upgrade: the bytes converged before the
+    /// reattach step ran at all.
+    #[test]
+    fn an_unavailable_reattach_receipt_warns_instead_of_failing() {
+        let warning = jetbrains_upgrade_reattach_warning(
+            9,
+            "ok:0.2.427:documents=0/0:reattach_error=CRDT replica manager was not initialized",
+        )
+        .expect("an unavailable receipt must be reported");
+        assert!(
+            warning.contains("CRDT replica manager was not initialized"),
+            "{warning}"
+        );
+        assert!(
+            warning.contains("installed and live"),
+            "the receipt must not read as a failed upgrade: {warning}"
         );
     }
 

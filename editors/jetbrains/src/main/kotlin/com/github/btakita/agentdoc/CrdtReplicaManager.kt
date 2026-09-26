@@ -72,6 +72,38 @@ internal fun nativeReloadReplicaRestartReport(
         failedPaths = failed,
     )
 }
+
+/**
+ * Merge per-project replica restart reports into one whole-IDE report.
+ *
+ * A dynamic plugin load reattaches every open project at once, so the receipt the
+ * package installer reads has to describe the IDE, not one project.
+ */
+internal fun mergeReplicaRestartReports(
+    reports: List<NativeReloadReplicaRestartReport>,
+): NativeReloadReplicaRestartReport =
+    NativeReloadReplicaRestartReport(
+        expected = reports.sumOf { it.expected },
+        attached = reports.sumOf { it.attached },
+        failedPaths = reports.flatMap { it.failedPaths },
+    )
+
+/**
+ * `#jbupgradereattach`: one-line, classloader-safe receipt for the package installer.
+ *
+ * This is a receipt, never a verdict. The upgrade verdict is already decided by the
+ * time it is produced -- the replacement bytes are installed and a fresh descriptor of
+ * the expected version is live. Pending paths stay last in the text so a path
+ * containing `:` cannot be mistaken for another field.
+ */
+internal fun dynamicLoadReattachReceipt(report: NativeReloadReplicaRestartReport): String {
+    val documents = "documents=${report.attached}/${report.expected}"
+    if (report.failedPaths.isEmpty()) return documents
+    val pending = report.failedPaths.joinToString(",") { path ->
+        path.replace('\n', ' ').replace('\r', ' ')
+    }
+    return "$documents:pending=$pending"
+}
 private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
 private const val DYNAMIC_PLUGIN_ATTACH_RECEIPT_TIMEOUT_MS = 15_000L
@@ -3551,12 +3583,25 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
 
         /**
-         * Reattach every open agent-doc document and return only after the controller
-         * accepted each replacement replica. Dynamic plugin load keeps editor tabs open,
-         * so the package installer uses this receipt before claiming a restart-free
-         * upgrade completed.
+         * Reattach every open agent-doc document and report which replicas the controller
+         * accepted. Dynamic plugin load keeps editor tabs open, so
+         * [ProjectManagerListener.projectOpened] is never replayed for the replacement
+         * classloader and the package installer asks for this receipt afterwards.
+         *
+         * `#jbupgradereattach`: the report is a receipt, not a verdict on the upgrade.
+         * A pending path is not evidence that the replacement failed -- it means one
+         * document has not re-registered with the controller that owns ITS OWN project
+         * root. That convergence is gated by facts this upgrade does not own: whether the
+         * other project's controller is live, the terminal non-agent-doc refusal, and the
+         * per-document register backoff that `forceRefresh = false` deliberately honors.
+         * So a document can stay pending for the entire wait while the plugin bytes are
+         * correct and live, and each pending path keeps its own bounded retry armed.
+         * Raising here aborted `make install` after the replacement had already landed.
          */
-        fun ensureOpenDocumentReplicasAndWait(project: Project, reason: String): Int {
+        internal fun ensureOpenDocumentReplicasAndWait(
+            project: Project,
+            reason: String,
+        ): NativeReloadReplicaRestartReport {
             check(!SwingUtilities.isEventDispatchThread()) {
                 "open-document replica receipts must be awaited off the EDT"
             }
@@ -3577,7 +3622,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         }
                     }
             }
-            val failed = targets.mapNotNull { (filePath, document, text) ->
+            val attachedPaths = linkedSetOf<String>()
+            targets.forEach { (filePath, document, text) ->
                 manager.log.info(
                     "[crdt-replica] awaiting dynamic-plugin-load registration for ${File(filePath).name}; reason=$reason",
                 )
@@ -3608,12 +3654,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         }
                     }
                 }
-                filePath.takeUnless { manager.forwarders[filePath]?.attached == true }
+                if (manager.forwarders[filePath]?.attached == true) {
+                    attachedPaths.add(filePath)
+                }
             }
-            check(failed.isEmpty()) {
-                "dynamic plugin load did not reattach ${failed.joinToString()}"
-            }
-            return targets.size
+            return nativeReloadReplicaRestartReport(targets.map { it.first }, attachedPaths)
         }
 
         fun ensureOpenDocumentReplica(project: Project, filePath: String, reason: String) {

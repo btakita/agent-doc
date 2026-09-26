@@ -43,8 +43,7 @@ public final class JetBrainsPluginUpgradeAction {
         if (loaded == null) {
             return result.get();
         }
-        int attachedDocuments = initializeOpenProjectsAfterDynamicLoad(loaded);
-        return result.get() + ":documents=" + attachedDocuments;
+        return result.get() + ":" + reattachOpenDocuments(loaded);
     }
 
     private static String runOnEdt(
@@ -162,26 +161,43 @@ public final class JetBrainsPluginUpgradeAction {
         }
     }
 
-    private static int initializeOpenProjectsAfterDynamicLoad(IdeaPluginDescriptorImpl descriptor) {
+    /**
+     * Ask the replacement generation to rebuild project services and reattach open documents,
+     * then return its receipt.
+     *
+     * `#jbupgradereattach`: this runs only after the upgrade verdict is already decided.
+     * {@code runOnEdt} returns {@code ok:} solely on converged bytes -- the package is installed
+     * and a fresh descriptor of the expected version owns a new classloader. Open-document CRDT
+     * re-registration is a different property, owned by whichever controller owns each document's
+     * own project root, which this install does not own. So a shortfall, or even an unreachable
+     * receipt, is reported here rather than raised: raising it failed the whole {@code make install}
+     * after the replacement had already landed irreversibly, and the retry then correctly reported
+     * the package byte-identical with no restart required.
+     */
+    private static String reattachOpenDocuments(IdeaPluginDescriptorImpl descriptor) {
         try {
             Class<?> lifecycle = Class.forName(
                 LIFECYCLE_CLASS,
                 true,
                 descriptor.getPluginClassLoader()
             );
-            return (Integer) lifecycle
-                .getMethod("initializeOpenProjectsAfterDynamicLoad")
-                .invoke(null);
-        } catch (ReflectiveOperationException failure) {
+            return String.valueOf(
+                lifecycle.getMethod("initializeOpenProjectsAfterDynamicLoad").invoke(null)
+            );
+        } catch (Throwable failure) {
             Throwable cause = failure instanceof InvocationTargetException invocation
                 && invocation.getCause() != null
                 ? invocation.getCause()
                 : failure;
-            throw new IllegalStateException(
-                "replacement plugin did not reclaim open documents: " + cause.getMessage(),
-                cause
-            );
+            return "documents=0/0:reattach_error=" + singleLine(cause);
         }
+    }
+
+    /** Keep a receipt to one line: the launcher reads the status file as a single status. */
+    private static String singleLine(Throwable cause) {
+        String message = cause.getMessage();
+        String text = message == null || message.isBlank() ? cause.getClass().getName() : message;
+        return text.replace('\n', ' ').replace('\r', ' ').trim();
     }
 
     static boolean sameInstallRoot(Path actual, Path expected) {

@@ -685,6 +685,42 @@ Verification:
 Published commits:
 - `lazily-spec`: `2d23619 feat: specify durable reconciliation`
 - `lazily-rs`: `3655825 feat: add durable reconciliation`
+
+### Re: Apache-2.0 family convergence — gpt-5 · 2026-09-25T22:07:11-04:00
+
+> **Queue prompt:**
+>
+> do [#lzapachefamilylicense]
+
+
+Completed `#lzapachefamilylicense`. Every Lazily repository and publishable package now follows the owner-authorized Apache-2.0 policy, with legal files present in the distributed artifacts and existing third-party provenance preserved.
+
+| Repository / package | Commit | Result |
+|---|---:|---|
+| lazily-cpp | `3ecce7c` | Apache LICENSE/NOTICE and README |
+| lazily-cs | `c4b1955` | Apache metadata plus LICENSE/NOTICE in both NuGet packages |
+| lazily-dart | `db6d49e` | Apache LICENSE/NOTICE included by the pub archive |
+| lazily-formal | `fdb37c7` | Apache metadata, LICENSE/NOTICE, and README |
+| lazily-gd | `3aeaa51` | Apache LICENSE/NOTICE and README |
+| lazily-go | `9526c9d` | Apache LICENSE/NOTICE |
+| lazily-js | `a90880f` | Apache npm metadata and packaged LICENSE/NOTICE |
+| lazily-kt | `7cfaa72` | Apache NOTICE and LICENSE/NOTICE in binary/source JARs |
+| lazily-py | `2be1449` | Apache expression and LICENSE/NOTICE in wheel and sdist |
+| lazily-react | `dfebda1` | Apache npm metadata and packaged legal files |
+| lazily-rs | `c3026be` | Apache root/macro/signaling metadata and package legal files |
+| lazily-spec | current `main` | Already canonical Apache-2.0; no new license diff required |
+| lazily-zig | `5c8158a` | Apache metadata, LICENSE/NOTICE, and README |
+| lazily-html + lazily-interop | agent-loop `7577a6b31` | Embedded packages migrated in their actual repository boundary |
+
+The embedded `lazily-html` package now ships `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES`. Its vendored dom-expressions and hyper-dom-expressions material remains explicitly attributed under the upstream Ryan Carniato MIT terms. `lazily-interop` is non-publishable, but its Cargo metadata and repository legal files are also converged.
+
+Verification is green:
+
+- Every repository's full local gate passed. Notable evidence includes Rust `.tsift/artifacts/tart-615e376afb.test.log`, interop `.tsift/artifacts/tart-0677b4d645.test.log`, C++ `tart-1164f90e40`, C# `tart-6558544098`, Dart `tart-615cd4be3f`, GDScript `tart-c8bf03c399`, Formal `tart-e1a93fba15`, React `tart-4cd10c8224`, and Zig `tart-e4d44fe961`.
+- Package dry-runs/inspection confirmed the legal files for npm, NuGet, pub, Maven, wheel, sdist, and Cargo artifacts. Dart's pub dry-run produced the expected archive and exited 65 only for pre-existing workspace-state warnings; its full `make check` passed.
+- Canonical LICENSE copies byte-match `lazily-spec/LICENSE`; focused private-name scans and diff checks passed.
+- CI is successful for C++, C#, Dart, GDScript, Go, JavaScript, Kotlin, Python, React, and Zig. Formal has no workflow. Rust CI run `36210506007` is still in progress; its signaling/formal jobs and mdBook workflow are already green, while the full local `make check` passed.
+- All commits were pushed separately at repository boundaries, and unrelated dirty workspace changes were left unstaged.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -697,7 +733,7 @@ Published commits:
 - ~~do [#lzsimlicense]~~
 - ~~do ~~[#lzdurablepg]~~~~
 - ~~do [#lzdurablejetstream]~~
-- do [#lzapachefamilylicense]
+- ~~do [#lzapachefamilylicense]~~
 - ~~do [#lzdurablereconcile]~~
 - do [#lzdurablefamily]
 <!-- /agent:queue -->
@@ -705,7 +741,6 @@ Published commits:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzapachefamilylicense] [lazily family] Converge every Lazily repository LICENSE/NOTICE and publish metadata on the owner-authorized Apache-2.0 family policy before the next release or durable publication; preserve third-party notices and fixture provenance, run each repository full gate, and commit/push each repository separately.
 - [ ] [#lzdurablefamily] [lazily family] Roll the durable capability model across the family after the Rust reference is proven: publish explicit Core, Client, Durable Host, Distributed Host, and Accelerated Host tiers; give non-Rust bindings typed ingress and projection clients first; require mature database and broker clients plus the shared crash/replay corpus before any binding claims native-host support; and add cross-language envelope-version, ordering, deduplication, receipt, and projection-fingerprint conformance without claiming false parity.
 <!-- /agent:backlog -->
 

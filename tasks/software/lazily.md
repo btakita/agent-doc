@@ -171,8 +171,6 @@ Remaining queue head is `#lzdocorphanresidue`, which is `[operator-verify]`: the
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzfakepublisherproof]~~
-- ~~do [#lzartifactpurgeexec]~~
 - do [#lzdocorphanresidue]
 <!-- /agent:queue -->
 

@@ -51,7 +51,7 @@ transcript non-reproducible.
 `features` declares production surfaces the peer actually wraps:
 `distributed_crdt`, `reliable_sync`, `causal_receipts`, `signaling`,
 `transport_links`, `stdlib_timer_v1`, `stdlib_timeout_v1`, and
-`stdlib_revision_barrier_v1`. A feature scenario forms its peer group only from
+`stdlib_revision_barrier_v1`, and `durable_client_v1`. A feature scenario forms its peer group only from
 bindings that advertise the feature. A binding that does not implement the
 feature yet is reported as **staged** and receives no green credit for that
 scenario.
@@ -144,6 +144,18 @@ The supervisor stages a peer that does not advertise the requested feature.
 Fewer than two eligible peers is a failing
 `insufficient_eligible_peers` result, never a vacuous pass. A peer that
 advertises a feature but rejects one of these controls fails closed.
+
+### Durable client feature controls
+
+`durable_client_v1` uses the same reset/step/observe exchange. Its operations
+validate the exact five-field v1 envelope, apply advisory projections in durable
+source-position order across broker gaps and replay, distinguish exact duplicate
+content from an identity conflict, observe terminal owner receipts separately
+from transport acknowledgements, and compare projection fingerprints together
+with their `complete_history` or `latest_state_only` completeness domain. Every
+observation is non-authoritative: the client cannot authorize an owner
+transition. A native database or broker implementation is not required for this
+client tier.
 
 ### `bye`
 

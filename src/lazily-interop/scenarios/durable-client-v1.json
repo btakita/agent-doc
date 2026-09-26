@@ -1,0 +1,70 @@
+{
+  "name": "durable-client-v1",
+  "seed": 17,
+  "peers": [
+    {"name": "left", "peer_id": 1},
+    {"name": "right", "peer_id": 2}
+  ],
+  "required_features": ["durable_client_v1"],
+  "required_codecs": ["json"],
+  "required_channels": [],
+  "frame_sets": {},
+  "steps": [
+    {"op": "feature_reset", "feature": "durable_client_v1"},
+    {
+      "op": "feature_step", "feature": "durable_client_v1",
+      "step": {"operation": "validate_envelope", "envelope": {"protocol_version": 1, "message_id": "sample-owner/message-1", "schema_version": 7, "codec_version": 11, "payload": [0, 1, 127, 128, 255]}},
+      "expected": {"accepted": true, "reason": "accepted", "payload_decoded": true, "owner_authority": false}
+    },
+    {
+      "op": "feature_step", "feature": "durable_client_v1",
+      "step": {"operation": "validate_envelope", "envelope": {"protocol_version": 2, "message_id": "sample-owner/message-2", "schema_version": 7, "codec_version": 11, "payload": [255]}},
+      "expected": {"accepted": false, "reason": "unsupported_protocol_version", "payload_decoded": false, "owner_authority": false}
+    },
+    {
+      "op": "feature_step", "feature": "durable_client_v1",
+      "step": {"operation": "order_projection", "observed_source_positions": [2, 1, 2]},
+      "expected": {"applied_source_positions": [1, 2], "delivery_classification": ["buffered", "applied", "duplicate"], "broker_order_authoritative": false, "may_authorize_transition": false}
+    },
+    {
+      "op": "feature_step", "feature": "durable_client_v1",
+      "step": {
+        "operation": "classify_dedup",
+        "deliveries": [
+          {"protocol_version": 1, "message_id": "sample-owner/message-4", "schema_version": 7, "codec_version": 11, "payload": [65]},
+          {"protocol_version": 1, "message_id": "sample-owner/message-4", "schema_version": 7, "codec_version": 11, "payload": [65]},
+          {"protocol_version": 1, "message_id": "sample-owner/message-4", "schema_version": 7, "codec_version": 11, "payload": [66]}
+        ]
+      },
+      "expected": {"classification": ["first", "duplicate", "conflict"], "owner_authority": false}
+    },
+    {
+      "op": "feature_step", "feature": "durable_client_v1",
+      "step": {"operation": "observe_receipt", "receipt": {"protocol_version": 1, "receipt_id": "sample-owner/receipt-1", "message_id": "sample-owner/message-4", "outcome": "committed", "owner_position": 42}},
+      "expected": {"receipt": {"protocol_version": 1, "receipt_id": "sample-owner/receipt-1", "message_id": "sample-owner/message-4", "outcome": "committed", "owner_position": 42}, "terminal_owner_receipt": true, "transport_ack_equivalent": false, "owner_authority": false}
+    },
+    {
+      "op": "feature_step", "feature": "durable_client_v1",
+      "step": {
+        "operation": "compare_projection_fingerprints",
+        "left": {"projection_id": "orders", "source_position": 42, "fingerprint": "aabbccdd", "completeness": "complete_history", "may_authorize_transition": false},
+        "right": {"projection_id": "orders", "source_position": 42, "fingerprint": "aabbccdd", "completeness": "complete_history", "may_authorize_transition": false}
+      },
+      "expected": {"same_source": true, "same_fingerprint": true, "same_completeness": true, "equivalent": true, "may_authorize_transition": false}
+    },
+    {
+      "op": "feature_step", "feature": "durable_client_v1",
+      "step": {
+        "operation": "compare_projection_fingerprints",
+        "left": {"projection_id": "orders", "source_position": 42, "fingerprint": "aabbccdd", "completeness": "complete_history", "may_authorize_transition": false},
+        "right": {"projection_id": "orders", "source_position": 42, "fingerprint": "aabbccdd", "completeness": "latest_state_only", "may_authorize_transition": false}
+      },
+      "expected": {"same_source": true, "same_fingerprint": true, "same_completeness": false, "equivalent": false, "may_authorize_transition": false}
+    },
+    {
+      "op": "feature_observe", "feature": "durable_client_v1",
+      "expected": {"same_source": true, "same_fingerprint": true, "same_completeness": false, "equivalent": false, "may_authorize_transition": false}
+    }
+  ],
+  "expected_snapshot": []
+}

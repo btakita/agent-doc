@@ -74,6 +74,7 @@ struct ReferencePeer {
     cells: BTreeMap<(u64, Option<String>), Cell>,
     seen: BTreeSet<String>,
     last_stamp: Option<Stamp>,
+    feature_observations: BTreeMap<String, Value>,
     #[cfg(unix)]
     links: HashMap<u64, SharedSocket>,
     #[cfg(unix)]
@@ -88,6 +89,7 @@ impl ReferencePeer {
             cells: BTreeMap::new(),
             seen: BTreeSet::new(),
             last_stamp: None,
+            feature_observations: BTreeMap::new(),
             #[cfg(unix)]
             links: HashMap::new(),
             #[cfg(unix)]
@@ -104,6 +106,9 @@ impl ReferencePeer {
             "local_set" => self.local_set(request),
             "deliver" => self.deliver(request),
             "snapshot" => self.snapshot(),
+            "feature_reset" => self.feature_reset(request),
+            "feature_step" => self.feature_step(request),
+            "feature_observe" => self.feature_observe(request),
             "link_open" => self.link_open(request),
             "link_send" => self.link_send(request),
             "link_recv" => self.link_recv(request),
@@ -154,7 +159,11 @@ impl ReferencePeer {
         });
         #[cfg(not(unix))]
         let channel_variants = json!({});
-        let mut features = vec!["distributed_crdt".to_owned(), "transport_links".to_owned()];
+        let mut features = vec![
+            "distributed_crdt".to_owned(),
+            "transport_links".to_owned(),
+            "durable_client_v1".to_owned(),
+        ];
         if let Ok(extra) = std::env::var("LAZILY_INTEROP_EXTRA_FEATURES") {
             features.extend(
                 extra
@@ -302,6 +311,45 @@ impl ReferencePeer {
             })
             .collect::<Vec<_>>();
         json!({"ok": true, "cells": cells})
+    }
+
+    fn feature_reset(&mut self, request: &Value) -> Value {
+        let Some(feature) = request.get("feature").and_then(Value::as_str) else {
+            return json!({"ok": false, "error": "feature_reset requires feature"});
+        };
+        self.feature_observations.remove(feature);
+        json!({"ok": true, "feature": feature})
+    }
+
+    fn feature_step(&mut self, request: &Value) -> Value {
+        let Some(feature) = request.get("feature").and_then(Value::as_str) else {
+            return json!({"ok": false, "error": "feature_step requires feature"});
+        };
+        if feature != "durable_client_v1" {
+            return json!({"ok": false, "error": format!("unsupported feature {feature}")});
+        }
+        let Some(step) = request.get("step") else {
+            return json!({"ok": false, "error": "feature_step requires step"});
+        };
+        let observation = match durable_client_observation(step) {
+            Ok(observation) => observation,
+            Err(error) => return json!({"ok": false, "error": error}),
+        };
+        self.feature_observations
+            .insert(feature.to_owned(), observation.clone());
+        json!({"ok": true, "feature": feature, "observation": observation})
+    }
+
+    fn feature_observe(&self, request: &Value) -> Value {
+        let Some(feature) = request.get("feature").and_then(Value::as_str) else {
+            return json!({"ok": false, "error": "feature_observe requires feature"});
+        };
+        match self.feature_observations.get(feature) {
+            Some(observation) => {
+                json!({"ok": true, "feature": feature, "observation": observation})
+            }
+            None => json!({"ok": false, "error": "feature has no observation"}),
+        }
     }
 
     fn link_open(&mut self, request: &Value) -> Value {
@@ -525,6 +573,183 @@ impl ReferencePeer {
             frames.reverse();
         }
         Ok((frames, bytes))
+    }
+}
+
+fn durable_client_observation(step: &Value) -> Result<Value, String> {
+    let operation = step
+        .get("operation")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "durable client step requires operation".to_owned())?;
+    match operation {
+        "validate_envelope" => {
+            let envelope = step
+                .get("envelope")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "validate_envelope requires envelope".to_owned())?;
+            let protocol = envelope
+                .get("protocol_version")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| "envelope requires protocol_version".to_owned())?;
+            let (accepted, reason, payload_decoded) = if protocol != 1 {
+                (false, "unsupported_protocol_version", false)
+            } else if envelope
+                .get("message_id")
+                .and_then(Value::as_str)
+                .is_none_or(str::is_empty)
+            {
+                (false, "invalid_message_id", false)
+            } else if envelope.get("schema_version").and_then(Value::as_u64) == Some(0) {
+                (false, "invalid_schema_version", false)
+            } else if envelope.get("codec_version").and_then(Value::as_u64) == Some(0) {
+                (false, "invalid_codec_version", false)
+            } else {
+                let payload = envelope
+                    .get("payload")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| "envelope requires byte payload".to_owned())?;
+                if payload
+                    .iter()
+                    .any(|byte| byte.as_u64().is_none_or(|byte| byte > 255))
+                {
+                    return Err("envelope payload contains a non-byte".to_owned());
+                }
+                (true, "accepted", true)
+            };
+            Ok(json!({
+                "accepted": accepted,
+                "reason": reason,
+                "payload_decoded": payload_decoded,
+                "owner_authority": false
+            }))
+        }
+        "order_projection" => {
+            let observed = step
+                .get("observed_source_positions")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "order_projection requires positions".to_owned())?;
+            let mut applied_through = 0_u64;
+            let mut buffered = BTreeSet::new();
+            let mut applied = Vec::new();
+            let mut classifications = Vec::new();
+            for value in observed {
+                let position = value
+                    .as_u64()
+                    .ok_or_else(|| "source position must be unsigned".to_owned())?;
+                if position <= applied_through || buffered.contains(&position) {
+                    classifications.push("duplicate");
+                } else if position > applied_through + 1 {
+                    buffered.insert(position);
+                    classifications.push("buffered");
+                } else {
+                    classifications.push("applied");
+                    applied_through = position;
+                    applied.push(position);
+                    while buffered.remove(&(applied_through + 1)) {
+                        applied_through += 1;
+                        applied.push(applied_through);
+                    }
+                }
+            }
+            Ok(json!({
+                "applied_source_positions": applied,
+                "delivery_classification": classifications,
+                "broker_order_authoritative": false,
+                "may_authorize_transition": false
+            }))
+        }
+        "classify_dedup" => {
+            let deliveries = step
+                .get("deliveries")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "classify_dedup requires deliveries".to_owned())?;
+            let mut first_by_id = BTreeMap::<String, Value>::new();
+            let mut classification = Vec::new();
+            for delivery in deliveries {
+                let id = delivery
+                    .get("message_id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| "delivery requires message_id".to_owned())?;
+                match first_by_id.get(id) {
+                    None => {
+                        first_by_id.insert(id.to_owned(), delivery.clone());
+                        classification.push("first");
+                    }
+                    Some(first) if first == delivery => classification.push("duplicate"),
+                    Some(_) => classification.push("conflict"),
+                }
+            }
+            Ok(json!({"classification": classification, "owner_authority": false}))
+        }
+        "observe_receipt" => {
+            let receipt = step
+                .get("receipt")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "observe_receipt requires receipt".to_owned())?;
+            if receipt.get("protocol_version").and_then(Value::as_u64) != Some(1) {
+                return Err("unsupported receipt protocol".to_owned());
+            }
+            for field in ["receipt_id", "message_id"] {
+                if receipt
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+                {
+                    return Err(format!("receipt requires {field}"));
+                }
+            }
+            let outcome = receipt
+                .get("outcome")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "receipt requires outcome".to_owned())?;
+            if !["committed", "duplicate", "conflict", "rejected"].contains(&outcome) {
+                return Err("invalid terminal receipt outcome".to_owned());
+            }
+            Ok(json!({
+                "receipt": receipt,
+                "terminal_owner_receipt": true,
+                "transport_ack_equivalent": false,
+                "owner_authority": false
+            }))
+        }
+        "compare_projection_fingerprints" => {
+            let left = step
+                .get("left")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "fingerprint comparison requires left".to_owned())?;
+            let right = step
+                .get("right")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "fingerprint comparison requires right".to_owned())?;
+            for observation in [left, right] {
+                if observation
+                    .get("may_authorize_transition")
+                    .and_then(Value::as_bool)
+                    != Some(false)
+                {
+                    return Err("projection observation claims transition authority".to_owned());
+                }
+                if !matches!(
+                    observation.get("completeness").and_then(Value::as_str),
+                    Some("complete_history" | "latest_state_only")
+                ) {
+                    return Err("invalid projection completeness".to_owned());
+                }
+            }
+            let same_source = left.get("source_position") == right.get("source_position");
+            let same_fingerprint = left.get("fingerprint") == right.get("fingerprint");
+            let same_completeness = left.get("completeness") == right.get("completeness");
+            let same_projection = left.get("projection_id") == right.get("projection_id");
+            Ok(json!({
+                "same_source": same_source,
+                "same_fingerprint": same_fingerprint,
+                "same_completeness": same_completeness,
+                "equivalent": same_projection && same_source && same_fingerprint && same_completeness,
+                "may_authorize_transition": false
+            }))
+        }
+        other => Err(format!("unknown durable client operation {other}")),
     }
 }
 

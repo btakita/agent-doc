@@ -22,6 +22,7 @@ const FEATURES: &[&str] = &[
     "stdlib_timer_v1",
     "stdlib_timeout_v1",
     "stdlib_revision_barrier_v1",
+    "durable_client_v1",
 ];
 const CHANNELS: &[&str] = &[
     "in_process_ffi",

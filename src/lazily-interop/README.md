@@ -31,6 +31,14 @@ controls to the eligible Zig, Go, and C++ peers, checks every observation agains
 the `lazily-spec` fixture oracle, and therefore covers both every pair in the
 group and the three-way agreement. These scenarios are part of `network-suite`,
 alongside the semantic and channel matrices.
+
+The `durable_client_v1` scenario uses the same reset/step/observe controls to
+compare envelope-version preflight, source-position projection ordering across
+gaps, duplicate/conflict classification, terminal owner receipts distinct from
+transport ACKs, and advisory projection-fingerprint completeness. It grants no
+owner-transition authority and requires neither a database nor a native broker
+client.
+
 The C# peer now joins semantic convergence through its production CRDT runtime
 and JSON IPC codec while leaving transport links unadvertised.
 

@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -113,7 +113,7 @@ The two operator actions from the previous cycle are still outstanding: re-run t
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - do [#lzfakepublisherproof]
 - do [#lzartifactpurgeexec]
 - do [#lzdocorphanresidue]

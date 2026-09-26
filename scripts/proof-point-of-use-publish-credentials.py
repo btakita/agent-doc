@@ -94,6 +94,10 @@ NONSECRET_LITERALS = frozenset({"__token__"})
 
 MODES = ("success", "failure", "empty")
 
+# Intentionally untracked operator files. Their absence (CI, a fresh clone) is a
+# legitimate skip, not drift.
+IGNORED_OPERATOR_FILES = frozenset({".env", "src/lazily-js/.env"})
+
 
 class ProofFailure(Exception):
     """A proof assertion failed."""
@@ -197,6 +201,30 @@ def _patched_path(chunk: list[str]) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def repo_for_path(rel: str) -> str:
+    parts = rel.split("/")
+    return f"{parts[0]}/{parts[1]}" if len(parts) > 2 and parts[0] == "src" else "."
+
+
+def repo_present(root: Path, repo: str) -> bool:
+    """An uninitialized submodule is an existing but EMPTY directory."""
+    if repo == ".":
+        return True
+    path = root / repo
+    if not path.is_dir():
+        return False
+    return any(path.iterdir())
+
+
+def absence_state(root: Path, rel: str) -> str:
+    """Classify why `rel` is missing: a legitimate skip, or real drift."""
+    if not repo_present(root, repo_for_path(rel)):
+        return "repo_absent"
+    if rel in IGNORED_OPERATOR_FILES:
+        return "ignored_file_absent"
+    return "missing"
+
+
 def sha256_of(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -229,8 +257,10 @@ def run_static_phase(plan_text: str, root: Path) -> dict[str, Any]:
     for rel, expected in sorted(recorded.items()):
         path = root / rel
         if not path.is_file():
-            preimages.append({"path": rel, "state": "missing"})
-            failures.append(f"preimage file is missing: {rel}")
+            state = absence_state(root, rel)
+            preimages.append({"path": rel, "state": state})
+            if state == "missing":
+                failures.append(f"preimage file is missing: {rel}")
             continue
         actual = sha256_of(path)
         state = "match" if actual == expected else "drifted"
@@ -244,6 +274,13 @@ def run_static_phase(plan_text: str, root: Path) -> dict[str, Any]:
 
     applies: list[dict[str, Any]] = []
     for patch in patches:
+        rel = patch.path if patch.repo == "." else f"{patch.repo}/{patch.path}"
+        if not (root / patch.repo / patch.path).is_file():
+            state = absence_state(root, rel)
+            applies.append({"repo": patch.repo, "path": patch.path, "state": state})
+            if state == "missing":
+                failures.append(f"patch target is missing: {rel}")
+            continue
         repo = root / patch.repo
         forward, forward_error = git_apply_check(repo, patch.text)
         reverse, _ = git_apply_check(repo, patch.text, reverse=True)
@@ -259,7 +296,11 @@ def run_static_phase(plan_text: str, root: Path) -> dict[str, Any]:
             )
         applies.append({"repo": patch.repo, "path": patch.path, "state": state})
 
-    states = {entry["state"] for entry in applies}
+    states = {
+        entry["state"]
+        for entry in applies
+        if entry["state"] not in {"repo_absent", "ignored_file_absent"}
+    }
     if states == {"appliable"}:
         application = "unapplied"
     elif states == {"already_applied"}:
@@ -267,10 +308,16 @@ def run_static_phase(plan_text: str, root: Path) -> dict[str, Any]:
     else:
         application = "mixed"
 
+    skipped = sorted(
+        entry["path"] if entry["repo"] == "." else f"{entry['repo']}/{entry['path']}"
+        for entry in applies
+        if entry["state"] in {"repo_absent", "ignored_file_absent"}
+    )
     return {
         "preimages": preimages,
         "patches": applies,
         "application_state": application,
+        "skipped_absent": skipped,
         "failures": failures,
     }
 
@@ -284,7 +331,8 @@ def build_patched_file(root: Path, patch: FilePatch) -> str:
     """Apply the patch to a scratch copy and return the patched text."""
     source = root / patch.repo / patch.path
     if not source.is_file():
-        raise ProofFailure(f"patch target is missing: {patch.repo}/{patch.path}")
+        rel = patch.path if patch.repo == "." else f"{patch.repo}/{patch.path}"
+        raise ProofFailure(f"patch target is missing: {rel}")
     with tempfile.TemporaryDirectory() as tmp:
         scratch = Path(tmp)
         subprocess.run(["git", "init", "-q"], cwd=scratch, check=True, capture_output=True)
@@ -787,6 +835,9 @@ def run_publisher_phase(root: Path, patches: list[FilePatch], modes: Iterable[st
     with tempfile.TemporaryDirectory(prefix="publish-credential-proof.") as tmp:
         base = Path(tmp)
         for site in CALL_SITES:
+            if not repo_present(root, site.repo):
+                results.append({"site": site.name, "state": "repo_absent"})
+                continue
             try:
                 recipe = recipe_for(site, root, patches)
             except ProofFailure as failure:
@@ -811,8 +862,16 @@ def run_publisher_phase(root: Path, patches: list[FilePatch], modes: Iterable[st
                     if sandbox is not None:
                         passage_lookups += len(sandbox.passage_keys())
                         publisher_invocations += len(sandbox.publisher_records())
+    exercised = sorted({entry["site"] for entry in results if "mode" in entry})
+    skipped = sorted({entry["site"] for entry in results if entry.get("state") == "repo_absent"})
+    if not exercised:
+        failures.append(
+            "no call site was exercised at all; a proof that runs nothing must not report success"
+        )
     return {
         "results": results,
+        "exercised_sites": exercised,
+        "skipped_absent_sites": skipped,
         "failures": failures,
         # Measured, not asserted: every lookup and every publisher invocation was
         # recorded by a fake inside the sandbox. A real `passage` or publisher
@@ -885,8 +944,18 @@ def run_fresh_shell_phase(root: Path, application_state: str) -> dict[str, Any]:
     failures: list[str] = []
 
     if alias_state["missing"]:
-        failures.append("the ignored root `.env` is absent, so its alias state cannot be checked")
-    elif application_state == "applied":
+        return {
+            "application_state": application_state,
+            "state": "skipped",
+            "reason": (
+                "the ignored root `.env` is not present (expected on CI and in a fresh clone), "
+                "so there is no alias state to check; nothing is asserted rather than passing "
+                "vacuously"
+            ),
+            "env_alias_names": alias_state,
+            "failures": [],
+        }
+    if application_state == "applied":
         if alias_state["live"]:
             failures.append(
                 "the plan reads as applied, but the root `.env` still assigns "

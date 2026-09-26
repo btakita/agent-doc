@@ -232,7 +232,10 @@ extensions for Node ESM. Diff against upstream before upgrading.
 
 ## License
 
-MIT.
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+The vendored dom-expressions and hyper-dom-expressions portions remain under
+their upstream MIT terms; see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
 
 [lazily-js]: https://github.com/lazily-hub/lazily-js
 [relementjs]: https://github.com/relementjs/relementjs

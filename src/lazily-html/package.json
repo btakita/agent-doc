@@ -2,7 +2,7 @@
   "name": "@lazily-hub/lazily-html",
   "version": "0.1.0",
   "description": "Isomorphic fine-grained HTML renderer on @lazily-hub/lazily-js. Preact/React-compatible API (Component class, hooks, createElement/h, createContext, forwardRef, memo, render, renderToString) with Solid-style run-once components: setState writes a lazily Source and only the affected DOM expressions patch. No VDOM diffing. Browser + server (SSR) from one package.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/lazily-hub/lazily-html.git"
@@ -21,6 +21,12 @@
     }
   },
   "sideEffects": false,
+  "files": [
+    "src/",
+    "LICENSE",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES"
+  ],
   "scripts": {
     "build": "node --check src/index.js && node --check src/owner.js && node --check src/instance.js && node --check src/hooks.js && node --check src/context.js && node --check src/create-element.js && node --check src/mount.js && node --check src/lite.js && node --check src/component.js && node --check src/server.js && node --check src/synced-view.js && node --check src/hydrate.js && node --check src/full/index.js && node --check src/full/client.js && node --check src/full/reconcile.js && node --check src/full/constants.js && node --check src/full/hyper.js && node scripts/update-size-limits.mjs",
     "test:size": "size-limit",

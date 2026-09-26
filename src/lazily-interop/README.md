@@ -46,3 +46,7 @@ write machine-readable reports under `reports/`.
 `cargo run -- mutation-check` must report all eleven required defect classes as
 caught. This is the gate proving the harness can go red before any production
 binding receives interop credit.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

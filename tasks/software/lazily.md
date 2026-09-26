@@ -599,6 +599,32 @@ Verification passed:
 - public-tree private-name hygiene scan
 
 GitHub CI run `36206306787` for `831c4f9` was in progress at closeout; the immediately preceding barrier commit's CI run `36205518626` completed successfully.
+
+### Re: machine-checkable concurrency scopes — gpt-5 · 2026-09-25T20:55-04:00
+
+> **Queue prompt:**
+>
+> do [#lzconcurrencyscope]
+
+
+Completed `#lzconcurrencyscope` across `lazily-spec` and `lazily-go`.
+
+The canonical spec now defines four stable scopes in `concurrency-scopes.json`: `single_goroutine`, `single_process_serialized`, `durable_cross_process`, and `distributed_fenced`. A strict JSON Schema and independent pytest guards require unique/complete scope identities, forbid every in-process capability from claiming database atomicity, cross-replica exclusion, or projection-maintenance authority, and pin `postgres_projection_barrier` as the sole current barrier claim. The documentation separates Go owner-goroutine/lock/channel terminology, PostgreSQL durable coordination, and authority-issued fences without treating the scopes as interchangeable.
+
+Go mirrors those identifiers through `ConcurrencyScope` and `ConcurrencyScopedCapability`. Contexts, synchronous/thread-safe/async queue families, and all latest-durable projection shells now advertise their actual process boundary. `DatabaseProjectionMaintenanceBarrier` requires an explicit scope, and `PostgresProjectionBarrier` advertises `durable_cross_process`. Negative conformance tests enumerate every process-local surface and fail if any acquires the database-barrier interface.
+
+Pushed commits:
+
+- `lazily-spec` `125f687` — `spec: define concurrency capability scopes`
+- `lazily-go` `fee2133` — `feat: expose concurrency capability scopes`
+
+Verification passed:
+
+- `lazily-spec`: focused concurrency tests; full `make check` with 316 pytest tests, Lean build, schema, coverage, fixture-copy, identity, assertion, and corpus guards
+- `lazily-go`: focused scope/interface tests; full `make check` with vet, build, ordinary tests, race detector, interop, real PostgreSQL integration, conformance coverage, assertion ordering, and CI reachability
+- private-name hygiene scans for both public repos
+
+At closeout, spec CI `36206618178` was in progress and Go CI `36206625022` was queued.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -607,7 +633,7 @@ GitHub CI run `36206306787` for `831c4f9` was in progress at closeout; the immed
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzprojectionbarrier]~~
 - ~~do [#lzprojectionracecorpus]~~
-- do [#lzconcurrencyscope]
+- ~~do [#lzconcurrencyscope]~~
 - do [#lzsimlicense]
 - ~~do ~~[#lzdurablepg]~~~~
 - do [#lzdurablejetstream]
@@ -618,7 +644,6 @@ GitHub CI run `36206306787` for `831c4f9` was in progress at closeout; the immed
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzconcurrencyscope] [lazily-go,lazily-spec] Make concurrency scope explicit and machine-checkable across Lazily surfaces: classify single-goroutine, single-process lock/channel serialized, durable cross-process, and distributed/fenced capabilities; document that ThreadSafeContext, AsyncContext, queues, and the in-memory LatestDurableProjection core do not provide database atomicity or cross-replica exclusion; and add negative conformance tests that prevent an in-process capability from being advertised as a projection-maintenance barrier. Use independently authored neutral examples and public Go/PostgreSQL terminology only.
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
 - [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, sta ble publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.
 - [ ] [#lzdurablereconcile] [lazily-spec, lazily-rs] Add the complete-history projection and reconciliation layer from tasks/software/plan-lazily-postgres-nats-valkey.md: transaction-consistent snapshots with monotonic projection versions, ordered create/amend/retract event replay, checkpointed rebuild, dry-run drift reports, lag and health signals, and scheduled idempotent reconciliation through the transactional outbox. Prove replay equivalence, partial and final retractions, restart/resume, and that stale or cache-only reads never authorize a transition.

@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -92,13 +92,31 @@ Audited all four gated review items against live state. Two were hiding agent-ex
 I filed these two rather than implementing them because the queued instruction was the extraction itself. Both are now drainable heads, so the next cycle can take them.
 
 **JetBrains advisory persists** (`stale_plugin`, `plugin_bytes_superseded`): live pid 3129637 has `agent-doc-jetbrains-0.2.419.jar` mapped with its inode unlinked, which no version string can reveal. Run the plugin installer once so its dynamic update transaction converges, and restart the IDE only if that install reports a dynamic-unload failure. This document does not own agent-doc development, so I did not install.
+
+### Re: queue halted by operator — opus-5 · 2026-09-26T14:24-04:00
+
+Acknowledged `queue: stop`. Preflight resolved `queue_active: false` with `queue_drainable_head_count: 0`, so I drained nothing and executed no repo work. The three heads and their backlog items are left intact, so re-enabling `go` resumes exactly where this stopped; I did not strike them, because discarding queued intent is your call, not mine.
+
+Why each stays open, since none was executed:
+
+- `#lzfakepublisherproof`: not started. Still the agent-executable prerequisite for `#lzambienttokenresolve`.
+- `#lzartifactpurgeexec`: not started. Still non-destructive work that deletes nothing.
+- `#lzdocorphanresidue`: `[operator-verify]` by construction, and it needs your deletion in IDEA regardless of queue state.
+
+**`agent-doc plan` contradicted preflight on this turn, and the contradiction is a false-closeout hazard.** With the queue inactive, `plan` still emitted `repo_actions` for all three heads and a `required_commands` line of `agent-doc finalize ... --done lzfakepublisherproof --done lzartifactpurgeexec --done lzdocorphanresidue`. Following that literally would have marked three unexecuted items complete, including an `[operator-verify]` item that no agent turn can satisfy. `plan` appears to derive `repo_actions` from queue prose without consulting the `queue_active` state that preflight already resolved. Filed to `tasks/agent-doc/agent-doc-bugs2.md` as `#planinactivequeuedone`; I trusted preflight, per the rule that drainability is never re-derived from queue prose.
+
+**New in this cycle's advisories:** the running binary is missing one committed change, `df02ce27c fix: route pane focus and stop by document actor`. That is a stop-routing fix, on a turn whose entire subject is a stop, so treat any stop/focus-routing oddity you see right now as possibly pre-fix behavior rather than a new defect. I did not run `make install`, since this document does not own agent-doc development.
+
+The two operator actions from the previous cycle are still outstanding: re-run the JetBrains plugin installer once (live pid 3129637 still has an unlinked jar inode mapped, which is the likely cause of this session's retained-write deferrals), and delete the three orphan fragment lines in this document.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 #actionable-review
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+- do [#lzfakepublisherproof]
+- do [#lzartifactpurgeexec]
+- do [#lzdocorphanresidue]
 <!-- /agent:queue -->
 
 ## Backlog

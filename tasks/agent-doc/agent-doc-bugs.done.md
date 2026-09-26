@@ -181,3 +181,4 @@
   tasks/api.md and the #actionable-review edit will admit normally. I've recorded this variant in the divergence
   memory, since the previously documented self-clearing path does not apply to it.
   ✻ Brewed for 4m 58s · done 3:46 PM
+- 2026-09-26 [#quotedpreset] A `#preset` reference inside QUOTED content is read as a live preset request: `extract_prompt_preset_requests_from_text` matched `#actionable-review` inside the quoted bullet `- queue head review PR 567 again -> - #actionable-review`, and preflight resolved + expanded it as a directive. Same root cause as 0937d4bba (quoted content read as a directive) but a different detector with different scoping semantics — a preset ref is valid anywhere in a prompt, so the guard cannot be "preamble only". Suppress preset requests found inside a blockquote, a fenced block, or a list item that is itself quoted diff/report content; mutation-check against the agent-doc-bugs.md 2026-09-26 paste.

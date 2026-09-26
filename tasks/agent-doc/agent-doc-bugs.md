@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -223,6 +223,31 @@ The fix is a shared predicate, not a second string: `agent_doc_document::admissi
 **Install ordering.** This cycle owns the fix, so it owns the install — but I am deliberately doing `make install` **after** this commit rather than before it. The `#supselfheal` auto-recycle is proven for the recycle, not for a post-install `finalize`, and this document is attached with `live_editors=1`.
 
 **One thing I did not fix, filed instead.** `prompt_presets_requested` picked up `#actionable-review` from **inside** your quoted bullet — the same "quoted content read as a directive" root cause, but in a different detector with different semantics (`extract_prompt_preset_requests_from_text`). Half-landing it alongside four verified changes would be worse than naming it precisely; it is at the top of the backlog.
+
+### Re: #quotedpreset — a preset named inside quoted content is description, not a request — opus-5 · 2026-09-26T17:53-04:00
+
+> **Queue prompt:** do [#quotedpreset]
+
+Fixed, mutation-checked, suite-green, committed and pushed as `11a66ef82` (superproject pointer `3821ffc39`).
+
+**There were two independent holes, not one.** `referenced_presets_in_text` ran both preset detectors, and each was broken in its own way:
+
+- It fed `extract_prompt_preset_requests_from_text` **one line at a time**. That function tracks fence state *across* lines, so a per-line call resets the state on every line — fence suppression never fired at all. The blockquote check survived only because it happens to be per-line.
+- The `#preset` hashtag detector sitting next to it had **no scoping whatsoever** — no fence, no blockquote, nothing. That is the path your `#actionable-review` came through. Line 175 of this document (`  - queue head 🚧 review PR 567 again → - #actionable-review`) and line 187 (`...the #actionable-review edit will admit normally`) both matched; so did the fenced copy at line 205.
+
+**The guard.** New `agent_doc_diff::directive_bearing_line_mask(text)` is the single answer to "can this line carry a live directive" — outside fences, outside blockquotes, outside quoted diff/report content. Both preset detectors and the hashtag detector read it, computed over the **whole** text.
+
+**Defining "quoted diff/report content" without a preamble rule.** You were right that the 0937d4bba shape does not transfer: a preset reference is valid anywhere in prose, so "preamble only" would break `Please analyze failed orders. #next-steps`. The structural fact a paste does leave behind is its own indentation — a pasted terminal report keeps the report's columns while the prompt around it sits at column zero. Indentation alone is not enough, because markdown list nesting indents identically. So the classifier walks back to the nearest non-blank line at a strictly smaller indent and asks whether *that* line opens a list item: if it does, the indent is nesting and the line stays live; if it does not (prose, a heading, a report lead-in such as `git diff HEAD -- tasks/api.md (4 lines each way):`) or there is no shallower line at all, the run is a paste. In your report every indented line resolves back to the bare `Fix ` at column zero.
+
+One trap worth naming, because I walked into it: a caller holding the mask must **not** re-enter the text scanner with a single line to do the actual parse. A lone line has no surrounding lines, so it classifies as a paste and a legitimately nested `  - preset release-check` gets suppressed. `prompt_preset_requests_in_directive_line` is the companion for that case, and a mutation reverting it reddens.
+
+**Verification.** `make check`: exit 0, runner-native **9789 tests run, 9789 passed, 259 skipped** (asserted from nextest's own summary, not a grep). `cargo build --release`: exit 0. Ten new tests across the two crates.
+
+**Mutation-checked, 3 mutations, all detected, clean M0 before and after each.** Disabling the quoted-report guard reproduces the original defect *verbatim* against this document's real paste region — `["#actionable-review"]` where the fix returns empty — and reddens 5 tests. Disabling the blockquote/blank guard reddens 2. Reverting the per-line companion reddens 1 (it took a second attempt: my first nested-list test used a `#`-prefixed name, so the hashtag detector rescued it and the mutation survived — the pinning test now uses an unhashed `release-check` to isolate the directive path).
+
+**Two things to know.** `make check` ran against a tree holding three other sessions' uncommitted work (`agent-doc-commit-io`, `agent-doc-controller-io`, `agent-doc-queue`, `src/plugin_activation.rs`); both commits used `--only` with explicit paths and took none of it. And CI run `36274419033` was still in progress when I checked (previous run `36269600381` green), so this closes out on local evidence.
+
+**Install deferred by one step, on purpose.** `[[feedback_no_mid_session_install_against_live_supervisor]]` ends with "close out the document FIRST, install after" — a mid-session `make install` strands this document's attached Lazily replica. I am running `make install` + recycle immediately after this closeout, before the queue takes `#orchworktreeleak`.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -231,12 +256,13 @@ The fix is a shared predicate, not a second string: `agent_doc_document::admissi
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#quotedpreset]~~
+- do [#orchworktreeleak]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#quotedpreset] A `#preset` reference inside QUOTED content is read as a live preset request: `extract_prompt_preset_requests_from_text` matched `#actionable-review` inside the quoted bullet `- queue head review PR 567 again -> - #actionable-review`, and preflight resolved + expanded it as a directive. Same root cause as 0937d4bba (quoted content read as a directive) but a different detector with different scoping semantics — a preset ref is valid anywhere in a prompt, so the guard cannot be "preamble only". Suppress preset requests found inside a blockquote, a fenced block, or a list item that is itself quoted diff/report content; mutation-check against the agent-doc-bugs.md 2026-09-26 paste.
 - [ ] [#orchworktreeleak] `orchestrate --mode parallel` never removes the git worktrees or branches it creates. Seven were left in `.agent-doc/worktrees/` from two runs (`deep/3f069c68/0-2`, `deep/b26b9957/0-3`), each holding only orchestrate scaffolding (`.agent-doc-prompt.txt`, `.agent-doc-result.json`, `.agent-doc-result.log`). src/parallel.rs collects results at step 5 and returns without cleanup, and the timeout path only kills panes. Remove each worktree + branch after result collection and on the timeout path; keep them only when the task left real uncommitted work, and say so.
 <!-- /agent:backlog -->
 

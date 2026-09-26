@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -51,20 +51,33 @@ Completed `#lzdurableadmissioncloseout`.
 - Commits: `lazily-rs` `74af6c9` (`chore: enforce dependency license admission`) was pushed to `origin/main`; private planning record `c17eb79c82` (`docs: close durable runtime admission gate`) is committed in the superproject.
 
 The JetBrains advisory remains: run the plugin installer once to replace the superseded live jar bytes; restart the IDE only if that install reports a dynamic-unload failure.
+
+### Re: root instruction-files target paths — gpt-5 · 2026-09-26T13:52-04:00
+
+> **Queue prompt:**
+>
+> do [#lzrootinstructionpath]
+
+
+Completed `#lzrootinstructionpath`.
+
+- Corrected the root `Makefile` `publish` and `clean` recipes from `cd instruction-files` to `cd src/instruction-files`.
+- Verified both targets without executing them: `make -n publish` and `make -n clean` resolve the corrected path, `src/instruction-files` exists, and the dry-run output contains no stale `cd instruction-files` form. No publisher or cleaner ran.
+- Refreshed `tasks/software/plan-ambient-publish-token-point-of-use.md` with the corrected root credential hunk and the new Makefile preimage SHA-256 `c574a714867cdf8a277714d4173a059f91f1341a6e5dad19ff78d2e1c167d891`.
+- Reproved the plan: all eight recorded preimage hashes match; all seven fenced patch sets pass `git apply --unidiff-zero --check`; the exact local publisher inventory still matches the recorded consumers plus the tagpath dry-run/prose-only check; and every workflow-owned publisher file carries a repository-secret or OIDC authentication marker. No credential reference was evaluated.
+- Verification: the complete root `make check` passed with exit 0 and zero detected failures. This superproject has no workflow named `CI`, so no corresponding remote CI run exists to inspect.
+- Committed as `2c3ed5fdcc` (`fix: correct instruction-files target paths`). The credential-scoping patches remain unapplied, no real publisher was invoked, and no credential was read, rotated, or changed.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzdurableadmissioncloseout]~~
-- do [#lzrootinstructionpath]
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzrootinstructionpath] [agent-loop superproject] Fix the root Makefile stale `cd instruction-files` paths in the `publish` and `clean` targets to use `src/instruction-files`; verify the command paths with non-publishing/dry-run checks only, then refresh the root Makefile hunk and preimage hash in tasks/software/plan-ambient-publish-token-point-of-use.md and rerun its static inventory and patch-check proof. Do not apply credential-scoping patches, invoke a real publisher, evaluate credential references, or rotate secrets.
 <!-- /agent:backlog -->
 
 ## Review

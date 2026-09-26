@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0db0d-7e1c-7c50-b447-0eacf4505b3c
+  codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -56,6 +56,20 @@ Verification:
 - agent-doc commit `c4b62e733` and superproject pointer commit `44a8ae1df` were created; the agent-doc commit is pushed.
 
 The remaining `#tmuxfocussyncverify` item is narrowed to one operator-visible check: click between the two live IntelliJ session tabs/splits and confirm tmux follows each exact document.
+
+### Re: recovered response
+
+Fixed and deployed.
+
+- Right editor focus now selects tmux `%218`; `%215` is inactive.
+- Passive layout publications log `focus_not_requested`, so they can no longer steal focus.
+- Stop-hook retained-delivery and `write_applied` states remain on binary-owned recovery instead of falling through to “already continued once.”
+- The original FPE retained cycle committed successfully; its current interruption is a newer `preflight_started` cycle.
+- Full `make check`: 9,758 tests passed.
+- JetBrains plugin 0.2.421 is loaded live.
+- Pushed:
+  - `agent-doc`: `22479d31f`
+  - `agent-loop`: `853abdb79`
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

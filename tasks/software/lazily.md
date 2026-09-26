@@ -108,14 +108,38 @@ Why each stays open, since none was executed:
 **New in this cycle's advisories:** the running binary is missing one committed change, `df02ce27c fix: route pane focus and stop by document actor`. That is a stop-routing fix, on a turn whose entire subject is a stop, so treat any stop/focus-routing oddity you see right now as possibly pre-fix behavior rather than a new defect. I did not run `make install`, since this document does not own agent-doc development.
 
 The two operator actions from the previous cycle are still outstanding: re-run the JetBrains plugin installer once (live pid 3129637 still has an unlinked jar inode mapped, which is the likely cause of this session's retained-write deferrals), and delete the three orphan fragment lines in this document.
+
+### Re: fail-closed artifact purge executor — opus-5 · 2026-09-26T15:18-04:00
+
+`#lzartifactpurgeexec` is done and pushed as `187f31622` (`feat: enforce artifact purge refusals in code`). The two invariants that lived only in the handoff README are now code.
+
+**`src/agent-doc/scripts/purge-actions-artifacts.py`** is the only command that may call the artifact deletion endpoint. Dry run is the default; deletion needs `--execute` **and** `--authorize-deletion <owner/repo>` whose value equals the audited repository, and that pair is checked before any network call.
+
+Candidacy is re-derived live rather than trusted from the CSV. The executor imports the audit generator and calls its own `counterpart()` against a fresh enumeration of the Actions artifacts, Releases, and PyPI files, so candidacy has exactly one definition in the repo. An id is refused per-artifact when the live artifact is renamed, resized, has a different expiry, has no durable counterpart any more, or whose counterpart kind/name/URL drifted from the audit row. An id gone from the live API or already expired is *skipped*, never reported as deleted.
+
+Withheld rows are refused twice over: an id in `artifact-unresolved.csv` can never enter the delete set, and naming one with `--only` aborts the run outright. A candidate/withheld overlap aborts at load — if the two CSVs disagree, no row in either is trustworthy.
+
+Structural faults all abort before the network: a candidate with no counterpart URL, summary totals that disagree with the CSV rows, a summary already claiming `deletion_performed`, a handoff older than `--max-handoff-age-days` (7), a `--repo` that does not match the audit, or a PyPI project the audit module cannot use to verify that repository. A plan above `--max-deletions` (250) aborts rather than deleting a truncated subset.
+
+**Coverage.** `--self-test` exercises every refusal path offline against a fake client — unauthorized `--execute`, wrong-repo authorization, `--only` on a withheld id, `--only` on a non-candidate, size drift, rename drift, vanished release asset, untagged run, absent id, expired id, the deletion cap, CSV overlap, missing counterpart URL, both summary-total mismatches, a summary claiming a prior deletion, a stale handoff, missing files, re-derivation scope, plus end-to-end CLI runs proving dry run never reaches the deleter and an authorized run deletes exactly the planned ids. A non-204 status and a raised exception both report failure instead of success. Two assertions make the test refuse to touch the network at all: an injected client factory that raises if a refusal was supposed to fire earlier, and a deleter that raises if anything tries to delete. `make check` runs it via the new `artifact-purge-check` target.
+
+**Verification.** `make check` passed with exit 0, 9,770/9,770 tests, Lean and TLC green. The first run failed on `plan::tests::finalize_placeholder_keeps_small_done_flag_lists` with `No such file or directory` execing the test binary — a concurrent relink of `agent_doc-8c52c9c9410fc3e0` in this shared tree, not an assertion; the binary was present afterward and the rerun was clean.
+
+The live default dry run against `btakita/agent-doc` planned **2,771 deletable artifacts (45.47 GB)**, skipped **10** now absent from the API, refused **0**, and deleted nothing. Zero refusals means the 2026-09-25 rows still match live metadata exactly, so the audit has not decayed in a day. The default 250 cap correctly aborted that 2,771-artifact plan on the first attempt — deleting the full set is a deliberate `--max-deletions 3000`, which is the fail-closed behavior I wanted from a cap.
+
+I also updated the generator's `report_markdown` and the committed handoff README with a `Purging` section, taking the README text straight from the generator so a regeneration cannot drift from it.
+
+`#lzagentdocartifactpurge` keeps its review gate and now names the exact command plus the authorization flags; nothing was deleted, and no code path deletes without both explicit flags. CI run `36265576676` for this commit is in progress — not waited on, per the observe-don't-await rule.
+
+Remaining drainable head is `#lzfakepublisherproof`. `#lzdocorphanresidue` still needs your three-line deletion in IDEA.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzfakepublisherproof]
-- do [#lzartifactpurgeexec]
+- ⏭️ do [#lzfakepublisherproof]
+- ~~do [#lzartifactpurgeexec]~~
 - do [#lzdocorphanresidue]
 <!-- /agent:queue -->
 
@@ -123,7 +147,6 @@ The two operator actions from the previous cycle are still outstanding: re-run t
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzfakepublisherproof] Implement the fake-publisher and fresh-shell proof harness specified in `tasks/software/plan-ambient-publish-token-point-of-use.md` lines 228-280 as a committed runnable target; no harness exists today. Cover success, failure, and empty modes; intercept `python -m twine` with a fake `twine/__main__.py` on a temporary `PYTHONPATH` because a `PATH` executable does not intercept it; assert the publisher child sees exactly the expected sentinel variable while its parent holds none of the six root aliases or the child-only `NPM_CONFIG_TOKEN`; assert TestPyPI sees no production alias or `TWINE_PASSWORD`; assert failure and empty modes exit nonzero with no fake publisher invoked. Never resolve, print, or rotate a real credential and never run a real publish. This is the agent-executable prerequisite for `#lzambienttokenresolve`.
-- [ ] [#lzartifactpurgeexec] Add a fail-closed, dry-run-default purge executor for the artifact audit handoff at `src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/`. The generator `src/agent-doc/scripts/audit-actions-artifacts.py` is already re-runnable via `--repo` and `--output-dir`, so encode the remaining prose invariants in code: re-derive or intersect candidate ids against the live Actions API at execution time, refuse every id present in `artifact-unresolved.csv` (466 withheld rows), default to dry-run, require an explicit authorization flag, and add tests for each refusal path. Delete nothing; the destructive run stays operator-authorized under `#lzagentdocartifactpurge`.
 - [ ] [#lzdocorphanresidue] [operator-verify] Three truncated orphan fragment lines sit after the agent:done close marker in `tasks/software/lazily.md`, beginning `eturn typed satisfied/`, `cate orphan line remains outside`, and `ebc036`. They are residue from a prior compaction, outside every agent-doc component, so component writes cannot clear them and a disk edit under the live JetBrains editor would contend with the editor authority. Operator: delete exactly those three lines in IDEA, save, and send `continue`.
 <!-- /agent:backlog -->
 
@@ -132,7 +155,7 @@ The two operator actions from the previous cycle are still outstanding: re-run t
 <!-- agent:review -->
 - [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Re-verified 2026-09-26: `make release-macos-cadence-check` reports the weekly window open since 2026-09-22T16:41:49Z, v0.35.398 (2026-09-15) is the last release with both Darwin architectures, and `gh release view` confirms v0.35.417 is still Latest with six assets and no Darwin archive. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
-- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit commit 4af68aa8f verified 2,781 exact durable-counterpart delete candidates totaling 45.56 GB and withheld 466 artifacts; the handoff is under src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/. Live artifact counts have already changed, so regenerate or intersect the candidate IDs with the live API immediately before deletion and never delete withheld rows; the re-intersection and withheld-row refusal are being moved into code as agent-executable `#lzartifactpurgeexec`. Blocked solely on explicit destructive authorization; no artifact was deleted.
+- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit commit 4af68aa8f verified 2,781 exact durable-counterpart delete candidates totaling 45.56 GB and withheld 466 artifacts; the handoff is under src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/. The re-intersection and withheld-row refusal are now code, not prose: run `python3 scripts/purge-actions-artifacts.py` (commit 187f31622) from src/agent-doc. Its live dry run on 2026-09-26 planned 2,771 deletable artifacts (45.47 GB), skipped 10 already absent from the API, and refused 0. The destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000`; the 250 default cap will otherwise abort. Blocked solely on explicit destructive authorization; no artifact has been deleted.
 - [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] The ready-to-apply point-of-use credential plan is complete at tasks/software/plan-ambient-publish-token-point-of-use.md and all eight recorded preimage hashes still match. Prerequisite `#lzrootinstructionpath` completed as commit `2c3ed5fdcc`; the remaining agent-executable prerequisite is `#lzfakepublisherproof` (the fake-publisher and fresh-shell proof harness does not exist yet). After that lands, application remains blocked on an operator quiet window and on rotation of the Cargo, npm, and PyPI credentials. Do not resolve or print credential values during preparation.
 <!-- /agent:review -->
 

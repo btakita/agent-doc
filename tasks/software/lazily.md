@@ -3,7 +3,7 @@ agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
   codex: 01a0da83-7762-7810-8ddf-49eda4e9a807
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -67,26 +67,55 @@ Completed `#lzrootinstructionpath`.
 - Reproved the plan: all eight recorded preimage hashes match; all seven fenced patch sets pass `git apply --unidiff-zero --check`; the exact local publisher inventory still matches the recorded consumers plus the tagpath dry-run/prose-only check; and every workflow-owned publisher file carries a repository-secret or OIDC authentication marker. No credential reference was evaluated.
 - Verification: the complete root `make check` passed with exit 0 and zero detected failures. This superproject has no workflow named `CI`, so no corresponding remote CI run exists to inspect.
 - Committed as `2c3ed5fdcc` (`fix: correct instruction-files target paths`). The credential-scoping patches remain unapplied, no real publisher was invoked, and no credential was read, rotated, or changed.
+
+### Re: actionable review extraction — opus-5 · 2026-09-26T14:16-04:00
+
+> **Queue prompt:**
+>
+> #actionable-review
+
+Audited all four gated review items against live state. Two were hiding agent-executable work inside an operator gate; two are correctly gated and stay that way.
+
+**Extracted into backlog + queue** (appended, so they do not preempt the current drain):
+
+- `#lzfakepublisherproof`: the plan's fake-publisher proof does not exist anywhere. A search across `*.py`, `*.sh`, `*.rs`, and `Makefile` in the whole superproject found no harness, so the "fake-publisher and fresh-shell verification" blocker on `#lzambienttokenresolve` is agent-buildable today rather than operator-gated. The spec is already written at `tasks/software/plan-ambient-publish-token-point-of-use.md` lines 228-280.
+- `#lzartifactpurgeexec`: `src/agent-doc/scripts/audit-actions-artifacts.py` is already parameterized (`--repo`, `--output-dir`), so re-intersecting candidates against the live API is a re-run, not new work. What is missing is the fail-closed executor. The handoff README states "no deletion command is included," and the 466-row withheld-artifact invariant lives only in prose. Building a dry-run-default executor that refuses withheld ids deletes nothing and leaves the destructive run under `#lzagentdocartifactpurge`.
+- `#lzdocorphanresidue` (`[operator-verify]`): three truncated fragment lines sit after `&lt;!-- /agent:done --&gt;` in this document, beginning `eturn typed satisfied/`, `cate orphan line remains outside`, and `ebc036`. They are residue from a prior compaction, outside every agent-doc component, so component writes cannot reach them, and a disk edit under the live JetBrains editor would fight the editor's authority. Tagged for operator deletion so it does not churn the drain.
+
+**Stays gated, facts re-verified rather than trusted:**
+
+- `#lzmacosrunner`: `make release-macos-cadence-check` reports the weekly window open since 2026-09-22T16:41:49Z (v0.35.398 uploaded Darwin assets 2026-09-15), and `gh release view` confirms v0.35.417 is still `Latest` carrying six assets with no Darwin archive. The gate is real, because Darwin archives need a Mac. Text refreshed with the verification date.
+- `#lzgithubbudget20`: blocked on a payment method on the personal GitHub account, with no agent-executable slice. Left unchanged.
+
+**Corrected stale review text:** `#lzambienttokenresolve` asserted that "agent-executable prerequisite #lzrootinstructionpath is now tracked in backlog and queue." That item completed this session as commit `2c3ed5fdcc` and the backlog is empty, so the sentence was stale. It now names `#lzfakepublisherproof` as the remaining agent-executable prerequisite.
+
+I filed these two rather than implementing them because the queued instruction was the extraction itself. Both are now drainable heads, so the next cycle can take them.
+
+**JetBrains advisory persists** (`stale_plugin`, `plugin_bytes_superseded`): live pid 3129637 has `agent-doc-jetbrains-0.2.419.jar` mapped with its inode unlinked, which no version string can reveal. Run the plugin installer once so its dynamic update transaction converges, and restart the IDE only if that install reports a dynamic-unload failure. This document does not own agent-doc development, so I did not install.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 #actionable-review
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzfakepublisherproof] Implement the fake-publisher and fresh-shell proof harness specified in `tasks/software/plan-ambient-publish-token-point-of-use.md` lines 228-280 as a committed runnable target; no harness exists today. Cover success, failure, and empty modes; intercept `python -m twine` with a fake `twine/__main__.py` on a temporary `PYTHONPATH` because a `PATH` executable does not intercept it; assert the publisher child sees exactly the expected sentinel variable while its parent holds none of the six root aliases or the child-only `NPM_CONFIG_TOKEN`; assert TestPyPI sees no production alias or `TWINE_PASSWORD`; assert failure and empty modes exit nonzero with no fake publisher invoked. Never resolve, print, or rotate a real credential and never run a real publish. This is the agent-executable prerequisite for `#lzambienttokenresolve`.
+- [ ] [#lzartifactpurgeexec] Add a fail-closed, dry-run-default purge executor for the artifact audit handoff at `src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/`. The generator `src/agent-doc/scripts/audit-actions-artifacts.py` is already re-runnable via `--repo` and `--output-dir`, so encode the remaining prose invariants in code: re-derive or intersect candidate ids against the live Actions API at execution time, refuse every id present in `artifact-unresolved.csv` (466 withheld rows), default to dry-run, require an explicit authorization flag, and add tests for each refusal path. Delete nothing; the destructive run stays operator-authorized under `#lzagentdocartifactpurge`.
+- [ ] [#lzdocorphanresidue] [operator-verify] Three truncated orphan fragment lines sit after the agent:done close marker in `tasks/software/lazily.md`, beginning `eturn typed satisfied/`, `cate orphan line remains outside`, and `ebc036`. They are residue from a prior compaction, outside every agent-doc component, so component writes cannot clear them and a disk edit under the live JetBrains editor would contend with the editor authority. Operator: delete exactly those three lines in IDEA, save, and send `continue`.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. The next upload is eligible and the release set is stale relative to current support: v0.35.417 has no Darwin archives, while v0.35.398 is the last release with both architectures. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
+- [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Re-verified 2026-09-26: `make release-macos-cadence-check` reports the weekly window open since 2026-09-22T16:41:49Z, v0.35.398 (2026-09-15) is the last release with both Darwin architectures, and `gh release view` confirms v0.35.417 is still Latest with six assets and no Darwin archive. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
-- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit commit 4af68aa8f verified 2,781 exact durable-counterpart delete candidates totaling 45.56 GB and withheld 466 artifacts; the handoff is under src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/. Live artifact counts have already changed, so regenerate or intersect the candidate IDs with the live API immediately before deletion and never delete withheld rows. Blocked solely on explicit destructive authorization; no artifact was deleted.
-- [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] The ready-to-apply point-of-use credential plan is complete at tasks/software/plan-ambient-publish-token-point-of-use.md and all eight recorded preimage hashes still match. Agent-executable prerequisite #lzrootinstructionpath is now tracked in backlog and queue. After it completes, application remains blocked on an operator quiet window, fake-publisher and fresh-shell verification, and rotation of the Cargo, npm, and PyPI credentials. Do not resolve or print credential values during preparation.
+- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit commit 4af68aa8f verified 2,781 exact durable-counterpart delete candidates totaling 45.56 GB and withheld 466 artifacts; the handoff is under src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/. Live artifact counts have already changed, so regenerate or intersect the candidate IDs with the live API immediately before deletion and never delete withheld rows; the re-intersection and withheld-row refusal are being moved into code as agent-executable `#lzartifactpurgeexec`. Blocked solely on explicit destructive authorization; no artifact was deleted.
+- [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] The ready-to-apply point-of-use credential plan is complete at tasks/software/plan-ambient-publish-token-point-of-use.md and all eight recorded preimage hashes still match. Prerequisite `#lzrootinstructionpath` completed as commit `2c3ed5fdcc`; the remaining agent-executable prerequisite is `#lzfakepublisherproof` (the fake-publisher and fresh-shell proof harness does not exist yet). After that lands, application remains blocked on an operator quiet window and on rotation of the Cargo, npm, and PyPI credentials. Do not resolve or print credential values during preparation.
 <!-- /agent:review -->
 
 ## Icebox

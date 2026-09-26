@@ -1052,6 +1052,10 @@ fn document_authority_transport_interrupted(error: &std::io::Error) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct DocumentDeliveryWakeProjection {
     document_hash: String,
+    #[serde(default)]
+    content_hash: Option<String>,
+    #[serde(default)]
+    visible_delivery_projected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1060,6 +1064,8 @@ pub struct DocumentDeliveryWakeSubscription {
     pub latest_version: u64,
     pub timed_out: bool,
     pub changed: bool,
+    pub content_hash: Option<String>,
+    pub visible_delivery_projected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1131,23 +1137,29 @@ pub fn subscribe_document_delivery_wakes_for_file(
         request,
         timeout.saturating_add(Duration::from_secs(2)),
     )?;
-    let changed = subscription.frames.iter().any(|frame| {
+    let projection = subscription.frames.iter().rev().find_map(|frame| {
         let Ok(message) = serde_json::from_str::<lazily::IpcMessage>(&frame.message_json) else {
-            return false;
+            return None;
         };
         let Ok(payload) =
             state_plane_snapshot_payload(&message, &channel, DOCUMENT_DELIVERY_WAKE_TYPE_TAG)
         else {
-            return false;
+            return None;
         };
         serde_json::from_slice::<DocumentDeliveryWakeProjection>(&payload)
-            .is_ok_and(|wake| wake.document_hash == document_hash)
+            .ok()
+            .filter(|wake| wake.document_hash == document_hash)
     });
     Ok(DocumentDeliveryWakeSubscription {
         controller_generation: subscription.controller_generation,
         latest_version: subscription.latest_version,
         timed_out: subscription.timed_out,
-        changed,
+        changed: projection.is_some(),
+        content_hash: projection
+            .as_ref()
+            .and_then(|projection| projection.content_hash.clone()),
+        visible_delivery_projected: projection
+            .is_some_and(|projection| projection.visible_delivery_projected),
     })
 }
 
@@ -8802,8 +8814,9 @@ fn observe_retained_delivery_after_replica_event(
 
 pub(super) fn publish_document_delivery_wake(
     runtime: &ControllerRuntime,
-    canonical: &Path,
+    observation: &RetainedDeliveryObservation,
 ) -> Result<()> {
+    let canonical = &observation.file;
     let document_hash = agent_doc_hash::document_id_for_path(canonical);
     let channel = document_delivery_wake_channel(&document_hash);
     let epoch = DOCUMENT_DELIVERY_WAKE_EPOCH.fetch_add(1, Ordering::SeqCst);
@@ -8813,7 +8826,11 @@ pub(super) fn publish_document_delivery_wake(
         std::process::id(),
         bootstrap.controller_generation
     );
-    let snapshot = DocumentDeliveryWakeProjection { document_hash };
+    let snapshot = DocumentDeliveryWakeProjection {
+        document_hash,
+        content_hash: Some(observation.content_hash.clone()),
+        visible_delivery_projected: observation.delivery_converged,
+    };
     let message_json = state_plane_snapshot_message_json(
         epoch,
         &channel,
@@ -20947,6 +20964,7 @@ enum FocusPaneCandidateDecision<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPaneRejectReason {
     ActorNotFocusable,
+    ActorOwnershipUnproven,
     MissingActorRecord,
 }
 
@@ -20954,6 +20972,7 @@ impl FocusPaneRejectReason {
     const fn as_str(self) -> &'static str {
         match self {
             Self::ActorNotFocusable => "actor_not_focusable",
+            Self::ActorOwnershipUnproven => "actor_ownership_unproven",
             Self::MissingActorRecord => "missing_actor_record",
         }
     }
@@ -21024,19 +21043,14 @@ fn decide_focus_pane_candidate<'a>(
     }
 
     if let Some(FocusActorCandidate {
-        pane_id, focusable, ..
+        pane_id,
+        focusable: false,
+        ..
     }) = actor
     {
-        if !focusable {
-            return FocusPaneCandidateDecision::Reject {
-                reason: FocusPaneRejectReason::ActorNotFocusable,
-                pane_id: Some(pane_id),
-            };
-        }
-        return FocusPaneCandidateDecision::Candidate {
-            pane_id,
-            focused_reason: "focused_agent_doc_actor",
-            not_alive_reason: "actor_pane_not_alive",
+        return FocusPaneCandidateDecision::Reject {
+            reason: FocusPaneRejectReason::ActorNotFocusable,
+            pane_id: Some(pane_id),
         };
     }
 
@@ -21045,6 +21059,13 @@ fn decide_focus_pane_candidate<'a>(
             pane_id,
             focused_reason: "focused_durable_registry",
             not_alive_reason: "registry_pane_not_alive",
+        };
+    }
+
+    if let Some(candidate) = actor {
+        return FocusPaneCandidateDecision::Reject {
+            reason: FocusPaneRejectReason::ActorOwnershipUnproven,
+            pane_id: Some(candidate.pane_id),
         };
     }
 
@@ -21415,14 +21436,11 @@ fn handle_focus_document_pane_with_policy(
                 | agent_doc_controller::actor::ActorState::Closed
         );
         // `#fpeselectstashpane`: probe the BOUND pane, never scan for another
-        // one. This is only asked when a differing live owner was derived, so
-        // the ordinary converged path (no live owner, or the same pane) costs
-        // no extra observation.
-        let still_owns_document = focusable
-            && proven_live_owner
-                .as_deref()
-                .is_some_and(|owner| owner != record.pane_id)
-            && process_tree_exactly_owns_document(&tmux, &record.pane_id, &canonical);
+        // one. Every focus candidate needs current process-tree proof: a stale
+        // actor row must not steer the client merely because its pane remains
+        // alive and focusable.
+        let still_owns_document =
+            focusable && process_tree_exactly_owns_document(&tmux, &record.pane_id, &canonical);
         FocusActorCandidate {
             pane_id: record.pane_id.as_str(),
             focusable,
@@ -21431,7 +21449,10 @@ fn handle_focus_document_pane_with_policy(
     });
     let decision = decide_focus_pane_candidate(
         actor,
-        registry_entry.as_ref().map(|entry| entry.pane.as_str()),
+        registry_entry.as_ref().and_then(|entry| {
+            process_tree_exactly_owns_document(&tmux, &entry.pane, &canonical)
+                .then_some(entry.pane.as_str())
+        }),
         proven_live_owner.as_deref(),
     );
     let (mut pane_id, mut focused_reason, not_alive_reason) = match decision {
@@ -26681,6 +26702,18 @@ mod tests {
                 focused_reason: "focused_live_process_owner",
                 not_alive_reason: "live_owner_pane_not_alive",
             },
+        );
+    }
+
+    #[test]
+    fn focus_candidate_refuses_unproven_active_actor_instead_of_focusing_wrong_pane() {
+        assert_eq!(
+            decide_focus_pane_candidate(Some(unproven_actor("%wrong", true)), None, None),
+            FocusPaneCandidateDecision::Reject {
+                reason: FocusPaneRejectReason::ActorOwnershipUnproven,
+                pane_id: Some("%wrong"),
+            },
+            "a durable actor row without matching live process ownership must never move tmux focus",
         );
     }
 

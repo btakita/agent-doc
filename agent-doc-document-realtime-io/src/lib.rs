@@ -1074,6 +1074,36 @@ fn await_serialized_atomic_write_projection(
     }
 }
 
+/// Read the strict visible-delivery receipt from whichever process owns the
+/// document hub. CLI mutations normally run outside the project controller, so
+/// the process-local relay registry is expected to be empty there. The
+/// controller wake snapshot carries the exact hash witnessed by its live hub;
+/// accepting only a matching hash prevents an older delivery edge from
+/// authorizing a newer write.
+fn visible_editor_projection_receipt_for_target(path: &Path, target_hash: &str) -> Result<bool> {
+    if agent_doc_crdt_relay_io::visible_delivery_projected_for_file(path)?.unwrap_or(false) {
+        return Ok(true);
+    }
+    let subscription =
+        agent_doc_controller_io::project_controller::subscribe_document_delivery_wakes_for_file(
+            path,
+            None,
+            std::time::Duration::ZERO,
+        )?;
+    Ok(document_delivery_wake_proves_target(
+        &subscription,
+        target_hash,
+    ))
+}
+
+fn document_delivery_wake_proves_target(
+    subscription: &agent_doc_controller_io::project_controller::DocumentDeliveryWakeSubscription,
+    target_hash: &str,
+) -> bool {
+    subscription.visible_delivery_projected
+        && subscription.content_hash.as_deref() == Some(target_hash)
+}
+
 /// Await the strict visible-editor receipt for an exact canonical target.
 ///
 /// `delivery_converged` is only the availability barrier: it can become true
@@ -1100,7 +1130,7 @@ fn await_visible_editor_projection_receipt(path: &Path, target_hash: &str) -> Re
         if agent_doc_hash::content_hash(text) != target_hash {
             return Ok(false);
         }
-        if agent_doc_crdt_relay_io::visible_delivery_projected_for_file(path)?.unwrap_or(false) {
+        if visible_editor_projection_receipt_for_target(path, target_hash)? {
             return Ok(true);
         }
         let remaining = std::time::Duration::from_millis(
@@ -1125,6 +1155,9 @@ fn await_visible_editor_projection_receipt(path: &Path, target_hash: &str) -> Re
             subscribe_document_delivery_wakes_for_file(path, controller_cursor, remaining)
         {
             Ok(subscription) => {
+                if document_delivery_wake_proves_target(&subscription, target_hash) {
+                    return Ok(true);
+                }
                 controller_cursor = Some(
                     agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
                         controller_generation: subscription.controller_generation,
@@ -1237,8 +1270,7 @@ fn atomic_write_rebased_through_authority_body(
             // `delivery_converged`, so every case that already refused still
             // refuses, with the same message.
             let mut editor_receipt =
-                agent_doc_crdt_relay_io::visible_delivery_projected_for_file(path)?
-                    .unwrap_or(false);
+                visible_editor_projection_receipt_for_target(path, &relay_write.content_hash)?;
             if !relay_write.delivery_converged
                 && !matches!(
                     &current,
@@ -1434,8 +1466,10 @@ fn canonical_editor_projection_is_persisted(
     canonical: &str,
     source: &str,
 ) -> Result<bool> {
-    let visible_editor_receipt =
-        agent_doc_crdt_relay_io::visible_delivery_projected_for_file(path)?.unwrap_or(false);
+    let visible_editor_receipt = visible_editor_projection_receipt_for_target(
+        path,
+        &agent_doc_hash::content_hash(canonical),
+    )?;
     if visible_editor_receipt
         && canonical_disk_projection_is_exact(path, canonical)
         && let agent_doc_crdt_relay_io::CurrentText::Current {
@@ -8256,6 +8290,38 @@ fn retained_compact_projection_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn controller_delivery_wake_proves_only_the_exact_visible_target() {
+        let subscription =
+            agent_doc_controller_io::project_controller::DocumentDeliveryWakeSubscription {
+                controller_generation: 7,
+                latest_version: 11,
+                timed_out: false,
+                changed: true,
+                content_hash: Some("target-hash".to_string()),
+                visible_delivery_projected: true,
+            };
+
+        assert!(document_delivery_wake_proves_target(
+            &subscription,
+            "target-hash"
+        ));
+        assert!(!document_delivery_wake_proves_target(
+            &subscription,
+            "newer-hash"
+        ));
+
+        let unprojected =
+            agent_doc_controller_io::project_controller::DocumentDeliveryWakeSubscription {
+                visible_delivery_projected: false,
+                ..subscription
+            };
+        assert!(!document_delivery_wake_proves_target(
+            &unprojected,
+            "target-hash"
+        ));
+    }
 
     #[test]
     fn projected_editor_authority_survives_controller_handoff_until_explicit_detach() {

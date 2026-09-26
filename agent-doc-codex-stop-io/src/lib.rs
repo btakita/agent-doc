@@ -527,7 +527,22 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
                     reason: message,
                 });
             }
-            if !input.stop_hook_active {
+            // A recursive Stop normally acts only as a status gate. The one
+            // exception is fresh prompt work sitting behind a committed
+            // predecessor: there is no open cycle to duplicate, and telling
+            // the agent to run `finalize` is impossible because finalize must
+            // reject that terminal predecessor. Reuse the same binary-owned
+            // reopen/capture/closeout path as the first Stop invocation.
+            let recursive_post_commit_prompt = input.stop_hook_active
+                && is_committed_prompt_diff_interruption(&reason)
+                && agent_doc_flow_io::closeout::cycle_already_committed(&file).is_some()
+                && matches!(
+                    agent_doc_template::replay_guard::classify_replay_payload(
+                        &input.last_assistant_message
+                    ),
+                    agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
+                );
+            if !input.stop_hook_active || recursive_post_commit_prompt {
                 let stop_closeout = match attempt_stop_closeout(&file, &state, input) {
                     Ok(stop_closeout) => stop_closeout,
                     Err(err) => {
@@ -548,6 +563,12 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
                 };
                 match stop_closeout {
                     StopCloseAttempt::Closed => {
+                        if recursive_post_commit_prompt {
+                            agent_doc_ops_log_io::log_op(
+                                &file,
+                                "codex_stop_post_commit_prompt_auto_closed source=recursive_stop",
+                            );
+                        }
                         if let Some(response) = auto_queue_continuation_response(
                             &file,
                             &cleanup_roots,
@@ -762,8 +783,7 @@ fn active_session_prompt_requires_writeback(
         }
     };
 
-    if !input.stop_hook_active
-        && agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
+    if agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
         && matches!(
             agent_doc_template::replay_guard::classify_replay_payload(
                 &input.last_assistant_message
@@ -4665,9 +4685,21 @@ Reviewed the gated items.\n\
     }
 
     #[test]
-    fn stop_hook_active_blocks_committed_cycle_fresh_prompt_instead_of_stopping() {
+    fn recursive_stop_reopens_and_closes_committed_cycle_fresh_prompt() {
         let dir = setup_project();
-        let doc = write_doc(&dir);
+        let doc = write_template_doc(&dir);
+        let seeded = fs::read_to_string(&doc).unwrap().replace(
+            "❯ Hello\n<!-- /agent:exchange -->",
+            "❯ Hello\n\n### Re: Hello — gpt-5\n\nInitial response.\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &seeded).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &seeded,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -4678,13 +4710,11 @@ Reviewed the gated items.\n\
             Some(&original),
         )
         .unwrap();
-        fs::write(
-            &doc,
-            format!(
-                "{original}\n❯ do #repair-false-closeouts. #spec-test-build-install-commit-push\n"
-            ),
-        )
-        .unwrap();
+        let prompt_edit = original.replace(
+            "<!-- /agent:exchange -->",
+            "\n❯ • Hook stopped\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, prompt_edit).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
         match agent_doc_session_check_io::inspect(
@@ -4694,12 +4724,7 @@ Reviewed the gated items.\n\
         .unwrap()
         {
             agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
-                assert!(message.contains("is `committed`"), "{message}");
-                assert!(
-                    message.contains("no new agent-doc cycle started")
-                        || message.contains("without reopening the binary-owned write/commit path"),
-                    "{message}"
-                );
+                assert!(is_committed_prompt_diff_interruption(&message), "{message}");
             }
             other => panic!("expected interrupted session-check status, got {other:?}"),
         }
@@ -4708,26 +4733,25 @@ Reviewed the gated items.\n\
             session_id: "codex-session".to_string(),
             turn_id: "turn-1".to_string(),
             cwd: dir.path().display().to_string(),
-            last_assistant_message: "Still working.".to_string(),
+            last_assistant_message: "Recovered and closed the interrupted hook work.".to_string(),
             stop_hook_active: true,
         })
         .unwrap();
 
-        match response {
-            StopResponse::Block { reason, .. } => {
-                assert!(
-                    reason.contains("fresh unresolved exchange work"),
-                    "{reason}"
-                );
-                assert!(
-                    reason.contains("previous cycle was already committed"),
-                    "{reason}"
-                );
-                assert!(reason.contains("do #repair-false-closeouts"), "{reason}");
-                assert!(reason.contains("agent-doc finalize"), "{reason}");
-                assert!(!reason.contains("already continued once"), "{reason}");
-            }
-            other => panic!("expected block response, got {other:?}"),
-        }
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let closed = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(closed.phase.as_str(), "committed");
+        assert!(
+            fs::read_to_string(&doc)
+                .unwrap()
+                .contains("Recovered and closed the interrupted hook work."),
+            "recursive Stop must reopen the terminal predecessor and persist the response instead of prescribing finalize against a committed cycle"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_post_commit_prompt_cycle_reopened")
+                && ops.contains("codex_stop_post_commit_prompt_auto_closed"),
+            "recursive Stop must cross the same binary-owned reopen/close path as the first Stop attempt:\n{ops}"
+        );
     }
 }

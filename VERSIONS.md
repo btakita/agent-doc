@@ -19,6 +19,25 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   a concurrent editor ACK cannot produce a false manual-commit instruction
   while the controller is already completing that exact write.
 
+- **Recursive Codex Stop now closes fresh post-commit prompt work itself.** A
+  repeated Stop invocation previously skipped the binary-owned reopen path and
+  instructed the agent to run `finalize` against the terminal predecessor,
+  which `finalize` correctly rejects. Recursive Stop now mints the fresh cycle,
+  captures the response once, and consumes the same strict closeout receipt as
+  the first invocation.
+
+- **Foreground writes now consume the controller's exact editor-delivery
+  receipt across process boundaries.** The controller wake carries both the
+  projected content hash and strict visible-delivery bit, so a CLI write can
+  prove its own target landed instead of timing out as a retained write while
+  the editor and disk already agree. Stale or merely observed wakeups remain
+  insufficient to authorize commit.
+
+- **Tmux auto-focus refuses stale, unproven pane ownership.** A focusable actor
+  or durable pane registry entry must still have a live process tree owning the
+  requested document before agent-doc selects it. This prevents a recycled
+  pane from stealing focus from the document's proven live owner.
+
 - **A saved queue edit now fast-forwards from its proven merge baseline instead
   of being deleted by replica re-registration.** When live editor authority is
   still exactly the recorded baseline and disk alone advanced, preflight

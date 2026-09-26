@@ -6278,22 +6278,20 @@ impl ControllerRuntime {
         document_hash: &str,
         observation: Option<RetainedDeliveryObservation>,
     ) -> bool {
-        let wake_file = observation
-            .as_ref()
-            .map(|observation| observation.file.clone());
+        let wake_projection = observation.clone();
         let changed = self
             .document_graphs
             .observe_retained_delivery_with_change(document_hash, observation)
             .1;
         if changed
-            && let Some(file) = wake_file
-            && let Err(error) = rpc::publish_document_delivery_wake(self, &file)
+            && let Some(observation) = wake_projection
+            && let Err(error) = rpc::publish_document_delivery_wake(self, &observation)
         {
             agent_doc_ops_log_io::log_op(
-                &file,
+                &observation.file,
                 &format!(
                     "document_delivery_wake_deferred file={} source=retained_delivery_observation reason={error:#}",
-                    file.display(),
+                    observation.file.display(),
                 ),
             );
         }

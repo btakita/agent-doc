@@ -543,22 +543,32 @@ Verification completed in this cycle:
 - Both repository heads exactly match `origin/main`; no new repository mutation or commit was required.
 
 `#lzdurablespec` is complete. No additional backlog follow-up is needed because the later Postgres, JetStream, reconciliation, and family-rollout phases are already tracked separately. The exchange remains large, but the active queue can continue without compaction.
+
+### Re: #lzdurablepg — gpt-5 · 2026-09-25T20:27:37-04:00
+
+Implemented and published the Rust reference PostgreSQL durable host in `lazily-rs`.
+
+- Added the optional `durable-postgres` feature and a serializable `PostgresDurableHost` that atomically claims inbox identities and persists the validated owner image, accepted state/history, projection version, outbox intents, timer changes, fence state, and local receipts.
+- Added ordered relay leasing with `FOR UPDATE SKIP LOCKED`, durable lease expiry, stable effect identities, and receipt recording that closes the pending outbox row in the same owner transaction.
+- Added complete-transaction retries for SQLSTATE `40001` and deadlocks, while preserving the backend-neutral `DurableOwnerCore` as the semantic authority.
+- Added deterministic PostgreSQL integration tests proving rollback, a real serialization failure/retry, crash-after-commit-before-ACK idempotency, publish-before-receipt retry, stable delivery identity, terminal receipt behavior, and full event-history rebuild.
+- Added an isolated local PostgreSQL test harness plus `make check` and hosted-CI wiring, including the exact CI-reachability pins.
+
+Verification is green: focused PostgreSQL integration tests, all-features clippy, the complete `make check` matrix, and hosted CI run `36198963519` all passed. Commit `e093e32` (`feat: add Postgres durable owner host`) is pushed to `lazily-rs/main`.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzsimprocessadapter]~~
-- ~~do [#lzsimlicense]: Apache License 2.0~~
-- ~~do [#lzdurablespec]~~
-- do [#lzdurablepg]
-- do [#lzdurablejetstream]
-- do [#lzdurablereconcile]
-- do [#lzdurablefamily]
 - do [#lzprojectionbarrier]
 - do [#lzprojectionracecorpus]
 - do [#lzconcurrencyscope]
+- do [#lzsimlicense]
+- ~~do ~~[#lzdurablepg]~~~~
+- do [#lzdurablejetstream]
+- do [#lzdurablereconcile]
+- do [#lzdurablefamily]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -568,8 +578,7 @@ Verification completed in this cycle:
 - [ ] [#lzprojectionracecorpus] [lazily-go,simulation][blocked-by:lzprojectionbarrier] Extend SimConsumerTestkit with an independently authored, generic projection-maintenance history family: materialized append/amend/retract events interleaved with full rebuild, bounded lock timeout, retry, cancellation, and crash windows. Reuse one production reducer across an in-memory reference adapter and an explicitly selected real PostgreSQL adapter; causally shrink failures and assert no accepted update is lost plus final complete-history replay equivalence. Derive techniques only from cited public primary sources such as official Go fuzzing and PostgreSQL documentation; use synthetic nouns and exclude all consumer names, schemas, events, policies, incidents, data, fixtures, and code.
 - [ ] [#lzconcurrencyscope] [lazily-go,lazily-spec] Make concurrency scope explicit and machine-checkable across Lazily surfaces: classify single-goroutine, single-process lock/channel serialized, durable cross-process, and distributed/fenced capabilities; document that ThreadSafeContext, AsyncContext, queues, and the in-memory LatestDurableProjection core do not provide database atomicity or cross-replica exclusion; and add negative conformance tests that prevent an in-process capability from being advertised as a projection-maintenance barrier. Use independently authored neutral examples and public Go/PostgreSQL terminology only.
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
-- [ ] [#lzdurablepg] [lazily-rs] Implement the Rust reference Postgres durable host from tasks/software/plan-lazily-postgres-nats-valkey.md: one transaction claims the inbox identity and persists accepted events or state, projection version, outbox intents, timer changes, fences, and local receipts; relay workers claim rows with FOR UPDATE SKIP LOCKED. Prove rollback, serialization retry, crash-after-commit-before-ACK, publish-before-receipt retry, stable idempotency, and full history rebuild with deterministic integration tests.
-- [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, stable publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.
+- [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, sta ble publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.
 - [ ] [#lzdurablereconcile] [lazily-spec, lazily-rs] Add the complete-history projection and reconciliation layer from tasks/software/plan-lazily-postgres-nats-valkey.md: transaction-consistent snapshots with monotonic projection versions, ordered create/amend/retract event replay, checkpointed rebuild, dry-run drift reports, lag and health signals, and scheduled idempotent reconciliation through the transactional outbox. Prove replay equivalence, partial and final retractions, restart/resume, and that stale or cache-only reads never authorize a transition.
 - [ ] [#lzdurablefamily] [lazily family] Roll the durable capability model across the family after the Rust reference is proven: publish explicit Core, Client, Durable Host, Distributed Host, and Accelerated Host tiers; give non-Rust bindings typed ingress and projection clients first; require mature database and broker clients plus the shared crash/replay corpus before any binding claims native-host support; and add cross-language envelope-version, ordering, deduplication, receipt, and projection-fingerprint conformance without claiming false parity.
 <!-- /agent:backlog -->

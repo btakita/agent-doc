@@ -748,27 +748,52 @@ The family interop runner now executes the durable scenario through actual Go, J
 Verification is green locally across every affected repository. The canonical spec's full gate passed 332 pytest cases plus Lean and generated/coverage/provenance checks (artifact `tart-8d6ca356ec`); Rust's full feature, database, broker, crash-window, formal, and conformance matrix passed (artifact `tart-36c63bea9c`); and the mixed-language interop and complete interop gates passed (artifacts `tart-3f2a9fc1ff` and `tart-cec49311fb`). Full binding gates also passed, including race/type/format/build/browser/WASM/formal/reachability checks as applicable.
 
 Hosted CI is green for the spec, Go, JavaScript, Python, React, C++, C#, Dart, GDScript, Kotlin, and Zig heads. Rust CI run `36213340522` is still in progress at closeout; its signaling, Lean, and benchmark jobs are green, and the same pushed head passed the exhaustive local gate. Unrelated pre-existing agent-doc/navigation and concurrent CI-reach worktree changes were preserved and excluded.
+
+### Re: #actionable-review — gpt-5 · 2026-09-25T23:44:39-04:00
+
+> **Queue prompt:** #actionable-review
+
+Actionable review is complete. Three independent read-only passes checked all five gated items against the live repositories, plans, completed archive, release assets, and prepared audit artifacts.
+
+I added two concrete tasks to backlog + queue, preserving the existing drain order:
+
+- `#lzdurableadmissioncloseout` closes a real post-implementation gap: `lazily-rs` selected `postgres` and `async-nats`, but the plan-required resolved dependency/license inventory, fail-closed drift gate, and durable-change provenance record never landed.
+- `#lzrootinstructionpath` fixes the root Makefile's stale `instruction-files` paths, which currently block safe application of the already-prepared point-of-use credential plan; it also refreshes that plan without evaluating credentials or publishing anything.
+
+I resolved `#lzdurableipgate` as complete. Its public-source register, independent-authorship rules, exclusions, and conditional employer boundary are already durable in the plan, and the private employer attestation remains a prohibition for employer-related work rather than an agent-executable task.
+
+Four items remain correctly operator-gated:
+
+- `#lzmacosrunner` now records the actual current policy and the eligible Mac-only Darwin upload path; no hosted-runner reversal was queued.
+- `#lzgithubbudget20` still requires a valid payment method and a personal-account billing change.
+- `#lzagentdocartifactpurge` now points to the completed 2,781-ID / 45.56 GB candidate audit and requires live-ID revalidation plus explicit destructive approval.
+- `#lzambienttokenresolve` now points to the completed patch plan and the newly queued path prerequisite; quiet-window application and credential rotation remain operator-owned.
+
+The JetBrains plugin reinstall requested by preflight completed as byte-identical: the installer reported the current package already present, no dynamic-unload failure, and no restart requirement. No implementation code changed, so a runtime test suite was not applicable; verification was read-only repository inspection, exact preimage-hash comparison, release-asset inspection, and the three independent audits. The exchange remains large, but the active queue should continue rather than pause for compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lzdurableadmissioncloseout]
+- do [#lzrootinstructionpath]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzdurableadmissioncloseout] [lazily-rs, plan] Close the durable-runtime license/provenance gate: generate and commit an all-features Cargo.lock inventory covering runtime, build, and dev dependencies with exact versions, enabled features, reviewed SPDX expressions, source URLs, and notice disposition; add a fail-closed make/CI drift gate; record one durable implementation provenance note naming the official sources, independent authorship and synthetic fixtures, selected postgres/async-nats dependencies, and absence of Haiven/employer inputs; then update tasks/software/plan-lazily-postgres-nats-valkey.md admission checklist truthfully. Do not claim or create the private employer-boundary attestation.
+- [ ] [#lzrootinstructionpath] [agent-loop superproject] Fix the root Makefile stale `cd instruction-files` paths in the `publish` and `clean` targets to use `src/instruction-files`; verify the command paths with non-publishing/dry-run checks only, then refresh the root Makefile hunk and preimage hash in tasks/software/plan-ambient-publish-token-point-of-use.md and rerun its static inventory and patch-check proof. Do not apply credential-scoping patches, invoke a real publisher, evaluate credential references, or rotate secrets.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzdurableipgate] [lazily family] Before durable-runtime implementation, record the public-pattern and provenance gate for tasks/software/plan-lazily-postgres-nats-valkey.md: cite Event Sourcing and CQRS, transactional inbox/outbox, idempotent consumers, at-least-once delivery, Postgres queue claiming, and JetStream ACK/redelivery semantics from public primary or official sources; inventory dependency licenses; require independently authored Lazily APIs and conformance fixtures; exclude Haiven names, schemas, events, policies, incidents, and code; and obtain the written prior-work and employer boundary described by the plan before employer-related implementation.
-- [/] [#lzmacosrunner] [operator-decision, lazily-py/agent-doc] Billing audit found no cost-saving requirement: public standard macOS runner gross usage is fully discounted and billed zero. Keep hosted runners by default. Never remove the macOS deliverables: any local replacement must reproduce both agent-doc Darwin archives and the lazily-py macOS wheels before hosted macOS jobs are removed. If local control, gross-meter reduction, or runner availability is still desired, prefer SSH-driven builds; blocked until the operator provides the Mac hostname/IP, SSH username, architecture, and dedicated build-account confirmation.
+- [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. The next upload is eligible and the release set is stale relative to current support: v0.35.417 has no Darwin archives, while v0.35.398 is the last release with both architectures. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
-- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Existing 3,304 nonexpired Actions artifacts total about 53.5 GB and continue accruing storage cost until expiry or deletion. New transient release/wheel artifacts now retain for one day in agent-doc 9fbda092c. NEXT: authorize deletion of old Actions artifacts after verifying durable GitHub Release and PyPI copies; destructive cleanup was not performed in this cycle.
-- [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] agent-loop/.mise.toml has `[env] _.source = ".env"`, and .env holds $(passage ...) REFERENCES for every credential — correct hygiene, untracked and gitignored. But mise RESOLVES those substitutions at shell startup, so the resolved cleartext sits in the ambient environment of every process spawned from this tree. Verified by presence check on 2026-09-12, values never printed: CARGO_REGISTRY_TOKEN (35 chars) and NPM_TOKEN (40 chars) are live in the environment right now. That is not a leak by itself — nothing here was found printing them, and the lazily-zig build specifically does NOT (see #lzzigenvsecretleak, measured) — but it means every tool in the tree is one env-dumping code path away from disclosure, and there are many such paths in build systems, crash handlers and CI log collectors. THE FIX IS SUBSTITUTION AT THE POINT OF USE: keep the refs in .env for documentation, but let the publish commands resolve them (`CARGO_REGISTRY_TOKEN=$(passage ...) cargo publish`) rather than mise resolving them into every shell. WHY THIS IS YOURS AND NOT MINE: changing .mise.toml alters the environment of every session started from this tree, and thirty peer sessions were live when this was filed — several mid-build. A change like that wants a quiet moment and someone watching, not a queue drain. SEPARATELY AND MORE URGENTLY: rotate CARGO_REGISTRY_TOKEN, NPM_TOKEN and PYPI_PUBLISH_TOKEN. Not because a build printed them, but because the resolved values passed through a subagent's tool output while it was diagnosing the (non-)leak, which puts them in that transcript permanently. Log shredding does not reach a transcript. crates.io has no Revoke button, only Regenerate — see reference_cargo_publish_token_passage.md.
+- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit commit 4af68aa8f verified 2,781 exact durable-counterpart delete candidates totaling 45.56 GB and withheld 466 artifacts; the handoff is under src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/. Live artifact counts have already changed, so regenerate or intersect the candidate IDs with the live API immediately before deletion and never delete withheld rows. Blocked solely on explicit destructive authorization; no artifact was deleted.
+- [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] The ready-to-apply point-of-use credential plan is complete at tasks/software/plan-ambient-publish-token-point-of-use.md and all eight recorded preimage hashes still match. Agent-executable prerequisite #lzrootinstructionpath is now tracked in backlog and queue. After it completes, application remains blocked on an operator quiet window, fake-publisher and fresh-shell verification, and rotation of the Cargo, npm, and PyPI credentials. Do not resolve or print credential values during preparation.
 <!-- /agent:review -->
 
 ## Icebox

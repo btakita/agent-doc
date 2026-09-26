@@ -1,4 +1,4 @@
-.PHONY: release check precommit update publish clean check-shared
+.PHONY: release check precommit update publish clean check-shared publish-credential-proof
 
 SUBMODULES = src/agent-doc src/corky
 
@@ -10,7 +10,7 @@ release:
 	done
 
 # Run clippy + tests for both projects (includes shared crate)
-check: check-shared
+check: check-shared publish-credential-proof
 	@for dir in $(SUBMODULES); do \
 		echo "=== $$dir: make check ==="; \
 		$(MAKE) -C $$dir check || exit 1; \
@@ -55,3 +55,13 @@ clean:
 		$(MAKE) -C $$dir clean; \
 	done
 	@cd src/instruction-files && cargo clean
+
+# Fake-publisher and fresh-shell proof for the point-of-use publish credential
+# plan (`#lzfakepublisherproof`, tasks/software/plan-ambient-publish-token-point-of-use.md).
+# Resolves no credential and invokes no real publisher: `passage`, `cargo`,
+# `maturin`, `bun`, and `python -m twine` are all replaced by recorders that
+# return a fixed nonsecret sentinel. The self-test runs first because a proof
+# whose assertions cannot fail is worse than no proof.
+publish-credential-proof:
+	@python3 scripts/proof-point-of-use-publish-credentials.py --self-test
+	@python3 scripts/proof-point-of-use-publish-credentials.py

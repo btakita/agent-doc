@@ -31,10 +31,10 @@ The checks do not evaluate `passage`.
 | Preimage path | SHA-256 at preparation |
 |---|---|
 | `.env` | `925444427b8220f0a8f4456a0c0419e420a3d8e86c13f7f34b4c52365614b79b` |
-| `Makefile` | `c574a714867cdf8a277714d4173a059f91f1341a6e5dad19ff78d2e1c167d891` |
+| `Makefile` | `f8bdf25baefbcf421b3dd8ff9626061f3632de9fd0ca5416482949ce8de5f21e` |
 | `src/module-harness/Makefile` | `9118a00b4b0ceeebc21edce85c79896708192e1481c56e08dd052eef8edae718` |
 | `src/corky/Makefile` | `b916ec15aff54522381a9ae3684d872391caa9b8aa1d169de4914ce58dc1bfe3` |
-| `src/agent-doc/Makefile` | `37dd56c2f5b1f4b674f2f4c21c372b336981f3662cf9f23a8571735b505688f9` |
+| `src/agent-doc/Makefile` | `d922c0547cd68b07cf577157295b8648d0e07bb7197483fbd1a961dfe963205a` |
 | `src/lazily-py/Makefile` | `9800bc245c846bea80d6f5de1bd73c6bdd9226482c876dfdbc46644394baeb54` |
 | `src/lazily-js/.env` | `b2aa4db4666435d210c0a711739b0c7a55637431b8236b7566d3fd8e489f0023` |
 | `src/ctx-core-dev/lib/monorepo/bin/publish--force.sh` | `ce5ebd5f0f431b30b534a1e12a0535608c5836f9706574f8613ee8506d9246d1` |
@@ -134,7 +134,7 @@ diff --git a/Makefile b/Makefile
 diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
-@@ -327 +327,4 @@
+@@ -334 +334,4 @@
 -	.venv/bin/python -m twine upload --skip-existing dist/*
 +	@set +x; \
 +		token="$$(passage btak/PYPI_PUBLISH_TOKEN)" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup failed' >&2; exit 1; }; \
@@ -245,6 +245,18 @@ matches the table above; all seven fenced patch sets pass
 preimage SHA-256 matches; and root `publish`/`clean` path checks pass under
 `make -n`. The root `make check` suite also passes. These checks neither
 evaluated `passage` nor invoked a publisher.
+
+Steps 1-5 below are now a committed runnable target rather than a manual
+procedure: `make publish-credential-proof` (implemented by
+`scripts/proof-point-of-use-publish-credentials.py`). It recomputes every
+preimage hash, runs `git apply --unidiff-zero --check` per patch, rebuilds each
+patched file in a scratch checkout, and exercises all eight production call
+sites in success, failure, and empty modes against fake `passage`, `cargo`,
+`maturin`, `bun`, and `python -m twine` recorders. It resolves no credential and
+invokes no real publisher, so it is safe to run before application; it is also
+what caught this document's own `src/agent-doc/Makefile` preimage drift. Its
+`--self-test` negative controls must pass first, so a proof whose assertions
+cannot fail never reports success.
 
 After operator application, use fake executables only—never a real publisher:
 

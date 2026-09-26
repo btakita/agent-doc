@@ -165,6 +165,64 @@ So a document can stay pending for the whole wait while the plugin bytes are cor
 **One note, not a new item.** `memory/MEMORY.md` is 26.2KB against a 24.4KB load limit, so its last entries are silently dropped each session. I trimmed eight over-long entries — leaving the index smaller than I found it even after adding mine — but it is still over. I left it uncommitted on purpose: it currently holds another session's in-progress index edits, so committing it wholesale would take their work too.
 
 **CI.** Run `36263825987` was still in progress when I checked (previous run green), so this closes out on local evidence as the runbook prescribes.
+Fix 
+  The pending edit is a handoff plus a halt, not just a new item
+
+  git diff HEAD -- tasks/api.md (4 lines each way):
+
+  - agent: codex → agent: claude, with a new resume.codex id
+  - queue: go → queue: stop
+  - queue head 🚧 review PR 567 again → - #actionable-review
+
+  Two things follow. First, with queue: stop there is no drain to continue even if admission had succeeded — so nothing
+  is being lost by stopping here. Second, the fresh codex resume id points at a concurrent Codex session as the likely
+  second writer whose replica advanced past the baseline; that is the most probable cause of the three-way split.
+
+  One contradiction worth flagging: session-check advised "run agent-doc tasks/api.md to continue" — the exact trigger
+  the hook just refused. The admission gate is the authority, so I did not act on that advice; re-invoking will keep
+  refusing until the editor side settles.
+
+  What unblocks it (operator-side): settle the divergent editor so replica and disk converge — save or close the
+  document's editor, and close the other Codex session on tasks/api.md if one is still open. Then re-invoke /agent-doc
+  tasks/api.md and the #actionable-review edit will admit normally. I've recorded this variant in the divergence
+  memory, since the previously documented self-clearing path does not apply to it.
+
+✻ Brewed for 4m 58s · done 3:46 PM
+
+### Re: #fix — a pasted status report spawned three agents, and two remedies that order refused actions — opus-5 · 2026-09-26T16:34-04:00
+
+> **Queue prompt:** do [#fix]
+
+Both pasted reports are the same defect class, and executing this turn surfaced a third, more expensive instance of it. All four are fixed, mutation-checked, suite-green, committed and pushed as `0937d4bba`.
+
+**The class: code-owned guidance that orders an action the receiving session cannot or must not take.**
+
+**What running this turn did before I could stop it.** SKILL step 0d makes `plan`'s `required_commands` mandatory, and this turn's plan emitted `agent-doc orchestrate ... --mode parallel --from-exchange`. I ran it. It created three git worktrees and three `claude -p` panes — `%232`/`%233`/`%234` in `.agent-doc/worktrees/3f069c68-{0,1,2}` — one per line, and the "tasks" were your three quoted diff lines verbatim:
+
+```
+task 0: agent: codex → agent: claude, with a new resume.codex id
+task 1: queue: go → queue: stop
+task 2: queue head 🚧 review PR 567 again → - #actionable-review
+```
+
+The chain, each link measured: `detect_orchestration_mode` joins **every** non-list line in the added block — including prose *below* the list — and substring-matches the bare adjective `"concurrent"`. Your narrative says "points at a **concurrent** Codex session", so the mode resolved `Parallel`. `plan` then emitted that fan-out **next to its own `parallelizable: false`** — the same contract reported one repo action, so there was no batch to split. `orchestrate --from-exchange` took the last bullet list as the task list. Panes and worktrees killed; seven leaked worktrees (three mine, four content-free ones from an earlier run) removed.
+
+Fixes:
+
+- **`agent-doc-diff`** — the batch directive is the **preamble only**. Prose after the list is commentary, never a dispatch instruction. And the Parallel needle is narrowed to the adverb `"concurrently"`: the adjective names a subject ("a concurrent session", "concurrent editor mutation"), the adverb modifies execution. The existing code already carried this exact reasoning for *task bodies* — it just was never applied to the narrative.
+- **`plan`** — declines a `--mode parallel` handoff when `parallelizable` is false, and records the declined fan-out as a warning rather than dropping it silently. One contract must not order what it has itself judged impossible.
+
+**Your flagged contradiction was real.** `session-check` printed "run `agent-doc tasks/api.md` to continue" from `realtime_steering_closeout_guidance`, which had no condition on it at all — while preflight's `disk_edit_newer_than_registered_authority` was refusing that exact trigger for a three-way baseline/authority/disk split. Refuse, re-advise, refuse, and nothing in the loop named the operator-side action. Trusting the admission gate over the advice was the right call.
+
+The fix is a shared predicate, not a second string: `agent_doc_document::admission_divergence` now owns both the split classification and its remedy, and preflight *and* session-check read it. The refusal used to state the condition plus three hashes and stop; it now carries the convergence remedy — save or close the editor tab, close any other session on the same document — and says outright that re-invoking stays refused, with `--force-disk` and hand-aligning disk to authority both ruled out. Keeping the predicate in one place is what stops the two halves drifting apart again, the way `#preflightsettleparity` did.
+
+**The `lazily.md` report is the same shape.** `stale_plugin`'s binary-stale branch read "Rebuild and reinstall the CLI (`make install`)" as an unconditional instruction, to **every** document session on every turn — including the many that must not install, because a mid-session install against a live supervisor strands attached editor replicas. Your session reasoned its way out correctly and shouldn't have had to. The warning now says it is advisory, that the rebuild belongs to the cycle owning agent-doc development/release, and why a non-owner must not run it from there.
+
+**Verification.** Every new test was mutation-checked against pre-fix code, not just run green. The three orchestration tests reproduce the observed failure exactly — `mode: Parallel, task_count: 3` with your real trigger text — and go red when either guard is reverted. Full `make check`: **9,779 passed, 0 failed** (exit status captured directly, plus nextest's own count, per `#rtkmask`). CI run `36269600381` was still in progress when I checked; `36267052297` before it is green, so this closes on local evidence.
+
+**Install ordering.** This cycle owns the fix, so it owns the install — but I am deliberately doing `make install` **after** this commit rather than before it. The `#supselfheal` auto-recycle is proven for the recycle, not for a post-install `finalize`, and this document is attached with `live_editors=1`.
+
+**One thing I did not fix, filed instead.** `prompt_presets_requested` picked up `#actionable-review` from **inside** your quoted bullet — the same "quoted content read as a directive" root cause, but in a different detector with different semantics (`extract_prompt_preset_requests_from_text`). Half-landing it alongside four verified changes would be worse than naming it precisely; it is at the top of the backlog.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -178,6 +236,8 @@ So a document can stay pending for the whole wait while the plugin bytes are cor
 
 
 <!-- agent:backlog -->
+- [ ] [#quotedpreset] A `#preset` reference inside QUOTED content is read as a live preset request: `extract_prompt_preset_requests_from_text` matched `#actionable-review` inside the quoted bullet `- queue head review PR 567 again -> - #actionable-review`, and preflight resolved + expanded it as a directive. Same root cause as 0937d4bba (quoted content read as a directive) but a different detector with different scoping semantics — a preset ref is valid anywhere in a prompt, so the guard cannot be "preamble only". Suppress preset requests found inside a blockquote, a fenced block, or a list item that is itself quoted diff/report content; mutation-check against the agent-doc-bugs.md 2026-09-26 paste.
+- [ ] [#orchworktreeleak] `orchestrate --mode parallel` never removes the git worktrees or branches it creates. Seven were left in `.agent-doc/worktrees/` from two runs (`deep/3f069c68/0-2`, `deep/b26b9957/0-3`), each holding only orchestrate scaffolding (`.agent-doc-prompt.txt`, `.agent-doc-result.json`, `.agent-doc-result.log`). src/parallel.rs collects results at step 5 and returns without cleanup, and the timeout path only kills panes. Remove each worktree + branch after result collection and on the timeout path; keep them only when the task left real uncommitted work, and say so.
 <!-- /agent:backlog -->
 
 ## Review

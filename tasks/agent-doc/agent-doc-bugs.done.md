@@ -164,3 +164,20 @@
 - 2026-09-25 [#agentdocsim] Implement the agent-doc deterministic simulation harness on Lazily after the active Lazily oracle work commits; audit tasks/software/lazily.md for missing generic features and add only non-duplicative backlog items without racing its live owner.
 - 2026-09-25 [#fixdevopsrun] Fix devops.md Run Agent Do wedge
 - 2026-09-26 [#jbupgradereattach] make install aborts on a JetBrains dynamic upgrade whose reattach verification fails even though the upgrade landed. Observed 2026-09-26: first install exited 2 with 'replacement plugin did not reclaim open documents: dynamic plugin load did not reattach src/boost-client/tasks/monsterrodholders.md', and the immediate retry reported the plugin already byte-identical at 0.2.427 and 'no restart required' — so the replacement bytes were in place and only the open-document reattach assertion failed. Determine whether the reattach check races the document reopen or whether a cross-project document genuinely cannot be reclaimed, and stop aborting the whole install when the plugin bytes converged.
+- 2026-09-26 [#fix] Fix
+  The pending edit is a handoff plus a halt, not just a new item
+  git diff HEAD -- tasks/api.md (4 lines each way):
+  - [ ] [#fix-ks0h] agent: codex → agent: claude, with a new resume.codex id
+  - [ ] [#fix-a88v] queue: go → queue: stop
+  - [ ] [#fix-0d1k] queue head 🚧 review PR 567 again → - #actionable-review
+  Two things follow. First, with queue: stop there is no drain to continue even if admission had succeeded — so nothing
+  is being lost by stopping here. Second, the fresh codex resume id points at a concurrent Codex session as the likely
+  second writer whose replica advanced past the baseline; that is the most probable cause of the three-way split.
+  One contradiction worth flagging: session-check advised "run agent-doc tasks/api.md to continue" — the exact trigger
+  the hook just refused. The admission gate is the authority, so I did not act on that advice; re-invoking will keep
+  refusing until the editor side settles.
+  What unblocks it (operator-side): settle the divergent editor so replica and disk converge — save or close the
+  document's editor, and close the other Codex session on tasks/api.md if one is still open. Then re-invoke /agent-doc
+  tasks/api.md and the #actionable-review edit will admit normally. I've recorded this variant in the divergence
+  memory, since the previously documented self-clearing path does not apply to it.
+  ✻ Brewed for 4m 58s · done 3:46 PM

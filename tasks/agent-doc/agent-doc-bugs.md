@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0da47-db7f-72d2-9c0b-4bce5d22225c
+  codex: 01a0da6f-f9d1-7650-9e1e-2d68f3b24fef
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -432,6 +432,25 @@ The related live cases were also resolved and verified:
 - `lazily.md` was recovered with the new bare-commit path. After a later supervisor queue projection arrived, it was committed again as `35e596bf35`; session-check is OK and the file is clean. The queue remains active, but no queue task was executed by this repair.
 
 Verification: all 9,744 Rust tests passed, plus editor parity, cross-editor simulation, package checks, and all TLA+ models. Installed versions remain agent-doc 0.35.418, JetBrains 0.2.419, and VS Code 0.2.71. Source CI run `36196141320` was queued by the push.
+Fix agent-doc root causes of devops.md. Note that devops.md had recently Claim For Tmux Pane on it. I think that command created a conflict:
+```
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/devops.md
+
+
+• Agent-doc admission failed: tasks/devops.md is owned by live pane %223, but this invocation came from pane %195.
+
+  Run the command in owning pane %223. No cycle was opened or modified, and I did not rerun preflight.
+
+  8:05 PM
+```
+
+### Re: recovered response
+
+`Fagent-doc` isn’t a recognized entrypoint. Use:
+
+`agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`
+
+Run it from the owning pane `%215`.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

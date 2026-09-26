@@ -648,6 +648,23 @@ Pushed commits:
 Verification passed: `uv lock --check`, generator reproducibility checks, public-tree private-name scan, and full `lazily-spec make check` (316 pytest tests, Lean build, schema, coverage, fixture-copy, identity, assertion, license/provenance, and corpus guards). GitHub CI run `36206926194` completed successfully.
 
 The spec/fixture admission blocker is closed. I added `#lzapachefamilylicense` immediately before durable publication work to converge the remaining Lazily repositories whose existing license files or package metadata still contradict the owner’s family-wide Apache-2.0 decision.
+
+### Re: Durable JetStream transport — gpt-5 · 2026-09-25 21:27 EDT
+
+> **Queue prompt:**
+>
+> do [#lzdurablejetstream]
+
+
+Implemented and pushed the NATS JetStream durable transport phase in `lazily-rs` as commit `5557541`.
+
+- Added versioned typed pull ingress with explicit server-confirmed ACK only after the adapter itself commits the PostgreSQL unit of work. The inbox identity must match the envelope identity; commit failure and identity mismatch leave the delivery unacknowledged for redelivery.
+- Added transport-only progress/NAK handling, `MaxAckPending` backpressure, drain semantics, and a disposable wakeup source that never authorizes durable work.
+- Added durable poison disposition in PostgreSQL, stable dead-letter publication, and TERM only after both durable classification and publication succeed.
+- Added stable outbox publication identity, JetStream duplicate suppression, and PostgreSQL publication receipts so publish-before-receipt crashes recover through the existing claim lease.
+- Added the `durable-jetstream` feature using `async-nats` 0.50, public adapter APIs, operator documentation, a real PostgreSQL/NATS test launcher, and a pinned CI/make gate.
+
+Verification is green: the exact post-hardening `make check` completed with exit 0, including the real NATS 2.12.1 and PostgreSQL crash-window corpus, all-feature clippy/build, loom, conformance, formal, and benchmark gates. Private-name hygiene and staged-diff checks passed. GitHub CI run `36208491685` was queued at closeout.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -659,7 +676,7 @@ The spec/fixture admission blocker is closed. I added `#lzapachefamilylicense` i
 - ~~do [#lzconcurrencyscope]~~
 - ~~do [#lzsimlicense]~~
 - ~~do ~~[#lzdurablepg]~~~~
-- do [#lzdurablejetstream]
+- ~~do [#lzdurablejetstream]~~
 - do [#lzdurablereconcile]
 - do [#lzdurablefamily]
 <!-- /agent:queue -->
@@ -668,7 +685,6 @@ The spec/fixture admission blocker is closed. I added `#lzapachefamilylicense` i
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzapachefamilylicense] [lazily family] Converge every Lazily repository LICENSE/NOTICE and publish metadata on the owner-authorized Apache-2.0 family policy before the next release or durable publication; preserve third-party notices and fixture provenance, run each repository full gate, and commit/push each repository separately.
-- [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, sta ble publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.
 - [ ] [#lzdurablereconcile] [lazily-spec, lazily-rs] Add the complete-history projection and reconciliation layer from tasks/software/plan-lazily-postgres-nats-valkey.md: transaction-consistent snapshots with monotonic projection versions, ordered create/amend/retract event replay, checkpointed rebuild, dry-run drift reports, lag and health signals, and scheduled idempotent reconciliation through the transactional outbox. Prove replay equivalence, partial and final retractions, restart/resume, and that stale or cache-only reads never authorize a transition.
 - [ ] [#lzdurablefamily] [lazily family] Roll the durable capability model across the family after the Rust reference is proven: publish explicit Core, Client, Durable Host, Distributed Host, and Accelerated Host tiers; give non-Rust bindings typed ingress and projection clients first; require mature database and broker clients plus the shared crash/replay corpus before any binding claims native-host support; and add cross-language envelope-version, ordering, deduplication, receipt, and projection-fingerprint conformance without claiming false parity.
 <!-- /agent:backlog -->

@@ -248,6 +248,28 @@ One trap worth naming, because I walked into it: a caller holding the mask must 
 **Two things to know.** `make check` ran against a tree holding three other sessions' uncommitted work (`agent-doc-commit-io`, `agent-doc-controller-io`, `agent-doc-queue`, `src/plugin_activation.rs`); both commits used `--only` with explicit paths and took none of it. And CI run `36274419033` was still in progress when I checked (previous run `36269600381` green), so this closes out on local evidence.
 
 **Install deferred by one step, on purpose.** `[[feedback_no_mid_session_install_against_live_supervisor]]` ends with "close out the document FIRST, install after" — a mid-session `make install` strands this document's attached Lazily replica. I am running `make install` + recycle immediately after this closeout, before the queue takes `#orchworktreeleak`.
+
+### Re: #coinedpresetid + the infra.md report — a preset name is tracked, and a warning must name its own limit — opus-5 · 2026-09-26T18:19-04:00
+
+> **Queue prompt:** do [#coinedpresetid]
+
+Both landed. `a8e8b7ca4` (`#coinedpresetid`) and `da6e7a320` (`#accretionthreshold`), superproject pointer `2967912ae`.
+
+**`#coinedpresetid`.** The guard's known universe is every component except `exchange`, plus the done archive. Frontmatter is not a component, so nothing ever reached the `prompt_presets:` keys — a response explaining where `#actionable-review` was matched got told to file a backlog item for it. A preset name resolves to its preset body, so the dangling-id damage the guard exists to prevent cannot happen for a name the document itself registers.
+
+New `agent_doc_turn::coined_ids::registered_prompt_preset_ids(content)` is the single reading, normalized through `extract_tags` so "what counts as an id" keeps one definition: `'#a-b'` and `release-check` both yield the tag a response would write, a key that is not tag-shaped yields nothing, and an unregistered id still coins. Both sites read it — the `PreToolUse` block and the post-commit session-check warning — so a preset name cannot be tracked on one path and invented on the other. `coined_guard_predicate.rs` already existed to enforce exactly that discipline over the done archive (`#coinedguardledgerasymmetry`); it now carries a list of shared ledger sources and checks both sites against each, rather than naming only the archive.
+
+**The infra.md report — one of the two items is a real defect, and it is the one that read as harmless.**
+
+*Plugin bytes: already converged, measured, not taken on faith.* `/proc/3129637/map_files` now maps `agent-doc-jetbrains-0.2.428.jar` **without** `(deleted)`; all eight older generations (0.2.419 through 0.2.427) carry it. `probe_mapped_plugin_jar` returns early on a current mapping, so `plugin_bytes_superseded` no longer fires for that pid. The report predates this session's `make install`. The `stale_plugin` half (live 0.2.426 vs. 0.2.422 bundled) was the binary-stale direction that `0937d4bba` already reclassified as advisory. Nothing to fix.
+
+*Exchange size: the warning was lying about its own threshold.* The report said "400 lines / 21 response sections against a **50-section** threshold" — which reads as *under* the limit, in a session that was warning. That reading came straight from the reason string, which printed both raw counts and named no limit at all, leaving the nearest number in the same report to fill the gap: `clear_threshold`, an unrelated `/clear`-cadence knob that is also counted in response sections. The actual trigger was 400 lines against `WARN_EXCHANGE_LINES` (160); sections were 21 against a warn limit of 8, so *both* had crossed and neither was 50. Each reason now names the measure that crossed and that measure's own warn limit, and names no measure that did not cross.
+
+That is the same class as the other two fixes this session: code-owned guidance that misdescribes itself. It is worth saying plainly that the infra.md session did nothing wrong — it reported the number the binary handed it.
+
+**What I did not do.** `tasks/infra.md` resolves to `src/haiven-dev/tasks/infra.md`, owned by a live busy pane (`%214`, pid 2121103, `state=alive-busy`, `current_command=agent-doc`). Compacting another pane's live document from here is the non-owner hazard, so the compact offer stays with that session — say the word there and it will run.
+
+**Verification.** `make check`: exit 0, runner-native **9797 tests run, 9797 passed, 259 skipped** (nextest's own summary, independently asserted). Four mutations across the two fixes, all detected, clean M0 each side: dropping the preset ids from both known universes reddens one test per guard site; scanning a preset key verbatim instead of through the tag grammar loses unhashed keys; dropping the crossed-measure clause reddens both accretion tests; naming the line count unconditionally reddens the under-threshold direction. Both commits used `--only` with explicit paths — the tree still holds another session's work in `agent-doc-commit-io`, `agent-doc-controller-io`, `agent-doc-queue`, and `src/plugin_activation.rs`, and none of it was taken.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -258,12 +280,12 @@ One trap worth naming, because I walked into it: a caller holding the mask must 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#quotedpreset]~~
+- ~~do [#coinedpresetid]~~
 - do [#orchworktreeleak]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#coinedpresetid] session-check's coined-id guard does not count a REGISTERED prompt-preset name as a tracked id: a response that names `#actionable-review` or `#next-steps` (both keys in this document's `prompt_presets:` frontmatter) warns "response coins new id(s) ... that are not in agent:backlog, agent:queue, agent:done, or agent:review" and hints to file a backlog item for each. A registered preset name resolves to its frontmatter body, so it is not a dangling id. Observed 2026-09-26 on the #quotedpreset response, which quoted both names while explaining where they were matched. Fix: read `prompt_presets` keys as a fourth resolution source in the coined-id check; mutation-check that an unregistered `#id` still warns.
 - [ ] [#orchworktreeleak] `orchestrate --mode parallel` never removes the git worktrees or branches it creates. Seven were left in `.agent-doc/worktrees/` from two runs (`deep/3f069c68/0-2`, `deep/b26b9957/0-3`), each holding only orchestrate scaffolding (`.agent-doc-prompt.txt`, `.agent-doc-result.json`, `.agent-doc-result.log`). src/parallel.rs collects results at step 5 and returns without cleanup, and the timeout path only kills panes. Remove each worktree + branch after result collection and on the timeout path; keep them only when the task left real uncommitted work, and say so.
 <!-- /agent:backlog -->
 

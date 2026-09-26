@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check artifact-purge-check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -168,6 +168,13 @@ plugin-version-check:
 	@python3 scripts/check_plugin_versions.py --self-test
 	@python3 scripts/check_plugin_versions.py
 
+# Refusal-path regressions for the artifact purge executor (`#lzartifactpurgeexec`).
+# Offline only: the self-test never contacts the Actions API and never deletes.
+# The live dry run needs `gh` auth, so it stays an explicit operator invocation
+# (`python3 scripts/purge-actions-artifacts.py`).
+artifact-purge-check:
+	@python3 scripts/purge-actions-artifacts.py --self-test
+
 # Build + machine-check the Lean formal models under formal/ (including the
 # wait-machine bound and captured-response closeout safety/completeness proofs).
 # Skips gracefully when the Lean
@@ -197,7 +204,7 @@ lean:
 # the release process runs `make check`, so leaving the installed-surface audit
 # out of it let 0.35.224 ship with harness runbooks several versions behind the
 # binary while every version marker matched.
-check: plugin-version-check clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
+check: plugin-version-check artifact-purge-check clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
 audit-docs:

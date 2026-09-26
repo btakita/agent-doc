@@ -132,13 +132,46 @@ I also updated the generator's `report_markdown` and the committed handoff READM
 `#lzagentdocartifactpurge` keeps its review gate and now names the exact command plus the authorization flags; nothing was deleted, and no code path deletes without both explicit flags. CI run `36265576676` for this commit is in progress — not waited on, per the observe-don't-await rule.
 
 Remaining drainable head is `#lzfakepublisherproof`. `#lzdocorphanresidue` still needs your three-line deletion in IDEA.
+
+### Re: fake-publisher proof harness — opus-5 · 2026-09-26T15:52-04:00
+
+> **Queue prompt:**
+>
+> do [#lzfakepublisherproof]
+
+
+`#lzfakepublisherproof` is done and pushed as `cf2cbfda9` plus a follow-up `3e48cef93`. The plan's five-step manual proof is now `make publish-credential-proof`, wired into root `make check`.
+
+**It runs before application, which is the whole point.** The patches are still unapplied and operator-gated, so the harness rebuilds each *patched* file in a scratch git checkout, extracts the patched recipe lines, and runs exactly those. It also proves the extraction is honest: a hunk's added recipe lines must appear *contiguously* inside the target's recipe in the patched file, or the run fails as drifted hunk offsets.
+
+Coverage is all eight production call sites — root instruction-files, module-harness, corky's six crates, corky maturin, agent-doc's venv twine, lazily-py twine, ctx-core-dev bun, plus unpatched TestPyPI — in success, failure, and empty modes: **22 checks, all green**. Success asserts exactly one `passage` lookup for the expected key, that the publisher actually ran, and that its child saw *exactly* the point-of-use variable carrying the sentinel — no root alias, no `NPM_CONFIG_TOKEN`, nothing credential-shaped on the command line. Failure and empty assert a nonzero exit with **no publisher invoked at all**. Measured, not claimed: 21 fake `passage` lookups (7 patched sites × 3 modes) and 13 fake publisher invocations (success mode, corky contributing 6). Twine is intercepted as the plan specifies — a fake `twine/__main__.py` on a temporary `PYTHONPATH`, since a `PATH` executable does not intercept `python -m twine` — and agent-doc's absolute venv interpreter gets a temporary wrapper.
+
+No credential is resolved, printed, or rotated, and no real publisher runs. Every value a recorder observes is masked before it reaches a log; only the sentinel and an explicit nonsecret allowlist (`__token__`) are written verbatim. I scanned the report for token-shaped strings: the only long strings are the plan's own SHA-256 preimages.
+
+**Three things I had to correct rather than assert.**
+
+First, my fresh-shell phase was measuring nothing. A non-interactive `zsh -l -c` does not fire mise's `precmd` activation hook, so it saw zero aliases and would have "passed" vacuously — and would keep passing after application for the wrong reason. Forcing activation means sourcing `.env`, which resolves real credentials, so I will not do it. The assertion now rests on the root `.env`'s alias **name** state, read without ever evaluating the file: 6 assigned, 0 commented, exactly the unapplied state. The plan's literal step-5 loop still runs, but is labelled `inconclusive` with its reason instead of counted as a pass. Rerunning it interactively after application is now an explicit operator step on `#lzambienttokenresolve`.
+
+Second, this machine's environment carries none of the aliases, so the parent-env scrub is a no-op here and the child-side assertion was structurally sound but never contrastively demonstrated. Two controls are now end-to-end with an obvious decoy injected past the scrubber: the pre-patch recipe inheriting an ambient `CARGO_REGISTRY_TOKEN` must be rejected, and an unrelated ambient `NPM_TOKEN` reaching the publisher child must be rejected. `parent_env_names_removed` reports when the scrub was a no-op.
+
+Third, I had written `real_publisher_invoked: false` into the report. That was an unmeasured claim dressed as an observation; it is gone, replaced by the lookup and invocation counts above, which a failed interception would drive to zero and redden.
+
+`--self-test` runs all of those negative controls *before* the real proof, so a proof whose assertions cannot fail never reports success.
+
+**The harness immediately earned its keep:** `src/agent-doc/Makefile`'s recorded preimage no longer matched, because my own previous commit `187f31622` added `artifact-purge-check` to that file. I refreshed that hash and its hunk offset (327 → 334), and the root `Makefile` hash this change drifts. All eight preimages match and all eight patches apply again.
+
+The follow-up commit fixes a real consequence of wiring this into root `make check`: the superproject's `Agent Doc` workflow runs that target, and its checkout has no `.env` and initializes only seven submodules, so five of these repos are absent or present as empty directories. Absence is now classified — `repo_absent` for an uninitialized submodule, `ignored_file_absent` for a missing `.env`, and a hard failure only when a *checked-out* repo lacks the file. Skipped entries are listed explicitly so reduced coverage is visible, and a run that exercises no call site at all fails outright so the skip path cannot become a vacuous pass. A simulated CI checkout exits 0 reporting 2 exercised / 6 skipped; a root holding only the plan exits 1 on that guard.
+
+**Verification.** Root `make check` exit 0, 9,770/9,770 agent-doc tests, proof and self-test green inside it. An intermediate root run went red on agent-doc's `plugin-version-check` (JetBrains packaging fence) — that was a concurrent session's mid-edit JB sources in this shared tree, not my change; those paths are clean and the gate passes now, and I re-ran root check to exit 0 rather than report the stale red. Both superproject workflows are `workflow_dispatch`-only, so this push triggers no CI run; the three agent-doc CI runs, including last cycle's `187f31622`, are all still in progress and not waited on. Exchange is at 107 lines with the queue active — noting the size, not pausing to compact.
+
+Remaining queue head is `#lzdocorphanresidue`, which is `[operator-verify]`: the three truncated orphan lines after the `agent:done` close marker still need your deletion in IDEA.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ⏭️ do [#lzfakepublisherproof]
+- ~~do [#lzfakepublisherproof]~~
 - ~~do [#lzartifactpurgeexec]~~
 - do [#lzdocorphanresidue]
 <!-- /agent:queue -->
@@ -146,7 +179,6 @@ Remaining drainable head is `#lzfakepublisherproof`. `#lzdocorphanresidue` still
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzfakepublisherproof] Implement the fake-publisher and fresh-shell proof harness specified in `tasks/software/plan-ambient-publish-token-point-of-use.md` lines 228-280 as a committed runnable target; no harness exists today. Cover success, failure, and empty modes; intercept `python -m twine` with a fake `twine/__main__.py` on a temporary `PYTHONPATH` because a `PATH` executable does not intercept it; assert the publisher child sees exactly the expected sentinel variable while its parent holds none of the six root aliases or the child-only `NPM_CONFIG_TOKEN`; assert TestPyPI sees no production alias or `TWINE_PASSWORD`; assert failure and empty modes exit nonzero with no fake publisher invoked. Never resolve, print, or rotate a real credential and never run a real publish. This is the agent-executable prerequisite for `#lzambienttokenresolve`.
 - [ ] [#lzdocorphanresidue] [operator-verify] Three truncated orphan fragment lines sit after the agent:done close marker in `tasks/software/lazily.md`, beginning `eturn typed satisfied/`, `cate orphan line remains outside`, and `ebc036`. They are residue from a prior compaction, outside every agent-doc component, so component writes cannot clear them and a disk edit under the live JetBrains editor would contend with the editor authority. Operator: delete exactly those three lines in IDEA, save, and send `continue`.
 <!-- /agent:backlog -->
 
@@ -156,7 +188,7 @@ Remaining drainable head is `#lzfakepublisherproof`. `#lzdocorphanresidue` still
 - [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Re-verified 2026-09-26: `make release-macos-cadence-check` reports the weekly window open since 2026-09-22T16:41:49Z, v0.35.398 (2026-09-15) is the last release with both Darwin architectures, and `gh release view` confirms v0.35.417 is still Latest with six assets and no Darwin archive. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit commit 4af68aa8f verified 2,781 exact durable-counterpart delete candidates totaling 45.56 GB and withheld 466 artifacts; the handoff is under src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/. The re-intersection and withheld-row refusal are now code, not prose: run `python3 scripts/purge-actions-artifacts.py` (commit 187f31622) from src/agent-doc. Its live dry run on 2026-09-26 planned 2,771 deletable artifacts (45.47 GB), skipped 10 already absent from the API, and refused 0. The destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000`; the 250 default cap will otherwise abort. Blocked solely on explicit destructive authorization; no artifact has been deleted.
-- [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] The ready-to-apply point-of-use credential plan is complete at tasks/software/plan-ambient-publish-token-point-of-use.md and all eight recorded preimage hashes still match. Prerequisite `#lzrootinstructionpath` completed as commit `2c3ed5fdcc`; the remaining agent-executable prerequisite is `#lzfakepublisherproof` (the fake-publisher and fresh-shell proof harness does not exist yet). After that lands, application remains blocked on an operator quiet window and on rotation of the Cargo, npm, and PyPI credentials. Do not resolve or print credential values during preparation.
+- [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] The ready-to-apply point-of-use credential plan is complete at tasks/software/plan-ambient-publish-token-point-of-use.md. The agent-executable prerequisite `#lzfakepublisherproof` is DONE: `make publish-credential-proof` (commits `cf2cbfda9`, `3e48cef93`) statically verifies all eight preimages plus `git apply --check`, then exercises all eight production call sites in success, failure, and empty modes against fake passage/cargo/maturin/bun/twine recorders — 22 checks, currently green, resolving no credential and invoking no publisher. It already caught real drift and refreshed two preimage hashes (`src/agent-doc/Makefile`, root `Makefile`) plus one hunk offset. Remaining blockers are operator-only: a quiet window for application, rotation of the Cargo, npm, and PyPI credentials, and one manual step the harness cannot do — rerunning the plan's step-5 name loop in a real INTERACTIVE shell after application, because a non-interactive shell does not fire mise's activation hook and forcing it would resolve real credentials. Do not resolve or print credential values during preparation.
 <!-- /agent:review -->
 
 ## Icebox

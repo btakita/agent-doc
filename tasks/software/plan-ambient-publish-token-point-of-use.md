@@ -31,7 +31,7 @@ The checks do not evaluate `passage`.
 | Preimage path | SHA-256 at preparation |
 |---|---|
 | `.env` | `925444427b8220f0a8f4456a0c0419e420a3d8e86c13f7f34b4c52365614b79b` |
-| `Makefile` | `4ef21b48b700033ad7176a76731c383545eda2b95aa4246603b98eacef777e3e` |
+| `Makefile` | `c574a714867cdf8a277714d4173a059f91f1341a6e5dad19ff78d2e1c167d891` |
 | `src/module-harness/Makefile` | `9118a00b4b0ceeebc21edce85c79896708192e1481c56e08dd052eef8edae718` |
 | `src/corky/Makefile` | `b916ec15aff54522381a9ae3684d872391caa9b8aa1d169de4914ce58dc1bfe3` |
 | `src/agent-doc/Makefile` | `37dd56c2f5b1f4b674f2f4c21c372b336981f3662cf9f23a8571735b505688f9` |
@@ -69,8 +69,8 @@ diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
 @@ -45 +45,6 @@
--	@cd instruction-files && cargo publish
-+	@cd instruction-files && { \
+-	@cd src/instruction-files && cargo publish
++	@cd src/instruction-files && { \
 +		set +x; \
 +		token="$$(passage btak/CARGO_REGISTRY_TOKEN)" || { printf '%s\n' 'CARGO_REGISTRY_TOKEN lookup failed' >&2; exit 1; }; \
 +		test -n "$$token" || { printf '%s\n' 'CARGO_REGISTRY_TOKEN lookup returned empty' >&2; exit 1; }; \
@@ -78,10 +78,11 @@ diff --git a/Makefile b/Makefile
 +	}
 ```
 
-The root target's existing `cd instruction-files` path does not resolve in this
-checkout (`src/instruction-files` does). Do not claim or test root-target
-compatibility until that independent defect is fixed. The credential hunk is
-ready, but application of this repository's tracked hunk is gated on that fix.
+The independent root-path defect is fixed: both `publish` and `clean` now enter
+`src/instruction-files`. `make -n publish` and `make -n clean` resolve that path,
+the directory exists, and neither dry run contains the stale `cd
+instruction-files` form. No publisher or cleaner was executed. The credential
+hunk above is refreshed against this corrected preimage.
 
 ### `src/module-harness`
 
@@ -238,6 +239,13 @@ Before application:
 3. Reject any patch that removes `.mise.toml`'s `_.source = ".env"`, changes an
    unrelated `.env` assignment, evaluates `passage`, or modifies TestPyPI.
 
+Latest preparation proof (2026-09-26): the call-site/workflow inventory still
+matches the table above; all seven fenced patch sets pass
+`git apply --unidiff-zero --check` in their named repositories; every recorded
+preimage SHA-256 matches; and root `publish`/`clean` path checks pass under
+`make -n`. The root `make check` suite also passes. These checks neither
+evaluated `passage` nor invoked a publisher.
+
 After operator application, use fake executables only—never a real publisher:
 
 1. Put a fake `passage` first on `PATH`. It returns a fixed nonsecret sentinel,
@@ -274,7 +282,8 @@ or against the fresh-shell result.
 
 1. Choose a quiet window and close or stop long-running shells/IDE tasks rooted
    in this checkout.
-2. Resolve and test the root `instruction-files` path defect independently.
+2. Confirm the already-corrected root `src/instruction-files` path still passes
+   the non-publishing dry-run checks.
 3. Run all patch checks, then apply the ignored-file edits and per-repository
    tracked patches. Record each repository commit ID; this is intentionally not
    one atomic superproject commit.

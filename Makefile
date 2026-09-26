@@ -42,7 +42,7 @@ update:
 # Publish: shared crate first, then both projects
 publish:
 	@echo "=== instruction-files: cargo publish ==="
-	@cd instruction-files && cargo publish
+	@cd src/instruction-files && cargo publish
 	@for dir in $(SUBMODULES); do \
 		echo "=== $$dir: make publish ==="; \
 		$(MAKE) -C $$dir publish || exit 1; \
@@ -54,4 +54,4 @@ clean:
 		echo "=== $$dir: make clean ==="; \
 		$(MAKE) -C $$dir clean; \
 	done
-	@cd instruction-files && cargo clean
+	@cd src/instruction-files && cargo clean

@@ -141,6 +141,9 @@ fn durable_client_v1_replays_all_portable_proof_dimensions() {
     );
     let report: Value = serde_json::from_slice(&output.stdout).expect("JSON result");
     assert_eq!(report["status"], "pass");
-    assert_eq!(report["peers"], serde_json::json!(["left", "right"]));
-    assert_eq!(report["coverage"]["feature_steps_run"], 16);
+    assert_eq!(
+        report["peers"],
+        serde_json::json!(["lazily-go", "lazily-js", "lazily-py"])
+    );
+    assert_eq!(report["coverage"]["feature_steps_run"], 24);
 }

@@ -2,8 +2,9 @@
   "name": "durable-client-v1",
   "seed": 17,
   "peers": [
-    {"name": "left", "peer_id": 1},
-    {"name": "right", "peer_id": 2}
+    {"name": "lazily-go", "peer_id": 1},
+    {"name": "lazily-js", "peer_id": 2},
+    {"name": "lazily-py", "peer_id": 3}
   ],
   "required_features": ["durable_client_v1"],
   "required_codecs": ["json"],

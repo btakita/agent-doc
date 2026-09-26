@@ -573,6 +573,32 @@ Implemented and published the generic PostgreSQL projection-maintenance barrier 
 - Added the isolated local PostgreSQL harness, `make check` gate, hosted PostgreSQL service, and exact CI-reachability pin.
 
 Verification passed with the focused PostgreSQL suite, the exact Go 1.24 toolchain compile, and the complete `make check` matrix (format, vet, build, tests, race detector, interop, conformance, ordering, and reachability). Commit `ade9169` (`feat: add Postgres projection barrier`) is pushed to `lazily-go/main`; hosted CI run `36205518626` was queued at closeout.
+
+### Re: projection-maintenance race corpus — gpt-5 · 2026-09-25T20:50-04:00
+
+> **Queue prompt:**
+>
+> do [#lzprojectionracecorpus]
+
+
+Completed `#lzprojectionracecorpus` in `lazily-go` and pushed commit `831c4f9` (`feat: add projection maintenance race corpus`).
+
+The extension adds a generic `RunProjectionMaintenance` history runner and shared `ReduceMaterializedProjectionHistory` reducer for append/amend/retract events. It requires an in-memory reference and an explicitly selected PostgreSQL adapter, validates each attempted event against the accepted prefix, and checks exact accepted-history equality plus complete-history replay equivalence after every step.
+
+The real PostgreSQL corpus covers full rebuild, a writer blocked behind an already-scanned concurrent rebuild, bounded advisory-lock timeout, context cancellation, injected `40001` whole-transaction retry, rollback after a crash-before-commit window, and recovery through a fresh connection pool after crash-after-commit. `ShrinkSimProjectionMaintenanceFailure` preserves `CauseID` dependencies, event semantics, and accepted event identities while producing a one-removal-minimal failing history. A deterministic Go fuzz target exercises valid reducer histories.
+
+Documentation cites only official Go fuzzing and PostgreSQL locking/isolation/timeout sources, and all corpus nouns are synthetic. The existing PostgreSQL gate now runs both the barrier tests and this race corpus.
+
+Verification passed:
+
+- focused unit and causal-shrink tests
+- 2-second fuzz run (153,501 executions)
+- real PostgreSQL integration corpus
+- exact Go 1.24 compile
+- full `make check`, including vet, build, ordinary tests, race detector, interop self-check, PostgreSQL, conformance coverage, assertion ordering, and CI reachability
+- public-tree private-name hygiene scan
+
+GitHub CI run `36206306787` for `831c4f9` was in progress at closeout; the immediately preceding barrier commit's CI run `36205518626` completed successfully.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -580,7 +606,7 @@ Verification passed with the focused PostgreSQL suite, the exact Go 1.24 toolcha
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzprojectionbarrier]~~
-- do [#lzprojectionracecorpus]
+- ~~do [#lzprojectionracecorpus]~~
 - do [#lzconcurrencyscope]
 - do [#lzsimlicense]
 - ~~do ~~[#lzdurablepg]~~~~
@@ -592,7 +618,6 @@ Verification passed with the focused PostgreSQL suite, the exact Go 1.24 toolcha
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzprojectionracecorpus] [lazily-go,simulation][blocked-by:lzprojectionbarrier] Extend SimConsumerTestkit with an independently authored, generic projection-maintenance history family: materialized append/amend/retract events interleaved with full rebuild, bounded lock timeout, retry, cancellation, and crash windows. Reuse one production reducer across an in-memory reference adapter and an explicitly selected real PostgreSQL adapter; causally shrink failures and assert no accepted update is lost plus final complete-history replay equivalence. Derive techniques only from cited public primary sources such as official Go fuzzing and PostgreSQL documentation; use synthetic nouns and exclude all consumer names, schemas, events, policies, incidents, data, fixtures, and code.
 - [ ] [#lzconcurrencyscope] [lazily-go,lazily-spec] Make concurrency scope explicit and machine-checkable across Lazily surfaces: classify single-goroutine, single-process lock/channel serialized, durable cross-process, and distributed/fenced capabilities; document that ThreadSafeContext, AsyncContext, queues, and the in-memory LatestDurableProjection core do not provide database atomicity or cross-replica exclusion; and add negative conformance tests that prevent an in-process capability from being advertised as a projection-maintenance barrier. Use independently authored neutral examples and public Go/PostgreSQL terminology only.
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
 - [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, sta ble publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.

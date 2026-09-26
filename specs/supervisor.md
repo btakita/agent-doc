@@ -347,8 +347,9 @@ on claude exit with code c:
                          that as failed startup provenance and restart fresh
                          instead of chaining `--continue`
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user
-                         (Enter to restart fresh / q to exit) so the operator
-                         can intentionally quit the supervisor cleanly
+                         (Enter to resume the exact document conversation / q to
+                         exit) so the operator can intentionally restart or quit
+                         without silently replacing the conversation
                          EXCEPT when stdin-forwarded Ctrl+C terminates the
                          child → prompt user with that same menu instead of
                          treating the exit like a transient crash

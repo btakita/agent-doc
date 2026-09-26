@@ -1519,11 +1519,12 @@ pub fn run_with_reap_policy_resume_and_harness(
                         "Press Enter to explicitly start fresh, or 'q' to exit.",
                         "user_quit_without_exact_session_id",
                         PromptEofPolicy::Quit,
+                        PromptRestartMode::Fresh,
                     ) {
                         PromptOutcome::Quit => {
                             break "exact_session_id_unavailable";
                         }
-                        PromptOutcome::RestartFresh => {
+                        PromptOutcome::Restart => {
                             raw_mode.resume();
                             first_run = true;
                             auto_trigger_next_launch = true;
@@ -1959,11 +1960,12 @@ pub fn run_with_reap_policy_resume_and_harness(
                     "Press Enter to restart the agent, or 'q' to exit.",
                     "user_quit_after_stop_agent",
                     PromptEofPolicy::Quit,
+                    PromptRestartMode::Continue,
                 ) {
                     PromptOutcome::Quit => {
                         break "user_quit_after_stop_agent";
                     }
-                    PromptOutcome::RestartFresh => {
+                    PromptOutcome::Restart => {
                         raw_mode.resume();
                         // "Stop Agent" terminates the child, not its document-bound
                         // conversation. Replacement must use the exact lineage.
@@ -2158,11 +2160,12 @@ pub fn run_with_reap_policy_resume_and_harness(
                             "Press Enter to restart, or 'q' to exit.",
                             "user_quit",
                             PromptEofPolicy::Quit,
+                            PromptRestartMode::Continue,
                         ) {
                             PromptOutcome::Quit => {
                                 break "user_quit_clean_exit";
                             }
-                            PromptOutcome::RestartFresh => {
+                            PromptOutcome::Restart => {
                                 raw_mode.resume();
                                 first_run = false;
                                 restart_count += 1;
@@ -2220,11 +2223,12 @@ pub fn run_with_reap_policy_resume_and_harness(
                                     "Press Enter to restart fresh, or 'q' to exit.",
                                     "user_quit_after_ctrl_c",
                                     PromptEofPolicy::Quit,
+                                    PromptRestartMode::Fresh,
                                 ) {
                                     PromptOutcome::Quit => {
                                         break "user_quit_after_ctrl_c";
                                     }
-                                    PromptOutcome::RestartFresh => {
+                                    PromptOutcome::Restart => {
                                         raw_mode.resume();
                                         first_run = true;
                                         restart_count += 1;
@@ -2232,6 +2236,7 @@ pub fn run_with_reap_policy_resume_and_harness(
                                 }
                             }
                             SupervisorRestartContinueExitStrategy::CtrlDPromptUser => {
+                                let restart_mode = PromptRestartMode::Continue;
                                 shared.transition_actor_state(
                                     agent_doc_controller::actor::ActorState::WaitingInput,
                                     "supervisor",
@@ -2246,16 +2251,17 @@ pub fn run_with_reap_policy_resume_and_harness(
                                 match prompt_for_restart_or_quit(
                                     &mut session_log,
                                     "ctrl_d",
-                                    "Press Enter to restart fresh, or 'q' to exit.",
+                                    "Press Enter to restart and continue this session, or 'q' to exit.",
                                     "user_quit_after_ctrl_d",
                                     PromptEofPolicy::Quit,
+                                    restart_mode,
                                 ) {
                                     PromptOutcome::Quit => {
                                         break "user_quit_after_ctrl_d";
                                     }
-                                    PromptOutcome::RestartFresh => {
+                                    PromptOutcome::Restart => {
                                         raw_mode.resume();
-                                        first_run = true;
+                                        first_run = restart_mode.starts_fresh();
                                         restart_count += 1;
                                     }
                                 }
@@ -2288,11 +2294,12 @@ pub fn run_with_reap_policy_resume_and_harness(
                                     "Press Enter to restart fresh, or 'q' to exit.",
                                     "user_quit_after_resume_failure",
                                     PromptEofPolicy::RestartFresh,
+                                    PromptRestartMode::Fresh,
                                 ) {
                                     PromptOutcome::Quit => {
                                         break "user_quit_after_resume_failure";
                                     }
-                                    PromptOutcome::RestartFresh => {
+                                    PromptOutcome::Restart => {
                                         raw_mode.resume();
                                         first_run = true;
                                         restart_count += 1;

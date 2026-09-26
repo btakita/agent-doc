@@ -4,6 +4,21 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.418
 
+- **Ctrl+D + Enter now resumes the exact document conversation.** The supervisor's Ctrl+D menu previously advertised and selected a fresh restart, so an operator trying to restart the exited Codex child silently received a new thread. The prompt now distinguishes continuation from the Ctrl+C fresh-restart path, preserves the document-bound lineage, and launches the replacement through exact resume.
+
+- **Stale tmux pane identities no longer strand Codex admission and Stop.**
+  Agent-doc validates an inherited `TMUX_PANE` before publishing invocation
+  authority, so a long-lived Codex daemon whose launch pane was replaced uses
+  the attached client's live pane instead. A refused admission is also retired
+  as a denied thread binding; later ordinary prompts cannot inherit the live
+  owner's open cycle or enter an impossible Stop-hook `commit` loop.
+
+- **Stop no longer calls a response-bearing retained transition stranded after
+  its mutable cycle crosses committed.** The durable transition's captured
+  continuation remains the closeout owner until terminal proof settles it, so
+  a concurrent editor ACK cannot produce a false manual-commit instruction
+  while the controller is already completing that exact write.
+
 - **A saved queue edit now fast-forwards from its proven merge baseline instead
   of being deleted by replica re-registration.** When live editor authority is
   still exactly the recorded baseline and disk alone advanced, preflight

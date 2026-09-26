@@ -445,13 +445,17 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
     };
 
     let file = PathBuf::from(&state.doc_path);
+    let cleanup_roots = tracking_roots(&cwd, Some(&file));
     if state.preflight_admitted == Some(false) {
         // Admission already told this turn to stop. Neither an older document
         // cycle nor its active queue can authorize capturing that explanation.
+        // Retire the denied binding as well: it never acquired document
+        // ownership, so a later ordinary prompt in this Codex thread must not
+        // inherit the other pane's open-cycle debt.
+        clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
         agent_doc_ops_log_io::log_op(&file, "codex_stop_refused_admission_preserved");
         return Ok(StopResponse::Continue { continue_: true });
     }
-    let cleanup_roots = tracking_roots(&cwd, Some(&file));
     if !file.exists() {
         clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
         return Ok(StopResponse::Continue { continue_: true });
@@ -1825,7 +1829,7 @@ mod tests {
     }
 
     #[test]
-    fn refused_admission_does_not_capture_explanation_or_drain_previous_queue() {
+    fn refused_admission_does_not_leak_another_panes_cycle_into_later_prompts() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_auto_queue_doc(&dir, &["fix queue retrieval"]);
         init_git_repo(dir.path(), &doc);
@@ -1837,11 +1841,27 @@ mod tests {
         };
         agent_doc_codex_hook_io::apply_user_prompt_submit(&input).unwrap();
         agent_doc_codex_hook_io::record_preflight_admission(&input, false).unwrap();
+
+        // A later ordinary prompt must not replace the refusal with an active
+        // document binding. That used to make Stop attempt the live owner's
+        // commit and prescribe the same impossible command back to this pane.
+        let newer = agent_doc_codex_hook_io::UserPromptSubmitInput {
+            turn_id: "new-turn".into(),
+            prompt: "Fix the admission defect".into(),
+            ..input.clone()
+        };
+        agent_doc_codex_hook_io::apply_user_prompt_submit(&newer).unwrap();
+        let (_, refused) = load_bound_session_for_stop(dir.path(), "codex-session")
+            .unwrap()
+            .unwrap();
+        assert_eq!(refused.last_turn_id, "refused-turn");
+        assert_eq!(refused.preflight_admitted, Some(false));
+
         let before = fs::read_to_string(&doc).unwrap();
         let result = apply_stop(&StopInput {
-            session_id: input.session_id.clone(),
-            turn_id: input.turn_id.clone(),
-            cwd: input.cwd.clone(),
+            session_id: newer.session_id.clone(),
+            turn_id: newer.turn_id.clone(),
+            cwd: newer.cwd.clone(),
             last_assistant_message: "Preflight refused; pending content is retained.".into(),
             stop_hook_active: false,
         })
@@ -1849,24 +1869,12 @@ mod tests {
         assert!(matches!(result, StopResponse::Continue { continue_: true }));
         assert_eq!(fs::read_to_string(&doc).unwrap(), before);
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
-
-        // A new ordinary prompt clears the refusal; a late old-hook receipt
-        // cannot fence it, even when the document binding is unchanged.
-        let newer = agent_doc_codex_hook_io::UserPromptSubmitInput {
-            turn_id: "new-turn".into(),
-            prompt: "Fix the admission defect".into(),
-            ..input
-        };
-        agent_doc_codex_hook_io::apply_user_prompt_submit(&newer).unwrap();
-        let old = agent_doc_codex_hook_io::UserPromptSubmitInput {
-            turn_id: "refused-turn".into(),
-            ..newer
-        };
-        agent_doc_codex_hook_io::record_preflight_admission(&old, false).unwrap();
-        let (_, state) = load_bound_session_for_stop(dir.path(), "codex-session")
-            .unwrap()
-            .unwrap();
-        assert_eq!(state.preflight_admitted, None);
+        assert!(
+            load_bound_session_for_stop(dir.path(), "codex-session")
+                .unwrap()
+                .is_none(),
+            "Stop must retire a binding that never acquired the document"
+        );
     }
     use std::fs;
     use std::process::Command as ProcessCommand;

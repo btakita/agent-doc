@@ -324,10 +324,49 @@ pub fn current_pane_id(runner: &(impl TmuxCommandRunner + ?Sized)) -> Result<Str
 pub fn current_pane_id_from_env_or_tmux(
     runner: &(impl TmuxCommandRunner + ?Sized),
 ) -> Result<String, TmuxIoError> {
-    if let Some(pane) = current_pane_id_from_env() {
+    if let Some(pane) = current_pane_id_override() {
         return Ok(pane);
     }
-    current_pane_id(runner)
+    current_pane_id_from_candidate_or_tmux(runner, std::env::var("TMUX_PANE").ok())
+}
+
+/// Resolve explicit pane evidence only while it still names a live tmux pane.
+///
+/// Long-lived harness daemons can outlive the pane that originally launched
+/// them and keep exporting that pane through `TMUX_PANE`. Treating that stale
+/// value as current actor identity makes a command running in the replacement
+/// pane look like a foreign invocation. Controller effects are different: the
+/// thread-local override is a typed logical-actor receipt and remains
+/// authoritative without consulting ambient process state.
+pub fn current_live_pane_id_from_env_or_override(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+) -> Option<String> {
+    if let Some(pane) = current_pane_id_override() {
+        return Some(pane);
+    }
+    live_pane_id_from_candidate(runner, std::env::var("TMUX_PANE").ok())
+}
+
+fn live_pane_id_from_candidate(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    candidate: Option<String>,
+) -> Option<String> {
+    let pane = candidate.filter(|pane| !pane.trim().is_empty())?;
+    let observation =
+        display_message_value_nonempty(runner, Some(&pane), "#{pane_id}\t#{pane_dead}")?;
+    let mut fields = observation.split('\t');
+    let observed_pane = fields.next()?;
+    let pane_dead = fields.next()?;
+    (observed_pane == pane && pane_dead == "0").then_some(pane)
+}
+
+fn current_pane_id_from_candidate_or_tmux(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    candidate: Option<String>,
+) -> Result<String, TmuxIoError> {
+    live_pane_id_from_candidate(runner, candidate)
+        .map(Ok)
+        .unwrap_or_else(|| current_pane_id(runner))
 }
 
 /// Resolve only pane evidence carried by this process context.
@@ -885,6 +924,41 @@ mod tests {
         });
 
         assert_eq!(current_pane_id_override(), None);
+    }
+
+    struct PaneContextRunner;
+
+    impl TmuxCommandRunner for PaneContextRunner {
+        fn run(&self, command: &TmuxCommand) -> Result<String, TmuxIoError> {
+            if command.args().iter().any(|arg| arg == "%stale") {
+                return Ok(String::new());
+            }
+            if command.args().iter().any(|arg| arg == "%dead") {
+                return Ok("%dead\t1\n".to_string());
+            }
+            if command.args().iter().any(|arg| arg == "%live") {
+                return Ok("%live\t0\n".to_string());
+            }
+            Ok("%replacement\n".to_string())
+        }
+    }
+
+    #[test]
+    fn stale_or_dead_environment_pane_falls_back_to_current_tmux_context() {
+        let runner = PaneContextRunner;
+
+        assert_eq!(
+            current_pane_id_from_candidate_or_tmux(&runner, Some("%stale".to_string())),
+            Ok("%replacement".to_string())
+        );
+        assert_eq!(
+            current_pane_id_from_candidate_or_tmux(&runner, Some("%dead".to_string())),
+            Ok("%replacement".to_string())
+        );
+        assert_eq!(
+            current_pane_id_from_candidate_or_tmux(&runner, Some("%live".to_string())),
+            Ok("%live".to_string())
+        );
     }
 
     #[test]

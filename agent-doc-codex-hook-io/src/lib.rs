@@ -287,6 +287,10 @@ pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
     let doc_path = resolve_agent_doc_path(&input.prompt, &cwd).or_else(|| {
         previous_state
             .as_ref()
+            // A refused trigger never acquired this document for the Codex
+            // thread. Reusing that path for an ordinary follow-up would turn
+            // another pane's open cycle into this thread's Stop-hook debt.
+            .filter(|state| state.preflight_admitted != Some(false))
             .map(|state| PathBuf::from(&state.doc_path))
             .filter(|path| path.is_file())
     });

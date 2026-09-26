@@ -83,6 +83,13 @@ be superseded only by exact process-tree proof for the invoking document. Pane
 string equality without that proof is insufficient, including for legacy
 registry rows with no actor generation.
 
+A long-lived harness daemon may retain `TMUX_PANE` after that pane has been
+destroyed. Admission must validate the ambient pane against live tmux state
+before publishing invocation identity. A missing or retained-dead ambient pane
+falls back to tmux's attached-client context; a live ambient non-owner remains
+a real mismatch and is rejected. The controller's typed logical-actor override
+is not ambient process state and remains authoritative.
+
 ## Supervisor generation transition authority
 
 Supervisor replacement is gated by durable document topology, not a scraped

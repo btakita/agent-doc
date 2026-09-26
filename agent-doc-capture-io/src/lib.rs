@@ -531,11 +531,23 @@ pub fn retained_write_ownership(
     let capture_resume_unowned = retained_capture
         && agent_doc_supervisor_io::process::supervisor_pid_for_doc(file).is_none()
         && !agent_doc_supervisor_io::process::supervisor_pid_matches_doc(std::process::id(), file);
+    // A response-bearing retained transition remains an owner even if the
+    // mutable cycle state has already crossed `committed` and the active
+    // capture view therefore disappears. The transition carries its own
+    // captured-response continuation until terminal proof settles it. Reading
+    // only the current cycle/capture produced a race where Stop called this
+    // write STRANDED while the controller delivered and committed it one
+    // second later.
+    let retained_projection = agent_doc_cycle_state_io::load_document_projection(file)
+        .ok()
+        .flatten()
+        .is_some_and(|projection| projection.retained_captured_response_write().is_some());
     agent_doc_turn::write_ownership::RetainedWriteOwnership::new_with_phase(
         cycle_open,
         retained_capture,
         write_applied,
     )
+    .with_retained_projection(retained_projection)
     .with_capture_resume_unowned(capture_resume_unowned)
 }
 

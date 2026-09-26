@@ -73,6 +73,15 @@ Regression coverage must include the full follow-up lifecycle: a routed dispatch
 
 The Codex stop hook does not replace the documented `finalize` / `write --commit` + `session-check` path. It is a backstop for the exact Codex `session_id` that `UserPromptSubmit` durably bound to the document. When Codex reaches `Stop` with an open bound `agent-doc` cycle, the binary validates `last_assistant_message` before replay. A single assistant closeout may be captured into the existing pending/capture ledger and replayed through the normal recover/write/commit path automatically. Transcript-shaped payloads such as full `agent:exchange` dumps, prompt-target lines, or repeated response headings must not enter the replay ledger; they are captured only as diagnostics and the hook blocks or fails closed instead. If `last_assistant_message` is empty because a tool-only/authentication step ended the turn before the assistant emitted the final closeout, the hook must also fail closed, save a diagnostic record with the tracked prompt, and require the normal `finalize` / `session-check` recovery path. If the exact session has no tracked binding, the hook is a no-op even when another document in the project has a durable queue marker. If the validated auto-close succeeds, `session-check` should be green and the tracked hook state should be cleared.
 
+A refused UserPromptSubmit admission never binds that Codex thread to the
+document. Its refusal receipt fences the matching Stop invocation, which then
+retires the denied binding without inspecting, capturing, repairing, or
+committing the registered owner's cycle. An ordinary later prompt cannot replace
+the refusal with active document debt; only a new explicit `agent-doc <FILE>`
+trigger may attempt admission again. Consequently Stop must never turn a pane
+authority refusal into an instruction to run `agent-doc commit` from the same
+non-owning pane.
+
 Prompt writeback debt is cycle-scoped. `UserPromptSubmit` records the cycle ID and
 whether that cycle was open when it observed the prompt. Once that same cycle has
 a captured response and reaches `committed`, the Stop hook must retire the prompt

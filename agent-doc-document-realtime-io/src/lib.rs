@@ -10247,6 +10247,70 @@ mod tests {
     }
 
     #[test]
+    fn committed_cycle_keeps_response_bearing_retained_transition_owned() {
+        let baseline = "# Session\n\nPlease investigate.\n";
+        let response = "### Re: investigate\n\nFixed exactly once.\n";
+        let target = format!("{baseline}\n{response}");
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        let response_sha = agent_doc_hash::content_hash(response);
+        agent_doc_cycle_state_io::mark_response_captured(
+            &file,
+            "response_captured",
+            Some(baseline),
+            Some(baseline),
+            &response_sha,
+            Some(&cycle.cycle_id),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::append_response_captured_body(
+            &file,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &cycle.cycle_id,
+                capture_id: &cycle.cycle_id,
+                response_sha256: &response_sha,
+                response_body: response,
+                intent_body: Some(response),
+                mutation_plan_json: None,
+                file_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                snapshot_hash: Some(&agent_doc_hash::content_hash(baseline)),
+                baseline_content: Some(baseline),
+            },
+        )
+        .unwrap();
+        ensure_deferred_document_write_intent(
+            &file,
+            baseline,
+            &target,
+            "response_retained_transition_test",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+
+        // Reproduce the race: mutable closeout has crossed committed, so the
+        // active-capture view is empty, but terminal proof has not yet settled
+        // the response-bearing retained transition.
+        agent_doc_cycle_state_io::mark_committed(
+            &file,
+            "commit_success",
+            Some(baseline),
+            Some(baseline),
+        )
+        .unwrap();
+        assert!(agent_doc_capture_io::load_active(&file).unwrap().is_none());
+
+        let ownership = agent_doc_capture_io::retained_write_ownership(&file);
+        assert!(ownership.retained_projection);
+        assert_eq!(
+            ownership.verdict(),
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred,
+            "the transition will settle from its controller state edge and must not prescribe a competing manual commit"
+        );
+    }
+
+    #[test]
     fn canonical_disk_projection_is_exact_after_editor_saved_same_bytes() {
         let canonical = "# Session\n\neditor-saved canonical\n";
         let (_dir, file, _content) = temp_doc(canonical);

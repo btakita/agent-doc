@@ -97,8 +97,9 @@ pub fn verdict_in(
     // A controller can be headless while executing on behalf of a tmux actor.
     // The thread-local override is explicit actor evidence and therefore takes
     // precedence over the controller process's missing ambient `TMUX` value.
-    let explicit_invocation_pane = agent_doc_tmux_io::current_pane_id_from_env();
     let tmux = agent_doc_tmux_io::configured_tmux();
+    let explicit_invocation_pane =
+        agent_doc_tmux_io::current_live_pane_id_from_env_or_override(&tmux);
     // One bounded read graph gives owner liveness and invocation proof the same
     // `/proc` cut. Splitting these observations across scopes can classify a
     // pane as stale and exact-owner from two different process generations.

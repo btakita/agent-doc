@@ -12,7 +12,7 @@ A command may mutate a document's cycle, lease, retained-write, or closeout stat
 
 ### Inputs
 
-- Invocation origin: headless process, foreground tmux pane, or controller effect carrying an explicit actor pane.
+- Invocation origin: headless process, foreground tmux pane, or controller effect carrying an explicit actor pane. An ambient `TMUX_PANE` inherited by a long-lived harness daemon is accepted only while tmux still proves that pane is live; otherwise resolution falls back to the attached client's current pane.
 - Registered owner observation: absent, current logical actor, another logical actor, or indeterminate.
 - Registered-owner liveness: live, stale, or indeterminate.
 - Requested operation class: read-only probe or mutating command.
@@ -49,6 +49,7 @@ Registry/actor changes enter through controller actor events. Tmux and process l
 
 - Remove the write runtime's direct `registry pane != ambient pane` policy branch.
 - Keep document/session parsing, registry lookup, tmux lookup, and process-liveness checks as I/O adapters only.
+- Validate ambient `TMUX_PANE` liveness at the I/O boundary before publishing invocation identity; keep the controller's typed actor override authoritative.
 - Run the authority projection before preflight repair/recovery and before write mutation.
 - Gate drain-owner lease acquisition through the same projection; lease release remains universally available for cleanup.
 - Keep durable writes and tmux actions as effects gated by the authority verdict.

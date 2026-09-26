@@ -43,7 +43,7 @@
 //!   surfaces an idle prompt, treat that as failed startup provenance and restart
 //!   fresh instead of chaining `--continue`.
 //!   If stdin EOF/Ctrl-D was forwarded, Codex returns to the restart-or-quit
-//!   prompt so the operator can intentionally restart fresh or exit the
+//!   prompt so the operator can intentionally resume the same conversation or exit the
 //!   supervisor cleanly even when the previous run already committed. A
 //!   stdin-forwarded Ctrl+C that terminates the child now uses that same quit
 //!   prompt instead of being misclassified as a transient crash. Only
@@ -462,8 +462,34 @@ fn log_idle_queue_drain_submit(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptOutcome {
-    RestartFresh,
+    Restart,
     Quit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptRestartMode {
+    Fresh,
+    Continue,
+}
+
+impl PromptRestartMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Continue => "continue",
+        }
+    }
+
+    fn instruction(self) -> &'static str {
+        match self {
+            Self::Fresh => "restart fresh",
+            Self::Continue => "restart and continue this session",
+        }
+    }
+
+    fn starts_fresh(self) -> bool {
+        matches!(self, Self::Fresh)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -478,6 +504,7 @@ fn prompt_for_restart_or_quit(
     prompt_text: &str,
     quit_event: &str,
     eof_policy: PromptEofPolicy,
+    restart_mode: PromptRestartMode,
 ) -> PromptOutcome {
     loop {
         if let Err(err) = write_operator_prompt_line(prompt_text) {
@@ -513,25 +540,27 @@ fn prompt_for_restart_or_quit(
                         session_log,
                         &format!("user_restart_fresh_after_eof prompt={prompt_kind}"),
                     );
-                    return PromptOutcome::RestartFresh;
+                    return PromptOutcome::Restart;
                 }
             },
             SupervisorPromptDecision::RestartFresh => {
                 log_event(
                     session_log,
                     &format!(
-                        "user_restart_fresh prompt={} bytes_read={} input={}",
+                        "user_restart_{} prompt={} bytes_read={} input={}",
+                        restart_mode.label(),
                         prompt_kind,
                         bytes_read,
                         prompt_input_summary(&input)
                     ),
                 );
-                return PromptOutcome::RestartFresh;
+                return PromptOutcome::Restart;
             }
             SupervisorPromptDecision::Invalid => {
-                if let Err(err) = write_operator_prompt_line(
-                    "Unrecognized input. Press Enter to restart fresh, or 'q' to exit.",
-                ) {
+                if let Err(err) = write_operator_prompt_line(&format!(
+                    "Unrecognized input. Press Enter to {}, or 'q' to exit.",
+                    restart_mode.instruction()
+                )) {
                     log_event(
                         session_log,
                         &format!("operator_prompt_write_failed prompt={prompt_kind} error={err}"),
@@ -2782,6 +2811,14 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
+
+    #[test]
+    fn ctrl_d_restart_mode_preserves_conversation_lineage() {
+        let mode = PromptRestartMode::Continue;
+        assert!(!mode.starts_fresh());
+        assert_eq!(mode.label(), "continue");
+        assert_eq!(mode.instruction(), "restart and continue this session");
+    }
 
     #[cfg(unix)]
     #[test]

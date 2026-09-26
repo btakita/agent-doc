@@ -9,11 +9,43 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tempfile::TempDir;
 
 fn agent_doc() -> Command {
     cargo_bin_cmd!("agent-doc")
+}
+
+static OWNED_PANE_FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+struct OwnedPaneFixture {
+    tmux: tmux_router::IsolatedTmux,
+    pane: String,
+}
+
+impl OwnedPaneFixture {
+    fn new(root: &Path) -> Self {
+        let sequence = OWNED_PANE_FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let socket = format!("agent-doc-run-owner-test-{}-{sequence}", std::process::id());
+        let tmux = tmux_router::IsolatedTmux::new(&socket);
+        let pane = tmux.new_session("owner", root).unwrap();
+        Self { tmux, pane }
+    }
+
+    fn configure(&self, command: &mut Command) {
+        command
+            .env(
+                "AGENT_DOC_TMUX_SOCKET",
+                self.tmux.server_socket.as_ref().unwrap(),
+            )
+            .env_remove("TMUX")
+            .env("TMUX_PANE", &self.pane);
+    }
+
+    fn new_non_owner_pane(&self, root: &Path) -> String {
+        self.tmux.new_window("owner", root).unwrap()
+    }
 }
 
 fn init_git_repo(root: &Path, tracked: &Path) {
@@ -1077,9 +1109,12 @@ fn codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_com
     )
     .unwrap();
     init_git_repo(tmp.path(), &doc);
-    write_codex_owner_session(tmp.path(), &doc);
+    let owner = OwnedPaneFixture::new(tmp.path());
+    write_codex_owner_session(tmp.path(), &doc, &owner.pane);
 
-    agent_doc()
+    let mut command = agent_doc();
+    owner.configure(&mut command);
+    command
         .current_dir(tmp.path())
         // Deterministically simulate a Codex harness. `detect_harness()` checks
         // Claude/OpenCode markers before Codex, so an inherited `CLAUDECODE`
@@ -1091,7 +1126,6 @@ fn codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_com
         .env_remove("OPENCODE")
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
-        .env("TMUX_PANE", "%77")
         .arg(doc.to_str().unwrap())
         .assert()
         .failure()
@@ -1133,9 +1167,12 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
     record_selected_queue_head(tmp.path(), &doc, committed, "do something");
-    write_codex_owner_session(tmp.path(), &doc);
+    let owner = OwnedPaneFixture::new(tmp.path());
+    write_codex_owner_session(tmp.path(), &doc, &owner.pane);
 
-    agent_doc()
+    let mut command = agent_doc();
+    owner.configure(&mut command);
+    command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE")
@@ -1143,7 +1180,6 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
         .env_remove("OPENCODE")
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
-        .env("TMUX_PANE", "%77")
         .arg(doc.to_str().unwrap())
         .assert()
         .failure()
@@ -1186,7 +1222,8 @@ fn codex_owned_pane_independent_queue_edit_defers_until_closeout() {
     fs::write(&doc, committed).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
-    write_codex_owner_session(tmp.path(), &doc);
+    let owner = OwnedPaneFixture::new(tmp.path());
+    write_codex_owner_session(tmp.path(), &doc, &owner.pane);
     save_active_queue_turn_scope(&doc, "active", 1);
     cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
 
@@ -1196,7 +1233,9 @@ fn codex_owned_pane_independent_queue_edit_defers_until_closeout() {
     );
     fs::write(&doc, &edited).unwrap();
 
-    agent_doc()
+    let mut command = agent_doc();
+    owner.configure(&mut command);
+    command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE")
@@ -1204,7 +1243,6 @@ fn codex_owned_pane_independent_queue_edit_defers_until_closeout() {
         .env_remove("OPENCODE")
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
-        .env("TMUX_PANE", "%77")
         .arg(doc.to_str().unwrap())
         .assert()
         .success()
@@ -1224,12 +1262,12 @@ fn codex_owned_pane_independent_queue_edit_defers_until_closeout() {
     );
 }
 
-fn write_codex_owner_session(root: &Path, doc: &Path) {
+fn write_codex_owner_session(root: &Path, doc: &Path, pane: &str) {
     let mut registry = tmux_router::Registry::new();
     registry.insert(
         doc.display().to_string(),
         tmux_router::RegistryEntry {
-            pane: "%77".to_string(),
+            pane: pane.to_string(),
             pid: 123,
             cwd: root.display().to_string(),
             started: "2026-05-10T00:00:00Z".to_string(),
@@ -1242,13 +1280,13 @@ fn write_codex_owner_session(root: &Path, doc: &Path) {
     agent_doc_session_registry_io::save_in(root, &registry).unwrap();
 }
 
-fn write_codex_actor_record(root: &Path, doc: &Path) {
+fn write_codex_actor_record(root: &Path, doc: &Path, pane: &str) {
     let document_id = doc.canonicalize().unwrap().to_string_lossy().to_string();
     let actor = agent_doc_controller::actor::ActorRecord {
         document_id,
         session_id: "session-recursive".to_string(),
         generation: 1,
-        pane_id: "%77".to_string(),
+        pane_id: pane.to_string(),
         window_id: "@7".to_string(),
         harness: "codex".to_string(),
         state: agent_doc_controller::actor::ActorState::Busy,
@@ -1294,9 +1332,12 @@ fn preflight_emits_owned_pane_self_invocation_for_unresolved_prompt() {
     .unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
-    write_codex_owner_session(tmp.path(), &doc);
+    let owner = OwnedPaneFixture::new(tmp.path());
+    write_codex_owner_session(tmp.path(), &doc, &owner.pane);
 
-    let out = agent_doc()
+    let mut command = agent_doc();
+    owner.configure(&mut command);
+    let out = command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE")
@@ -1304,7 +1345,6 @@ fn preflight_emits_owned_pane_self_invocation_for_unresolved_prompt() {
         .env_remove("OPENCODE")
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
-        .env("TMUX_PANE", "%77")
         .args(["preflight", "--probe", doc.to_str().unwrap()])
         .output()
         .unwrap();
@@ -1316,7 +1356,7 @@ fn preflight_emits_owned_pane_self_invocation_for_unresolved_prompt() {
         "owned_pane_self_invocation must be present: {json}"
     );
     assert_eq!(osi["kind"].as_str().unwrap(), "unresolved_prompt");
-    assert_eq!(osi["current_pane"].as_str().unwrap(), "%77");
+    assert_eq!(osi["current_pane"].as_str().unwrap(), owner.pane);
     assert!(
         osi["work_excerpt"]
             .as_str()
@@ -1344,9 +1384,13 @@ fn preflight_owned_pane_self_invocation_absent_for_non_owner_pane() {
     )
     .unwrap();
     init_git_repo(tmp.path(), &doc);
-    write_codex_owner_session(tmp.path(), &doc);
+    let owner = OwnedPaneFixture::new(tmp.path());
+    write_codex_owner_session(tmp.path(), &doc, &owner.pane);
+    let non_owner_pane = owner.new_non_owner_pane(tmp.path());
 
-    let out = agent_doc()
+    let mut command = agent_doc();
+    owner.configure(&mut command);
+    let out = command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE")
@@ -1354,7 +1398,7 @@ fn preflight_owned_pane_self_invocation_absent_for_non_owner_pane() {
         .env_remove("OPENCODE")
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
-        .env("TMUX_PANE", "%99")
+        .env("TMUX_PANE", non_owner_pane)
         .args(["preflight", "--probe", doc.to_str().unwrap()])
         .output()
         .unwrap();
@@ -1382,9 +1426,12 @@ fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
     .unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
-    write_codex_owner_session(tmp.path(), &doc);
+    let owner = OwnedPaneFixture::new(tmp.path());
+    write_codex_owner_session(tmp.path(), &doc, &owner.pane);
 
-    let out = agent_doc()
+    let mut command = agent_doc();
+    owner.configure(&mut command);
+    let out = command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE")
@@ -1392,7 +1439,6 @@ fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
         .env_remove("OPENCODE")
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
-        .env("TMUX_PANE", "%77")
         .args(["preflight", "--probe", doc.to_str().unwrap()])
         .output()
         .unwrap();
@@ -1428,8 +1474,9 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
     fs::write(&doc, committed).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
-    write_codex_owner_session(tmp.path(), &doc);
-    write_codex_actor_record(tmp.path(), &doc);
+    let owner = OwnedPaneFixture::new(tmp.path());
+    write_codex_owner_session(tmp.path(), &doc, &owner.pane);
+    write_codex_actor_record(tmp.path(), &doc, &owner.pane);
     save_active_queue_turn_scope(&doc, "active", 1);
     cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
 
@@ -1439,7 +1486,9 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
     );
     fs::write(&doc, edited).unwrap();
 
-    let out = agent_doc()
+    let mut command = agent_doc();
+    owner.configure(&mut command);
+    let out = command
         .current_dir(tmp.path())
         .env_remove("CLAUDECODE")
         .env_remove("CLAUDE_CODE")
@@ -1447,7 +1496,6 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
         .env_remove("OPENCODE")
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
-        .env("TMUX_PANE", "%77")
         .args(["preflight", "--probe", doc.to_str().unwrap()])
         .output()
         .unwrap();

@@ -3741,7 +3741,9 @@ fn agent_doc_restart_prompt_visible(captured: &str) -> bool {
         line,
         "Press Enter to restart, or 'q' to exit."
             | "Press Enter to restart fresh, or 'q' to exit."
+            | "Press Enter to restart and continue this session, or 'q' to exit."
             | "Unrecognized input. Press Enter to restart fresh, or 'q' to exit."
+            | "Unrecognized input. Press Enter to restart and continue this session, or 'q' to exit."
     )
 }
 

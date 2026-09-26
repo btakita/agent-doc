@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0da6f-f9d1-7650-9e1e-2d68f3b24fef
+  codex: 01a0db0d-7e1c-7c50-b447-0eacf4505b3c
 agent: codex
 claude_model: opus
 agent_doc_format: template

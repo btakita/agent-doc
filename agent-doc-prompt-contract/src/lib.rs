@@ -319,18 +319,27 @@ pub fn push_unique_prompt_bearing_changes(
     }
 }
 
+/// Preset references that `text` actually requests.
+///
+/// Both detectors — the `preset <name>` directive form and the bare `#preset`
+/// hashtag form — are scoped by [`agent_doc_diff::directive_bearing_line_mask`]
+/// over the WHOLE text, so a reference inside a fenced block, a blockquote, or
+/// quoted diff/report content is descriptive content, not a live request
+/// (`#quotedpreset`). Scanning line by line is what previously defeated fence
+/// suppression and left the hashtag form unscoped entirely.
 fn referenced_presets_in_text(
     text: &str,
     prompt_presets: &IndexMap<String, String>,
 ) -> Vec<String> {
     let mut referenced = Vec::new();
+    let mask = agent_doc_diff::directive_bearing_line_mask(text);
 
-    for line in text.lines() {
-        if line_defines_prompt_preset(line, prompt_presets) {
+    for (line, bearing) in text.lines().zip(mask) {
+        if !bearing || line_defines_prompt_preset(line, prompt_presets) {
             continue;
         }
 
-        for preset in agent_doc_diff::extract_prompt_preset_requests_from_text(line) {
+        for preset in agent_doc_diff::prompt_preset_requests_in_directive_line(line) {
             if let Some(preset) = agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(
                 prompt_presets,
                 &preset,
@@ -688,6 +697,98 @@ mod tests {
                 &presets,
             ),
             vec!["#next-steps".to_string()]
+        );
+    }
+
+    #[test]
+    fn requested_prompt_presets_ignores_hashtag_inside_quoted_report_paste() {
+        let presets = IndexMap::from([(
+            "#actionable-review".to_string(),
+            "Add actionable review items into backlog + queue".to_string(),
+        )]);
+        // Verbatim shape of the 2026-09-26 agent-doc-bugs.md paste (`#quotedpreset`).
+        let pasted_report = [
+            "Fix ",
+            "  The pending edit is a handoff plus a halt, not just a new item",
+            "",
+            "  git diff HEAD -- tasks/api.md (4 lines each way):",
+            "",
+            "  - agent: codex \u{2192} agent: claude, with a new resume.codex id",
+            "  - queue: go \u{2192} queue: stop",
+            "  - queue head review PR 567 again \u{2192} - #actionable-review",
+            "",
+            "  What unblocks it (operator-side): settle the divergent editor. Then re-invoke",
+            "  /agent-doc tasks/api.md and the #actionable-review edit will admit normally.",
+        ]
+        .join("\n");
+
+        assert!(
+            requested_prompt_presets(&[pasted_report.clone()], &[], &presets).is_empty(),
+            "a preset hashtag inside pasted report content is description, not a request"
+        );
+    }
+
+    #[test]
+    fn requested_prompt_presets_ignores_hashtag_inside_fence_and_blockquote() {
+        let presets = IndexMap::from([(
+            "#actionable-review".to_string(),
+            "Add actionable review items into backlog + queue".to_string(),
+        )]);
+        let text = "> the head was #actionable-review\n\n```\ntask 2: \u{2192} - #actionable-review\n```\n";
+
+        assert!(requested_prompt_presets(&[text.to_string()], &[], &presets).is_empty());
+    }
+
+    #[test]
+    fn requested_prompt_presets_keeps_live_request_beside_a_quoted_paste() {
+        let presets = IndexMap::from([(
+            "#actionable-review".to_string(),
+            "Add actionable review items into backlog + queue".to_string(),
+        )]);
+        let text = [
+            "do #actionable-review",
+            "",
+            "Fix ",
+            "  - queue head review PR 567 again \u{2192} - #actionable-review",
+        ]
+        .join("\n");
+
+        assert_eq!(
+            requested_prompt_presets(&[text], &[], &presets),
+            vec!["#actionable-review".to_string()],
+            "suppressing the quoted copy must not suppress the live directive"
+        );
+    }
+
+    #[test]
+    fn requested_prompt_presets_keeps_nested_list_request() {
+        let presets = IndexMap::from([(
+            "#next-steps".to_string(),
+            "Any follow-up items to place in the backlog?".to_string(),
+        )]);
+        let text = "- fix the crash\n  - then #next-steps\n";
+
+        assert_eq!(
+            requested_prompt_presets(&[text.to_string()], &[], &presets),
+            vec!["#next-steps".to_string()],
+            "list nesting is not quoted content"
+        );
+    }
+
+    #[test]
+    fn requested_prompt_presets_keeps_nested_list_directive_form() {
+        // Unhashed name on purpose: the hashtag detector cannot see it, so this
+        // pins the `preset <name>` directive path alone.
+        let presets = IndexMap::from([(
+            "release-check".to_string(),
+            "Prepare release.".to_string(),
+        )]);
+        let text = ["- fix the crash", "  - preset release-check"].join("\n");
+
+        assert_eq!(
+            requested_prompt_presets(&[text], &[], &presets),
+            vec!["release-check".to_string()],
+            "an already-scoped line must not be re-classified without its context"
         );
     }
 

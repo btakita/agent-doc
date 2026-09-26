@@ -109,6 +109,10 @@
 //!   directives from user-added diff lines, ignoring code fences and blockquotes.
 //! - `extract_prompt_preset_requests_from_text(text)`: text-mode companion used by orchestration
 //!   task extraction for batch-level preset directives outside unified diffs.
+//! - `directive_bearing_line_mask(text)`: per-line mask of which lines can carry a live
+//!   directive — outside fences, blockquotes, and quoted diff/report content (`#quotedpreset`).
+//! - `prompt_preset_requests_in_directive_line(line)`: single already-scoped line companion for
+//!   callers that hold their own mask.
 //! - `parse_slash_commands_simple`: single added `/clear` line → `["/clear"]`
 //! - `parse_slash_commands_ignores_fenced`: `/cmd` inside a ``` block → empty
 //! - `parse_slash_commands_ignores_blockquote`: `> /cmd` → empty
@@ -119,6 +123,8 @@
 //! - `detect_prompt_preset_requests_from_diff`: added `preset #1` and `presets release-check, #2`
 //!   lines → ordered unique preset names returned
 //! - `extract_prompt_preset_requests_from_text_ignores_fences_and_blockquotes`
+//! - `directive_bearing_line_mask_*`: fence / blockquote / quoted-report-paste scoping, and that
+//!   markdown list nesting stays directive-bearing
 //! - `extract_imperative_directives(diff)`: finds added user directive lines like `do #id`,
 //!   `run tests`, `build + install`, `commit + push`, or pending-item prose like
 //!   `[#id] Fix the cross-repo ...`, skipping code fences and blockquotes
@@ -2105,14 +2111,138 @@ pub enum OrchestrationRequestMode {
     Dag,
 }
 
+/// Minimum leading-whitespace columns before a line can be classified as
+/// quoted diff/report content (`#quotedpreset`).
+const QUOTED_REPORT_MIN_INDENT: usize = 2;
+
+/// Leading-whitespace width of `line`, counting a tab as four columns.
+fn leading_indent_columns(line: &str) -> usize {
+    line.chars()
+        .take_while(|c| c.is_whitespace() && *c != '\n')
+        .map(|c| if c == '\t' { 4 } else { 1 })
+        .sum()
+}
+
+/// True when `trimmed` opens a markdown list item (`- `, `* `, `+ `, `1. `, `1) `).
+fn line_opens_list_item(trimmed: &str) -> bool {
+    if trimmed == "-" || trimmed == "*" || trimmed == "+" {
+        return true;
+    }
+    if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
+        return true;
+    }
+    let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    digits > 0
+        && (trimmed[digits..].starts_with(". ")
+            || trimmed[digits..].starts_with(") ")
+            || trimmed[digits..] == *"."
+            || trimmed[digits..] == *")")
+}
+
+/// True when `lines[idx]` is quoted diff/report content rather than live prompt
+/// text (`#quotedpreset`).
+///
+/// A pasted terminal report keeps its original indentation, so every line of the
+/// paste sits at least [`QUOTED_REPORT_MIN_INDENT`] columns in while the prompt
+/// around it stays at column zero. Markdown list nesting and list continuation
+/// indent the same way, so indentation alone cannot decide: the classifier walks
+/// back to the nearest non-blank line at a strictly smaller indent and asks
+/// whether that line opens a list item. If it does, the indent is list nesting and
+/// the line is live prompt text; if it does not (prose, a heading, a report
+/// lead-in) or there is no shallower line at all, the indented run is a paste.
+fn line_is_quoted_report_content(lines: &[&str], idx: usize) -> bool {
+    let indent = leading_indent_columns(lines[idx]);
+    if indent < QUOTED_REPORT_MIN_INDENT {
+        return false;
+    }
+
+    for prev in lines[..idx].iter().rev() {
+        let trimmed = prev.trim_start();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if leading_indent_columns(prev) < indent {
+            return !line_opens_list_item(trimmed);
+        }
+    }
+
+    true
+}
+
+/// Per-line mask marking which lines of `text` can carry a live directive.
+///
+/// A line is directive-bearing when it sits outside fenced code blocks, outside
+/// blockquotes, and outside quoted diff/report content. Callers that scan for
+/// directives (`preset <name>` forms, `#preset` hashtag references) must build the
+/// mask over the WHOLE text: feeding one line at a time resets fence state on
+/// every line and silently disables fence suppression (`#quotedpreset`).
+pub fn directive_bearing_line_mask(text: &str) -> Vec<bool> {
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut mask = vec![false; lines.len()];
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == '`' || fc == '~' {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_char = fc;
+                    fence_len = fl;
+                    continue;
+                }
+            }
+        } else {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let fl = trimmed.chars().take_while(|&c| c == fc).count();
+                if fl >= fence_len && trimmed[fl..].trim().is_empty() {
+                    in_fence = false;
+                }
+            }
+            continue;
+        }
+
+        if trimmed.is_empty() || trimmed.starts_with('>') {
+            continue;
+        }
+        if line_is_quoted_report_content(&lines, idx) {
+            continue;
+        }
+
+        mask[idx] = true;
+    }
+
+    mask
+}
+
 /// Extract ordered unique prompt preset references from user-added diff lines.
 pub fn detect_prompt_preset_requests(diff: &str) -> Vec<String> {
     let mut requests = Vec::new();
     let mut in_fence = false;
     let mut fence_char = '`';
     let mut fence_len = 0usize;
+    // Diff-marker-stripped bodies, so quoted-report classification reads the
+    // paste's own indentation rather than the `+`/`-`/` ` column.
+    let contents = diff
+        .lines()
+        .map(|line| {
+            if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
+                ""
+            } else if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+                &line[1..]
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>();
 
-    for line in diff.lines() {
+    for (idx, line) in diff.lines().enumerate() {
         if line.starts_with("---") || line.starts_with("+++") || line.starts_with("@@") {
             continue;
         }
@@ -2152,6 +2282,9 @@ pub fn detect_prompt_preset_requests(diff: &str) -> Vec<String> {
         if content.starts_with('>') {
             continue;
         }
+        if line_is_quoted_report_content(&contents, idx) {
+            continue;
+        }
 
         collect_prompt_preset_requests_from_line(content, &mut requests);
     }
@@ -2160,44 +2293,34 @@ pub fn detect_prompt_preset_requests(diff: &str) -> Vec<String> {
 }
 
 /// Extract ordered unique prompt preset references from plain text.
+///
+/// Fenced blocks, blockquotes, and quoted diff/report content are suppressed via
+/// [`directive_bearing_line_mask`]. Pass the WHOLE text, never one line at a time:
+/// a per-line call resets fence state on every line (`#quotedpreset`).
 pub fn extract_prompt_preset_requests_from_text(text: &str) -> Vec<String> {
     let mut requests = Vec::new();
-    let mut in_fence = false;
-    let mut fence_char = '`';
-    let mut fence_len = 0usize;
+    let mask = directive_bearing_line_mask(text);
 
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-
-        if !in_fence {
-            let fc = trimmed.chars().next().unwrap_or('\0');
-            if fc == '`' || fc == '~' {
-                let fl = trimmed.chars().take_while(|&c| c == fc).count();
-                if fl >= 3 {
-                    in_fence = true;
-                    fence_char = fc;
-                    fence_len = fl;
-                    continue;
-                }
-            }
-        } else {
-            let fc = trimmed.chars().next().unwrap_or('\0');
-            if fc == fence_char {
-                let fl = trimmed.chars().take_while(|&c| c == fc).count();
-                if fl >= fence_len && trimmed[fl..].trim().is_empty() {
-                    in_fence = false;
-                }
-            }
+    for (line, bearing) in text.lines().zip(mask) {
+        if !bearing {
             continue;
         }
-
-        if trimmed.starts_with('>') {
-            continue;
-        }
-
         collect_prompt_preset_requests_from_line(line, &mut requests);
     }
 
+    requests
+}
+
+/// Preset names requested by a single line that the caller has ALREADY scoped.
+///
+/// Callers holding a [`directive_bearing_line_mask`] must use this rather than
+/// re-entering [`extract_prompt_preset_requests_from_text`] with one line: a
+/// single-line call has no surrounding lines, so it cannot tell list nesting from
+/// a pasted report and suppresses legitimately indented directives
+/// (`#quotedpreset`).
+pub fn prompt_preset_requests_in_directive_line(line: &str) -> Vec<String> {
+    let mut requests = Vec::new();
+    collect_prompt_preset_requests_from_line(line, &mut requests);
     requests
 }
 
@@ -5446,6 +5569,101 @@ Done.\n\
                 "release-check".to_string(),
                 "#2".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn directive_bearing_line_mask_scopes_fences_blockquotes_and_pasted_reports() {
+        // Built by join, never by backslash line continuation: a `\`-continued
+        // Rust literal eats the leading whitespace that this test is ABOUT.
+        let text = [
+            "do #live",
+            "> quoted #hidden",
+            "```",
+            "fenced #hidden",
+            "```",
+            "Fix ",
+            "  The pending edit is a handoff plus a halt",
+            "",
+            "  git diff HEAD -- tasks/api.md (4 lines each way):",
+            "",
+            "  - queue head review PR 567 again \u{2192} - #actionable-review",
+            "",
+            "  tasks/api.md and the #actionable-review edit will admit normally.",
+            "back at column zero #live",
+        ]
+        .join("\n");
+        let text = text.as_str();
+
+        let bearing = directive_bearing_line_mask(text)
+            .into_iter()
+            .zip(text.lines())
+            .filter_map(|(bearing, line)| bearing.then_some(line))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            bearing,
+            vec!["do #live", "Fix ", "back at column zero #live"],
+            "fenced, blockquoted, and indented pasted-report lines are not directive-bearing"
+        );
+    }
+
+    #[test]
+    fn directive_bearing_line_mask_keeps_markdown_list_nesting_live() {
+        let text = "- do the thing\n  - then preset #nested\n  continued prose for the item\n";
+
+        assert_eq!(
+            directive_bearing_line_mask(text),
+            vec![true, true, true],
+            "indentation under a list item is nesting, not a pasted report"
+        );
+    }
+
+    #[test]
+    fn extract_prompt_preset_requests_from_text_ignores_quoted_report_paste() {
+        let text = [
+            "preset #live",
+            "Fix ",
+            "  git diff HEAD -- tasks/api.md (4 lines each way):",
+            "",
+            "  - preset #quoted-in-paste",
+        ]
+        .join("\n");
+        let text = text.as_str();
+
+        assert_eq!(
+            extract_prompt_preset_requests_from_text(text),
+            vec!["#live".to_string()]
+        );
+    }
+
+    #[test]
+    fn detect_prompt_preset_requests_ignores_quoted_report_paste() {
+        let diff = [
+            "--- snapshot",
+            "+++ document",
+            "@@ -1 +1,5 @@",
+            " ctx",
+            "+preset #live",
+            "+Fix ",
+            "+  git diff HEAD -- tasks/api.md (4 lines each way):",
+            "+  - preset #quoted-in-paste",
+        ]
+        .join("\n");
+        let diff = diff.as_str();
+
+        assert_eq!(
+            detect_prompt_preset_requests(diff),
+            vec!["#live".to_string()]
+        );
+    }
+
+    #[test]
+    fn prompt_preset_requests_in_directive_line_reads_an_indented_nested_directive() {
+        assert_eq!(
+            prompt_preset_requests_in_directive_line("  - preset #nested"),
+            vec!["#nested".to_string()],
+            "an already-scoped line must not be re-classified without its context"
         );
     }
 

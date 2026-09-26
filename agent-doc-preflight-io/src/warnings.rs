@@ -269,6 +269,50 @@ pub fn plugin_version_is_older(running: &str, expected: &str) -> bool {
     false
 }
 
+/// Which half of a generation mismatch is behind.
+///
+/// `stale` is symmetric — exact generation identity is what native effects
+/// require — but the *remedy* is not. Printing "install/update the editor
+/// plugin" when the live plugin is the NEWER half sends the operator to
+/// reinstall a build that is already running, and leaves the actually-stale
+/// half (this binary) untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaleGenerationSide {
+    /// The live plugin is older than the build this binary ships.
+    Plugin,
+    /// The live plugin is newer: this agent-doc binary is the stale half.
+    Binary,
+}
+
+/// Resolve which half is behind, or `None` when neither version parses as a
+/// dotted numeric generation and no direction can be claimed.
+pub fn stale_generation_side(running: &str, expected: &str) -> Option<StaleGenerationSide> {
+    if plugin_version_is_older(running, expected) {
+        Some(StaleGenerationSide::Plugin)
+    } else if plugin_version_is_older(expected, running) {
+        Some(StaleGenerationSide::Binary)
+    } else {
+        None
+    }
+}
+
+/// The single `stale_plugin` message body, shared by the preflight warning and
+/// the replay-boundary console line so an operator cannot be handed two
+/// different remedies for one mismatch.
+pub fn stale_plugin_message(kind: &str, running: &str, expected: &str) -> String {
+    match stale_generation_side(running, expected) {
+        Some(StaleGenerationSide::Plugin) => format!(
+            "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The live editor may run pre-fix IPC/plugin code (a known source of live_prompt_drift / content_ours merge regressions). Install/update the {kind} plugin (JetBrains: update to {expected} and restart/reload the IDE; VS Code: reinstall the extension and reload the window). `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot replace Kotlin/TypeScript plugin code or change the reported plugin version. A later live registration at {expected} or newer supersedes this warning."
+        ),
+        Some(StaleGenerationSide::Binary) => format!(
+            "stale agent-doc binary: a live {kind} plugin reports version {running}, newer than the {expected} build this agent-doc binary ships with. The plugin is NOT the stale half — do not reinstall or restart it, that would reinstall a build that is already live. Rebuild and reinstall the CLI (`make install`) so the controller ships generation {running}. `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot change which plugin build this binary expects. A rebuilt binary shipping {running} supersedes this warning."
+        ),
+        None => format!(
+            "editor plugin generation mismatch: a live {kind} plugin reports version {running} while this agent-doc binary ships {expected}, and neither is a dotted numeric generation, so which half is behind cannot be determined. Reconcile the pair by hand before relying on editor delivery ACKs; `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib and changes neither side."
+        ),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LivePluginGenerationStatus {
     pub editor_id: Option<String>,
@@ -351,8 +395,8 @@ pub fn report_live_plugin_generation_refresh(file: &Path) {
     for status in live_plugin_generation_statuses(file) {
         if status.stale {
             eprintln!(
-                "[editor] live {} plugin {} does not match expected generation {}; install/update the editor plugin and restart/reload the IDE host. `agent-doc admin reload-lib` refreshes only libagent_doc and cannot change plugin code or its reported version.",
-                status.kind, status.running, status.expected,
+                "[editor] {}",
+                stale_plugin_message(&status.kind, &status.running, &status.expected),
             );
         } else {
             eprintln!(
@@ -379,8 +423,19 @@ pub fn report_live_plugin_generation_refresh(file: &Path) {
 /// different from the plugin build this binary ships with, and warn so the
 /// operator reloads one exact generation pair.
 pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
+    // Delegate to the pure core rather than re-deriving the message here: the
+    // two bodies had drifted, so every message assertion in this module tested
+    // text production never emitted.
+    stale_plugin_warnings_from_statuses(live_plugin_generation_statuses(file))
+}
+
+/// Shared tail of both `stale_plugin` entry points: one deduplicated warning per
+/// stale (kind, running-version) pair.
+fn stale_plugin_warnings_from_statuses(
+    statuses: impl IntoIterator<Item = LivePluginGenerationStatus>,
+) -> Vec<PreflightWarning> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
-    live_plugin_generation_statuses(file)
+    statuses
         .into_iter()
         .filter_map(|status| {
             if !status.stale || !seen.insert((status.kind.clone(), status.running.clone())) {
@@ -388,10 +443,7 @@ pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
             }
             Some(PreflightWarning {
                 code: "stale_plugin".to_string(),
-                message: format!(
-                    "live {} editor plugin {} does not match the {} build shipped with this agent-doc binary; install/update the editor plugin and restart/reload the IDE host before relying on editor delivery ACKs.",
-                    status.kind, status.running, status.expected
-                ),
+                message: stale_plugin_message(&status.kind, &status.running, &status.expected),
                 document_agent: None,
                 active_harness: None,
             })
@@ -406,30 +458,10 @@ pub fn stale_plugin_warnings_from_registrations(
     registrations: &[agent_doc_reliable_sync_io::liveness::EditorRegistration],
     expected_for_kind: impl Fn(&str) -> Option<&'static str>,
 ) -> Vec<PreflightWarning> {
-    let mut seen: HashSet<(String, String)> = HashSet::new();
-    let mut warnings = Vec::new();
-    for status in
-        live_plugin_generation_statuses_from_registrations(registrations, &expected_for_kind)
-    {
-        if !status.stale {
-            continue;
-        }
-        if !seen.insert((status.kind.clone(), status.running.clone())) {
-            continue;
-        }
-        warnings.push(PreflightWarning {
-            code: "stale_plugin".to_string(),
-            message: format!(
-                "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The live editor may run pre-fix IPC/plugin code (a known source of live_prompt_drift / content_ours merge regressions). Install/update the {kind} plugin (JetBrains: update to {expected} and restart/reload the IDE; VS Code: reinstall the extension and reload the window). `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot replace Kotlin/TypeScript plugin code or change the reported plugin version. A later live registration at {expected} or newer supersedes this warning.",
-                kind = status.kind,
-                running = status.running,
-                expected = status.expected,
-            ),
-            document_agent: None,
-            active_harness: None,
-        });
-    }
-    warnings
+    stale_plugin_warnings_from_statuses(live_plugin_generation_statuses_from_registrations(
+        registrations,
+        &expected_for_kind,
+    ))
 }
 
 /// `#pluginbyteidentity`: what a live editor process actually has *mapped* for
@@ -498,7 +530,23 @@ pub fn classify_mapped_plugin_jar(
             path: mapped_link.to_string(),
             inode: mapped,
         },
-        // A jar we cannot stat on either side proves nothing.
+        // `/proc/<pid>/map_files/<range>` cannot be stat'd without
+        // CAP_SYS_ADMIN — even by the owner of the process — so `mapped_inode`
+        // is `None` on every ordinary run and the arms above are unreachable
+        // outside a privileged probe. The kernel only appends `" (deleted)"`
+        // when the mapping's backing inode has been unlinked, and that case
+        // returned above; reaching here with the jar still present on disk is
+        // therefore positive proof that this mapping is the live generation.
+        // Classifying it `Unknown` instead let a lingering `(deleted)` mapping
+        // from an already-replaced generation win the fold in
+        // `prefer_mapped_plugin_jar`, which is how a healthy IDE was told to
+        // reinstall a plugin it was already running.
+        (None, Some(disk)) => MappedPluginJar::Current {
+            path: mapped_link.to_string(),
+            inode: disk,
+        },
+        // A jar we can stat on neither side, or whose path has since vanished,
+        // proves nothing.
         _ => MappedPluginJar::Unknown,
     }
 }
@@ -708,7 +756,7 @@ mod tests {
     #[test]
     fn unstattable_mapping_is_unknown_not_superseded() {
         let jar = "/opt/idea/lib/agent-doc-jetbrains-0.2.388.jar";
-        for (mapped, disk) in [(None, Some(1_u64)), (Some(1_u64), None), (None, None)] {
+        for (mapped, disk) in [(Some(1_u64), None), (None, None)] {
             let classified = classify_mapped_plugin_jar(jar, mapped, disk);
             assert_eq!(
                 classified,
@@ -716,6 +764,74 @@ mod tests {
                 "missing inode evidence must fail open: mapped={mapped:?} disk={disk:?}"
             );
             assert!(!classified.is_superseded());
+        }
+    }
+
+    /// `#pluginmapfileseperm`: the shape every real Linux probe produces.
+    /// `/proc/<pid>/map_files/<range>` is EPERM to `stat()` without
+    /// CAP_SYS_ADMIN, so the mapped inode is never readable and the only
+    /// inode we ever hold is the disk one. If that is classified `Unknown`,
+    /// `MappedPluginJar::Current` is unreachable in production and the
+    /// `(deleted)` residue of superseded generations decides the verdict.
+    #[test]
+    fn non_deleted_mapping_is_current_when_only_the_disk_inode_is_readable() {
+        let jar = "/home/u/.local/share/JetBrains/x/lib/agent-doc-jetbrains-0.2.426.jar";
+        let classified = classify_mapped_plugin_jar(jar, None, Some(79_464_992));
+        assert_eq!(
+            classified,
+            MappedPluginJar::Current {
+                path: jar.to_string(),
+                inode: 79_464_992
+            },
+            "an absent (deleted) suffix over a jar still on disk is itself proof \
+             the mapping is live; map_files is unstattable so no mapped inode exists"
+        );
+        assert!(!classified.is_superseded());
+    }
+
+    /// Regression for the live shape measured on IDEA pid 3129637
+    /// (2026-09-25): six `(deleted)` mappings left behind by successive
+    /// dynamic reloads plus one live mapping of the installed jar. The fold
+    /// must land on the live generation and emit no warning, whatever order
+    /// `read_dir` hands the entries over in.
+    #[test]
+    fn lingering_deleted_reload_generations_do_not_outvote_the_live_jar() {
+        let dir = "/home/u/.local/share/JetBrains/x/lib";
+        let live = format!("{dir}/agent-doc-jetbrains-0.2.426.jar");
+        let residue: Vec<String> = ["0.2.419", "0.2.420", "0.2.421", "0.2.423", "0.2.424"]
+            .iter()
+            .map(|version| format!("{dir}/agent-doc-jetbrains-{version}.jar (deleted)"))
+            .collect();
+
+        for live_first in [true, false] {
+            let mut links: Vec<&str> = residue.iter().map(String::as_str).collect();
+            if live_first {
+                links.insert(0, live.as_str());
+            } else {
+                links.push(live.as_str());
+            }
+
+            let mut best = MappedPluginJar::Unknown;
+            for link in links {
+                // Every probe sees `mapped_inode: None`; only the live jar
+                // still resolves to a disk inode.
+                let disk = (!link.ends_with(" (deleted)")).then_some(79_464_992_u64);
+                best = prefer_mapped_plugin_jar(best, classify_mapped_plugin_jar(link, None, disk));
+            }
+
+            assert!(
+                !best.is_superseded(),
+                "live_first={live_first}: the installed generation is mapped and must win: {best:?}"
+            );
+            assert!(
+                plugin_byte_identity_warnings_from(&[(
+                    "jetbrains".to_string(),
+                    3_129_637_u32,
+                    best.clone()
+                )])
+                .is_empty(),
+                "live_first={live_first}: a healthy IDE must not be told to reinstall"
+            );
         }
     }
 
@@ -970,6 +1086,66 @@ mod tests {
         assert_eq!(statuses.len(), 2);
         assert!(statuses.iter().any(|status| status.stale));
         assert!(statuses.iter().any(|status| !status.stale));
+    }
+
+    /// `#stalepluginremedydirection`: measured live 2026-09-25 — plugin 0.2.426
+    /// against a binary shipping 0.2.422. The mismatch is real, but the plugin
+    /// is the NEWER half, so "install/update the editor plugin" is the one
+    /// remedy that cannot work and hides the half that is actually behind.
+    #[test]
+    fn a_newer_live_plugin_blames_the_binary_not_the_plugin() {
+        let newer = vec![registration_with_editor("jetbrains", "0.2.426")];
+        let warnings = stale_plugin_warnings_from_registrations(&newer, |_| Some("0.2.422"));
+        assert_eq!(warnings.len(), 1);
+        let message = &warnings[0].message;
+        assert!(
+            message.contains("newer than the 0.2.422 build"),
+            "the direction must be stated as measured: {message}"
+        );
+        assert!(
+            message.contains("Rebuild and reinstall the CLI"),
+            "the remedy must target the stale half: {message}"
+        );
+        assert!(
+            !message.contains("Install/update the jetbrains plugin"),
+            "the newer half must never be sent for reinstallation: {message}"
+        );
+        assert_eq!(
+            stale_generation_side("0.2.426", "0.2.422"),
+            Some(StaleGenerationSide::Binary)
+        );
+        assert_eq!(
+            stale_generation_side("0.2.422", "0.2.426"),
+            Some(StaleGenerationSide::Plugin)
+        );
+        assert_eq!(
+            stale_generation_side("nightly", "0.2.426"),
+            None,
+            "an unparseable generation must not manufacture a direction"
+        );
+    }
+
+    /// The doc comment called `stale_plugin_warnings_from_registrations` the
+    /// "pure core" of `stale_plugin_warnings` while the two built different
+    /// messages, so every message assertion above tested text production never
+    /// emitted. Pin them to one body.
+    #[test]
+    fn both_stale_plugin_entry_points_emit_one_shared_message() {
+        let registrations = vec![registration_with_editor("jetbrains", "0.2.205")];
+        let core = stale_plugin_warnings_from_registrations(&registrations, |_| Some("0.2.206"));
+        let statuses =
+            live_plugin_generation_statuses_from_registrations(&registrations, |_| Some("0.2.206"));
+        let shared = stale_plugin_warnings_from_statuses(statuses);
+        assert_eq!(core.len(), 1);
+        assert_eq!(shared.len(), 1);
+        assert_eq!(
+            core[0].message, shared[0].message,
+            "the production path and the tested core must not drift apart again"
+        );
+        assert_eq!(
+            core[0].message,
+            stale_plugin_message("jetbrains", "0.2.205", "0.2.206")
+        );
     }
 
     #[test]

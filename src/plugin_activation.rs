@@ -14,13 +14,19 @@
 //!
 //! This probe asks a different question that needs no registration at all:
 //!
-//! > **Was the installed plugin artifact written AFTER the IDE process started?**
+//! > **Which plugin generation does each live IDE process actually have mapped?**
 //!
-//! A JVM loads plugin jars at startup. If the newest installed
-//! `agent-doc-jetbrains-<version>.jar` has an mtime later than an IDE process's
-//! start time, that process cannot be running it — no matter what it registered,
-//! and no matter whether it registered at all. If no IDE process is running, the
-//! premise is not "stale", it is **dead**: there is nothing to activate.
+//! The first answer is direct: a process that maps
+//! `agent-doc-jetbrains-<version>.jar` with the inode still linked is executing
+//! that generation. Only when that mapping cannot be read does the probe fall
+//! back on timestamps — if the newest installed jar has an mtime later than an
+//! IDE process's start time, that process probably has not loaded it. That
+//! fallback is a heuristic, not a proof, because agent-doc ships a dynamic
+//! plugin upgrade (`JetBrainsPluginUpgradeBootstrap`) whose entire purpose is to
+//! load a new build into a *running* IDE; taking it as proof reported a
+//! restart-required premise against an IDE that had already hot-loaded the
+//! installed build. If no IDE process is running, the premise is not "stale", it
+//! is **dead**: there is nothing to activate.
 //!
 //! # Platform
 //!
@@ -51,6 +57,10 @@ pub struct IdeProcess {
     pub started_at: SystemTime,
     /// A short label for the operator (the IDE's main class or argv[0]).
     pub label: String,
+    /// The plugin generation this process currently has *mapped*, when that can
+    /// be read — direct byte evidence that outranks the start-time heuristic.
+    /// `None` means the mapping could not be read, not that none exists.
+    pub loaded_plugin_version: Option<String>,
 }
 
 /// One IDE process that started before the installed artifact was written.
@@ -137,6 +147,15 @@ pub fn classify_activation(
     }
     let stale = processes
         .iter()
+        .filter(|process| {
+            // Direct byte evidence outranks the start-time heuristic. agent-doc
+            // ships a dynamic plugin upgrade (`JetBrainsPluginUpgradeBootstrap`)
+            // precisely so a *running* IDE picks up a new build, so "the jar was
+            // written after the process started" does not imply the process
+            // cannot be running it. When the process has the installed
+            // generation mapped, it demonstrably is.
+            process.loaded_plugin_version.as_deref() != Some(artifact.version.as_str())
+        })
         .filter_map(|process| {
             artifact
                 .modified
@@ -207,16 +226,58 @@ pub fn live_ide_processes() -> Vec<IdeProcess> {
             let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
             let cmdline = String::from_utf8_lossy(&cmdline).replace('\0', " ");
             let label = jetbrains_ide_label(&cmdline)?;
+            // An argv rewritten to a bare product name is recognizable but not
+            // self-proving; corroborate it against what the process has mapped
+            // before counting it as a live IDE host.
+            if jetbrains_ide_label_is_bare_product_name(&cmdline)
+                && !process_maps_jetbrains_runtime(pid)
+            {
+                return None;
+            }
             let started_at = entry.metadata().ok()?.modified().ok()?;
             Some(IdeProcess {
                 pid,
                 started_at,
                 label,
+                loaded_plugin_version: mapped_plugin_version(pid),
             })
         })
         .collect::<Vec<_>>();
     processes.sort_by_key(|process| process.pid);
     processes
+}
+
+/// The plugin generation `pid` currently has mapped, when the mapping proves a
+/// live (non-unlinked) jar. Reuses the byte-identity probe that
+/// `plugin_bytes_superseded` is built on, so both answers come from one reading
+/// of the same evidence.
+#[cfg(target_os = "linux")]
+fn mapped_plugin_version(pid: u32) -> Option<String> {
+    let agent_doc_preflight_io::warnings::MappedPluginJar::Current { path, .. } =
+        agent_doc_preflight_io::warnings::probe_mapped_plugin_jar(pid, "agent-doc-jetbrains-")
+    else {
+        return None;
+    };
+    Path::new(&path)
+        .file_name()
+        .and_then(|name| name.to_str())?
+        .strip_prefix("agent-doc-jetbrains-")?
+        .strip_suffix(".jar")
+        .map(str::to_string)
+}
+
+/// Corroborating evidence that `pid` really is a JetBrains IDE host: its address
+/// space carries a JetBrains runtime or plugin path. `/proc/<pid>/maps` is
+/// readable for our own processes (unlike `/proc/<pid>/map_files/*`, which is
+/// EPERM without CAP_SYS_ADMIN), and an unreadable `maps` fails closed.
+#[cfg(target_os = "linux")]
+fn process_maps_jetbrains_runtime(pid: u32) -> bool {
+    const RUNTIME_MARKERS: &[&str] = &["/JetBrains", "/jetbrains", "/jbr/", "/idea"];
+    std::fs::read_to_string(format!("/proc/{pid}/maps")).is_ok_and(|maps| {
+        RUNTIME_MARKERS
+            .iter()
+            .any(|marker| maps.contains(*marker))
+    })
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -256,8 +317,28 @@ pub fn jetbrains_ide_label(cmdline: &str) -> Option<String> {
     let first = cmdline.split_whitespace().next()?;
     PRODUCT_BINARIES
         .iter()
-        .find(|binary| first.ends_with(**binary))
+        .find(|binary| first.ends_with(**binary) || first == binary.trim_start_matches('/'))
         .map(|binary| binary.trim_start_matches('/').to_string())
+}
+
+/// Whether [`jetbrains_ide_label`] matched only the bare product name.
+///
+/// IDEA's native launcher rewrites its own argv, so a running IDE's
+/// `/proc/<pid>/cmdline` is the five bytes `idea\0` — no main class, no launcher
+/// path. Measured 2026-09-26 on pid 3129637: a live IDE with 472 threads and the
+/// plugin jar mapped reported `cmdline == "idea"`, so every path-shaped match
+/// failed and the probe concluded "no JetBrains IDE process is running" — which
+/// in turn declared three `[operator-verify]` review premises dead while the IDE
+/// they name was running the whole time.
+///
+/// A bare token is specific enough to recognize and too generic to trust alone
+/// (`aqua`, `rider` are ordinary words), so callers corroborate it against
+/// process evidence before accepting it.
+pub fn jetbrains_ide_label_is_bare_product_name(cmdline: &str) -> bool {
+    cmdline
+        .split_whitespace()
+        .next()
+        .is_some_and(|first| !first.contains('/') && jetbrains_ide_label(cmdline).is_some())
 }
 
 /// The full probe: resolve the installed artifact and the live IDEs, then
@@ -295,6 +376,7 @@ mod tests {
             pid,
             started_at,
             label: "com.intellij.idea.Main".to_string(),
+            loaded_plugin_version: None,
         }
     }
 
@@ -424,5 +506,78 @@ mod tests {
         );
         assert_eq!(jetbrains_ide_label("/usr/bin/cargo build"), None);
         assert_eq!(jetbrains_ide_label(""), None);
+    }
+
+    /// `#hotloadbeatsmtime`: measured 2026-09-26 — IDEA pid 3129637 started
+    /// 69344s before the 0.2.427 install, and `/proc/3129637/map_files` showed
+    /// that same 0.2.427 jar mapped with its inode still linked. agent-doc's own
+    /// dynamic upgrade had hot-loaded it. The timestamp heuristic nevertheless
+    /// reported "cannot have loaded it — restart the IDE to activate", which is
+    /// the premise `#activateinstalledjetbrai` sat gated on.
+    #[test]
+    fn a_hot_loaded_generation_outranks_the_start_time_heuristic() {
+        let install = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000);
+        let started = SystemTime::UNIX_EPOCH + Duration::from_secs(1_400);
+
+        let mut hot_loaded = process(3_129_637, started);
+        hot_loaded.loaded_plugin_version = Some("0.35.400".to_string());
+        let probe = classify_activation(Some(artifact(install)), &[hot_loaded]);
+        assert!(
+            matches!(probe, ActivationProbe::Active { .. }),
+            "a process mapping the installed generation has loaded it: {probe:?}"
+        );
+        assert_eq!(
+            probe.doctor_issue(),
+            None,
+            "a healthy hot-load must not ask for a restart"
+        );
+
+        // An older generation still mapped is the case the heuristic is for.
+        let mut previous = process(3_129_637, started);
+        previous.loaded_plugin_version = Some("0.35.399".to_string());
+        assert!(
+            matches!(
+                classify_activation(Some(artifact(install)), &[previous]),
+                ActivationProbe::Stale { .. }
+            ),
+            "a process still on the previous generation stays stale"
+        );
+
+        // Unreadable mapping evidence falls back to the timestamp heuristic
+        // rather than silently reporting healthy.
+        assert!(
+            matches!(
+                classify_activation(Some(artifact(install)), &[process(3_129_637, started)]),
+                ActivationProbe::Stale { .. }
+            ),
+            "no mapping evidence must keep the conservative answer"
+        );
+    }
+
+    /// `#ideargvrewrite`: measured 2026-09-26 — live IDEA pid 3129637 (472
+    /// threads, plugin jar mapped) had `/proc/<pid>/cmdline == "idea"`. The
+    /// launcher rewrites argv, so neither the main class nor a launcher path
+    /// survives, and the probe reported "no JetBrains IDE process is running"
+    /// while declaring three review premises dead.
+    #[test]
+    fn an_argv_rewritten_ide_is_still_recognized_but_needs_corroboration() {
+        assert_eq!(
+            jetbrains_ide_label("idea"),
+            Some("idea".to_string()),
+            "a launcher-rewritten argv is the normal shape of a running IDEA"
+        );
+        assert!(jetbrains_ide_label_is_bare_product_name("idea"));
+        assert!(jetbrains_ide_label_is_bare_product_name("rustrover"));
+
+        // Path-shaped and main-class matches prove themselves and must not be
+        // sent through corroboration.
+        assert!(!jetbrains_ide_label_is_bare_product_name("/opt/idea/bin/idea"));
+        assert!(!jetbrains_ide_label_is_bare_product_name(
+            "/usr/lib/jvm/java-21/bin/java -cp x com.intellij.idea.Main"
+        ));
+
+        // A non-IDE bare token stays unmatched, corroboration or not.
+        assert_eq!(jetbrains_ide_label("cargo"), None);
+        assert!(!jetbrains_ide_label_is_bare_product_name("cargo"));
     }
 }

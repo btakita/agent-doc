@@ -625,6 +625,29 @@ Verification passed:
 - private-name hygiene scans for both public repos
 
 At closeout, spec CI `36206618178` was in progress and Go CI `36206625022` was queued.
+
+### Re: Apache-2.0 simulation admission — gpt-5 · 2026-09-25T21:01-04:00
+
+Completed `#lzsimlicense` using the owner decisions already recorded in this document: “Apache License 2.0” and “use Apache2 across all Lazily packages.”
+
+`lazily-spec` now has the full Apache-2.0 `LICENSE`, a project `NOTICE`, and matching `pyproject.toml` metadata. The repository documents Apache-2.0 reuse terms for its independently authored specifications, schemas, and fixtures.
+
+The former evidence gaps are enforced by generated artifacts:
+
+- `third-party/uv-lock-licenses.json` inventories every registry package resolved by `uv.lock`, including exact version, reviewed SPDX expression, direct/transitive relationship, source, notice disposition, and the lock-file digest. Its generator fails closed when the locked package set changes without review.
+- `provenance/fixtures.json` records every current canonical fixture by path, SHA-256, first-party origin, and Apache-2.0 license, plus every byte-identical Go vendored copy with its canonical source. The current ledger covers 160 canonical fixtures and nine Go copies.
+- future generated simulation fixtures must declare schema version, origin, Apache-2.0 license, seed, and generator path/version; imported material additionally requires upstream identity, license, notices, and reviewer approval.
+
+Both generators run under `make check`. The private simulation plan now records the authorized decision and changes publication from blocked to admitted under the enforced provenance policy.
+
+Pushed commits:
+
+- `lazily-spec` `1fd1709` — `chore: license spec and fixtures under Apache-2.0`
+- `agent-loop` `c0ab39475` — `simulation: record Apache-2.0 admission evidence`
+
+Verification passed: `uv lock --check`, generator reproducibility checks, public-tree private-name scan, and full `lazily-spec make check` (316 pytest tests, Lean build, schema, coverage, fixture-copy, identity, assertion, license/provenance, and corpus guards). GitHub CI run `36206926194` completed successfully.
+
+The spec/fixture admission blocker is closed. I added `#lzapachefamilylicense` immediately before durable publication work to converge the remaining Lazily repositories whose existing license files or package metadata still contradict the owner’s family-wide Apache-2.0 decision.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -634,7 +657,7 @@ At closeout, spec CI `36206618178` was in progress and Go CI `36206625022` was q
 - ~~do [#lzprojectionbarrier]~~
 - ~~do [#lzprojectionracecorpus]~~
 - ~~do [#lzconcurrencyscope]~~
-- do [#lzsimlicense]
+- ~~do [#lzsimlicense]~~
 - ~~do ~~[#lzdurablepg]~~~~
 - do [#lzdurablejetstream]
 - do [#lzdurablereconcile]
@@ -644,7 +667,7 @@ At closeout, spec CI `36206618178` was in progress and Go CI `36206625022` was q
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
+- [ ] [#lzapachefamilylicense] [lazily family] Converge every Lazily repository LICENSE/NOTICE and publish metadata on the owner-authorized Apache-2.0 family policy before the next release or durable publication; preserve third-party notices and fixture provenance, run each repository full gate, and commit/push each repository separately.
 - [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, sta ble publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.
 - [ ] [#lzdurablereconcile] [lazily-spec, lazily-rs] Add the complete-history projection and reconciliation layer from tasks/software/plan-lazily-postgres-nats-valkey.md: transaction-consistent snapshots with monotonic projection versions, ordered create/amend/retract event replay, checkpointed rebuild, dry-run drift reports, lag and health signals, and scheduled idempotent reconciliation through the transactional outbox. Prove replay equivalence, partial and final retractions, restart/resume, and that stale or cache-only reads never authorize a transition.
 - [ ] [#lzdurablefamily] [lazily family] Roll the durable capability model across the family after the Rust reference is proven: publish explicit Core, Client, Durable Host, Distributed Host, and Accelerated Host tiers; give non-Rust bindings typed ingress and projection clients first; require mature database and broker clients plus the shared crash/replay corpus before any binding claims native-host support; and add cross-language envelope-version, ordering, deduplication, receipt, and projection-fingerprint conformance without claiming false parity.

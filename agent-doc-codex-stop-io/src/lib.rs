@@ -498,7 +498,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             // bounded opportunity to finish through editor/CRDT authority. The
             // route-owned supervisor continues the same operation after this hook
             // returns if convergence takes longer.
-            let editor_convergence_blocked = is_editor_convergence_required_interruption(&reason);
+            let binary_owned_closeout_pending = is_binary_owned_closeout_interruption(&reason);
             // The hook executes the freshly-installed binary even when the
             // route-owned supervisor still has an older inode. Resume the
             // existing keyed capture here as the version-independent liveness
@@ -507,14 +507,14 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             if try_resume_captured_finalize_in_hook(&file) {
                 return apply_stop(input);
             }
-            if editor_convergence_blocked {
+            if binary_owned_closeout_pending {
                 agent_doc_ops_log_io::log_op(
                     &file,
-                    "codex_stop_editor_convergence_required_blocked",
+                    "codex_stop_binary_owned_closeout_pending",
                 );
                 let display = file.display();
                 let message = format!(
-                    "agent-doc Stop hook found an editor-convergence blocked closeout for {display}. {reason} The captured response is retained and the agent-doc binary/supervisor owns the keyed editor/CRDT retry. Do not recapture the response, rerun finalize, kill the controller, or use `--force-disk`; only re-check session status after the binary reports recovery, unless it explicitly reports `needs_operator`. Do not send the final answer yet."
+                    "agent-doc Stop hook found a binary-owned closeout still converging for {display}. {reason} The captured response is retained and the agent-doc binary/supervisor owns the keyed editor/CRDT retry and terminal commit. Do not recapture the response, rerun finalize, kill the controller, or use `--force-disk`; only re-check session status after the binary reports recovery, unless it explicitly reports `needs_operator`. Do not send the final answer yet."
                 );
                 if input.stop_hook_active {
                     return Ok(StopResponse::Stop {
@@ -736,10 +736,16 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
     false
 }
 
-fn is_editor_convergence_required_interruption(reason: &str) -> bool {
+fn is_binary_owned_closeout_interruption(reason: &str) -> bool {
     reason.contains("closeout blocked by `editor_convergence_required`")
         || (reason.contains("editor_convergence_required")
             && reason.contains("operator_text_authority_v1"))
+        || (reason.contains("binary-owned response delivery `")
+            && reason.contains(" is retained for `")
+            && reason.contains("Same-capture recovery remains pending"))
+        || (reason.contains("cycle `")
+            && reason.contains(" is still `write_applied`")
+            && reason.contains("response write landed but no terminal commit followed"))
 }
 
 fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Option<StopResponse>> {
@@ -4349,6 +4355,19 @@ Reviewed the gated items.\n\
         }
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix2"));
+    }
+
+    #[test]
+    fn retained_delivery_and_write_applied_interruptions_remain_binary_owned() {
+        assert!(is_binary_owned_closeout_interruption(
+            "[session-check] INTERRUPTED: binary-owned response delivery `intent-1` is retained for `/repo/tasks/example.md` (reason=merge_unsaved_editor_cut_with_deferred_target); the same capture will resume automatically after editor/controller delivery converges. Same-capture recovery remains pending: retained target has not reached exact canonical/disk convergence."
+        ));
+        assert!(is_binary_owned_closeout_interruption(
+            "[session-check] INTERRUPTED: cycle `cycle-1` is still `write_applied` — response write landed but no terminal commit followed."
+        ));
+        assert!(!is_binary_owned_closeout_interruption(
+            "[session-check] INTERRUPTED: cycle `cycle-1` is still `preflight_started` — cycle started but no write/commit followed."
+        ));
     }
 
     #[test]

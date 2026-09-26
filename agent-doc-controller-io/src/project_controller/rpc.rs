@@ -2965,9 +2965,13 @@ pub(super) fn run_controller_editor_intent(
             serde_json::to_string(&focus_document_pane(project_root, Path::new(document))?)
                 .context("serialize controller-owned focus receipt")
         }
-        SurfaceIntent::Sync { columns, document } => serde_json::to_string(&sync_tmux_layout(
+        SurfaceIntent::Sync {
+            columns,
+            document,
+            preserve_focus,
+        } => serde_json::to_string(&sync_tmux_layout(
             project_root,
-            automatic_editor_surface_sync_invocation(columns, document),
+            automatic_editor_surface_sync_invocation(columns, document, *preserve_focus),
         )?)
         .context("serialize controller-owned tmux layout receipt"),
     }
@@ -2976,6 +2980,7 @@ pub(super) fn run_controller_editor_intent(
 fn automatic_editor_surface_sync_invocation(
     columns: &[SurfaceColumn],
     document: &str,
+    preserve_focus: bool,
 ) -> ControllerTmuxLayoutSyncInvocation {
     ControllerTmuxLayoutSyncInvocation {
         columns: columns
@@ -2983,7 +2988,7 @@ fn automatic_editor_surface_sync_invocation(
             .map(|column| column.files.join(","))
             .collect(),
         window: None,
-        focus: Some(document.to_string()),
+        focus: (!preserve_focus).then(|| document.to_string()),
         // The visible editor surface is desired state, including during
         // startup restoration. The binary's automatic-caller policy owns safe
         // autostart, ambiguous-owner refusal, and inactive-desktop focus
@@ -18908,8 +18913,13 @@ fn handle_editor_surface_observe(
         // command socket. The eager intent effect is a no-op for both in
         // production (see the runtime constructor closure).
         match receipt.intent.clone() {
-            SurfaceIntent::Sync { columns, document } => {
-                let invocation = automatic_editor_surface_sync_invocation(&columns, &document);
+            SurfaceIntent::Sync {
+                columns,
+                document,
+                preserve_focus,
+            } => {
+                let invocation =
+                    automatic_editor_surface_sync_invocation(&columns, &document, preserve_focus);
                 let _ = publish_pane_layout_desired_invocation(
                     bootstrap,
                     runtime,
@@ -22270,8 +22280,11 @@ mod pane_layout_projection_dispatch_tests {
     #[test]
     fn automatic_editor_surface_sync_allows_binary_owned_safe_autostart() {
         let columns = vec![SurfaceColumn::new(["/project/tasks/software/lazily.md"])];
-        let invocation =
-            automatic_editor_surface_sync_invocation(&columns, "/project/tasks/software/lazily.md");
+        let invocation = automatic_editor_surface_sync_invocation(
+            &columns,
+            "/project/tasks/software/lazily.md",
+            false,
+        );
 
         assert!(!invocation.no_autostart);
         assert!(invocation.exact_visible);
@@ -22280,6 +22293,22 @@ mod pane_layout_projection_dispatch_tests {
             invocation.columns,
             vec!["/project/tasks/software/lazily.md".to_string()]
         );
+        assert_eq!(
+            invocation.focus.as_deref(),
+            Some("/project/tasks/software/lazily.md")
+        );
+    }
+
+    #[test]
+    fn passive_editor_surface_sync_preserves_the_active_tmux_pane() {
+        let columns = vec![SurfaceColumn::new([
+            "/project/tasks/left.md",
+            "/project/tasks/right.md",
+        ])];
+        let invocation =
+            automatic_editor_surface_sync_invocation(&columns, "/project/tasks/left.md", true);
+
+        assert_eq!(invocation.focus, None);
     }
 
     #[test]
@@ -24680,6 +24709,7 @@ mod tests {
             }],
             force_reconcile: true,
             focus_only: false,
+            preserve_focus: false,
         }
     }
 
@@ -24765,6 +24795,7 @@ mod tests {
             columns: columns.clone(),
             force_reconcile: false,
             focus_only: false,
+            preserve_focus: false,
         };
         for client in ["idea:1", "idea:2"] {
             let (accepted, _) = graph.observe(

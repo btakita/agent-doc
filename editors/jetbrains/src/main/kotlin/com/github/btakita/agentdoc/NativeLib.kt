@@ -412,8 +412,8 @@ interface AgentDocLib : Library {
      * Report what the editor looks like now and get the derived tmux intent back
      * (`#jbsurfaceswap`).
      *
-     * `surface_json` is an `EditorSurface`: `{ "focused", "visible", "columns", "force_reconcile"
-     * }`. The receipt is `{ "intent", "idle", "outcome", "error" }`. This replaces choosing between
+     * `surface_json` is an `EditorSurface`: `{ "focused", "visible", "columns", "force_reconcile",
+     * "preserve_focus" }`. The receipt is `{ "intent", "idle", "outcome", "error" }`. This replaces choosing between
      * [agent_doc_focus_document_pane_json] and [agent_doc_sync_tmux_layout_json] in the plugin.
      */
     fun agent_doc_editor_surface_observe_json(

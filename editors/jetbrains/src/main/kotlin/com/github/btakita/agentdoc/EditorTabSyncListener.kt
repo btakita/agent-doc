@@ -254,10 +254,17 @@ if (
 }
 
     internal object SurfaceObservationOrdering {
+        private fun ownsFocus(authority: ObservationAuthority?): Boolean =
+            authority == ObservationAuthority.DocumentSelection ||
+                authority == ObservationAuthority.EditorFocus
+
         fun shouldReplace(
             currentAuthority: ObservationAuthority?,
             incomingAuthority: ObservationAuthority,
         ): Boolean {
+            if (ownsFocus(currentAuthority) && !ownsFocus(incomingAuthority)) {
+                return false
+            }
             if (
                 currentAuthority == ObservationAuthority.DocumentSelection &&
                 incomingAuthority == ObservationAuthority.EditorFocus
@@ -408,6 +415,7 @@ internal object SelectionProjectionSettling {
         val columns: List<SurfaceColumnPayload>,
         @SerializedName("force_reconcile") val forceReconcile: Boolean,
         @SerializedName("focus_only") val focusOnly: Boolean,
+        @SerializedName("preserve_focus") val preserveFocus: Boolean,
     )
 
 private data class PendingSurfaceObservation(
@@ -416,7 +424,13 @@ private data class PendingSurfaceObservation(
     val previousFile: VirtualFile? = null,
     val forceReconcile: Boolean,
     val authority: ObservationAuthority,
-)
+) {
+    val preserveFocus: Boolean
+        get() =
+            authority == ObservationAuthority.Layout ||
+                authority == ObservationAuthority.FileOpened ||
+                authority == ObservationAuthority.IdeActivation
+}
 
 private data class PendingSurface(
     val projectRoot: String,
@@ -438,6 +452,7 @@ private data class CapturedSurface(
     val openMdFiles: List<String>,
     val editorLayout: EditorLayout?,
     val forceReconcile: Boolean,
+    val preserveFocus: Boolean,
 )
 
     internal object SurfaceReport {
@@ -547,6 +562,7 @@ private data class CapturedSurface(
             openMdFiles: List<String> = visibleMdFiles,
             editorLayout: EditorLayout?,
             forceReconcile: Boolean,
+            preserveFocus: Boolean = false,
         ): EditorSurfacePayload =
             EditorSurfacePayload(
                 focused = focusedFile,
@@ -568,6 +584,7 @@ private data class CapturedSurface(
                         .orEmpty(),
                 forceReconcile = forceReconcile,
                 focusOnly = false,
+                preserveFocus = preserveFocus,
             )
 
         /**
@@ -585,6 +602,7 @@ private data class CapturedSurface(
                 columns = emptyList(),
                 forceReconcile = true,
                 focusOnly = true,
+                preserveFocus = false,
             )
     }
 
@@ -639,9 +657,9 @@ private data class CapturedSurface(
                 }
                 if (latestSurfaceObservation.compareAndSet(current, observation)) break
             }
-            if (requiredFocusGeneration == null) {
-                // Only an admitted independent surface observation may supersede the focus effect.
-                // A rejected lower-authority event does not own enough state to cancel it.
+            if (requiredFocusGeneration == null && !observation.preserveFocus) {
+                // Only an admitted focus-authoritative observation may supersede the focus effect.
+                // Passive layout facts neither cancel nor replace explicit pane selection.
                 invalidateFocusProjection()
             }
         }
@@ -707,6 +725,7 @@ private data class CapturedSurface(
                     preferredFile = observation.preferredFile,
                     previousFile = observation.previousFile,
                     forceReconcile = observation.forceReconcile,
+                    preserveFocus = observation.preserveFocus,
                     reconcileStaleSelection =
                         observation.authority == ObservationAuthority.DocumentSelection &&
                             remainingSelectionPasses == 0,
@@ -851,6 +870,7 @@ private data class CapturedSurface(
         preferredFile: VirtualFile? = null,
         previousFile: VirtualFile? = null,
         forceReconcile: Boolean = false,
+        preserveFocus: Boolean = false,
         reconcileStaleSelection: Boolean = false,
     ): CapturedSurface? {
         val manager = FileEditorManager.getInstance(project)
@@ -970,6 +990,7 @@ private data class CapturedSurface(
             openMdFiles = openMdFiles,
             editorLayout = settledProjection.editorLayout,
             forceReconcile = forceReconcile,
+            preserveFocus = preserveFocus,
         )
     }
 
@@ -1009,6 +1030,7 @@ private data class CapturedSurface(
                         openMdFiles = captured.openMdFiles,
                         editorLayout = absoluteEditorLayout,
                         forceReconcile = captured.forceReconcile,
+                        preserveFocus = captured.preserveFocus,
                     ),
                 ),
             knownControllerRoots = knownControllerRoots,

@@ -25,6 +25,7 @@ class EditorTabSyncListenerTest {
         visibleMdFiles: List<String>,
         editorLayout: EditorLayout? = null,
         forceReconcile: Boolean = false,
+        preserveFocus: Boolean = false,
     ): String =
         gson.toJson(
             EditorTabSyncListener.SurfaceReport.buildSurface(
@@ -32,6 +33,7 @@ class EditorTabSyncListenerTest {
                 visibleMdFiles = visibleMdFiles,
                 editorLayout = editorLayout,
                 forceReconcile = forceReconcile,
+                preserveFocus = preserveFocus,
             )
         )
 
@@ -229,7 +231,11 @@ class EditorTabSyncListenerTest {
             source
                 .substringAfter("private fun requestObservation(")
                 .substringBefore("private fun scheduleRetainedSurfaceRetry(")
-        assertTrue(admission.contains("if (requiredFocusGeneration == null)"))
+        assertTrue(
+            admission.contains(
+                "if (requiredFocusGeneration == null && !observation.preserveFocus)"
+            )
+        )
         assertTrue(admission.contains("invalidateFocusProjection()"))
         assertTrue(source.contains("activeFocusProjection.getAndSet(null)?.cancel(true)"))
     }
@@ -807,6 +813,22 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `passive layout observation preserves explicit pane focus`() {
+        val passive =
+            JsonParser.parseString(
+                    surfaceJson(
+                        "/repo/tasks/left.md",
+                        listOf("/repo/tasks/left.md", "/repo/tasks/right.md"),
+                        preserveFocus = true,
+                    )
+                )
+                .asJsonObject
+
+        assertTrue(passive.get("preserve_focus").asBoolean)
+        assertFalse(passive.get("focus_only").asBoolean)
+    }
+
+    @Test
     fun `observation reports no layout_synced field for the controller to answer`() {
         val surface =
             JsonParser.parseString(surfaceJson("/repo/a.md", listOf("/repo/a.md"))).asJsonObject
@@ -854,7 +876,11 @@ assertFalse(selection.contains("collectVisibleMarkdownFiles"))
         assertTrue(focusGained.contains("requestObservation("))
         assertTrue(focusGained.contains("preferredFile = file"))
         assertTrue(focusGained.contains("forceReconcile = false"))
-        assertTrue(focusGained.contains("authority = ObservationAuthority.EditorFocus"))
+assertTrue(focusGained.contains("authority = ObservationAuthority.EditorFocus"))
+        assertTrue(source.contains("authority == ObservationAuthority.Layout"))
+        assertTrue(source.contains("authority == ObservationAuthority.FileOpened"))
+        assertTrue(source.contains("authority == ObservationAuthority.IdeActivation"))
+        assertTrue(source.contains("preserveFocus = observation.preserveFocus"))
         assertFalse(focusGained.contains("delayMs"))
 
         val focusProjection =
@@ -1146,5 +1172,30 @@ previousSelectionPath = "/repo/tasks/tsift.md",
                 incomingAuthority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
             ),
         )
+    }
+
+    @Test
+    fun `passive surface cannot supersede pending explicit focus`() {
+        for (
+            passive in
+                listOf(
+                    EditorTabSyncListener.ObservationAuthority.Layout,
+                    EditorTabSyncListener.ObservationAuthority.FileOpened,
+                    EditorTabSyncListener.ObservationAuthority.IdeActivation,
+                )
+        ) {
+            assertFalse(
+                EditorTabSyncListener.SurfaceObservationOrdering.shouldReplace(
+                    currentAuthority = EditorTabSyncListener.ObservationAuthority.EditorFocus,
+                    incomingAuthority = passive,
+                ),
+            )
+            assertFalse(
+                EditorTabSyncListener.SurfaceObservationOrdering.shouldReplace(
+                    currentAuthority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
+                    incomingAuthority = passive,
+                ),
+            )
+        }
     }
 }

@@ -2883,7 +2883,7 @@ pub unsafe extern "C" fn agent_doc_tmux_focus_state_json(
 ///
 /// `surface_json` is an `EditorSurface`: `{ "focused": "<path>", "visible":
 /// ["<path>", ...], "columns": [{ "files": ["<path>", ...] }, ...],
-/// "force_reconcile": false }`.
+/// "force_reconcile": false, "preserve_focus": false }`.
 ///
 /// Note there is no `layout_synced`: the Project Controller observes tmux
 /// locally, so a plugin never reports a fact it would have to ask the

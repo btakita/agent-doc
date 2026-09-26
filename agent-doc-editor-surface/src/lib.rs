@@ -88,6 +88,11 @@ pub struct EditorSurface {
     /// its intentionally narrow one-document payload.
     #[serde(default)]
     pub focus_only: bool,
+    /// This observation owns layout membership but not pane selection. Passive
+    /// structural edges use it so a background editor/project cannot overwrite
+    /// a newer explicit focus projection from another controller root.
+    #[serde(default)]
+    pub preserve_focus: bool,
 }
 
 /// Ordered editor fact sent to the Project Controller.
@@ -270,6 +275,7 @@ pub enum SurfaceIntent {
     Sync {
         columns: Vec<SurfaceColumn>,
         document: String,
+        preserve_focus: bool,
     },
 }
 
@@ -358,7 +364,9 @@ impl SurfaceTracking {
             return (self.clone(), SurfaceIntent::Idle);
         }
 
-        let same_focus = self.focused_document.as_deref() == Some(surface.focused.as_str());
+        let preserve_focus = surface.preserve_focus && !surface.focus_only;
+        let same_focus =
+            preserve_focus || self.focused_document.as_deref() == Some(surface.focused.as_str());
         if surface.focus_only {
             if !surface.force_reconcile && same_focus {
                 return (self.clone(), SurfaceIntent::Idle);
@@ -385,7 +393,11 @@ impl SurfaceTracking {
 
         let advanced = Self {
             reconciled_signature: Some(signature),
-            focused_document: Some(surface.focused.clone()),
+            focused_document: if preserve_focus {
+                self.focused_document.clone()
+            } else {
+                Some(surface.focused.clone())
+            },
         };
 
         // tmux has drifted from a layout the editor never changed: focusing
@@ -396,6 +408,7 @@ impl SurfaceTracking {
                 SurfaceIntent::Sync {
                     columns: surface.columns.clone(),
                     document: surface.focused.clone(),
+                    preserve_focus,
                 },
             );
         }
@@ -418,6 +431,7 @@ impl SurfaceTracking {
             SurfaceIntent::Sync {
                 columns: surface.columns.clone(),
                 document: surface.focused.clone(),
+                preserve_focus,
             },
         )
     }
@@ -443,6 +457,7 @@ mod tests {
             columns,
             force_reconcile: false,
             focus_only: false,
+            preserve_focus: false,
         }
     }
 
@@ -494,6 +509,45 @@ mod tests {
             },
             "layout reconciliation never moves the active pane, so a doc switch must focus"
         );
+    }
+
+    #[test]
+    fn passive_layout_observation_cannot_replace_explicit_focus() {
+        let initial = surface("/right.md", &[&["/left.md"], &["/right.md"]]);
+        let (tracking, _) = SurfaceTracking::default().advance(&initial, MATCHES);
+        let passive = EditorSurface {
+            focused: "/left.md".to_string(),
+            preserve_focus: true,
+            ..initial
+        };
+
+        let (advanced, intent) = tracking.advance(&passive, MATCHES);
+
+        assert_eq!(intent, SurfaceIntent::Idle);
+        assert_eq!(advanced.focused_document.as_deref(), Some("/right.md"));
+    }
+
+    #[test]
+    fn passive_structural_change_reconciles_without_claiming_focus() {
+        let initial = surface("/right.md", &[&["/left.md"], &["/right.md"]]);
+        let (tracking, _) = SurfaceTracking::default().advance(&initial, MATCHES);
+        let passive = EditorSurface {
+            focused: "/left.md".to_string(),
+            columns: vec![SurfaceColumn::new(["/left.md", "/right.md"])],
+            preserve_focus: true,
+            ..initial
+        };
+
+        let (advanced, intent) = tracking.advance(&passive, MATCHES);
+
+        assert!(matches!(
+            intent,
+            SurfaceIntent::Sync {
+                preserve_focus: true,
+                ..
+            }
+        ));
+        assert_eq!(advanced.focused_document.as_deref(), Some("/right.md"));
     }
 
     #[test]

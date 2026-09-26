@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -721,27 +721,44 @@ Verification is green:
 - Canonical LICENSE copies byte-match `lazily-spec/LICENSE`; focused private-name scans and diff checks passed.
 - CI is successful for C++, C#, Dart, GDScript, Go, JavaScript, Kotlin, Python, React, and Zig. Formal has no workflow. Rust CI run `36210506007` is still in progress; its signaling/formal jobs and mdBook workflow are already green, while the full local `make check` passed.
 - All commits were pushed separately at repository boundaries, and unrelated dirty workspace changes were left unstaged.
+
+### Re: Durable capability family rollout — gpt-5 · 2026-09-25T23:04:27-04:00
+
+> **Queue prompt:**
+>
+> do [#lzdurablefamily]
+
+
+Completed and published `#lzdurablefamily` across the Lazily family.
+
+The canonical contract now defines five evidence-based tiers—Core, Client, Durable Host, Distributed Host, and Accelerated Host—in `lazily-spec`. The shared v1 client corpus covers envelope/version validation, advisory ordering, exact-content deduplication and ID-reuse conflict detection, committed/duplicate/conflict/rejected receipts, and projection fingerprints including source position, digest, and completeness. Commit `d336ac4` adds the schemas, corpus, generated artifacts, documentation, and checks; `38f8678` publishes the final family coverage matrix.
+
+Capability claims are deliberately asymmetric:
+
+- All ten primary bindings claim Core and Client.
+- Only Rust claims Durable Host and Distributed Host, backed respectively by its PostgreSQL owner/outbox implementation and NATS JetStream transport plus the shared crash/replay corpus.
+- No binding claims Accelerated Host.
+- Go's PostgreSQL projection barrier remains a client-side projection facility, not a native-host claim.
+- React delegates its client behavior to `lazily-js` and makes no host claim.
+
+Typed ingress/projection clients and real peer-operation support were published in Rust (`46b7dd0`), Go (`425333b`, docs `83ad12f`), JavaScript (`25eb7b8`, docs `3c566d0`), Python (`c779892`, docs `01012c6`), and React (`9912b81`, CI fixture pin `d468dc7`). Native bindings received equivalent corpus-backed client surfaces without false host parity: C++ (`eaeb52e`, docs `838807b`, exact-floor fix `1396e15`), C# (`ed05b66`, docs `b6035b8`), Dart (`382793c`, docs `b520f6b`), GDScript (`8439d94`, docs `138bf2f`), Kotlin (`58516de`, docs `0d84d05`), and Zig (`e97171c`, docs `b6951d3`). Every commit is pushed to its repository's `main`.
+
+The family interop runner now executes the durable scenario through actual Go, JavaScript, and Python peers rather than reference-only replay. Agent-loop commits `d46c5d772` and `a32979156` add and enforce that scenario; the run produced 24 matching observations across the three languages.
+
+Verification is green locally across every affected repository. The canonical spec's full gate passed 332 pytest cases plus Lean and generated/coverage/provenance checks (artifact `tart-8d6ca356ec`); Rust's full feature, database, broker, crash-window, formal, and conformance matrix passed (artifact `tart-36c63bea9c`); and the mixed-language interop and complete interop gates passed (artifacts `tart-3f2a9fc1ff` and `tart-cec49311fb`). Full binding gates also passed, including race/type/format/build/browser/WASM/formal/reachability checks as applicable.
+
+Hosted CI is green for the spec, Go, JavaScript, Python, React, C++, C#, Dart, GDScript, Kotlin, and Zig heads. Rust CI run `36213340522` is still in progress at closeout; its signaling, Lean, and benchmark jobs are green, and the same pushed head passed the exhaustive local gate. Unrelated pre-existing agent-doc/navigation and concurrent CI-reach worktree changes were preserved and excluded.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzprojectionbarrier]~~
-- ~~do [#lzprojectionracecorpus]~~
-- ~~do [#lzconcurrencyscope]~~
-- ~~do [#lzsimlicense]~~
-- ~~do ~~[#lzdurablepg]~~~~
-- ~~do [#lzdurablejetstream]~~
-- ~~do [#lzapachefamilylicense]~~
-- ~~do [#lzdurablereconcile]~~
-- do [#lzdurablefamily]
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdurablefamily] [lazily family] Roll the durable capability model across the family after the Rust reference is proven: publish explicit Core, Client, Durable Host, Distributed Host, and Accelerated Host tiers; give non-Rust bindings typed ingress and projection clients first; require mature database and broker clients plus the shared crash/replay corpus before any binding claims native-host support; and add cross-language envelope-version, ordering, deduplication, receipt, and projection-fingerprint conformance without claiming false parity.
 <!-- /agent:backlog -->
 
 ## Review

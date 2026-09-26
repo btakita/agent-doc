@@ -279,6 +279,12 @@ pub fn known_ids_for_document(file: &Path) -> Result<BTreeSet<String>, String> {
         agent_doc_element_backlog_io::done_archive::archived_tracked_ids(file, &content)
             .map_err(|err| format!("reading the done archive: {err}"))?,
     );
+    // `#coinedpresetid`: same predicate `session-check` reads, so a registered
+    // preset name cannot answer "tracked" on one path and "invented" on the
+    // other. Frontmatter is not a component, so the scan above cannot see it.
+    known.extend(agent_doc_turn::coined_ids::registered_prompt_preset_ids(
+        &content,
+    ));
     Ok(known)
 }
 
@@ -439,6 +445,41 @@ mod tests {
         });
         assert_eq!(
             pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&["fr79"])), None),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// `#coinedpresetid` — both guard paths read one predicate, so a registered
+    /// preset name cannot be "tracked" for `session-check` and "invented" here.
+    #[test]
+    fn known_ids_for_document_counts_registered_prompt_presets() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(
+            &file,
+            concat!(
+                "---\n",
+                "prompt_presets:\n",
+                "  '#actionable-review': Add actionable review items into backlog + queue\n",
+                "---\n\n",
+                "<!-- agent:exchange -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+        )
+        .unwrap();
+
+        let ids = known_ids_for_document(&file).unwrap();
+        assert!(ids.contains("actionable-review"), "got {ids:?}");
+
+        let input = json!({
+            "file_path": "/repo/src/rpc.rs",
+            "new_string": "// `#actionable-review` is a registered preset"
+        });
+        assert_eq!(
+            pretooluse_decision("Edit", &input, &DocumentIds::Known(ids), None),
             PreToolUseDecision::Allow
         );
     }

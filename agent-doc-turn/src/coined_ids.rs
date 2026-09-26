@@ -16,6 +16,11 @@
 //!
 //! Pure by design: the caller supplies the response text and the document's known
 //! id universe, so every rule is testable without a document or a repo.
+//!
+//! `registered_prompt_preset_ids` is the one exception that reads a document: a
+//! `prompt_presets:` key is a resolvable id that lives in frontmatter rather than
+//! in a component, so both guard paths fold it into the known universe
+//! (`#coinedpresetid`).
 
 use std::collections::BTreeSet;
 
@@ -76,6 +81,30 @@ pub fn extract_tags(text: &str) -> BTreeSet<String> {
     out
 }
 
+/// Work ids a document's registered `prompt_presets:` frontmatter accounts for
+/// (`#coinedpresetid`).
+///
+/// A preset name resolves to its frontmatter body, so naming one in prose is a
+/// reference, not an invented id — the dangling-id damage this guard exists to
+/// catch cannot happen. The components the guard reads do not include
+/// frontmatter, so without this a response explaining where `#actionable-review`
+/// was matched is told to file a backlog item for it.
+///
+/// Names are normalized through [`extract_tags`] rather than by hand, so
+/// "what counts as an id" has exactly one definition: a hashed key (`'#a-b'`)
+/// and an unhashed one (`release-check`) both yield the tag a response would
+/// write, and a key that is not tag-shaped yields nothing.
+pub fn registered_prompt_preset_ids(content: &str) -> BTreeSet<String> {
+    let Ok((frontmatter, _)) = agent_doc_frontmatter::frontmatter::parse(content) else {
+        return BTreeSet::new();
+    };
+    frontmatter
+        .prompt_presets
+        .keys()
+        .flat_map(|key| extract_tags(&format!(" #{}", key.trim_start_matches('#'))))
+        .collect()
+}
+
 /// Tags the response coined that no known id accounts for.
 ///
 /// `known_ids` is the document's id universe (backlog, queue, done, review) plus
@@ -94,6 +123,43 @@ mod tests {
 
     fn known(ids: &[&str]) -> BTreeSet<String> {
         ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    #[test]
+    fn registered_prompt_preset_names_are_tracked_ids() {
+        let content = "---\nprompt_presets:\n  '#actionable-review': Add actionable review items\n  release-check: Run cargo test.\n---\n\n## Body\n";
+
+        let ids = registered_prompt_preset_ids(content);
+
+        assert!(ids.contains("actionable-review"), "hashed key, got {ids:?}");
+        assert!(ids.contains("release-check"), "unhashed key, got {ids:?}");
+    }
+
+    #[test]
+    fn a_registered_preset_named_in_prose_is_not_coined() {
+        let content = "---\nprompt_presets:\n  '#actionable-review': Add actionable review items\n---\n\n## Body\n";
+        let known = registered_prompt_preset_ids(content);
+
+        assert!(
+            coined_ids("matched #actionable-review inside the quoted bullet", &known).is_empty()
+        );
+    }
+
+    #[test]
+    fn an_unregistered_id_still_coins_beside_a_registered_preset() {
+        let content = "---\nprompt_presets:\n  '#actionable-review': Add actionable review items\n---\n\n## Body\n";
+        let known = registered_prompt_preset_ids(content);
+
+        assert_eq!(
+            coined_ids("#actionable-review and #inventedhere", &known),
+            vec!["inventedhere".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_document_without_prompt_presets_contributes_no_ids() {
+        assert!(registered_prompt_preset_ids("---\nagent: claude\n---\n\nBody\n").is_empty());
+        assert!(registered_prompt_preset_ids("no frontmatter at all\n").is_empty());
     }
 
     /// The live failure: a turn coins a tag for work it did, and nothing records it.

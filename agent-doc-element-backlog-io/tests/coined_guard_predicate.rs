@@ -60,15 +60,34 @@ fn read_site(relative: &str) -> String {
         .unwrap_or_else(|err| panic!("guard site {} must be readable: {err}", path.display()))
 }
 
+/// Every source of "tracked" that both guards must read through ONE predicate.
+///
+/// Archived ids were the original drift. Registered `prompt_presets:` names
+/// (`#coinedpresetid`) are the second: they live in frontmatter, not in a
+/// component, so each site would otherwise need its own reading of the same
+/// question.
+const SHARED_LEDGER_PREDICATES: &[(&str, &str)] = &[
+    (
+        "archived_tracked_ids",
+        "done_archive::archived_tracked_ids",
+    ),
+    (
+        "registered_prompt_preset_ids",
+        "coined_ids::registered_prompt_preset_ids",
+    ),
+];
+
 #[test]
-fn every_coined_id_guard_calls_the_shared_archive_predicate() {
+fn every_coined_id_guard_calls_the_shared_ledger_predicates() {
     for (name, relative) in GUARD_SITES {
-        let source = read_site(relative);
-        assert!(
-            source.contains("archived_tracked_ids"),
-            "the {name} coined-id guard must resolve archived ids through \
-             done_archive::archived_tracked_ids, not its own reading"
-        );
+        let source = production_source(relative);
+        for (marker, path) in SHARED_LEDGER_PREDICATES {
+            assert!(
+                source.contains(marker),
+                "the {name} coined-id guard must resolve this ledger source through \
+                 {path}, not its own reading"
+            );
+        }
     }
 }
 

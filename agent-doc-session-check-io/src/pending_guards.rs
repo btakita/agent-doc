@@ -142,6 +142,12 @@ fn known_ids_for_coined_guard(file: &Path, content: &str) -> Result<BTreeSet<Str
     // guard, so the same archive cannot answer "tracked" on one path and
     // "invented" on the other.
     known.extend(agent_doc_element_backlog_io::done_archive::archived_tracked_ids(file, content)?);
+    // `#coinedpresetid`: a registered preset name resolves to its frontmatter
+    // body, so it is a reference and not an invented id. Frontmatter is not a
+    // component, so the scan above cannot see it.
+    known.extend(agent_doc_turn::coined_ids::registered_prompt_preset_ids(
+        content,
+    ));
     Ok(known)
 }
 
@@ -280,5 +286,41 @@ mod tests {
         let known = known_ids_for_coined_guard(&file, content).unwrap();
         assert!(known.contains("qeditrace"));
         assert!(agent_doc_turn::coined_ids::coined_ids("closed #qeditrace", &known).is_empty());
+    }
+
+    /// `#coinedpresetid` — frontmatter is not a component, so the component scan
+    /// cannot see a registered preset name; the guard must read it separately.
+    #[test]
+    fn registered_prompt_preset_names_are_known_ids() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "prompt_presets:\n",
+            "  '#actionable-review': Add actionable review items into backlog + queue\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: something\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+
+        let known = known_ids_for_coined_guard(&file, content).unwrap();
+        assert!(known.contains("actionable-review"), "got {known:?}");
+        assert!(
+            agent_doc_turn::coined_ids::coined_ids(
+                "matched #actionable-review inside the quoted bullet",
+                &known
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            agent_doc_turn::coined_ids::coined_ids("#actionable-review and #inventedhere", &known),
+            vec!["inventedhere".to_string()],
+            "an unregistered id must still coin"
+        );
     }
 }

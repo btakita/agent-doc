@@ -229,6 +229,16 @@ On every preflight run:
 in the `agent:done archive=...done.md` target as completed-history proof for
 backlog replay and as known identifiers for the coined-ID guard after inline
 history is reaped. Invalid archive targets fail closed instead of being ignored.
+- Registered-preset invariant (`#coinedpresetid`): a name registered in
+  `prompt_presets:` frontmatter is a known identifier for the coined-ID guard.
+  It resolves to its preset body, so naming it in prose is a reference, never an
+  invented id — a response explaining where `#actionable-review` was matched
+  must not be told to file a backlog item for it. Frontmatter is not a
+  component, so the component scan cannot see it; both guard sites (the
+  `PreToolUse` block and the post-commit session-check warning) must read the
+  one shared predicate rather than each deriving preset names for itself, and a
+  hashed key (`'#a-b'`) and an unhashed one (`release-check`) both resolve to
+  the tag a response would write. An unregistered id still coins.
 - Same-write reap invariant (`#reappersistcrosscycle`): a closeout that COMMITS
   archives the items it marks in the SAME write that marks them. It must not
   leave `[x]` with the `agent:done` move owed, and in particular a RETAINED

@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -106,6 +106,65 @@ Two more surfaced while reading that code:
 **Review items re-measured.** All three whose premise was a recorded `(plugin version, IDE pid, start time)` triple were wrong, and the probe that produced them is what I just fixed — so their premises are restated from today's measurement. `#activateinstalledjetbrai` loses its restart blocker entirely: plugin 0.2.427 is hot-loaded in pid 3129637 and no restart is required. Only its splice proof remains. `#cargovodtrim`, `#pypiquotafix`, `#grokmcpverify`, and `#coder7` are genuinely blocked on operator input and unchanged.
 
 **One new item.** The first `make install` failed its JetBrains dynamic upgrade with `replacement plugin did not reclaim open documents: dynamic plugin load did not reattach src/boost-client/tasks/monsterrodholders.md`, then the retry reported the plugin already byte-identical — meaning the upgrade had in fact landed and only its reattach verification failed. A fail-closed step that aborts `make install` after the work succeeded is worth chasing; queued at the top of the backlog.
+
+### Re: #jbupgradereattach — the reattach check was asserting a property the upgrade does not own — opus-5 · 2026-09-26T15:47-04:00
+
+> **Queue prompt:** do [#jbupgradereattach]
+
+Fixed, tested, mutation-checked, installed into the live IDE, committed, pushed.
+
+**The answer to the diagnostic question: neither branch, and both are beside the point.** It is not primarily a race, and the cross-project document is not "genuinely unreclaimable" either — the assertion was simply measuring something the upgrade has no authority over.
+
+`JetBrainsPluginUpgradeAction.runOnEdt` returns `ok:<version>` only after the replacement package is installed and a fresh descriptor of the expected version owns a new classloader. That is the entire upgrade. *Then* `initializeOpenProjectsAfterDynamicLoad` ran and threw if any open agent-doc document had not re-registered a CRDT replica within 15s. But re-registration goes through `CpSocketReplicaTransport(resolveProjectRoot(filePath))` — **the controller that owns each document's own project root.** `src/boost-client/tasks/monsterrodholders.md` belongs to a different project than the one being installed into, so its convergence depends on facts this install neither owns nor can influence:
+
+- whether that other project's controller is live and accepting registrations,
+- the terminal non-agent-doc refusal (`#replicarefusalstorm`),
+- and the per-document register backoff — `ensureOpenDocumentReplica(forceRefresh = false)` deliberately honors it, so a document already inside a backoff from before the unload **never even attempts** a registration during the wait, and the 15s can only ever expire.
+
+So a document can stay pending for the whole wait while the plugin bytes are correct and live. That is exactly what was measured: the abort, then a retry reporting the package already byte-identical at 0.2.427 with "no restart required".
+
+**Architecture contract.**
+
+- **Invariant:** a dynamic plugin upgrade succeeds iff the replacement bytes are installed and a fresh descriptor of the expected version owns a new classloader. Post-load open-document reattachment is reported as a receipt and can never change that verdict.
+- **Policy owner:** `runOnEdt` owns the verdict. `ensureOpenDocumentReplicasAndWait` produces a receipt and owns no verdict.
+- **Evidence input:** the existing `NativeReloadReplicaRestartReport` (`expected` / `attached` / `failedPaths`), reused rather than duplicated — the native-reload path already had exactly this shape.
+- **Transition table:**
+
+| bytes + descriptor | reattach outcome | status | installer |
+|---|---|---|---|
+| plugin not loaded / different root | not reached | `skip:…` | skip, no failure |
+| unload refused, generation retained, version mismatch | not reached | `error:…`, non-zero exit | abort — unchanged |
+| converged | every open agent-doc doc attached | `ok:V:documents=N/N` | success, silent |
+| converged | some pending | `ok:V:documents=M/N:pending=…` | success + warning naming each document |
+| converged | one project's receipt unavailable | that project counted pending | success + warning naming it |
+| converged | receipt unreachable (reflection/class) | `ok:V:documents=0/0:reattach_error=…` | success + warning |
+
+- **Reactive topology:** unchanged. `ensureOpenDocumentReplica` remains the Source of attach receipts and each pending document keeps its existing bounded retry. No new retry owner, no polling loop, no second deadline — the one 15s wait already there stays, now as a receipt deadline instead of an assertion deadline.
+- **Imperative extraction audit:** the `Int` return was the imperative summary that discarded *which* documents were pending, forcing the caller to raise in order to say anything at all. Replaced by the report type; merge, receipt formatting, and installer warning parsing are three pure functions, each unit-tested.
+- **Out of scope:** making those pending documents actually converge (that is the other project's controller liveness, a separate concern), and any change to the 15s deadline.
+
+**Changes.**
+
+- `CrdtReplicaManager.ensureOpenDocumentReplicasAndWait` returns a report instead of raising; added pure `mergeReplicaRestartReports` and `dynamicLoadReattachReceipt`.
+- `PluginLifecycleListener.initializeOpenProjectsAfterDynamicLoad` returns the one-line receipt, logs any shortfall, and scopes each project so one project that cannot produce a receipt neither erases the others' nor reads as converged.
+- `JetBrainsPluginUpgradeAction.reattachOpenDocuments` reports an unreachable receipt as `reattach_error=` rather than throwing.
+- `src/plugin.rs` names pending documents on stderr as a `WARNING` and still counts the process upgraded. Pending paths stay the receipt's last field, so a path containing `:` survives intact.
+
+**Verification.**
+
+- `make check`: exit 0, runner-native **9770 tests run, 9770 passed, 259 skipped, 0 failed** (asserted from nextest's own summary, not a grep), plus 1 doctest.
+- Full JetBrains plugin suite (`gradlew test`, which `make check` does *not* include — it lives under `dev-harness-test`): **558 tests, 0 failures, 0 skipped, 58 classes**, exit 0.
+- `cargo build --release`: exit 0 — the supervisor auto-install path uses release mode, which `make check` does not exercise.
+- **Mutation-checked, 5 mutations, all detected, restores green.** Re-adding the `throw` in the upgrade action → 1 failure. Dropping the receipt's pending field → 3 failures. Making the installer parser always silent → 3 failures. Collapsing pending paths at the first `:` → 1 failure. Plus a clean M0 before and after each.
+- **Live proof, the exact command that aborted:** `make install` exited **0**, bumped the plugin 0.2.427 → 0.2.428, reported "Plugin dynamically upgraded in 1 live JetBrains process(es)" and "no IDE restart is required". `/proc/3129637/map_files` maps `agent-doc-jetbrains-0.2.428.jar` **without** `(deleted)`; the eight older generations all carry it. This run's receipt converged, so no warning fired — the pending branch is covered by the unit tests and mutations above.
+
+**Pushed.** `agent-doc` `b6681291e` (fix) and `aca0831ef` (0.2.428 bump); `agent-loop` pointers `0b8e2c947`, `972fe15d0`, plus `a5b26fd20c` for two memory entries. All commits used `--only` with an explicit path list — the shared tree holds another session's uncommitted work in `Makefile`, `agent-doc-commit-io`, `agent-doc-controller-io`, `scripts/`, and `memory/MEMORY.md`, and none of it was picked up.
+
+**Two things worth knowing, now in `memory/`.** The first `make check` here failed with `[double-spawn] failed to exec .../test_cli-70ac6f34b1ec1096` — a concurrent session's `make test` had cargo-GC'd the binary nextest was about to run. That reads exactly like a red suite but is a collision; the re-run on an idle tree was fully green. And my wait-for-idle loop deadlocked because `pgrep -f "cargo nextest run --workspace"` matches the wrapper shell running that very loop — match the binary with `pgrep -x` instead.
+
+**One note, not a new item.** `memory/MEMORY.md` is 26.2KB against a 24.4KB load limit, so its last entries are silently dropped each session. I trimmed eight over-long entries — leaving the index smaller than I found it even after adding mine — but it is still over. I left it uncommitted on purpose: it currently holds another session's in-progress index edits, so committing it wholesale would take their work too.
+
+**CI.** Run `36263825987` was still in progress when I checked (previous run green), so this closes out on local evidence as the runbook prescribes.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -114,13 +173,11 @@ Two more surfaced while reading that code:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ #advance-review
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#jbupgradereattach] make install aborts on a JetBrains dynamic upgrade whose reattach verification fails even though the upgrade landed. Observed 2026-09-26: first install exited 2 with 'replacement plugin did not reclaim open documents: dynamic plugin load did not reattach src/boost-client/tasks/monsterrodholders.md', and the immediate retry reported the plugin already byte-identical at 0.2.427 and 'no restart required' — so the replacement bytes were in place and only the open-document reattach assertion failed. Determine whether the reattach check races the document reopen or whether a cross-project document genuinely cannot be reclaimed, and stop aborting the whole install when the plugin bytes converged.
 <!-- /agent:backlog -->
 
 ## Review

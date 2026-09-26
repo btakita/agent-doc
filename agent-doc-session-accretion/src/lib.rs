@@ -98,12 +98,32 @@ impl Default for SessionAccretionInput {
 
 pub fn evaluate_session_accretion(input: SessionAccretionInput) -> SessionAccretionReport {
     let mut reasons = Vec::new();
-    if input.exchange_lines >= WARN_EXCHANGE_LINES
-        || input.response_sections >= WARN_RESPONSE_SECTIONS
-    {
+    // `#accretionthreshold`: name the measure that actually crossed. Reporting
+    // both counts and nothing else leaves the reader to pick a limit, and the
+    // nearest number in the same report is `clear_threshold` — an unrelated
+    // `/clear`-cadence knob counted in response sections. A session read "400
+    // lines / 21 response sections" beside `clear_threshold: 50` as "21 against
+    // a 50-section threshold" and reported itself as under the limit while
+    // warning; the trigger was the line count against `WARN_EXCHANGE_LINES`.
+    let mut crossed = Vec::new();
+    if input.exchange_lines >= WARN_EXCHANGE_LINES {
+        crossed.push(format!(
+            "{} lines (warn at {WARN_EXCHANGE_LINES})",
+            input.exchange_lines
+        ));
+    }
+    if input.response_sections >= WARN_RESPONSE_SECTIONS {
+        crossed.push(format!(
+            "{} response sections (warn at {WARN_RESPONSE_SECTIONS})",
+            input.response_sections
+        ));
+    }
+    if !crossed.is_empty() {
         reasons.push(format!(
-            "exchange has grown to {} lines across {} response sections",
-            input.exchange_lines, input.response_sections
+            "exchange has grown to {} lines across {} response sections — over on {}",
+            input.exchange_lines,
+            input.response_sections,
+            crossed.join(" and ")
         ));
     }
     if input.recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES {
@@ -379,6 +399,68 @@ mod tests {
 
         assert_eq!(lines, 4);
         assert_eq!(responses, 2);
+    }
+
+    /// `#accretionthreshold` — the reason must name the measure that crossed,
+    /// and only that one, so the reader cannot pair the other count with the
+    /// unrelated `clear_threshold` in the same report.
+    #[test]
+    fn accretion_reason_names_the_measure_that_crossed() {
+        let report = evaluate_session_accretion(SessionAccretionInput {
+            document: "session.md".to_string(),
+            // The live infra.md shape: far over on lines, well under on sections.
+            exchange_lines: 400,
+            response_sections: 21,
+            clear_threshold: 50,
+            ..Default::default()
+        });
+
+        let reason = report
+            .reasons
+            .iter()
+            .find(|reason| reason.contains("exchange has grown"))
+            .expect("exchange reason");
+        assert!(
+            reason.contains(&format!("400 lines (warn at {WARN_EXCHANGE_LINES})")),
+            "{reason}"
+        );
+        assert!(
+            reason.contains(&format!(
+                "21 response sections (warn at {WARN_RESPONSE_SECTIONS})"
+            )),
+            "{reason}"
+        );
+        assert!(
+            !reason.contains("50"),
+            "clear_threshold is a /clear-cadence knob, not the warn limit: {reason}"
+        );
+    }
+
+    /// The other direction: over on sections, under on lines.
+    #[test]
+    fn accretion_reason_omits_a_measure_that_did_not_cross() {
+        let report = evaluate_session_accretion(SessionAccretionInput {
+            document: "session.md".to_string(),
+            exchange_lines: 10,
+            response_sections: WARN_RESPONSE_SECTIONS,
+            ..Default::default()
+        });
+
+        let reason = report
+            .reasons
+            .iter()
+            .find(|reason| reason.contains("exchange has grown"))
+            .expect("exchange reason");
+        assert!(
+            reason.contains(&format!(
+                "over on {WARN_RESPONSE_SECTIONS} response sections (warn at {WARN_RESPONSE_SECTIONS})"
+            )),
+            "{reason}"
+        );
+        assert!(
+            !reason.contains(&format!("10 lines (warn at {WARN_EXCHANGE_LINES})")),
+            "the line count did not cross, so it must not be named as over: {reason}"
+        );
     }
 
     #[test]

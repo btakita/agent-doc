@@ -665,6 +665,26 @@ Implemented and pushed the NATS JetStream durable transport phase in `lazily-rs`
 - Added the `durable-jetstream` feature using `async-nats` 0.50, public adapter APIs, operator documentation, a real PostgreSQL/NATS test launcher, and a pinned CI/make gate.
 
 Verification is green: the exact post-hardening `make check` completed with exit 0, including the real NATS 2.12.1 and PostgreSQL crash-window corpus, all-feature clippy/build, loom, conformance, formal, and benchmark gates. Private-name hygiene and staged-diff checks passed. GitHub CI run `36208491685` was queued at closeout.
+
+### Re: lzdurablereconcile — gpt-5 · 2026-09-25T21:50:49-04:00
+
+Implemented and pushed the complete-history projection and reconciliation layer across the canonical spec and Rust binding.
+
+- `lazily-spec` now specifies ordered create/amend/retract replay, monotonic projection checkpoints, restart/resume equivalence, partial and final retractions, dry-run drift/lag health, stable reconciliation effect identities, and the durable-owner-only authority rule. The existing projection fixture carries four executable reconciliation cases without inflating unrelated binding corpus floors.
+- `lazily-rs` adds `CompleteHistoryProjector`, restart-safe `ProjectionCheckpoint`, strict contiguous replay errors, canonical projection bytes, `ReconciliationReport`, explicit advisory read authority, and stable idempotent repair intents attached to `DurableCommit` for transactional-outbox persistence.
+- The PostgreSQL host adds `load_transaction_consistent_snapshot`, reading owner authority and projection metadata from one statement snapshot. The live integration test proves that snapshot boundary, commit/duplicate behavior, and one stable repair outbox claim.
+- Conformance tests bind every new `expect` and `expected` assertion block and prove full replay equals checkpoint resume, exact partial/final retraction, health classification, stable repair identity, and that stale/cache-only observations cannot authorize transitions.
+
+Verification:
+- `lazily-spec`: full `make check` passed; tsift artifact `.tsift/artifacts/tart-74b1b7c702.test.log`.
+- `lazily-rs`: full `make check` passed; tsift artifact `.tsift/artifacts/tart-b86f0ede89.test.log`.
+- Live PostgreSQL integration: 5/5 tests passed, including reconciliation snapshot/outbox coverage.
+- Public-name scans and `git diff --check` passed.
+- Unrelated dirty files in both subrepos were preserved and left unstaged.
+
+Published commits:
+- `lazily-spec`: `2d23619 feat: specify durable reconciliation`
+- `lazily-rs`: `3655825 feat: add durable reconciliation`
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -677,7 +697,8 @@ Verification is green: the exact post-hardening `make check` completed with exit
 - ~~do [#lzsimlicense]~~
 - ~~do ~~[#lzdurablepg]~~~~
 - ~~do [#lzdurablejetstream]~~
-- do [#lzdurablereconcile]
+- do [#lzapachefamilylicense]
+- ~~do [#lzdurablereconcile]~~
 - do [#lzdurablefamily]
 <!-- /agent:queue -->
 
@@ -685,7 +706,6 @@ Verification is green: the exact post-hardening `make check` completed with exit
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzapachefamilylicense] [lazily family] Converge every Lazily repository LICENSE/NOTICE and publish metadata on the owner-authorized Apache-2.0 family policy before the next release or durable publication; preserve third-party notices and fixture provenance, run each repository full gate, and commit/push each repository separately.
-- [ ] [#lzdurablereconcile] [lazily-spec, lazily-rs] Add the complete-history projection and reconciliation layer from tasks/software/plan-lazily-postgres-nats-valkey.md: transaction-consistent snapshots with monotonic projection versions, ordered create/amend/retract event replay, checkpointed rebuild, dry-run drift reports, lag and health signals, and scheduled idempotent reconciliation through the transactional outbox. Prove replay equivalence, partial and final retractions, restart/resume, and that stale or cache-only reads never authorize a transition.
 - [ ] [#lzdurablefamily] [lazily family] Roll the durable capability model across the family after the Rust reference is proven: publish explicit Core, Client, Durable Host, Distributed Host, and Accelerated Host tiers; give non-Rust bindings typed ingress and projection clients first; require mature database and broker clients plus the shared crash/replay corpus before any binding claims native-host support; and add cross-language envelope-version, ordering, deduplication, receipt, and projection-fingerprint conformance without claiming false parity.
 <!-- /agent:backlog -->
 

@@ -1,6 +1,8 @@
 # Plan: Durable Lazily runtime with Postgres, NATS, and optional Valkey
 
-**Status:** Proposed; public-pattern/provenance gate recorded 2026-09-25
+**Status:** Proposed; public-pattern gate recorded 2026-09-25; durable-runtime
+license/provenance gate closed 2026-09-26; private employer-boundary attestation
+remains open
 **Created:** 2026-08-05
 **Session:** `tasks/software/lazily.md`
 
@@ -158,17 +160,17 @@ already committed outcome. No source above is imported as code or fixture data.
 
 ### Dependency-license intake
 
-No Postgres, NATS, or Valkey client dependency is present in the current
-`lazily-rs` manifest, so no client choice is admitted by this plan. The
-pre-selection inventory is:
+The first durable-runtime client choices are now present in `lazily-rs` and are
+admitted only with the committed all-features inventory and fail-closed drift
+gate described below:
 
 | Surface | Current/candidate license | Admission state |
 |---|---|---|
-| `lazily-rs` | MIT, as declared in its current `Cargo.toml` | Existing metadata only; the recorded Apache-2.0 family direction has not yet converged across manifests and license files, so resolve that mismatch before publishing a durable crate. |
+| `lazily-rs` | Apache-2.0 in `Cargo.toml`, `LICENSE`, and `NOTICE` | Repository metadata is converged. The wider multi-language family direction remains a separate open reconciliation. |
 | PostgreSQL server | [PostgreSQL License](https://www.postgresql.org/about/licence/) | Service/test dependency candidate; verify deployment and redistribution obligations. |
-| Rust PostgreSQL client | Candidate families such as [SQLx](https://github.com/transact-rs/sqlx) and [`tokio-postgres`](https://github.com/rust-postgres/rust-postgres) publish MIT and Apache-2.0 license files | Not selected. Record the exact crate/version/features and resolved transitive license report before adding it. |
+| Rust PostgreSQL client | [`postgres` 0.19.14](https://crates.io/crates/postgres/0.19.14), MIT OR Apache-2.0 with Apache-2.0 selected | Selected with `with-serde_json-1`; exact transitive graph and license evidence are committed. |
 | NATS Server | [Apache-2.0](https://github.com/nats-io/nats-server/blob/main/LICENSE) | Service/test dependency candidate. Preserve license and notices for redistribution. |
-| Rust NATS client | [`async-nats`, Apache-2.0](https://github.com/nats-io/nats.rs/blob/main/LICENSE) | Candidate only; pinning it still requires a resolved transitive license report. |
+| Rust NATS client | [`async-nats` 0.50.0, Apache-2.0](https://crates.io/crates/async-nats/0.50.0) | Selected for JetStream delivery. Exact enabled features, transitive graph, source, and license evidence are committed. |
 | Valkey server | [BSD-3-Clause](https://github.com/valkey-io/valkey/blob/unstable/COPYING) | Optional service/test dependency candidate; never an authority. |
 | Rust Valkey client | [`redis-rs` three-clause BSD license](https://github.com/redis-rs/redis-rs/blob/main/LICENSE) | Candidate only; do not infer the server license from the client or vice versa. |
 
@@ -178,19 +180,25 @@ The reproducible current baseline is:
 cargo metadata --locked --all-features --format-version 1
 ```
 
-Run from `src/lazily-rs`, it resolves 354 packages with 25 distinct declared
-license expressions and zero packages missing a declaration. None is
-`async-nats`, `tokio-postgres`, `deadpool-postgres`, `sqlx`, `redis`, `bb8`, or
-`testcontainers`. This baseline describes the existing graph; it neither clears
-all combinations in compound SPDX expressions nor admits a future durable
-dependency.
+Run from `src/lazily-rs` at the 2026-09-26 admission boundary, it resolves 415
+packages with 28 distinct declared license expressions and zero missing license
+declarations. `docs/dependency-license-inventory.json` records every exact
+package/version, runtime/build/dev reachability, enabled feature set, selected
+SPDX branch, Cargo source and canonical source URL, checksum, discovered license
+and notice files with hashes, and notice disposition. The selected `postgres`
+and `async-nats` rows are part of that same transitive inventory; no Valkey
+client has been selected.
 
-Before the first manifest change, generate and commit a machine-readable license
-inventory from the resolved lockfile, including build/dev dependencies and
-enabled features. Review every SPDX expression and notice; fail CI on an
-unreviewed package, unknown license, git/path dependency without provenance, or
-license outside the repository allowlist. Repeat the inventory on every lockfile
-change. A candidate row above is not approval of its future transitive graph.
+`scripts/dependency-inventory.py --check` recomputes the inventory from the
+locked all-features graph and fails on drift, missing/unreviewed declarations,
+stale license decisions, unsupported sources, unprovenanced path dependencies,
+provenance-note drift, or durable implementation changes not reflected by the
+note's source digest. `make dependency-inventory-check`, `make check`, and the
+Rust CI job all execute it. Regeneration is explicit through
+`make dependency-inventory`, whose `--accept-current-review` spelling makes the
+package/license/notice review decision visible. A previously admitted expression
+does not make a future lockfile graph self-admitting: CI still fails until the
+changed inventory is reviewed and committed.
 
 ### Independent-authorship and exclusion record
 
@@ -201,6 +209,16 @@ synthetic nouns and values. The public repositories must exclude all employer
 or product-specific names, schemas, subjects, events, policies, incidents,
 fixtures, credentials, logs, and code. In particular, no Haiven material may be
 used as a template, golden test, transformed fixture, or naming source.
+
+The current public note is
+`src/lazily-rs/docs/durable-runtime-provenance.md`. It names the official
+PostgreSQL, JetStream, rust-postgres, and nats.rs sources; records independent
+authorship and synthetic fixtures; records `postgres` 0.19.14 and `async-nats`
+0.50.0; and generically excludes employer-owned and customer-specific inputs.
+This private admission record additionally confirms that no Haiven material,
+other employer input, employer time, equipment, credentials, or accounts were
+used for the admitted public implementation. This is not the still-missing
+private employer-boundary attestation and does not claim one exists.
 
 Do not paste third-party source into prompts or use it as transformation input.
 If later work needs to adapt rather than merely study third-party expression,
@@ -237,15 +255,16 @@ that this is consistent with their agreements.
 - [x] Public pattern sources and their narrow claims are recorded.
 - [x] Independent-authorship, synthetic-fixture, and confidential-material
   exclusions are explicit.
-- [x] Current platform/client license candidates are inventoried without
-  selecting a client.
+- [x] Selected Postgres and NATS clients, and remaining platform/client
+  candidates, have truthful license/admission dispositions.
 - [ ] The family-wide Apache-2.0 direction is reconciled with the currently
-  mixed manifest and license-file metadata before a durable crate is published.
-- [ ] Exact client crates, versions, features, transitive licenses, and notices
+  mixed manifest and license-file metadata before every family crate is
+  published; `lazily-rs` itself is converged.
+- [x] Exact client crates, versions, features, transitive licenses, and notices
   are recorded from the first resolved durable-runtime lockfile.
 - [ ] A private written-boundary attestation is recorded before any
   employer-related implementation.
-- [ ] Each implementation change carries its own provenance note and passes the
+- [x] Each admitted public implementation change carries provenance and passes the
   license/provenance CI gate.
 
 ## Authority modes

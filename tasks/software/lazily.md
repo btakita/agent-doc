@@ -33,20 +33,37 @@ completed
 Compacted content:
 - Archived 37 response topic(s): Archived 11 response topics; #actionable-review; Codex attribution and queued work; 34 more
 - Prior summary/context: prior compacted content: Archived 11 response topic(s): Lazily stdlib matrix release; Is lazily-rs published; Feature...
+
+### Re: durable runtime admission closeout — gpt-5 · 2026-09-26T13:39-04:00
+
+> **Queue prompt:**
+>
+> do [#lzdurableadmissioncloseout]
+
+
+Completed `#lzdurableadmissioncloseout`.
+
+- Added `src/lazily-rs/docs/dependency-license-inventory.json`: a deterministic all-features `Cargo.lock` inventory of 415 packages and 28 reviewed license declarations, including exact versions, enabled features, runtime/build/dev reachability, selected SPDX branches, source URLs/checksums, license/notice evidence, and notice disposition.
+- Added the fail-closed `scripts/dependency-inventory.py` gate plus `make dependency-inventory-check`; `make check` and the named CI step now enforce inventory, license/source/provenance, and durable-source-digest drift. The CI-reach closure and exact step map prove the new gate is active.
+- Added `docs/durable-runtime-provenance.md`, naming the official PostgreSQL, JetStream, rust-postgres, and nats.rs sources, independent authorship, synthetic fixtures, selected `postgres 0.19.14` / `async-nats 0.50.0`, and generic exclusion of employer/customer inputs. Public-repo private-name hygiene passed.
+- Updated `tasks/software/plan-lazily-postgres-nats-valkey.md` truthfully: the selected clients and closed public license/provenance gate are recorded; the wider family license reconciliation and private employer-boundary attestation remain open. This private record confirms no Haiven or other employer inputs, time, equipment, credentials, or accounts were used, without claiming or creating the attestation.
+- Verification: `make dependency-inventory-check` passed; the negative regeneration control refused `--write` without explicit review acceptance; `make ci-reach` passed; the full `make check` passed with exit 0 and zero detected failures. The new GitHub CI run is in progress, so it is recorded as pending rather than used as closeout evidence.
+- Commits: `lazily-rs` `74af6c9` (`chore: enforce dependency license admission`) was pushed to `origin/main`; private planning record `c17eb79c82` (`docs: close durable runtime admission gate`) is committed in the superproject.
+
+The JetBrains advisory remains: run the plugin installer once to replace the superseded live jar bytes; restart the IDE only if that install reports a dynamic-unload failure.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzdurableadmissioncloseout]
+- ~~do [#lzdurableadmissioncloseout]~~
 - do [#lzrootinstructionpath]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdurableadmissioncloseout] [lazily-rs, plan] Close the durable-runtime license/provenance gate: generate and commit an all-features Cargo.lock inventory covering runtime, build, and dev dependencies with exact versions, enabled features, reviewed SPDX expressions, source URLs, and notice disposition; add a fail-closed make/CI drift gate; record one durable implementation provenance note naming the official sources, independent authorship and synthetic fixtures, selected postgres/async-nats dependencies, and absence of Haiven/employer inputs; then update tasks/software/plan-lazily-postgres-nats-valkey.md admission checklist truthfully. Do not claim or create the private employer-boundary attestation.
 - [ ] [#lzrootinstructionpath] [agent-loop superproject] Fix the root Makefile stale `cd instruction-files` paths in the `publish` and `clean` targets to use `src/instruction-files`; verify the command paths with non-publishing/dry-run checks only, then refresh the root Makefile hunk and preimage hash in tasks/software/plan-ambient-publish-token-point-of-use.md and rerun its static inventory and patch-check proof. Do not apply credential-scoping patches, invoke a real publisher, evaluate credential references, or rotate secrets.
 <!-- /agent:backlog -->
 

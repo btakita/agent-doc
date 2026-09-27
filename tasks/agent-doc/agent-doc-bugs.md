@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -196,6 +196,53 @@ M0 green after restoring both files, with `git status` clean on each.
 **Unrelated, one line:** `.bin/agent-doc` is a broken symlink here — its target `src/agent-doc/target/release/agent-doc` does not exist, because the dev loop builds `release-local`. The cargo-installed `agent-doc` on PATH is current (0.35.418), so nothing in this turn was affected; I did not run `cargo build --release` to repair it, since that is the `#installfulloom` fat-LTO build and this was not a release.
 
 `#activateinstalledjetbrai` stays gated: `#readbackeditor` is still the operator read-back it depends on.
+
+### Re: do [#pypiquotarecheck] — opus-5 · 2026-09-27T02:58-04:00
+
+> **Queue prompt:**
+>
+> do [#pypiquotarecheck]
+
+
+Re-checked, and then fixed the reason this item keeps coming back. Committed `e7c0694de` (submodule) + `97d95e468` (pointer), both pushed.
+
+**The decision has not happened.** `pypi/support#12214` is still open, still one comment — the `github-actions` acknowledgement bot — and `updated_at` is unchanged at `2026-09-10T22:46:21Z`. Seventeen days, no human response.
+
+**Why this item was expensive to re-check, and why that is now gone.** The item told me to verify usage from the authenticated `/manage/project/agent-doc/` pages. PyPI gates every `/manage/` route behind a password re-confirmation, so the check dead-ends on a credential I will not enter — and the alternative the item explicitly forbids, `pypi.org/pypi/agent-doc/json`, is the stale-CDN view that previously claimed 27 of 34 deleted releases were still present. So the re-check had no source it could actually use, which is how it became a recurring no-op.
+
+It turns out there is a third source, and it is the correct one: the **PEP 691 simple index** (`Accept: application/vnd.pypi.simple.v1+json`) carries a `size` for **every file**. The project total is therefore computable with no credentials and off a non-cache-prone endpoint.
+
+**`scripts/pypi-quota-check.py`**, wired as `make pypi-quota-check`:
+
+```
+agent-doc: 8.362 GiB of 10.0 GiB (83.6%), headroom 1.638 GiB
+  releases: 151 (0.35.113..0.35.417)
+  post-cutover: 20 releases, 0.68 MiB (mean 34.6 KiB)
+  pre-cutover:  131 releases, 8.361 GiB (0.35.113..0.35.343)
+  further releases before the ceiling: 49,662
+  next deletable tranche IF a ceiling is in reach: 0.35.113..0.35.161 (40 releases, 2.491 GiB)
+  limit request pypi/support#12214: awaiting_decision (state=open, comments=1, updated 2026-09-10T22:46:21Z)
+  VERDICT: headroom fine — do NOT delete releases. Growth is bounded by the post-cutover wheel size.
+```
+
+That reproduces every number the item recorded by hand — 8.4 GiB of 10.0, 20 thin releases at 0.7 MiB, ~65 MiB apiece before the cutover, floor at 0.35.113 — and adds the one that settles the question: **~49,662 further releases fit before the ceiling.** The ceiling is not approaching. It cannot be reached by releasing.
+
+**The verdict is deliberately conservative about deletion.** A ceiling counts as "in reach" only when headroom drops under `--headroom-floor-gib` (default 1 GiB) **or** the projected remaining release count drops under `--release-floor` (default 200), and the script exits non-zero only then. An unreachable ceiling is never a reason to prune history — which is exactly the failure mode this item exists to prevent. The tranche is printed as *would be* deletable, not as a recommendation.
+
+**Verification split follows `artifact-purge-check`.** `make pypi-quota-self-test` covers the arithmetic and both verdict thresholds offline and joins `make check`; the live network read stays an explicit `make pypi-quota-check`. `make check` exit 0, nextest runner-native `9845 tests run: 9845 passed (2 slow), 259 skipped`.
+
+**Mutation-checked four ways**, each red, M0 green:
+
+- force `ceiling_in_reach = False` → red;
+- make `version_key` lexicographic (so `0.35.9` sorts after `0.35.113`) → red;
+- silently skip a file with no size instead of raising → red;
+- report `0` instead of `None` when there is no post-cutover release, which would manufacture a false ceiling-in-reach → red.
+
+**Gated, not done, and the gate is now machine-readable.** `#pypiquotarecheck` moves to `agent:review`: the only thing outstanding is a third party's decision, which is the exceptional gate case. But it no longer needs a human to *observe* its state — it clears on a reply to `pypi/support#12214`, or on `make pypi-quota-check` exiting non-zero. I did not touch any release.
+
+**No reinstall this cycle.** Nothing under `src/` or any crate changed — this is a script, a Makefile target and an `AGENTS.md` paragraph — so the installed binary is already current at this commit's Rust content, and a redundant `make install` would only re-fan `reload_library` at the live editor replicas mid-drain.
+
+**CI.** Run `36301000202` (the captured-splice scenario push) was `in_progress` at 7m48s when I checked. Recorded, not awaited; this turn closes from local evidence. Exchange is at 170 lines across 7 sections — noted, not stalling the queue for it.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -204,26 +251,19 @@ M0 green after restoring both files, with `git status` clean on each.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~complete [#confirmfixlive]~~
-- ~~do [#opcapturedormant]~~
-- ~~do [#bkqattrcli]~~
-- ~~do [#hswspawncount]~~
-- ~~do [#hswdisposabledoc]~~
-- ~~do [#splicesimcov]~~
-- do [#pypiquotarecheck]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
 - [ ] [#readbackeditor] [opcaptureliveread] [agent-doc] [operator-verify] Read back an editor-op capture receipt from a real typing burst, now that every reporter refusal names itself (65c865f24, plugin 0.2.429). Type a few characters into tasks/agent-doc/agent-doc-bugs.md in IntelliJ once the recycled plugin holds a live registration, then run agent-doc verify-op-capture on it. Three outcomes, all now diagnosable: editor_ops_recorded ... transaction=batch means capture works and activateinstalledjetbrai is unblocked; editor_op_capture_refused reason=<token> names which guard fired (all_ops_non_operator points back at isOperatorDocumentEvent, shadow_replay_mismatch at the burst replay, doc_advanced_during_drain is benign and self-retrying, base_hash_unavailable at the merge base); no receipt at all means the reporter chain never ran, so check that the plugin generation actually reloaded. Blocks activateinstalledjetbrai and splicesimcov.
 - [ ] [#activateinstalledjetbrai] [agent-doc] [operator-verify] Prove captured local editor edits recover across an independently advanced canonical response — BLOCKED ON #opcapturedormant, and no longer validatable from logs. Asked to validate from logs 2026-09-26 and the answer is that the evidence class is ABSENT, not inconclusive: the splice-recovery path itself is healthy (15 captured-local-splice-recovery invocations 2026-09-24..27, all status=current authority=cp_model, with the canonical text demonstrably advancing between them — the 2026-09-26T00:11:48..52 burst runs text_len 42885 -> 42885 -> 42892 -> 42900 across three distinct hashes), but all 317 editor_op_epoch_closed events in that window are cause=non_operator_projection, so not one of those recoveries carried an operator-authored edit. Order of work: (1) fix #opcapturedormant so operator edits are recorded as ops at all; (2) re-run `agent-doc verify-op-capture <FILE>` — it now accepts the batch producer the JetBrains TypingTracker actually drives (6b0eabc0c), so a pass is meaningful and a failure names both producers; (3) only then does the disposable-document live proof have anything to prove. Do NOT re-narrow this gate to "just needs the live check" until step 1 lands. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
-- [ ] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision so the next PyPI ceiling is raised rather than cleared by another mass deletion. Context changed 2026-09-26: #pypiquotafix is DONE — the 34 oldest releases (0.35.0 through 0.35.112, 1.63 GiB) are deleted and PyPI settings now reports 8.4 GiB of the 10.0 GiB limit, so there is no urgency. #12214 is still open with only the github-actions bot auto-reply from 2026-09-10T22:46:21Z. Growth is already bounded: the 20 releases at or after the 0.35.383 thin-wheel cutover total 0.7 MiB, against roughly 68 MiB apiece before it, so the remaining 8.36 GiB is 131 historical fat wheels and is not growing. If the grant lands, record it and drop this item. If it is refused or stalls past the next ceiling, the next clean tranche is 0.35.113 through 0.35.152 (another 2.10 GiB) — but do not delete anything until a ceiling is actually in reach. Verify deletions from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json, which served a stale CDN view claiming 27 of the 34 deleted releases were still present.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] 🚧 [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically now: a human reply on pypi/support#12214, or `make pypi-quota-check` exiting non-zero. As of 2026-09-27 that check exits 0 — 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 151 releases (0.35.113..0.35.417), room for ~49,662 further post-cutover releases — so there is nothing to act on and nothing to delete. pypi/support#12214 is still open with one comment (the acknowledgement bot) and untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check actually reports (next tranche would be 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 <!-- /agent:review -->

@@ -34,7 +34,7 @@ The checks do not evaluate `passage`.
 | Preimage path | SHA-256 at preparation |
 |---|---|
 | `.env` | `925444427b8220f0a8f4456a0c0419e420a3d8e86c13f7f34b4c52365614b79b` |
-| `Makefile` | `f8bdf25baefbcf421b3dd8ff9626061f3632de9fd0ca5416482949ce8de5f21e` |
+| `Makefile` | `3e3091d2f67a2b8dbffebfca29ab71f1c32e6527517b0112b5add51aa4d7d1d4` |
 | `src/module-harness/Makefile` | `9118a00b4b0ceeebc21edce85c79896708192e1481c56e08dd052eef8edae718` |
 | `src/corky/Makefile` | `b916ec15aff54522381a9ae3684d872391caa9b8aa1d169de4914ce58dc1bfe3` |
 | `src/agent-doc/Makefile` | `a0931f885d4f906566e44ffd2e20b1a272c328fa6c509d42640a03a9cf4af192` |
@@ -304,6 +304,16 @@ invokes no real publisher, so it is safe to run before application; it is also
 what caught this document's own `src/agent-doc/Makefile` preimage drift. Its
 `--self-test` negative controls must pass first, so a proof whose assertions
 cannot fail never reports success.
+
+`make review-gate-status` (implemented by `scripts/review-gate-status.py`) runs
+that proof as one of four review-gate probes and asserts from its JSON report
+rather than its exit status: it goes red when a preimage drifts, when a patch set
+stops applying, or when the proof's exit code and its own report disagree. That
+last case is the false-green this plan is most exposed to, because the operator's
+application step is exactly where a non-applying patch would surface. The
+aggregated probe caught the fifth `Makefile` preimage drift the moment the root
+`Makefile` grew the target itself; the context-bearing hunks (`7fab345f18`) still
+applied, so only the recorded hash needed refreshing, by hand, as intended.
 
 After operator application, use fake executables only—never a real publisher:
 

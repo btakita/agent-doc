@@ -1,4 +1,4 @@
-.PHONY: release check precommit update publish clean check-shared publish-credential-proof
+.PHONY: release check precommit update publish clean check-shared publish-credential-proof review-gate-status review-gate-self-test
 
 SUBMODULES = src/agent-doc src/corky
 
@@ -10,7 +10,7 @@ release:
 	done
 
 # Run clippy + tests for both projects (includes shared crate)
-check: check-shared publish-credential-proof
+check: check-shared publish-credential-proof review-gate-self-test
 	@for dir in $(SUBMODULES); do \
 		echo "=== $$dir: make check ==="; \
 		$(MAKE) -C $$dir check || exit 1; \
@@ -65,3 +65,18 @@ clean:
 publish-credential-proof:
 	@python3 scripts/proof-point-of-use-publish-credentials.py --self-test
 	@python3 scripts/proof-point-of-use-publish-credentials.py
+
+# Measure every gated `agent:review` item in tasks/software/lazily.md in one
+# pass (`#advance-review`). Separates "still waiting on the operator" from
+# "the gate's recorded evidence has rotted" -- the latter is actionable without
+# the operator and is the only defect this pass has ever caught. Exits 1 when
+# any gate's evidence is stale, 2 on refusal. Needs network (it shells out to
+# the credential proof and the two macOS release probes), which is why only the
+# offline self-test is a `check` dependency.
+review-gate-status:
+	@python3 scripts/review-gate-status.py --self-test
+	@python3 scripts/review-gate-status.py
+
+# Offline negative controls for the gate probes. Cheap, no network.
+review-gate-self-test:
+	@python3 scripts/review-gate-status.py --self-test

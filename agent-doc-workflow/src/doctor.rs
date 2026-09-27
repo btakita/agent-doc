@@ -384,12 +384,20 @@ fn evaluate_closeout_commit(
     if facts.git.snapshot_status.as_deref().is_some_and(|status| {
         status.contains("SnapshotDiffersFromHead") || status == "NoSnapshot" || status == "NoHead"
     }) {
+        // `#doctorsccontra`: do NOT prescribe `session-check` here. `session-check`
+        // reports `ok — commit_already_current` for a snapshot that is merely AHEAD
+        // of HEAD (uncommitted queue/backlog maintenance or a committed-cycle
+        // response), so doctor used to call the state recoverable and then hand the
+        // operator a command that reports everything is fine and reconverges
+        // nothing. The command that actually advances HEAD from the snapshot is the
+        // next cycle's binary-owned step-2 commit, which is what opening a cycle
+        // runs.
         return result.recoverable(
             format!(
-                "snapshot git status is {}",
+                "snapshot git status is {} — session-check reports `ok` for a snapshot ahead of HEAD and cannot reconverge the planes",
                 facts.git.snapshot_status.as_deref().unwrap_or("unknown")
             ),
-            vec![format!("agent-doc session-check {}", file.display())],
+            vec![format!("agent-doc {}", file.display())],
         );
     }
     if facts.session_check.ok == Some(true) {
@@ -613,6 +621,42 @@ mod tests {
                 .repair_commands
                 .iter()
                 .any(|command| command == "agent-doc write --commit tasks/example.md"),
+            "{closeout:?}"
+        );
+    }
+
+    #[test]
+    fn doctor_snapshot_ahead_of_head_does_not_prescribe_session_check() {
+        // `#doctorsccontra`: `session-check` reports `ok — commit_already_current`
+        // for a snapshot that is merely AHEAD of HEAD, so prescribing it left the
+        // operator with a repair that reconverges nothing. The repair must be the
+        // cycle-opening command whose binary-owned step-2 commit advances HEAD.
+        let mut facts = WorkflowDoctorFacts::default();
+        facts.session_check.ok = Some(true);
+        facts.cycle_state.present = true;
+        facts.cycle_state.open = Some(false);
+        facts.git.snapshot_status =
+            Some("SnapshotDiffersFromHead { snapshot_len: 45347, head_len: 45408 }".to_string());
+
+        let report = evaluate_catalog(
+            Path::new("tasks/example.md"),
+            workflow_invariant_catalog(),
+            facts,
+            Vec::new(),
+        );
+
+        let closeout = invariant_result(&report, WorkflowInvariantId::CloseoutCommit);
+        assert_eq!(closeout.outcome, WorkflowDoctorOutcome::Recoverable);
+        assert!(
+            !closeout
+                .repair_commands
+                .iter()
+                .any(|command| command.contains("session-check")),
+            "doctor must not prescribe session-check for a snapshot ahead of HEAD: {closeout:?}"
+        );
+        assert_eq!(
+            closeout.repair_commands,
+            vec!["agent-doc tasks/example.md"],
             "{closeout:?}"
         );
     }

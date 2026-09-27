@@ -239,11 +239,99 @@ pub fn classify_route_closeout_block(
             "route_closeout_block_active_queue_head",
         )
         .ok()
-        .and_then(|content| agent_doc_queue::queue_continuation::live_continuation_head(&content))
+        // `#planhead`/`#qchurn`: drainability-filtered, not the raw head. The
+        // unfiltered `live_continuation_head` returns the first head regardless of
+        // whether any drainer will act on it, so an `[operator-verify]` head — one
+        // preflight has already deferred and that `session-check` reports as
+        // needing no continuation — made a blocked closeout dispatch anyway and
+        // burned a guaranteed no-op cycle. Supervisor scope is the right scope
+        // here: the supervisor clear-and-continue path does drain
+        // `[focused-cycle]`/`[clean-session]` heads, and defers only
+        // `[operator-verify]`/noise.
+        .and_then(|content| {
+            agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+                &content,
+                agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            )
+        })
     };
     let dispatch_decision = classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
         recovery_queues_prompt_for_after_closeout,
         active_queue_head,
     });
     (recovery_decision, dispatch_decision)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stub_effects() -> RouteCloseoutDrainEffects {
+        RouteCloseoutDrainEffects {
+            force_disk_route_writes: || false,
+            run_pending_maintenance: |_, _| Ok(()),
+            cancel_empty_preflight: |_| Ok(false),
+            cancel_empty_preflight_after_owner_release: |_| Ok(false),
+            repair_closeout: |_| Ok(String::new()),
+            inspect_session: |_| Ok(SessionCheckStatus::Ok("stub".to_string())),
+            await_closeout_projection: |_, _, _| Ok(CloseoutCycleWaitOutcome::Terminal),
+            // Anything but `QueuePromptForAfterCloseout`, so the queue-head branch
+            // under test is the one that runs.
+            decide_closeout_recovery: |_, _| CloseoutRecoveryDecision::AlreadyCommitted,
+        }
+    }
+
+    fn operator_verify_only_queue_doc(dir: &Path) -> std::path::PathBuf {
+        let doc = dir.join("session.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue: go\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — opus-5\n\nDone.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- do [#opv]\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog queue=append -->\n",
+                "- [ ] [#opv] [operator-verify] needs a human eyeball, do not auto-drain\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+        )
+        .unwrap();
+        doc
+    }
+
+    #[test]
+    fn closeout_block_does_not_wait_on_an_operator_verify_only_queue_head() {
+        // `#planhead`/`#qchurn`: this used to read the raw
+        // `live_continuation_head`, so an `[operator-verify]` head — deferred by
+        // preflight and reported by `session-check` as needing no continuation —
+        // came back as an active queue head and the blocked closeout dispatched
+        // for it anyway, burning a guaranteed no-op cycle. No drainer acts on
+        // that head, so the decision must not be `WaitForActiveQueueHead`.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = operator_verify_only_queue_doc(dir.path());
+
+        let (_recovery, dispatch) = classify_route_closeout_block(
+            &doc,
+            "blocked for test".to_string(),
+            false,
+            stub_effects(),
+        );
+
+        assert!(
+            !matches!(
+                dispatch,
+                CloseoutBlockDispatchDecision::WaitForActiveQueueHead { .. }
+            ),
+            "an operator-verify-only queue must not be treated as a drainable active head: {dispatch:?}"
+        );
+    }
 }

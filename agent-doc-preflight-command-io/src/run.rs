@@ -1203,6 +1203,41 @@ pub fn run_with_options_to_writer(
         .and_then(diff::parse_slash_command_only_added_diff);
     let no_changes = diff_result.is_none();
 
+    // `#qmaintorphan`: queue maintenance (step 4b2) runs AFTER the single step-2
+    // commit, so a mutation it persisted to the visible document + snapshot is
+    // normally committed by this cycle's own `respond` / `write --commit`. On a
+    // `no_changes` cycle there is no response to persist and SKILL.md tells the
+    // agent to stop, which left that mutation orphaned: snapshot and working tree
+    // carried the reaped queue heads while HEAD stayed behind. `doctor` reports the
+    // result as recoverable `SnapshotDiffersFromHead`, and the next commit path can
+    // read it as an unanswered typed-component edit.
+    //
+    // Commit it here, but ONLY when step 2 committed nothing. That preserves the
+    // `#64mb` invariant of exactly one HEAD advance per preflight: if step 2 already
+    // advanced HEAD, this maintenance rides the next preflight's step-2 commit as
+    // before, instead of producing a second `commit_staging` in the same run.
+    if !options.probe && no_changes && queue_state.maintenance_mutated && !committed {
+        match commit_previous_cycle_for_preflight(file) {
+            Ok(true) => {
+                rc.invalidate_head_content();
+                eprintln!(
+                    "[preflight] committed queue maintenance on a no-changes cycle (#qmaintorphan)"
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "preflight_queue_maintenance_committed file={} reason=no_changes_cycle (#qmaintorphan)",
+                        file.display()
+                    ),
+                );
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("[preflight] queue maintenance commit warning: {e}");
+            }
+        }
+    }
+
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
 
@@ -2392,7 +2427,8 @@ mod tests {
     #[test]
     fn legacy_gated_nag_switches_form_exactly_at_the_budget() {
         let at_budget = legacy_gated_in_backlog_message(1, REVIEW_LEGIBILITY_TARGET - 1, "plan.md");
-        let over_budget = legacy_gated_in_backlog_message(2, REVIEW_LEGIBILITY_TARGET - 1, "plan.md");
+        let over_budget =
+            legacy_gated_in_backlog_message(2, REVIEW_LEGIBILITY_TARGET - 1, "plan.md");
         assert!(
             at_budget.contains("run `agent-doc migrate"),
             "landing exactly on the target is still legible: {at_budget}"
@@ -4193,6 +4229,76 @@ mod tests {
             committed.contains("[#current] current editor work")
                 && !committed.contains("[#stale] stale work"),
             "preflight must commit current authority, not the stale recovery snapshot:\n{committed}"
+        );
+    }
+
+    #[test]
+    fn preflight_commits_queue_maintenance_on_a_no_changes_cycle() {
+        // `#qmaintorphan`: queue maintenance runs at step 4b2, AFTER the single
+        // step-2 commit. On a `no_changes` cycle SKILL.md tells the agent to stop
+        // without persisting, so a mutation maintenance already wrote to the
+        // visible document AND the snapshot was left with HEAD behind it — the
+        // recoverable `SnapshotDiffersFromHead` split that `doctor` reports and
+        // that the next commit path can read as an unanswered typed-component edit.
+        //
+        // The mutation here is queue-tag attr normalization (the same one
+        // `run_queue_maintenance_normalizes_boolean_true_queue_attrs` covers). The
+        // only head is `[operator-verify]`, so nothing is drainable and no
+        // synthetic queue-head prompt diff is synthesized (`#rt83`) — that is what
+        // keeps this a genuine `no_changes` cycle.
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let original = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — opus-5\n\nDone.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority=true go=true -->\n",
+            "- do [#opv]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#opv] [operator-verify] needs a human eyeball, do not auto-drain\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        commit_all(root, "add doc", None);
+
+        let head_before = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed document");
+        assert!(
+            head_before.contains("priority=true"),
+            "precondition: the un-normalized queue tag starts out committed:\n{head_before}"
+        );
+
+        run(&doc).expect("preflight must run a no-changes cycle");
+
+        let live_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !live_after.contains("priority=true"),
+            "precondition: maintenance must have normalized the queue tag in the visible \
+             document, otherwise this fixture is not exercising a maintenance mutation:\n{live_after}"
+        );
+
+        let head_after = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed document");
+        assert!(
+            !head_after.contains("priority=true"),
+            "queue maintenance mutated the document but never committed it, leaving the \
+             snapshot and working tree ahead of HEAD (#qmaintorphan):\n{head_after}"
         );
     }
 

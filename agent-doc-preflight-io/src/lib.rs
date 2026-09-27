@@ -2326,6 +2326,17 @@ pub struct QueueState {
     /// phantom `+:pushpin: do [#id]` prompt diff, which previously kept
     /// `no_changes:false` every preflight and sustained the qchurn flood.
     pub queue_supervisor_drainable: bool,
+    /// `#qmaintorphan`: whether queue maintenance mutated the document this
+    /// preflight. Queue maintenance runs at step 4b2, *after* the single step-2
+    /// commit, so its mutation is normally committed by the cycle's own
+    /// `respond` / `write --commit`. On a `no_changes` cycle the skill tells the
+    /// agent to stop without persisting, which orphaned that mutation in the
+    /// working tree + snapshot while HEAD stayed behind — a three-plane split
+    /// that `doctor` reports as recoverable `SnapshotDiffersFromHead` and that
+    /// the next commit path can classify as an unanswered typed-component edit.
+    /// `run` commits maintenance itself when this is set and nothing else
+    /// changed.
+    pub maintenance_mutated: bool,
     pub synced_queue_ids: Vec<String>,
     pub warnings: Vec<PreflightWarning>,
 }
@@ -2629,6 +2640,8 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             queue_drainable_head_count: 0,
             queue_continuation_required: false,
             queue_supervisor_drainable: false,
+            // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
+            maintenance_mutated: false,
             synced_queue_ids: vec![],
             warnings: vec![],
         });
@@ -2651,6 +2664,8 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             queue_drainable_head_count: 0,
             queue_continuation_required: false,
             queue_supervisor_drainable: false,
+            // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
+            maintenance_mutated: false,
             synced_queue_ids: vec![],
             warnings: vec![],
         });
@@ -2730,6 +2745,8 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         queue_drainable_head_count,
         queue_continuation_required,
         queue_supervisor_drainable,
+        // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
+        maintenance_mutated: false,
         synced_queue_ids: vec![],
         warnings: vec![],
     })
@@ -2797,11 +2814,8 @@ fn disk_edit_newer_than_registered_authority(
         return Ok(None);
     };
     let disk = std::fs::read_to_string(file)?;
-    let assessment = agent_doc_document::admission_divergence::assess(
-        Some(&baseline),
-        Some(authority),
-        &disk,
-    );
+    let assessment =
+        agent_doc_document::admission_divergence::assess(Some(&baseline), Some(authority), &disk);
     log_admission_divergence_assessment(file, &baseline, authority, &disk, assessment);
     match assessment.adoption {
         agent_doc_document::admission_divergence::DiskAdoption::ProceedOnAuthority => Ok(None),
@@ -2851,7 +2865,8 @@ fn log_admission_divergence_assessment(
     disk: &str,
     assessment: agent_doc_document::admission_divergence::AdmissionAssessment,
 ) {
-    if assessment.divergence == agent_doc_document::admission_divergence::AdmissionDivergence::Resolvable
+    if assessment.divergence
+        == agent_doc_document::admission_divergence::AdmissionDivergence::Resolvable
     {
         return;
     }
@@ -4346,6 +4361,8 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 queue_supervisor_drainable: false,
+                // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
+                maintenance_mutated: false,
                 synced_queue_ids,
                 warnings: Vec::new(),
             });
@@ -4377,6 +4394,8 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                 queue_drainable_head_count: 0,
                 queue_continuation_required: false,
                 queue_supervisor_drainable: false,
+                // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
+                maintenance_mutated: false,
                 synced_queue_ids,
                 warnings: Vec::new(),
             });
@@ -4975,6 +4994,12 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         queue_drainable_head_count,
         queue_continuation_required,
         queue_supervisor_drainable,
+        // `#qmaintorphan`: only the persisted mutation counts. `mutated` is set
+        // by the branches above and written to BOTH the visible document and the
+        // snapshot by `persist_queue_maintenance_doc` + the snapshot sync block;
+        // the earlier stop-fence / time-gate returns exit before that persist, so
+        // they report `false` and leave no plane split behind.
+        maintenance_mutated: mutated,
         synced_queue_ids,
         warnings: queue_warnings,
     })
@@ -12749,8 +12774,8 @@ mod tests {
         std::fs::write(&doc, disk).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(&doc, baseline, |_, _| {}).unwrap();
         let outcome = disk_edit_newer_than_registered_authority(&doc, authority);
-        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         (dir, outcome, log)
     }
 

@@ -30410,6 +30410,9 @@ fn test_agent_doc_route_io_owns_route_closeout_drain() {
         "classify_closeout_block_dispatch(",
         "route_dispatch_drain_pending_maintenance_warning",
         "agent_doc_queue::queue_continuation::live_continuation_head(&content)",
+        // `#planhead`/`#qchurn`: the drainability-filtered derivation that replaced
+        // the unfiltered head must not migrate back into route.rs either.
+        "agent_doc_queue::queue_continuation::live_drainable_continuation_head(",
     ] {
         assert!(
             !route_source.contains(forbidden_snippet),
@@ -30431,8 +30434,17 @@ fn test_agent_doc_route_io_owns_route_closeout_drain() {
             && closeout_drain.contains("project_closeout_drain(")
             && closeout_drain.contains("classify_closeout_block_dispatch(")
             && closeout_drain.contains("agent_doc_ops_log_io::log_op")
+            // `#planhead`/`#qchurn`: the active-queue-head derivation must be the
+            // drainability-filtered one in the SUPERVISOR scope. The unfiltered
+            // `live_continuation_head` returned an `[operator-verify]` head that no
+            // drainer acts on, so a blocked closeout dispatched a guaranteed no-op
+            // cycle for it.
             && closeout_drain
-                .contains("agent_doc_queue::queue_continuation::live_continuation_head"),
+                .contains("agent_doc_queue::queue_continuation::live_drainable_continuation_head(")
+            && closeout_drain
+                .contains("agent_doc_queue::queue_continuation::DrainScope::Supervisor")
+            && !closeout_drain
+                .contains("agent_doc_queue::queue_continuation::live_continuation_head("),
         "route closeout drain and block classification should live in agent-doc-route-io while orchestration injects only runtime closeout effects"
     );
     assert!(

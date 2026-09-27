@@ -33,18 +33,64 @@ completed
 Compacted content:
 - Archived 15 response topic(s): durable runtime admission closeout; root instruction-files target paths; actionable review extraction; 12 more
 - Prior summary/context: prior compacted content: Archived 37 response topic(s): Archived 11 response topics; #actionable-review; Codex attrib...
+
+### Re: are the dependencies feature-gated — opus-5 · 2026-09-27T07:04-04:00
+
+> **Queue prompt:**
+>
+> Are dependencies gated on feature flags? Such as postgres, temporal, nats, etc? If not, can we make the dependencies optional?
+
+I audited all fifteen `lazily-*` manifests. **Postgres and NATS were already gated everywhere they appear. There is no `temporal` dependency in the family at all** — the only match is `test_temporal_conformance` in lazily-cpp, which is the time/clock conformance test, not temporal.io.
+
+But the question found two real leaks, both in the *ungated* direction, and both are fixed and pushed.
+
+**lazily-rs: the default build pulled 45 crates, of which 36 were a protobuf toolchain.** Every backend feature was correctly optional — `postgres` behind `durable-postgres`, `async-nats` behind `durable-jetstream`, `rusqlite`, `str0m`, `tokio-tungstenite`, `leptos_reactive`, all of it. What was not gated was `[build-dependencies]`:
+
+```toml
+[build-dependencies]
+prost-build = "0.14.4"
+protoc-bin-vendored = "3.2.0"
+```
+
+Cargo resolves, downloads and compiles build-dependencies for **every** build of the crate regardless of which features are on — `build.rs` guarding its body on `CARGO_FEATURE_PROTOBUF` stops the codegen from *running*, not the toolchain from being *built*. So the default graph of a reactive-signals library carried prost-build, petgraph, regex, syn, prettyplease, tempfile, rustix and **all nine `protoc-bin-vendored-*` platform crates**, each embedding a full protoc binary.
+
+Both are now `optional = true` and named in the feature (`protobuf = ["dep:prost", "dep:prost-build", "dep:protoc-bin-vendored"]`), with `build.rs`'s body behind `#[cfg(feature = "protobuf")]`. **Measured: 45 crates → 9** (`arc-swap`, `lazily`, `lazily-macros`, `proc-macro2`, `quote`, `rustversion`, `smallvec`, `syn`, `unicode-ident`). A cold `cargo build --features protobuf` in a separate target dir still compiles 13 prost/protoc crates and still emits `lazily.graph_boundary.v1.rs`, so the opt-in path is intact.
+
+**lazily-js: `koffi` and `protobufjs` were hard `dependencies`.** The koffi one was a manifest-versus-code contradiction: `src/ffi-node.js` requires it inside a try/catch and its own error message says `npm i koffi`, while `package.json` made it mandatory — so every consumer of the reactive core installed a native FFI addon. `protobufjs` is imported only by `build/generated/graph-boundary.js`, reachable solely through the `./protobuf-graph-boundary` export subpath. Both are now optional peers (`peerDependenciesMeta.optional`, which npm does not auto-install) and stay in `devDependencies` so this repo's own suite still exercises them. Proven against an **empty `node_modules`**: `src/index.js` imports with 108 exports, `src/ffi-node.js` with 11 (its try/catch holds), and only `src/protobuf-graph-boundary.js` fails, with `ERR_MODULE_NOT_FOUND` naming protobufjs.
+
+**The other thirteen are clean, and two are exemplary.** lazily-py ships `mypy-extensions` alone with attrs/msgspec/pydantic/prometheus_client as extras, and its own comment already explains they are install ergonomics rather than dependencies. lazily-dart, lazily-zig and lazily-cpp have **zero** runtime dependencies (zig's `.dependencies` table is entirely commented out; cpp is a header-only INTERFACE target with no `find_package`/`FetchContent`). lazily-cs scopes `System.Text.Json` to `netstandard2.1` only, correctly, since net8/net10 carry it in-box. lazily-react and lazily-html depend on `@lazily-hub/lazily-js` as a peer. lazily-formal, lazily-spec, lazily-interop, lazily-gd carry nothing relevant.
+
+**Each fix carries a guard, and I attacked both rather than reasoning about them.**
+
+- `make default-build-dependency-check` (`scripts/default-build-dependency-guard.py`, now a `make check` dependency) measures the graph **cargo resolves**, not the manifest prose, and pins the default set as an exact equality in both directions. Its second half is the control that keeps the first honest: all 17 gated crates must be **present** under `--all-features`, because a `cargo tree` that silently produced nothing would otherwise satisfy the absence check vacuously and report green over an empty set. Restoring the pre-fix manifest reddens it with the 36 crates named; seven mutations of its own paths (comparison neutered, control neutered, empty-output refusal dropped, exit-status refusal dropped, tree-parse proof dropped, and both directions of the pin) each redden `--self-test`.
+- `test/package-manifest.test.js` in lazily-js asserts the set of bare package specifiers the shipped code imports **equals** the set the manifest declares optional, in both directions, so a new undeclared import and a pin nothing imports both fail. It strips comments first (`state-projection.js` carries a JSDoc import example that would otherwise read as a dependency) and carries two floors so a walk that lost the tree cannot report "no undeclared imports" over nothing. Eight mutations each reddened the intended assertion.
+
+One control worth naming because it was the load-bearing one: half-fixing lazily-rs — build-deps optional but *not* added to the feature — makes `cargo build --features protobuf` fail outright, so the feature wiring cannot be quietly omitted.
+
+**The first full lazily-rs run came back RED, and correctly so.** `check-ci-reach` refused the new gate because it was not pinned in `EXPECTED_CLOSURE_TARGETS` — that guard exists to make retiring a gate an incomplete edit, and adding one is meant to touch the pin. Fixed properly rather than loosened: the target joins `EXPECTED_CLOSURE_TARGETS`, `ci.yml` gains a step running both its commands, `EXPECTED_GATE_STEPS` pins that step name, and the closure-size comment is refreshed to the measured 57 (it already read a stale 52). The workflow YAML parses and the step carries both commands verbatim.
+
+**Verification.** lazily-js `make check` green at exit 0, **691/691 tests pass, 0 fail**, zero `✖` lines, and the four new tests ran inside that run — committed `82e5d1e`, pushed. lazily-rs `make check` green at exit 0 on the re-run: **908 test-result blocks, 7195 passed, 0 failed, zero `test result: FAILED`**, including `test-durable-postgres` 5/5 and `test-durable-jetstream` 1/1, with the new gate running as the run's second step — committed `045f99e`, pushed. I did not touch either repo's `AGENTS.md`: both are currently modified by another session, so documenting the gate there would entangle this commit with theirs; the Makefile comment, the script docstring and the CI step name carry it instead.
+
+**Two leaks remain, both queued at the top of the backlog** — I am not gating them as review items, they are agent-executable: `#lzktoptionaldeps` (lazily-kt's four unconditional Gradle `implementation` deps, of which protobuf-kotlin 4.31.1 and kotlinx-serialization-json are codec-only) and `#lzgooptionalpgx` (lazily-go's root `go.mod` requires `jackc/pgx/v5` plus six indirects for a dependency exactly **one test file** imports and **zero** non-test files do; Go has no optional deps, so it needs a nested integration module).
+
+Exchange is at 365 lines across 14 response sections, over the warn thresholds; the queue is active so I am not pausing to compact.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~🚧 #advance-review~~
+- 🚧 do [#dependenciesgatedfeature]
+- do [#lzktoptionaldeps]
+- do [#lzgooptionalpgx]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzktoptionaldeps] lazily-kt declares four UNCONDITIONAL Gradle `implementation` dependencies in build.gradle.kts — `net.java.dev.jna:jna:5.15.0`, `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0`, `org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3`, `com.google.protobuf:protobuf-kotlin:4.31.1` — so every consumer gets all four on its runtime classpath. protobuf-kotlin is needed only by the protobuf codec and kotlinx-serialization-json only by the JSON codec; JNA and coroutines-core are arguably core. Gate the codec deps behind Gradle feature variants (`java-library` + `registerFeature` + capabilities) or separate published artifacts, then pin the PUBLISHED POM's `<dependencies>` with a test asserting the set in BOTH directions, so a new unconditional dep and a pin nothing uses both redden — mirroring lazily-rs `make default-build-dependency-check` (scripts/default-build-dependency-guard.py, wired into `make check` and ci.yml) and lazily-js `test/package-manifest.test.js`. Mutation-check the pin before trusting it. Run `make check` green, then commit and push per lazily-kt's standing rule.
+- [ ] [#lzgooptionalpgx] lazily-go's root go.mod declares `github.com/jackc/pgx/v5 v5.7.6` plus six indirects (pgpassfile, pgservicefile, puddle, golang.org/x/crypto, x/sync, x/text) in the main `require` block, but pgx is imported by exactly ONE file — postgres_projection_barrier_integration_test.go — and by ZERO non-test files. Go has no optional dependencies, so the fix is a nested module: move the Postgres integration test into its own directory with its own go.mod (a `replace` directive back to the root), leaving the published module graph requiring nothing. Add a guard asserting the root go.mod `require` block is EMPTY and that the nested module still builds the test, with the second half as the anti-vacuity control — a guard that only checks emptiness passes over a deleted test. Mutation-check it. Run `make check` green, then commit and push per lazily-go's standing rule.
+- [ ] 🚧 [#dependenciesgatedfeature] Are dependencies gated on feature flags? Such as postgres, temporal, nats, etc? If not, can we make the dependencies optional?
 <!-- /agent:backlog -->
 
 ## Review

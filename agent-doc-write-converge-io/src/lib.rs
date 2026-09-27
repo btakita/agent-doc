@@ -30,7 +30,7 @@ use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
     FullContentRepairRedelivery, IpcDiskRepairReason, IpcLivePromptDriftState, IpcRepairDecision,
-    IpcSnapshotSource, is_socket_receipt_timeout_error,
+    IpcSnapshotSource, is_socket_receipt_timeout_error, is_socket_status_error,
 };
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, merge_visible_queue_additions_into_content_ours,
@@ -4247,18 +4247,53 @@ pub fn try_editor_converge(
                     err
                 ),
             );
-            if is_socket_receipt_timeout_error(err.to_string()) {
-                match record_ipc_socket_ack_timeout(&project_root, file, Some(&patch_id), source) {
+            // `#rejectioncountswedge`: a definitive receipt REJECTION must count
+            // toward the wedge, not only a timeout.
+            //
+            // This branch used to record only `is_socket_receipt_timeout_error`, so
+            // an endpoint that answered `IPC receipt rejected` accrued nothing:
+            // `degraded` stayed false, `editor_ipc_write_wedge_needs_recycle`
+            // returned false, and the `#midturn-wedge-recycle` escape never armed.
+            // The result is a circular wait — the recycle defers on
+            // `agent_doc_cycle_open` while the cycle cannot close until the stale
+            // supervisor is replaced. Observed 2026-09-27 on
+            // `tasks/agent-doc/agent-doc-bugs.md`: `supervisor_recycle_deferred_cycle_open
+            // stale=true inflight=0` every second against a durable 12687-byte capture.
+            //
+            // A rejection is STRONGER evidence than a timeout, which is the
+            // inversion `formal/tla/EditorReplicaStrand.tla` already names: "The
+            // endpoint is ALIVE — it returns a receipt — and it REJECTS. That is a
+            // definitive negative answer, not a timeout." Counting the weaker signal
+            // and discarding the stronger one is the defect.
+            //
+            // It shares the timeout counter and threshold rather than escalating on
+            // the first rejection: this arms a supervisor recycle, so two
+            // consecutive refusals is the conservative bar.
+            let failure_kind = if is_socket_receipt_timeout_error(err.to_string()) {
+                Some("timeout")
+            } else if is_socket_status_error(err.to_string()) {
+                Some("rejection")
+            } else {
+                None
+            };
+            if let Some(failure_kind) = failure_kind {
+                match record_ipc_socket_ack_failure(
+                    &project_root,
+                    file,
+                    Some(&patch_id),
+                    source,
+                    failure_kind,
+                ) {
                     Ok(true) => {
                         eprintln!(
-                            "[write] IPC listener degraded for {} after repeated {source} receipt timeouts",
+                            "[write] IPC listener degraded for {} after repeated {source} receipt {failure_kind}s",
                             file.display()
                         );
                         log_write_wedge_requests_supervisor_recycle(file, source);
                     }
                     Ok(false) => {}
                     Err(e) => eprintln!(
-                        "[write] WARNING: {source} converge ack-timeout record failed (non-fatal): {e}"
+                        "[write] WARNING: {source} converge ack-{failure_kind} record failed (non-fatal): {e}"
                     ),
                 }
             }
@@ -4418,11 +4453,30 @@ fn editor_transport_health_for_current_session(
     )
 }
 
+/// Compatibility alias for the timeout-only spelling.
 pub fn record_ipc_socket_ack_timeout(
     project_root: &Path,
     file: &Path,
     patch_id: Option<&str>,
     transport: &str,
+) -> Result<bool> {
+    record_ipc_socket_ack_failure(project_root, file, patch_id, transport, "timeout")
+}
+
+/// `#rejectioncountswedge` — record one unproven-delivery failure against the
+/// editor transport health record, and report whether it crossed the wedge
+/// threshold.
+///
+/// `failure_kind` is `timeout` or `rejection`. Both accrue on the same counter:
+/// the question the threshold answers is "has a nominally-active listener refused
+/// this many consecutive writes without proving delivery", and a rejection
+/// answers it at least as strongly as a timeout.
+pub fn record_ipc_socket_ack_failure(
+    project_root: &Path,
+    file: &Path,
+    patch_id: Option<&str>,
+    transport: &str,
+    failure_kind: &str,
 ) -> Result<bool> {
     let prior = editor_transport_health_for_current_session(project_root, file)?;
     let prior_timeouts = prior
@@ -4465,9 +4519,10 @@ pub fn record_ipc_socket_ack_timeout(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ipc_socket_ack_timeout_recorded file={} transport={} patch_id={} consecutive_timeouts={} degraded={}",
+            "ipc_socket_ack_failure_recorded file={} transport={} kind={} patch_id={} consecutive_failures={} degraded={} (#rejectioncountswedge)",
             file.display(),
             transport,
+            failure_kind,
             patch_id.unwrap_or("-"),
             consecutive_timeouts,
             degraded
@@ -5116,6 +5171,53 @@ mod tests {
             !editor_ipc_write_wedged(dir.path(), &doc),
             "a new session id must not inherit old transport health"
         );
+    }
+
+    /// `#rejectioncountswedge` — a definitive `IPC receipt rejected` must arm the
+    /// wedge exactly as a timeout does.
+    ///
+    /// It did not: the record site classified only
+    /// `is_socket_receipt_timeout_error`, so a rejecting endpoint accrued nothing,
+    /// `editor_ipc_write_wedge_needs_recycle` stayed false, and the
+    /// `#midturn-wedge-recycle` escape never armed — leaving the recycle deferred
+    /// on `agent_doc_cycle_open` while the cycle waited on the recycle.
+    #[test]
+    fn ipc_receipt_rejections_arm_the_wedge_like_timeouts() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: reject-session\n---\n\ncontent").unwrap();
+
+        assert!(
+            !record_ipc_socket_ack_failure(dir.path(), &doc, Some("p1"), "finalize", "rejection")
+                .unwrap(),
+            "the first rejection only records health state"
+        );
+        assert!(
+            record_ipc_socket_ack_failure(dir.path(), &doc, Some("p2"), "finalize", "rejection")
+                .unwrap(),
+            "a second consecutive rejection must mark the listener degraded"
+        );
+        assert!(editor_ipc_write_wedged(dir.path(), &doc));
+        assert!(
+            editor_ipc_write_wedge_needs_recycle(dir.path(), &doc),
+            "a degraded-by-rejection listener must request the midturn recycle, \
+             or the open-cycle defer becomes a circular wait"
+        );
+    }
+
+    /// The classifier that chooses between them. `IPC receipt rejected` is the
+    /// real message a rejecting endpoint produces; it must not fall through to
+    /// "no failure worth recording".
+    #[test]
+    fn a_rejected_receipt_is_classified_as_a_recordable_failure() {
+        let rejected = r#"IPC receipt rejected: {"type":"receipt","status":"rejected"}"#;
+        assert!(
+            !is_socket_receipt_timeout_error(rejected),
+            "a rejection is not a timeout — which is why it was being dropped"
+        );
+        assert!(is_socket_status_error(rejected));
+        assert!(is_socket_receipt_timeout_error("IPC receipt timeout (2s)"));
     }
 
     #[test]

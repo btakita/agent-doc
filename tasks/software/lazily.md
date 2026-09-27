@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -217,24 +217,61 @@ Two things worth noting from this stretch, neither of them blockers:
 
 - The exchange is at 171 lines across 7 response sections, past the 160-line warn threshold. No `agent_doc_auto_compact` opt-in is set, so I am not compacting — flagging it since compaction residue is exactly what this item was cleaning up.
 - `agent-doc doctor` reported `no issues detected` on this document the whole time those three orphan lines were present, and `agent-doc autofix` had no catalog entry for the class. Text stranded outside every component is undetected by both, which is why this needed a human to notice it. If you want that detector built, queue it and I will take it.
+
+### Re: advancing the four gated review items — opus-5 · 2026-09-27T01:05-04:00
+
+> **Queue prompt:**
+>
+> #advance-review
+
+Re-verified all four against live state rather than trusting their text, and turned one of them into code. Two items moved materially; two are still operator-only, and one of those I could not verify at all — I say so instead of re-asserting it.
+
+**`#lzmacosrunner` — the policy's second half is now enforced, not prose.** The cadence gate only ever bounded how *often* Darwin assets may be uploaded. Nothing asserted that any release actually *carries* them, so "never drop either deliverable" had no enforcement — and the deliverable has been dropped five times since v0.35.398 with `make release-macos-cadence-check` still reporting success. New `make release-macos-coverage-check` (commit `ddb612833`, pushed) names them exactly: **v0.35.399, v0.35.400, v0.35.401, v0.35.406, v0.35.417**. A half-shipped pair counts as a drop; drafts are excluded; a published release with no timestamp fails closed rather than being skipped, so an unorderable release cannot hide a dropped deliverable. It is deliberately **not** a `make check` dependency — clearing it needs Mac hardware, and blocking the build on hardware would redden every unrelated change. `specs/07-core-commands.md` records why the cadence gate is blind to this class, and `test_cli` pins both the gate's existence and that exclusion.
+
+**`#lzagentdocartifactpurge` — the audit decayed in one day, and the fail-closed executor caught it.** Yesterday's live dry run refused 0. Today it refuses **105**, all `no_live_durable_counterpart`, and the plan shrank from 2,771 to **2,666 artifacts (43.83 GB)**, 10 skipped, 0 deleted. Cause, verified directly against PyPI rather than inferred: **PyPI's oldest surviving `agent-doc` release is now 0.35.113**, so 27 versions in 0.35.0–0.35.37 lost their wheels. For those artifacts the Actions copy is now the only copy, and the executor's live re-derivation refused every one. That is the design working — the refusal is the feature, and it is why this run is still safe to authorize.
+
+Two facts the operator's authorization now depends on, neither previously recorded:
+
+- **20% of the remaining plan rests on a store that demonstrably prunes.** 530 of the 2,666 candidates are backed by PyPI files alone, lowest surviving backer 0.35.119 — six versions above the prune floor. The other 2,136 rest on GitHub release assets, which have not decayed.
+- **There is a hard deadline.** The handoff was generated 2026-09-25T17:02:35Z and the executor's 7-day `--max-handoff-age-days` guard aborts the entire run after **2026-10-02T17:02:35Z**, unless the audit is regenerated or `--allow-stale-handoff` is passed.
+
+**`#lzambienttokenresolve` — re-proved, and it caught my own drift again.** `make publish-credential-proof` is green: 22 checks, 8/8 preimages, 8/8 patch sets applying, 21 fake `passage` lookups and 13 fake publisher invocations measured, `application_state: unapplied`, root `.env` at 6 assigned / 0 commented. Adding the Darwin coverage target to `src/agent-doc/Makefile` moved the twine recipe from line 334 to 340 and changed that file's preimage — the harness failed on it before I noticed, which is the third time it has earned its keep. Hash and hunk offset refreshed as `12e766d414`. Remaining blockers are unchanged and operator-only.
+
+**`#lzgithubbudget20` — I could not verify this one, and did not pretend to.** `/users/btakita/settings/billing/*` returns 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. So the block is *unverified*, not re-confirmed, and there is no agent-executable slice. I left the item otherwise unchanged and recorded the limitation in its text.
+
+**Verification.** Root `make check` exit 0, **9,820/9,820 tests**, `audit-docs` clean. Two earlier runs went red and I did not waive either:
+
+1. `test_release_cadence_applies_only_to_macos_assets` failed because extracting the shared `gh` fetch dropped the phrase naming what the cadence gate refuses. That was a genuine regression in my change, not a brittle test — the fix threads the consequence in from each caller, so the cadence path still says it is "refusing to publish Darwin assets" and the coverage path states its own.
+2. `queue_authority_observation_requires_exact_strike_application_receipt` failed once under the full 9,820-test run (retry receipt `None` instead of `Some(<projection_id>)`, 1.14s) and passes 5/5 in isolation at 0.02s. It waits on a bounded receive, so parallel load starves it. The third full run passed all 9,820, CI is green at HEAD, and nothing I changed compiles into `agent-doc-controller-io`. Filed as actionable rather than fixed, because a concurrent session holds uncommitted rustfmt edits across that exact file and editing it now would collide.
+
+Also worth knowing: the background-task summary for both red runs reported "exit code 0" while `make check` had actually exited 2. The explicit `$?` capture is what caught it — a summary line is not a test result.
+
+Three items queued, none of them gates. This session's tree also holds another session's uncommitted work, so the green suite is proof about my change, not about HEAD.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 #advance-review
+- do [#lzauditrefresh]
+- do [#lzpypiperishable]
+- do [#lzstrikereceiptflake]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzauditrefresh] Regenerate the GitHub Actions artifact purge audit before the 7-day handoff guard expires at 2026-10-02T17:02:35Z, so [#lzagentdocartifactpurge] stays authorizable without --allow-stale-handoff. The generator is already parameterized (src/agent-doc/scripts/audit-actions-artifacts.py --repo --output-dir); a fresh run drops the 105 rows whose PyPI counterpart was pruned and re-dates the handoff. This replaces the basis of a pending operator authorization (2,781 candidates / 466 withheld, commit 4af68aa8f), so restate the new counts in that review item when it lands.
+- [ ] [#lzpypiperishable] Classify PyPI-only durable counterparts as perishable in src/agent-doc/scripts/audit-actions-artifacts.py. Proven 2026-09-27: 27 agent-doc versions (0.35.0-0.35.37) lost their PyPI wheels within a day, killing 105 delete candidates, and 530 of the 2,666 remaining candidates rest on PyPI alone with the prune floor at 0.35.113 sitting six versions below the lowest surviving backer (0.35.119). Emit counterpart durability as its own column and summary so an operator can authorize release-asset-backed rows without inheriting PyPI decay risk.
+- [ ] [#lzstrikereceiptflake] Make agent-doc-controller-io project_controller::tests::queue_authority_observation_requires_exact_strike_application_receipt deterministic. Under the full 9,820-test nextest run it failed with the retry receipt None instead of Some(projection_id) after 1.14s, while passing 5/5 in isolation at 0.02s; it waits on a bounded receive, so parallel load starves it. Not fixed 2026-09-27 because a concurrent session held uncommitted rustfmt edits across agent-doc-controller-io/src/project_controller.rs and editing it would have collided. Replace the timing budget with a deterministic barrier or SimWorld step.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Re-verified 2026-09-26: `make release-macos-cadence-check` reports the weekly window open since 2026-09-22T16:41:49Z, v0.35.398 (2026-09-15) is the last release with both Darwin architectures, and `gh release view` confirms v0.35.417 is still Latest with six assets and no Darwin archive. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
-- [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
+- [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Re-verified 2026-09-27: `make release-macos-cadence-check` still reports the weekly window open since 2026-09-22T16:41:49Z, and v0.35.398 (2026-09-15) is still the last release carrying both Darwin architectures. The policy's never-drop-either-deliverable half is now enforced instead of prose: `make release-macos-coverage-check` (commit ddb612833) names every release published after the last Darwin-complete one that ships an incomplete pair, and it currently fails naming five — v0.35.399, v0.35.400, v0.35.401, v0.35.406, v0.35.417. It is deliberately NOT a `make check` dependency, because clearing it needs Mac hardware. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
+- [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account. Checked 2026-09-27 and could NOT verify the current state from here: /users/btakita/settings/billing/* returns 404 with a user-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope — so this block is unverified rather than re-confirmed. No agent-executable slice.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit commit 4af68aa8f verified 2,781 exact durable-counterpart delete candidates totaling 45.56 GB and withheld 466 artifacts; the handoff is under src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/. The re-intersection and withheld-row refusal are now code, not prose: run `python3 scripts/purge-actions-artifacts.py` (commit 187f31622) from src/agent-doc. Its live dry run on 2026-09-26 planned 2,771 deletable artifacts (45.47 GB), skipped 10 already absent from the API, and refused 0. The destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000`; the 250 default cap will otherwise abort. Blocked solely on explicit destructive authorization; no artifact has been deleted.
 - [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] The ready-to-apply point-of-use credential plan is complete at tasks/software/plan-ambient-publish-token-point-of-use.md. The agent-executable prerequisite `#lzfakepublisherproof` is DONE: `make publish-credential-proof` (commits `cf2cbfda9`, `3e48cef93`) statically verifies all eight preimages plus `git apply --check`, then exercises all eight production call sites in success, failure, and empty modes against fake passage/cargo/maturin/bun/twine recorders — 22 checks, currently green, resolving no credential and invoking no publisher. It already caught real drift and refreshed two preimage hashes (`src/agent-doc/Makefile`, root `Makefile`) plus one hunk offset. Remaining blockers are operator-only: a quiet window for application, rotation of the Cargo, npm, and PyPI credentials, and one manual step the harness cannot do — rerunning the plan's step-5 name loop in a real INTERACTIVE shell after application, because a non-interactive shell does not fire mise's activation hook and forcing it would resolve real credentials. Do not resolve or print credential values during preparation.
 <!-- /agent:review -->

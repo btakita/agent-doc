@@ -1,17 +1,40 @@
-//! One source of truth for "will the next `agent-doc <FILE>` admission refuse?".
+//! One source of truth for "how does the next `agent-doc <FILE>` admission
+//! reconcile the three revision planes?".
 //!
-//! Preflight refuses to open a cycle when the recorded baseline, the registered
-//! live editor authority, and the durable disk file have ALL advanced to three
-//! distinct revisions: there is no unchanged branch to fast-forward from, so
-//! choosing a winner would silently drop one writer's text.
+//! Preflight observes three planes — the recorded baseline, the registered live
+//! editor authority, and the durable disk file — and picks the action that
+//! reconciles them. Every classification is resolvable; none of them stalls.
 //!
-//! `session-check` must consult the SAME classification before it prescribes a
-//! remedy. It used to print "run `agent-doc <FILE>` to continue" unconditionally,
-//! which in this state is a deadlock: the agent runs the trigger, the
-//! `UserPromptSubmit` hook's preflight refuses it, session-check prints the same
-//! advice again, and nothing names the operator-side action that actually clears
-//! it. Keeping the predicate here — rather than re-deriving it on each side —
-//! is what stops the two halves from drifting apart again.
+//! `session-check` must consult the SAME classification so the two halves cannot
+//! drift apart.
+//!
+//! # Why a genuine split merges instead of refusing (`#admissionsplitmerge`)
+//!
+//! This module used to **refuse admission** when all three planes had durably
+//! advanced and the authority did not already contain disk, on the reasoning that
+//! "choosing a winner would silently drop one writer's text". That reasoning is
+//! sound and its conclusion was wrong: the alternative to choosing a winner is not
+//! refusing, it is **merging**, which drops nobody. agent-doc already owns a pure
+//! node-identity three-way merge for exactly this input shape
+//! (`agent_doc_merge::document_cell_merge`, `base`/`ours`/`theirs`), and the
+//! baseline is by definition the common ancestor the merge needs.
+//!
+//! Refusing was also unachievable as a *stable* state. A realtime document has two
+//! writers by design — the operator types in a registered editor while agent-doc
+//! projects to disk — so two planes advancing independently is the normal condition,
+//! not a fault to be prevented. The prescribed remedy ("save or close the editor
+//! tab") asked a human to hand-converge planes the binary is built to merge, and it
+//! stalled the queue until they did. Observed twice on 2026-09-27 within seven
+//! hours (`tasks/agent-doc/agent-doc-bugs.md`, `tasks/software/lazily.md`) with
+//! durable deltas of 10 and 17 bytes: in the first, disk carried the operator's
+//! queue edits and the editor buffer carried a different revision of the same three
+//! lines. Nothing about that is unmergeable.
+//!
+//! So the split classifies as `ThreeWaySplitMerged` and selects
+//! `MergeDiskIntoAuthority`. The IO shell performs the merge and adopts the result
+//! through the same compare-and-swap editor write that already adopts a proven
+//! newer durable save — the merge cannot live here because `agent-doc-merge`
+//! depends on this crate.
 //!
 //! # Why the comparison is normalized (`#admissionmarkersplit`)
 //!
@@ -63,20 +86,24 @@ pub enum AdmissionDivergence {
     /// proceed on the authority and the next commit converges disk.
     AuthoritySubsumesDisk,
     /// Baseline, authority, and disk are three durably distinct revisions with
-    /// content on disk the authority does not carry. Admission refuses, and only
-    /// convergence on the editor side clears it.
-    UnmergeableThreeWaySplit,
+    /// content on disk the authority does not carry: two writers genuinely
+    /// diverged. Admission reconciles them with a three-way merge against the
+    /// baseline ancestor, so neither writer is dropped and nothing stalls.
+    ThreeWaySplitMerged,
 }
 
 impl AdmissionDivergence {
-    /// `true` when the next admission will refuse on this observation.
-    pub fn refuses_admission(self) -> bool {
-        self == Self::UnmergeableThreeWaySplit
+    /// `true` when reconciling this observation needs a three-way merge rather
+    /// than a fast-forward or a plain diff.
+    ///
+    /// No classification refuses admission: see `#admissionsplitmerge`.
+    pub fn requires_disk_merge(self) -> bool {
+        self == Self::ThreeWaySplitMerged
     }
 
     /// Stable log token naming WHY the observation classified this way.
     ///
-    /// The refusal used to be indistinguishable in `ops.log` from the two
+    /// The merged split used to be indistinguishable in `ops.log` from the two
     /// benign shapes above — every case printed the same three raw hashes — so
     /// diagnosing one meant reconstructing byte lengths out of surrounding
     /// `commit_staging` / `document_baseline_checkpoint` lines. The token plus
@@ -86,7 +113,7 @@ impl AdmissionDivergence {
             Self::Resolvable => "verbatim_branch_unchanged",
             Self::TransientMarkersOnly => "transient_markers_only",
             Self::AuthoritySubsumesDisk => "authority_subsumes_disk",
-            Self::UnmergeableThreeWaySplit => "unmergeable_three_way_split",
+            Self::ThreeWaySplitMerged => "three_way_split_merged",
         }
     }
 }
@@ -99,8 +126,9 @@ pub enum DiskAdoption {
     /// The durable authority branch is unchanged and disk durably advanced:
     /// fast-forward the live authority onto the proven newer durable save.
     FastForwardAuthorityToDisk,
-    /// Refuse admission rather than choose a winner.
-    Refuse,
+    /// Both branches durably advanced: three-way merge disk into the live
+    /// authority against the baseline ancestor and admit on the merged revision.
+    MergeDiskIntoAuthority,
 }
 
 impl DiskAdoption {
@@ -109,7 +137,7 @@ impl DiskAdoption {
         match self {
             Self::ProceedOnAuthority => "proceed_on_authority",
             Self::FastForwardAuthorityToDisk => "fast_forward_authority_to_disk",
-            Self::Refuse => "refuse",
+            Self::MergeDiskIntoAuthority => "merge_disk_into_authority",
         }
     }
 }
@@ -147,12 +175,8 @@ impl AdmissionAssessment {
 /// The verbatim tests run first and keep their exact pre-normalization
 /// behaviour, so this is a strict widening: an observation that resolved before
 /// resolves the same way now, and only observations that previously refused can
-/// change verdict.
-pub fn assess(
-    baseline: Option<&str>,
-    authority: Option<&str>,
-    disk: &str,
-) -> AdmissionAssessment {
+/// change verdict — they now merge (`#admissionsplitmerge`).
+pub fn assess(baseline: Option<&str>, authority: Option<&str>, disk: &str) -> AdmissionAssessment {
     let (Some(baseline), Some(authority)) = (baseline, authority) else {
         return AdmissionAssessment {
             divergence: AdmissionDivergence::Resolvable,
@@ -193,13 +217,17 @@ pub fn assess(
         };
     }
     AdmissionAssessment {
-        divergence: AdmissionDivergence::UnmergeableThreeWaySplit,
-        adoption: DiskAdoption::Refuse,
+        divergence: AdmissionDivergence::ThreeWaySplitMerged,
+        adoption: DiskAdoption::MergeDiskIntoAuthority,
     }
 }
 
 /// Classify one coherent observation of the three planes.
-pub fn classify(baseline: Option<&str>, authority: Option<&str>, disk: &str) -> AdmissionDivergence {
+pub fn classify(
+    baseline: Option<&str>,
+    authority: Option<&str>,
+    disk: &str,
+) -> AdmissionDivergence {
     assess(baseline, authority, disk).divergence
 }
 
@@ -223,21 +251,22 @@ pub fn authority_subsumes_disk(durable_disk: &str, durable_authority: &str) -> b
         .all(|disk_line| authority_lines.by_ref().any(|line| line == disk_line))
 }
 
-/// The operator-side remedy for a refused admission.
+/// What a three-way split means for the caller now that admission merges it.
 ///
-/// Stated as the action that actually converges the planes. Re-invoking the
-/// trigger is explicitly ruled out so the caller cannot hand back advice the
-/// admission gate will refuse again.
-pub fn unmergeable_split_remedy(file_display: &str) -> String {
+/// There is no operator action to prescribe, and no action for the agent either:
+/// the merge happens inside admission. This text exists so a diagnostic that
+/// observes the split reports it as reconciled rather than as a fault, and so it
+/// still rules out the two recoveries that destroy a writer's text — an agent
+/// that reaches for `--force-disk` on seeing "three planes" is the failure mode
+/// this wording has always been guarding against.
+pub fn three_way_merge_notice(file_display: &str) -> String {
     format!(
         "This document's recorded baseline, live editor buffer, and file on disk are three different \
-revisions whose durable content differs (not just transient agent-doc markers), and the live buffer \
-does not carry everything already on disk, so admission refuses rather than choose a winner and drop \
-a writer's text. Re-invoking `agent-doc {file_display}` will keep refusing until the planes converge \
-— do NOT retry it, and do NOT use `--force-disk` or hand-align disk to the authority (either one \
-discards the other writer). Operator-side: save or close this document's editor tab so the live \
-buffer and disk converge, and close any other agent-doc session still open on this same document. \
-Admission then proceeds normally on the next invocation."
+revisions whose durable content differs (not just transient agent-doc markers), so two writers \
+genuinely diverged. Admission reconciles them with a three-way merge against the baseline ancestor \
+and proceeds on the merged revision — no writer is dropped and there is nothing to converge by hand. \
+Run `agent-doc {file_display}` normally. Do NOT use `--force-disk` and do NOT hand-align disk to the \
+authority: either one discards the other writer's text that the merge preserves."
     )
 }
 
@@ -267,15 +296,53 @@ mod tests {
         );
     }
 
+    /// `#admissionsplitmerge`: three durably distinct revisions are a genuine
+    /// two-writer divergence, which is the normal condition for a realtime
+    /// document — not a fault. It resolves by merge, never by refusing.
     #[test]
-    fn three_distinct_revisions_refuse_admission() {
+    fn three_distinct_revisions_merge_instead_of_refusing() {
         let assessment = assess(Some("base\n"), Some("live only\n"), "disk only\n");
         assert_eq!(
             assessment.divergence,
-            AdmissionDivergence::UnmergeableThreeWaySplit
+            AdmissionDivergence::ThreeWaySplitMerged
         );
-        assert!(assessment.divergence.refuses_admission());
-        assert_eq!(assessment.adoption, DiskAdoption::Refuse);
+        assert!(assessment.divergence.requires_disk_merge());
+        assert_eq!(assessment.adoption, DiskAdoption::MergeDiskIntoAuthority);
+    }
+
+    /// The invariant that replaces the refusal: **no** observation of the three
+    /// planes may select an action that declines to reconcile them. A stall was
+    /// reintroduced once as a "safe" default; this test is what makes reaching for
+    /// one again a red suite rather than a wedged queue.
+    #[test]
+    fn no_observation_of_the_three_planes_declines_to_reconcile() {
+        let observations = [
+            ("base", "base", "base"),
+            ("base", "base", "disk"),
+            ("base", "live", "base"),
+            ("base", "same", "same"),
+            ("base\n", "live only\n", "disk only\n"),
+            ("# D\n\ni\n", "# D\n\ni\nc\ns\n", "# D\n\ni\nc\n"),
+            ("# D\n\ni\n", "# D\n\ni\ns\n", "# D\n\ni\ne\n"),
+            (
+                "# D\n\nb\n",
+                "# D\n\n<!-- agent:boundary:a:d -->\nb\n",
+                "# D\n\nb\nx\n",
+            ),
+        ];
+        for (baseline, authority, disk) in observations {
+            let adoption = assess(Some(baseline), Some(authority), disk).adoption;
+            assert!(
+                matches!(
+                    adoption,
+                    DiskAdoption::ProceedOnAuthority
+                        | DiskAdoption::FastForwardAuthorityToDisk
+                        | DiskAdoption::MergeDiskIntoAuthority
+                ),
+                "every observation must reconcile, got {adoption:?} for \
+                 baseline={baseline:?} authority={authority:?} disk={disk:?}"
+            );
+        }
     }
 
     #[test]
@@ -305,8 +372,11 @@ mod tests {
             assessment.divergence,
             AdmissionDivergence::TransientMarkersOnly
         );
-        assert!(!assessment.divergence.refuses_admission());
-        assert_eq!(assessment.adoption, DiskAdoption::FastForwardAuthorityToDisk);
+        assert!(!assessment.divergence.requires_disk_merge());
+        assert_eq!(
+            assessment.adoption,
+            DiskAdoption::FastForwardAuthorityToDisk
+        );
     }
 
     /// A ` (HEAD)` suffix is 7 bytes of transport state on a heading. It must
@@ -338,25 +408,26 @@ mod tests {
             assessment.divergence,
             AdmissionDivergence::AuthoritySubsumesDisk
         );
-        assert!(!assessment.divergence.refuses_admission());
+        assert!(!assessment.divergence.requires_disk_merge());
         // Disk is an ancestor: there is nothing to fast-forward INTO the
         // authority, and adopting disk would drop the operator's steering.
         assert_eq!(assessment.adoption, DiskAdoption::ProceedOnAuthority);
     }
 
     /// Subsumption must not swallow a real conflict: disk content the authority
-    /// never received still refuses.
+    /// never received is a genuine second writer, so it must select the merge
+    /// rather than silently proceeding on the authority and dropping that text.
     #[test]
-    fn disk_content_missing_from_the_authority_still_refuses() {
+    fn disk_content_missing_from_the_authority_selects_the_merge() {
         let baseline = "# Doc\n\nintro\n";
         let disk = "# Doc\n\nintro\nexternal edit only on disk\n";
         let authority = "# Doc\n\nintro\noperator steering\n";
         let assessment = assess(Some(baseline), Some(authority), disk);
         assert_eq!(
             assessment.divergence,
-            AdmissionDivergence::UnmergeableThreeWaySplit
+            AdmissionDivergence::ThreeWaySplitMerged
         );
-        assert_eq!(assessment.adoption, DiskAdoption::Refuse);
+        assert_eq!(assessment.adoption, DiskAdoption::MergeDiskIntoAuthority);
     }
 
     /// `ProceedOnAuthority` is the only safe action when disk is durably equal to
@@ -392,65 +463,81 @@ mod tests {
             AdmissionDivergence::Resolvable,
             AdmissionDivergence::TransientMarkersOnly,
             AdmissionDivergence::AuthoritySubsumesDisk,
-            AdmissionDivergence::UnmergeableThreeWaySplit,
+            AdmissionDivergence::ThreeWaySplitMerged,
         ]
         .map(AdmissionDivergence::reason_token);
         let unique: std::collections::HashSet<_> = tokens.iter().collect();
-        assert_eq!(unique.len(), tokens.len(), "duplicate log token: {tokens:?}");
         assert_eq!(
-            AdmissionDivergence::UnmergeableThreeWaySplit.reason_token(),
-            "unmergeable_three_way_split"
+            unique.len(),
+            tokens.len(),
+            "duplicate log token: {tokens:?}"
+        );
+        assert_eq!(
+            AdmissionDivergence::ThreeWaySplitMerged.reason_token(),
+            "three_way_split_merged"
         );
         let actions = [
             DiskAdoption::ProceedOnAuthority,
             DiskAdoption::FastForwardAuthorityToDisk,
-            DiskAdoption::Refuse,
+            DiskAdoption::MergeDiskIntoAuthority,
         ]
         .map(DiskAdoption::action_token);
         let unique: std::collections::HashSet<_> = actions.iter().collect();
         assert_eq!(unique.len(), actions.len());
     }
 
-    /// Only `Refuse` may pair with a refusing classification, and a refusing
-    /// classification may never pair with an action that proceeds. A mismatch
-    /// here is how a "fixed" gate silently keeps wedging (or silently stops
-    /// protecting a writer).
+    /// Only `MergeDiskIntoAuthority` may pair with a merge-requiring
+    /// classification, and a merge-requiring classification may never pair with
+    /// an action that proceeds without merging. A mismatch here is how a "fixed"
+    /// gate silently stops protecting a writer.
     #[test]
-    fn the_refusal_verdict_and_the_action_cannot_disagree() {
+    fn the_merge_verdict_and_the_action_cannot_disagree() {
         let observations = [
             ("base", "base", "disk"),
             ("base", "live", "base"),
             ("base", "same", "same"),
             ("base\n", "live only\n", "disk only\n"),
-            ("# D\n\nb\n", "# D\n\n<!-- agent:boundary:a:d -->\nb\n", "# D\n\nb\nx\n"),
+            (
+                "# D\n\nb\n",
+                "# D\n\n<!-- agent:boundary:a:d -->\nb\n",
+                "# D\n\nb\nx\n",
+            ),
             ("# D\n\ni\n", "# D\n\ni\nc\ns\n", "# D\n\ni\nc\n"),
             ("# D\n\ni\n", "# D\n\ni\ns\n", "# D\n\ni\ne\n"),
         ];
         for (baseline, authority, disk) in observations {
             let assessment = assess(Some(baseline), Some(authority), disk);
             assert_eq!(
-                assessment.divergence.refuses_admission(),
-                assessment.adoption == DiskAdoption::Refuse,
+                assessment.divergence.requires_disk_merge(),
+                assessment.adoption == DiskAdoption::MergeDiskIntoAuthority,
                 "verdict/action disagree for {assessment:?}"
             );
         }
     }
 
-    /// The remedy must not prescribe the trigger the admission gate refuses, and
-    /// must not prescribe the two recoveries that destroy a writer's text.
+    /// The notice must report the split as reconciled, must not send anyone off to
+    /// hand-converge planes the binary merges, and must still rule out the two
+    /// recoveries that destroy a writer's text.
     #[test]
-    fn the_remedy_never_prescribes_a_refused_or_destructive_action() {
-        let remedy = unmergeable_split_remedy("tasks/api.md");
-        assert!(remedy.contains("save or close this document's editor tab"));
-        assert!(remedy.contains("will keep refusing"));
-        assert!(remedy.contains("do NOT retry"));
-        assert!(remedy.contains("--force-disk"));
-        assert!(
-            !remedy.contains("to continue"),
-            "the deadlocking `run ... to continue` phrasing must not reappear: {remedy}"
-        );
-        // The refusal now means durable divergence. Saying so is what stops an
-        // operator from reading a marker-only split into a genuine one.
-        assert!(remedy.contains("not just transient agent-doc markers"));
+    fn the_notice_reports_a_merge_and_never_prescribes_a_destructive_action() {
+        let notice = three_way_merge_notice("tasks/api.md");
+        assert!(notice.contains("three-way merge"));
+        assert!(notice.contains("no writer is dropped"));
+        assert!(notice.contains("--force-disk"));
+        // The stalling remedy must not come back in any of its phrasings.
+        for stall in [
+            "save or close this document's editor tab",
+            "will keep refusing",
+            "do NOT retry",
+            "refuses",
+        ] {
+            assert!(
+                !notice.contains(stall),
+                "the stalling remedy phrase {stall:?} must not reappear: {notice}"
+            );
+        }
+        // Saying the divergence is durable is what stops a marker-only split from
+        // being read as a genuine one.
+        assert!(notice.contains("not just transient agent-doc markers"));
     }
 }

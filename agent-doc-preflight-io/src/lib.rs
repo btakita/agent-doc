@@ -2822,22 +2822,119 @@ fn disk_edit_newer_than_registered_authority(
         agent_doc_document::admission_divergence::DiskAdoption::FastForwardAuthorityToDisk => {
             Ok(Some(disk))
         }
-        agent_doc_document::admission_divergence::DiskAdoption::Refuse => {
-            Err(QueueAuthorityUnavailable::new(format!(
-                "disk and registered editor authority both advanced from the recorded baseline; refusing to choose a winner (baseline_hash={}, authority_hash={}, disk_hash={}; durable baseline_hash={}, durable authority_hash={}, durable disk_hash={}). {}",
-                agent_doc_hash::short_content_hash(&baseline),
-                agent_doc_hash::short_content_hash(authority),
-                agent_doc_hash::short_content_hash(&disk),
-                durable_short_content_hash(&baseline),
-                durable_short_content_hash(authority),
-                durable_short_content_hash(&disk),
-                agent_doc_document::admission_divergence::unmergeable_split_remedy(
-                    &file.display().to_string()
-                ),
-            ))
-            .into())
+        agent_doc_document::admission_divergence::DiskAdoption::MergeDiskIntoAuthority => {
+            merge_admission_three_way_split(file, &baseline, authority, &disk)
         }
     }
+}
+
+/// Reconcile a genuine two-writer split into one revision (`#admissionsplitmerge`).
+///
+/// This replaces a refusal. Both branches durably advanced and the live authority
+/// does not already contain disk, so there is no fast-forward available — but the
+/// baseline is by definition their common ancestor, which is exactly the input a
+/// three-way merge takes. `agent_doc_merge` is the same pure engine the ordinary
+/// write path merges concurrent editor and agent revisions with; the returned
+/// candidate is adopted through the same compare-and-swap editor write that adopts
+/// a proven newer durable save, so the authority cut is rechecked at the mutation
+/// edge.
+///
+/// Disk is the `agent` side and the live editor buffer is the `operator` side. That
+/// orientation is load-bearing: on a same-node conflict the merge keeps the
+/// operator value, which is the codebase-wide rule that the in-editor document is
+/// the source of truth.
+///
+/// The engines are tried in a ladder, `Cell` first. `Cell` merges node-by-node and
+/// preserves each side's authored order, which is what `#qauthorder` requires of a
+/// diverged queue — the shape of both live incidents. It also reports `fell_back`
+/// when it declines, and its own contract says a caller must then pick another pure
+/// strategy. `Semantic` is that second rung, but it is NOT a safe first choice here:
+/// it rebuilds prose from the operator skeleton, and on the probe fixture below it
+/// emitted an EMPTY `agent:exchange` where both sides had a body. Adopting that would
+/// be precisely the dropped-writer outcome the old refusal existed to prevent, which
+/// is why every rung must clear `merge_preserves_authority` before it is adopted.
+///
+/// Returning `Ok(None)` means "proceed on the authority unchanged". That is the
+/// non-stalling outcome when no rung produces an adoptable revision: disk then
+/// converges at the next commit, exactly as it does for `AuthoritySubsumesDisk`.
+/// It is never an error — an admission that cannot merge still must not refuse.
+fn merge_admission_three_way_split(
+    file: &Path,
+    baseline: &str,
+    authority: &str,
+    disk: &str,
+) -> Result<Option<String>> {
+    let durable = agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
+    let durable_authority = durable(authority);
+    let durable_disk = durable(disk);
+
+    let mut adopted = None;
+    let mut rungs = Vec::new();
+    for engine in [
+        agent_doc_merge::MergeRequest::cell(baseline, disk, authority),
+        agent_doc_merge::MergeRequest::semantic(baseline, disk, authority),
+    ] {
+        let plan = agent_doc_merge::merge(engine);
+        let durable_merged = durable(&plan.merged_doc);
+        let outcome = if plan.fell_back {
+            // The per-cell engine declined; its contract requires the next strategy.
+            "engine_fell_back"
+        } else if let Err(err) = agent_doc_element::element::parse(&plan.merged_doc) {
+            // A structurally invalid merge must never reach the editor.
+            rungs.push(format!("{:?}=not_structurally_valid({err:#})", plan.engine));
+            continue;
+        } else if !agent_doc_document::admission_divergence::authority_subsumes_disk(
+            &durable_authority,
+            &durable_merged,
+        ) {
+            // The merge would regress the editor plane. Never clobber a live buffer.
+            "would_drop_authority_content"
+        } else if durable_merged == durable_authority {
+            // Nothing from disk survived: the compare-and-swap write is a no-op.
+            "equals_authority"
+        } else {
+            // Coarse diagnostic only: strict line subsumption, so an *edited* disk
+            // line legitimately reads `false` (the operator's newer version of that
+            // line is what survived). It is not a "nothing was lost" proof, and must
+            // not be read as one — hence the name.
+            let disk_lines_all_verbatim =
+                agent_doc_document::admission_divergence::authority_subsumes_disk(
+                    &durable_disk,
+                    &durable_merged,
+                );
+            rungs.push(format!(
+                "{:?}=adopted(disk_lines_all_verbatim={disk_lines_all_verbatim} advisories={} conflicts={})",
+                plan.engine,
+                plan.conflict_advisories.len(),
+                plan.conflicts.len()
+            ));
+            adopted = Some(plan.merged_doc);
+            break;
+        };
+        rungs.push(format!("{:?}={outcome}", plan.engine));
+    }
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "admission_three_way_merge file={} outcome={} rungs=[{}] baseline_hash={} authority_hash={} disk_hash={} merged_hash={} (#admissionsplitmerge)",
+            file.display(),
+            if adopted.is_some() {
+                "adopted"
+            } else {
+                "proceed_on_authority"
+            },
+            rungs.join(" "),
+            durable_short_content_hash(baseline),
+            durable_short_content_hash(authority),
+            durable_short_content_hash(disk),
+            adopted
+                .as_deref()
+                .map(agent_doc_hash::short_content_hash)
+                .unwrap_or_else(|| "none".to_string()),
+        ),
+    );
+    Ok(adopted)
 }
 
 /// Short hash of a plane's DURABLE content — transient agent-doc markers removed.
@@ -2889,12 +2986,17 @@ fn log_admission_divergence_assessment(
     );
 }
 
-/// Fast-forward a proven newer durable save into the live CRDT authority.
+/// Adopt a reconciled revision into the live CRDT authority.
 ///
-/// This is a three-way merge with an unchanged authority branch, not a generic
-/// disk-wins rule. The caller proved the authority branch is unchanged from the
-/// baseline in the DURABLE domain and that disk durably advanced past both; the
-/// compare-and-swap below rechecks the authority cut at the mutation edge. When
+/// Two callers reach this, and neither is a generic disk-wins rule: a proven newer
+/// durable save whose authority branch is unchanged in the DURABLE domain
+/// (`FastForwardAuthorityToDisk`), and the merged revision produced by
+/// `merge_admission_three_way_split` when both branches advanced
+/// (`MergeDiskIntoAuthority`, `#admissionsplitmerge`). In both cases the candidate
+/// is already the reconciled result, so the compare-and-swap below is what rechecks
+/// the authority cut at the mutation edge. The companion `admission_divergence` /
+/// `admission_three_way_merge` log lines name which class produced the candidate.
+/// When
 /// the authority differed from the baseline only by transient agent-doc markers,
 /// this fast-forward drops those markers from the live buffer — they are
 /// transport state the next write re-applies, never operator text.
@@ -7230,8 +7332,12 @@ mod tests {
         );
     }
 
+    /// `#admissionsplitmerge`: end-to-end through the real CRDT relay. Both branches
+    /// durably advanced past the baseline, which used to be a typed fail-closed
+    /// refusal. It must now merge: the live authority ends up carrying BOTH queue
+    /// additions, the observation succeeds, and disk is never written by admission.
     #[test]
-    fn queue_authority_refuses_two_advanced_branches() {
+    fn queue_authority_merges_two_advanced_branches() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let baseline = concat!(
@@ -7265,18 +7371,30 @@ mod tests {
         );
         std::fs::write(&doc, &disk).unwrap();
 
-        let err = observe_queue_authority_after_native_save_with_bounded_retry(
+        let observed = observe_queue_authority_after_native_save_with_bounded_retry(
             &doc,
             "test_ambiguous_native_save",
             3,
             |file| agent_doc_crdt_relay_io::current_text_for_file(file).map(Some),
         )
-        .unwrap_err();
+        .expect("two advanced branches must merge, not refuse admission");
+        let text = match observed {
+            Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+            other => panic!("expected a live current authority, got {other:?}"),
+        };
         assert!(
-            err.downcast_ref::<QueueAuthorityUnavailable>().is_some(),
-            "ambiguous branches must retain typed fail-closed admission: {err:#}"
+            text.contains("- authority branch"),
+            "the merged authority must keep the editor's branch:\n{text}"
         );
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), disk);
+        assert!(
+            text.contains("- disk branch"),
+            "the merged authority must keep the disk branch:\n{text}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            disk,
+            "admission reconciles the live authority and never writes disk"
+        );
     }
 
     #[test]
@@ -12829,38 +12947,98 @@ mod tests {
         );
     }
 
-    /// The gate still protects a real second writer: disk content the live buffer
-    /// never received refuses, names itself in the log, and prints BOTH hash
-    /// domains so the refusal cannot be mistaken for a marker-only split.
+    /// A session document with the components a real one has. `queue` is the
+    /// component both live `#admissionsplitmerge` incidents diverged in.
+    fn queue_document(queue_lines: &str) -> String {
+        format!(
+            "# Doc\n\n<!-- agent:exchange -->\nintro\n<!-- /agent:exchange -->\n\
+             <!-- agent:queue go -->\n{queue_lines}<!-- /agent:queue -->\n"
+        )
+    }
+
+    /// `#admissionsplitmerge`: the gate still protects a real second writer, but by
+    /// MERGING rather than refusing. This is the shape of the 2026-09-27 incident on
+    /// `tasks/agent-doc/agent-doc-bugs.md`: the operator's queue edit reached disk
+    /// while the live editor buffer held a different revision of the same queue.
+    /// BOTH edits must survive into the adopted candidate.
     #[test]
-    fn genuinely_divergent_durable_content_still_refuses_and_logs_both_domains() {
+    fn genuinely_divergent_durable_content_merges_both_writers() {
         let (_dir, outcome, log) = admission_gate(
-            "# Doc\n\nintro\n",
-            "# Doc\n\nintro\nexternal edit only on disk\n",
-            "# Doc\n\nintro\noperator steering\n",
+            &queue_document("- do [#one]\n- do [#two]\n"),
+            &queue_document("- do [#one]\n- Fix Run Agent Doc\n- do [#two]\n"),
+            &queue_document("- do [#one]\n- do [#two]: automate\n"),
         );
-        let err = outcome.expect_err("durably divergent planes must refuse admission");
-        let message = format!("{err:#}");
+        let adopted = outcome
+            .expect("durably divergent planes must merge, never refuse")
+            .expect("the merge of two genuinely divergent writers must be adopted");
         assert!(
-            message.contains("refusing to choose a winner"),
-            "refusal must state the condition:\n{message}"
-        );
-        assert!(
-            message.contains("durable baseline_hash=")
-                && message.contains("durable authority_hash=")
-                && message.contains("durable disk_hash="),
-            "refusal must print the durable hashes that decide the class:\n{message}"
+            adopted.contains("do [#two]: automate"),
+            "the merge must keep the live editor buffer's edit:\n{adopted}"
         );
         assert!(
-            message.contains("save or close this document's editor tab"),
-            "refusal must carry the operator-side remedy:\n{message}"
+            adopted.contains("Fix Run Agent Doc"),
+            "the merge must keep the second writer's disk edit:\n{adopted}"
+        );
+        assert!(
+            adopted.contains("intro"),
+            "the merge must not drop an untouched component body:\n{adopted}"
         );
         assert!(
             log.contains(&expected_fields(
-                agent_doc_document::admission_divergence::AdmissionDivergence::UnmergeableThreeWaySplit,
-                agent_doc_document::admission_divergence::DiskAdoption::Refuse,
+                agent_doc_document::admission_divergence::AdmissionDivergence::ThreeWaySplitMerged,
+                agent_doc_document::admission_divergence::DiskAdoption::MergeDiskIntoAuthority,
             )),
-            "the refusal must name its class in the log:\n{log}"
+            "the observation must name its class in the log:\n{log}"
+        );
+        assert!(
+            log.contains("admission_three_way_merge ")
+                && log.contains("outcome=adopted")
+                && log.contains("Cell=adopted("),
+            "the merge must record its outcome and which engine produced it:\n{log}"
+        );
+    }
+
+    /// The load-bearing safety gate: a rung whose merged revision would drop text
+    /// the live editor buffer holds must never be adopted. `Semantic` rebuilds prose
+    /// from the operator skeleton and empties a component body it cannot reconstruct,
+    /// so without this gate the ladder would clobber a live buffer — the exact
+    /// dropped-writer outcome the old refusal existed to prevent.
+    #[test]
+    fn a_merge_that_would_drop_authority_text_is_never_adopted() {
+        let baseline = queue_document("- do [#one]\n");
+        let disk = queue_document("- do [#one]\n- disk only\n");
+        let authority = queue_document("- do [#one]\n- authority only\n");
+        let (_dir, outcome, _log) = admission_gate(&baseline, &disk, &authority);
+        let adopted = outcome.expect("a three-plane split must never refuse admission");
+        if let Some(adopted) = adopted {
+            assert!(
+                adopted.contains("authority only"),
+                "an adopted merge must preserve every durable authority line:\n{adopted}"
+            );
+            assert!(
+                adopted.contains("intro"),
+                "an adopted merge must preserve untouched component bodies:\n{adopted}"
+            );
+        }
+    }
+
+    /// A split with nothing for the merge to contribute must proceed on the
+    /// authority, never refuse.
+    #[test]
+    fn an_unadoptable_merge_proceeds_on_the_authority_instead_of_refusing() {
+        let (_dir, outcome, log) = admission_gate(
+            "# Doc\n\nintro\n",
+            "# Doc\n\nintro\nshared line\n",
+            "# Doc\n\nintro\nshared line\noperator steering\n",
+        );
+        let adopted = outcome.expect("an unadoptable merge must not refuse admission");
+        assert_eq!(
+            adopted, None,
+            "disk is an ancestor here: there is nothing to adopt"
+        );
+        assert!(
+            !log.contains("refus"),
+            "admission must never refuse on a three-plane observation:\n{log}"
         );
     }
 

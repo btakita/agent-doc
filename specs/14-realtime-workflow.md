@@ -589,22 +589,45 @@ content merely because a save notification fired.
 
 Opening a cycle compares three planes: the recorded **merge baseline** (the durable
 common ancestor in `state.db`), the registered **live editor authority** (the CRDT
-cut), and the **durable disk** file. Preflight refuses admission only when all
-three are distinct *and* the live buffer does not already carry everything on
-disk — refusing is how agent-doc avoids choosing a winner and dropping a writer's
-text. `agent_doc_document::admission_divergence` owns that classification; both
-preflight's queue-authority observation and `session-check`'s steering remedy
-derive from it, so the refusal and the remedy printed for it cannot drift apart.
+cut), and the **durable disk** file. **Admission never refuses on this
+observation** (`#admissionsplitmerge`): every classification reconciles, because a
+realtime document has two writers by design and two planes advancing independently
+is its normal condition, not a fault. `agent_doc_document::admission_divergence`
+owns the classification; both preflight's queue-authority observation and
+`session-check`'s steering diagnostic derive from it so they cannot drift apart.
+
+When all three planes are distinct *and* the live buffer does not already carry
+everything on disk, two writers genuinely diverged. The baseline is by definition
+their common ancestor, which is exactly the input a three-way merge takes, so
+admission **merges** rather than choosing a winner: `agent_doc_merge` (the same pure
+engine the ordinary write path uses) reconciles them with disk as the `agent` side
+and the live editor buffer as the `operator` side, and the merged revision is adopted
+through the same compare-and-swap editor write that adopts a proven newer durable
+save. The operator orientation is load-bearing — on a same-node conflict the merge
+keeps the editor value, the codebase-wide rule that the in-editor document is the
+source of truth, and records the non-applied side as an `agent:exchange` note instead
+of dropping it silently.
+
+This replaced a refusal whose prescribed remedy was "save or close the editor tab".
+That remedy asked a human to hand-converge planes the binary is built to merge, and
+it stalled the queue until they did — observed twice on 2026-09-27 within seven hours
+(`tasks/agent-doc/agent-doc-bugs.md`, `tasks/software/lazily.md`) at durable deltas of
+10 and 17 bytes. A merge that cannot be adopted safely — structurally invalid, or one
+that would regress the editor plane — proceeds on the authority unchanged and lets
+disk converge at the next commit. That is the non-stalling fallback; it is never an
+error.
 
 The comparison is made in the **durable domain**. Transient agent-doc markers —
 `<!-- agent:boundary:… -->` lines, the ` (HEAD)` heading suffix, the `❯ 🚧`
 active-prompt marker, per-cycle guard comments, and the managed pipeline
 frontmatter block — live in the editor buffer but are stripped from the durable
 baseline and the committed file by design. Comparing raw bytes let agent-doc's own
-transport state manufacture the third revision, and that false refusal is
-permanent rather than transient: the prescribed remedy is "save or close the
-editor tab", and saving cannot converge planes that agent-doc re-splits on every
-write. Normalizing first (`transient_markers::normalize_transient_agent_doc_markers`)
+transport state manufacture the third revision — back when that refused, the false
+refusal was permanent rather than transient, because saving cannot converge planes
+that agent-doc re-splits on every write. Normalization still matters now that the
+split merges: it keeps agent-doc's own transport state from driving a pointless merge
+and compare-and-swap write on every preflight.
+Normalizing first (`transient_markers::normalize_transient_agent_doc_markers`)
 is the same rule every other durable comparison in the codebase already applies.
 
 Four classifications, each naming itself in `ops.log` as
@@ -615,7 +638,7 @@ Four classifications, each naming itself in `ops.log` as
 | `verbatim_branch_unchanged` | A plane still matches another byte-for-byte. | Proceed, or fast-forward a proven newer durable save. Not logged — it is the every-preflight case. |
 | `transient_markers_only` | The planes differ only by transient markers; a durable branch is unchanged. | Same as above, decided on durable content. |
 | `authority_subsumes_disk` | Three durably distinct revisions, but the live buffer preserves every durable disk line in order. | Proceed on the authority; adopt nothing. Disk is an ancestor, and adopting it would drop the operator's newer steering. |
-| `unmergeable_three_way_split` | Three durably distinct revisions with content on disk the authority never received. | Refuse admission and print the operator-side convergence remedy. |
+| `three_way_split_merged` | Three durably distinct revisions with content on disk the authority never received: two writers genuinely diverged. | Three-way merge disk into the live authority against the baseline ancestor and admit on the merged revision. The merge records `admission_three_way_merge … outcome=<adopted\|…> disk_content_preserved=<bool>`; an unadoptable merge proceeds on the authority. Never refuses. |
 
 `authority_subsumes_disk` is what a **blocked commit** looks like. When the
 controller reports `NativeSaveRequired` with `disk_projection_ready=false`, the

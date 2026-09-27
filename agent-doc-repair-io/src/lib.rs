@@ -1294,7 +1294,10 @@ pub fn replay_orphaned_response(
     let document_is_template = fm.resolve_mode().is_template();
     let use_template_write = document_is_template || response.contains("<!-- patch:");
     let response_to_write = if use_template_write {
-        match agent_doc_template::replay_guard::classify_replay_payload(response) {
+        match agent_doc_template::replay_guard::classify_replay_payload_against_document(
+            response,
+            Some(doc_content),
+        ) {
             agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
                 fail_closed_on_blocked_template_replay(file, response, &reason)?;
                 response.to_string()

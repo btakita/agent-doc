@@ -31,13 +31,18 @@
 //! - `classify_multiple_clean_patches_as_replayable`
 //! - `classify_blocks_agent_component_dump`
 //! - `classify_blocks_prompt_lines`
-//! - `classify_blocks_multiple_response_headings`
+//! - `classify_allows_several_distinct_response_headings`
+//! - `classify_blocks_a_heading_repeated_within_one_payload`
+//! - `classify_blocks_a_heading_already_committed_in_the_document`
+//! - `classify_allows_fresh_headings_against_a_document`
+//! - `topic_normalization_splits_on_the_last_em_dash`
 //! - `classify_blocks_patch_payload_with_unmatched_transcript`
 //! - `classify_patch_payload_with_leading_guard_marker_as_replayable`
 //! - `classify_patch_payload_with_safe_leading_commentary_extracts_patch_body`
 
 use std::borrow::Cow;
 
+#[derive(Debug)]
 pub enum ReplayPayloadClassification<'a> {
     Empty,
     Replayable(Cow<'a, str>),
@@ -97,7 +102,23 @@ fn unmatched_is_only_replay_guard_markers(unmatched: &str) -> bool {
     saw_marker
 }
 
+/// Classify a replay payload with no document to compare against.
+///
+/// Callers that HAVE the document should prefer
+/// [`classify_replay_payload_against_document`]: without it the
+/// already-committed-heading check cannot run, so a genuine replay is caught
+/// only by its transcript artifacts and by repeating a heading within one
+/// payload.
 pub fn classify_replay_payload(message: &str) -> ReplayPayloadClassification<'_> {
+    classify_replay_payload_against_document(message, None)
+}
+
+/// `#multiheadingreplay` — classify a replay payload against the document it
+/// would be written into.
+pub fn classify_replay_payload_against_document<'a>(
+    message: &'a str,
+    document: Option<&str>,
+) -> ReplayPayloadClassification<'a> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
         return ReplayPayloadClassification::Empty;
@@ -145,14 +166,38 @@ pub fn classify_replay_payload(message: &str) -> ReplayPayloadClassification<'_>
         );
     }
 
-    let response_headings = trimmed
-        .lines()
-        .filter(|line| line.trim_start().starts_with("### Re:"))
-        .count();
-    if response_headings > 1 {
-        return ReplayPayloadClassification::Blocked(
-            "it contained multiple assistant response headings".to_string(),
-        );
+    // `#multiheadingreplay` — a heading COUNT cannot tell a replay from a turn
+    // that answered several prompts.
+    //
+    // This used to block any payload with more than one `### Re:` heading, which
+    // is exactly the shape `SKILL.md` prescribes: reconcile the changed exchange
+    // tail oldest-first, answering each unresolved prompt. A six-prompt turn
+    // therefore emits six headings, and `repair` refused the only recovery path
+    // its own instructions produce — observed 2026-09-27, with a 12687-byte
+    // durable capture that no path could replay.
+    //
+    // What the guard is really for is a TRANSCRIPT DUMP, and the four checks
+    // above already catch every artifact one carries: component markers, `❯`
+    // prompt lines, `## User`, and `## Assistant`. What is left that a dump has
+    // and a fresh answer does not is a heading the document ALREADY holds, or
+    // the same heading twice inside one payload. Both are replays by
+    // construction; a set of distinct, new topics is one turn doing its job.
+    let payload_topics = re_heading_topics(trimmed);
+    if let Some(duplicate) = first_duplicate(&payload_topics) {
+        return ReplayPayloadClassification::Blocked(format!(
+            "it repeated the assistant response heading `{duplicate}` within one payload"
+        ));
+    }
+    if let Some(document) = document {
+        let committed = re_heading_topics(document);
+        if let Some(already) = payload_topics
+            .iter()
+            .find(|topic| committed.contains(topic))
+        {
+            return ReplayPayloadClassification::Blocked(format!(
+                "its assistant response heading `{already}` is already committed in the document"
+            ));
+        }
     }
 
     let has_patch_markers = trimmed.contains("<!-- patch:") || trimmed.contains("<!-- /patch:");
@@ -216,9 +261,47 @@ pub fn classify_replay_payload(message: &str) -> ReplayPayloadClassification<'_>
     ReplayPayloadClassification::Replayable(Cow::Borrowed(trimmed))
 }
 
+/// The `### Re:` topics in `text`, normalized for comparison.
+///
+/// Attribution is stripped at the LAST spaced em dash, matching
+/// `strip_re_heading_attribution`: the heading format is
+/// `### Re: topic — model · timestamp`, and a topic may itself contain an em
+/// dash. Splitting on the first one would truncate such a topic and make two
+/// different headings compare equal.
+fn re_heading_topics(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let rest = line.strip_prefix("### Re:")?;
+            let topic = match rest.rfind(" — ") {
+                Some(at) => &rest[..at],
+                None => rest,
+            };
+            let topic = topic.trim();
+            if topic.is_empty() {
+                None
+            } else {
+                Some(topic.to_lowercase())
+            }
+        })
+        .collect()
+}
+
+/// The first topic that appears more than once, if any.
+fn first_duplicate(topics: &[String]) -> Option<&String> {
+    topics
+        .iter()
+        .enumerate()
+        .find(|(index, topic)| topics[..*index].contains(topic))
+        .map(|(_, topic)| topic)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ReplayPayloadClassification, classify_replay_payload};
+    use super::{
+        ReplayPayloadClassification, classify_replay_payload,
+        classify_replay_payload_against_document, first_duplicate, re_heading_topics,
+    };
 
     fn assert_replayable(payload: &str) {
         match classify_replay_payload(payload) {
@@ -287,12 +370,73 @@ mod tests {
         assert_blocked("❯ do #task\n### Re: topic — gpt-5\n", "prompt lines");
     }
 
+    /// `#multiheadingreplay` — several DISTINCT topics is a turn that answered
+    /// several prompts, which is exactly what `SKILL.md` asks for. Blocking it
+    /// left a durable capture with no replay path at all.
     #[test]
-    fn classify_blocks_multiple_response_headings() {
-        assert_blocked(
+    fn classify_allows_several_distinct_response_headings() {
+        match classify_replay_payload(
             "### Re: first — gpt-5\none\n### Re: second — gpt-5\ntwo\n",
-            "multiple assistant response headings",
+        ) {
+            ReplayPayloadClassification::Replayable(_) => {}
+            other => panic!("expected replayable, got {other:?}"),
+        }
+    }
+
+    /// The same heading twice in one payload is a replay by construction.
+    #[test]
+    fn classify_blocks_a_heading_repeated_within_one_payload() {
+        assert_blocked(
+            "### Re: same topic — gpt-5\none\n### Re: same topic — opus-5\ntwo\n",
+            "repeated the assistant response heading `same topic`",
         );
+    }
+
+    /// With the document in hand, a heading it ALREADY holds is the real replay
+    /// signal the count was standing in for.
+    #[test]
+    fn classify_blocks_a_heading_already_committed_in_the_document() {
+        let document = "## Exchange\n### Re: do #alpha — opus-5 · 2026-09-27T10:00-04:00\nbody\n";
+        match classify_replay_payload_against_document(
+            "### Re: do #alpha — opus-5 · 2026-09-27T17:00-04:00\nagain\n",
+            Some(document),
+        ) {
+            ReplayPayloadClassification::Blocked(reason) => assert!(
+                reason.contains("already committed in the document"),
+                "got `{reason}`"
+            ),
+            other => panic!("expected blocked, got {other:?}"),
+        }
+    }
+
+    /// ...and fresh topics still pass against that same document.
+    #[test]
+    fn classify_allows_fresh_headings_against_a_document() {
+        let document = "## Exchange\n### Re: do #alpha — opus-5 · 2026-09-27T10:00-04:00\nbody\n";
+        match classify_replay_payload_against_document(
+            "### Re: do #beta — opus-5\none\n### Re: do #gamma — opus-5\ntwo\n",
+            Some(document),
+        ) {
+            ReplayPayloadClassification::Replayable(_) => {}
+            other => panic!("expected replayable, got {other:?}"),
+        }
+    }
+
+    /// Attribution is stripped at the LAST spaced em dash, so a topic that
+    /// itself contains one is not truncated into a false match.
+    #[test]
+    fn topic_normalization_splits_on_the_last_em_dash() {
+        assert_eq!(
+            re_heading_topics("### Re: lazily.md — one crash behind it — opus-5 · 2026-09-27T17:44-04:00\n"),
+            vec!["lazily.md — one crash behind it".to_string()]
+        );
+        // Without the last-em-dash rule both of these would normalize to
+        // "lazily.md" and the second would read as a replay of the first.
+        let topics = re_heading_topics(
+            "### Re: lazily.md — one crash — opus-5\n### Re: lazily.md — two crashes — opus-5\n",
+        );
+        assert_eq!(topics.len(), 2);
+        assert!(first_duplicate(&topics).is_none(), "{topics:?}");
     }
 
     #[test]

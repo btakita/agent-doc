@@ -770,6 +770,19 @@ Later operator operations therefore cannot be concatenated onto an old snapshot
 base across an intervening agent projection. The newest CP/CRDT current text
 remains the authority/fallback when an op epoch is unavailable.
 
+Capture has two producers and `verify-op-capture` accepts either
+(`#opcaptureverifybatchproducer`). The one-op FFI
+`agent_doc_record_editor_op` writes `editor_op_recorded ... #qnodemerge4wire`;
+the batch FFI `agent_doc_record_editor_ops_json` writes
+`editor_ops_recorded count=<n> base=<hash> transaction=batch #qbasehashmemo`,
+and the JetBrains `TypingTracker` drives ONLY the batch form. A verifier that
+demands the singular marker therefore fails on every real JetBrains session
+however much was captured, so both markers prove capture and both
+`editor_op_record_failed` and `editor_ops_record_failed` count as failures. The
+merge-consumer receipt `editor_ops_for_base accepted=true` is producer-agnostic.
+When neither producer marker is present the diagnostic must name both, so a
+dormant capture ledger is not misread as the wrong-marker defect.
+
 Document-scoped editor actions must not create cross-document authority edges.
 In particular, JetBrains Compact Exchange saves only its selected document
 before routing; `saveAllDocuments()` is forbidden because it can synchronously

@@ -3786,6 +3786,22 @@ enum PendingAction {
         /// Gate type (e.g., "release", "deploy")
         gate_type: String,
     },
+    /// Set a component attribute on the tracked-work marker (e.g. `queue`,
+    /// `priority`) so backlog adds can mirror into `agent:queue` (`#bkqattrcli`)
+    #[command(name = "set-attr")]
+    SetAttr {
+        /// Attribute name (`queue` or `priority` on agent:backlog)
+        attr: String,
+        /// Optional value; omit for a bare flag. `queue` accepts `sync`,
+        /// `append`, or `prepend`.
+        value: Option<String>,
+    },
+    /// Remove a component attribute from the tracked-work marker (`#bkqattrcli`)
+    #[command(name = "unset-attr")]
+    UnsetAttr {
+        /// Attribute name to remove
+        attr: String,
+    },
     /// Set a typed proof/disproof verify predicate on a gated item so the gate
     /// auto-resolves from ops.log markers (`#optverify`).
     SetVerify {
@@ -6177,6 +6193,21 @@ fn try_main() -> anyhow::Result<()> {
                                 &file, &id, &spec,
                             )
                         }
+                        PendingAction::SetAttr { attr, value } => {
+                            agent_doc_element_backlog_io::backlog_cmd::set_attr(
+                                &file,
+                                agent_doc_element_backlog::backlog::TrackedWorkList::Backlog,
+                                &attr,
+                                value.as_deref(),
+                            )
+                        }
+                        PendingAction::UnsetAttr { attr } => {
+                            agent_doc_element_backlog_io::backlog_cmd::unset_attr(
+                                &file,
+                                agent_doc_element_backlog::backlog::TrackedWorkList::Backlog,
+                                &attr,
+                            )
+                        }
                     },
                 )
             },
@@ -6250,6 +6281,21 @@ fn try_main() -> anyhow::Result<()> {
                         PendingAction::SetVerify { id, spec: _ } => {
                             anyhow::bail!(
                                 "agent-doc icebox set-verify is not supported for parked work (requested #{id})"
+                            )
+                        }
+                        PendingAction::SetAttr { attr, value } => {
+                            agent_doc_element_backlog_io::backlog_cmd::set_attr(
+                                &file,
+                                agent_doc_element_backlog::backlog::TrackedWorkList::Icebox,
+                                &attr,
+                                value.as_deref(),
+                            )
+                        }
+                        PendingAction::UnsetAttr { attr } => {
+                            agent_doc_element_backlog_io::backlog_cmd::unset_attr(
+                                &file,
+                                agent_doc_element_backlog::backlog::TrackedWorkList::Icebox,
+                                &attr,
                             )
                         }
                     },

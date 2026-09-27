@@ -558,6 +558,112 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     Ok(())
 }
 
+/// Attribute edits this command accepts, per tracked-work component.
+///
+/// `#bkqattrcli`: an unrestricted set-attr would let a typo land a permanently
+/// ignored attribute on a live document, which is the class of silent failure this
+/// command exists to remove. `queue` and `priority` are the two that actually
+/// change tracked-work behaviour; `queue` on `agent:icebox` is deliberately absent
+/// because an icebox item never auto-populates `agent:queue`.
+fn editable_marker_attrs(list: backlog::TrackedWorkList) -> &'static [&'static str] {
+    match list {
+        backlog::TrackedWorkList::Backlog => &["queue", "priority"],
+        backlog::TrackedWorkList::Icebox => &["priority"],
+    }
+}
+
+fn validate_editable_attr(list: backlog::TrackedWorkList, attr: &str) -> Result<()> {
+    let allowed = editable_marker_attrs(list);
+    if allowed.contains(&attr) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "`{attr}` is not an editable `agent:{}` attribute (accepted: {}). \
+         An unrecognized attribute is parsed but ignored, so setting it would \
+         look like it worked and change nothing.",
+        list.label(),
+        allowed.join(", "),
+    )
+}
+
+/// Validate the `queue` sync mode before it reaches the document.
+///
+/// A `queue=<garbage>` marker parses, so preflight only warns about it later while
+/// nothing mirrors in the meantime. Refusing at the command boundary keeps the
+/// document in a state whose behaviour matches what the operator asked for.
+fn validate_attr_value(attr: &str, value: Option<&str>) -> Result<()> {
+    if attr != "queue" {
+        if let Some(value) = value {
+            anyhow::bail!(
+                "`{attr}` is a boolean marker attribute; drop the `={value}` value"
+            );
+        }
+        return Ok(());
+    }
+    let Some(value) = value else {
+        return Ok(());
+    };
+    // Validate through the module that OWNS the vocabulary, so a new sync mode
+    // never has to be added in two places.
+    if agent_doc_queue::document_queue::BacklogQueueSyncMode::parse(value).is_some() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "`queue={value}` is not a recognized backlog sync mode (use `sync`, `append`, \
+         `prepend`, or the bare `queue` flag)"
+    )
+}
+
+/// Set an attribute on a tracked-work component's opening marker.
+///
+/// `#bkqattrcli`: attributes live in the marker span, so no content command could
+/// reach them — `agent-doc backlog add` mirrors into `agent:queue` only when the
+/// marker carries `queue`, and the sole way to add it was hand-editing a file that
+/// may be open in a live editor (a raw disk edit there becomes a disk candidate the
+/// agent must never resolve). This routes the marker mutation through the same
+/// editor-converging write path as `backlog add`.
+pub fn set_attr(
+    file: &Path,
+    list: backlog::TrackedWorkList,
+    attr: &str,
+    value: Option<&str>,
+) -> Result<()> {
+    let attr = attr.trim();
+    validate_editable_attr(list, attr)?;
+    validate_attr_value(attr, value)?;
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
+    let marker = &full_content[comp.open_start..comp.open_end];
+    let next_marker = element::set_open_marker_attr(marker, attr, value)
+        .with_context(|| format!("failed to set `{attr}` on agent:{}", list.label()))?;
+    if next_marker == marker {
+        return Ok(());
+    }
+    let mut new_doc = String::with_capacity(full_content.len() + next_marker.len());
+    new_doc.push_str(&full_content[..comp.open_start]);
+    new_doc.push_str(&next_marker);
+    new_doc.push_str(&full_content[comp.open_end..]);
+    persist_pending_write(file, &full_content, &new_doc)
+}
+
+/// Remove an attribute from a tracked-work component's opening marker.
+/// Removing an absent attribute is a no-op.
+pub fn unset_attr(file: &Path, list: backlog::TrackedWorkList, attr: &str) -> Result<()> {
+    let attr = attr.trim();
+    validate_editable_attr(list, attr)?;
+    let (full_content, comp) = find_tracked_list_component(file, list)?;
+    let marker = &full_content[comp.open_start..comp.open_end];
+    let next_marker = element::unset_open_marker_attr(marker, attr)
+        .with_context(|| format!("failed to unset `{attr}` on agent:{}", list.label()))?;
+    if next_marker == marker {
+        return Ok(());
+    }
+    let mut new_doc = String::with_capacity(full_content.len());
+    new_doc.push_str(&full_content[..comp.open_start]);
+    new_doc.push_str(&next_marker);
+    new_doc.push_str(&full_content[comp.open_end..]);
+    persist_pending_write(file, &full_content, &new_doc)
+}
+
 pub fn icebox_add(file: &Path, item: &str) -> Result<()> {
     add_many_to_list(
         file,

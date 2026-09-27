@@ -349,6 +349,12 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   `do [#ID]` directive without rewriting unrelated queue bytes.
 - Non-item separator lines and headings inside backlog/icebox must be preserved during mutation.
 - Flush-left parent items are the tracked units; indented nested lists travel with the parent during edit/reorder/reap/transfer.
+- `backlog <FILE> set-attr <ATTR> [VALUE]` / `unset-attr <ATTR>` mutate the
+  component's MARKER attributes rather than its content (`#bkqattrcli`), through the
+  same editor-converging write path as `add`. Accepted: `queue` and `priority` on
+  `agent:backlog`, `priority` on `agent:icebox`; a `queue` value must be a
+  recognized sync mode. An unrecognized attribute is refused because it would parse
+  and then be ignored. See `specs/pending-system.md`.
 
 ## boundary
 

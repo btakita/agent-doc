@@ -551,6 +551,148 @@ fn strip_malformed_true_suffix(value: &str) -> Option<&str> {
     }
 }
 
+/// Why an opening-marker attribute edit could not be applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarkerAttrError {
+    /// The text is not a well-formed `<!-- agent:<name> ... -->` opening marker.
+    NotAnOpeningMarker,
+    /// The attribute key is empty or carries characters the parser cannot read
+    /// back (whitespace, `=`, or a comment terminator).
+    InvalidAttrKey { attr: String },
+    /// The value would not survive a parse/render round trip.
+    InvalidAttrValue { value: String },
+}
+
+impl std::fmt::Display for MarkerAttrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAnOpeningMarker => {
+                write!(f, "not a well-formed `<!-- agent:<name> ... -->` marker")
+            }
+            Self::InvalidAttrKey { attr } => {
+                write!(f, "`{attr}` is not a usable attribute key")
+            }
+            Self::InvalidAttrValue { value } => {
+                write!(f, "`{value}` is not a usable attribute value")
+            }
+        }
+    }
+}
+
+impl std::error::Error for MarkerAttrError {}
+
+/// Set `attr` on a component's opening marker, returning the rewritten marker.
+///
+/// `#bkqattrcli`: attributes are a marker-span mutation, not a content patch, so
+/// no content command could ever reach them — which left `queue` on
+/// `agent:backlog` reachable only by hand-editing a file that may be open in a
+/// live editor. `value` is `None` for a bare flag (`queue`) and `Some` for a
+/// `key=value` pair; an existing token for the same key is replaced in place so
+/// attribute order stays stable, and everything else in the marker (including any
+/// trailing newline) is preserved byte for byte.
+pub fn set_open_marker_attr(
+    marker: &str,
+    attr: &str,
+    value: Option<&str>,
+) -> Result<String, MarkerAttrError> {
+    let attr = attr.trim();
+    if attr.is_empty()
+        || attr.contains(char::is_whitespace)
+        || attr.contains('=')
+        || attr.contains("--")
+    {
+        return Err(MarkerAttrError::InvalidAttrKey {
+            attr: attr.to_string(),
+        });
+    }
+    if let Some(value) = value
+        && (value.contains('"') || value.contains("--"))
+    {
+        return Err(MarkerAttrError::InvalidAttrValue {
+            value: value.to_string(),
+        });
+    }
+    let parts = split_open_marker(marker)?;
+    let mut tokens = split_attr_tokens(&parts.attr_text);
+    let replacement = (attr.to_string(), value.map(|v| v.to_string()));
+    match tokens.iter().position(|(key, _)| key == attr) {
+        Some(index) => tokens[index] = replacement,
+        None => tokens.push(replacement),
+    }
+    Ok(render_open_marker(&parts, &tokens))
+}
+
+/// Remove `attr` from a component's opening marker, returning the rewritten
+/// marker. Removing an absent attribute is a no-op, not an error.
+pub fn unset_open_marker_attr(marker: &str, attr: &str) -> Result<String, MarkerAttrError> {
+    let attr = attr.trim();
+    let parts = split_open_marker(marker)?;
+    let tokens: Vec<(String, Option<String>)> = split_attr_tokens(&parts.attr_text)
+        .into_iter()
+        .filter(|(key, _)| key != attr)
+        .collect();
+    Ok(render_open_marker(&parts, &tokens))
+}
+
+/// The byte-preserving decomposition of an opening marker.
+struct OpenMarkerParts {
+    /// Everything up to and including the component name, e.g. `<!-- agent:backlog`.
+    head: String,
+    /// The raw attribute text between the name and `-->`.
+    attr_text: String,
+    /// Everything after `-->`, e.g. a trailing newline.
+    tail: String,
+}
+
+fn split_open_marker(marker: &str) -> Result<OpenMarkerParts, MarkerAttrError> {
+    let open = marker
+        .find("<!--")
+        .ok_or(MarkerAttrError::NotAnOpeningMarker)?;
+    let close_rel = marker[open..]
+        .find("-->")
+        .ok_or(MarkerAttrError::NotAnOpeningMarker)?;
+    let close = open + close_rel;
+    let inner = marker[open + 4..close].trim_start();
+    let name_rel = marker[open + 4..close].len() - inner.len();
+    let name_start = open + 4 + name_rel;
+    let name = inner
+        .split_whitespace()
+        .next()
+        .ok_or(MarkerAttrError::NotAnOpeningMarker)?;
+    // A closing marker (`<!-- /agent:backlog -->`) has no attribute span to edit.
+    if !name.starts_with("agent:") {
+        return Err(MarkerAttrError::NotAnOpeningMarker);
+    }
+    let name_end = name_start + name.len();
+    Ok(OpenMarkerParts {
+        head: marker[..name_end].to_string(),
+        attr_text: marker[name_end..close].to_string(),
+        tail: marker[close + 3..].to_string(),
+    })
+}
+
+fn render_open_marker(parts: &OpenMarkerParts, tokens: &[(String, Option<String>)]) -> String {
+    let rendered: Vec<String> = tokens
+        .iter()
+        .map(|(key, value)| render_attr_token(key, value.as_deref()))
+        .collect();
+    if rendered.is_empty() {
+        return format!("{} -->{}", parts.head, parts.tail);
+    }
+    format!("{} {} -->{}", parts.head, rendered.join(" "), parts.tail)
+}
+
+fn render_attr_token(key: &str, value: Option<&str>) -> String {
+    match value {
+        None => key.to_string(),
+        // A value with whitespace only survives a round trip when quoted; an
+        // empty value is a malformed pair the parser drops, so render the flag.
+        Some("") => key.to_string(),
+        Some(value) if value.chars().any(char::is_whitespace) => format!("{key}=\"{value}\""),
+        Some(value) => format!("{key}={value}"),
+    }
+}
+
 /// Valid name: `[a-zA-Z0-9][a-zA-Z0-9-]*`
 fn is_valid_name(name: &str) -> bool {
     if name.is_empty() {
@@ -3226,6 +3368,129 @@ Fix applied to skip non-agent <!-- sequences.
         assert_eq!(comps.len(), 1);
         assert_eq!(comps[0].name, "pending");
         assert!(is_backlog_component(&comps[0].name));
+    }
+
+    #[test]
+    /// `#bkqattrcli`: the attribute the whole item is about.
+    #[test]
+    fn set_open_marker_attr_adds_a_bare_queue_flag() {
+        assert_eq!(
+            set_open_marker_attr("<!-- agent:backlog -->\n", "queue", None).unwrap(),
+            "<!-- agent:backlog queue -->\n"
+        );
+    }
+
+    #[test]
+    fn set_open_marker_attr_preserves_existing_attrs_and_order() {
+        assert_eq!(
+            set_open_marker_attr("<!-- agent:queue priority go -->", "preset", Some("#spec"))
+                .unwrap(),
+            "<!-- agent:queue priority go preset=#spec -->"
+        );
+    }
+
+    #[test]
+    fn set_open_marker_attr_replaces_a_key_in_place() {
+        // Replacing rather than appending keeps operator-visible attribute order
+        // stable across repeated edits.
+        assert_eq!(
+            set_open_marker_attr("<!-- agent:backlog queue=append priority -->", "queue", Some("sync"))
+                .unwrap(),
+            "<!-- agent:backlog queue=sync priority -->"
+        );
+    }
+
+    #[test]
+    fn set_open_marker_attr_round_trips_a_value_with_spaces() {
+        let marker =
+            set_open_marker_attr("<!-- agent:done -->", "archive", Some("tasks/a b.done.md"))
+                .unwrap();
+        assert_eq!(marker, "<!-- agent:done archive=\"tasks/a b.done.md\" -->");
+        let attrs = parse_attrs("archive=\"tasks/a b.done.md\"");
+        assert_eq!(
+            attrs.get("archive").map(String::as_str),
+            Some("tasks/a b.done.md"),
+            "a rendered value must parse back to itself"
+        );
+    }
+
+    #[test]
+    fn unset_open_marker_attr_drops_only_the_named_key() {
+        assert_eq!(
+            unset_open_marker_attr("<!-- agent:backlog queue priority -->\n", "queue").unwrap(),
+            "<!-- agent:backlog priority -->\n"
+        );
+        assert_eq!(
+            unset_open_marker_attr("<!-- agent:backlog queue -->", "queue").unwrap(),
+            "<!-- agent:backlog -->"
+        );
+    }
+
+    #[test]
+    fn unset_open_marker_attr_is_a_no_op_for_an_absent_key() {
+        assert_eq!(
+            unset_open_marker_attr("<!-- agent:backlog priority -->", "queue").unwrap(),
+            "<!-- agent:backlog priority -->"
+        );
+    }
+
+    #[test]
+    fn marker_attr_edits_refuse_input_they_cannot_round_trip() {
+        // A closing marker has no attribute span, and a key or value carrying `=`,
+        // whitespace, a quote, or a comment terminator would not parse back.
+        assert_eq!(
+            set_open_marker_attr("<!-- /agent:backlog -->", "queue", None),
+            Err(MarkerAttrError::NotAnOpeningMarker)
+        );
+        assert_eq!(
+            set_open_marker_attr("- [ ] not a marker", "queue", None),
+            Err(MarkerAttrError::NotAnOpeningMarker)
+        );
+        assert!(matches!(
+            set_open_marker_attr("<!-- agent:backlog -->", "que ue", None),
+            Err(MarkerAttrError::InvalidAttrKey { .. })
+        ));
+        assert!(matches!(
+            set_open_marker_attr("<!-- agent:backlog -->", "queue=x", None),
+            Err(MarkerAttrError::InvalidAttrKey { .. })
+        ));
+        assert!(matches!(
+            set_open_marker_attr("<!-- agent:backlog -->", "queue", Some("a\"b")),
+            Err(MarkerAttrError::InvalidAttrValue { .. })
+        ));
+        assert!(matches!(
+            set_open_marker_attr("<!-- agent:backlog -->", "queue", Some("a-->b")),
+            Err(MarkerAttrError::InvalidAttrValue { .. })
+        ));
+    }
+
+    #[test]
+    fn a_set_attr_marker_parses_back_through_the_document_parser() {
+        // The end-to-end contract: the rewritten marker has to make the component
+        // parser report the attribute, not just look right.
+        let doc = "<!-- agent:backlog -->\n- [ ] [#a1] item\n<!-- /agent:backlog -->\n";
+        let comp = parse(doc)
+            .unwrap()
+            .into_iter()
+            .find(|c| is_backlog_component(&c.name))
+            .unwrap();
+        let marker = set_open_marker_attr(&doc[comp.open_start..comp.open_end], "queue", None)
+            .unwrap();
+        let updated = format!("{}{}", marker, &doc[comp.open_end..]);
+        let reparsed = parse(&updated)
+            .unwrap()
+            .into_iter()
+            .find(|c| is_backlog_component(&c.name))
+            .unwrap();
+        assert!(
+            reparsed.attrs.contains_key("queue"),
+            "the parser must see the attribute the edit added: {updated}"
+        );
+        assert_eq!(
+            &updated[reparsed.open_end..reparsed.close_start],
+            "- [ ] [#a1] item\n",
+            "a marker-span edit must not disturb the body"
+        );
     }
 
     #[test]

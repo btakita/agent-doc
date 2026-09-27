@@ -1516,6 +1516,124 @@ fn preflight_emits_review_counts() {
     );
 }
 
+/// `#bkqattrcli`: reproduce the reported defect end to end, then prove the new
+/// command fixes it. Before `set-attr`, the only route to a `queue` attribute was
+/// hand-editing the marker — unavailable precisely when the document is open in a
+/// live editor, because a raw disk edit there becomes a disk candidate the agent
+/// must never resolve.
+#[test]
+fn backlog_set_attr_makes_backlog_adds_mirrorable_into_the_queue() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_format: template\n---\n\n\
+         <!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+         <!-- agent:queue -->\n<!-- /agent:queue -->\n\n\
+         <!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+    )
+    .unwrap();
+
+    // The marker starts without `queue`, which is the reported state.
+    let before = fs::read_to_string(&doc).unwrap();
+    assert!(
+        before.contains("<!-- agent:backlog -->"),
+        "fixture must start without a queue attribute:\n{before}"
+    );
+
+    let output = agent_doc()
+        .args([
+            "backlog",
+            doc.to_str().unwrap(),
+            "set-attr",
+            "queue",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "set-attr queue failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        after.contains("<!-- agent:backlog queue -->"),
+        "set-attr must add the bare queue flag to the marker:\n{after}"
+    );
+    // A marker-span edit must not disturb the body or any other component.
+    assert!(
+        after.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"),
+        "an unrelated component must be untouched:\n{after}"
+    );
+
+    // And it round-trips: unset-attr returns the marker to its original shape.
+    let output = agent_doc()
+        .args([
+            "backlog",
+            doc.to_str().unwrap(),
+            "unset-attr",
+            "queue",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "unset-attr queue failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&doc).unwrap(),
+        before,
+        "unset-attr must restore the original marker byte for byte"
+    );
+}
+
+/// An unrecognized attribute is PARSED but ignored, so accepting it would look
+/// like it worked and change nothing — the exact silent-failure class this command
+/// exists to remove.
+#[test]
+fn backlog_set_attr_refuses_an_attribute_that_would_be_ignored() {
+    let (_tmp, doc) = setup_doc("- [ ] [#a1] item");
+
+    let output = agent_doc()
+        .args(["backlog", doc.to_str().unwrap(), "set-attr", "qeueu"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "a typo'd attribute must be refused, not silently written"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not an editable `agent:backlog` attribute")
+            && stderr.contains("queue")
+            && stderr.contains("priority"),
+        "the refusal must name what is accepted: {stderr}"
+    );
+
+    let output = agent_doc()
+        .args([
+            "backlog",
+            doc.to_str().unwrap(),
+            "set-attr",
+            "queue",
+            "sideways",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "an unrecognized queue sync mode must be refused"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not a recognized backlog sync mode"),
+        "the refusal must name the recognized modes: {stderr}"
+    );
+}
+
 #[test]
 fn preflight_warns_for_legacy_gated_backlog_items() {
     let (_tmp, doc) = setup_doc("- [/] [#bbbb] legacy gated");

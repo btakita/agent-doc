@@ -442,8 +442,96 @@ pub fn enqueue_actionable_ids_in_content_with_anchors(
     placement: FollowUpQueuePlacement,
     anchored_ids: &[String],
 ) -> anyhow::Result<Option<String>> {
+    Ok(
+        match enqueue_actionable_ids_reporting(content, actionable_ids, placement, anchored_ids)? {
+            MirrorOutcome::Mirrored(next) => Some(next),
+            MirrorOutcome::Refused(_) => None,
+        },
+    )
+}
+
+/// Why a backlog-to-queue mirror pass produced no queue change.
+///
+/// `#bkqattrcli`: [`BacklogNotOptedIn`](MirrorRefusal::BacklogNotOptedIn) used to
+/// be an unreported early return, so "add these to backlog + queue" landed only its
+/// backlog half and reported success. That refusal is a document-configuration
+/// defect the operator has to see; the others are ordinary no-ops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirrorRefusal {
+    /// The `agent:backlog` marker carries no `queue` attribute, so nothing in this
+    /// document can ever mirror. Fix with `agent-doc backlog <FILE> set-attr queue`.
+    BacklogNotOptedIn,
+    /// The document has no `agent:queue` component to mirror into.
+    NoQueueComponent,
+    /// No caller-supplied id is an open backlog item (deduped, iceboxed, or done).
+    NoQueueableIds,
+    /// Every queueable id already has a live queue head.
+    AlreadyQueued,
+}
+
+impl MirrorRefusal {
+    /// True when the refusal means the document can NEVER mirror, as opposed to
+    /// having nothing to mirror this pass.
+    pub fn is_configuration_defect(self) -> bool {
+        matches!(self, Self::BacklogNotOptedIn)
+    }
+
+    /// Stable ops-log token for this refusal.
+    ///
+    /// The token lives with the enum, not at the logging call site: the FlowCore
+    /// budget gate exists precisely to stop `reason=` literals accumulating in hot
+    /// paths instead of being owned by the flow type that produced them.
+    pub fn reason_token(self) -> &'static str {
+        match self {
+            Self::BacklogNotOptedIn => "backlog_not_opted_in",
+            Self::NoQueueComponent => "no_queue_component",
+            Self::NoQueueableIds => "no_queueable_ids",
+            Self::AlreadyQueued => "already_queued",
+        }
+    }
+
+    /// Render the complete ops-log line for a refusal worth recording.
+    pub fn closeout_log_line(self, ids: usize) -> String {
+        format!(
+            "closeout_queue_mirror_refused ids={ids} reason={} #bkqattrcli",
+            self.reason_token()
+        )
+    }
+
+    /// Operator-facing explanation plus the command that fixes it.
+    pub fn remedy(self) -> &'static str {
+        match self {
+            Self::BacklogNotOptedIn => {
+                "the `agent:backlog` marker carries no `queue` attribute, so backlog adds                  cannot mirror into `agent:queue` — run `agent-doc backlog <FILE> set-attr queue`                  (`#bkqattrcli`) and re-run the capture, or file the queue heads explicitly"
+            }
+            Self::NoQueueComponent => {
+                "the document has no `agent:queue` component to mirror into"
+            }
+            Self::NoQueueableIds => {
+                "none of the ids is an open `agent:backlog` item (deduped, iceboxed, or done)"
+            }
+            Self::AlreadyQueued => "every id already has a live queue head",
+        }
+    }
+}
+
+/// The result of one mirror pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MirrorOutcome {
+    Mirrored(String),
+    Refused(MirrorRefusal),
+}
+
+/// [`enqueue_actionable_ids_in_content_with_anchors`], reporting WHY a pass
+/// mirrored nothing instead of collapsing every reason into `None`.
+pub fn enqueue_actionable_ids_reporting(
+    content: &str,
+    actionable_ids: &[String],
+    placement: FollowUpQueuePlacement,
+    anchored_ids: &[String],
+) -> anyhow::Result<MirrorOutcome> {
     if actionable_ids.is_empty() {
-        return Ok(None);
+        return Ok(MirrorOutcome::Refused(MirrorRefusal::NoQueueableIds));
     }
     let anchored: HashSet<String> = anchored_ids
         .iter()
@@ -457,11 +545,11 @@ pub fn enqueue_actionable_ids_in_content_with_anchors(
         .filter(|comp| matches!(comp.name.as_str(), "backlog" | "pending"))
         .any(|comp| comp.attrs.contains_key("queue"));
     if !backlog_opts_in {
-        return Ok(None);
+        return Ok(MirrorOutcome::Refused(MirrorRefusal::BacklogNotOptedIn));
     }
 
     let Some(queue_comp) = components.iter().find(|comp| comp.name == "queue") else {
-        return Ok(None);
+        return Ok(MirrorOutcome::Refused(MirrorRefusal::NoQueueComponent));
     };
 
     // Only ids that are actually open BACKLOG items may be queued: an icebox id,
@@ -482,7 +570,7 @@ pub fn enqueue_actionable_ids_in_content_with_anchors(
         .filter(|id| !id.is_empty() && open_backlog.contains(id))
         .collect();
     if queueable.is_empty() {
-        return Ok(None);
+        return Ok(MirrorOutcome::Refused(MirrorRefusal::NoQueueableIds));
     }
 
     let body = &content[queue_comp.open_end..queue_comp.close_start];
@@ -561,7 +649,7 @@ pub fn enqueue_actionable_ids_in_content_with_anchors(
     }
 
     if ordered.is_empty() {
-        return Ok(None);
+        return Ok(MirrorOutcome::Refused(MirrorRefusal::AlreadyQueued));
     }
 
     // `#queuemirrororder`: honour the backlog ANCHOR when projecting into the
@@ -624,7 +712,7 @@ pub fn enqueue_actionable_ids_in_content_with_anchors(
                 }
             }
         };
-        return Ok(Some(queue_comp.replace_content(content, &new_body)));
+        return Ok(MirrorOutcome::Mirrored(queue_comp.replace_content(content, &new_body)));
     }
 
     // Mixed block: insert each anchored id after its anchor's live head (in backlog
@@ -695,7 +783,7 @@ pub fn enqueue_actionable_ids_in_content_with_anchors(
         };
     }
 
-    Ok(Some(queue_comp.replace_content(content, &new_body)))
+    Ok(MirrorOutcome::Mirrored(queue_comp.replace_content(content, &new_body)))
 }
 
 /// `#queuemirrororder`: project the backlog's declared order onto the queue mirror.
@@ -1044,6 +1132,118 @@ mod tests {
         assert_eq!(request.mode, BacklogQueueSyncMode::Append);
         assert_eq!(request.ids, vec!["a".to_string(), "c".to_string()]);
         assert_eq!(request.enqueue_ids, vec!["a".to_string(), "c".to_string()]);
+    }
+
+    /// `#bkqattrcli`: a backlog marker with no `queue` attribute can NEVER mirror,
+    /// which is a document-configuration defect the operator must see — not the
+    /// same thing as having nothing to mirror this pass.
+    #[test]
+    fn a_backlog_without_the_queue_attr_reports_a_configuration_defect() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#fresh] newly filed follow-up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let outcome = enqueue_actionable_ids_reporting(
+            content,
+            &["fresh".to_string()],
+            FollowUpQueuePlacement::Prepend,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            outcome,
+            MirrorOutcome::Refused(MirrorRefusal::BacklogNotOptedIn)
+        );
+        let MirrorOutcome::Refused(refusal) = outcome else {
+            unreachable!()
+        };
+        assert!(
+            refusal.is_configuration_defect(),
+            "a marker that can never mirror is a defect, not a no-op"
+        );
+        assert!(
+            refusal.remedy().contains("set-attr queue"),
+            "the remedy must name the command that fixes it: {}",
+            refusal.remedy()
+        );
+    }
+
+    /// The ordinary no-ops must NOT read as configuration defects, or the loud
+    /// report becomes noise on every clean cycle.
+    #[test]
+    fn ordinary_mirror_no_ops_are_not_configuration_defects() {
+        let opted_in = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#already]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue -->\n",
+            "- [ ] [#already] already queued\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        for (ids, expected) in [
+            (vec!["already".to_string()], MirrorRefusal::AlreadyQueued),
+            (vec!["ghost".to_string()], MirrorRefusal::NoQueueableIds),
+            (Vec::new(), MirrorRefusal::NoQueueableIds),
+        ] {
+            let outcome = enqueue_actionable_ids_reporting(
+                opted_in,
+                &ids,
+                FollowUpQueuePlacement::Prepend,
+                &[],
+            )
+            .unwrap();
+            assert_eq!(outcome, MirrorOutcome::Refused(expected), "ids={ids:?}");
+            let MirrorOutcome::Refused(refusal) = outcome else {
+                unreachable!()
+            };
+            assert!(
+                !refusal.is_configuration_defect(),
+                "{refusal:?} is an ordinary no-op and must stay quiet"
+            );
+        }
+
+        let no_queue_component = concat!(
+            "<!-- agent:backlog queue -->\n",
+            "- [ ] [#fresh] item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let outcome = enqueue_actionable_ids_reporting(
+            no_queue_component,
+            &["fresh".to_string()],
+            FollowUpQueuePlacement::Prepend,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            outcome,
+            MirrorOutcome::Refused(MirrorRefusal::NoQueueComponent)
+        );
+    }
+
+    /// The compatibility wrapper must keep collapsing every refusal to `None`, so
+    /// existing callers are unaffected by the typed outcome.
+    #[test]
+    fn the_option_returning_wrapper_still_collapses_every_refusal() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#fresh] item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(
+            enqueue_actionable_ids_in_content_with_anchors(
+                content,
+                &["fresh".to_string()],
+                FollowUpQueuePlacement::Prepend,
+                &[],
+            )
+            .unwrap(),
+            None
+        );
     }
 
     /// `#backlogqueueprepend`: `<!-- agent:backlog priority queue -->` is the

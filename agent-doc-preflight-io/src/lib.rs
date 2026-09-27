@@ -5064,15 +5064,30 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     let anchored_ids: Vec<String> = agent_doc_cycle_state_io::pending_anchored_ids(file)
         .into_iter()
         .collect();
-    let Some(current_content) =
-        agent_doc_queue::backlog_sync::enqueue_actionable_ids_in_content_with_anchors(
-            &content,
-            &backlog_ids,
-            placement,
-            &anchored_ids,
-        )?
-    else {
-        return Ok(Vec::new());
+    let current_content = match agent_doc_queue::backlog_sync::enqueue_actionable_ids_reporting(
+        &content,
+        &backlog_ids,
+        placement,
+        &anchored_ids,
+    )? {
+        agent_doc_queue::backlog_sync::MirrorOutcome::Mirrored(next) => next,
+        agent_doc_queue::backlog_sync::MirrorOutcome::Refused(refusal) => {
+            // `#bkqattrcli`: a document that can NEVER mirror is a configuration
+            // defect, not a quiet no-op. Silently returning here made the "+ queue"
+            // half of a capture instruction land nothing while the cycle reported
+            // success, so say it once, with the command that fixes it.
+            if refusal.is_configuration_defect() {
+                eprintln!(
+                    "[closeout] {} backlog id(s) could not mirror into agent:queue: {}",
+                    backlog_ids.len(),
+                    refusal.remedy()
+                );
+                // The refusal renders its own ops-log line, so its reason token
+                // stays owned by the flow enum instead of this hot path.
+                agent_doc_ops_log_io::log_op(file, &refusal.closeout_log_line(backlog_ids.len()));
+            }
+            return Ok(Vec::new());
+        }
     };
     let updated_components = agent_doc_element::element::parse(&current_content)?;
     let updated_queue = updated_components

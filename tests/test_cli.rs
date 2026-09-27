@@ -14443,6 +14443,31 @@ fn test_release_cadence_applies_only_to_macos_assets() {
         "the macOS gate must verify Darwin asset upload timestamps and fail closed"
     );
 
+    // The cadence gate only asserts the weekly WINDOW. Coverage — that a release
+    // actually carries both Darwin archives — is a separate gate, deliberately NOT
+    // a `check` dependency, because clearing it needs Mac hardware and wiring it
+    // into the build would redden every unrelated change.
+    assert!(
+        harness.contains("verify-macos-release-coverage")
+            && harness.contains("DARWIN_ARCHIVE_COUNT = 2")
+            && harness.contains("is published but has no published_at"),
+        "a release that dropped either Darwin archive must be detectable, and an \
+         unorderable release must fail closed instead of hiding one"
+    );
+    assert!(
+        makefile.contains("python3 scripts/agent-doc-dev verify-macos-release-coverage"),
+        "the Darwin coverage gate must be reachable as a make target"
+    );
+    let check_line = makefile
+        .lines()
+        .find(|line| line.starts_with("check:"))
+        .expect("Makefile must define a check target");
+    assert!(
+        !check_line.contains("release-macos-coverage-check")
+            && !check_line.contains("release-macos-cadence-check"),
+        "neither macOS gate may block `check`: both need Mac hardware to clear"
+    );
+
     let macos_release =
         fs::read_to_string(manifest_dir.join("scripts/release-macos-assets")).unwrap();
     assert!(

@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check artifact-purge-check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check artifact-purge-check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -43,6 +43,12 @@ release: check
 
 release-macos-cadence-check:
 	@python3 scripts/agent-doc-dev verify-macos-release-cadence
+
+# Report releases published after the last Darwin upload that dropped either
+# Darwin archive. Deliberately NOT part of `check`: clearing it needs Mac
+# hardware, so wiring it into the build would redden every unrelated change.
+release-macos-coverage-check:
+	@python3 scripts/agent-doc-dev verify-macos-release-coverage
 
 # Build both Darwin archives on a Mac and attach them to an existing release.
 # Usage: make release-macos-assets TAG=v0.35.398

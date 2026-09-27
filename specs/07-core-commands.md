@@ -263,6 +263,15 @@ verified. The command builds both Darwin targets, requires the binary and `.dyli
 in each archive, and refreshes the release's checksum manifest across every
 platform archive.
 
+The cadence gate bounds only how OFTEN Darwin assets may be uploaded, so it
+cannot detect the opposite failure: a release that shipped no Darwin archive at
+all. `make release-macos-coverage-check` names every release published after the
+last Darwin-complete release that ships an incomplete pair, counting a
+half-shipped pair as a drop. It excludes drafts and fails closed on a published
+release with no timestamp, so an unorderable release cannot hide a dropped
+deliverable. Neither macOS gate is a `check` dependency: clearing them requires
+Mac hardware, and blocking the build on hardware would redden unrelated changes.
+
 `agent-doc upgrade` checks GitHub Releases for a newer version and upgrades through the prebuilt GitHub binary / `pip` cascade. The agent-doc Rust workspace is private and is not a crates.io upgrade source.
 
 PyPI publishing is cadence-gated (`#pypicadence`): milestone tags (`vX.Y.0`)

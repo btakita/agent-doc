@@ -63,6 +63,7 @@ MACOS_RELEASE_CADENCE_DAYS = 7
 MACOS_RELEASE_ASSET_RE = re.compile(
     r"^agent-doc-(?:x86_64|aarch64)-apple-darwin\.tar\.gz$"
 )
+DARWIN_ARCHIVE_COUNT = 2
 
 
 class HarnessError(RuntimeError):
@@ -113,9 +114,9 @@ def latest_macos_release_asset(payload: object) -> tuple[str, dt.datetime] | Non
     return latest
 
 
-def verify_macos_release_cadence(
-    root: Path,
-) -> tuple[str | None, dt.datetime | None, dt.datetime | None]:
+def fetch_releases(root: Path, *, refusal: str) -> object:
+    """Read every release. `refusal` names what the CALLER refuses to do on failure,
+    so an unread release list never silently becomes an empty one."""
     try:
         completed = subprocess.run(
             [
@@ -135,13 +136,102 @@ def verify_macos_release_cadence(
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip() or "unknown gh error"
         raise HarnessError(
-            "cannot verify the seven-day macOS release window; "
-            "refusing to publish Darwin assets: " + detail
+            f"cannot read GitHub releases; {refusal}: " + detail
         )
     try:
-        payload = json.loads(completed.stdout)
+        return json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise HarnessError("gh returned invalid JSON for GitHub releases") from exc
+
+
+def release_darwin_asset_names(release: dict[str, object], tag: str) -> set[str]:
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise HarnessError(f"GitHub Release {tag} has no asset list")
+    names: set[str] = set()
+    for asset in assets:
+        if not isinstance(asset, dict):
+            raise HarnessError(f"GitHub Release {tag} has a non-object asset")
+        name = asset.get("name")
+        if isinstance(name, str) and MACOS_RELEASE_ASSET_RE.fullmatch(name):
+            names.add(name)
+    return names
+
+
+def darwin_release_coverage(
+    payload: object,
+) -> tuple[list[tuple[str, dt.datetime]], list[tuple[str, dt.datetime]]]:
+    """Partition published releases by whether they ship BOTH Darwin archives.
+
+    Returns (complete, incomplete), each ordered oldest-first by publication
+    time. A release carrying only one of the two archives counts as incomplete,
+    because the policy is to never drop either deliverable. Drafts are excluded:
+    an unpublished release ships nothing yet. A non-draft release with no
+    publication timestamp is a hard error rather than a silent skip, so an
+    unorderable release can never hide a dropped deliverable.
+    """
+    if not isinstance(payload, list):
+        raise HarnessError("gh returned non-array paginated release data")
+    complete: list[tuple[str, dt.datetime]] = []
+    incomplete: list[tuple[str, dt.datetime]] = []
+    for page in payload:
+        if not isinstance(page, list):
+            raise HarnessError("gh returned a non-array release page")
+        for release in page:
+            if not isinstance(release, dict):
+                raise HarnessError("gh returned a non-object release")
+            tag = release.get("tag_name")
+            if not isinstance(tag, str) or not tag:
+                raise HarnessError("GitHub Release has no tag_name")
+            if release.get("draft") is True:
+                continue
+            published_at = release.get("published_at")
+            if published_at is None:
+                raise HarnessError(
+                    f"GitHub Release {tag} is published but has no published_at"
+                )
+            when = parse_release_timestamp(published_at)
+            if len(release_darwin_asset_names(release, tag)) == DARWIN_ARCHIVE_COUNT:
+                complete.append((tag, when))
+            else:
+                incomplete.append((tag, when))
+    complete.sort(key=lambda entry: entry[1])
+    incomplete.sort(key=lambda entry: entry[1])
+    return complete, incomplete
+
+
+def uncovered_releases_since_last_darwin(
+    payload: object,
+) -> tuple[tuple[str, dt.datetime] | None, list[tuple[str, dt.datetime]]]:
+    """Name the last Darwin-complete release and every later release that dropped it.
+
+    Releases published before that anchor are deliberately not reported: they
+    predate the deliverable and re-attaching assets to them is not the policy.
+    """
+    complete, incomplete = darwin_release_coverage(payload)
+    anchor = complete[-1] if complete else None
+    if anchor is None:
+        return None, incomplete
+    return anchor, [entry for entry in incomplete if entry[1] > anchor[1]]
+
+
+def verify_macos_release_coverage(
+    root: Path,
+) -> tuple[tuple[str, dt.datetime] | None, list[tuple[str, dt.datetime]]]:
+    return uncovered_releases_since_last_darwin(
+        fetch_releases(
+            root,
+            refusal="refusing to judge Darwin asset coverage from an unread release list",
+        )
+    )
+
+
+def verify_macos_release_cadence(
+    root: Path,
+) -> tuple[str | None, dt.datetime | None, dt.datetime | None]:
+    payload = fetch_releases(
+        root, refusal="refusing to publish Darwin assets"
+    )
     latest = latest_macos_release_asset(payload)
     if latest is None:
         return None, None, None
@@ -519,6 +609,77 @@ version = "1.2.3"
     )
 
 
+def darwin_release(tag: str, published_at: str, names: list[str]) -> dict[str, object]:
+    return {
+        "tag_name": tag,
+        "published_at": published_at,
+        "assets": [{"name": name} for name in names],
+    }
+
+
+BOTH_DARWIN = [
+    "agent-doc-x86_64-apple-darwin.tar.gz",
+    "agent-doc-aarch64-apple-darwin.tar.gz",
+]
+
+
+def self_test_darwin_coverage() -> None:
+    """Prove the Darwin coverage detector fires, and equally that it stays silent."""
+    v1 = darwin_release("v1", "2026-09-01T12:00:00Z", BOTH_DARWIN)
+
+    # A later release that dropped both archives is reported.
+    anchor, uncovered = uncovered_releases_since_last_darwin(
+        [[v1, darwin_release("v2", "2026-09-02T12:00:00Z", ["agent-doc-x86_64-unknown-linux-gnu.tar.gz"])]]
+    )
+    if anchor is None or anchor[0] != "v1" or [tag for tag, _ in uncovered] != ["v2"]:
+        raise HarnessError("Darwin coverage detector missed a dropped deliverable")
+
+    # Negative control: when every later release is complete it must report nothing.
+    anchor, uncovered = uncovered_releases_since_last_darwin(
+        [[v1, darwin_release("v2", "2026-09-02T12:00:00Z", BOTH_DARWIN)]]
+    )
+    if anchor is None or anchor[0] != "v2" or uncovered:
+        raise HarnessError("Darwin coverage detector reported a gap that does not exist")
+
+    # Either deliverable counts: one archive of the pair is still a drop.
+    _, uncovered = uncovered_releases_since_last_darwin(
+        [[v1, darwin_release("v2", "2026-09-02T12:00:00Z", [BOTH_DARWIN[0]])]]
+    )
+    if [tag for tag, _ in uncovered] != ["v2"]:
+        raise HarnessError("Darwin coverage detector accepted a half-shipped pair")
+
+    # A release published BEFORE the anchor is not a regression and is not reported.
+    _, uncovered = uncovered_releases_since_last_darwin(
+        [[darwin_release("v0", "2026-08-01T12:00:00Z", []), v1]]
+    )
+    if uncovered:
+        raise HarnessError("Darwin coverage detector reported a pre-anchor release")
+
+    # A draft ships nothing yet, so it is excluded rather than reported.
+    draft = {"tag_name": "v2", "draft": True, "published_at": None, "assets": []}
+    _, uncovered = uncovered_releases_since_last_darwin([[v1, draft]])
+    if uncovered:
+        raise HarnessError("Darwin coverage detector reported an unpublished draft")
+
+    # A published release with no timestamp cannot be ordered, so it fails closed
+    # instead of being skipped into invisibility.
+    try:
+        uncovered_releases_since_last_darwin(
+            [[v1, {"tag_name": "v2", "published_at": None, "assets": []}]]
+        )
+    except HarnessError:
+        pass
+    else:
+        raise HarnessError("Darwin coverage detector accepted an unorderable release")
+
+    # With no Darwin release ever, every incomplete release is reported.
+    anchor, uncovered = uncovered_releases_since_last_darwin(
+        [[darwin_release("v1", "2026-09-01T12:00:00Z", [])]]
+    )
+    if anchor is not None or [tag for tag, _ in uncovered] != ["v1"]:
+        raise HarnessError("Darwin coverage detector mishandled an empty history")
+
+
 def self_test() -> None:
     latest = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
     if next_macos_release_at(latest) != dt.datetime(
@@ -555,6 +716,8 @@ def self_test() -> None:
         dt.datetime(2026, 9, 2, 12, 0, tzinfo=dt.timezone.utc),
     ):
         raise HarnessError("macOS cadence did not select the latest Darwin asset")
+
+    self_test_darwin_coverage()
     with tempfile.TemporaryDirectory(prefix="agent-doc-dev-") as temp:
         root = Path(temp)
         write_fixture(root)
@@ -650,6 +813,15 @@ def parse_args() -> argparse.Namespace:
     )
     cadence.add_argument("--root", type=Path)
 
+    coverage = subparsers.add_parser(
+        "verify-macos-release-coverage",
+        help=(
+            "fail if any release published after the last Darwin upload ships "
+            "an incomplete pair of Darwin archives"
+        ),
+    )
+    coverage.add_argument("--root", type=Path)
+
     subparsers.add_parser(
         "self-test", help="exercise projection and drift detection on a fixture"
     )
@@ -687,6 +859,31 @@ def main() -> int:
                 print(
                     f"weekly macOS asset window is open: {tag} uploaded Darwin assets at "
                     f"{published_at.isoformat()} (eligible since {eligible_at.isoformat()})"
+                )
+        elif args.command == "verify-macos-release-coverage":
+            anchor, uncovered = verify_macos_release_coverage(root)
+            if uncovered:
+                where = (
+                    f"the last Darwin-complete release {anchor[0]} "
+                    f"({anchor[1].isoformat()})"
+                    if anchor is not None
+                    else "no Darwin-complete release"
+                )
+                tags = ", ".join(tag for tag, _ in uncovered)
+                raise HarnessError(
+                    f"{len(uncovered)} release(s) published after {where} ship an "
+                    f"incomplete pair of Darwin archives: {tags}; build them on a Mac "
+                    f"with `make release-macos-assets TAG=<tag>`"
+                )
+            if anchor is None:
+                print(
+                    "no release has ever shipped Darwin archives, so none has been "
+                    "dropped"
+                )
+            else:
+                print(
+                    f"every release published after {anchor[0]} ships both Darwin "
+                    f"archives (last Darwin upload {anchor[1].isoformat()})"
                 )
         elif args.command == "self-test":
             self_test()

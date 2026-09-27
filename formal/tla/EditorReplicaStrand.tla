@@ -7,12 +7,21 @@ by a cdylib generation swap.
 
 WHY THIS MODULE EXISTS
 ----------------------
-`JetBrainsFileCache` already claims `EventuallyConverged` for editor-first
-reload/reregister, and it passes. Production wedges anyway, and has for months.
-The reason is that its `ReregisterFromExactEditorCut` step is an unconditional
-assignment: re-registration cannot fail there, so convergence is an axiom of the
-model rather than a property of the design. Every fix aimed at a symptom kept
-being certified by a model that had assumed the failure away.
+`JetBrainsFileCache` claimed `EventuallyConverged` for editor-first
+reload/reregister and passed, while production wedged for months. Its
+`ReregisterFromExactEditorCut` step was an unconditional assignment:
+re-registration could not fail there, so convergence was an axiom of the model
+rather than a property of the design, and every fix aimed at a symptom kept being
+certified by a model that had assumed the failure away.
+
+That module now admits the rejection too, and ships its own must-violate config.
+The two are kept separate because they model different scopes: `JetBrainsFileCache`
+covers the editor-first reconnect and granular retained-intent replay — what a
+published cut must contain — while this module covers the authority-resolution
+ladder underneath it: the bounded re-registration budget, the attachment latch,
+and the precedence between editor and disk. The wedge is only a state-graph
+deadlock at THIS granularity, because only here are the retry budget and the
+latch explicit.
 
 The failure this module admits is the one the logs actually show. Measured
 2026-09-27 18:28:54-18:28:58Z on `tasks/agent-doc/agent-doc-bugs.md` (and four

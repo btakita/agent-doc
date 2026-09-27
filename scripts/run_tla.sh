@@ -43,10 +43,22 @@ modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtL
 # `EventuallyConverged` while production wedged for months, because its
 # reregister step was an unconditional assignment that could not be rejected.
 #
-# Every module that models a recovery path should therefore also ship a config
-# with the recovery edge disabled, and prove the wedge is genuinely reachable.
-# That is what makes the positive run mean something.
-must_violate=(EditorReplicaStrand:EditorReplicaStrandWedge)
+# There are two kinds of obligation here, and a module that models a recovery
+# path wants both:
+#
+#   * a WEDGE config disables the recovery edge and must violate the liveness
+#     property - proof that the edge is load-bearing rather than decorative;
+#   * a REACH config asserts the negation of the desired end state and must be
+#     violated too - proof that the happy path is still reachable, so a
+#     conditional property cannot pass because its antecedent never holds.
+#
+# Together they mean the positive run is checking something. Either one alone
+# leaves a way to go vacuous.
+must_violate=(
+    EditorReplicaStrand:EditorReplicaStrandWedge
+    JetBrainsFileCache:JetBrainsFileCacheWedge
+    JetBrainsFileCache:JetBrainsFileCacheReach
+)
 
 for module in "${modules[@]}"; do
     cp "${repo_root}/formal/tla/${module}.tla" "${work_dir}/"
@@ -62,7 +74,12 @@ for module in "${modules[@]}"; do
     if grep -Eq '\(\* --(fair )?algorithm' "${module}.tla"; then
       java -XX:+UseParallelGC -cp "${tools_jar}" pcal.trans "${module}.tla"
     fi
-java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto "${module}.tla"
+# `-metadir` is explicit because TLC otherwise derives it from the current time
+# to the SECOND, and two checks that start inside the same second collide with
+# "that directory already exists". With the same module now checked under several
+# configs that is not a rare race, it is the common case.
+java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto \
+    -metadir "${work_dir}/states-${module}" "${module}.tla"
 done
 
 for entry in "${must_violate[@]}"; do
@@ -71,6 +88,7 @@ for entry in "${must_violate[@]}"; do
     log="${module}-${config}.log"
     # `set -e` is active, so guard the intentionally-failing run.
     if java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto \
+        -metadir "${work_dir}/states-${module}-${config}" \
         -config "${config}.cfg" "${module}.tla" >"${log}" 2>&1; then
         echo "[tla] NON-VACUITY FAILURE: ${module} with ${config}.cfg was expected to" >&2
         echo "[tla] report a violation and instead passed. The recovery edge that" >&2

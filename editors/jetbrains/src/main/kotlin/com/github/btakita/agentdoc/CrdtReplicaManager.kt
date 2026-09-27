@@ -559,7 +559,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     // replacement controller project an older snapshot over operator text.
     private val settledShadows = ConcurrentHashMap<String, String>()
     private val applyingRemote = ConcurrentHashMap.newKeySet<String>()
-    private val fileContentReloadingPaths = ConcurrentHashMap.newKeySet<String>()
+    // #opcapturedormant: `beforeFileContentReload` and `fileContentReloaded` are two
+    // separate callbacks with no `finally` between them, so a reload that is vetoed,
+    // cancelled, or fails mid-write never posts its completion. A bare path set then
+    // strands the path forever, `isApplyingNonOperatorMutation` stays true for the
+    // life of the manager, and EVERY later operator keystroke is misclassified as a
+    // projection — silencing both op capture and local-splice forwarding. Store the
+    // reload start instead so the window is bounded and self-healing.
+    private val fileContentReloadingPaths = ConcurrentHashMap<String, Long>()
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
     private val localEditorFlushVersions = ConcurrentHashMap<String, AtomicLong>()
     private val localEditorFlushTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
@@ -606,7 +613,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     if (!file.name.endsWith(".md") || managerForFilePath(filePath) !== this@CrdtReplicaManager) {
                         return
                     }
-                    fileContentReloadingPaths.add(filePath)
+                    fileContentReloadingPaths[filePath] = System.currentTimeMillis()
                     advanceNonOperatorMutationEpoch(filePath)
                 }
 
@@ -3927,8 +3934,26 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         fun isApplyingRemote(filePath: String): Boolean =
             instances.values.any { it.applyingRemote.contains(filePath) }
 
-        private fun isReloadingFileContent(filePath: String): Boolean =
-            instances.values.any { it.fileContentReloadingPaths.contains(filePath) }
+        private fun isReloadingFileContent(filePath: String): Boolean {
+            val nowMs = System.currentTimeMillis()
+            var reloading = false
+            for (instance in instances.values) {
+                val startedAtMs = instance.fileContentReloadingPaths[filePath] ?: continue
+                if (fileContentReloadInProgressUtil(startedAtMs, nowMs, FILE_CONTENT_RELOAD_BOUND_MS)) {
+                    reloading = true
+                } else {
+                    // A reload that never posted its completion callback. Drop the
+                    // marker so operator classification recovers, and say so once.
+                    instance.fileContentReloadingPaths.remove(filePath)
+                    instance.log.warn(
+                        "[crdt-replica] file-content reload marker for $filePath expired after " +
+                            "${nowMs - startedAtMs}ms without fileContentReloaded; " +
+                            "restoring operator edit classification (#opcapturedormant)",
+                    )
+                }
+            }
+            return reloading
+        }
 
         /**
          * #ensurereregister: true when some open project already holds a CRDT
@@ -4137,6 +4162,30 @@ internal fun retainedProjectionHoldAllowsRefreshUtil(
 
 internal fun shouldApplyRemoteCrdtUpdateUtil(update: ReplicaRemoteUpdate, clientId: Long): Boolean =
     update.origin != clientId
+
+/**
+ * Upper bound on how long a `beforeFileContentReload` marker may stand.
+ *
+ * A file-content reload is a synchronous EDT operation; it completes in
+ * milliseconds. Anything older than this never posted `fileContentReloaded`.
+ */
+internal const val FILE_CONTENT_RELOAD_BOUND_MS = 5_000L
+
+/**
+ * True while a file-content reload started at [startedAtMs] is still plausibly
+ * in flight (`#opcapturedormant`).
+ *
+ * A clock that moved backwards must not extend the window indefinitely either, so
+ * a negative elapsed time expires the marker.
+ */
+internal fun fileContentReloadInProgressUtil(
+    startedAtMs: Long,
+    nowMs: Long,
+    boundMs: Long,
+): Boolean {
+    val elapsedMs = nowMs - startedAtMs
+    return elapsedMs in 0..boundMs
+}
 
 internal fun isOperatorDocumentEventUtil(
     nonOperatorMutation: Boolean,

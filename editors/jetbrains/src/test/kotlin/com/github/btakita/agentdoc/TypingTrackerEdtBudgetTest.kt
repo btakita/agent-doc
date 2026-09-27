@@ -414,6 +414,106 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
+    fun `an unreplayable burst is refused explicitly instead of returning no ops`() {
+        // #opcapturedormant: `null` (the ops do not reconstruct the reported buffer)
+        // and `emptyList()` (the burst held no operator op) are different diagnoses.
+        // Collapsing them is what made every drop silent.
+        assertEquals(
+            "a burst with no operator-attributable op is empty, not unreplayable",
+            emptyList<PreparedEditorOp>(),
+            prepareEditorOpReports(
+                finalText = "abc",
+                ops = listOf(
+                    PendingEditorOp(offset = 0, oldFragment = "", newFragment = "abc", nonOperatorMutation = true),
+                ),
+            ),
+        )
+        assertEquals(
+            "ops that cannot be replayed against the reported buffer must be refused, not emptied",
+            null,
+            prepareEditorOpReports(
+                finalText = "totally different",
+                ops = listOf(
+                    PendingEditorOp(offset = 0, oldFragment = "", newFragment = "abc", nonOperatorMutation = false),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `a burst the document outran is detected from the modification stamp`() {
+        // The reporter reads the buffer and drains the burst as two steps off the
+        // EDT. A change landing between them produces text no replay can reach, so
+        // the stamp is what separates "requeue and retry" from a silent drop.
+        val burst = listOf(
+            PendingEditorOp(offset = 0, oldFragment = "", newFragment = "a", nonOperatorMutation = false, docStamp = 7L),
+            PendingEditorOp(offset = 1, oldFragment = "", newFragment = "b", nonOperatorMutation = false, docStamp = 8L),
+        )
+        assertTrue(
+            "a quiet burst ends at the snapshot stamp",
+            capturedBurstMatchesSnapshotUtil(burst, snapshotStamp = 8L),
+        )
+        assertFalse(
+            "a snapshot taken after a later change must not be replayed against this burst",
+            capturedBurstMatchesSnapshotUtil(burst, snapshotStamp = 9L),
+        )
+        assertTrue(
+            "an empty burst has nothing to invalidate",
+            capturedBurstMatchesSnapshotUtil(emptyList(), snapshotStamp = 9L),
+        )
+        assertTrue(
+            "an op captured without a stamp must not be discarded by the guard",
+            capturedBurstMatchesSnapshotUtil(
+                listOf(PendingEditorOp(offset = 0, oldFragment = "", newFragment = "a", nonOperatorMutation = false)),
+                snapshotStamp = 9L,
+            ),
+        )
+    }
+
+    @Test
+    fun `every reporter refusal writes a receipt and keeps the captured burst`() {
+        val trackerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(trackerPath)
+
+        assertTrue(
+            "the buffer text and its stamp must come from one read action",
+            source.contains("DocumentSnapshot(document.text, document.modificationStamp)"),
+        )
+        assertTrue(
+            "documentChanged must stamp each captured op so the drain can detect the race",
+            source.contains("docStamp = event.document.modificationStamp"),
+        )
+        assertTrue(
+            "the burst must be drained adjacent to the snapshot it is replayed against",
+            source.contains("if (drainEditorOps) drainPendingEditorOps(filePath) else emptyList()"),
+        )
+        assertTrue(
+            "a burst that never reached the reporter must be requeued, not dropped",
+            source.contains("if (!burstHandedOff) requeuePendingEditorOps(filePath, drainedOps)"),
+        )
+        val refusalBody = source.substringAfter("private fun reportDrainedEditorOps")
+            .substringBefore("#qnodemerge4wire Phase 4")
+        for (reason in listOf(
+            "OpCaptureRefusal.DOC_ADVANCED_DURING_DRAIN",
+            "OpCaptureRefusal.SHADOW_REPLAY_MISMATCH",
+            "OpCaptureRefusal.ALL_OPS_NON_OPERATOR",
+        )) {
+            assertTrue(
+                "every silent early return must now name itself: $reason",
+                refusalBody.contains(reason),
+            )
+        }
+        assertEquals(
+            "an unavailable merge base must be reported for both the null and empty case",
+            2,
+            source.split("OpCaptureRefusal.BASE_HASH_UNAVAILABLE").size - 1,
+        )
+    }
+
+    @Test
     fun `crdt document listener uses shadows instead of copying full editor text`() {
         val managerPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
@@ -545,7 +645,7 @@ class TypingTrackerEdtBudgetTest {
                 listenerBody.contains("non-operator-editor-event") &&
                 source.contains("FileDocumentManagerListener.TOPIC") &&
                 source.contains("override fun beforeFileContentReload") &&
-                source.contains("fileContentReloadingPaths.add(filePath)") &&
+                source.contains("fileContentReloadingPaths[filePath] = System.currentTimeMillis()") &&
                 source.contains("isReloadingFileContent(filePath)") &&
                 source.contains("wholeTextReplaced = event.isWholeTextReplaced") &&
                 source.contains("isDocumentUnsaved(event.document)") &&

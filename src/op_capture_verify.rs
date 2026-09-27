@@ -17,6 +17,7 @@ struct OpCaptureVerification {
     batch_recorded_count: usize,
     accepted_count: usize,
     failed_count: usize,
+    refused_count: usize,
     cafe_demo: bool,
 }
 
@@ -25,12 +26,13 @@ pub fn run(file: &Path, expect_cafe_demo: bool) -> Result<()> {
     println!("op-capture verification ok for {}", file.display());
     println!("ops_log={}", report.ops_log.display());
     println!(
-        "doc={} editor_op_recorded={} editor_ops_recorded={} editor_ops_for_base_accepted={} failures={}",
+        "doc={} editor_op_recorded={} editor_ops_recorded={} editor_ops_for_base_accepted={} failures={} capture_refusals={}",
         report.doc_tag,
         report.recorded_count,
         report.batch_recorded_count,
         report.accepted_count,
-        report.failed_count
+        report.failed_count,
+        report.refused_count
     );
     if expect_cafe_demo {
         println!("cafe_demo=ok offset=6 delete_len=6 insert_non_ascii=true");
@@ -83,13 +85,24 @@ fn verify(file: &Path, expect_cafe_demo: bool) -> Result<OpCaptureVerification> 
                 && line.contains("#qbasehashmemo")
         })
         .collect();
+    // `#opcapturedormant`: a dormant ledger writes neither producer marker nor a
+    // failure marker, so the reporter's own refusal receipts are the only evidence
+    // that separates "the editor refused to hand the burst over" from "the operator
+    // never typed". Name them in the failure instead of reporting a bare absence.
+    let refused: Vec<&str> = doc_lines
+        .iter()
+        .copied()
+        .filter(|line| OpsLogEvent::EditorOpCaptureRefused.is_line(line))
+        .collect();
+    let refused_count = refused.len();
     if recorded.is_empty() && batch_recorded.is_empty() {
         bail!(
             "missing editor-op producer marker for {doc_tag} in {} — expected either \
              `{}` (one-op FFI, #qnodemerge4wire) or `{EDITOR_OPS_RECORDED_MARKER} ... transaction=batch` \
-             (batch FFI, #qbasehashmemo, the path the JetBrains TypingTracker uses)",
+             (batch FFI, #qbasehashmemo, the path the JetBrains TypingTracker uses).{}",
             ops_log.display(),
             OpsLogEvent::EditorOpRecorded,
+            describe_capture_refusals(&refused),
         );
     }
 
@@ -135,8 +148,39 @@ fn verify(file: &Path, expect_cafe_demo: bool) -> Result<OpCaptureVerification> 
         batch_recorded_count: batch_recorded.len(),
         accepted_count: accepted.len(),
         failed_count,
+        refused_count,
         cafe_demo: expect_cafe_demo,
     })
+}
+
+/// Summarize `editor_op_capture_refused` receipts for a producer-marker failure.
+///
+/// With no receipts at all the reporter chain itself is unobserved — either the
+/// plugin predates the refusal receipt or its `documentChanged` listener never
+/// ran — which is a materially different diagnosis from a named refusal.
+fn describe_capture_refusals(refused: &[&str]) -> String {
+    if refused.is_empty() {
+        return format!(
+            " No `{}` receipts either: the reporter chain is unobserved, so either no operator \
+             document change reached the editor listener or the plugin predates the refusal receipt.",
+            OpsLogEvent::EditorOpCaptureRefused,
+        );
+    }
+    let mut reasons: Vec<&str> = refused
+        .iter()
+        .filter_map(|line| {
+            line.split_whitespace()
+                .find_map(|field| field.strip_prefix("reason="))
+        })
+        .collect();
+    reasons.sort_unstable();
+    reasons.dedup();
+    format!(
+        " {} `{}` receipt(s) name why the burst was never handed over: {}.",
+        refused.len(),
+        OpsLogEvent::EditorOpCaptureRefused,
+        reasons.join(", "),
+    )
 }
 
 fn verify_cafe_demo(
@@ -259,6 +303,55 @@ mod tests {
             err.contains("editor_op_recorded") && err.contains("transaction=batch"),
             "the diagnostic must name both producers so a dormant ledger is not \
              misread as the wrong-marker bug: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_names_the_refusal_reasons_behind_a_dormant_ledger() {
+        // `#opcapturedormant`: the reporter refused the burst, so the absence has a
+        // cause the operator can act on. Naming it is the whole point of the receipt.
+        let (_dir, doc) = setup_log(
+            "[2026-06-24T00:00:00Z] editor_op_capture_refused reason=all_ops_non_operator detail=ops=3 #opcapturedormant doc=plan\n\
+             [2026-06-24T00:00:01Z] editor_op_capture_refused reason=shadow_replay_mismatch detail=ops=2_operator_ops=2 #opcapturedormant doc=plan\n",
+        );
+
+        let err = verify(&doc, false).unwrap_err().to_string();
+        assert!(
+            err.contains("2 `editor_op_capture_refused` receipt(s)")
+                && err.contains("all_ops_non_operator")
+                && err.contains("shadow_replay_mismatch"),
+            "a dormant ledger with refusal receipts must report their reasons: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_says_the_reporter_chain_is_unobserved_when_no_refusal_receipt_exists() {
+        // Zero producers AND zero refusals is a different diagnosis from a named
+        // refusal: nothing in the reporter chain ran, or the plugin is too old.
+        let (_dir, doc) = setup_log(
+            "[2026-06-24T00:00:00Z] editor_op_epoch_closed cause=non_operator_projection action=cleared doc=plan\n",
+        );
+
+        let err = verify(&doc, false).unwrap_err().to_string();
+        assert!(
+            err.contains("reporter chain is unobserved"),
+            "a bare absence must be distinguished from a named refusal: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_counts_refusals_alongside_a_successful_capture() {
+        let (_dir, doc) = setup_log(
+            "[2026-06-24T00:00:00Z] editor_op_capture_refused reason=doc_advanced_during_drain detail=ops=1_requeued=true #opcapturedormant doc=plan\n\
+             [2026-06-24T00:00:01Z] editor_ops_recorded count=1 base=abc transaction=batch #qbasehashmemo doc=plan\n\
+             [2026-06-24T00:00:02Z] editor_ops_for_base accepted=true ops=1 base=abc offsets=3 delete_bytes=0 insert_bytes=1 insert_non_ascii=false #qnodemerge4wire doc=plan\n",
+        );
+
+        let report = verify(&doc, false).unwrap();
+        assert_eq!(report.batch_recorded_count, 1);
+        assert_eq!(
+            report.refused_count, 1,
+            "a requeued burst is a refusal receipt, not a capture failure"
         );
     }
 

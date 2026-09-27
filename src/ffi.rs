@@ -1634,6 +1634,66 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
     }
 }
 
+/// Record why an editor refused to hand a captured operator burst to op capture.
+///
+/// `#opcapturedormant`: every early return in the JetBrains `TypingTracker`
+/// reporter chain used to be silent, so a dormant ledger read as
+/// *zero recorded ops AND zero failures* — indistinguishable from "the operator
+/// never typed". Neither `editor_ops_recorded` nor `editor_ops_record_failed` is
+/// written when the burst never reaches [`agent_doc_record_editor_ops_json`], so
+/// the refusal itself has to be a receipt.
+///
+/// `reason` is a stable snake_case token (`all_ops_non_operator`,
+/// `shadow_replay_mismatch`, `doc_advanced_during_drain`,
+/// `base_hash_unavailable`); `detail` is free-form diagnostic context and may be
+/// empty. Returns `1` when the receipt was written and `0` on invalid UTF-8.
+///
+/// # Safety
+///
+/// `file_path`, `reason`, and `detail` must be valid, NUL-terminated UTF-8
+/// strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_log_editor_op_capture_refusal(
+    file_path: *const c_char,
+    reason: *const c_char,
+    detail: *const c_char,
+) -> i32 {
+    let (Ok(file), Ok(reason), Ok(detail)) = (
+        unsafe { CStr::from_ptr(file_path) }.to_str(),
+        unsafe { CStr::from_ptr(reason) }.to_str(),
+        unsafe { CStr::from_ptr(detail) }.to_str(),
+    ) else {
+        eprintln!(
+            "[op-capture] agent_doc_log_editor_op_capture_refusal: non-UTF-8 argument; dropping receipt"
+        );
+        return 0;
+    };
+    let file_path_buf = std::path::PathBuf::from(file);
+    agent_doc_ops_log_io::log_op(
+        &file_path_buf,
+        &format!(
+            "{} reason={} detail={} #opcapturedormant",
+            OpsLogEvent::EditorOpCaptureRefused,
+            sanitize_op_capture_refusal_field(reason),
+            sanitize_op_capture_refusal_field(detail),
+        ),
+    );
+    1
+}
+
+/// Keep one ops-log receipt on one line with parseable `key=value` fields.
+fn sanitize_op_capture_refusal_field(value: &str) -> String {
+    let collapsed: String = value
+        .chars()
+        .map(|c| if c.is_whitespace() { '_' } else { c })
+        .collect();
+    if collapsed.is_empty() {
+        "none".to_string()
+    } else {
+        collapsed
+    }
+}
+
 /// Close the current editor-op epoch before applying a non-operator projection.
 ///
 /// Captured operator operations are meaningful only within one uninterrupted
@@ -4196,6 +4256,73 @@ mod tests {
         assert!(
             !ops_log.contains('�'),
             "ops log should not contain mojibake:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn op_capture_refusal_receipt_names_its_reason_on_one_line() {
+        // `#opcapturedormant`: a dormant ledger writes no producer and no failure
+        // marker, so the refusal receipt is the only evidence of WHY. It has to stay
+        // one parseable line with a `reason=` field even when the detail has spaces.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+        let reason_c = CString::new("shadow_replay_mismatch").unwrap();
+        let detail_c = CString::new("ops=3 operator_ops=2").unwrap();
+        let rc = unsafe {
+            agent_doc_log_editor_op_capture_refusal(
+                file_c.as_ptr(),
+                reason_c.as_ptr(),
+                detail_c.as_ptr(),
+            )
+        };
+        assert_eq!(rc, 1, "a well-formed refusal must be recorded");
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let receipt = ops_log
+            .lines()
+            .find(|line| OpsLogEvent::EditorOpCaptureRefused.is_line(line))
+            .unwrap_or_else(|| panic!("no refusal receipt written:\n{ops_log}"));
+        assert!(
+            receipt.contains("reason=shadow_replay_mismatch"),
+            "the reason must be a parseable field: {receipt}"
+        );
+        assert!(
+            receipt.contains("detail=ops=3_operator_ops=2"),
+            "whitespace in the detail must not split the field: {receipt}"
+        );
+        assert!(
+            receipt.contains("#opcapturedormant"),
+            "the receipt must carry its anchor: {receipt}"
+        );
+    }
+
+    #[test]
+    fn op_capture_refusal_receipt_records_an_empty_detail_as_none() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+        let reason_c = CString::new("base_hash_unavailable").unwrap();
+        let detail_c = CString::new("").unwrap();
+        let rc = unsafe {
+            agent_doc_log_editor_op_capture_refusal(
+                file_c.as_ptr(),
+                reason_c.as_ptr(),
+                detail_c.as_ptr(),
+            )
+        };
+        assert_eq!(rc, 1);
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("reason=base_hash_unavailable detail=none"),
+            "an empty detail must not leave a dangling field:\n{ops_log}"
         );
     }
 

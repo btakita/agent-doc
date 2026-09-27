@@ -146,6 +146,18 @@ Direct path (no gating needed):
 items inside `agent:backlog`; preflight reports `legacy_gated_in_backlog` and
 `agent-doc migrate` moves those items into `agent:review`.
 
+The `legacy_gated_in_backlog` warning is budget-aware (`#review-migrate-gated`).
+`agent-doc migrate` only MOVES gated items, so on a document with a long legacy
+tail it can satisfy the component-placement rule while pushing `agent:review`
+past the 10-item legibility target the instruction surfaces state — asking the
+agent to trade one rule for another, every cycle, with no way to satisfy both.
+When `review_count + legacy_gated_in_backlog_count` would exceed that target the
+warning therefore states the review count the migration would produce, names the
+target it would break, and recommends triage first (`--backlog-ungate <id>` for a
+stale gate, `--done <id>` for one already satisfied, migrate only what is
+genuinely blocked) instead of repeating the bare command. At or below the target
+the migration is simply correct and the warning stays short.
+
 **Why three states instead of a prose suffix:**
 
 - **Machine-readable.** Preflight emits `backlog_gated_count`, `review_count`, and `review_gated_count`; release workflow can query gated items programmatically.

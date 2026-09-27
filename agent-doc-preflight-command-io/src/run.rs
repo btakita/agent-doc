@@ -722,10 +722,10 @@ pub fn run_with_options_to_writer(
     if pending_report.legacy_gated_in_backlog_count > 0 {
         warnings.push(PreflightWarning {
             code: "legacy_gated_in_backlog".to_string(),
-            message: format!(
-                "{} gated item(s) still live in agent:backlog; run `agent-doc migrate {}` to move them into agent:review.",
+            message: legacy_gated_in_backlog_message(
                 pending_report.legacy_gated_in_backlog_count,
-                file.display()
+                pending_report.review_count,
+                &file.display().to_string(),
             ),
             document_agent: None,
             active_harness: None,
@@ -2180,6 +2180,46 @@ pub fn run_with_options_to_writer(
     Ok(())
 }
 
+/// Item budget that keeps `agent:review` legible, mirrored by the generated
+/// instruction surfaces ("keep `agent:review` small (target < 10)").
+///
+/// The preflight nag below is measured against this number because the migration
+/// it recommends only MOVES items: it can satisfy the component-placement rule
+/// while breaking the budget rule.
+const REVIEW_LEGIBILITY_TARGET: usize = 10;
+
+/// Build the `legacy_gated_in_backlog` warning text.
+///
+/// `#review-migrate-gated`: a gated `[/]` item living in `agent:backlog` really is
+/// misplaced, but `agent-doc migrate` relocates EVERY one of them into
+/// `agent:review` — which on a document carrying a long legacy tail pushes review
+/// far past its legibility budget. Nagging for that every cycle asks the agent to
+/// trade one stated rule for another with no way to satisfy both, so the warning
+/// has to name the consequence and the triage-first remedy instead of repeating a
+/// bare command. Below the budget the migration is simply correct, and the
+/// warning stays short.
+fn legacy_gated_in_backlog_message(
+    gated_in_backlog: usize,
+    review_count: usize,
+    file_display: &str,
+) -> String {
+    let projected_review = review_count.saturating_add(gated_in_backlog);
+    if projected_review <= REVIEW_LEGIBILITY_TARGET {
+        return format!(
+            "{gated_in_backlog} gated item(s) still live in agent:backlog; run \
+             `agent-doc migrate {file_display}` to move them into agent:review."
+        );
+    }
+    format!(
+        "{gated_in_backlog} gated item(s) still live in agent:backlog. \
+         `agent-doc migrate {file_display}` would move all of them into agent:review, taking it \
+         from {review_count} to {projected_review} items — past the {REVIEW_LEGIBILITY_TARGET}-item \
+         legibility target, so running it now trades one rule for another. Triage the gated items \
+         first: `--backlog-ungate <id>` the ones whose blocking condition is stale, `--done <id>` \
+         the ones already satisfied, and migrate only what is genuinely blocked."
+    )
+}
+
 fn commit_previous_cycle_for_preflight(file: &Path) -> Result<bool> {
     match agent_doc_commit_io::commit(file) {
         Ok(did_commit) => Ok(did_commit),
@@ -2308,6 +2348,59 @@ mod tests {
             Some("claude-code")
         );
         assert_eq!(PreflightInvocation::Direct.explicit_harness(), None);
+    }
+
+    /// `#review-migrate-gated`: the nag must not push `agent:review` past its own
+    /// stated budget. Below the budget it stays the short "just migrate" form.
+    #[test]
+    fn legacy_gated_nag_recommends_migrate_while_review_stays_legible() {
+        let message = legacy_gated_in_backlog_message(3, 4, "plan.md");
+        assert!(
+            message.contains("run `agent-doc migrate plan.md`"),
+            "a migration that keeps review legible is simply correct: {message}"
+        );
+        assert!(
+            !message.contains("legibility target"),
+            "no tradeoff to report below the budget: {message}"
+        );
+    }
+
+    #[test]
+    fn legacy_gated_nag_names_the_review_budget_tradeoff_instead_of_repeating_the_command() {
+        // The monsterrodholders shape: 20 legacy gated backlog items against 11
+        // review items. Migrating takes review to 31, so the bare nag asks for a
+        // state the same instruction surface forbids.
+        let message = legacy_gated_in_backlog_message(20, 11, "monsterrodholders.md");
+        assert!(
+            message.contains("from 11 to 31"),
+            "the warning must state the review count it would produce: {message}"
+        );
+        assert!(
+            message.contains("10-item legibility target"),
+            "the warning must name the budget it would break: {message}"
+        );
+        assert!(
+            message.contains("--backlog-ungate <id>") && message.contains("--done <id>"),
+            "the warning must name the triage-first remedy: {message}"
+        );
+        assert!(
+            !message.contains("run `agent-doc migrate"),
+            "the warning must stop recommending the bare migration: {message}"
+        );
+    }
+
+    #[test]
+    fn legacy_gated_nag_switches_form_exactly_at_the_budget() {
+        let at_budget = legacy_gated_in_backlog_message(1, REVIEW_LEGIBILITY_TARGET - 1, "plan.md");
+        let over_budget = legacy_gated_in_backlog_message(2, REVIEW_LEGIBILITY_TARGET - 1, "plan.md");
+        assert!(
+            at_budget.contains("run `agent-doc migrate"),
+            "landing exactly on the target is still legible: {at_budget}"
+        );
+        assert!(
+            over_budget.contains("legibility target"),
+            "one item past the target must report the tradeoff: {over_budget}"
+        );
     }
 
     #[test]

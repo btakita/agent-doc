@@ -783,6 +783,37 @@ merge-consumer receipt `editor_ops_for_base accepted=true` is producer-agnostic.
 When neither producer marker is present the diagnostic must name both, so a
 dormant capture ledger is not misread as the wrong-marker defect.
 
+A refused capture is a receipt, not silence (`#opcapturedormant`). Neither
+producer marker nor a failure marker is written when a burst never reaches the
+record FFI at all, so a dormant ledger is otherwise indistinguishable from an
+operator who never typed. Every refusal in the editor reporter chain therefore
+writes `editor_op_capture_refused reason=<token> detail=<fields>
+#opcapturedormant` through `agent_doc_log_editor_op_capture_refusal`, with
+stable reasons: `all_ops_non_operator` (the burst held no operator-attributable
+op), `shadow_replay_mismatch` (the recorded ops do not reconstruct the reported
+buffer), `doc_advanced_during_drain` (the buffer moved on between the snapshot
+and the drain; the burst is requeued and retried at the next quiet boundary),
+and `base_hash_unavailable` (no merge base to stamp against). `verify-op-capture`
+names these reasons when both producer markers are absent, and reports the
+absence of receipts as an unobserved reporter chain — a different diagnosis from
+a named refusal.
+
+A captured burst is replayed only against a buffer snapshot it can reach. The
+reporter reads the editor text and drains the pending burst off the EDT, so each
+captured op carries the `Document` modification stamp it left behind and the
+snapshot carries the stamp it was read with, both from one read action. A stamp
+mismatch requeues the burst instead of discarding it; a burst that never reaches
+the reporter for any other reason is requeued too. An unreplayable burst and a
+burst with no operator op are distinct outcomes and must not collapse into one
+empty result.
+
+Non-operator classification must be bounded. A projection marker installed by a
+`beforeFileContentReload` callback expires if the paired `fileContentReloaded`
+never arrives, because a vetoed, cancelled, or failed reload otherwise strands
+the marker and makes every later operator keystroke read as a projection —
+silencing op capture and local-splice forwarding together for the life of the
+editor session.
+
 Document-scoped editor actions must not create cross-document authority edges.
 In particular, JetBrains Compact Exchange saves only its selected document
 before routing; `saveAllDocuments()` is forbidden because it can synchronously

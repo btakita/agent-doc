@@ -733,6 +733,73 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `a file content reload marker expires instead of silencing operator edits forever`() {
+        // #opcapturedormant: `beforeFileContentReload` and `fileContentReloaded` are
+        // two callbacks with no `finally` between them. A reload that is vetoed or
+        // fails mid-write never posts completion, and an unbounded marker then makes
+        // isApplyingNonOperatorMutation permanently true — every later keystroke is
+        // misclassified as a projection, silencing op capture AND splice forwarding.
+        assertTrue(
+            "a reload that just started is still in flight",
+            fileContentReloadInProgressUtil(
+                startedAtMs = 1_000L,
+                nowMs = 1_000L,
+                boundMs = FILE_CONTENT_RELOAD_BOUND_MS,
+            ),
+        )
+        assertTrue(
+            "a reload inside the bound is still in flight",
+            fileContentReloadInProgressUtil(
+                startedAtMs = 1_000L,
+                nowMs = 1_000L + FILE_CONTENT_RELOAD_BOUND_MS,
+                boundMs = FILE_CONTENT_RELOAD_BOUND_MS,
+            ),
+        )
+        assertFalse(
+            "a marker older than the bound never posted fileContentReloaded and must expire",
+            fileContentReloadInProgressUtil(
+                startedAtMs = 1_000L,
+                nowMs = 1_000L + FILE_CONTENT_RELOAD_BOUND_MS + 1L,
+                boundMs = FILE_CONTENT_RELOAD_BOUND_MS,
+            ),
+        )
+        assertFalse(
+            "a backwards clock must not extend the window indefinitely",
+            fileContentReloadInProgressUtil(
+                startedAtMs = 10_000L,
+                nowMs = 1_000L,
+                boundMs = FILE_CONTENT_RELOAD_BOUND_MS,
+            ),
+        )
+    }
+
+    @Test
+    fun `the reload marker is stored with its start time so it can expire`() {
+        val managerPath = listOf(
+            java.nio.file.Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            java.nio.file.Paths.get(
+                "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt",
+            ),
+        ).first { java.nio.file.Files.exists(it) }
+        val source = java.nio.file.Files.readString(managerPath)
+
+        assertFalse(
+            "an unbounded path set cannot recover from a missing fileContentReloaded",
+            source.contains("fileContentReloadingPaths = ConcurrentHashMap.newKeySet<String>()"),
+        )
+        assertTrue(
+            "the reload marker must carry the start time the bound is measured from",
+            source.contains("fileContentReloadingPaths = ConcurrentHashMap<String, Long>()") &&
+                source.contains("fileContentReloadingPaths[filePath] = System.currentTimeMillis()"),
+        )
+        assertTrue(
+            "an expired marker must be dropped so operator classification recovers",
+            source.contains("fileContentReloadInProgressUtil(startedAtMs, nowMs, FILE_CONTENT_RELOAD_BOUND_MS)") &&
+                source.contains("instance.fileContentReloadingPaths.remove(filePath)"),
+        )
+    }
+
+    @Test
     fun `a refused register leaves the forwarder detached and no-ops local deltas`() {
         // The Detached / headless path: the supervisor refuses register, so the
         // plugin must fall back (attached=false) and never ship deltas.

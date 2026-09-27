@@ -42,6 +42,49 @@ internal data class PendingEditorOp(
     val oldFragment: String,
     val newFragment: String,
     val nonOperatorMutation: Boolean,
+    /**
+     * `Document.modificationStamp` immediately after this change landed.
+     * [UNKNOWN_DOCUMENT_STAMP] when the capturing caller has no stamp (offset-math
+     * tests); the reporter always records the real stamp so the drain can tell a
+     * quiet burst from one the document outran.
+     */
+    val docStamp: Long = UNKNOWN_DOCUMENT_STAMP,
+)
+
+/** Sentinel for "no document stamp was captured with this op". */
+internal const val UNKNOWN_DOCUMENT_STAMP = -1L
+
+/**
+ * True when [snapshotStamp] is still the stamp the last captured op left behind.
+ *
+ * `#opcapturedormant`: the reporter reads the full buffer and drains the pending
+ * burst as two separate steps off the EDT, so a change landing between them
+ * produces a text that no replay of the drained ops can reach — and
+ * [prepareEditorOpReports] then discards the whole burst. Comparing stamps makes
+ * that race observable so the ops can be requeued for the next quiet boundary
+ * instead of silently dropped.
+ */
+internal fun capturedBurstMatchesSnapshotUtil(
+    ops: List<PendingEditorOp>,
+    snapshotStamp: Long,
+): Boolean {
+    val lastStamp = ops.lastOrNull()?.docStamp ?: return true
+    if (lastStamp == UNKNOWN_DOCUMENT_STAMP || snapshotStamp == UNKNOWN_DOCUMENT_STAMP) return true
+    return lastStamp == snapshotStamp
+}
+
+/** Stable `reason=` tokens for `editor_op_capture_refused` receipts. */
+internal object OpCaptureRefusal {
+    const val ALL_OPS_NON_OPERATOR = "all_ops_non_operator"
+    const val SHADOW_REPLAY_MISMATCH = "shadow_replay_mismatch"
+    const val DOC_ADVANCED_DURING_DRAIN = "doc_advanced_during_drain"
+    const val BASE_HASH_UNAVAILABLE = "base_hash_unavailable"
+}
+
+/** A buffer text and the modification stamp it was read with, from one read action. */
+internal data class DocumentSnapshot(
+    val text: String,
+    val stamp: Long,
 )
 
 internal data class PreparedEditorOp(
@@ -85,20 +128,29 @@ internal fun pluginVersion(): String =
         ?: TypingTracker::class.java.`package`?.implementationVersion
         ?: "unknown"
 
+/**
+ * Replay a coalesced burst into byte-offset reports, or `null` when the burst
+ * cannot be replayed against [finalText].
+ *
+ * `#opcapturedormant`: `null` and an empty list are different diagnoses. `null`
+ * means the recorded ops do not reconstruct the buffer we are reporting, so the
+ * burst is unusable; an empty list means the burst held no operator-attributable
+ * op at all. Collapsing both into `emptyList()` made every drop silent.
+ */
 internal fun prepareEditorOpReports(
     finalText: String,
     ops: List<PendingEditorOp>,
-): List<PreparedEditorOp> {
+): List<PreparedEditorOp>? {
     if (ops.isEmpty()) return emptyList()
 
-    var shadow = reverseApplyEditorOps(finalText, ops) ?: return emptyList()
+    var shadow = reverseApplyEditorOps(finalText, ops) ?: return null
     val reports = mutableListOf<PreparedEditorOp>()
     for (op in ops) {
         val offset = op.offset
-        if (offset < 0 || offset > shadow.length) return emptyList()
+        if (offset < 0 || offset > shadow.length) return null
         val oldEnd = offset + op.oldFragment.length
-        if (oldEnd > shadow.length) return emptyList()
-        if (shadow.substring(offset, oldEnd) != op.oldFragment) return emptyList()
+        if (oldEnd > shadow.length) return null
+        if (shadow.substring(offset, oldEnd) != op.oldFragment) return null
 
         val byteOffset = shadow
             .substring(0, offset)
@@ -132,7 +184,7 @@ internal fun prepareEditorOpReports(
         shadow = shadow.substring(0, offset) + op.newFragment + shadow.substring(oldEnd)
     }
 
-    if (shadow != finalText) return emptyList()
+    if (shadow != finalText) return null
     return reports
 }
 
@@ -206,6 +258,7 @@ object TypingTracker : DocumentListener {
             oldFragment = event.oldFragment.toString(),
             newFragment = event.newFragment.toString(),
             nonOperatorMutation = nonOperatorMutation,
+            docStamp = event.document.modificationStamp,
         )
         recordPendingEditorOp(filePath, op)
         scheduleFullContentReport(filePath, event.document)
@@ -216,6 +269,38 @@ object TypingTracker : DocumentListener {
         pendingEditorOps.compute(filePath) { _, existing ->
             (existing ?: mutableListOf()).also { it.add(op) }
         }
+    }
+
+    /**
+     * Put a drained burst back at the head of the pending list.
+     *
+     * `#opcapturedormant`: a drain that cannot be reported must not destroy the
+     * operator's captured ops — the next quiet boundary can still record them
+     * against a consistent buffer snapshot.
+     */
+    private fun requeuePendingEditorOps(filePath: String, ops: List<PendingEditorOp>) {
+        if (ops.isEmpty()) return
+        pendingEditorOps.compute(filePath) { _, existing ->
+            (existing ?: mutableListOf()).also { it.addAll(0, ops) }
+        }
+    }
+
+    private fun logOpCaptureRefusal(
+        lib: AgentDocLib,
+        filePath: String,
+        reason: String,
+        detail: String,
+    ) {
+        try {
+            lib.agent_doc_log_editor_op_capture_refusal(filePath, reason, detail)
+        } catch (_: UnsatisfiedLinkError) {
+            // older cdylib without the refusal-receipt ABI; the debug log still names it
+        } catch (_: NoSuchMethodError) {
+            // older cdylib without the refusal-receipt ABI; the debug log still names it
+        } catch (e: Throwable) {
+            LOG.debug("[native] op-capture refusal receipt skipped: ${e.message}")
+        }
+        LOG.debug("[native] op capture refused for $filePath: reason=$reason detail=$detail")
     }
 
     private fun drainPendingEditorOps(filePath: String): List<PendingEditorOp> {
@@ -407,14 +492,30 @@ object TypingTracker : DocumentListener {
      * permit. A blocking read here prevents listener shutdown, which in turn
      * prevents native reload and can retain the callback thread indefinitely.
      */
-    private fun tryReadDocumentText(document: Document): String? {
+    private fun tryReadDocumentText(document: Document): String? =
+        tryReadDocumentSnapshot(document)?.text
+
+    /**
+     * Read the buffer text and its modification stamp inside ONE read action.
+     *
+     * `#opcapturedormant`: the stamp is only a usable race detector if it is
+     * consistent with the text it is paired with, so both have to come out of the
+     * same read action.
+     */
+    private fun tryReadDocumentSnapshot(document: Document): DocumentSnapshot? {
         val application =
             com.intellij.openapi.application.ApplicationManager.getApplication() as? ApplicationEx
                 ?: return null
-        if (application.isReadAccessAllowed) return document.text
-        val textRef = AtomicReference<String?>()
-        return if (application.tryRunReadAction { textRef.set(document.text) }) {
-            textRef.get()
+        if (application.isReadAccessAllowed) {
+            return DocumentSnapshot(document.text, document.modificationStamp)
+        }
+        val snapshotRef = AtomicReference<DocumentSnapshot?>()
+        return if (
+            application.tryRunReadAction {
+                snapshotRef.set(DocumentSnapshot(document.text, document.modificationStamp))
+            }
+        ) {
+            snapshotRef.get()
         } else {
             null
         }
@@ -428,13 +529,22 @@ object TypingTracker : DocumentListener {
         requireReplica: Boolean,
     ): Boolean {
         return try {
-            val text = tryReadDocumentText(document)
-            if (text == null) {
+            val snapshot = tryReadDocumentSnapshot(document)
+            if (snapshot == null) {
                 if (!requireReplica) {
                     scheduleFullContentReport(filePath, document)
                 }
                 return false
             }
+            val text = snapshot.text
+            // `#opcapturedormant`: drain the burst adjacent to the snapshot it will
+            // be replayed against. The observed-content FFI and the replica ensure
+            // below can each block, and every editor change landing in that window
+            // used to poison the whole batch on the way out.
+            val drainedOps =
+                if (drainEditorOps) drainPendingEditorOps(filePath) else emptyList()
+            var burstHandedOff = false
+            try {
             // #falsetyping-guard: derive replica-churn provenance. A document that
             // is fully flushed to disk has no unsaved edits at all, so clear any
             // stale local-edit marker. Otherwise the buffer is unsaved: the edits
@@ -473,12 +583,17 @@ object TypingTracker : DocumentListener {
                     forceRefresh = false,
                 )
             }
-        LOG.debug("[native] document_changed content reported: $filePath")
-        if (drainEditorOps) {
-            val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))
-            reportEditorOps(lib, filePath, opReports)
-        }
+            LOG.debug("[native] document_changed content reported: $filePath")
+            if (drainEditorOps) {
+                burstHandedOff = true
+                reportDrainedEditorOps(lib, filePath, document, snapshot, drainedOps)
+            }
             true
+            } finally {
+                // Any exit that never reached the reporter keeps the operator's
+                // captured ops for the next quiet boundary (`#opcapturedormant`).
+                if (!burstHandedOff) requeuePendingEditorOps(filePath, drainedOps)
+            }
         } catch (_: UnsatisfiedLinkError) {
             false
         } catch (_: NoSuchMethodError) {
@@ -490,6 +605,56 @@ object TypingTracker : DocumentListener {
     }
 
     /**
+     * Resolve a drained burst into captured ops, naming every refusal.
+     *
+     * `#opcapturedormant`: each outcome here used to be an unlogged early return, so
+     * a permanently dormant ledger and an operator who never typed produced the same
+     * evidence — zero `editor_ops_recorded` AND zero `editor_ops_record_failed`.
+     */
+    private fun reportDrainedEditorOps(
+        lib: AgentDocLib,
+        filePath: String,
+        document: Document,
+        snapshot: DocumentSnapshot,
+        drainedOps: List<PendingEditorOp>,
+    ) {
+        if (drainedOps.isEmpty()) return
+        if (!capturedBurstMatchesSnapshotUtil(drainedOps, snapshot.stamp)) {
+            // The buffer moved on after the snapshot: keep the ops and retry at the
+            // next quiet boundary rather than replaying them against stale text.
+            requeuePendingEditorOps(filePath, drainedOps)
+            scheduleFullContentReport(filePath, document)
+            logOpCaptureRefusal(
+                lib,
+                filePath,
+                OpCaptureRefusal.DOC_ADVANCED_DURING_DRAIN,
+                "ops=${drainedOps.size} requeued=true",
+            )
+            return
+        }
+        val opReports = prepareEditorOpReports(snapshot.text, drainedOps)
+        if (opReports == null) {
+            logOpCaptureRefusal(
+                lib,
+                filePath,
+                OpCaptureRefusal.SHADOW_REPLAY_MISMATCH,
+                "ops=${drainedOps.size} operator_ops=${drainedOps.count { !it.nonOperatorMutation }}",
+            )
+            return
+        }
+        if (opReports.isEmpty()) {
+            logOpCaptureRefusal(
+                lib,
+                filePath,
+                OpCaptureRefusal.ALL_OPS_NON_OPERATOR,
+                "ops=${drainedOps.size}",
+            )
+            return
+        }
+        reportEditorOps(lib, filePath, opReports)
+    }
+
+/**
  * #qnodemerge4wire Phase 4: report a coalesced editor burst as byte-offset
  * operations in one bounded native transaction. IntelliJ `DocumentEvent`
  * offsets/fragments are UTF-16; [prepareEditorOpReports] replays the burst
@@ -504,13 +669,30 @@ private fun reportEditorOps(
     // Resolve the base hash captured ops must align to; skip (diff-guess
     // fallback) when unavailable. One burst resolves this once, rather than
     // making a native base-hash call per keystroke.
-    val baseHashPtr = lib.agent_doc_document_base_hash(filePath) ?: return
+    val baseHashPtr = lib.agent_doc_document_base_hash(filePath)
+    if (baseHashPtr == null) {
+        logOpCaptureRefusal(
+            lib,
+            filePath,
+            OpCaptureRefusal.BASE_HASH_UNAVAILABLE,
+            "ops=${ops.size} base_hash=null",
+        )
+        return
+    }
     val baseHash = try {
         baseHashPtr.getString(0)
         } finally {
             lib.agent_doc_free_string(baseHashPtr)
     }
-    if (baseHash.isNullOrEmpty()) return
+    if (baseHash.isNullOrEmpty()) {
+        logOpCaptureRefusal(
+            lib,
+            filePath,
+            OpCaptureRefusal.BASE_HASH_UNAVAILABLE,
+            "ops=${ops.size} base_hash=empty",
+        )
+        return
+    }
 
     val batch = JsonArray()
     for (op in ops) {

@@ -839,6 +839,18 @@ interface AgentDocLib : Library {
     fun agent_doc_clear_editor_op_epoch(filePath: String): Int
 
     /**
+     * Record why a captured operator burst never reached [agent_doc_record_editor_ops_json]
+     * (`#opcapturedormant`). Every early return in the reporter chain used to be silent, so a
+     * dormant ledger was indistinguishable from an operator who never typed. [reason] is a stable
+     * snake_case token; [detail] is free-form context and may be empty.
+     */
+    fun agent_doc_log_editor_op_capture_refusal(
+        filePath: String,
+        reason: String,
+        detail: String,
+    ): Int
+
+    /**
      * Compute the base hash captured ops must be stamped with so the write-time merge accepts them
      * (`#qnodemerge4wire`) — the SHA256 hex of the resolved CRDT merge base text. Returns a string
      * pointer (null on error → skip op capture this edit). Caller must free with

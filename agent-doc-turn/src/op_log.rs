@@ -156,6 +156,7 @@ ops_log_events! {
     EditorOpRecorded => "editor_op_recorded",
     EditorOpsForBase => "editor_ops_for_base",
     EditorOpRecordFailed => "editor_op_record_failed",
+    EditorOpCaptureRefused => "editor_op_capture_refused",
     ConvergenceGateBlocked => "convergence_gate_blocked",
 }
 

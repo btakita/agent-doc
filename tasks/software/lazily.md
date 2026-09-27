@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -165,13 +165,43 @@ The follow-up commit fixes a real consequence of wiring this into root `make che
 **Verification.** Root `make check` exit 0, 9,770/9,770 agent-doc tests, proof and self-test green inside it. An intermediate root run went red on agent-doc's `plugin-version-check` (JetBrains packaging fence) — that was a concurrent session's mid-edit JB sources in this shared tree, not my change; those paths are clean and the gate passes now, and I re-ran root check to exit 0 rather than report the stale red. Both superproject workflows are `workflow_dispatch`-only, so this push triggers no CI run; the three agent-doc CI runs, including last cycle's `187f31622`, are all still in progress and not waited on. Exchange is at 107 lines with the queue active — noting the size, not pausing to compact.
 
 Remaining queue head is `#lzdocorphanresidue`, which is `[operator-verify]`: the three truncated orphan lines after the `agent:done` close marker still need your deletion in IDEA.
+
+### Re: what #lzdocorphanresidue needs — opus-5 · 2026-09-27T00:20-04:00
+
+> **Queue prompt:**
+>
+> [#lzdocorphanresidue]: What needs to be done here?
+
+**Delete lines 203-205 of this file in IDEA, save, and send `continue`.** That is the whole item.
+
+They are the last three lines, immediately after the `&lt;!-- /agent:done --&gt;` close marker at line 202:
+
+| line | content (truncated) |
+|---|---|
+| 203 | `eturn typed satisfied/timed-out/cancelled/disposed-or-unavailable outcomes; optionally prove keyed side-effect receipts…` |
+| 204 | `cate orphan line remains outside all agent-doc components at line 158. Please delete only the stray `- [ ] [#lzstdlibbarrier] ...` line…` |
+| 205 | `ebc036` |
+
+Each begins mid-word (`eturn`, `cate`, `ebc036`) because they are truncated tails left behind by an earlier compaction — the head of each line was archived and the remainder was stranded. Line 204 is itself the orphaned tail of a *previous* instance of this same problem, which is how the residue accumulated. Nothing references them; deleting all three is lossless.
+
+**Why I cannot do it for you.** Two independent reasons, both verified this cycle rather than assumed:
+
+1. The lines sit *after* `&lt;!-- /agent:done --&gt;`, outside every `agent:*` component. Every write path the agent owns — `agent-doc write`, `patch`, the backlog/review/done flags — addresses a named component, so none of them can reach text in that gap.
+2. A live JetBrains editor holds the document and owns authority: the ops log reports `realtime_doc_resolve authority=editor_buffer live_editors=1 delivery_converged=true` and `crdt_current_text authority=multi_replica live_editors=1 delivery_version=15`. Editing the file on disk under that would be hand-aligning disk to the authority, which is the one move the recovery rules forbid outright — it manufactures a divergence the editor then has to arbitrate.
+
+Disk and the editor buffer currently agree exactly (both tails identical, `text_len=25457`), so there is no divergence to repair — only these three lines to remove.
+
+**If you would rather not touch it by hand:** close the `lazily.md` tab in IDEA. That drops `live_editors` to 0, disk becomes the authority, and I can clear the lines and strike the item on the next invocation. Tell me once the tab is closed.
+
+The item stays open and `[operator-verify]` either way — this turn answered your question rather than executing the deletion, so there is nothing to mark done yet.
+
+One note while I was in here: preflight reports `queue_maintenance_not_persisted` (`pending add: custom id already exists: lzdocorphanresidue`). The queue add was a no-op because the id was already queued, so the queue text you see is current — no action needed.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzdocorphanresidue]
 <!-- /agent:queue -->
 
 ## Backlog

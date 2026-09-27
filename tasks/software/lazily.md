@@ -79,6 +79,47 @@ One control worth naming because it was the load-bearing one: half-fixing lazily
 **Two leaks remain, both queued at the top of the backlog** — I am not gating them as review items, they are agent-executable: `#lzktoptionaldeps` (lazily-kt's four unconditional Gradle `implementation` deps, of which protobuf-kotlin 4.31.1 and kotlinx-serialization-json are codec-only) and `#lzgooptionalpgx` (lazily-go's root `go.mod` requires `jackc/pgx/v5` plus six indirects for a dependency exactly **one test file** imports and **zero** non-test files do; Go has no optional deps, so it needs a nested integration module).
 
 Exchange is at 365 lines across 14 response sections, over the warn thresholds; the queue is active so I am not pausing to compact.
+
+### Re: #lzktoptionaldeps protobuf codec gated, published graph pinned — opus-5 · 2026-09-27T16:43-04:00
+
+> **Queue prompt:**
+>
+> do [#lzktoptionaldeps]
+
+
+Done and pushed to `lazily-hub/lazily-kt` main (`b2d15cb`, plus a docs follow-up `4a3efa7`).
+
+**The leak is gone.** `ProtobufGraphBoundary.kt` and the `../lazily-spec/proto` source dir moved out of `main` into a `protobufCodec` source set, published as a Gradle feature variant with an explicit `io.github.lazily:lazily-protobuf-codec` capability. `protobuf-kotlin` is now `<optional>true</optional>` in the generated POM — which Maven does not resolve transitively — and lives only under the gated variant in Gradle Module Metadata. The main jar went 1.7M → 1.5M and contains zero protobuf classes.
+
+The capability name is set explicitly rather than taken as Gradle's default. Gradle derives it from the **project** name (`lazily-kt`), not the published artifactId (`lazily`), so consumers would have been told to request `io.github.lazily:lazily-kt-protobuf-codec` while depending on `io.github.lazily:lazily`. The guard pins the string.
+
+**One premise in the item was wrong, and I did not act on it.** `kotlinx-serialization-json` is not "only the JSON codec" — nine main sources use it, including `StateChart.kt`'s `ChartDef.fromJson`, the Harel chart parser this module's own POM description advertises, plus `Ipc.kt`, `Command.kt`, `Capability.kt`, `Receipt.kt` and `Signaling.kt`. Gating it means splitting the wire plane out of the library, which is a different change from removing a dependency nothing in the default surface uses. It stays core, and the reason is recorded next to the pin so the next reader does not re-derive it. Default graph is now four artifacts: `kotlin-stdlib`, `jna`, `kotlinx-coroutines-core`, `kotlinx-serialization-json`.
+
+**The pin reads the generated documents, not `build.gradle.kts`.** `scripts/check-published-dependencies.py` parses the generated POM **and** the Gradle Module Metadata, because what a consumer resolves is not the text of a dependency block — the Kotlin plugin's implicit `kotlin-stdlib`, the `-jvm` artifacts Gradle substitutes for the multiplatform coordinates, and the `<optional>` marker a feature variant produces are all plugin behaviour, and reading the manifest would not have caught this leak in the first place. Four sets, each compared in both directions.
+
+Both documents are measured because each closes a hole the other leaves open. Module metadata is invisible to Maven, so a POM-only regression passes a metadata-only check. And `<optional>true</optional>` is fifteen characters of XML: a POM-only guard is satisfied by a dependency gated in the POM that no feature variant stands behind — Maven protected, every Gradle consumer still downloading the codec — and satisfied just as happily by a capability renamed out from under the documented coordinate, because POMs do not carry capabilities. So the gated dependency must appear under a variant carrying the exact capability string, and that variant must publish at least one file, so an empty shell cannot stand in for the codec. Unparseable or empty measurements **refuse** (exit 2) rather than satisfying a set-equality over nothing, and the pins themselves are checked for vacuity before any document is read.
+
+**Mutation-checked, six cases, green control before and after:**
+
+| mutation | result |
+|---|---|
+| M0 control | exit 0 GREEN |
+| new unconditional `implementation` | exit 1 — `com.squareup.okio:okio-jvm` published but not pinned |
+| codec moved back into the default graph | caught (the gradle build breaks first) |
+| codec declared in BOTH main and the feature | exit 1 — caught **three times over**: POM default gains it, POM optional loses it, module `runtimeElements` gains it |
+| capability renamed | exit 2 — 0 runtime variants carry the pinned capability |
+| pin names an undeclared dependency | exit 1 — `org.example:ghost` pinned but not published |
+| gated pin emptied | exit 2 — refused as vacuous |
+
+Restores came from scratch copies with a `touch`, never `git checkout --`, so the fix under test was never reverted mid-run, and every mutation was asserted applied before the guard ran.
+
+**Wired and verified.** New `published-dependency-check` target in `make check`, a `Published dependency floor (#lzktoptionaldeps)` step in `ci.yml`, and both `EXPECTED_CLOSURE_TARGETS` and `EXPECTED_CI_STEPS` in `check-ci-reach.sh` updated — the reachability guard re-proves on every run that the gate is actually reached by CI. `make check` exit 0: **511 tests, 0 failures**, 149/161 canonical fixtures replayed per the runtime manifest, spotless, interop peer, both Lean models, assertion ordering, ci-reach all green.
+
+README gained an `## Optional feature` section with the Gradle capability request and the Maven classifier form. It uses version placeholders, not `0.42.0`: **v0.42.0 is already tagged without this change**, so the split lands in the next release and the section says so rather than implying a published artifact carries it. Also corrected the stale `v0.41.1` coordinate line.
+
+**CI:** run `36349017938` is pending — pushed minutes ago, not yet started. Local `make check` is the evidence above; nothing in CI differs except a fresh checkout of the siblings.
+
+**Next:** `#lzgooptionalpgx` is the queue head. I also filed `#lzktoptionaljna` (appended, not preempting) — `jna` is now the largest thing left in kt's default graph at ~1.9 MB with exactly one importer, and the pattern to remove it is the one that just landed. Its real question is how much of `LazilyFfiBoundary` the conformance suite drives through JNA versus the pure-JVM channel, which is why it is a separate item rather than something I folded into this commit.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -86,14 +127,15 @@ Exchange is at 365 lines across 14 response sections, over the warn thresholds; 
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#dependenciesgatedfeature]~~
-- do [#lzktoptionaldeps]
+- ~~do [#lzktoptionaldeps]~~
 - do [#lzgooptionalpgx]
+- do [#lzktoptionaljna]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzktoptionaldeps] lazily-kt declares four UNCONDITIONAL Gradle `implementation` dependencies in build.gradle.kts — `net.java.dev.jna:jna:5.15.0`, `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0`, `org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3`, `com.google.protobuf:protobuf-kotlin:4.31.1` — so every consumer gets all four on its runtime classpath. protobuf-kotlin is needed only by the protobuf codec and kotlinx-serialization-json only by the JSON codec; JNA and coroutines-core are arguably core. Gate the codec deps behind Gradle feature variants (`java-library` + `registerFeature` + capabilities) or separate published artifacts, then pin the PUBLISHED POM's `<dependencies>` with a test asserting the set in BOTH directions, so a new unconditional dep and a pin nothing uses both redden — mirroring lazily-rs `make default-build-dependency-check` (scripts/default-build-dependency-guard.py, wired into `make check` and ci.yml) and lazily-js `test/package-manifest.test.js`. Mutation-check the pin before trusting it. Run `make check` green, then commit and push per lazily-kt's standing rule.
+- [ ] [#lzktoptionaljna] lazily-kt's `net.java.dev.jna:jna:5.15.0` is now the largest dependency left in the default published graph (~1.9 MB — the jar embeds native stubs for every supported platform), and exactly ONE main source imports it: LazilyFFI.kt. LazilyFfiBoundary.kt is the JVM-side surface and the README already calls that plane "State-projection consumer (optional FFI)". Apply the same treatment #lzktoptionaldeps just landed for protobuf: move LazilyFFI.kt (and whatever of LazilyFfiBoundary.kt genuinely needs JNA rather than the pure-JVM channel) into an `ffi` source set, register it as a Gradle feature variant with an explicit `io.github.lazily:lazily-ffi` capability, and extend the ALLOWED_POM_DEFAULT / GATED_* pins in scripts/check-published-dependencies.py in the same commit. The hard part is NOT the Gradle wiring — it is deciding how much of LazilyFfiBoundary the conformance suite exercises through the JNA path versus the pure-JVM channel, because the conformance replays must keep running against the same surface. Mutation-check the extended pin (the existing scratch harness shape: mutate, assert applied, restore from a scratch copy, require a green control before and after). Run `make check` green, then commit and push per lazily-kt's standing rule.
 - [ ] [#lzgooptionalpgx] lazily-go's root go.mod declares `github.com/jackc/pgx/v5 v5.7.6` plus six indirects (pgpassfile, pgservicefile, puddle, golang.org/x/crypto, x/sync, x/text) in the main `require` block, but pgx is imported by exactly ONE file — postgres_projection_barrier_integration_test.go — and by ZERO non-test files. Go has no optional dependencies, so the fix is a nested module: move the Postgres integration test into its own directory with its own go.mod (a `replace` directive back to the root), leaving the published module graph requiring nothing. Add a guard asserting the root go.mod `require` block is EMPTY and that the nested module still builds the test, with the second half as the anti-vacuity control — a guard that only checks emptiness passes over a deleted test. Mutation-check it. Run `make check` green, then commit and push per lazily-go's standing rule.
 <!-- /agent:backlog -->
 

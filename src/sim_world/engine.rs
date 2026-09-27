@@ -572,6 +572,9 @@ impl SimWorld {
             SimCommand::SwitchFrontmatterHarness { from, to } => {
                 self.switch_frontmatter_harness(from, to);
             }
+            SimCommand::SwitchFrontmatterHarnessTo { to } => {
+                self.recycle_clear.frontmatter_harness = to.to_string();
+            }
             SimCommand::DispatchRouteAfterHarnessSwitch => {
                 self.dispatch_route_after_harness_switch();
             }

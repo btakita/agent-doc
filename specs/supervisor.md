@@ -94,6 +94,22 @@ The supervisor is a single process that:
    a fresh restart, and records `agent_restart_performed` before spawning the
    new harness.
 
+**One spawn per switch, consecutively (`#hswspawncount`):** the 1:1 invariant
+holds across a SEQUENCE of switches on one document, not only for an isolated
+switch. Each completed restart must leave the state the next switch starts from:
+the running launch harness becomes the new harness, and the persisted actor record
+is written back NORMALIZED (`claude-code`, never the raw launch name `claude`), so
+route's normalized `expected_harness` compares equal and a later dispatch is
+accepted instead of deferring to a restart that already ran. Once launch matches
+frontmatter the switch is resolved, so further idle-watch ticks must neither
+re-detect nor respawn — a respawn storm shows up only BETWEEN switches, which is
+why the deterministic coverage drives a consecutive codex → claude → codex
+sequence and asserts spawn counts over the whole sequence rather than per switch
+in isolation (`route_sim_consecutive_harness_switches_spawn_exactly_once_each_with_no_storm`).
+A sequence fixture must carry state forward between legs rather than re-seed it;
+re-seeding the launch harness and the persisted record turns the sequence into
+three independent first-switches and cannot observe this class of defect.
+
 JetBrains "Restart Agent" menu invocations must also leave an
 optverify-scannable `.agent-doc/logs/ops.log` marker before dispatching the
 restart command:

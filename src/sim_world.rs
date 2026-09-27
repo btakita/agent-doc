@@ -4500,6 +4500,19 @@ enum SimCommand {
         from: &'static str,
         to: &'static str,
     },
+    /// `#hswspawncount`: flip ONLY the frontmatter `agent:` to `to`, carrying the
+    /// live launch harness and persisted actor record forward exactly as the previous
+    /// restart left them.
+    ///
+    /// [`SwitchFrontmatterHarness`](SimCommand::SwitchFrontmatterHarness) re-seeds
+    /// `launch_harness` and `persisted_actor_harness` from its `from`, which is right
+    /// for a single switch off a known baseline but wrong for a CONSECUTIVE sequence:
+    /// re-seeding would overwrite the normalized record the first restart wrote
+    /// (`claude-code`) with a raw launch name (`claude`), so the fixture would be
+    /// asserting against state it invented rather than state the machine produced.
+    SwitchFrontmatterHarnessTo {
+        to: &'static str,
+    },
     /// `#actorswitchdefer`: a `route` dispatch (JB `Run Agent Doc`) lands while the
     /// frontmatter harness no longer matches the live actor's harness. Drives the
     /// production `mismatched_authoritative_actor_can_be_replaced` guard + the route
@@ -6762,6 +6775,181 @@ fn route_sim_harness_switch_accepts_handoff_then_idle_watch_drives_fresh_restart
     assert_eq!(
         world.coverage.actor_switch_changes_detected, detected_before,
         "once launch==frontmatter the switch is resolved; no further change is detected"
+    );
+}
+
+/// `#hswspawncount`: exactly ONE supervisor spawn per authoritative harness switch
+/// across a CONSECUTIVE codex → claude → codex sequence in ONE document, with no
+/// refusal and no respawn storm.
+///
+/// The 1:1 invariant is already proven live for isolated switches (3
+/// `harness_change_detected`, each producing exactly 1
+/// `agent_restart_performed action=spawn_fresh_harness`), and the deferral half too
+/// (5 non-authoritative respec refreshes, zero spawns). What no scenario covered is a
+/// sequence on a SINGLE document, where each switch has to start from the state the
+/// previous restart actually left — including the normalized persisted record
+/// (`claude-code`, not the raw launch name `claude`) that `#actorharnessnormcompare`
+/// exists for. That is why the second and third switches use
+/// [`SimCommand::SwitchFrontmatterHarnessTo`]: re-seeding the launch harness between
+/// switches would make this a sequence of three independent first-switches wearing a
+/// sequence's clothes.
+#[test]
+fn route_sim_consecutive_harness_switches_spawn_exactly_once_each_with_no_storm() {
+    let mut world = SimWorld::new(7_104);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Ready);
+
+    // The first switch seeds the baseline: a live codex actor, frontmatter → claude.
+    world
+        .apply(SimCommand::SwitchFrontmatterHarness {
+            from: "codex",
+            to: "claude",
+        })
+        .unwrap();
+
+    // Each leg: route defers with an accepted handoff, one idle-watch tick reaches the
+    // quiet boundary and triggers, and the restart loop spawns the new harness once.
+    let legs: [(&str, &str); 3] = [
+        ("codex", "claude"),
+        ("claude", "codex"),
+        ("codex", "claude"),
+    ];
+    for (leg, (old, new)) in legs.iter().enumerate() {
+        let leg_no = leg + 1;
+        if leg > 0 {
+            // Flip ONLY the frontmatter. `launch_harness` is whatever the previous
+            // restart set, and the persisted record is whatever it wrote back.
+            assert_eq!(
+                world.recycle_clear.launch_harness, *old,
+                "leg {leg_no}: the previous restart must have left the supervisor running {old}"
+            );
+            world
+                .apply(SimCommand::SwitchFrontmatterHarnessTo { to: new })
+                .unwrap();
+        }
+
+        let handoffs_before = world.coverage.actor_switch_route_handoffs_accepted;
+        world
+            .apply(SimCommand::DispatchRouteAfterHarnessSwitch)
+            .unwrap();
+        assert_eq!(
+            world.coverage.actor_switch_route_handoffs_accepted,
+            handoffs_before + 1,
+            "leg {leg_no}: a healthy {old} actor must accept a handoff, not be replaced"
+        );
+
+        let triggered_before = world.coverage.actor_switch_restarts_triggered;
+        world
+            .apply(SimCommand::SupervisorHarnessSwitchTick)
+            .unwrap();
+        assert_eq!(
+            world.coverage.actor_switch_restarts_triggered,
+            triggered_before + 1,
+            "leg {leg_no}: a quiet dispatch-ready boundary must trigger exactly one restart"
+        );
+
+        let performed_before = world.coverage.actor_switch_restarts_performed;
+        world
+            .apply(SimCommand::PerformDeferredHarnessRestart)
+            .unwrap();
+        assert_eq!(
+            world.coverage.actor_switch_restarts_performed,
+            performed_before + 1,
+            "leg {leg_no}: the deferred restart must spawn the new harness exactly once"
+        );
+        assert_eq!(
+            world.recycle_clear.launch_harness, *new,
+            "leg {leg_no}: the supervisor must now be running {new}"
+        );
+        assert_eq!(
+            world.recycle_clear.persisted_actor_harness,
+            agent_doc_harness::normalize_harness_name(new),
+            "leg {leg_no}: the restart must write the NORMALIZED harness onto the record"
+        );
+
+        // No respawn storm: with launch == frontmatter there is no standing change, so
+        // further idle-watch ticks must neither detect nor spawn. This is the assertion
+        // the isolated scenarios could not make — a storm only shows up as extra spawns
+        // BETWEEN switches.
+        let detected_before = world.coverage.actor_switch_changes_detected;
+        let performed_settled = world.coverage.actor_switch_restarts_performed;
+        for _ in 0..3 {
+            world
+                .apply(SimCommand::SupervisorHarnessSwitchTick)
+                .unwrap();
+            world
+                .apply(SimCommand::PerformDeferredHarnessRestart)
+                .unwrap();
+        }
+        assert_eq!(
+            world.coverage.actor_switch_changes_detected, detected_before,
+            "leg {leg_no}: a resolved switch must not be re-detected"
+        );
+        assert_eq!(
+            world.coverage.actor_switch_restarts_performed, performed_settled,
+            "leg {leg_no}: a resolved switch must not respawn (storm)"
+        );
+
+        // And a route dispatch after the completed switch is ACCEPTED, not deferred to
+        // a restart that already ran (`#actorharnessrecordwriteback` /
+        // `#actorharnessnormcompare`).
+        let dispatches_before = world.coverage.actor_switch_post_restart_dispatches;
+        world
+            .apply(SimCommand::DispatchRouteAfterHarnessRestart)
+            .unwrap();
+        assert_eq!(
+            world.coverage.actor_switch_post_restart_dispatches,
+            dispatches_before + 1,
+            "leg {leg_no}: a dispatch after the completed switch must be accepted"
+        );
+    }
+
+    // Three switches, three spawns — exactly 1:1, with no refusal anywhere.
+    assert_eq!(
+        world.coverage.actor_switch_restarts_performed, 3,
+        "three consecutive switches must produce exactly three spawns"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_changes_detected, 3,
+        "each switch must be detected exactly once"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_restarts_triggered, 3,
+        "each switch must be triggered exactly once"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_restart_disabled_bails, 0,
+        "agent_change_restart is ON for the whole sequence: no leg may refuse"
+    );
+    assert_eq!(
+        world.coverage.route_dispatch_acceptances, 0,
+        "no prompt may ever be dispatched into an old-harness pane"
+    );
+
+    // The ops log must carry one spawn per leg, in switch order, and never a spawn
+    // whose old and new harness are the same (the shape a storm would take).
+    let ops_log = world.ops_log.join("\n");
+    let spawns: Vec<&str> = ops_log
+        .lines()
+        .filter(|line| line.contains("agent_restart_performed"))
+        .collect();
+    assert_eq!(
+        spawns,
+        vec![
+            "agent_restart_performed old_harness=codex new_harness=claude action=spawn_fresh_harness",
+            "agent_restart_performed old_harness=claude new_harness=codex action=spawn_fresh_harness",
+            "agent_restart_performed old_harness=codex new_harness=claude action=spawn_fresh_harness",
+        ],
+        "the spawn sequence must match the switch sequence exactly:\n{ops_log}"
+    );
+    assert_eq!(
+        ops_log
+            .lines()
+            .filter(|line| line.contains("harness_change_detected"))
+            .count(),
+        3,
+        "detection must be 1:1 with the switches, not per tick:\n{ops_log}"
     );
 }
 

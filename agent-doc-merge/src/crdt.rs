@@ -367,6 +367,13 @@ fn merge_inner(
         // CRDT merge to separate that character from the rest of the
         // formatting, producing garbled text like `*Soft-bristle brush only**`
         // instead of `**Soft-bristle brush only**`.
+        // `mutual_prefix` is a BYTE count from `common_prefix_len`, which walks
+        // raw bytes and can stop partway through a multi-byte character when the
+        // two sides diverge inside one (for example `❯` vs `❮`, which share
+        // their first two bytes). Slicing at that index panics, so floor it to a
+        // char boundary first. Flooring cannot lose a line boundary: no UTF-8
+        // continuation byte can be `\n`.
+        let mutual_prefix = floor_char_boundary(ours_text, mutual_prefix);
         let snap = &ours_text[..mutual_prefix];
         let snapped = match snap.rfind('\n') {
             Some(pos) if pos >= base_diverge => pos + 1,
@@ -2133,6 +2140,23 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
 }
 
+/// Round `idx` down to the nearest UTF-8 character boundary in `s`.
+///
+/// `common_prefix_len` counts raw bytes, so its result can land inside a
+/// multi-byte character whenever the two sides diverge mid-character. Any
+/// caller that uses such a count as a slice index must floor it first, or the
+/// slice panics.
+fn floor_char_boundary(s: &str, idx: usize) -> usize {
+    if idx >= s.len() {
+        return s.len();
+    }
+    let mut idx = idx;
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
 /// Count the number of bytes in the common suffix of two strings.
 fn common_suffix_len(a: &str, b: &str) -> usize {
     a.bytes()
@@ -2335,6 +2359,39 @@ fn apply_ops_lazily(t: &mut TextCrdt, ops: &[EditOp]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `common_prefix_len` walks raw BYTES, so two sides that diverge *inside* a
+    /// multi-byte character yield a prefix length that is not a char boundary.
+    /// Slicing at it panicked in the project controller, which then closed the
+    /// preflight connection without a response and wedged the document's queue.
+    #[test]
+    fn merge_survives_divergence_inside_multibyte_char() {
+        // `❯` (E2 9D AF) and `❮` (E2 9D AE) share their first two bytes, so
+        // the byte-wise common prefix stops one byte into the 3-byte character.
+        let ours = "shared line\nprompt ❯ ours tail\n";
+        let theirs = "shared line\nprompt ❮ theirs tail\n";
+
+        let prefix = common_prefix_len(ours, theirs);
+        assert_eq!(prefix, "shared line\nprompt ".len() + 2);
+        assert!(
+            !ours.is_char_boundary(prefix),
+            "repro requires a non-boundary prefix, got {prefix}"
+        );
+
+        let merged = merge(None, ours, theirs).expect("merge must not panic mid-character");
+        assert!(merged.contains("shared line"), "merged: {merged:?}");
+    }
+
+    #[test]
+    fn floor_char_boundary_floors_into_multibyte_char() {
+        let s = "ab❯"; // bytes: a b E2 9D AF
+        assert_eq!(floor_char_boundary(s, 2), 2, "already a boundary");
+        assert_eq!(floor_char_boundary(s, 3), 2, "one byte into the char");
+        assert_eq!(floor_char_boundary(s, 4), 2, "two bytes into the char");
+        assert_eq!(floor_char_boundary(s, 5), 5, "end of string");
+        assert_eq!(floor_char_boundary(s, 99), s.len(), "past the end clamps");
+        assert_eq!(floor_char_boundary("", 3), 0, "empty string");
+    }
 
     #[test]
     fn roundtrip_text() {

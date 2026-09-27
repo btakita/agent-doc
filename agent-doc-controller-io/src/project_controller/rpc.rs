@@ -686,7 +686,16 @@ fn controller_request_deadline_exceeded(error: &anyhow::Error) -> bool {
     })
 }
 
-fn controller_transport_drop_is_retryable(err: &anyhow::Error) -> bool {
+/// Whether `err` is a controller transport drop — the connection went away
+/// before the controller answered — rather than a refusal the controller
+/// authored.
+///
+/// A drop says nothing about the request's merits: the usual cause is a
+/// controller that was recycled or replaced by a newer build mid-request. Every
+/// caller that can afford to re-ask should, which is why this is public: the
+/// preflight admission hook classifies with the same predicate rather than
+/// re-spelling the message (`#admissiontransportretry`).
+pub fn controller_transport_drop_is_retryable(err: &anyhow::Error) -> bool {
     if err.chain().any(|cause| {
         cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
             matches!(

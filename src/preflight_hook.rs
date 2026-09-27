@@ -264,7 +264,7 @@ fn run_preflight_for_prompt(
         return HookAdmission::Failed;
     }
 
-    match run_preflight_within_budget(&file, budget, preflight_invocation) {
+    match run_preflight_admission(&file, budget, preflight_invocation) {
         Ok(contract) => {
             // The marker seals a successfully produced contract. It must not
             // appear on any error path because the skill treats its absence as
@@ -286,6 +286,111 @@ fn run_preflight_for_prompt(
             HookAdmission::Failed
         }
     }
+}
+
+/// `#admissiontransportretry` — how much of the admission budget must remain for
+/// a second attempt to be worth starting.
+///
+/// Below this there is not enough time for preflight to finish, and spending what
+/// is left would trade a named refusal for an unnamed overrun — the
+/// `#hookcontractlost` failure this hook exists to prevent.
+const ADMISSION_RETRY_MIN_REMAINING: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// What to do with a failed admission attempt (`#admissiontransportretry`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdmissionRetry {
+    /// Re-ask with the remaining budget.
+    Retry,
+    /// The controller authored this refusal; it is final.
+    ControllerRefusal,
+    /// A transport drop, but too little budget remains to finish a second
+    /// attempt. Report the named refusal instead of risking a silent overrun.
+    InsufficientBudget,
+}
+
+/// Pure half of [`run_preflight_admission`]: classify a failed attempt.
+///
+/// Split out because both decisions are exactly the ones worth pinning — that a
+/// controller-authored refusal is never retried, and that a transport drop is
+/// retried only with enough budget left to finish — and neither should need a
+/// live controller to test.
+fn classify_admission_failure(
+    err: &anyhow::Error,
+    remaining: std::time::Duration,
+) -> AdmissionRetry {
+    if !agent_doc_controller_io::project_controller::controller_transport_drop_is_retryable(err) {
+        return AdmissionRetry::ControllerRefusal;
+    }
+    if remaining < ADMISSION_RETRY_MIN_REMAINING {
+        return AdmissionRetry::InsufficientBudget;
+    }
+    AdmissionRetry::Retry
+}
+
+/// Run preflight admission, re-asking once if the controller transport dropped.
+///
+/// A controller that is recycled or replaced by a newer build mid-request closes
+/// the connection without answering, and the client surfaces `project controller
+/// closed connection without a response`. That is a transport fact, not a
+/// verdict: the controller never said this turn may not proceed. Surfacing it as
+/// a terminal refusal kills an operator's `agent-doc <FILE>` for a half-second of
+/// controller churn — observed 2026-09-27 on `tasks/software/lazily.md`, where the
+/// agent correctly reported the refusal and stopped, because a refusal with a
+/// reason is exactly what it is told to trust.
+///
+/// `agent_doc_controller_io::project_controller` already classifies this message
+/// as retryable and already retries it for `coordination_claim`, `actor_binding`,
+/// and `dispatch`. Admission is the one boundary where *not* retrying costs a
+/// whole turn, so it re-asks with the same predicate — never a second spelling of
+/// the message.
+///
+/// Re-asking is safe here because it is the ordinary path: preflight runs afresh
+/// every turn, and a `preflight_started` cycle left stale-empty by the dropped
+/// attempt auto-closes under the interrupted-cycle guard. Only the transport drop
+/// retries — a refusal the controller authored is final and must stay final.
+fn run_preflight_admission(
+    file: &Path,
+    budget: std::time::Duration,
+    preflight_invocation: agent_doc_preflight_command_io::PreflightInvocation,
+) -> anyhow::Result<String> {
+    let started = std::time::Instant::now();
+    let first = run_preflight_within_budget(file, budget, preflight_invocation);
+    let Err(err) = first else {
+        return first;
+    };
+    let remaining = budget.saturating_sub(started.elapsed());
+    match classify_admission_failure(&err, remaining) {
+        AdmissionRetry::ControllerRefusal => return Err(err),
+        AdmissionRetry::InsufficientBudget => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_admission_transport_drop_not_retried file={} remaining_ms={} \
+                     min_remaining_ms={} reason=insufficient_budget (#admissiontransportretry)",
+                    file.display(),
+                    remaining.as_millis(),
+                    ADMISSION_RETRY_MIN_REMAINING.as_millis(),
+                ),
+            );
+            return Err(err);
+        }
+        AdmissionRetry::Retry => {}
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "preflight_admission_transport_drop_retry file={} remaining_ms={} \
+             reason=stale_or_recycled_controller detail={} (#admissiontransportretry)",
+            file.display(),
+            remaining.as_millis(),
+            agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
+        ),
+    );
+    eprintln!(
+        "[agent-doc] preflight admission: controller transport dropped ({err:#}); re-asking once within the remaining {:.1}s budget",
+        remaining.as_secs_f32(),
+    );
+    run_preflight_within_budget(file, remaining, preflight_invocation)
 }
 
 /// Report the preflight deadline the Claude settings for this session wire, and
@@ -867,4 +972,60 @@ mod tests {
         assert!(CODEX_IN_PANE_ADMISSION_DIRECTIVE.contains("already active"));
         assert!(CODEX_IN_PANE_ADMISSION_DIRECTIVE.contains("do not"));
     }
+
+    /// `#admissiontransportretry` — the message a recycled/replaced controller
+    /// leaves behind. Observed 2026-09-27 ending an `agent-doc
+    /// tasks/software/lazily.md` turn as if the controller had refused it.
+    #[test]
+    fn a_controller_transport_drop_earns_a_second_admission_attempt() {
+        let err = anyhow::anyhow!("project controller closed connection without a response");
+        assert_eq!(
+            classify_admission_failure(&err, HOOK_ADMISSION_BUDGET_SECS_DURATION),
+            AdmissionRetry::Retry
+        );
+    }
+
+    /// A refusal the controller AUTHORED is a verdict, not a transport fact, and
+    /// re-asking it would be the retry loop this hook must never become.
+    #[test]
+    fn a_controller_authored_refusal_is_never_retried() {
+        for message in [
+            "controller not authoritative",
+            "admission_divergence: refusing to choose a winner",
+            "`plan.md` did not resolve to a file",
+        ] {
+            let err = anyhow::anyhow!(message);
+            assert_eq!(
+                classify_admission_failure(&err, HOOK_ADMISSION_BUDGET_SECS_DURATION),
+                AdmissionRetry::ControllerRefusal,
+                "{message}"
+            );
+        }
+    }
+
+    /// With the budget nearly spent, a second attempt cannot finish — and an
+    /// unnamed overrun is worse than a named refusal (`#hookcontractlost`).
+    #[test]
+    fn a_transport_drop_with_no_budget_left_keeps_the_named_refusal() {
+        let err = anyhow::anyhow!("project controller closed connection without a response");
+        assert_eq!(
+            classify_admission_failure(&err, std::time::Duration::from_secs(1)),
+            AdmissionRetry::InsufficientBudget
+        );
+        // The boundary itself: exactly the minimum retries, one below does not.
+        assert_eq!(
+            classify_admission_failure(&err, ADMISSION_RETRY_MIN_REMAINING),
+            AdmissionRetry::Retry
+        );
+        assert_eq!(
+            classify_admission_failure(
+                &err,
+                ADMISSION_RETRY_MIN_REMAINING - std::time::Duration::from_millis(1)
+            ),
+            AdmissionRetry::InsufficientBudget
+        );
+    }
+
+    const HOOK_ADMISSION_BUDGET_SECS_DURATION: std::time::Duration =
+        std::time::Duration::from_secs(HOOK_ADMISSION_BUDGET_SECS);
 }

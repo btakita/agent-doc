@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -58,6 +58,13 @@ must_violate=(
     EditorReplicaStrand:EditorReplicaStrandWedge
     JetBrainsFileCache:JetBrainsFileCacheWedge
     JetBrainsFileCache:JetBrainsFileCacheReach
+    # `TransientRefusalLatch` has one wedge PER KNOB rather than one for the
+    # module. The three knobs are independent fixes for the same class, so a
+    # single wedge would let two of them go vacuous the moment the third landed.
+    TransientRefusalLatch:TransientRefusalLatchUnclassified
+    TransientRefusalLatch:TransientRefusalLatchBlindRetry
+    TransientRefusalLatch:TransientRefusalLatchCrashAsVerdict
+    TransientRefusalLatch:TransientRefusalLatchReach
 )
 
 for module in "${modules[@]}"; do

@@ -325,13 +325,13 @@ Same scope note as the last cycle: `make artifact-purge-check` is the `make chec
 - ~~#advance-review~~
 - ~~do [#lzauditrefresh]~~
 - ~~do [#lzpypiperishable]~~
-- do [#lzstrikereceiptflake]
+- 🚧 do [#lzstrikereceiptflake]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstrikereceiptflake] Make agent-doc-controller-io project_controller::tests::queue_authority_observation_requires_exact_strike_application_receipt deterministic. Under the full 9,820-test nextest run it failed with the retry receipt None instead of Some(projection_id) after 1.14s, while passing 5/5 in isolation at 0.02s; it waits on a bounded receive, so parallel load starves it. Not fixed 2026-09-27 because a concurrent session held uncommitted rustfmt edits across agent-doc-controller-io/src/project_controller.rs and editing it would have collided. Replace the timing budget with a deterministic barrier or SimWorld step.
+- [ ] 🚧 [#lzstrikereceiptflake] Make agent-doc-controller-io project_controller::tests::queue_authority_observation_requires_exact_strike_application_receipt deterministic. Under the full 9,820-test nextest run it failed with the retry receipt None instead of Some(projection_id) after 1.14s, while passing 5/5 in isolation at 0.02s; it waits on a bounded receive, so parallel load starves it. Not fixed 2026-09-27 because a concurrent session held uncommitted rustfmt edits across agent-doc-controller-io/src/project_controller.rs and editing it would have collided. Replace the timing budget with a deterministic barrier or SimWorld step.
 <!-- /agent:backlog -->
 
 ## Review

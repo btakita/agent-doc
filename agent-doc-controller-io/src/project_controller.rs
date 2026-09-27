@@ -17846,6 +17846,59 @@ revised operator request
         );
     }
 
+    /// `#lzstrikereceiptflake`: release when the `map` entry for `key` satisfies
+    /// `ready`, driven by a lazily Effect on that entry instead of a polling
+    /// deadline. The strike worker writes the document *before* it publishes its
+    /// application receipt, so a test that polls the document text and then
+    /// reads the receipt races that publication: under the full parallel suite
+    /// the read landed first and observed `None`. Subscribing to the Source
+    /// removes the timing budget — the barrier releases on the exact `set` that
+    /// publishes the value, and the timeout below only reports a lost
+    /// publication rather than carrying the correctness of the wait.
+    fn await_source_map_entry<V>(
+        ctx: &ThreadSafeContext,
+        map: &lazily::ThreadSafeSourceMap<String, V>,
+        key: &str,
+        ready: impl Fn(&V) -> bool + Send + Sync + 'static,
+        missing: &str,
+    ) -> V
+    where
+        V: PartialEq + Clone + Send + Sync + 'static,
+    {
+        let settled: Arc<(Mutex<Option<V>>, Condvar)> =
+            Arc::new((Mutex::new(None), Condvar::new()));
+        let publisher = Arc::clone(&settled);
+        let observed = map.clone();
+        let observed_key = key.to_string();
+        let effect = ctx.effect(move |ctx| {
+            // SourceMap value dependencies only exist after the key does, so
+            // observe membership as its own edge: a value published into a
+            // not-yet-materialized entry must still wake this barrier.
+            let _present = observed.contains_key(ctx, &observed_key);
+            let Some(value) = observed.observe(ctx, &observed_key) else {
+                return;
+            };
+            if !ready(&value) {
+                return;
+            }
+            let (slot, released) = &*publisher;
+            *slot.lock() = Some(value);
+            released.notify_all();
+        });
+        let (slot, released) = &*settled;
+        let mut guard = slot.lock();
+        let timed_out = released
+            .wait_while_for(&mut guard, |value| value.is_none(), Duration::from_secs(60))
+            .timed_out();
+        assert!(!timed_out, "{missing}");
+        let value = guard
+            .take()
+            .expect("the barrier released without publishing a value");
+        drop(guard);
+        ctx.dispose_effect(&effect);
+        value
+    }
+
     #[test]
     fn queue_authority_observation_requires_exact_strike_application_receipt() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -17907,24 +17960,22 @@ revised operator request
             "actor admission is not an application receipt and must gate queue completion"
         );
 
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let error = loop {
-            match runtime.document_queue_authority_observe(
+        // The adapter failure is published asynchronously. Wait on that Source,
+        // then require one observation to surface it.
+        await_source_map_entry(
+            &runtime.document_graphs.ctx,
+            &runtime.document_graphs.answered_free_text_strike_failure,
+            &document_hash,
+            |failure| failure.is_some(),
+            "the asynchronous adapter failure was not published",
+        );
+        let error = runtime
+            .document_queue_authority_observe(
                 &document_hash,
                 &canonical,
                 projected_authority.clone(),
-            ) {
-                Err(error) => break error,
-                Ok(_) => {
-                    assert!(
-                        Instant::now() < deadline,
-                        "the asynchronous adapter failure was not published"
-                    );
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-            }
-        };
-
+            )
+            .expect_err("a published adapter failure must fail queue-authority observation");
         assert!(
             error
                 .to_string()
@@ -17955,34 +18006,29 @@ revised operator request
                 }),
             );
 
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let retried = loop {
-            let retried = std::fs::read_to_string(&canonical).unwrap();
-            if retried.contains("queue: stop") && !retried.contains("- close the queue") {
-                break retried;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "the changed delivery frontier did not retry the adapter"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        assert!(
-            retried.contains("queue: stop") && !retried.contains("- close the queue"),
-            "a changed retained-delivery frontier must retry the owned terminal queue drain: {retried}"
+        // The receipt is published after the write it acknowledges, so the
+        // receipt barrier also orders the document read below. Polling the
+        // document text first and then reading the receipt is what raced
+        // (`#lzstrikereceiptflake`).
+        let receipt = await_source_map_entry(
+            &runtime.document_graphs.ctx,
+            &runtime.document_graphs.answered_free_text_strike_applied,
+            &document_hash,
+            |applied| applied.is_some(),
+            "the changed delivery frontier did not retry the adapter",
         );
         let projection = runtime
             .document_graphs
             .current_answered_free_text_strike(&document_hash);
         assert_eq!(
-            runtime
-                .document_graphs
-                .answered_free_text_strike_applied
-                .observe(&runtime.document_graphs.ctx, &document_hash)
-                .flatten()
-                .as_deref(),
+            receipt.as_deref(),
             Some(projection.projection_id.as_str()),
             "the retry must publish the exact application receipt required by closeout"
+        );
+        let retried = std::fs::read_to_string(&canonical).unwrap();
+        assert!(
+            retried.contains("queue: stop") && !retried.contains("- close the queue"),
+            "a changed retained-delivery frontier must retry the owned terminal queue drain: {retried}"
         );
     }
 

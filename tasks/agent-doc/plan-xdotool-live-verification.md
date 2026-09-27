@@ -43,6 +43,10 @@ agent-runnable verification.
 assertion is deterministic):
 
 1. Open the scratch doc in a dedicated IntelliJ editor; record its window id.
+   Automated (`#activateinstalledjetbrai`): the harness asks the ALREADY-RUNNING IDE to
+   open it (`$AGENT_DOC_IDE_LAUNCHER`, else `idea`) and polls for the window, so no human
+   opens a file first. The open is refused for any path outside `.agent-doc/live-repro/`,
+   and a cold IDE is still never launched.
 2. Start an agent-doc cycle in the supervisor tmux pane (`finalize`/`write`).
 3. Poll the log for the IPC-apply sentinel; when it appears, focus-guard, then
    `xdotool type --window <id>` a small edit (or `key` a few chars) into the doc to

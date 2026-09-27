@@ -37,3 +37,12 @@ Live `fpe.md` was already actively executing work in pane `%6`; no input or rest
 Remaining live prerequisite: IntelliJ PID 1653132 still advertises plugin 0.2.376 after installation. The updated Kotlin classes require IDE/plugin activation before the retained live editor recovery can be verified. Do not interpret the native-only hot reload as proof of updated plugin behavior, and do not bypass the retained capture to finish the document. The activation/recovery check remains open.
 
 Subsequent recovery evidence: the controller completed the original capture automatically at 03:26:48 UTC in document commit `1b35dcb028`, followed by `captured_finalize_resume_committed` at 03:26:51. A fresh connected admission succeeded as `cycle-1789011115536`. The old closeout wedge is therefore cleared. Plugin 0.2.378 activation and a live stale-splice regression check remain outstanding; they are no longer prerequisites for resuming this document.
+
+Status 2026-09-27 (`#activateinstalledjetbrai`, automation closed): both remaining prerequisites recorded above are
+cleared. (1) Plugin activation: ops.log `live_plugin_generation_refresh` for this document reports
+`running=0.2.431 expected=0.2.431 stale=false`, so the stale-0.2.376 gate no longer holds. (2) The manual
+IDE-open step is automated — `require_window` now asks the running IDE to open the scratch doc itself and polls
+for the window, refusing any path outside `.agent-doc/live-repro/`. `--dry-run` no longer needs a live desktop
+and prints the whole recipe offline. What remains is one live driver run
+(`scripts/xdotool-live-verify.sh captured-splice`), which injects real keystrokes into the operator's desktop;
+it is agent-executable but confirmed with the operator first for that reason, not because anything is unbuilt.

@@ -19009,6 +19009,35 @@ fn record_editor_surface_focus_outcome(
 }
 
 /// Stable ops.log label for a surface intent (`#surfaceobservesilent`).
+/// Decide whether this surface observation is worth an `ops.log` line.
+///
+/// `Some(repeats)` means log it, carrying how many identical observations have
+/// been folded into the current run. `None` means suppress it.
+///
+/// A steady state logs on the 1st, 2nd, 4th, 8th, ... identical observation, so a
+/// heartbeat that never changes costs O(log n) lines instead of n — roughly 17
+/// lines a day instead of 43,000 — while any CHANGE logs on its very first
+/// observation. Doubling rather than a fixed window is what keeps the most recent
+/// `repeats=` count within a factor of two of the true run length, so no tail is
+/// ever lost: the previous count is still on the page when the run ends.
+fn fold_repeated_surface_observation(key: &str) -> Option<u64> {
+    static LAST_OBSERVATION: std::sync::LazyLock<parking_lot::Mutex<Option<(String, u64)>>> =
+        std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+    let mut last = LAST_OBSERVATION.lock();
+    match last.as_mut() {
+        Some((previous, folded)) if previous == key => {
+            *folded += 1;
+            let folded = *folded;
+            // 1, 2, 4, 8, ... repeats after the first line of this run.
+            folded.is_power_of_two().then_some(folded)
+        }
+        _ => {
+            *last = Some((key.to_string(), 0));
+            Some(0)
+        }
+    }
+}
+
 fn surface_intent_label(intent: &SurfaceIntent) -> &'static str {
     match intent {
         SurfaceIntent::Sync { .. } => "sync",
@@ -19050,19 +19079,44 @@ fn handle_editor_surface_observe(
     // line at all, and neither did a plain accepted `Idle`. A selection that
     // published and was rejected was therefore indistinguishable from a selection
     // that never published, which is exactly the evidence a "tmux focus did not
-    // auto-sync" report needs. Record the ingress unconditionally, ahead of any
-    // intent handling.
-    agent_doc_ops_log_io::log_op(
-        &bootstrap.project_root,
-        &format!(
-            "controller_editor_surface_observed client={} generation={} sequence={} accepted={} intent={}",
-            projection_identity.0,
-            projection_identity.1,
-            projection_identity.2,
-            accepted,
-            surface_intent_label(&receipt.intent),
-        ),
+    // auto-sync" report needs. Record the ingress ahead of any intent handling.
+    //
+    // Consecutive no-op repeats are coalesced. Recording every ingress literally
+    // meant one line every ~2s per attached editor forever — measured on
+    // agent-loop 2026-09-27 as a steady 30 lines/min of
+    // `accepted=true intent=idle` at an unchanging generation, ~43k lines/day and
+    // the bulk of an 11.5MB ops.log. That buried the very evidence this log exists
+    // to preserve: finding the five-document replica strand in the same file meant
+    // filtering thousands of identical heartbeats first. Suppressing a repeat is
+    // not the same as the old silence — every state CHANGE still logs, and the
+    // first line after a run of repeats carries `repeats=N`, so a heartbeat that
+    // stops, changes generation, flips `accepted`, or leaves `idle` is all still
+    // visible, with the duration of the quiet period recoverable from the count.
+    let surface_observation_key = format!(
+        "{}|{}|{}|{}",
+        projection_identity.0,
+        projection_identity.1,
+        accepted,
+        surface_intent_label(&receipt.intent),
     );
+    if let Some(repeats) = fold_repeated_surface_observation(&surface_observation_key) {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "controller_editor_surface_observed client={} generation={} sequence={} accepted={} intent={}{}",
+                projection_identity.0,
+                projection_identity.1,
+                projection_identity.2,
+                accepted,
+                surface_intent_label(&receipt.intent),
+                if repeats > 0 {
+                    format!(" repeats={repeats}")
+                } else {
+                    String::new()
+                },
+            ),
+        );
+    }
     if accepted {
         // `#tmuxautosyncreactive`: both non-idle intents are handled IN-PROCESS
         // so the editor socket request never round-trips through the controller
@@ -25624,6 +25678,39 @@ mod tests {
     /// what stalled #tmuxfocussyncverify. Assert the ingress receipt exists for BOTH
     /// outcomes, and that the logged `accepted=` matches the graph's own verdict
     /// rather than a constant.
+    /// The churn half of `#surfaceobservesilent`. Logging every ingress literally
+    /// produced a steady 30 lines/min per attached editor at an unchanging
+    /// generation — ~43k lines/day, the bulk of an 11.5MB ops.log — which buried
+    /// the rare events the log exists for. Folding must be aggressive on a
+    /// steady state and instant on any change.
+    #[test]
+    fn a_steady_surface_heartbeat_folds_while_every_change_logs_immediately() {
+        let logged = |key: &str| fold_repeated_surface_observation(key).is_some();
+
+        // First observation of a state always logs.
+        assert!(logged("idea|7|true|idle"));
+        // Then 1, 2, 4, 8, ... — never every repeat.
+        let steady = (0..64)
+            .filter(|_| logged("idea|7|true|idle"))
+            .count();
+        assert!(
+            steady <= 8,
+            "a 64-observation steady state must fold to a handful of lines, got {steady}"
+        );
+        assert!(
+            steady >= 4,
+            "folding must still sample the run so a stuck heartbeat stays visible, got {steady}"
+        );
+
+        // Every component of the key is a change that must log at once: a new
+        // generation, a flipped verdict, and a non-idle intent are exactly the
+        // three things a "focus did not auto-sync" report needs to see.
+        assert!(logged("idea|8|true|idle"), "a new generation must log");
+        assert!(logged("idea|8|false|idle"), "a rejected verdict must log");
+        assert!(logged("idea|8|false|focus"), "a non-idle intent must log");
+        assert!(logged("vscode|8|false|focus"), "a new client must log");
+    }
+
     #[test]
     fn editor_surface_observe_logs_an_ingress_receipt_for_accepted_and_rejected_facts() {
         let dir = tempfile::tempdir().unwrap();

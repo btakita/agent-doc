@@ -48,7 +48,7 @@ DEFAULT_HANDOFF_DIR = (
     Path(__file__).resolve().parent.parent
     / "tasks"
     / "agent-doc"
-    / "artifact-purge-audit-2026-09-25"
+    / "artifact-purge-audit-2026-09-27"
 )
 DEFAULT_MAX_DELETIONS = 250
 DEFAULT_MAX_HANDOFF_AGE_DAYS = 7
@@ -1008,8 +1008,8 @@ def self_test() -> int:
     # 24. The committed handoff itself loads and structurally validates.
     if (DEFAULT_HANDOFF_DIR / SUMMARY_JSON).is_file():
         committed = load_handoff(DEFAULT_HANDOFF_DIR, max_age_days=None)
-        assert len(committed.candidates) == 2781, len(committed.candidates)
-        assert len(committed.withheld) == 466, len(committed.withheld)
+        assert len(committed.candidates) == 2666, len(committed.candidates)
+        assert len(committed.withheld) == 569, len(committed.withheld)
         assert not (set(committed.candidates) & set(committed.withheld))
 
     print("[self-test] purge_actions_artifacts: ok")

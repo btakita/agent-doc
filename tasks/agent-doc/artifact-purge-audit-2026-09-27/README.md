@@ -1,6 +1,6 @@
 # GitHub Actions artifact durability audit
 
-Generated: 2026-09-25T17:02:35.723915+00:00
+Generated: 2026-09-27T05:40:26.976576+00:00
 
 Repository: [btakita/agent-doc](https://github.com/btakita/agent-doc)
 
@@ -8,9 +8,9 @@ No artifacts were deleted. This report is a read-only candidate handoff.
 
 ## Result
 
-- Live nonexpired artifacts: 3,247, totaling 52,903,808,136 bytes (52.90 GB; 49.27 GiB).
-- Verified delete candidates: 2,781, totaling 45,557,799,985 bytes (45.56 GB; 42.43 GiB).
-- Not candidates: 466, totaling 7,346,008,151 bytes (7.35 GB; 6.84 GiB).
+- Live nonexpired artifacts: 3,235, totaling 52,803,347,005 bytes (52.80 GB; 49.18 GiB).
+- Verified delete candidates: 2,666, totaling 43,834,598,531 bytes (43.83 GB; 40.82 GiB).
+- Not candidates: 569, totaling 8,968,748,474 bytes (8.97 GB; 8.35 GiB).
 - Candidate proof requires an exact tagged version plus an exact target-specific GitHub Release asset or PyPI filename.
 - The candidate CSV is sorted by workflow, run, artifact class, and artifact id; each row records id, size, expiry, run URL, and counterpart URL.
 
@@ -19,26 +19,26 @@ No artifacts were deleted. This report is a read-only candidate handoff.
 | Workflow | Artifact class | Artifacts | Verified | Unresolved | Candidate bytes |
 |---|---|---:|---:|---:|---:|
 | Book | github-pages | 14 | 0 | 14 | 0 |
-| Deploy mdBook site to Pages | github-pages | 16 | 0 | 16 | 0 |
-| PyPI | wheel-aarch64-apple-darwin | 257 | 156 | 101 | 2,488,455,545 |
+| Deploy mdBook site to Pages | github-pages | 14 | 0 | 14 | 0 |
+| PyPI | wheel-aarch64-apple-darwin | 257 | 130 | 127 | 2,112,180,666 |
 | PyPI | wheel-bootstrap | 13 | 13 | 0 | 454,389 |
-| PyPI | wheel-x86_64-apple-darwin | 257 | 156 | 101 | 2,727,295,053 |
-| PyPI | wheel-x86_64-pc-windows-msvc | 254 | 154 | 100 | 2,647,272,693 |
-| PyPI | wheel-x86_64-unknown-linux-gnu | 257 | 156 | 101 | 2,777,551,715 |
-| Release | agent-doc-aarch64-apple-darwin | 418 | 413 | 5 | 6,174,599,175 |
-| Release | agent-doc-aarch64-unknown-linux-gnu | 420 | 412 | 8 | 6,302,050,673 |
-| Release | agent-doc-x86_64-apple-darwin | 420 | 412 | 8 | 6,744,090,041 |
-| Release | agent-doc-x86_64-pc-windows-msvc | 414 | 411 | 3 | 6,917,662,119 |
-| Release | agent-doc-x86_64-unknown-linux-gnu | 420 | 412 | 8 | 7,013,377,911 |
+| PyPI | wheel-x86_64-apple-darwin | 257 | 130 | 127 | 2,315,353,410 |
+| PyPI | wheel-x86_64-pc-windows-msvc | 254 | 128 | 126 | 2,239,984,492 |
+| PyPI | wheel-x86_64-unknown-linux-gnu | 257 | 129 | 128 | 2,341,573,688 |
+| Release | agent-doc-aarch64-apple-darwin | 416 | 411 | 5 | 6,157,728,386 |
+| Release | agent-doc-aarch64-unknown-linux-gnu | 418 | 410 | 8 | 6,284,353,732 |
+| Release | agent-doc-x86_64-apple-darwin | 418 | 410 | 8 | 6,725,421,993 |
+| Release | agent-doc-x86_64-pc-windows-msvc | 412 | 409 | 3 | 6,898,849,691 |
+| Release | agent-doc-x86_64-unknown-linux-gnu | 418 | 410 | 8 | 6,993,707,413 |
 | Release | agent-doc-x86_64-unknown-linux-musl | 87 | 86 | 1 | 1,764,990,671 |
 
 ## Unresolved classes
 
 | Reason | Artifacts | Bytes |
 |---|---:|---:|
-| matching PyPI platform file is missing | 395 | 6,622,546,457 |
+| matching PyPI platform file is missing | 500 | 8,254,029,207 |
 | matching GitHub Release asset is missing | 33 | 508,565,612 |
-| GitHub Pages artifact has no Release/PyPI counterpart | 30 | 117,705,105 |
+| GitHub Pages artifact has no Release/PyPI counterpart | 28 | 108,962,678 |
 | workflow run is not associated with a version tag | 8 | 97,190,977 |
 
 ## Method

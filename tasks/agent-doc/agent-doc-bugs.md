@@ -371,6 +371,120 @@ The four refusal tokens from `65c865f24` are untouched.
 **Verification.** `make check`: 9862 tests run, 9862 passed, 0 failed, exit 0. Gradle: 564 tests, 0 failures, 0 skipped — read from the JUnit XML rather than the wrapper output, which hides skipped task lines and would let a skipped test task read as a passing one. `cargo build --release` green. JB plugin `0.2.429` → `0.2.430`. CI `36311454957` is in progress; the previous commit's run (`36308915309`, the baseline fix) went green.
 
 This unblocks `#activateinstalledjetbrai` and `#splicesimcov`. Installing and recycling after closeout again, so the cdylib reload cannot strand this document's replica mid-write. Exchange is at 320 lines / 10 response sections; noting it rather than stalling the drain.
+
+### Re: Fix Run Agent Doc on monsterrodholders.md — opus-5 · 2026-09-27T17:44-04:00
+
+Fixed. Committed `e7c4c8e92`, pushed, installed.
+
+**What the IDE was actually reporting.** `idea.log` carried the verbatim failure:
+
+```
+[route] FAILED (exit 1): route_queue_activation: failed to resolve current document
+  .../monsterrodholders.md: editor is still attached; missing_replica recovery
+  exhausted and disk read authority is refused
+```
+
+**The bug is one string.** `resolve_editor_unavailable_disk_read_fallback` interpolates the observation family into one message, and `reason` is either `missing_replica` or `sync_pending`. Route's retry predicate (`agent-doc-route-io/src/queue_dispatch.rs`) matched `"sync_pending recovery exhausted"` **literally**, so the entire missing-replica family — the one a live JetBrains session actually hits — got no bounded retry at all and route failed the dispatch on the first refusal. The three existing tests all used the `sync_pending` spelling, so nothing caught it. Mutation-checked: the new `missing_replica` test fails against the old predicate.
+
+**Widening the predicate alone would not have fixed it,** and this is the part worth keeping. Every missing-replica recovery latch in `agent-doc-document-realtime-io` is keyed on the editor replica **liveness witness** — `should_pause_editor_replica_self_heal` and `claim_terminal_missing_replica_rebuild` both refuse a second attempt while it is unchanged. So an immediate retry skips the re-registration loop *and* the terminal rebuild and bails on the identical refusal: a provable no-op that spends one of only two attempts. The fix adds `wait_for_editor_replica_liveness_change` and gates the retry on a registration that actually landed; an unchanged witness fails closed at once. That is `#ensurewindowsize` seen from the caller — a large document on a busy IDE registers *after* the 400ms missing-replica ensure window has closed. Your IDE was indexing a 2MB `mrh-export.xml` at the time.
+
+`<reason>_resolve_retry` now records `witness_changed=` and `decision=retry|fail_closed`.
+
+### Re: do [#activateinstalledjetbrai]: automate the verification — opus-5 · 2026-09-27T17:44-04:00
+
+Automated. Committed `0cd957382`, pushed, installed: `agent-doc verify-captured-splice-recovery <FILE>`.
+
+**First, a correction to this item's own reasoning.** It concluded, from a window where all 317 `editor_op_epoch_closed` events said `cause=non_operator_projection`, that no recovery carried an operator edit. That inference was never available: `agent_doc_clear_editor_op_epoch` is the only producer of that event and writes exactly one cause, so `non_operator_projection` is the field's **only possible value**. It records "an epoch was cleared ahead of a non-operator mutation", never "this epoch carried operator ops". A single-valued field discriminates nothing, and the verifier now refuses it explicitly in its failure text so the next reader cannot repeat it.
+
+The receipt that *does* discriminate is `editor_op_capture_proof`, whose `operator_ops=` is the classification split — which `#opcapturedormant` added last cycle.
+
+**The gate, as a receipt predicate.** A pass needs three receipts for one document, in order: a splice-recovery `status=current` read; an `editor_op_capture_proof` with `operator_ops >= 1` and `shadow_replay=agreed`; then a later splice-recovery `status=current` read with a **different** `text_hash`. Ordering is the property — a capture entirely before or after every advance establishes nothing — and a disagreeing shadow replay discards the burst, so those ops never reached the merge.
+
+Each failure names its own missing link, because these are genuinely different diagnoses: no splice recovery ran; recoveries ran but never resolved `status=current`; the canonical text never advanced; no proof classified an operator op; proofs exist but disagreed. Zero proofs is an *unobserved reporter chain*, not a proof that classified everything as non-operator.
+
+Checked against the live logs, where it fails with the right answer:
+
+```
+35 captured-local-splice-recovery receipt(s) for doc=monsterrodholders, but none resolved
+`status=current` (observed: editor_attached_model_missing) — the recovery never saw canonical
+text, so the editor replica, not op capture, is the blocker
+```
+
+The live half is `scripts/xdotool-live-verify.sh captured-splice`: real keystrokes into a throwaway scratch doc under the harness's focus guards, a response cycle **between** two operator edits so the canonical text advances on its own, then the binary decides. Driving only the typing is exactly why earlier sweeps found recoveries with nothing to recover across. I have not run it — it injects keystrokes into your live desktop, so that is your call to make, not mine.
+
+### Re: lazily.md, devops.md, monsterrodholders.md — one crash behind all of them — opus-5 · 2026-09-27T17:44-04:00
+
+Root-caused and fixed. Committed `2c4278b29`, pushed, installed.
+
+**The crash.** `common_prefix_len` walks raw bytes, so two sides diverging inside a multi-byte character yield a prefix that is not a char boundary — and `merge_inner` sliced at it. The character it fires on is **`❯`, agent-doc's own prompt marker**, which is why it was deterministic on document content rather than random. Mutation-verified: without the floor,
+
+```
+panicked at agent-doc-merge/src/crdt.rs:376:30:
+end byte index 21 is not a char boundary; it is inside '❯' (bytes 19..22 of string)
+```
+
+That fix and its two tests were written by the concurrent lazily.md session, which left them uncommitted and asked whether this session should land them. It should — this session owns that code — so they are committed with attribution in the message. They were inside my green `make check`.
+
+**Then five refusal sites reported the consequences as verdicts.** A controller that panics mid-request closes the connection without answering, and the client says `project controller closed connection without a response`. Preflight admission surfaced that *transport fact* as a refusal **with a reason** — so the agent, correctly trusting a reasoned refusal, stopped. Same shape in `session-check`'s INTERRUPTED on devops.md and monsterrodholders.md: "the controller owns the generation-fenced editor save, do not resubmit or force disk" is true only while something durable **holds** the write, and the holder it named was the controller that had just crashed. A dead holder fires no state edge, so two sessions obeyed and stranded their writes. `AGENTS.md` already states that rule (`#percellconverge`) — the predicate just never asked whether the holder was alive.
+
+Admission now re-asks once on a transport drop, using `agent-doc-controller-io`'s **existing** predicate rather than a second spelling of the message (it already retries that error for `coordination_claim`, `actor_binding`, and `dispatch`; admission was the one boundary where not retrying costs a whole turn). Only a transport drop retries, and only with enough budget left to finish — an unnamed overrun is worse than a named refusal.
+
+Be clear about what that retry does and does not buy: against a *recycled* controller it recovers the turn; against a *deterministic panic* it fails the same way, which is correct. The crash fix is the remedy, and it is now installed. The supervisor recycles at the next idle boundary, after which devops.md and monsterrodholders.md should admit normally — their editor buffers are still authoritative and nothing was patched or forced.
+
+### Re: Use formal logic to fix this entire class of error — opus-5 · 2026-09-27T17:44-04:00
+
+Done: `formal/tla/TransientRefusalLatch.tla`, wired into `make check` with five configs. All seven TLA non-vacuity obligations pass.
+
+`EditorReplicaStrand` already models one wedge of this shape, but it is about what the **responder latched**. Everything in this turn is about what the **caller does with a refusal it did not author** — a different property, and the one that made four agents stop this afternoon.
+
+**The class.** A caller-visible refusal must be classified, and each class has exactly one correct response:
+
+- **AUTHORED** — the responder ruled. Re-asking is forbidden; retrying a verdict turns a fail-closed guard into a retry storm.
+- **TRANSIENT** — the cause can clear. The refusal must name a witness that clearing advances, and the caller must **wait** for it rather than fail closed.
+- **CRASH** — the responder died before answering, so no verdict exists; a replacement is the crash's witness.
+
+A transient refusal whose caller fails closed while the witness could still advance is a latch.
+
+**The sharp statement is `OnlyAuthoredVerdictsStop`:** work is handed back to the operator *only* because the responder ruled. Every instance this turn violates it. It also replaces TLC's deadlock check, which cannot serve here — stopping on a verdict is a legitimate dead end, so deadlock-checking failed the positive run for the one behaviour that is right. Naming *which* dead ends are legitimate is strictly better than forbidding all of them.
+
+**Three knobs, one must-violate config each**, because they are independent fixes for one class and a single wedge would let two go vacuous the moment the third landed:
+
+| knob FALSE | the instance it is |
+|---|---|
+| `ClassifyTransientRefusal` | route's `missing_replica` predicate |
+| `WaitForWitness` | blind retry burning a bounded budget |
+| `ClassifyCrashAsTransient` | admission reporting a panic as a verdict |
+
+Plus a REACH config, because the liveness property is conditional (`<>[]serving => []<>progressed`) — an adversary that degrades forever defeats any caller, and a model pretending otherwise would prove something false.
+
+Two modelling attempts were wrong before this one and both are worth recording: `ProgressRequiresAService` as an *invariant* failed on every trace where a later fault arrived, because `progressed` is a latched state — it had to become an action property. And the first model let the caller reach a terminal `gaveup` in the positive config, which TLC reported as a deadlock rather than as the property I meant.
+
+### Re: tmux pane auto-focus not focusing the right pane — opus-5 · 2026-09-27T17:44-04:00
+
+> **Queue prompt:**
+>
+> do [#fixrunmonsterrodholders]
+
+
+Diagnosed, not fixed — and one half I must not touch right now. Filed both at the top of `agent:backlog`.
+
+`controller_editor_surface_focus_outcome` splits cleanly over 247 receipts:
+
+| outcome | count | shape |
+|---|---|---|
+| `focused_agent_doc_actor` / `focused_live_process_owner` | 192 | working |
+| `focused=false reason=actor_pane_not_visible` | 42 | superproject docs, pane stashed |
+| `focused=false reason=missing_actor_record pane=-` | 13 | **11 of 13 are submodule documents** |
+
+Two distinct faults. `missing_actor_record` is a cross-root lookup gap: `devops.md`, `infra.md`, and `docs.md` live in submodules that carry their own `.agent-doc/`, so their actor record is in the *submodule's* controller store while the focus request reaches the superproject controller (`doc=agent-loop`) — which correctly answers "no record", and focus lands nowhere. That matches your report exactly: switching to a submodule document's tab leaves focus on the previous pane.
+
+`actor_pane_not_visible` is the other half — the pane exists but is stashed, and focus declines instead of un-stashing.
+
+I stopped short of fixing either, for one reason each. `actor_pane_not_visible` routes through `focus_refusal_requires_structural_layout` in `rpc.rs`, and the sibling session is editing **that exact function** in the shared tree right now — two agents in one repo region is the rule I will not break. And `missing_actor_record` needs a cross-root routing decision (does focus forward to the owning submodule controller, or does the superproject learn submodule actors?) that I am not going to settle in the last minutes of a six-prompt turn. Both are actionable, not gated, and they are the queue head.
+
+---
+
+**One note on this turn's verification.** Every `make check` I ran was green — final run exit 0, nextest runner-native `9892 tests run: 9892 passed`, 259 skipped, zero `result: FAILED`, and all seven TLA non-vacuity obligations confirmed. But it ran over a shared tree holding ~20 uncommitted files from the sibling session, including `rpc.rs` and `project_controller.rs`. So it proves my changes work *alongside* theirs, not that `HEAD` is green on its own. I staged every shared file as a hand-built blob of `HEAD` plus only my own hunks, so nothing of theirs was swept into my three commits — but CI on `HEAD` is the check that actually settles it.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -380,14 +494,16 @@ This unblocks `#activateinstalledjetbrai` and `#splicesimcov`. Installing and re
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#baselinecommitblocked]~~
-- ~~do [#readbackeditor]~~
-- do [#activateinstalledjetbrai]
+- ~~do [#fixrunmonsterrodholders]~~
+- do [#activateinstalledjetbrai]: automate the verification
+- Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#activateinstalledjetbrai] [agent-doc] [operator-verify] Prove captured local editor edits recover across an independently advanced canonical response — BLOCKED ON #opcapturedormant, and no longer validatable from logs. Asked to validate from logs 2026-09-26 and the answer is that the evidence class is ABSENT, not inconclusive: the splice-recovery path itself is healthy (15 captured-local-splice-recovery invocations 2026-09-24..27, all status=current authority=cp_model, with the canonical text demonstrably advancing between them — the 2026-09-26T00:11:48..52 burst runs text_len 42885 -> 42885 -> 42892 -> 42900 across three distinct hashes), but all 317 editor_op_epoch_closed events in that window are cause=non_operator_projection, so not one of those recoveries carried an operator-authored edit. Order of work: (1) fix #opcapturedormant so operator edits are recorded as ops at all; (2) re-run `agent-doc verify-op-capture <FILE>` — it now accepts the batch producer the JetBrains TypingTracker actually drives (6b0eabc0c), so a pass is meaningful and a failure names both producers; (3) only then does the disposable-document live proof have anything to prove. Do NOT re-narrow this gate to "just needs the live check" until step 1 lands. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
+- [ ] [#focussubmodulerecord] [agent-doc] Focus a submodule document to the right tmux pane. `controller_editor_surface_focus_outcome ... focused=false reason=missing_actor_record pane=-` fired 13x, and 11 of those are submodule documents (devops.md, infra.md, docs.md). Those submodules carry their own `.agent-doc/`, so the actor record lives in the SUBMODULE controller store while the focus request reaches the superproject controller (`doc=agent-loop`), which correctly answers "no record" — so focus lands nowhere and the previous pane keeps it. Decide the routing: forward the focus request to the owning submodule controller, or have the superproject controller learn submodule actor records. Evidence: .agent-doc/logs/ops.log, grep controller_editor_surface_focus_outcome.
+- [ ] [#focusstashedactor] [agent-doc] Focus a stashed actor pane instead of declining. `controller_editor_surface_focus_outcome ... focused=false reason=actor_pane_not_visible` fired 42x on superproject documents: the pane exists but is stashed, and focus declines rather than un-stashing it. Routes through `focus_refusal_requires_structural_layout` in agent-doc-controller-io/src/project_controller/rpc.rs. BLOCKED ON A CONCURRENT SESSION: as of 2026-09-27 17:00 a sibling agent-doc session holds that exact function uncommitted in the shared tree; do not edit it until that lands (never two agents in one repo region).
+- [ ] [#activateinstalledjetbrai] [agent-doc] Prove captured local editor edits recover across an independently advanced canonical response. The VERIFICATION IS NOW AUTOMATED (0cd957382): `agent-doc verify-captured-splice-recovery <FILE>` decides it from receipts — a splice-recovery `status=current` read, then an `editor_op_capture_proof` with `operator_ops>=1` and `shadow_replay=agreed`, then a later `status=current` read with a different `text_hash`; every failure names its missing link. Do NOT reason from `editor_op_epoch_closed cause=` — `non_operator_projection` is that field s only possible value, so it discriminates nothing (the verifier says so in its failure text). Remaining step is one live driver run: `scripts/xdotool-live-verify.sh captured-splice`, which injects real keystrokes into the operator s desktop and runs a response cycle between two operator edits. Agent-executable, but confirm with the operator first because it types into a live session. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 <!-- /agent:backlog -->
 
 ## Review

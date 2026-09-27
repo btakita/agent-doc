@@ -381,6 +381,87 @@ impl PluginProtocolHarness {
         Ok(updates.len())
     }
 
+    /// Replace this replica's membership at an exact observed controller cut.
+    /// `expected_canonical_hash` is the registration CAS the plugin fences a
+    /// captured splice batch with, so a stale captured base must refuse here
+    /// rather than after the old replica is already retired.
+    fn reregister_at_canonical_cut(&mut self, expected_canonical_hash: &str) -> anyhow::Result<()> {
+        let data = register_at_canonical_cut(
+            &self.project_root,
+            &self.file,
+            self.kind,
+            expected_canonical_hash,
+        )?;
+        let client_id = data["client_id"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("replacement register omitted client_id: {data}"))?;
+        anyhow::ensure!(
+            data["bootstrap_kind"].as_str() != Some("delta"),
+            "a replacement cut must bootstrap from the full canonical state: {data}"
+        );
+        let bootstrap = decode_field(&data, "bootstrap_b64")?;
+        self.pushed_state_vector = decode_field(&data, "canonical_state_vector_b64")?;
+        self.replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)?;
+        Ok(())
+    }
+
+    /// Forward one bounded splice batch, exactly like `CrdtReplicaForwarder`:
+    /// apply each code-point splice in order against the registered cut, prove
+    /// the planned result, then publish one incremental update.
+    fn forward_local_edits(
+        &mut self,
+        batch: &agent_doc_merge::captured_splice::CapturedSpliceBatch,
+    ) -> anyhow::Result<()> {
+        for edit in &batch.edits {
+            self.replica.apply_local_edit(
+                u32::try_from(edit.offset_code_points)?,
+                u32::try_from(edit.delete_code_points)?,
+                &edit.insert,
+            );
+        }
+        anyhow::ensure!(
+            self.replica.text() == batch.resulting_text,
+            "forwarded splices did not reproduce the planned cut"
+        );
+        let update = self.replica.diff(&self.pushed_state_vector)?;
+        self.pushed_state_vector = self.replica.state_vector();
+        request(
+            &self.project_root,
+            &self.file,
+            self.kind,
+            "replica_update",
+            serde_json::Map::from_iter([(
+                "update_b64".to_string(),
+                Value::String(BASE64.encode(update)),
+            )]),
+        )?;
+        Ok(())
+    }
+
+    /// Publish this replica's settled visible cut, like the manager's
+    /// `projectSettledVisibleState` after a forwarded splice batch. Without it
+    /// the controller keeps the retained canonical projection and no peer is
+    /// released.
+    fn project_visible_state(&self) -> anyhow::Result<()> {
+        let content_hash = agent_doc_hash::content_hash(&self.replica.text());
+        let projection = request(
+            &self.project_root,
+            &self.file,
+            self.kind,
+            "replica_projection",
+            serde_json::Map::from_iter([
+                ("content_hash".to_string(), Value::String(content_hash)),
+                ("disk_persisted".to_string(), Value::Bool(false)),
+            ]),
+        )?;
+        anyhow::ensure!(
+            projection["projected"] == Value::Bool(true),
+            "settled visible projection was not accepted: {projection}"
+        );
+        Ok(())
+    }
+
     fn disconnect(self) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
         request(
             &self.project_root,
@@ -418,6 +499,87 @@ fn request(
         file,
         Value::Object(fields),
     )
+}
+
+fn register_at_canonical_cut(
+    project_root: &Path,
+    file: &Path,
+    kind: PluginHarnessKind,
+    expected_canonical_hash: &str,
+) -> anyhow::Result<Value> {
+    request(
+        project_root,
+        file,
+        kind,
+        "replica_register",
+        serde_json::Map::from_iter([(
+            "expected_canonical_hash".to_string(),
+            Value::String(expected_canonical_hash.to_string()),
+        )]),
+    )
+}
+
+/// The controller cut the plugin observes before planning a captured batch.
+fn controller_canonical_text(project_root: &Path, file: &Path) -> anyhow::Result<String> {
+    let data = agent_doc_controller_io::project_controller::request_crdt_current_text_for_test(
+        project_root,
+        file,
+        "captured-local-splice-recovery",
+    )?;
+    anyhow::ensure!(
+        data["status"].as_str() == Some("current"),
+        "controller did not serve a current cut: {data}"
+    );
+    Ok(data["text"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("current cut omitted text: {data}"))?
+        .to_string())
+}
+
+fn splice(
+    offset_code_points: usize,
+    delete_code_points: usize,
+    insert: &str,
+) -> agent_doc_merge::captured_splice::CapturedSplice {
+    agent_doc_merge::captured_splice::CapturedSplice {
+        offset_code_points,
+        delete_code_points,
+        insert: insert.to_string(),
+    }
+}
+
+fn apply_splices(
+    base: &str,
+    edits: &[agent_doc_merge::captured_splice::CapturedSplice],
+) -> String {
+    let mut chars: Vec<char> = base.chars().collect();
+    for edit in edits {
+        let end = edit.offset_code_points + edit.delete_code_points;
+        chars.splice(edit.offset_code_points..end, edit.insert.chars());
+    }
+    chars.iter().collect()
+}
+
+/// The editor's captured typing burst: ordered code-point splices plus the cut
+/// they produced. The resulting cut is what proves the stream is real.
+fn captured_splice_batch(
+    base: &str,
+    edits: Vec<agent_doc_merge::captured_splice::CapturedSplice>,
+) -> agent_doc_merge::captured_splice::CapturedSpliceBatch {
+    let resulting_text = apply_splices(base, &edits);
+    agent_doc_merge::captured_splice::CapturedSpliceBatch {
+        edits,
+        resulting_text,
+    }
+}
+
+/// Code-point offset of `needle`, so a Unicode prefix cannot hide a byte-offset
+/// bug behind an ASCII fixture.
+fn code_point_offset(text: &str, needle: &str) -> usize {
+    let byte = text
+        .find(needle)
+        .unwrap_or_else(|| panic!("fixture is missing `{needle}`"));
+    text[..byte].chars().count()
 }
 
 fn decode_field(value: &Value, field: &str) -> anyhow::Result<Vec<u8>> {
@@ -588,6 +750,161 @@ fn cross_editor_plugin_protocol_harnesses_peer_through_real_agent_doc_controller
     assert!(ops.contains("source=jetbrains_plugin"));
     assert!(ops.contains("source=vscode_plugin"));
     assert!(ops.contains("method=replica_projection"));
+
+    let _ = jetbrains.disconnect().unwrap();
+    let _ = vscode.disconnect().unwrap();
+}
+
+/// Captured-edit splice recovery across an INDEPENDENTLY ADVANCED canonical
+/// response, through the real agent-doc controller.
+///
+/// The JetBrains peer holds a typing burst its replica never published; the
+/// VS Code peer advances canonical with an unrelated response block meanwhile.
+/// Recovery must then run the plugin-side sequence in order: observe the
+/// controller cut, plan the bounded splices BEFORE replacing membership,
+/// CAS-register that exact cut, forward the splices, and land the translated
+/// offsets without losing either change.
+#[test]
+fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independent_response() {
+    let _env_guard = agent_doc_test_support::env_lock();
+    let temp = tempfile::TempDir::new().unwrap();
+    let project_root = temp.path();
+    // The emoji keeps every captured offset code-point-scoped: a byte-offset
+    // regression cannot pass this fixture by accident.
+    let baseline = concat!(
+        "<!-- agent:exchange -->\n",
+        "do the 🌍 thing\n",
+        "<!-- /agent:exchange -->\n",
+        "<!-- agent:queue -->\n",
+        "- fix bug\n",
+        "<!-- /agent:queue -->\n",
+    );
+    let file = agent_doc_test_support::init_repo_with_doc(project_root, "splice.md", baseline);
+    std::fs::create_dir_all(project_root.join(".agent-doc/logs")).unwrap();
+    std::fs::create_dir_all(project_root.join(".agent-doc/snapshots")).unwrap();
+
+    let kinds = supported_plugin_harnesses();
+    assert_eq!(
+        kinds,
+        [PluginHarnessKind::JetBrains, PluginHarnessKind::VsCode],
+        "splice recovery peers only the implementations whose required features are supported"
+    );
+    agent_doc_test_support::seed_reliable_sync_editor_registration(
+        &file,
+        "captured-splice-simworld",
+        &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+    );
+    agent_doc()
+        .args([
+            "controller",
+            "status",
+            "--project-root",
+            &project_root.to_string_lossy(),
+            "--ensure",
+        ])
+        .assert()
+        .success();
+    let _controller = ControllerGuard {
+        project_root: project_root.to_path_buf(),
+    };
+
+    let mut jetbrains =
+        PluginProtocolHarness::attach(PluginHarnessKind::JetBrains, project_root, &file).unwrap();
+    let mut vscode =
+        PluginProtocolHarness::attach(PluginHarnessKind::VsCode, project_root, &file).unwrap();
+    let captured_base = jetbrains.text();
+    assert_eq!(captured_base, baseline);
+
+    // The operator retypes a queue line. The burst is captured against
+    // `captured_base` and never reaches the controller, so the JetBrains replica
+    // is the stale member recovery has to replace.
+    let bug_offset = code_point_offset(&captured_base, "bug");
+    let captured = captured_splice_batch(
+        &captured_base,
+        vec![
+            splice(bug_offset, 3, "queue "),
+            splice(bug_offset + "queue ".chars().count(), 0, "retrieval"),
+        ],
+    );
+    assert!(captured.resulting_text.contains("- fix queue retrieval\n"));
+
+    // Canonical advances independently while that burst is still retained.
+    let response = "### Re: the thing — simworld\n";
+    let response_offset = code_point_offset(&captured_base, "<!-- /agent:exchange -->");
+    vscode.edit_without_pulling(response_offset, response).unwrap();
+    vscode.pull_and_project().unwrap();
+
+    // 1. Observe the controller cut.
+    let canonical = controller_canonical_text(project_root, &file).unwrap();
+    assert!(canonical.contains(response), "canonical cut: {canonical:?}");
+    assert!(canonical.contains("- fix bug\n"), "canonical cut: {canonical:?}");
+    assert_ne!(canonical, captured_base);
+
+    // 2. Plan the bounded splices BEFORE replacing membership.
+    let rebased =
+        agent_doc_merge::captured_splice::rebase(&captured_base, &canonical, &captured).unwrap();
+    let shift = response.chars().count();
+    assert_eq!(
+        rebased
+            .edits
+            .iter()
+            .map(|edit| edit.offset_code_points)
+            .collect::<Vec<_>>(),
+        vec![bug_offset + shift, bug_offset + "queue ".chars().count() + shift],
+        "each captured offset must translate through the independent response insertion"
+    );
+    let expected = canonical.replacen("- fix bug\n", "- fix queue retrieval\n", 1);
+    assert_eq!(rebased.resulting_text, expected);
+    assert_ne!(
+        apply_splices(&canonical, &captured.edits),
+        expected,
+        "the untranslated offsets must NOT already produce the right cut, or this proves nothing"
+    );
+
+    // 3. CAS-register that exact cut. A stale captured base must refuse while
+    //    the existing replica is still the document's only JetBrains peer.
+    let stale = register_at_canonical_cut(
+        project_root,
+        &file,
+        PluginHarnessKind::JetBrains,
+        &agent_doc_hash::content_hash(&captured_base),
+    )
+    .expect_err("a stale captured base must not retire the live replica");
+    assert!(
+        stale
+            .to_string()
+            .contains("replica_register_canonical_precondition_failed"),
+        "unexpected refusal: {stale:#}"
+    );
+    jetbrains
+        .reregister_at_canonical_cut(&agent_doc_hash::content_hash(&canonical))
+        .unwrap();
+    assert_eq!(
+        jetbrains.text(),
+        canonical,
+        "the replacement replica must start from the cut its CAS proved"
+    );
+    // The replacement holds exactly the cut it registered against, so it
+    // acknowledges the retained canonical projection immediately. Until that
+    // receipt lands the controller quarantines every additive update from this
+    // member (`recovery=lazy_canonical_projection`).
+    jetbrains.project_visible_state().unwrap();
+
+    // 4. Forward the bounded splices, and 5. assert the translated offsets land
+    //    on both peers with the unrelated response intact.
+    jetbrains.forward_local_edits(&rebased).unwrap();
+    jetbrains.project_visible_state().unwrap();
+    for _ in 0..3 {
+        vscode.pull_and_project().unwrap();
+    }
+    assert_eq!(jetbrains.text(), expected);
+    assert_eq!(vscode.text(), expected);
+    assert!(vscode.text().contains(response));
+    assert!(vscode.text().contains("- fix queue retrieval\n"));
+
+    let ops = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(ops.contains("source=jetbrains_plugin"));
+    assert!(ops.contains("source=vscode_plugin"));
 
     let _ = jetbrains.disconnect().unwrap();
     let _ = vscode.disconnect().unwrap();

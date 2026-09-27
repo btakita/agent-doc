@@ -1317,6 +1317,45 @@ pub fn request_crdt_replica_for_test(
     )
 }
 
+/// Observe the live canonical cut exactly like the plugin's
+/// `CpSocketReplicaTransport.currentCanonicalText`: an existing controller, no
+/// flush barrier, and no projection recovery. Captured-splice recovery fences
+/// this observation with the registration CAS, so it must never launch or
+/// mutate anything.
+#[cfg(any(test, feature = "test-support"))]
+pub fn request_crdt_current_text_for_test(
+    project_root: &Path,
+    file: &Path,
+    source: &str,
+) -> Result<serde_json::Value> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "crdt_current_text".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::json!({
+                    "source": source,
+                    "recover_projection": false,
+                    "flush_barrier": false,
+                })
+                .to_string(),
+            ),
+        },
+        CONTROLLER_RPC_TIMEOUT,
+    )
+}
+
 fn request_controller_with_timeout<T: DeserializeOwned>(
     project_root: &Path,
     request: ControllerRequest,

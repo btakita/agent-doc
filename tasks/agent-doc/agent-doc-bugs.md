@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -34,6 +34,50 @@ queue: stop
 Compacted content:
 - Archived 7 response topic(s): queue prompt on cargovodtrim; actionable review items into backlog; pypiquotafix complete; 4 more
 - Prior summary/context: prior compacted content: Archived 8 response topic(s): #advance-review, tmux pane auto-focus, and queue edit converge...
+
+### Re: complete #confirmfixlive — opus-5 · 2026-09-27T01:23-04:00
+
+Marked done on your word. The `#focusstashescalate` fix stands as confirmed live across cross-window pane switches.
+
+### Re: do #opcapturedormant — opus-5 · 2026-09-27T01:23-04:00
+
+Root-caused and fixed. Committed `65c865f24`, pushed, plugin `0.2.429` installed.
+
+**Why the ledger read as empty.** The reporter chain had four early returns and every one of them was silent, so "the editor refused the burst" and "the operator never typed" produced identical evidence — zero `editor_ops_recorded` AND zero `editor_ops_record_failed`. Two of those returns were also wrong:
+
+- `prepareEditorOpReports` collapsed *unreplayable burst* and *burst with no operator op* into the same `emptyList()`. A shadow-replay mismatch discarded every operator op in the burst with no trace.
+- `reportFullContentNow` read the buffer text at the top and drained the pending burst at the bottom, across the observed-content FFI and a replica ensure that can each block. Any editor change landing in that window produced a text no replay of the drained ops could reach — so the mismatch above fired, and the burst was destroyed rather than retried.
+
+**The provable permanent-silencing path.** `beforeFileContentReload` added the path to `fileContentReloadingPaths`; `fileContentReloaded` removed it. Two separate callbacks, no `finally` between them. A reload that is vetoed, cancelled, or fails mid-write never posts completion, and the bare path set then stranded the marker for the life of the manager. `isReloadingFileContent` → `isApplyingNonOperatorMutation` → `isOperatorDocumentEvent` false forever, which silences the op-capture ledger *and* the local-splice forwarder together. That matches the rest of the evidence: the 67 `crdt_document_op_delta_ingested` events carry `authority=multi_replica` with whole-document `delta_len`, which is the signature of the non-operator branch at `CrdtReplicaManager.kt:740` doing `ensureOpenDocumentReplica(forceRefresh = true)` — not of a local splice forward.
+
+**What landed.**
+
+- `agent_doc_log_editor_op_capture_refusal` writes `editor_op_capture_refused reason=<token> detail=<fields> #opcapturedormant`. Stable reasons: `all_ops_non_operator`, `shadow_replay_mismatch`, `doc_advanced_during_drain`, `base_hash_unavailable` (both the null and empty base-hash case).
+- `prepareEditorOpReports` returns `null` for an unreplayable burst; empty stays "no operator op".
+- Each captured op carries the `Document` modification stamp it left behind; the snapshot carries the stamp it was read with, both from one read action. A mismatch requeues the burst at the head of the pending list and reschedules. A burst that never reaches the reporter for any other reason is requeued by a `finally`.
+- The reload marker stores its start time and expires after 5s, logging that it did. A missed completion callback can no longer silence operator classification permanently.
+- `verify-op-capture` names the refusal reasons when neither producer marker is present, and reports an absence of receipts as an *unobserved reporter chain* — a different diagnosis from a named refusal.
+
+**Verification.** `make check` green: exit 0, nextest runner-native `9823 tests run: 9823 passed, 259 skipped`, plus sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap, Lean and TLA+. Plugin suite: 563 tests, 0 failures, 0 errors asserted from the JUnit XML, including the five new tests. `make cross-editor-simworld` green (its earlier red in the first sweep was a stale `editors/vscode/out` artifact, not a regression — it passes once `npm run compile` runs). CI run `36297051970` for `65c865f24` is still in progress; recorded, not waited on.
+
+**What is left, and it is genuinely operator-gated.** I cannot read a receipt back from a real typing burst — that needs you to type into `agent-doc-bugs.md` in IntelliJ once the recycled plugin is loaded. Filed as the new head so `#activateinstalledjetbrai` has a concrete prerequisite instead of an absent evidence class.
+
+### Re: monsterrodholders migrate nag — opus-5 · 2026-09-27T01:23-04:00
+
+> **Queue prompt:**
+>
+> complete [#confirmfixlive]
+>
+> do [#opcapturedormant]
+
+
+Fixed in the binary, same commit. You were right to decline it: the nag asked for a state the same instruction surface forbids.
+
+`agent-doc migrate` only *moves* gated items, so on a document with a long legacy tail it satisfies the component-placement rule by breaking the review-size rule — 11 review items plus 20 legacy gated becomes 31, against a stated target of under 10. Repeating a bare command every cycle for that is not a warning, it is a trap.
+
+`legacy_gated_in_backlog` is now budget-aware. When `review_count + legacy_gated_in_backlog_count` would exceed the 10-item target it states the count the migration would produce, names the target it would break, and recommends triage first — `--backlog-ungate <id>` for a stale gate, `--done <id>` for one already satisfied, migrate only what is genuinely blocked. At or below the target the migration is simply correct and the warning stays the short form. Three tests pin both forms and the exact boundary; `specs/pending-system.md` records the rule.
+
+That means the monsterrodholders session can now drop `#review-migrate-gated` — the decision it was holding is encoded in the binary. I did not touch that document from here.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -42,9 +86,9 @@ Compacted content:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- [#confirmfixlive]: confirmed
-- do [#opcapturedormant]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~complete [#confirmfixlive]~~
+- ~~do [#opcapturedormant]~~
 - do [#bkqattrcli]
 - do [#hswspawncount]
 - do [#hswdisposabledoc]
@@ -54,8 +98,7 @@ Compacted content:
 
 
 <!-- agent:backlog -->
-- [ ] [#confirmfixlive] [agent-doc] [operator-verify] Confirm the #focusstashescalate fix live: after the controller recycles onto 0.35.418 + agent-doc 75963eec6, click between two visible session documents whose tmux panes are in DIFFERENT windows (one in 0:agent-doc, one in 1:stash) and confirm the second and every later switch focuses, not just the first. Evidence is now self-describing: ops.log carries controller_editor_surface_focus_outcome document= focused= reason= pane= for every selection, plus controller_editor_surface_focus_escalated when a stashed pane is handed to the layout owner. If a switch still does nothing, the reason field names which of the ~10 refusals fired.
-- [ ] [#opcapturedormant] [agent-doc] [P1] The editor op-capture ledger records NOTHING: across 2026-09-24..27 this project logged 216 editor_open and 317 editor_op_epoch_closed events — every single one cause=non_operator_projection action=cleared — with ZERO editor_op_recorded, ZERO editor_ops_recorded, ZERO editor_op_record_failed and ZERO editor_ops_record_failed. Zero successes AND zero failures means editors/jetbrains/.../TypingTracker.kt:527 (`lib.agent_doc_record_editor_ops_json`) is never reached, not that it is failing. This is not a no-typing artifact: the operator typed four separate queue heads into tasks/agent-doc/agent-doc-bugs.md in IntelliJ on 2026-09-26/27 while it held a live registration (pid 3129637, plugin 0.2.428), and those edits arrived as crdt_document_op_delta_ingested deltas without ever being recorded as captured ops. Consequence: every captured-local-splice-recovery invocation (15 in the same window, all status=current, on agent-doc-bugs.md and tasks/software/lazily.md) ran against agent-driven projections only, so no operator-captured edit has ever exercised the splice path in production, and #activateinstalledjetbrai cannot be proven while this holds. NEXT: instrument or read the TypingTracker guard chain to find why the batch record call is not reached (candidate causes: the op epoch being closed as non_operator_projection before the operator burst is flushed, a base-hash memo miss, or the tracker not being installed for the document); note that a bare absence is now diagnosable because verify-op-capture names both producers as of 6b0eabc0c. Blocks #activateinstalledjetbrai and #splicesimcov.
+- [ ] [#readbackeditor] [opcaptureliveread] [agent-doc] [operator-verify] Read back an editor-op capture receipt from a real typing burst, now that every reporter refusal names itself (65c865f24, plugin 0.2.429). Type a few characters into tasks/agent-doc/agent-doc-bugs.md in IntelliJ once the recycled plugin holds a live registration, then run agent-doc verify-op-capture on it. Three outcomes, all now diagnosable: editor_ops_recorded ... transaction=batch means capture works and activateinstalledjetbrai is unblocked; editor_op_capture_refused reason=<token> names which guard fired (all_ops_non_operator points back at isOperatorDocumentEvent, shadow_replay_mismatch at the burst replay, doc_advanced_during_drain is benign and self-retrying, base_hash_unavailable at the merge base); no receipt at all means the reporter chain never ran, so check that the plugin generation actually reloaded. Blocks activateinstalledjetbrai and splicesimcov.
 - [ ] [#activateinstalledjetbrai] [agent-doc] [operator-verify] Prove captured local editor edits recover across an independently advanced canonical response — BLOCKED ON #opcapturedormant, and no longer validatable from logs. Asked to validate from logs 2026-09-26 and the answer is that the evidence class is ABSENT, not inconclusive: the splice-recovery path itself is healthy (15 captured-local-splice-recovery invocations 2026-09-24..27, all status=current authority=cp_model, with the canonical text demonstrably advancing between them — the 2026-09-26T00:11:48..52 burst runs text_len 42885 -> 42885 -> 42892 -> 42900 across three distinct hashes), but all 317 editor_op_epoch_closed events in that window are cause=non_operator_projection, so not one of those recoveries carried an operator-authored edit. Order of work: (1) fix #opcapturedormant so operator edits are recorded as ops at all; (2) re-run `agent-doc verify-op-capture <FILE>` — it now accepts the batch producer the JetBrains TypingTracker actually drives (6b0eabc0c), so a pass is meaningful and a failure names both producers; (3) only then does the disposable-document live proof have anything to prove. Do NOT re-narrow this gate to "just needs the live check" until step 1 lands. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [ ] [#bkqattrcli] [agent-doc] No command can add a component attribute, so "into backlog + queue" is unreachable from the CLI on any document whose `agent:backlog` marker lacks `queue`. Verified 2026-09-26 on a scratch copy of tasks/agent-doc/agent-doc-bugs.md: two `--backlog-add` items landed in agent:backlog and mirrored NOTHING into agent:queue. `--backlog-queue-placement` is documented as acting only "when the backlog carries a `queue` attribute" and `agent-doc queue sync` is "sync from backlog items with `queue` attribute", so both are gated on it; `agent-doc backlog` has no set-attr, `write` exposes no marker flag, `patch` replaces component CONTENT only, and `migrate` only STRIPS deprecated attributes. The one remaining route is hand-editing the marker, which is unavailable precisely when it matters: reliable-sync-status shows this document live under IntelliJ pid 3129637 / plugin 0.2.428, and a raw disk edit under a live editor becomes a disk candidate the agent must never resolve. Add `agent-doc backlog set-attr <FILE> <attr>` / `unset-attr` (accepting at least `queue` and `priority`) routed through the same editor-converging write path as `backlog add` — the marker span is already modelled as Component.open_start/open_end with parsed attrs in agent-doc-element/src/element.rs (parse_attrs at :736), so this is a marker-span mutation class rather than a content patch. Also emit a preflight warning when a capture cycle adds backlog items that the queue cannot mirror, so the "+ queue" half of an actionable-review-style instruction fails loudly instead of silently landing half.
 - [ ] [#hswspawncount] [agent-doc] Add a SimWorld scenario asserting exactly ONE supervisor spawn per authoritative harness switch across a consecutive codex -> claude -> codex sequence in ONE document, with no refusal and no respawn storm. Rescoped 2026-09-26 after #harnessswitchverify was discharged from logs: the 1:1 invariant is already PROVEN live (3 harness_change_detected events 2026-09-24..27, all gate=WaitForBoundary, each producing exactly 1 agent_restart_performed action=spawn_fresh_harness — claude->codex on lazily.md 04:12:03->06Z, codex->claude on lazily.md 18:12:09->10Z, codex->claude on agent-doc-bugs.md 18:12:29->33Z with authority=editor_buffer), and the deferral half too (5 agent_restart_respec_refreshed with running_harness == resolved_harness produced ZERO spawns). What remains unproven is only a CONSECUTIVE multi-switch sequence on a single document, which is a deterministic-coverage job rather than another manual session. Grounding: four scenarios already exist (src/sim_world.rs:6556 persists the record so post-restart dispatch does not defer, :6663 accepted handoff then idle-watch fresh restart, :6769 paused supervisor holds for resume no restart, :6856 disabled restart bails explicitly) but NONE asserts a spawn COUNT over a multi-switch sequence. Plan: tasks/agent-doc/plan-stop-gated-queue-head.md.

@@ -346,6 +346,31 @@ Fixed in `42db8999e`, pushed. `checkpoint_document_baseline` now gates on conten
 `load_document_baseline_generation` is new in `agent-doc-snapshot-io` so a test can assert on the projected generation directly instead of parsing ops.log. `SPEC.md` and `specs/14-realtime-workflow.md` both carried the "baseline checkpointed from the live snapshot" phrasing that this trace disproves; both now state the durably-projected invariant instead.
 
 **Verification.** `make check`: 9859 tests run, 9859 passed, 0 failed, exit 0. `cargo build --release` green — the supervisor auto-install path builds release, which nextest does not, so a release-only break would stall promotion at the last good commit. CI run `36308915309` on `42db8999e` is still in progress; the prior run on `8eb8eca5b` was green. Installing + recycling after this closeout rather than before it, so the cdylib reload cannot strand this document's replica mid-write.
+
+### Re: do [#readbackeditor] — opus-5 · 2026-09-27T06:06-04:00
+
+> **Queue prompt:**
+>
+> do [#readbackeditor]
+
+
+Automated in `f39cba8f0`, pushed. `verify-op-capture` no longer needs a human IntelliJ burst.
+
+**What was still inferred.** `65c865f24` made a *dormant* ledger diagnosable by writing a refusal receipt for every silent early return. But a ledger that **does** record still proved the four facts only by the *absence* of a refusal — and a reporter whose `documentChanged` listener never ran writes neither a producer marker nor a refusal. Reading "no refusal" as "all four held" is the same absence-is-evidence inversion `#idlerevisionreactive` names, one layer up.
+
+**So the success path states them.** `agent_doc_log_editor_op_capture_proof` writes `editor_op_capture_proof epoch_generation=<n|unknown> operator_ops=<n> non_operator_ops=<n> shadow_replay=agreed|disagreed merge_base=<h12|unavailable>`, and the reporter calls it immediately **before** handing the burst to the record FFI. That ordering is the point: a proof receipt with no producer marker beside it is its own diagnosis — the reporter got all the way there and the FFI still wrote nothing, which is neither a dormant chain nor a named refusal. `verify-op-capture` counts the receipts and, on a missing producer marker, names the latest receipt's fields beside the refusal reasons.
+
+One naming correction. Your item asked for "live registration generation", and there is no such thing in the plugin — `EditorRegistration` carries a timestamp, not a generation, and a live-editor count needs a controller round trip per burst, exactly the load `#idlerevisionreactive` forbids on a hot path. What genuinely bounds a captured burst is the **op-capture epoch**: every remote/agent projection closes it first, so a burst is replayable only while its path is still at the epoch it was captured in. That is what the receipt reports, resolved from the plugin's own `remoteEditorEffectGenerations`. An absent epoch reads `unknown`, never a plausible-looking `0`.
+
+**The synthetic test found a second live defect.** `--expect-cafe-demo` is documented for live JB/VS Code plugin tests, yet it read byte evidence only off the one-op producer's per-op fields — so the batch path the JetBrains `TypingTracker` actually drives could never satisfy it. That is the same false negative `#opcaptureverifybatchproducer` removed from plain mode, surviving in cafe-demo mode because cafe-demo had its own reader. Fixed by giving `EditorOp`'s own crate the byte summary, rendering both the batch producer and the merge consumer through it, and letting cafe-demo read the contract off either.
+
+**Automation, and why the old tests could not have caught this.** Every other test in that module hands the verifier ops-log text the test itself wrote — that proves the parser and nothing about the producers, which is precisely how a verifier demanding a marker the shipped plugin never writes went unnoticed. The new test drives the proof FFI, the batch record FFI, and the merge consumer against a temporary project, then verifies the `ops.log` *those* producers wrote, cafe-demo byte contract included. A Kotlin contract test pins the reporter half: the epoch accessor exists and returns `-1` when absent, the classification split reaches the proof instead of being recomputed there, the proof precedes the record call, and an older cdylib without the ABI does not break capture. It reddens when the proof call is moved after the record call — I checked.
+
+The four refusal tokens from `65c865f24` are untouched.
+
+**Verification.** `make check`: 9862 tests run, 9862 passed, 0 failed, exit 0. Gradle: 564 tests, 0 failures, 0 skipped — read from the JUnit XML rather than the wrapper output, which hides skipped task lines and would let a skipped test task read as a passing one. `cargo build --release` green. JB plugin `0.2.429` → `0.2.430`. CI `36311454957` is in progress; the previous commit's run (`36308915309`, the baseline fix) went green.
+
+This unblocks `#activateinstalledjetbrai` and `#splicesimcov`. Installing and recycling after closeout again, so the cdylib reload cannot strand this document's replica mid-write. Exchange is at 320 lines / 10 response sections; noting it rather than stalling the drain.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -356,13 +381,12 @@ Fixed in `42db8999e`, pushed. `checkpoint_document_baseline` now gates on conten
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#baselinecommitblocked]~~
-- do [#readbackeditor]
+- ~~do [#readbackeditor]~~
 - do [#activateinstalledjetbrai]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#readbackeditor] [opcaptureliveread] [agent-doc] Automate the editor-op capture proof instead of asking an operator to type (operator instruction 2026-09-27: "Add to the logs what you need to verify. Then verify. Automate testing yourself."). Add the reporter-side logging that names each thing the proof needs — live registration generation, isOperatorDocumentEvent classification, shadow replay agreement, merge-base availability — then drive a synthetic typing burst through the plugin/FFI reporter path and assert editor_ops_recorded ... transaction=batch from the receipt in a deterministic test, so verify-op-capture no longer depends on a human IntelliJ burst. Keep the refusal-token diagnosis from 65c865f24 (all_ops_non_operator, shadow_replay_mismatch, doc_advanced_during_drain, base_hash_unavailable). Blocks activateinstalledjetbrai and splicesimcov.
 - [ ] [#activateinstalledjetbrai] [agent-doc] [operator-verify] Prove captured local editor edits recover across an independently advanced canonical response — BLOCKED ON #opcapturedormant, and no longer validatable from logs. Asked to validate from logs 2026-09-26 and the answer is that the evidence class is ABSENT, not inconclusive: the splice-recovery path itself is healthy (15 captured-local-splice-recovery invocations 2026-09-24..27, all status=current authority=cp_model, with the canonical text demonstrably advancing between them — the 2026-09-26T00:11:48..52 burst runs text_len 42885 -> 42885 -> 42892 -> 42900 across three distinct hashes), but all 317 editor_op_epoch_closed events in that window are cause=non_operator_projection, so not one of those recoveries carried an operator-authored edit. Order of work: (1) fix #opcapturedormant so operator edits are recorded as ops at all; (2) re-run `agent-doc verify-op-capture <FILE>` — it now accepts the batch producer the JetBrains TypingTracker actually drives (6b0eabc0c), so a pass is meaningful and a failure names both producers; (3) only then does the disposable-document live proof have anything to prove. Do NOT re-narrow this gate to "just needs the live check" until step 1 lands. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 <!-- /agent:backlog -->
 

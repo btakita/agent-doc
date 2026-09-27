@@ -372,6 +372,17 @@ When publishing a release:
    wheel. Its launcher waits for the matching GitHub Release, downloads the
    platform archive on first invocation, verifies `SHA256SUMS`, and keeps the
    executable and cdylib together in a versioned user cache.
+
+   That cutover is what bounds PyPI storage growth, so the project ceiling is a
+   measurement, not a guess: `make pypi-quota-check` sums per-file sizes from the
+   PEP 691 simple index and prints headroom, the post/pre-cutover split, how many
+   further releases fit, the limit-request status, and the tranche that *would* be
+   deletable. It exits non-zero only when a ceiling is genuinely in reach. Read it
+   there — never from `pypi.org/pypi/agent-doc/json`, which has served a stale CDN
+   view listing deleted releases, and never by waiting on the authenticated
+   `/manage/project/agent-doc/settings/` page, which PyPI gates behind a password
+   re-confirmation. Deleting release history is reserved for a ceiling the check
+   actually reports; verify any deletion from the authenticated `/manage/` pages.
 9. Verify the release run went green (`gh run list --limit 5`) and that
    `gh release view v<version>` lists four automated platform archives plus
    `SHA256SUMS`. On a Mac, `make release-macos-cadence-check` reports whether the

@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check artifact-purge-check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -181,6 +181,21 @@ plugin-version-check:
 artifact-purge-check:
 	@python3 scripts/purge-actions-artifacts.py --self-test
 
+# PyPI storage headroom + limit-request status, unauthenticated (`#pypislim`).
+# Reads per-file sizes from the PEP 691 simple index, NOT `pypi.org/pypi/<name>/json`
+# (which has served a stale CDN view listing deleted releases) and NOT the
+# authenticated `/manage/project/` settings page (PyPI gates it behind a password
+# re-confirmation, which is what used to stall this check on a human). Exits 1 only
+# when a ceiling is actually in reach; an unreachable ceiling is never a reason to
+# delete release history.
+pypi-quota-check:
+	@python3 scripts/pypi-quota-check.py
+
+# Offline arithmetic + verdict thresholds for the check above. Part of `make check`;
+# the live network read stays an explicit invocation (`make pypi-quota-check`).
+pypi-quota-self-test:
+	@python3 scripts/pypi-quota-check.py --self-test
+
 # Build + machine-check the Lean formal models under formal/ (including the
 # wait-machine bound and captured-response closeout safety/completeness proofs).
 # Skips gracefully when the Lean
@@ -210,7 +225,7 @@ lean:
 # the release process runs `make check`, so leaving the installed-surface audit
 # out of it let 0.35.224 ship with harness runbooks several versions behind the
 # binary while every version marker matched.
-check: plugin-version-check artifact-purge-check clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
+check: plugin-version-check artifact-purge-check pypi-quota-self-test clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
 audit-docs:

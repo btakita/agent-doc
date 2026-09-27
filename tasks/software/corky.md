@@ -305,6 +305,7 @@ Please give me a report the performance
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ckyonnx] corky will not start at all: `corky: /usr/lib/libonnxruntime.so.1: version VERS_1.27.1 not found (required by corky)`. The installed binary is /home/brian/.cargo/bin/corky; the system ships libonnxruntime.so.1 -> libonnxruntime.so.1.29.0, so the binary was linked against a 1.27.x runtime that no longer exists on this machine. Every corky path is dead, including `corky transcribe` and the YouTube lookup — surfaced 2026-09-26 while triaging agent-doc #cargovodtrim, where the platform VOD lookup was the only remaining locator. Fix: rebuild/reinstall corky against the current onnxruntime, or vendor/pin the runtime so a system ORT bump cannot break the installed binary again; then add a startup self-check that reports the ORT version mismatch as a clear diagnostic instead of a bare loader error.
 <!-- /agent:backlog -->
 
 ## Review

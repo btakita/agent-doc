@@ -33394,3 +33394,43 @@ fn restart_agent_refreshes_same_harness_config_and_degrades_failed_exact_resume(
         );
     }
 }
+
+/// `#rejectioncountswedge` — every site that accrues an unproven-delivery failure
+/// against the transport health record must classify a receipt REJECTION as well
+/// as a timeout.
+///
+/// Two independent sites carried the timeout-only guard — the converge recorder in
+/// `agent-doc-write-converge-io` and the live socket path in
+/// `agent-doc-write-ipc-io` — and fixing one on 2026-09-27 left the other silent,
+/// so the deadlock reproduced unchanged on the very next attempt. A rejection is
+/// the STRONGER signal (the endpoint answered and refused), and dropping it means
+/// `write_wedged` never arms and the `#midturn-wedge-recycle` escape from the
+/// open-cycle defer never fires.
+///
+/// A source-shape guard on purpose: the defect is a MISSING branch, which no
+/// behavioural test of the branches that do exist can observe.
+#[test]
+fn every_wedge_recording_site_classifies_rejections_too() {
+    let sites = [
+        "agent-doc-write-converge-io/src/lib.rs",
+        "agent-doc-write-ipc-io/src/transport.rs",
+    ];
+    let mut checked = 0usize;
+    for site in sites {
+        let source = std::fs::read_to_string(site).unwrap_or_else(|e| panic!("read {site}: {e}"));
+        if !source.contains("record_ipc_socket_ack_failure(") {
+            continue;
+        }
+        checked += 1;
+        assert!(
+            source.contains("is_socket_status_error("),
+            "{site} records a wedge failure but never classifies a receipt rejection - \
+             a rejecting endpoint accrues nothing and `write_wedged` never arms"
+        );
+    }
+    assert_eq!(
+        checked, 2,
+        "expected both known wedge-recording sites to still record failures; if a site \
+         moved, update this list rather than letting the guard silently check nothing"
+    );
+}

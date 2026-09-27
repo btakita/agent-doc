@@ -16,7 +16,7 @@ use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, FullContentIpcMode, build_ipc_node_patches_json,
     effective_unmatched_for_patch_payload, is_already_applied_receipt_error_message,
-    is_socket_receipt_timeout_error,
+    is_socket_receipt_timeout_error, is_socket_status_error,
 };
 use agent_doc_template as template;
 use agent_doc_template::stale_baseline::patch_touches_exchange;
@@ -34,7 +34,8 @@ use agent_doc_write_converge_io::{
     persist_already_applied_socket_content_ours_snapshot,
     poll_visible_write_content_lazily_event_or_projection,
     prefer_visible_content_over_stale_visible_write_snapshot,
-    reconcile_visible_write_snapshot_to_newer_operator_buffer, record_ipc_socket_ack_timeout,
+    log_write_wedge_requests_supervisor_recycle,
+    reconcile_visible_write_snapshot_to_newer_operator_buffer, record_ipc_socket_ack_failure,
     visible_write_disk_proof, write_visible_write_through_to_disk,
 };
 
@@ -918,14 +919,37 @@ fn try_ipc_inner(
                     "[write] targeted socket IPC failed: {} — retaining transition",
                     e
                 );
-                if is_socket_receipt_timeout_error(e.to_string()) {
-                    let degraded = record_ipc_socket_ack_timeout(
+                // `#rejectioncountswedge`: this is the site the live path takes,
+                // and it had the same timeout-only classification as the converge
+                // recorder — so a rejecting endpoint accrued nothing here either
+                // and `write_wedged` never armed. A rejection is the stronger
+                // signal (the endpoint answered), so it must count.
+                //
+                // The result is no longer discarded: crossing the threshold is
+                // what asks the supervisor for the `#midturn-wedge-recycle`, and
+                // swallowing it left the escape silent.
+                let failure_kind = if is_socket_receipt_timeout_error(e.to_string()) {
+                    Some("timeout")
+                } else if is_socket_status_error(e.to_string()) {
+                    Some("rejection")
+                } else {
+                    None
+                };
+                if let Some(failure_kind) = failure_kind {
+                    let degraded = record_ipc_socket_ack_failure(
                         &project_root,
                         file,
                         Some(&patch_id),
                         "socket_ipc",
+                        failure_kind,
                     )?;
-                    let _ = degraded;
+                    if degraded {
+                        eprintln!(
+                            "[write] IPC listener degraded for {} after repeated socket receipt {failure_kind}s",
+                            file.display()
+                        );
+                        log_write_wedge_requests_supervisor_recycle(file, "socket_ipc");
+                    }
                 }
                 return Ok(IpcResult {
                     success: false,

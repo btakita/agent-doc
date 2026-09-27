@@ -247,6 +247,39 @@ Two facts the operator's authorization now depends on, neither previously record
 Also worth knowing: the background-task summary for both red runs reported "exit code 0" while `make check` had actually exited 2. The explicit `$?` capture is what caught it — a summary line is not a test result.
 
 Three items queued, none of them gates. This session's tree also holds another session's uncommitted work, so the green suite is proof about my change, not about HEAD.
+
+### Re: regenerate the artifact purge audit — opus-5 · 2026-09-27T01:48-04:00
+
+> **Queue prompt:**
+>
+> do [#lzauditrefresh]
+
+
+Audit regenerated and the authorization basis re-dated. Two commits on `btakita/agent-doc` main, both pushed: `667eb4766` (the refresh) and `878396cfd` (a tripwire follow-up).
+
+**The refresh.** `python3 scripts/audit-actions-artifacts.py --repo btakita/agent-doc --output-dir tasks/agent-doc/artifact-purge-audit-2026-09-27` (36s, read-only). Against the 2026-09-25 handoff:
+
+| | 2026-09-25 | 2026-09-27 |
+|---|---:|---:|
+| Live nonexpired artifacts | 3,247 (52.90 GB) | 3,235 (52.80 GB) |
+| Verified delete candidates | 2,781 (45.56 GB) | **2,666 (43.83 GB)** |
+| Withheld | 466 (7.35 GB) | **569 (8.97 GB)** |
+| — PyPI platform file missing | 395 | 500 |
+| PyPI releases visible to the audit | 185 | 151 |
+
+The +105 in the PyPI-missing class is exactly the decay `[#lzagentdocartifactpurge]` recorded: PyPI pruned wheels for 34 versions, and the fresh audit now withholds those rows at generation time instead of leaving the executor to refuse them live.
+
+**Proof the two agree again.** The live dry run (`--max-deletions 3000`, no `--execute`) plans **2,666 deletions, 0 refused, 0 skipped** — the first clean intersection since 2026-09-25. Candidate composition: 2,136 backed by GitHub Release assets (34.83 GB), 530 by PyPI files alone (9.01 GB), lowest surviving PyPI-backed version `v0.35.119`. That 20% PyPI-only residual is the risk the authorization still carries; it did not change shape, only date.
+
+**New deadline: 2026-10-04T05:40:26Z.** Generated 2026-09-27T05:40:26Z, so `[#lzagentdocartifactpurge]` is authorizable for seven days without `--allow-stale-handoff`. I updated that review item with the new counts, directory, and deadline.
+
+I pointed `DEFAULT_HANDOFF_DIR` at the new directory and deleted the superseded 2026-09-25 handoff — git history keeps it, and leaving two handoffs in the tree invites `--handoff-dir` at expired data. Git recorded the four files as renames, so the diff is 194 insertions / 206 deletions rather than a 1.4 MB duplication.
+
+**The tripwire follow-up.** The self-test pins the committed handoff counts so a swapped handoff cannot be adopted unreviewed. On this legitimate regeneration it failed with a bare `AssertionError: 2666` — no pin, no remedy. It now names observed vs pinned counts, the handoff directory, and both readings (regenerated → restate the counts in the authorization and update the pins; otherwise → the handoff was replaced without review). Verified by mutating the pin back to `(2781, 466)` in place: the message fires as written, and `make artifact-purge-check` is green on the restored file.
+
+**Verification.** `make artifact-purge-check` exit 0 (the `make check` leg that owns this file) plus the live dry run above. I did **not** run full `make check`: the change touches no Rust, and the submodule tree currently holds another session in-flight edits across 13 Rust files (`src/main.rs` modified eight minutes before this commit), so a suite result there would attest to their code, not mine — and committing or building it was the hazard to avoid. `git commit --only` kept the commits to my five paths; their edits remain uncommitted. Latest CI run `36297051970` was `in_progress` when checked (started 05:23Z, from an earlier push) — recorded, not awaited.
+
+No `make install`: `scripts/purge-actions-artifacts.py` is not in the binary, so the advisory `stale_install` warning is unrelated to this change and I left the install to whichever cycle owns the Rust work in flight.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -254,7 +287,7 @@ Three items queued, none of them gates. This session's tree also holds another s
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~#advance-review~~
-- do [#lzauditrefresh]
+- ~~do [#lzauditrefresh]~~
 - do [#lzpypiperishable]
 - do [#lzstrikereceiptflake]
 <!-- /agent:queue -->
@@ -262,7 +295,6 @@ Three items queued, none of them gates. This session's tree also holds another s
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzauditrefresh] Regenerate the GitHub Actions artifact purge audit before the 7-day handoff guard expires at 2026-10-02T17:02:35Z, so [#lzagentdocartifactpurge] stays authorizable without --allow-stale-handoff. The generator is already parameterized (src/agent-doc/scripts/audit-actions-artifacts.py --repo --output-dir); a fresh run drops the 105 rows whose PyPI counterpart was pruned and re-dates the handoff. This replaces the basis of a pending operator authorization (2,781 candidates / 466 withheld, commit 4af68aa8f), so restate the new counts in that review item when it lands.
 - [ ] [#lzpypiperishable] Classify PyPI-only durable counterparts as perishable in src/agent-doc/scripts/audit-actions-artifacts.py. Proven 2026-09-27: 27 agent-doc versions (0.35.0-0.35.37) lost their PyPI wheels within a day, killing 105 delete candidates, and 530 of the 2,666 remaining candidates rest on PyPI alone with the prune floor at 0.35.113 sitting six versions below the lowest surviving backer (0.35.119). Emit counterpart durability as its own column and summary so an operator can authorize release-asset-backed rows without inheriting PyPI decay risk.
 - [ ] [#lzstrikereceiptflake] Make agent-doc-controller-io project_controller::tests::queue_authority_observation_requires_exact_strike_application_receipt deterministic. Under the full 9,820-test nextest run it failed with the retry receipt None instead of Some(projection_id) after 1.14s, while passing 5/5 in isolation at 0.02s; it waits on a bounded receive, so parallel load starves it. Not fixed 2026-09-27 because a concurrent session held uncommitted rustfmt edits across agent-doc-controller-io/src/project_controller.rs and editing it would have collided. Replace the timing budget with a deterministic barrier or SimWorld step.
 <!-- /agent:backlog -->
@@ -272,7 +304,7 @@ Three items queued, none of them gates. This session's tree also holds another s
 <!-- agent:review -->
 - [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Re-verified 2026-09-27: `make release-macos-cadence-check` still reports the weekly window open since 2026-09-22T16:41:49Z, and v0.35.398 (2026-09-15) is still the last release carrying both Darwin architectures. The policy's never-drop-either-deliverable half is now enforced instead of prose: `make release-macos-coverage-check` (commit ddb612833) names every release published after the last Darwin-complete one that ships an incomplete pair, and it currently fails naming five — v0.35.399, v0.35.400, v0.35.401, v0.35.406, v0.35.417. It is deliberately NOT a `make check` dependency, because clearing it needs Mac hardware. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account. Checked 2026-09-27 and could NOT verify the current state from here: /users/btakita/settings/billing/* returns 404 with a user-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope — so this block is unverified rather than re-confirmed. No agent-executable slice.
-- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit commit 4af68aa8f recorded 2,781 exact durable-counterpart delete candidates and withheld 466 artifacts; the handoff is under src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-25/. The re-intersection and withheld-row refusal are code, not prose: run `python3 scripts/purge-actions-artifacts.py` (commit 187f31622) from src/agent-doc; the destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000` and the 250 default cap otherwise aborts. Re-verified live 2026-09-27: the plan is now 2,666 artifacts (43.83 GB), 10 skipped as absent, and 105 REFUSED — up from 0 refusals a day earlier. Every refusal is `no_live_durable_counterpart`: PyPI no longer holds wheels for 27 versions in 0.35.0-0.35.37 and its oldest surviving agent-doc release is now 0.35.113, so for those artifacts the Actions copy is the only copy and the executor's live re-derivation correctly refused them. Residual risk being authorized: 530 of the 2,666 (20%) rest on PyPI files alone, lowest surviving backer 0.35.119 — six versions above the prune floor — while 2,136 rest on GitHub release assets, which have not decayed. Hard deadline: the 7-day `--max-handoff-age-days` guard aborts the whole run after 2026-10-02T17:02:35Z (handoff generated 2026-09-25T17:02:35Z) unless the audit is regenerated ([#lzauditrefresh]) or `--allow-stale-handoff` is passed. Blocked solely on explicit destructive authorization; no artifact has been deleted.
+- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit REGENERATED 2026-09-27 (commit 667eb4766); the live handoff is src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-27/ and the superseded 2026-09-25 handoff was deleted so only one basis can be authorized. The re-intersection and withheld-row refusal are code, not prose: run `python3 scripts/purge-actions-artifacts.py` from src/agent-doc; the destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000` and the 250 default cap otherwise aborts. Live dry run against the fresh handoff (2026-09-27T05:41Z): 2,666 artifacts (43.83 GB) deletable, 0 REFUSED, 0 skipped, so handoff and live state agree again — the 105 `no_live_durable_counterpart` refusals the stale handoff produced are now withheld at audit time (withheld grew 466 to 569, PyPI-missing 395 to 500) and PyPI releases visible to the audit fell 185 to 151. Residual risk being authorized is unchanged in shape: 530 of the 2,666 (20%, 9.01 GB) rest on PyPI files alone, lowest surviving PyPI-backed version v0.35.119 — six versions above the 0.35.113 prune floor — while 2,136 (34.83 GB) rest on GitHub release assets, which have not decayed. New hard deadline: the 7-day `--max-handoff-age-days` guard aborts the whole run after 2026-10-04T05:40:26Z unless the audit is regenerated again or `--allow-stale-handoff` is passed. Blocked solely on explicit destructive authorization; no artifact has been deleted.
 - [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] The ready-to-apply point-of-use credential plan is complete at tasks/software/plan-ambient-publish-token-point-of-use.md, and its agent-executable prerequisite [#lzfakepublisherproof] is DONE: `make publish-credential-proof` (commits `cf2cbfda9`, `3e48cef93`) statically verifies all eight preimages plus `git apply --check`, then exercises all eight production call sites in success, failure, and empty modes against fake passage/cargo/maturin/bun/twine recorders, resolving no credential and invoking no publisher. Re-verified 2026-09-27: 22 checks green, 8/8 preimages match, 8/8 patch sets apply, 21 fake passage lookups and 13 fake publisher invocations measured, application_state `unapplied`, root `.env` at 6 assigned / 0 commented. It caught its own drift a third time this cycle — adding the Darwin coverage target to `src/agent-doc/Makefile` moved the twine recipe from line 334 to 340 — and the hash plus hunk offset were refreshed as `12e766d414`. Remaining blockers are operator-only: a quiet window for application, rotation of the Cargo, npm, and PyPI credentials, and rerunning the plan's step-5 name loop in a real INTERACTIVE shell after application, because a non-interactive shell does not fire mise's activation hook and forcing it would resolve real credentials. Do not resolve or print credential values during preparation.
 <!-- /agent:review -->
 

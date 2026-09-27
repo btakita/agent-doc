@@ -16,6 +16,9 @@
 #      session — this is where #postcommit-ipc-worktree-corruption / #saevon false
 #      successes hide).
 #   4. Times keystrokes by an ops.log IPC-apply marker, not a fixed sleep.
+#   5. Opens the scratch doc in the ALREADY-RUNNING IDE itself (via $AGENT_DOC_IDE_LAUNCHER
+#      or `idea`) so no human has to open a file first; the open is refused for any
+#      path outside .agent-doc/live-repro/. It still never launches a cold IDE.
 #
 # Usage:
 #   scripts/xdotool-live-verify.sh check-env
@@ -35,6 +38,8 @@ REPO="${REPO:-$(pwd)}"
 DRY_RUN=0
 TIMEOUT=30
 CASE=""
+# Placeholder window id used only by --dry-run when no live editor is attached.
+DRYRUN_WID="dry-run-no-window"
 
 log()  { printf '[xdotool-live] %s\n' "$*" >&2; }
 die()  { printf '[xdotool-live] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -105,6 +110,10 @@ resolve_window() {
 # type/key. Aborts otherwise so a stray keystroke cannot corrupt real work.
 focus_guard() {
   local wid="$1" base="$2" active active_title
+  if [[ "$DRY_RUN" == 1 && "$wid" == "$DRYRUN_WID" ]]; then
+    log "[dry-run] would focus-guard '$base' before typing"
+    return 0
+  fi
   active="$(xdotool getactivewindow 2>/dev/null || true)"
   [[ -n "$active" ]] || die "focus-guard: no active window"
   if [[ "$active" != "$wid" ]]; then
@@ -122,6 +131,12 @@ focus_guard() {
 wait_for_marker() {
   local marker="$1" olog deadline now
   olog="$(ops_log)"
+  # --dry-run types nothing, so no NEW marker can arrive; poll once instead of
+  # burning the whole timeout. Cases that assert pre-existing markers still match.
+  if [[ "$DRY_RUN" == 1 ]]; then
+    [[ -f "$olog" ]] && grep -q -- "$marker" "$olog" 2>/dev/null
+    return $?
+  fi
   deadline=$(( $(date +%s) + TIMEOUT ))
   while :; do
     if [[ -f "$olog" ]] && grep -q -- "$marker" "$olog" 2>/dev/null; then
@@ -196,10 +211,62 @@ EOF
   printf '%s' "$doc"
 }
 
+# --- IDE open (removes the last human prerequisite) --------------------------
+# `#activateinstalledjetbrai`: this harness used to die telling a human to open the
+# scratch doc in IntelliJ, and that one step is what kept the item operator-gated.
+# The running IDE can be asked to open a file by its own launcher, so the harness
+# does it itself. Only ever the throwaway scratch doc — asserted below, because an
+# IDE-open of a real working doc is the same class of mistake the focus guard exists
+# to prevent.
+ide_launcher() {
+  local c
+  for c in "${AGENT_DOC_IDE_LAUNCHER:-}" idea; do
+    [[ -n "$c" ]] || continue
+    command -v "$c" >/dev/null 2>&1 && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
+
+open_scratch_in_ide() {
+  local doc="$1" base="$2" launcher deadline
+  # Safety: refuse to hand anything but a live-repro scratch doc to the IDE.
+  [[ "$doc" == *"/.agent-doc/live-repro/"* ]] \
+    || die "refusing to IDE-open '$doc' — only .agent-doc/live-repro/ scratch docs may be opened automatically"
+  if ! launcher="$(ide_launcher)"; then
+    warn "no IDE launcher found (tried \$AGENT_DOC_IDE_LAUNCHER, idea)"
+    return 1
+  fi
+  if [[ "$DRY_RUN" == 1 ]]; then
+    log "[dry-run] would ask the running IDE to open the scratch doc: $launcher $doc"
+    return 1
+  fi
+  log "no window for '$base' yet — asking the running IDE to open it ($launcher)"
+  "$launcher" "$doc" >/dev/null 2>&1 || true
+  # Poll for the window instead of sleeping: an IDE open is slow and variable, so a
+  # fixed sleep would either flake or pad every run.
+  deadline=$(( $(date +%s) + TIMEOUT ))
+  while :; do
+    resolve_window "$base" >/dev/null 2>&1 && return 0
+    (( $(date +%s) >= deadline )) && return 1
+    sleep 0.2
+  done
+}
+
 require_window() {
-  local base="$1" wid
+  local base="$1" doc="${2:-}" wid
   if ! wid="$(resolve_window "$base")"; then
-    die "no live editor window titled '*$base*' — open the scratch doc in IntelliJ first (this harness drives an already-open editor; it does not launch the IDE)"
+    if [[ -n "$doc" ]] && open_scratch_in_ide "$doc" "$base"; then
+      wid="$(resolve_window "$base")" \
+        || die "the IDE accepted the open but no window titled '*$base*' resolved within ${TIMEOUT}s"
+    elif [[ "$DRY_RUN" == 1 ]]; then
+      # --dry-run exists to review the recipe without touching a live desktop, so it
+      # must not require one. Hand back a sentinel the focus guard recognises.
+      warn "[dry-run] no live window for '$base'; printing the remaining recipe against a placeholder window"
+      printf '%s' "$DRYRUN_WID"
+      return 0
+    else
+      die "no live editor window titled '*$base*' and it could not be opened automatically — open the scratch doc in the IDE, or set AGENT_DOC_IDE_LAUNCHER to a launcher that opens a file in the RUNNING instance"
+    fi
   fi
   log "resolved scratch editor window $wid for '$base'"
   printf '%s' "$wid"
@@ -214,7 +281,7 @@ require_window() {
 case_exch_intermix() {
   local doc base wid
   doc="$(ensure_scratch_doc exch-intermix)"; base="$(basename "$doc")"
-  wid="$(require_window "$base")"
+  wid="$(require_window "$base" "$doc")"
   log "#exch-intermix-verify: type a mid-finalize edit, expect live_prompt_drift_auto_recovered"
   wait_for_marker "ipc.*apply\|reposition boundary signal sent" || warn "no IPC-apply marker seen before timeout; injecting edit anyway"
   type_into_scratch "$wid" "$base" "mid-finalize concurrent edit"
@@ -225,7 +292,7 @@ case_exch_intermix() {
 case_postcommit_worktree() {
   local doc base wid head_blob tree_blob
   doc="$(ensure_scratch_doc postcommit-worktree)"; base="$(basename "$doc")"
-  wid="$(require_window "$base")"
+  wid="$(require_window "$base" "$doc")"
   log "#postcommit-ipc-worktree-corruption: after closeout, assert working-tree == HEAD"
   wait_for_marker "reposition boundary signal sent" || warn "no post-commit reposition marker seen before timeout"
   # The bug = the working tree drifting from HEAD post-commit. Assert tree==HEAD.
@@ -247,7 +314,7 @@ case_postcommit_worktree() {
 case_saevon() {
   local doc base wid
   doc="$(ensure_scratch_doc saevon)"; base="$(basename "$doc")"
-  wid="$(require_window "$base")"
+  wid="$(require_window "$base" "$doc")"
   log "#saevon: requires EARLY_ACK_ENABLED=true + cargo build --release + agent-doc lib-install first"
   log "         expect '[ipc-socket] early-ack pending emitted before apply' with NO false-success / NO false ack-timeout"
   wait_for_marker "ipc.*apply\|reposition boundary signal sent" || warn "no IPC-apply marker before timeout; injecting edit anyway"
@@ -284,7 +351,7 @@ case_tmux_switch() {
 case_captured_splice() {
   local doc base wid rel
   doc="$(ensure_scratch_doc captured-splice)"; base="$(basename "$doc")"
-  wid="$(require_window "$base")"
+  wid="$(require_window "$base" "$doc")"
   rel="${doc#"$REPO"/}"
   log "#activateinstalledjetbrai: operator edit → independent response advance → operator edit"
 
@@ -330,9 +397,36 @@ case_lvbatch_markers() {
   return $ok
 }
 
+# --- pane-authority guard ---------------------------------------------------
+# `#activateinstalledjetbrai`: the recipe's canonical-advance step runs
+# `agent-doc write --commit`, which is refused from a non-owning pane
+# ("pane execution authority rejected before mutation"). That refusal used to
+# arrive AFTER keystrokes had already been injected into a live desktop — a live
+# side effect for a recipe that could never complete. Fail closed BEFORE typing.
+#
+# Read-only and tmux-native on purpose: `agent-doc route` dispatches rather than
+# reports, so there is no read-only authority query to call here. An agent-doc pane
+# whose cwd is the target repo owns that repo's controller.
+assert_pane_authority() {
+  command -v tmux >/dev/null 2>&1 || return 0
+  local self owners
+  self="${TMUX_PANE:-}"
+  owners="$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null \
+    | awk -v repo="$REPO" -v self="$self" '$2 == "agent-doc" && $3 == repo && $1 != self { print $1 }' \
+    | tr '\n' ' ')"
+  [[ -n "${owners// /}" ]] || return 0
+  warn "another agent-doc pane owns this repo's controller: ${owners% }"
+  warn "the canonical-advance step (agent-doc write --commit) is refused from a non-owning pane,"
+  warn "so this recipe cannot complete here — drive it from the owning pane, or point --repo at a"
+  warn "repo root this pane owns."
+  [[ "$DRY_RUN" == 1 ]] \
+    || die "refusing to inject keystrokes for a recipe that cannot complete from this pane (owning pane: ${owners% })"
+}
+
 run_case() {
   check_env
   assert_fresh_session
+  assert_pane_authority
   case "$CASE" in
     exch-intermix)        case_exch_intermix ;;
     postcommit-worktree)  case_postcommit_worktree ;;

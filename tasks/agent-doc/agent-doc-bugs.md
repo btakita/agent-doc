@@ -127,6 +127,36 @@ That is the coverage the item was asking for: the defect class that only a conse
 **Verification.** `make check` green: 9837 tests passed (up one), zero `make: ***` lines, plus clippy, sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap, Lean and TLA+. `specs/supervisor.md` records the consecutive invariant and the fixture rule — a sequence fixture must carry state forward between legs, never re-seed it.
 
 Exchange is at 77 lines / 4 sections; queue still active, so I kept draining.
+
+### Re: do #hswdisposabledoc — opus-5 · 2026-09-27T02:22-04:00
+
+> **Queue prompt:**
+>
+> do [#hswdisposabledoc]
+
+
+Done. Committed `13b17971f`, pushed, installed and smoke-tested end to end.
+
+The item asked for a throwaway document plus a one-screen operator script. I split it so the deterministic half lives in the binary, because the invariant is a **count** and a shell cannot state it.
+
+**`agent-doc verify-harness-switch <FILE> [--expect-switches <n>]`** reads the receipt trail back out of ops.log, scoped to one document, and reports four outcomes distinctly instead of collapsing them into pass/fail:
+
+- no `harness_change_detected` → never observed, and the message names the unsaved-frontmatter step that produces it;
+- detections with no `agent_restart_triggered` → HELD pending, with the observed `gate=` verdict quoted (`WaitForBoundary` = no quiet boundary yet, `None` = knob off) — a hold is not a failure;
+- a trigger with no `agent_restart_performed ... action=spawn_fresh_harness` → the restart never completed;
+- a spawn whose `old_harness` equals its `new_harness` → a respawn of what was already running, not a switch.
+
+`--expect-switches` is the whole point. Without it the check is presence-only, and a respawn storm satisfies presence. One test pins exactly that asymmetry: the same two-spawn log **passes** an unbounded verify and **fails** `--expect-switches 1`. So the operator procedure always passes it, and the script says why if you omit it.
+
+Counting stayed in the binary on purpose: `grep -q` cannot express "exactly one per switch", and it inverts on a match — the shape in which a measurement read from an exit status false-greens.
+
+**`scripts/harness-switch-live-check.sh`** is then a scaffold-and-print shell: `scaffold` / `steps` / `verify` / `clean` against `.agent-doc/live-repro/<slug>.md`. The printed procedure is **derived** from the scaffolded `agent:` value rather than hardcoded, so it cannot contradict the document on disk. The throwaway exists because the check needs an unsaved frontmatter edit in front of a live old-harness actor — not something to do to a real session document.
+
+**One thing the smoke test caught.** My first end-to-end run failed with a clap usage error, because the script calls the bare `agent-doc` on PATH and the installed binary predated the new subcommand. That is the stale-binary trap working as intended, and it also surfaced a real mismatch: clap derives `--expect-switches`, while the script had been written with `--switches`. Both fixed, then re-verified against the installed build.
+
+**Verification.** `make check` green: 9844 tests passed (7 new for the verifier), zero `make: ***` lines, plus clippy, sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap, Lean and TLA+. Smoke-tested scaffold → verify → clean on the installed binary, including the fail-closed path (exit 1 with the operator step named). `specs/supervisor.md` records the command, its four outcomes, and why the counting is not in the shell.
+
+Worth saying plainly: this is `[recommended]`, and `#hswspawncount` already covers the codex → claude → codex case deterministically. Use the live check only when a case genuinely needs a live editor and pane — the script's header says so too.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -140,7 +170,7 @@ Exchange is at 77 lines / 4 sections; queue still active, so I kept draining.
 - ~~do [#opcapturedormant]~~
 - ~~do [#bkqattrcli]~~
 - ~~do [#hswspawncount]~~
-- do [#hswdisposabledoc]
+- ~~do [#hswdisposabledoc]~~
 - do [#splicesimcov]
 - do [#pypiquotarecheck]
 <!-- /agent:queue -->
@@ -149,7 +179,6 @@ Exchange is at 77 lines / 4 sections; queue still active, so I kept draining.
 <!-- agent:backlog -->
 - [ ] [#readbackeditor] [opcaptureliveread] [agent-doc] [operator-verify] Read back an editor-op capture receipt from a real typing burst, now that every reporter refusal names itself (65c865f24, plugin 0.2.429). Type a few characters into tasks/agent-doc/agent-doc-bugs.md in IntelliJ once the recycled plugin holds a live registration, then run agent-doc verify-op-capture on it. Three outcomes, all now diagnosable: editor_ops_recorded ... transaction=batch means capture works and activateinstalledjetbrai is unblocked; editor_op_capture_refused reason=<token> names which guard fired (all_ops_non_operator points back at isOperatorDocumentEvent, shadow_replay_mismatch at the burst replay, doc_advanced_during_drain is benign and self-retrying, base_hash_unavailable at the merge base); no receipt at all means the reporter chain never ran, so check that the plugin generation actually reloaded. Blocks activateinstalledjetbrai and splicesimcov.
 - [ ] [#activateinstalledjetbrai] [agent-doc] [operator-verify] Prove captured local editor edits recover across an independently advanced canonical response — BLOCKED ON #opcapturedormant, and no longer validatable from logs. Asked to validate from logs 2026-09-26 and the answer is that the evidence class is ABSENT, not inconclusive: the splice-recovery path itself is healthy (15 captured-local-splice-recovery invocations 2026-09-24..27, all status=current authority=cp_model, with the canonical text demonstrably advancing between them — the 2026-09-26T00:11:48..52 burst runs text_len 42885 -> 42885 -> 42892 -> 42900 across three distinct hashes), but all 317 editor_op_epoch_closed events in that window are cause=non_operator_projection, so not one of those recoveries carried an operator-authored edit. Order of work: (1) fix #opcapturedormant so operator edits are recorded as ops at all; (2) re-run `agent-doc verify-op-capture <FILE>` — it now accepts the batch producer the JetBrains TypingTracker actually drives (6b0eabc0c), so a pass is meaningful and a failure names both producers; (3) only then does the disposable-document live proof have anything to prove. Do NOT re-narrow this gate to "just needs the live check" until step 1 lands. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
-- [ ] [#hswdisposabledoc] [agent-doc] [recommended] Scaffold a disposable session document plus a one-screen operator script for live harness-switch checks. DOWNGRADED 2026-09-26: the live proof this was staging is discharged — #harnessswitchverify was resolved from ops.log evidence (3 detections, 3 spawns, 1:1, editor-buffer authority on the agent-doc-bugs.md switch, 5 non-authoritative respec refreshes with zero spawns), so nothing is blocked on having a throwaway document. Still worth having for future live editor checks that genuinely need one (for example the #tmuxfocussyncverify click or a same-document codex -> claude -> codex round trip if #hswspawncount's deterministic scenario is ever judged insufficient): `agent-doc init` a throwaway with `agent: codex` frontmatter and record which frontmatter line to edit unsaved plus the receipts to expect (harness_change_detected gate=WaitForBoundary, then exactly one agent_restart_performed action=spawn_fresh_harness).
 - [ ] [#splicesimcov] [agent-doc] Add a cross-editor SimWorld scenario for captured-edit splice recovery across an INDEPENDENTLY ADVANCED canonical response — the single remaining proof in the #activateinstalledjetbrai review gate. Grounding (2026-09-26): tests/cross_editor_simworld.rs holds only three tests (cargo_target_debug_dir_honors_default_relative_and_absolute_targets, cross_editor_plugin_protocol_harnesses_peer_through_real_agent_doc_controller, native_plugin_harnesses_peer_through_real_agent_doc_controller) and none exercises the splice path; per tasks/agent-doc/plan-captured-editor-splice-recovery.md the native side is proven only through the ABI test plus one manual installed-native call. Cover the plugin-side sequence the plan describes: observe the controller cut, plan before replacing membership, CAS-register that cut, forward bounded splices, and assert the translated offsets land while an unrelated response change is in flight. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [ ] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision so the next PyPI ceiling is raised rather than cleared by another mass deletion. Context changed 2026-09-26: #pypiquotafix is DONE — the 34 oldest releases (0.35.0 through 0.35.112, 1.63 GiB) are deleted and PyPI settings now reports 8.4 GiB of the 10.0 GiB limit, so there is no urgency. #12214 is still open with only the github-actions bot auto-reply from 2026-09-10T22:46:21Z. Growth is already bounded: the 20 releases at or after the 0.35.383 thin-wheel cutover total 0.7 MiB, against roughly 68 MiB apiece before it, so the remaining 8.36 GiB is 131 historical fat wheels and is not growing. If the grant lands, record it and drop this item. If it is refused or stalls past the next ceiling, the next clean tranche is 0.35.113 through 0.35.152 (another 2.10 GiB) — but do not delete anything until a ceiling is actually in reach. Verify deletions from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json, which served a stale CDN view claiming 27 of the 34 deleted releases were still present.
 <!-- /agent:backlog -->

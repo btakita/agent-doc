@@ -18882,6 +18882,15 @@ fn record_editor_surface_focus_outcome(
     Ok(())
 }
 
+/// Stable ops.log label for a surface intent (`#surfaceobservesilent`).
+fn surface_intent_label(intent: &SurfaceIntent) -> &'static str {
+    match intent {
+        SurfaceIntent::Sync { .. } => "sync",
+        SurfaceIntent::Focus { .. } => "focus",
+        SurfaceIntent::Idle => "idle",
+    }
+}
+
 fn handle_editor_surface_observe(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -18906,6 +18915,23 @@ fn handle_editor_surface_observe(
         &bootstrap.project_root,
         observation,
         None,
+    );
+    // `#surfaceobservesilent`: an observation the graph REJECTS produced no ops.log
+    // line at all, and neither did a plain accepted `Idle`. A selection that
+    // published and was rejected was therefore indistinguishable from a selection
+    // that never published, which is exactly the evidence a "tmux focus did not
+    // auto-sync" report needs. Record the ingress unconditionally, ahead of any
+    // intent handling.
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_editor_surface_observed client={} generation={} sequence={} accepted={} intent={}",
+            projection_identity.0,
+            projection_identity.1,
+            projection_identity.2,
+            accepted,
+            surface_intent_label(&receipt.intent),
+        ),
     );
     if accepted {
         // `#tmuxautosyncreactive`: both non-idle intents are handled IN-PROCESS
@@ -19031,6 +19057,16 @@ fn handle_editor_surface_forget(
             generation,
         ))
     };
+    // `#surfaceobservesilent`: a stray or early retirement is the leading cause of
+    // a surface graph that silently rejects every later observation, so the forget
+    // side needs a receipt in the same log.
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_editor_surface_forgotten client={} generation={} client_family={} forgotten_clients={}",
+            client_id, generation, retire_client_family, forgotten_clients
+        ),
+    );
     Ok(serde_json::json!({
         "forgotten": forgotten_clients > 0,
         "forgotten_clients": forgotten_clients,
@@ -25160,6 +25196,120 @@ mod tests {
         assert_eq!(
             after_entries, before_entries,
             "passive editor ingress must not create bootstrap, WAL, or SHM files"
+        );
+    }
+
+    /// `#surfaceobservesilent`: the observe handler used to log NOTHING on ingress,
+    /// so a published selection the surface graph rejected was indistinguishable in
+    /// ops.log from a selection that never published at all. That is precisely the
+    /// evidence a "tmux focus did not auto-sync" report needs, and its absence is
+    /// what stalled #tmuxfocussyncverify. Assert the ingress receipt exists for BOTH
+    /// outcomes, and that the logged `accepted=` matches the graph's own verdict
+    /// rather than a constant.
+    #[test]
+    fn editor_surface_observe_logs_an_ingress_receipt_for_accepted_and_rejected_facts() {
+        let dir = tempfile::tempdir().unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity().unwrap()),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+
+        let observe = |client_id: &str, generation: u64, sequence: u64| {
+            let observation = EditorSurfaceObservation {
+                client_id: client_id.to_string(),
+                generation,
+                sequence,
+                surface: test_editor_surface("/project/observed.md"),
+            };
+            let payload = serde_json::to_string(&observation).unwrap();
+            handle_editor_surface_observe(
+                &bootstrap,
+                runtime.as_ref(),
+                ControllerRequest {
+                    command: "editor_surface_observe".to_string(),
+                    file: Some(PathBuf::from(&observation.surface.focused)),
+                    session_id: None,
+                    pane_id: None,
+                    window_id: None,
+                    generation: Some(generation),
+                    state: None,
+                    caller: Some(observation.client_id.clone()),
+                    reason: Some("editor_surface_observation".to_string()),
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: Some(payload),
+                },
+            )
+        };
+
+        observe("idea:ingress", 2, 2).unwrap();
+        // A retired generation must be fenced, which is the deterministic way to
+        // drive the graph's reject branch without guessing at dedup semantics.
+        handle_editor_surface_forget(
+            &bootstrap,
+            runtime.as_ref(),
+            ControllerRequest {
+                command: "editor_surface_forget".to_string(),
+                file: None,
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(2),
+                state: None,
+                caller: Some("idea:ingress".to_string()),
+                reason: Some("editor_surface_client_retired".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        )
+        .unwrap();
+        observe("idea:ingress", 2, 3).unwrap();
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        let receipts = ops_log
+            .lines()
+            .filter(|line| line.contains("controller_editor_surface_observed"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            receipts.len(),
+            2,
+            "every observation must leave one ingress receipt, accepted or not: {ops_log}"
+        );
+        assert!(
+            receipts
+                .iter()
+                .all(|line| line.contains("client=idea:ingress") && line.contains("sequence=")),
+            "the receipt must identify the publishing client and sequence: {receipts:?}"
+        );
+        let accepted_values = receipts
+            .iter()
+            .filter_map(|line| {
+                line.split_whitespace()
+                    .find_map(|field| field.strip_prefix("accepted="))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            accepted_values,
+            vec!["true", "false"],
+            "the receipt must report the graph's real verdict, not a constant: {receipts:?}"
+        );
+        assert!(
+            ops_log.contains("controller_editor_surface_forgotten client=idea:ingress"),
+            "a retirement must leave its own receipt, since a stray forget is what \
+             makes every later observation reject: {ops_log}"
         );
     }
 

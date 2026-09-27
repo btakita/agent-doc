@@ -324,6 +324,11 @@ The blocked commit itself (`NativeSaveRequired` + `disk_projection_ready=false` 
 
 ### Re: do [#baselinecommitblocked] — opus-5 · 2026-09-27T05:18-04:00
 
+> **Queue prompt:**
+>
+> do [#baselinecommitblocked]
+
+
 Fixed in `42db8999e`, pushed. `checkpoint_document_baseline` now gates on content identity.
 
 **What the trace actually shows.** Your report's premise is half right. The blocked commit did emit `document_baseline_checkpoint generation=1791` and then `generation=1792` — but both wrote `len=31112`, which is the *unchanged HEAD* content, not the live snapshot (31220). The baseline never advanced to a revision that never landed; it re-asserted the revision it already held and burned a generation each time. And since `admission_divergence` classifies by content hash rather than generation, that churn did not itself produce the three-plane split — the planes here were baseline == disk with the authority ahead, which is `authority_subsumes_disk`. What the churn *did* produce is a ledger that misreports the baseline as having moved, and exactly the diagnostic dead end the `admission_divergence` doc comment describes: identical content, moving generation, three planes no longer reconstructible from surrounding `commit_staging` lines.
@@ -350,14 +355,13 @@ Fixed in `42db8999e`, pushed. `checkpoint_document_baseline` now gates on conten
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#baselinecommitblocked]
+- ~~do [#baselinecommitblocked]~~
 - do [#readbackeditor]
 - do [#activateinstalledjetbrai]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#baselinecommitblocked] [agent-doc] Do not advance the merge-baseline checkpoint past a commit that never landed. Observed 2026-09-27 07:13Z: controller_commit_projection_pending decision=NativeSaveRequired disk_projection_ready=false -> commit_document_via_controller_error -> commit_blocked_unproved_head_current_component_drift, yet commit_staging/document_baseline_checkpoint still wrote generation=1792 len=31112 while disk kept the older revision. The baseline is documented as the common ancestor of disk and authority; checkpointing it from the live snapshot on a blocked commit breaks that invariant and is what produced the three-plane admission split 8eb8eca5b now tolerates in agent_doc_document::admission_divergence. Gate the checkpoint on a proven durable projection (or record a blocked-commit baseline generation that admission treats as provisional) across the ~30 checkpoint_document_baseline call sites, with a preflight-io regression test that a blocked commit leaves the baseline at the last durably-projected revision.
 - [ ] [#readbackeditor] [opcaptureliveread] [agent-doc] Automate the editor-op capture proof instead of asking an operator to type (operator instruction 2026-09-27: "Add to the logs what you need to verify. Then verify. Automate testing yourself."). Add the reporter-side logging that names each thing the proof needs — live registration generation, isOperatorDocumentEvent classification, shadow replay agreement, merge-base availability — then drive a synthetic typing burst through the plugin/FFI reporter path and assert editor_ops_recorded ... transaction=batch from the receipt in a deterministic test, so verify-op-capture no longer depends on a human IntelliJ burst. Keep the refusal-token diagnosis from 65c865f24 (all_ops_non_operator, shadow_replay_mismatch, doc_advanced_during_drain, base_hash_unavailable). Blocks activateinstalledjetbrai and splicesimcov.
 - [ ] [#activateinstalledjetbrai] [agent-doc] [operator-verify] Prove captured local editor edits recover across an independently advanced canonical response — BLOCKED ON #opcapturedormant, and no longer validatable from logs. Asked to validate from logs 2026-09-26 and the answer is that the evidence class is ABSENT, not inconclusive: the splice-recovery path itself is healthy (15 captured-local-splice-recovery invocations 2026-09-24..27, all status=current authority=cp_model, with the canonical text demonstrably advancing between them — the 2026-09-26T00:11:48..52 burst runs text_len 42885 -> 42885 -> 42892 -> 42900 across three distinct hashes), but all 317 editor_op_epoch_closed events in that window are cause=non_operator_projection, so not one of those recoveries carried an operator-authored edit. Order of work: (1) fix #opcapturedormant so operator edits are recorded as ops at all; (2) re-run `agent-doc verify-op-capture <FILE>` — it now accepts the batch producer the JetBrains TypingTracker actually drives (6b0eabc0c), so a pass is meaningful and a failure names both producers; (3) only then does the disposable-document live proof have anything to prove. Do NOT re-narrow this gate to "just needs the live check" until step 1 lands. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 <!-- /agent:backlog -->

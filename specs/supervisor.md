@@ -110,6 +110,31 @@ A sequence fixture must carry state forward between legs rather than re-seed it;
 re-seeding the launch harness and the persisted record turns the sequence into
 three independent first-switches and cannot observe this class of defect.
 
+**Live verification (`#hswdisposabledoc`):** `agent-doc verify-harness-switch <FILE>
+[--expect-switches <n>]` reads the same receipt trail back out of
+`.agent-doc/logs/ops.log`, scoped to that document. It reports four outcomes
+distinctly rather than collapsing them into pass/fail: no `harness_change_detected`
+means the switch was never observed (and names the unsaved-frontmatter step that
+produces it); detections with no `agent_restart_triggered` mean the switch is HELD
+pending and the message carries the observed `gate=` verdict (`WaitForBoundary` — no
+quiet boundary yet; `None` — the knob is off); a trigger with no
+`agent_restart_performed ... action=spawn_fresh_harness` means the restart never
+completed; and a spawn whose `old_harness` equals its `new_harness` is a respawn of
+what was already running, not a switch. `--expect-switches` is what makes the
+command able to fail a respawn storm — without it the check is presence-only, which a
+storm satisfies — so the operator procedure always passes it. Counting lives in the
+binary for this reason: a shell `grep -q` cannot express "exactly one per switch" and
+inverts on a match.
+
+`scripts/harness-switch-live-check.sh` scaffolds a disposable document under
+`.agent-doc/live-repro/`, prints the one-screen procedure (derived from the
+scaffolded `agent:` value, so the printed procedure cannot contradict the document on
+disk), runs the verifier, and removes the document. It is a scaffold-and-print shell
+only. A throwaway document exists because the check requires an UNSAVED frontmatter
+edit in front of a live old-harness actor, which should never be done to a real
+session document. Prefer the deterministic scenario above; use the live check only
+when the case genuinely needs a live editor and pane.
+
 JetBrains "Restart Agent" menu invocations must also leave an
 optverify-scannable `.agent-doc/logs/ops.log` marker before dispatching the
 restart command:

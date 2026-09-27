@@ -68,6 +68,7 @@ mod mcp;
 mod migrate;
 mod mode;
 mod notify;
+mod harness_switch_verify;
 mod op_capture_verify;
 mod ops_report;
 mod orchestrate;
@@ -2134,6 +2135,16 @@ enum Commands {
         /// Require the canonical café 日本 😀 byte-offset evidence
         #[arg(long)]
         expect_cafe_demo: bool,
+    },
+    /// Verify a live authoritative-harness switch from its ops.log receipts
+    /// (`#hswdisposabledoc`)
+    VerifyHarnessSwitch {
+        /// Path to the session document
+        file: PathBuf,
+        /// Require exactly this many spawns — one per switch. Without it the
+        /// command only checks the receipt trail, which a respawn storm satisfies.
+        #[arg(long)]
+        expect_switches: Option<usize>,
     },
     /// Show document content at a specific point in git history
     Show {
@@ -4437,6 +4448,10 @@ fn try_main() -> anyhow::Result<()> {
             file,
             expect_cafe_demo,
         } => op_capture_verify::run(&file, expect_cafe_demo),
+        Commands::VerifyHarnessSwitch {
+            file,
+            expect_switches,
+        } => harness_switch_verify::run(&file, expect_switches),
         Commands::Show {
             file,
             back,

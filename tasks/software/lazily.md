@@ -38,6 +38,11 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> do [#dependenciesgatedfeature]
+
+
+> **Queue prompt:**
+>
 > Are dependencies gated on feature flags? Such as postgres, temporal, nats, etc? If not, can we make the dependencies optional?
 
 I audited all fifteen `lazily-*` manifests. **Postgres and NATS were already gated everywhere they appear. There is no `temporal` dependency in the family at all** — the only match is `test_temporal_conformance` in lazily-cpp, which is the time/clock conformance test, not temporal.io.
@@ -80,7 +85,7 @@ Exchange is at 365 lines across 14 response sections, over the warn thresholds; 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#dependenciesgatedfeature]
+- ~~do [#dependenciesgatedfeature]~~
 - do [#lzktoptionaldeps]
 - do [#lzgooptionalpgx]
 <!-- /agent:queue -->
@@ -90,7 +95,6 @@ Exchange is at 365 lines across 14 response sections, over the warn thresholds; 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzktoptionaldeps] lazily-kt declares four UNCONDITIONAL Gradle `implementation` dependencies in build.gradle.kts — `net.java.dev.jna:jna:5.15.0`, `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0`, `org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3`, `com.google.protobuf:protobuf-kotlin:4.31.1` — so every consumer gets all four on its runtime classpath. protobuf-kotlin is needed only by the protobuf codec and kotlinx-serialization-json only by the JSON codec; JNA and coroutines-core are arguably core. Gate the codec deps behind Gradle feature variants (`java-library` + `registerFeature` + capabilities) or separate published artifacts, then pin the PUBLISHED POM's `<dependencies>` with a test asserting the set in BOTH directions, so a new unconditional dep and a pin nothing uses both redden — mirroring lazily-rs `make default-build-dependency-check` (scripts/default-build-dependency-guard.py, wired into `make check` and ci.yml) and lazily-js `test/package-manifest.test.js`. Mutation-check the pin before trusting it. Run `make check` green, then commit and push per lazily-kt's standing rule.
 - [ ] [#lzgooptionalpgx] lazily-go's root go.mod declares `github.com/jackc/pgx/v5 v5.7.6` plus six indirects (pgpassfile, pgservicefile, puddle, golang.org/x/crypto, x/sync, x/text) in the main `require` block, but pgx is imported by exactly ONE file — postgres_projection_barrier_integration_test.go — and by ZERO non-test files. Go has no optional dependencies, so the fix is a nested module: move the Postgres integration test into its own directory with its own go.mod (a `replace` directive back to the root), leaving the published module graph requiring nothing. Add a guard asserting the root go.mod `require` block is EMPTY and that the nested module still builds the test, with the second half as the anti-vacuity control — a guard that only checks emptiness passes over a deleted test. Mutation-check it. Run `make check` green, then commit and push per lazily-go's standing rule.
-- [ ] 🚧 [#dependenciesgatedfeature] Are dependencies gated on feature flags? Such as postgres, temporal, nats, etc? If not, can we make the dependencies optional?
 <!-- /agent:backlog -->
 
 ## Review

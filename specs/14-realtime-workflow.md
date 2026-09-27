@@ -935,6 +935,41 @@ the marker and makes every later operator keystroke read as a projection —
 silencing op capture and local-splice forwarding together for the life of the
 editor session.
 
+Whether a captured operator edit actually **recovered across an independently
+advanced canonical response** is decided from receipts, by
+`agent-doc verify-captured-splice-recovery <FILE>` (`#activateinstalledjetbrai`).
+A pass requires three receipts for one document, in order: a
+`controller_crdt_current_text source=captured-local-splice-recovery
+status=current` read; then an `editor_op_capture_proof` with `operator_ops >= 1`
+and `shadow_replay=agreed`; then a later splice-recovery `status=current` read
+whose `text_hash` **differs** from the first. Ordering is part of the property —
+an operator capture entirely before or after every advance establishes nothing —
+and a disagreeing shadow replay discards the burst, so those ops never reached
+the merge.
+
+Each failure names its missing link, because these are different diagnoses: no
+splice recovery ran; splice recoveries ran but never resolved `status=current`
+(the editor replica, not op capture, is the blocker); the canonical text never
+advanced between two recoveries; no capture proof classified an operator op; or
+proofs exist but their shadow replay disagreed. An absence of capture proofs
+entirely is an unobserved reporter chain, which is not the same as a proof that
+classified every op as non-operator.
+
+`editor_op_epoch_closed cause=` must never be read as evidence for or against
+this property. `agent_doc_clear_editor_op_epoch` is its only producer and writes
+exactly one cause, so `non_operator_projection` is the field's only possible
+value: it records that an epoch was cleared ahead of a non-operator mutation,
+never that an epoch carried operator ops. A window in which every one of those
+events says `non_operator_projection` therefore says nothing about operator
+capture, and concluding otherwise from it is a misreading of a single-valued
+field. `editor_op_capture_proof`'s `operator_ops=` is the discriminating receipt.
+
+The live half — producing a genuine operator-authored op and an independent
+response advance between two of them — is driven by
+`scripts/xdotool-live-verify.sh captured-splice`, which types real keystrokes into
+a throwaway scratch document under the harness's focus guards, runs a response
+cycle between the two edits, and then defers the verdict to the binary.
+
 Document-scoped editor actions must not create cross-document authority edges.
 In particular, JetBrains Compact Exchange saves only its selected document
 before routing; `saveAllDocuments()` is forbidden because it can synchronously

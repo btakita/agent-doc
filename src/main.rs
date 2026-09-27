@@ -44,6 +44,7 @@ mod annotate;
 mod audit_docs;
 mod auto_dag;
 mod autoclaim;
+mod captured_splice_verify;
 mod clean;
 mod cleanup_cmd;
 mod commands;
@@ -2135,6 +2136,12 @@ enum Commands {
         /// Require the canonical café 日本 😀 byte-offset evidence
         #[arg(long)]
         expect_cafe_demo: bool,
+    },
+    /// Verify that a captured local editor edit recovered across an
+    /// independently advanced canonical response (`#activateinstalledjetbrai`)
+    VerifyCapturedSpliceRecovery {
+        /// Path to the session document
+        file: PathBuf,
     },
     /// Verify a live authoritative-harness switch from its ops.log receipts
     /// (`#hswdisposabledoc`)
@@ -4448,6 +4455,7 @@ fn try_main() -> anyhow::Result<()> {
             file,
             expect_cafe_demo,
         } => op_capture_verify::run(&file, expect_cafe_demo),
+        Commands::VerifyCapturedSpliceRecovery { file } => captured_splice_verify::run(&file),
         Commands::VerifyHarnessSwitch {
             file,
             expect_switches,

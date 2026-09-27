@@ -22,7 +22,8 @@
 #   scripts/xdotool-live-verify.sh list
 #   scripts/xdotool-live-verify.sh <case> [--repo <dir>] [--dry-run] [--timeout <sec>]
 #
-# Cases: exch-intermix | postcommit-worktree | saevon | tmux-switch | lvbatch-markers
+# Cases: exch-intermix | postcommit-worktree | saevon | captured-splice | tmux-switch
+#        | lvbatch-markers
 #
 # This script intentionally contains no agent-doc document logic — all deterministic
 # document/commit behavior stays in the binary (CLAUDE.md "All deterministic behavior
@@ -264,6 +265,57 @@ case_tmux_switch() {
   warn "tmux-switch live frame assertion is manual/observational — see plan per-item recipe"
 }
 
+# `#activateinstalledjetbrai` — the gate that used to need a human eyeball.
+#
+# The property is: a captured local editor edit recovers across an
+# INDEPENDENTLY ADVANCED canonical response. Both halves have to be driven, in
+# order, and the receipt evaluation belongs to the binary
+# (`agent-doc verify-captured-splice-recovery`), not to greps here:
+#
+#   1. type an operator edit into the scratch doc (real keystrokes → the plugin's
+#      documentChanged listener → op capture);
+#   2. run a response cycle so the canonical text advances on its own;
+#   3. type a second operator edit, so a capture sits BETWEEN two splice
+#      recoveries that observed different canonical text;
+#   4. let the binary decide whether the receipts prove the property.
+#
+# Step 2 is the part a bare "type and grep" recipe skips, and skipping it is why
+# earlier evidence sweeps found splice recoveries with nothing to recover across.
+case_captured_splice() {
+  local doc base wid rel
+  doc="$(ensure_scratch_doc captured-splice)"; base="$(basename "$doc")"
+  wid="$(require_window "$base")"
+  rel="${doc#"$REPO"/}"
+  log "#activateinstalledjetbrai: operator edit → independent response advance → operator edit"
+
+  type_into_scratch "$wid" "$base" "operator edit one before the advance"
+  # Time on the capture receipt, not a sleep: no receipt means the reporter chain
+  # never ran and the rest of the recipe would prove nothing.
+  wait_for_marker "editor_op_capture_proof" \
+    || warn "no editor_op_capture_proof yet — the plugin may predate #opcaptureliveread, or the epoch was refused (verify-op-capture names which)"
+
+  if [[ "$DRY_RUN" == 1 ]]; then
+    log "[dry-run] would advance the canonical response via: agent-doc write --commit $rel"
+  else
+    log "advancing the canonical response independently of the editor"
+    (cd "$REPO" && agent-doc write --commit "$rel") \
+      || warn "response advance did not complete; the verifier will report an unadvanced canonical text"
+  fi
+
+  type_into_scratch "$wid" "$base" "operator edit two after the advance"
+
+  if [[ "$DRY_RUN" == 1 ]]; then
+    log "[dry-run] would assert: agent-doc verify-captured-splice-recovery $rel"
+    return 0
+  fi
+  if (cd "$REPO" && agent-doc verify-captured-splice-recovery "$rel"); then
+    log "PASS [activateinstalledjetbrai]: receipts prove recovery across an independent advance"
+    return 0
+  fi
+  warn "FAIL [activateinstalledjetbrai]: see the verifier's diagnosis above — it names which link is missing"
+  return 1
+}
+
 case_lvbatch_markers() {
   local olog; olog="$(ops_log)"
   log "#lvbatch markers — grepping ops.log for code-complete live markers"
@@ -285,9 +337,10 @@ run_case() {
     exch-intermix)        case_exch_intermix ;;
     postcommit-worktree)  case_postcommit_worktree ;;
     saevon)               case_saevon ;;
+    captured-splice)      case_captured_splice ;;
     tmux-switch)          case_tmux_switch ;;
     lvbatch-markers)      case_lvbatch_markers ;;
-    *) die "unknown case '$CASE' (try: check-env | list | exch-intermix | postcommit-worktree | saevon | tmux-switch | lvbatch-markers)" ;;
+    *) die "unknown case '$CASE' (try: check-env | list | exch-intermix | postcommit-worktree | saevon | captured-splice | tmux-switch | lvbatch-markers)" ;;
   esac
 }
 

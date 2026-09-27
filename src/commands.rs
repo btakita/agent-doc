@@ -230,6 +230,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Verify editor op-capture producer and merge-consumer evidence in ops.log",
     ));
     cmds.push(cmd(
+        "/agent-doc verify-captured-splice-recovery",
+        "<FILE>",
+        "Verify a captured editor edit recovered across an independently advanced response",
+    ));
+    cmds.push(cmd(
         "/agent-doc memory index",
         "<FILE> [--db PATH] [--json]",
         "Index session tracked work and exchange history into .tsift/memory.db",

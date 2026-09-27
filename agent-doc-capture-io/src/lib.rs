@@ -2329,4 +2329,40 @@ mod tests {
             "terminal replay provenance should be logged once:\n{log}"
         );
     }
+
+    /// `agent_doc_document::admission_divergence::authority_subsumes_disk` is a
+    /// deliberate copy of `agent_doc_workflow::capture::current_monotonically_extends_baseline`:
+    /// `agent-doc-workflow` depends on `agent-doc-turn`, which depends on
+    /// `agent-doc-document`, so the admission classifier cannot import the
+    /// original without closing a dependency cycle. This crate depends on both,
+    /// so it is the only place the two can be pinned to the same verdicts —
+    /// without this, a future edit to either copy silently changes whether an
+    /// admission refuses.
+    #[test]
+    fn admission_subsumption_matches_the_capture_monotonic_rule() {
+        let cases = [
+            ("", ""),
+            ("a\n", "a\n"),
+            ("a\n", "a\nb\n"),
+            ("a\nb\n", "a\nx\nb\n"),
+            ("a\nb\n", "b\na\n"),
+            ("a\nb\n", "a\n"),
+            ("a\n", "b\n"),
+            ("", "a\n"),
+            ("a\n", ""),
+            ("# D\n\ni\nc\n", "# D\n\ni\nc\ns\n"),
+            ("# D\n\ni\ne\n", "# D\n\ni\ns\n"),
+        ];
+        for (baseline, current) in cases {
+            assert_eq!(
+                agent_doc_document::admission_divergence::authority_subsumes_disk(
+                    baseline, current
+                ),
+                agent_doc_workflow::capture::current_monotonically_extends_baseline(
+                    baseline, current
+                ),
+                "subsumption rules disagree for baseline={baseline:?} current={current:?}"
+            );
+        }
+    }
 }

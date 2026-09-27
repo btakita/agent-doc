@@ -2783,7 +2783,12 @@ impl std::error::Error for QueueAuthorityUnavailable {}
 
 /// Return the disk text only when it proves the registered live replica is an
 /// older baseline cut. The baseline is the common ancestor: equality on the
-/// authority branch proves that only the durable disk branch advanced.
+/// durable authority branch proves that only the durable disk branch advanced.
+///
+/// The classification and the action both come from
+/// `agent_doc_document::admission_divergence`, shared with `session-check` so the
+/// refusal and the remedy printed for it cannot drift apart. This function is the
+/// IO shell: it loads the three planes, records the assessment, and maps it.
 fn disk_edit_newer_than_registered_authority(
     file: &Path,
     authority: &str,
@@ -2792,41 +2797,92 @@ fn disk_edit_newer_than_registered_authority(
         return Ok(None);
     };
     let disk = std::fs::read_to_string(file)?;
-    if disk == authority || disk == baseline {
-        return Ok(None);
-    }
-    if authority == baseline {
-        return Ok(Some(disk));
-    }
-    // Shared with `session-check` through `agent_doc_document::admission_divergence`
-    // so the refusal and the remedy printed for it cannot drift apart. The refusal
-    // used to state the condition and three hashes and stop there, leaving every
-    // consumer — the hook's `reason:` line included — with nothing actionable.
-    debug_assert!(
-        agent_doc_document::admission_divergence::classify(
-            Some(&baseline),
-            Some(authority),
-            &disk,
-        )
-        .refuses_admission()
+    let assessment = agent_doc_document::admission_divergence::assess(
+        Some(&baseline),
+        Some(authority),
+        &disk,
     );
-    Err(QueueAuthorityUnavailable::new(format!(
-        "disk and registered editor authority both advanced from the recorded baseline; refusing to choose a winner (baseline_hash={}, authority_hash={}, disk_hash={}). {}",
-        agent_doc_hash::short_content_hash(&baseline),
-        agent_doc_hash::short_content_hash(authority),
-        agent_doc_hash::short_content_hash(&disk),
-        agent_doc_document::admission_divergence::unmergeable_split_remedy(
-            &file.display().to_string()
+    log_admission_divergence_assessment(file, &baseline, authority, &disk, assessment);
+    match assessment.adoption {
+        agent_doc_document::admission_divergence::DiskAdoption::ProceedOnAuthority => Ok(None),
+        agent_doc_document::admission_divergence::DiskAdoption::FastForwardAuthorityToDisk => {
+            Ok(Some(disk))
+        }
+        agent_doc_document::admission_divergence::DiskAdoption::Refuse => {
+            Err(QueueAuthorityUnavailable::new(format!(
+                "disk and registered editor authority both advanced from the recorded baseline; refusing to choose a winner (baseline_hash={}, authority_hash={}, disk_hash={}; durable baseline_hash={}, durable authority_hash={}, durable disk_hash={}). {}",
+                agent_doc_hash::short_content_hash(&baseline),
+                agent_doc_hash::short_content_hash(authority),
+                agent_doc_hash::short_content_hash(&disk),
+                durable_short_content_hash(&baseline),
+                durable_short_content_hash(authority),
+                durable_short_content_hash(&disk),
+                agent_doc_document::admission_divergence::unmergeable_split_remedy(
+                    &file.display().to_string()
+                ),
+            ))
+            .into())
+        }
+    }
+}
+
+/// Short hash of a plane's DURABLE content — transient agent-doc markers removed.
+///
+/// A refusal that prints only raw hashes cannot be told apart from a marker-only
+/// false split without reconstructing byte lengths from surrounding
+/// `commit_staging` / `document_baseline_checkpoint` lines. Printing both domains
+/// makes the two shapes decidable from the refusal text alone.
+fn durable_short_content_hash(content: &str) -> String {
+    agent_doc_hash::short_content_hash(
+        &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content),
+    )
+}
+
+/// Record every non-verbatim three-plane observation with its class and action.
+///
+/// Verbatim-resolvable observations are the common case on every preflight and
+/// are not logged; the three interesting classes are rare and each one names
+/// itself, so `grep admission_divergence` decides a wedge without replaying the
+/// surrounding log.
+fn log_admission_divergence_assessment(
+    file: &Path,
+    baseline: &str,
+    authority: &str,
+    disk: &str,
+    assessment: agent_doc_document::admission_divergence::AdmissionAssessment,
+) {
+    if assessment.divergence == agent_doc_document::admission_divergence::AdmissionDivergence::Resolvable
+    {
+        return;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "admission_divergence file={} {} baseline_hash={} authority_hash={} disk_hash={} durable_baseline_hash={} durable_authority_hash={} durable_disk_hash={} baseline_len={} authority_len={} disk_len={} (#admissionmarkersplit)",
+            file.display(),
+            assessment.diagnostic_fields(),
+            agent_doc_hash::short_content_hash(baseline),
+            agent_doc_hash::short_content_hash(authority),
+            agent_doc_hash::short_content_hash(disk),
+            durable_short_content_hash(baseline),
+            durable_short_content_hash(authority),
+            durable_short_content_hash(disk),
+            baseline.len(),
+            authority.len(),
+            disk.len(),
         ),
-    ))
-    .into())
+    );
 }
 
 /// Fast-forward a proven newer durable save into the live CRDT authority.
 ///
 /// This is a three-way merge with an unchanged authority branch, not a generic
-/// disk-wins rule. The caller proved `authority == baseline && disk != baseline`;
-/// the compare-and-swap below rechecks the first half at the mutation edge.
+/// disk-wins rule. The caller proved the authority branch is unchanged from the
+/// baseline in the DURABLE domain and that disk durably advanced past both; the
+/// compare-and-swap below rechecks the authority cut at the mutation edge. When
+/// the authority differed from the baseline only by transient agent-doc markers,
+/// this fast-forward drops those markers from the live buffer — they are
+/// transport state the next write re-applies, never operator text.
 fn adopt_proven_newer_disk_save(
     file: &Path,
     authority: &str,
@@ -12665,6 +12721,138 @@ mod tests {
         assert!(
             active.iter().any(|t| t.contains("do [#open1]")),
             "unanswered id-backed head must remain active:\n{active:?}"
+        );
+    }
+
+    /// The diagnostic pair the classifier owns. Asserting through it — rather than
+    /// re-spelling the `reason` / `action` token text here — keeps them in one place.
+    fn expected_fields(
+        divergence: agent_doc_document::admission_divergence::AdmissionDivergence,
+        adoption: agent_doc_document::admission_divergence::DiskAdoption,
+    ) -> String {
+        agent_doc_document::admission_divergence::AdmissionAssessment {
+            divergence,
+            adoption,
+        }
+        .diagnostic_fields()
+    }
+
+    /// Set up a document whose durable baseline, disk file, and (caller-supplied)
+    /// live authority are all under test control, then run the admission gate.
+    fn admission_gate(
+        baseline: &str,
+        disk: &str,
+        authority: &str,
+    ) -> (TempDir, Result<Option<String>>, String) {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, disk).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, baseline, |_, _| {}).unwrap();
+        let outcome = disk_edit_newer_than_registered_authority(&doc, authority);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        (dir, outcome, log)
+    }
+
+    /// `#admissionmarkersplit`: the live wedge. The baseline is checkpointed in the
+    /// durable (marker-stripped) domain while the editor authority still carries
+    /// agent-doc's own boundary marker, so raw bytes make three revisions out of
+    /// two. Admission must NOT refuse, and the newer durable save must still be
+    /// fast-forwarded exactly as it would be with no marker present.
+    #[test]
+    fn a_transient_marker_only_authority_does_not_refuse_admission() {
+        let (_dir, outcome, log) = admission_gate(
+            "# Doc\n\nbody\n",
+            "# Doc\n\nbody\ndurable save\n",
+            "# Doc\n\n<!-- agent:boundary:fe1c0161:session -->\nbody\n",
+        );
+        let adopted = outcome.expect("marker-only divergence must not refuse admission");
+        assert_eq!(adopted.as_deref(), Some("# Doc\n\nbody\ndurable save\n"));
+        assert!(
+            log.contains("admission_divergence ")
+                && log.contains(&expected_fields(
+                    agent_doc_document::admission_divergence::AdmissionDivergence::TransientMarkersOnly,
+                    agent_doc_document::admission_divergence::DiskAdoption::FastForwardAuthorityToDisk,
+                )),
+            "the observation must name its class in the log:\n{log}"
+        );
+    }
+
+    /// `#admissionancestorsplit`: the blocked-commit shape. The baseline advanced
+    /// to the live snapshot while disk kept the older committed revision, then the
+    /// operator kept typing. Three durably distinct revisions, but disk is an
+    /// ancestor of the live buffer, so there is no writer to drop — proceed on the
+    /// authority and adopt nothing.
+    #[test]
+    fn an_authority_that_already_contains_disk_does_not_refuse_admission() {
+        let (_dir, outcome, log) = admission_gate(
+            "# Doc\n\nintro\n",
+            "# Doc\n\nintro\ncommitted response\n",
+            "# Doc\n\nintro\ncommitted response\noperator steering\n",
+        );
+        let adopted = outcome.expect("an ancestor disk revision must not refuse admission");
+        assert_eq!(
+            adopted, None,
+            "disk is an ancestor: adopting it would drop the operator's steering"
+        );
+        assert!(
+            log.contains(&expected_fields(
+                agent_doc_document::admission_divergence::AdmissionDivergence::AuthoritySubsumesDisk,
+                agent_doc_document::admission_divergence::DiskAdoption::ProceedOnAuthority,
+            )),
+            "the observation must name its class in the log:\n{log}"
+        );
+    }
+
+    /// The gate still protects a real second writer: disk content the live buffer
+    /// never received refuses, names itself in the log, and prints BOTH hash
+    /// domains so the refusal cannot be mistaken for a marker-only split.
+    #[test]
+    fn genuinely_divergent_durable_content_still_refuses_and_logs_both_domains() {
+        let (_dir, outcome, log) = admission_gate(
+            "# Doc\n\nintro\n",
+            "# Doc\n\nintro\nexternal edit only on disk\n",
+            "# Doc\n\nintro\noperator steering\n",
+        );
+        let err = outcome.expect_err("durably divergent planes must refuse admission");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("refusing to choose a winner"),
+            "refusal must state the condition:\n{message}"
+        );
+        assert!(
+            message.contains("durable baseline_hash=")
+                && message.contains("durable authority_hash=")
+                && message.contains("durable disk_hash="),
+            "refusal must print the durable hashes that decide the class:\n{message}"
+        );
+        assert!(
+            message.contains("save or close this document's editor tab"),
+            "refusal must carry the operator-side remedy:\n{message}"
+        );
+        assert!(
+            log.contains(&expected_fields(
+                agent_doc_document::admission_divergence::AdmissionDivergence::UnmergeableThreeWaySplit,
+                agent_doc_document::admission_divergence::DiskAdoption::Refuse,
+            )),
+            "the refusal must name its class in the log:\n{log}"
+        );
+    }
+
+    /// The ordinary observation — nothing diverged — must stay silent. Logging it
+    /// would emit a line on every preflight and bury the three rare classes the
+    /// diagnosis depends on.
+    #[test]
+    fn a_converged_observation_logs_no_admission_divergence_line() {
+        let (_dir, outcome, log) = admission_gate(
+            "# Doc\n\nbody\n",
+            "# Doc\n\nbody\n",
+            "# Doc\n\nbody\nlive edit\n",
+        );
+        assert_eq!(outcome.unwrap(), None);
+        assert!(
+            !log.contains("admission_divergence "),
+            "verbatim-resolvable observations must not be logged:\n{log}"
         );
     }
 }

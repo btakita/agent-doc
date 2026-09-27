@@ -496,23 +496,31 @@ fn unmergeable_split_steering_remedy(file: &Path) -> Option<String> {
     let disk = crate::resolve_disk_document_content(file, "session_check_steering_admission").ok()?;
     let authority =
         crate::resolve_current_document_content(file, "session_check_steering_admission").ok()?;
-    if !agent_doc_document::admission_divergence::classify(
+    let divergence = agent_doc_document::admission_divergence::classify(
         Some(&baseline),
         Some(&authority),
         &disk,
-    )
-    .refuses_admission()
-    {
+    );
+    if !divergence.refuses_admission() {
         return None;
     }
+    let durable = |content: &str| {
+        agent_doc_hash::short_content_hash(
+            &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content),
+        )
+    };
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "session_check_steering_admission_refused file={} baseline_hash={} authority_hash={} disk_hash={} remedy=operator_editor_convergence (#steeringremedydeadlock)",
+            "session_check_steering_admission_refused file={} reason={} baseline_hash={} authority_hash={} disk_hash={} durable_baseline_hash={} durable_authority_hash={} durable_disk_hash={} remedy=operator_editor_convergence (#steeringremedydeadlock)",
             file.display(),
+            divergence.reason_token(),
             agent_doc_hash::short_content_hash(&baseline),
             agent_doc_hash::short_content_hash(&authority),
             agent_doc_hash::short_content_hash(&disk),
+            durable(&baseline),
+            durable(&authority),
+            durable(&disk),
         ),
     );
     Some(format!(

@@ -585,6 +585,56 @@ If a writer exposes a partially written file, the realtime loop waits for a
 stable read/epoch or fails closed. It must not merge against stale buffered
 content merely because a save notification fired.
 
+## Admission Divergence Across Baseline, Authority, And Disk
+
+Opening a cycle compares three planes: the recorded **merge baseline** (the durable
+common ancestor in `state.db`), the registered **live editor authority** (the CRDT
+cut), and the **durable disk** file. Preflight refuses admission only when all
+three are distinct *and* the live buffer does not already carry everything on
+disk — refusing is how agent-doc avoids choosing a winner and dropping a writer's
+text. `agent_doc_document::admission_divergence` owns that classification; both
+preflight's queue-authority observation and `session-check`'s steering remedy
+derive from it, so the refusal and the remedy printed for it cannot drift apart.
+
+The comparison is made in the **durable domain**. Transient agent-doc markers —
+`<!-- agent:boundary:… -->` lines, the ` (HEAD)` heading suffix, the `❯ 🚧`
+active-prompt marker, per-cycle guard comments, and the managed pipeline
+frontmatter block — live in the editor buffer but are stripped from the durable
+baseline and the committed file by design. Comparing raw bytes let agent-doc's own
+transport state manufacture the third revision, and that false refusal is
+permanent rather than transient: the prescribed remedy is "save or close the
+editor tab", and saving cannot converge planes that agent-doc re-splits on every
+write. Normalizing first (`transient_markers::normalize_transient_agent_doc_markers`)
+is the same rule every other durable comparison in the codebase already applies.
+
+Four classifications, each naming itself in `ops.log` as
+`admission_divergence … reason=<token> action=<token>`:
+
+| Classification | Meaning | Action |
+|---|---|---|
+| `verbatim_branch_unchanged` | A plane still matches another byte-for-byte. | Proceed, or fast-forward a proven newer durable save. Not logged — it is the every-preflight case. |
+| `transient_markers_only` | The planes differ only by transient markers; a durable branch is unchanged. | Same as above, decided on durable content. |
+| `authority_subsumes_disk` | Three durably distinct revisions, but the live buffer preserves every durable disk line in order. | Proceed on the authority; adopt nothing. Disk is an ancestor, and adopting it would drop the operator's newer steering. |
+| `unmergeable_three_way_split` | Three durably distinct revisions with content on disk the authority never received. | Refuse admission and print the operator-side convergence remedy. |
+
+`authority_subsumes_disk` is what a **blocked commit** looks like. When the
+controller reports `NativeSaveRequired` with `disk_projection_ready=false`, the
+commit does not land, yet the baseline is still checkpointed from the live
+snapshot; disk keeps the older committed revision and the operator keeps typing.
+All three planes then differ with no rival writer at all. The monotonic
+subsequence proof is the same one that gates rebasing a retained response onto
+concurrent operator steering.
+
+Only the durable authority branch being unchanged authorizes adopting disk
+(`fast_forward_authority_to_disk`). That compare-and-swap rechecks the authority
+cut at the mutation edge; when the authority differed from the baseline only by
+transient markers, the fast-forward drops those markers from the live buffer —
+transport state the next write re-applies, never operator text.
+
+Refusals print **both** hash domains (raw and durable) so a marker-only split can
+never again be read as a genuine one from the refusal text alone, and
+`session_check_steering_admission_refused` carries the same `reason=` token.
+
 ## Disk Change Propagation To Live Editors
 
 When the document file changes on disk out of band — a `git` operation

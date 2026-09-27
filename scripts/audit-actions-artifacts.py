@@ -30,6 +30,20 @@ GITHUB_API = "https://api.github.com"
 PYPI_API = "https://pypi.org/pypi/agent-doc/json"
 VERSION_RE = re.compile(r"^v?(\d+\.\d+\.\d+(?:[A-Za-z0-9.+-]*)?)$")
 
+# Counterpart durability. Both counterpart classes are *exact* at generation time,
+# so candidacy does not depend on this; durability records how long that proof can
+# be trusted. A GitHub Release asset survives until someone deletes the release. A
+# PyPI file does not: between 2026-09-25 and 2026-09-27 PyPI pruned the wheels for
+# 34 agent-doc versions, which invalidated 105 rows a two-day-old audit had already
+# called deletable and left the Actions copy as the only copy. An operator must be
+# able to authorize the release-asset-backed rows without inheriting that decay.
+DURABLE = "durable"
+PERISHABLE = "perishable"
+COUNTERPART_DURABILITY = {
+    "github_release": DURABLE,
+    "pypi": PERISHABLE,
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -136,6 +150,33 @@ def bytes_label(value: int) -> str:
     return f"{value:,} bytes ({value / 1_000_000_000:.2f} GB; {value / 2**30:.2f} GiB)"
 
 
+def counterpart_durability(counterpart_kind: str) -> str:
+    """Classify how long a counterpart kind can be trusted to still exist.
+
+    Returns "" for an artifact with no counterpart. An unknown non-empty kind is a
+    programming error rather than a data condition: a new counterpart class must
+    declare its durability before the audit may offer it as a delete candidate.
+    """
+    if not counterpart_kind:
+        return ""
+    durability = COUNTERPART_DURABILITY.get(counterpart_kind)
+    if durability is None:
+        raise RuntimeError(
+            f"counterpart kind {counterpart_kind!r} has no declared durability; add it to "
+            "COUNTERPART_DURABILITY before emitting it as a delete candidate"
+        )
+    return durability
+
+
+def version_sort_key(value: str) -> tuple[int, int, int, str]:
+    """Order `v0.35.9` before `v0.35.113`; unparseable values sort first."""
+    match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(.*)$", value)
+    if match is None:
+        return (-1, -1, -1, value)
+    major, minor, patch, rest = match.groups()
+    return (int(major), int(minor), int(patch), rest)
+
+
 def version_for(artifact: dict[str, Any]) -> str | None:
     branch = artifact.get("workflow_run", {}).get("head_branch") or ""
     match = VERSION_RE.fullmatch(branch)
@@ -240,6 +281,76 @@ def fetch_runs(
     return runs, errors
 
 
+def candidate_durability_totals(candidates: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Summarize the candidate list by how perishable each counterpart class is.
+
+    `version_span` is the load-bearing part for a perishable class: it names the
+    oldest version whose counterpart still exists, which is what an operator
+    compares against the project's current prune floor.
+    """
+    buckets: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"count": 0, "size_bytes": 0, "kinds": set(), "versions": set()}
+    )
+    for row in candidates:
+        bucket = buckets[row["counterpart_durability"]]
+        bucket["count"] += 1
+        # Accepts both the generator's live rows and rows parsed back out of the CSV,
+        # so the executor can recompute this from the handoff it is about to trust.
+        bucket["size_bytes"] += int(row["size_bytes"])
+        bucket["kinds"].add(row["counterpart_kind"])
+        if row["head_branch"]:
+            bucket["versions"].add(row["head_branch"])
+    totals: dict[str, dict[str, Any]] = {}
+    for durability, bucket in sorted(buckets.items()):
+        versions = sorted(bucket["versions"], key=version_sort_key)
+        totals[durability] = {
+            "count": bucket["count"],
+            "size_bytes": bucket["size_bytes"],
+            "counterpart_kinds": sorted(bucket["kinds"]),
+            "version_count": len(versions),
+            "version_span": [versions[0], versions[-1]] if versions else [],
+        }
+    return totals
+
+
+def durability_markdown(candidates: list[dict[str, Any]]) -> list[str]:
+    totals = candidate_durability_totals(candidates)
+    lines = [
+        "## Counterpart durability",
+        "",
+        "Every candidate below has an exact durable counterpart **right now**. Durability"
+        " records how long that proof survives, and it is not the same for both classes.",
+        "",
+        "| Durability | Counterpart kinds | Candidates | Bytes | Versions | Oldest still backed |",
+        "|---|---|---:|---:|---:|---|",
+    ]
+    for durability, bucket in totals.items():
+        span = bucket["version_span"]
+        lines.append(
+            f"| {durability or '(none)'} | {', '.join(bucket['counterpart_kinds']) or '(none)'} | "
+            f"{bucket['count']:,} | {bucket['size_bytes']:,} | {bucket['version_count']:,} | "
+            f"{span[0] if span else '-'} |"
+        )
+    lines.extend(
+        [
+            "",
+            f"- `{DURABLE}` — a GitHub Release asset. It survives until someone deletes the"
+            " release, so the counterpart proof does not decay on its own.",
+            f"- `{PERISHABLE}` — a PyPI file. PyPI prunes old distributions: between"
+            " 2026-09-25 and 2026-09-27 it dropped the wheels for 34 agent-doc versions,"
+            " which invalidated 105 rows a two-day-old audit had already called deletable"
+            " and left the Actions copy as the only copy. Compare the oldest still-backed"
+            " version above against the project's current prune floor before authorizing"
+            " these rows.",
+            "- To authorize only the non-decaying rows, run the executor with"
+            " `--durability durable`; it then refuses every perishable-counterpart row the"
+            " same way it refuses a withheld one.",
+            "",
+        ]
+    )
+    return lines
+
+
 def report_markdown(
     repo: str,
     generated_at: str,
@@ -274,13 +385,18 @@ def report_markdown(
         f"- Verified delete candidates: {len(candidates):,}, totaling {bytes_label(candidate_size)}.",
         f"- Not candidates: {len(unresolved):,}, totaling {bytes_label(unresolved_size)}.",
         "- Candidate proof requires an exact tagged version plus an exact target-specific GitHub Release asset or PyPI filename.",
-        "- The candidate CSV is sorted by workflow, run, artifact class, and artifact id; each row records id, size, expiry, run URL, and counterpart URL.",
+        "- The candidate CSV is sorted by workflow, run, artifact class, and artifact id; each row records id, size, expiry, run URL, counterpart URL, and counterpart durability.",
         "",
-        "## By workflow and artifact class",
-        "",
-        "| Workflow | Artifact class | Artifacts | Verified | Unresolved | Candidate bytes |",
-        "|---|---|---:|---:|---:|---:|",
     ]
+    lines.extend(durability_markdown(candidates))
+    lines.extend(
+        [
+            "## By workflow and artifact class",
+            "",
+            "| Workflow | Artifact class | Artifacts | Verified | Unresolved | Candidate bytes |",
+            "|---|---|---:|---:|---:|---:|",
+        ]
+    )
     for (workflow, artifact_name), group in sorted(grouped.items()):
         verified = [row for row in group if row["candidate"]]
         lines.append(
@@ -323,6 +439,8 @@ def report_markdown(
             "  resized, or no longer backed by an exact durable counterpart is refused.",
             "- Every artifact id in `artifact-unresolved.csv` is refused unconditionally, including",
             "  when named explicitly with `--only`.",
+            "- `--durability durable` narrows the plan to non-decaying counterparts; a"
+            "  perishable row is then refused even when named explicitly with `--only`.",
             "- A structurally inconsistent handoff (candidate/withheld overlap, a candidate with no",
             "  counterpart, summary totals that disagree with the CSVs, a generation older than",
             "  `--max-handoff-age-days`) aborts before any network call.",
@@ -333,7 +451,7 @@ def report_markdown(
             "",
             "## Files",
             "",
-            "- `artifact-delete-candidates.csv` — operator delete-candidate list; this generator issues no deletion.",
+            "- `artifact-delete-candidates.csv` — operator delete-candidate list; this generator issues no deletion. `counterpart_durability` records whether each row's counterpart can decay.",
             "- `artifact-unresolved.csv` — artifacts withheld from the candidate list and the exact reason. The purge executor refuses every id listed here.",
             "- `artifact-audit-summary.json` — machine-readable totals and group summaries.",
             "",
@@ -390,6 +508,7 @@ def main() -> int:
                 "size_bytes": artifact["size_in_bytes"],
                 "candidate": bool(counterpart_url),
                 "counterpart_kind": kind,
+                "counterpart_durability": counterpart_durability(kind),
                 "counterpart_name": counterpart_name,
                 "counterpart_url": counterpart_url,
                 "unresolved_category": unresolved_category(reason) if reason else "",
@@ -417,6 +536,7 @@ def main() -> int:
         unresolved_categories[category]["count"] += 1
         unresolved_categories[category]["size_bytes"] += row["size_bytes"]
     summary = {
+        "candidate_durability": candidate_durability_totals(candidates),
         "generated_at": generated_at,
         "repository": args.repo,
         "source_artifact_count": len(rows),

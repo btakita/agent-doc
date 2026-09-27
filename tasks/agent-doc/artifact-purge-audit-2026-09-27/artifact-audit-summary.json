@@ -1,18 +1,44 @@
 {
   "candidate_count": 2666,
+  "candidate_durability": {
+    "durable": {
+      "count": 2136,
+      "counterpart_kinds": [
+        "github_release"
+      ],
+      "size_bytes": 34825051886,
+      "version_count": 406,
+      "version_span": [
+        "v0.34.69",
+        "v0.35.396"
+      ]
+    },
+    "perishable": {
+      "count": 530,
+      "counterpart_kinds": [
+        "pypi"
+      ],
+      "size_bytes": 9009546645,
+      "version_count": 142,
+      "version_span": [
+        "v0.35.119",
+        "v0.35.396"
+      ]
+    }
+  },
   "candidate_size_bytes": 43834598531,
   "deletion_performed": false,
-  "distinct_workflow_runs": 718,
-  "generated_at": "2026-09-27T05:40:26.976576+00:00",
+  "distinct_workflow_runs": 720,
+  "generated_at": "2026-09-27T05:56:08.338552+00:00",
   "github_release_count": 626,
   "groups": {
     "Book :: github-pages :: unresolved": {
-      "count": 14,
-      "size_bytes": 45854866
+      "count": 16,
+      "size_bytes": 52416741
     },
     "Deploy mdBook site to Pages :: github-pages :: unresolved": {
       "count": 14,
-      "size_bytes": 63107812
+      "size_bytes": 63116613
     },
     "PyPI :: wheel-aarch64-apple-darwin :: candidate": {
       "count": 130,
@@ -101,12 +127,12 @@
   },
   "pypi_release_count": 151,
   "repository": "btakita/agent-doc",
-  "source_artifact_count": 3235,
-  "source_size_bytes": 52803347005,
+  "source_artifact_count": 3237,
+  "source_size_bytes": 52809917681,
   "unresolved_categories": {
     "GitHub Pages artifact has no Release/PyPI counterpart": {
-      "count": 28,
-      "size_bytes": 108962678
+      "count": 30,
+      "size_bytes": 115533354
     },
     "matching GitHub Release asset is missing": {
       "count": 33,
@@ -121,6 +147,6 @@
       "size_bytes": 97190977
     }
   },
-  "unresolved_count": 569,
-  "unresolved_size_bytes": 8968748474
+  "unresolved_count": 571,
+  "unresolved_size_bytes": 8975319150
 }

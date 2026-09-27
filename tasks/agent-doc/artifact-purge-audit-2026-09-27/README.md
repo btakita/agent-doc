@@ -1,6 +1,6 @@
 # GitHub Actions artifact durability audit
 
-Generated: 2026-09-27T05:40:26.976576+00:00
+Generated: 2026-09-27T05:56:08.338552+00:00
 
 Repository: [btakita/agent-doc](https://github.com/btakita/agent-doc)
 
@@ -8,17 +8,30 @@ No artifacts were deleted. This report is a read-only candidate handoff.
 
 ## Result
 
-- Live nonexpired artifacts: 3,235, totaling 52,803,347,005 bytes (52.80 GB; 49.18 GiB).
+- Live nonexpired artifacts: 3,237, totaling 52,809,917,681 bytes (52.81 GB; 49.18 GiB).
 - Verified delete candidates: 2,666, totaling 43,834,598,531 bytes (43.83 GB; 40.82 GiB).
-- Not candidates: 569, totaling 8,968,748,474 bytes (8.97 GB; 8.35 GiB).
+- Not candidates: 571, totaling 8,975,319,150 bytes (8.98 GB; 8.36 GiB).
 - Candidate proof requires an exact tagged version plus an exact target-specific GitHub Release asset or PyPI filename.
-- The candidate CSV is sorted by workflow, run, artifact class, and artifact id; each row records id, size, expiry, run URL, and counterpart URL.
+- The candidate CSV is sorted by workflow, run, artifact class, and artifact id; each row records id, size, expiry, run URL, counterpart URL, and counterpart durability.
+
+## Counterpart durability
+
+Every candidate below has an exact durable counterpart **right now**. Durability records how long that proof survives, and it is not the same for both classes.
+
+| Durability | Counterpart kinds | Candidates | Bytes | Versions | Oldest still backed |
+|---|---|---:|---:|---:|---|
+| durable | github_release | 2,136 | 34,825,051,886 | 406 | v0.34.69 |
+| perishable | pypi | 530 | 9,009,546,645 | 142 | v0.35.119 |
+
+- `durable` — a GitHub Release asset. It survives until someone deletes the release, so the counterpart proof does not decay on its own.
+- `perishable` — a PyPI file. PyPI prunes old distributions: between 2026-09-25 and 2026-09-27 it dropped the wheels for 34 agent-doc versions, which invalidated 105 rows a two-day-old audit had already called deletable and left the Actions copy as the only copy. Compare the oldest still-backed version above against the project's current prune floor before authorizing these rows.
+- To authorize only the non-decaying rows, run the executor with `--durability durable`; it then refuses every perishable-counterpart row the same way it refuses a withheld one.
 
 ## By workflow and artifact class
 
 | Workflow | Artifact class | Artifacts | Verified | Unresolved | Candidate bytes |
 |---|---|---:|---:|---:|---:|
-| Book | github-pages | 14 | 0 | 14 | 0 |
+| Book | github-pages | 16 | 0 | 16 | 0 |
 | Deploy mdBook site to Pages | github-pages | 14 | 0 | 14 | 0 |
 | PyPI | wheel-aarch64-apple-darwin | 257 | 130 | 127 | 2,112,180,666 |
 | PyPI | wheel-bootstrap | 13 | 13 | 0 | 454,389 |
@@ -38,7 +51,7 @@ No artifacts were deleted. This report is a read-only candidate handoff.
 |---|---:|---:|
 | matching PyPI platform file is missing | 500 | 8,254,029,207 |
 | matching GitHub Release asset is missing | 33 | 508,565,612 |
-| GitHub Pages artifact has no Release/PyPI counterpart | 28 | 108,962,678 |
+| GitHub Pages artifact has no Release/PyPI counterpart | 30 | 115,533,354 |
 | workflow run is not associated with a version tag | 8 | 97,190,977 |
 
 ## Method
@@ -61,6 +74,7 @@ command that may call the artifact deletion endpoint, and it is dry run by defau
   resized, or no longer backed by an exact durable counterpart is refused.
 - Every artifact id in `artifact-unresolved.csv` is refused unconditionally, including
   when named explicitly with `--only`.
+- `--durability durable` narrows the plan to non-decaying counterparts; a  perishable row is then refused even when named explicitly with `--only`.
 - A structurally inconsistent handoff (candidate/withheld overlap, a candidate with no
   counterpart, summary totals that disagree with the CSVs, a generation older than
   `--max-handoff-age-days`) aborts before any network call.
@@ -71,6 +85,6 @@ refusal-path regressions; `make check` runs it via `artifact-purge-check`.
 
 ## Files
 
-- `artifact-delete-candidates.csv` — operator delete-candidate list; this generator issues no deletion.
+- `artifact-delete-candidates.csv` — operator delete-candidate list; this generator issues no deletion. `counterpart_durability` records whether each row's counterpart can decay.
 - `artifact-unresolved.csv` — artifacts withheld from the candidate list and the exact reason. The purge executor refuses every id listed here.
 - `artifact-audit-summary.json` — machine-readable totals and group summaries.

@@ -6,7 +6,7 @@ deliberately incapable of deletion. This command is the only place that may call
 the artifact deletion endpoint, and it is **dry run by default**: an actual
 deletion requires BOTH `--execute` and `--authorize-deletion <owner/repo>`.
 
-Two invariants are encoded here rather than left in the handoff prose:
+Three invariants are encoded here rather than left in the handoff prose:
 
 1. Every candidate is re-derived against the live Actions API at execution time,
    using the audit module's own candidacy rule as the single source of truth. A
@@ -16,9 +16,15 @@ Two invariants are encoded here rather than left in the handoff prose:
 2. Every artifact id recorded in `artifact-unresolved.csv` is refused
    unconditionally -- even if the live re-derivation would now call it a
    candidate, and even if an operator names it explicitly with `--only`.
+3. Counterpart durability is the audit module's classification, never this
+   script's. `--durability durable` restricts the plan to counterparts that do
+   not decay (GitHub Release assets), excluding the PyPI-backed rows whose
+   counterpart PyPI can prune; an excluded row is refused, not silently dropped,
+   including when an operator names it with `--only`.
 
 Structural faults in the handoff (a candidate/withheld overlap, a candidate with
-no counterpart, summary totals that disagree with the CSVs, a stale generation, a
+no counterpart, summary totals that disagree with the CSVs, a durability column
+that disagrees with the generator's classification, a stale generation, a
 repository that does not match the audit) abort the whole run before any network
 call. Per-artifact drift refuses that artifact and leaves the rest of the plan
 intact.
@@ -79,7 +85,9 @@ class AuditRow:
     artifact_name: str
     size_bytes: int
     expires_at: str
+    head_branch: str
     counterpart_kind: str
+    counterpart_durability: str
     counterpart_name: str
     counterpart_url: str
     unresolved_reason: str
@@ -102,6 +110,7 @@ class LiveArtifact:
     expires_at: str
     expired: bool
     counterpart_kind: str
+    counterpart_durability: str
     counterpart_name: str
     counterpart_url: str
     unresolved_reason: str
@@ -118,13 +127,21 @@ class Plan:
 
 
 def _row(record: dict[str, str], source: str) -> AuditRow:
+    if "counterpart_durability" not in record:
+        raise PurgeRefusal(
+            f"{source}: no counterpart_durability column; this handoff predates durability "
+            "classification and cannot be filtered by it. Regenerate it with "
+            "audit-actions-artifacts.py"
+        )
     try:
         return AuditRow(
             artifact_id=int(record["artifact_id"]),
             artifact_name=record["artifact_name"],
             size_bytes=int(record["size_bytes"]),
             expires_at=record["expires_at"],
+            head_branch=record.get("head_branch", ""),
             counterpart_kind=record["counterpart_kind"],
+            counterpart_durability=record["counterpart_durability"],
             counterpart_name=record["counterpart_name"],
             counterpart_url=record["counterpart_url"],
             unresolved_reason=record.get("unresolved_reason", ""),
@@ -143,10 +160,16 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
 def load_handoff(
     directory: Path,
     *,
+    audit: Any,
     now: dt.datetime | None = None,
     max_age_days: int | None = DEFAULT_MAX_HANDOFF_AGE_DAYS,
 ) -> Handoff:
-    """Load and structurally validate the handoff. Any inconsistency aborts."""
+    """Load and structurally validate the handoff. Any inconsistency aborts.
+
+    `audit` is the generator module, so the durability of each counterpart class has
+    exactly one definition: a handoff that classified a row differently than the
+    generator would today is a stale or hand-edited handoff, and it aborts.
+    """
     summary_path = directory / SUMMARY_JSON
     if not summary_path.is_file():
         raise PurgeRefusal(f"handoff file is missing: {summary_path}")
@@ -212,6 +235,35 @@ def load_handoff(
         raise PurgeRefusal(
             f"{SUMMARY_JSON}: candidate_size_bytes={recorded_bytes!r} disagrees with "
             f"{actual_bytes} summed from {CANDIDATES_CSV}"
+        )
+
+    for source, rows in ((CANDIDATES_CSV, candidates), (UNRESOLVED_CSV, withheld)):
+        for row in rows.values():
+            expected = audit.counterpart_durability(row.counterpart_kind)
+            if row.counterpart_durability != expected:
+                raise PurgeRefusal(
+                    f"{source}: artifact {row.artifact_id} records counterpart_durability "
+                    f"{row.counterpart_durability!r} for counterpart kind {row.counterpart_kind!r}, "
+                    f"but the audit generator classifies that kind as {expected!r}; regenerate "
+                    "the audit rather than purging from a stale classification"
+                )
+
+    recorded_durability = summary.get("candidate_durability")
+    actual_durability = audit.candidate_durability_totals(
+        [
+            {
+                "counterpart_durability": row.counterpart_durability,
+                "counterpart_kind": row.counterpart_kind,
+                "size_bytes": row.size_bytes,
+                "head_branch": row.head_branch,
+            }
+            for row in candidates.values()
+        ]
+    )
+    if recorded_durability != actual_durability:
+        raise PurgeRefusal(
+            f"{SUMMARY_JSON}: candidate_durability={recorded_durability!r} disagrees with "
+            f"{actual_durability!r} recomputed from {CANDIDATES_CSV}"
         )
 
     generated_at = summary.get("generated_at")
@@ -288,6 +340,7 @@ def live_candidacy(audit: Any, client: Any, repo: str, workers: int) -> dict[int
             expires_at=artifact["expires_at"],
             expired=bool(artifact["expired"]),
             counterpart_kind=kind,
+            counterpart_durability=audit.counterpart_durability(kind),
             counterpart_name=name,
             counterpart_url=url,
             unresolved_reason=reason,
@@ -300,8 +353,14 @@ def plan_purge(
     live: dict[int, LiveArtifact],
     *,
     only: Iterable[int] | None = None,
+    durability: str | None = None,
 ) -> Plan:
-    """Intersect the handoff with live candidacy. Withheld ids are never deletable."""
+    """Intersect the handoff with live candidacy. Withheld ids are never deletable.
+
+    `durability` restricts the plan to counterparts of that class, so an operator can
+    authorize the rows whose counterpart cannot decay without also authorizing the
+    rows whose counterpart can. An excluded row is refused, not silently dropped.
+    """
     plan = Plan()
 
     if only is not None:
@@ -321,6 +380,20 @@ def plan_purge(
 
     for artifact_id in selection:
         row = handoff.candidates[artifact_id]
+
+        if durability is not None and row.counterpart_durability != durability:
+            plan.refused.append(
+                {
+                    "artifact_id": artifact_id,
+                    "reason": "durability_excluded",
+                    "detail": (
+                        f"counterpart is {row.counterpart_durability or 'unclassified'} "
+                        f"({row.counterpart_kind or 'no counterpart'}), "
+                        f"--durability {durability} was requested"
+                    ),
+                }
+            )
+            continue
 
         # Second guard on the same invariant: a withheld id stays refused even if the
         # live re-derivation now proves a counterpart for it.
@@ -370,6 +443,9 @@ def plan_purge(
         counterpart_drift = [
             f"{label}: audit {recorded!r} != live {observed!r}"
             for label, recorded, observed in (
+                # Durability is derived from the kind by one function in the audit
+                # module, and `load_handoff` already proved the handoff's column agrees
+                # with it, so kind drift is the only way durability can drift.
                 ("counterpart_kind", row.counterpart_kind, current.counterpart_kind),
                 ("counterpart_name", row.counterpart_name, current.counterpart_name),
                 ("counterpart_url", row.counterpart_url, current.counterpart_url),
@@ -445,16 +521,27 @@ def build_report(
     executed: bool,
     deleted: list[int],
     failed: list[dict[str, Any]],
+    durability: str | None = None,
 ) -> dict[str, Any]:
+    deletable_durability: dict[str, dict[str, int]] = {}
+    for artifact_id in plan.delete:
+        row = handoff.candidates[artifact_id]
+        bucket = deletable_durability.setdefault(
+            row.counterpart_durability, {"count": 0, "size_bytes": 0}
+        )
+        bucket["count"] += 1
+        bucket["size_bytes"] += row.size_bytes
     return {
         "handoff_dir": str(handoff.directory),
         "handoff_generated_at": handoff.generated_at,
         "repository": repo,
         "mode": "execute" if executed else "dry-run",
+        "durability_filter": durability or "all",
         "audit_candidate_count": len(handoff.candidates),
         "audit_withheld_count": len(handoff.withheld),
         "deletable_count": len(plan.delete),
         "deletable_size_bytes": plan.delete_bytes(handoff),
+        "deletable_durability": dict(sorted(deletable_durability.items())),
         "refused_count": len(plan.refused),
         "skipped_count": len(plan.skipped),
         "refused": plan.refused,
@@ -488,6 +575,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="+",
         help="restrict the plan to these candidate artifact ids",
     )
+    parser.add_argument(
+        "--durability",
+        choices=["all", "durable", "perishable"],
+        default="all",
+        help=(
+            "restrict the plan to counterparts of this durability class; `durable` keeps only "
+            "rows backed by a GitHub Release asset, excluding the PyPI-backed rows whose "
+            "counterpart PyPI can prune (default: all)"
+        ),
+    )
     parser.add_argument("--max-deletions", type=int, default=DEFAULT_MAX_DELETIONS)
     parser.add_argument("--max-handoff-age-days", type=int, default=DEFAULT_MAX_HANDOFF_AGE_DAYS)
     parser.add_argument(
@@ -520,6 +617,7 @@ def run(
     audit = load_audit_module()
     handoff = load_handoff(
         args.handoff_dir,
+        audit=audit,
         max_age_days=None if args.allow_stale_handoff else args.max_handoff_age_days,
     )
     repo = args.repo or handoff.repo
@@ -532,7 +630,8 @@ def run(
 
     client = client_factory(audit, repo)
     live = live_candidacy(audit, client, repo, args.workers)
-    plan = plan_purge(handoff, live, only=args.only)
+    durability = None if args.durability == "all" else args.durability
+    plan = plan_purge(handoff, live, only=args.only, durability=durability)
 
     if len(plan.delete) > args.max_deletions:
         raise PurgeRefusal(
@@ -545,7 +644,15 @@ def run(
     if args.execute:
         deleted, failed = execute_plan(plan, deleter_factory(client, repo))
 
-    report = build_report(handoff, repo, plan, executed=args.execute, deleted=deleted, failed=failed)
+    report = build_report(
+        handoff,
+        repo,
+        plan,
+        executed=args.execute,
+        deleted=deleted,
+        failed=failed,
+        durability=durability,
+    )
     rendered = json.dumps(report, indent=2, sort_keys=True)
     print(rendered)
     if args.report_path:
@@ -617,6 +724,7 @@ def _write_handoff(
     generated_at: str,
     repo: str = "btakita/agent-doc",
     summary_overrides: dict[str, Any] | None = None,
+    drop_fields: Iterable[str] = (),
 ) -> None:
     fields = [
         "artifact_id",
@@ -634,11 +742,14 @@ def _write_handoff(
         "size_bytes",
         "candidate",
         "counterpart_kind",
+        "counterpart_durability",
         "counterpart_name",
         "counterpart_url",
         "unresolved_category",
         "unresolved_reason",
     ]
+    if drop_fields:
+        fields = [field_name for field_name in fields if field_name not in drop_fields]
     directory.mkdir(parents=True, exist_ok=True)
     for name, rows in ((CANDIDATES_CSV, candidates), (UNRESOLVED_CSV, withheld)):
         with (directory / name).open("w", encoding="utf-8", newline="") as handle:
@@ -651,6 +762,7 @@ def _write_handoff(
         "repository": repo,
         "candidate_count": len(candidates),
         "candidate_size_bytes": sum(int(row["size_bytes"]) for row in candidates),
+        "candidate_durability": load_audit_module().candidate_durability_totals(candidates),
         "unresolved_count": len(withheld),
         "unresolved_size_bytes": sum(int(row["size_bytes"]) for row in withheld),
         "deletion_performed": False,
@@ -668,8 +780,27 @@ def _candidate_row(artifact_id: int, name: str, size: int, tag: str) -> dict[str
         "size_bytes": str(size),
         "candidate": "True",
         "counterpart_kind": "github_release",
+        "counterpart_durability": "durable",
         "counterpart_name": asset,
         "counterpart_url": f"https://example.invalid/{tag}/{asset}",
+        "head_branch": tag,
+    }
+
+
+def _wheel_candidate_row(artifact_id: int, name: str, size: int, tag: str) -> dict[str, Any]:
+    """A PyPI-backed candidate: exact today, perishable because PyPI prunes files."""
+    version = tag.lstrip("v")
+    filename = f"agent_doc-{version}-py3-none-any.whl"
+    return {
+        "artifact_id": str(artifact_id),
+        "artifact_name": name,
+        "expires_at": "2026-12-01T00:00:00Z",
+        "size_bytes": str(size),
+        "candidate": "True",
+        "counterpart_kind": "pypi",
+        "counterpart_durability": "perishable",
+        "counterpart_name": filename,
+        "counterpart_url": f"https://example.invalid/pypi/{filename}",
         "head_branch": tag,
     }
 
@@ -740,8 +871,12 @@ def self_test() -> int:
     linux = "agent-doc-x86_64-unknown-linux-gnu"
     macos = "agent-doc-x86_64-apple-darwin"
 
-    def client_for(artifacts: list[dict[str, Any]], assets: list[str]) -> _FakeClient:
-        return _FakeClient(artifacts, [_release(tag, assets)], {})
+    def client_for(
+        artifacts: list[dict[str, Any]],
+        assets: list[str],
+        pypi: dict[str, Any] | None = None,
+    ) -> _FakeClient:
+        return _FakeClient(artifacts, [_release(tag, assets)], pypi or {})
 
     def planned(
         directory: Path,
@@ -750,10 +885,12 @@ def self_test() -> int:
         *,
         only: Iterable[int] | None = None,
         max_age_days: int | None = DEFAULT_MAX_HANDOFF_AGE_DAYS,
+        durability: str | None = None,
+        pypi: dict[str, Any] | None = None,
     ) -> tuple[Handoff, Plan]:
-        handoff = load_handoff(directory, max_age_days=max_age_days)
-        live = live_candidacy(audit, client_for(artifacts, assets), handoff.repo, 2)
-        return handoff, plan_purge(handoff, live, only=only)
+        handoff = load_handoff(directory, audit=audit, max_age_days=max_age_days)
+        live = live_candidacy(audit, client_for(artifacts, assets, pypi), handoff.repo, 2)
+        return handoff, plan_purge(handoff, live, only=only, durability=durability)
 
     # 1. The happy path: an exactly-matching candidate with a live durable counterpart.
     with tempfile.TemporaryDirectory() as tmp:
@@ -1011,8 +1148,8 @@ def self_test() -> int:
     # Regenerating the audit is expected to trip this; update both pins in the same
     # commit that lands the new handoff.
     if (DEFAULT_HANDOFF_DIR / SUMMARY_JSON).is_file():
-        committed = load_handoff(DEFAULT_HANDOFF_DIR, max_age_days=None)
-        pinned = (2666, 569)
+        committed = load_handoff(DEFAULT_HANDOFF_DIR, audit=audit, max_age_days=None)
+        pinned = (2666, 571)
         observed = (len(committed.candidates), len(committed.withheld))
         assert observed == pinned, (
             f"committed handoff {DEFAULT_HANDOFF_DIR.name} has "
@@ -1022,6 +1159,129 @@ def self_test() -> int:
             "committed handoff was replaced without review."
         )
         assert not (set(committed.candidates) & set(committed.withheld))
+
+    # 25. `--durability durable` keeps release-asset-backed rows and refuses the
+    # PyPI-backed ones, so the perishable half can be left unauthorized.
+    wheel = "wheel-bootstrap"
+    wheel_file = f"agent_doc-{tag.lstrip('v')}-py3-none-any.whl"
+    pypi_payload = {
+        tag.lstrip("v"): [
+            {"filename": wheel_file, "url": f"https://example.invalid/pypi/{wheel_file}"}
+        ]
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp) / "handoff"
+        _write_handoff(
+            directory,
+            [_candidate_row(11, linux, 1024, tag), _wheel_candidate_row(12, wheel, 512, tag)],
+            [],
+            generated_at=fresh,
+        )
+        live_artifacts = [_artifact(11, linux, 1024, tag), _artifact(12, wheel, 512, tag)]
+
+        handoff, plan = planned(directory, live_artifacts, [f"{linux}.tar.gz"], pypi=pypi_payload)
+        assert plan.delete == [11, 12], plan
+        assert plan.delete_bytes(handoff) == 1536
+
+        handoff, plan = planned(
+            directory, live_artifacts, [f"{linux}.tar.gz"], pypi=pypi_payload, durability="durable"
+        )
+        assert plan.delete == [11], plan
+        assert plan.delete_bytes(handoff) == 1024
+        assert [row["artifact_id"] for row in plan.refused] == [12], plan.refused
+        assert plan.refused[0]["reason"] == "durability_excluded", plan.refused
+        assert "perishable" in plan.refused[0]["detail"], plan.refused
+        report = build_report(
+            handoff, handoff.repo, plan, executed=False, deleted=[], failed=[], durability="durable"
+        )
+        assert report["durability_filter"] == "durable", report
+        assert report["deletable_durability"] == {"durable": {"count": 1, "size_bytes": 1024}}, report
+
+        # 26. The filter also refuses an explicitly named perishable id: `--only` can
+        # select from the plan, never widen it.
+        handoff, plan = planned(
+            directory,
+            live_artifacts,
+            [f"{linux}.tar.gz"],
+            pypi=pypi_payload,
+            durability="durable",
+            only=[12],
+        )
+        assert plan.delete == [], plan
+        assert plan.refused[0]["reason"] == "durability_excluded", plan.refused
+
+        # 27. The mirror filter selects exactly the complement, so neither class is
+        # privileged by the filter's implementation.
+        handoff, plan = planned(
+            directory,
+            live_artifacts,
+            [f"{linux}.tar.gz"],
+            pypi=pypi_payload,
+            durability="perishable",
+        )
+        assert plan.delete == [12], plan
+        assert [row["artifact_id"] for row in plan.refused] == [11], plan.refused
+
+        # 28. An unfiltered report still records the filter and both classes.
+        handoff, plan = planned(directory, live_artifacts, [f"{linux}.tar.gz"], pypi=pypi_payload)
+        report = build_report(handoff, handoff.repo, plan, executed=False, deleted=[], failed=[])
+        assert report["durability_filter"] == "all", report
+        assert report["deletable_durability"] == {
+            "durable": {"count": 1, "size_bytes": 1024},
+            "perishable": {"count": 1, "size_bytes": 512},
+        }, report
+
+    # 29. A durability column that disagrees with the generator's classification is a
+    # stale or hand-edited handoff and aborts at load.
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp) / "handoff"
+        mislabeled = _wheel_candidate_row(12, wheel, 512, tag) | {"counterpart_durability": "durable"}
+        _write_handoff(
+            directory,
+            [mislabeled],
+            [],
+            generated_at=fresh,
+            summary_overrides={
+                "candidate_durability": audit.candidate_durability_totals([mislabeled])
+            },
+        )
+        _refusal(["--handoff-dir", str(directory)], "the audit generator classifies that kind as")
+
+    # 30. A handoff with no durability column at all aborts and names the remedy,
+    # rather than defaulting a perishable row into the durable class.
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp) / "handoff"
+        _write_handoff(
+            directory,
+            [_candidate_row(11, linux, 1024, tag)],
+            [],
+            generated_at=fresh,
+            drop_fields=["counterpart_durability"],
+        )
+        _refusal(["--handoff-dir", str(directory)], "no counterpart_durability column")
+
+    # 31. A durability summary that disagrees with the CSV aborts, like every other
+    # summary total.
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp) / "handoff"
+        _write_handoff(
+            directory,
+            [_candidate_row(11, linux, 1024, tag)],
+            [],
+            generated_at=fresh,
+            summary_overrides={
+                "candidate_durability": {
+                    "durable": {
+                        "count": 9,
+                        "size_bytes": 1024,
+                        "counterpart_kinds": ["github_release"],
+                        "version_count": 1,
+                        "version_span": [tag, tag],
+                    }
+                }
+            },
+        )
+        _refusal(["--handoff-dir", str(directory)], "candidate_durability=")
 
     print("[self-test] purge_actions_artifacts: ok")
     return 0

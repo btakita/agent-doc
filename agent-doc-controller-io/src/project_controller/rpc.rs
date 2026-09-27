@@ -18862,10 +18862,97 @@ pub(crate) fn handle_tmux_layout_sync_state(
     tmux_layout_sync_state_for_invocation(bootstrap, runtime, &invocation)
 }
 
+/// Focus refusals the structural layout owner is the one able to repair
+/// (`#focusstashescalate`).
+///
+/// Both mean "the pane exists, it is just not in the `agent-doc` window", which
+/// the selection lane deliberately never fixes — it promotes nothing. Every
+/// other refusal names a missing actor, session, or pane, which republishing a
+/// layout cannot conjure.
+fn focus_refusal_requires_structural_layout(reason: &str) -> bool {
+    matches!(reason, "actor_pane_not_visible" | "outside_agent_doc_window")
+}
+
+/// Hand a `Focus` intent the selection lane could not apply to the structural
+/// layout owner (`#focusstashescalate`).
+///
+/// `SurfaceIntent::Focus` is derived exactly when the editor's visible columns
+/// are *unchanged*, so once tmux holds the target pane in the `stash` window no
+/// later observation derives `Sync` on its own and every subsequent tab switch
+/// dead-ends. Republishing the editor's own columns as desired layout is the
+/// same effect the first, layout-changing switch already runs successfully;
+/// `CoalesceIdentical` keeps a repeated selection from republishing work the
+/// worker has already converged.
+fn escalate_focus_to_structural_layout(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    document: &str,
+    columns: &[SurfaceColumn],
+    reason: &str,
+) {
+    if columns.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "controller_editor_surface_focus_escalation_skipped document={document} reason={reason} cause=no_editor_columns"
+            ),
+        );
+        return;
+    }
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_editor_surface_focus_escalated document={document} reason={reason} columns={}",
+            columns.len()
+        ),
+    );
+    // The intent is "select this document", so the republished layout must carry
+    // the focus rather than preserve whatever tmux happens to have selected.
+    let invocation = automatic_editor_surface_sync_invocation(columns, document, false);
+    if let Err(error) = publish_pane_layout_desired_invocation(
+        bootstrap,
+        runtime,
+        invocation,
+        None,
+        PaneLayoutPublication::CoalesceIdentical,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "controller_editor_surface_focus_escalation_failed document={document} reason={reason} error={error:#}"
+            ),
+        );
+    }
+}
+
 fn record_editor_surface_focus_outcome(
+    project_root: &Path,
     receipt: &mut SurfaceObservationReceipt,
     focus_result: Result<ControllerTmuxFocusReceipt>,
 ) -> Result<()> {
+    // `#surfacefocussilent`: `#surfaceobservesilent` gave the *ingress* a
+    // receipt, but its consequence still logged nothing. A focus that applied
+    // and a focus refused with any of ~ten reasons were byte-identical in
+    // ops.log, which is exactly the evidence a "tmux focus did not auto-sync"
+    // report needs — and its absence is what mis-diagnosed this three times.
+    match &focus_result {
+        Ok(outcome) => agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "controller_editor_surface_focus_outcome document={} focused={} reason={} pane={}",
+                outcome.document_id.as_deref().unwrap_or("-"),
+                outcome.focused,
+                outcome.reason,
+                outcome.pane_id.as_deref().unwrap_or("-"),
+            ),
+        ),
+        Err(error) => agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "controller_editor_surface_focus_outcome focused=false reason=focus_error error={error:#}"
+            ),
+        ),
+    }
     match focus_result {
         Ok(outcome) => {
             receipt.outcome = Some(
@@ -18904,6 +18991,10 @@ fn handle_editor_surface_observe(
         observation.generation,
         observation.sequence,
     );
+    // `#focusstashescalate`: a `Focus` consequence may have to hand a stashed
+    // pane back to the structural layout owner, so the editor's own visible
+    // columns must outlive the fold's move of the observation.
+    let surface_columns = observation.surface.columns.clone();
     // `#tmuxautosyncreactive`: fold against the RETAINED tmux observation rather
     // than probing synchronously. The background `pane_layout_effect_worker`
     // refreshes it via `observe_tmux_for_project` after each structural
@@ -18966,6 +19057,7 @@ fn handle_editor_surface_observe(
                         ),
                     );
                     record_editor_surface_focus_outcome(
+                        &bootstrap.project_root,
                         &mut receipt,
                         Ok(ControllerTmuxFocusReceipt {
                             focused: false,
@@ -19005,7 +19097,34 @@ fn handle_editor_surface_observe(
                     // graph's eager effect is intentionally a production no-op, so
                     // discarding this result left JetBrains with an accepted fact
                     // but no applied projection.
-                    record_editor_surface_focus_outcome(&mut receipt, focus_result)?;
+                    //
+                    // `#focusstashescalate`: "request structural repair" was never
+                    // wired. A refusal that only means "the pane is in the stash
+                    // window" has to reach the layout owner, because the intent is
+                    // `Focus` precisely when the editor layout stopped changing —
+                    // nothing else will ever ask.
+                    let structural_refusal = focus_result
+                        .as_ref()
+                        .ok()
+                        .filter(|outcome| {
+                            !outcome.focused
+                                && focus_refusal_requires_structural_layout(&outcome.reason)
+                        })
+                        .map(|outcome| outcome.reason.clone());
+                    record_editor_surface_focus_outcome(
+                        &bootstrap.project_root,
+                        &mut receipt,
+                        focus_result,
+                    )?;
+                    if let Some(reason) = structural_refusal {
+                        escalate_focus_to_structural_layout(
+                            bootstrap,
+                            runtime,
+                            &document,
+                            &surface_columns,
+                            &reason,
+                        );
+                    }
                 }
             }
             SurfaceIntent::Idle => {}
@@ -24760,7 +24879,9 @@ mod tests {
             error: None,
         };
 
+        let dir = tempfile::tempdir().unwrap();
         record_editor_surface_focus_outcome(
+            dir.path(),
             &mut receipt,
             Ok(tmux_focus_receipt(
                 true,
@@ -24793,7 +24914,9 @@ mod tests {
             error: None,
         };
 
+        let dir = tempfile::tempdir().unwrap();
         record_editor_surface_focus_outcome(
+            dir.path(),
             &mut receipt,
             Err(anyhow::anyhow!("payments queue is paused")),
         )
@@ -24801,6 +24924,262 @@ mod tests {
 
         assert_eq!(receipt.outcome, None);
         assert_eq!(receipt.error.as_deref(), Some("payments queue is paused"));
+    }
+
+    /// `#focusstashescalate`: only a refusal that means "the pane exists, it is
+    /// just not in the `agent-doc` window" is repairable by republishing a
+    /// layout. Escalating a missing actor/session/pane would ask the layout
+    /// owner to conjure something it cannot.
+    #[test]
+    fn only_placement_focus_refusals_escalate_to_the_structural_layout_owner() {
+        for reason in ["actor_pane_not_visible", "outside_agent_doc_window"] {
+            assert!(
+                focus_refusal_requires_structural_layout(reason),
+                "{reason} is a placement refusal the layout owner repairs"
+            );
+        }
+        for reason in [
+            "missing_actor_record",
+            "missing_tmux_session",
+            "resumed_pane_not_alive",
+            "desktop_editor_inactive",
+            "layout_owner_provisioned",
+            "focused",
+        ] {
+            assert!(
+                !focus_refusal_requires_structural_layout(reason),
+                "{reason} must not republish a layout"
+            );
+        }
+    }
+
+    /// `#surfacefocussilent`: the ingress receipt (`#surfaceobservesilent`)
+    /// proved the selection arrived and was accepted, but the *consequence* was
+    /// silent — a refused focus and an applied focus left byte-identical
+    /// ops.log. Assert the focus lane now names its own verdict, for an applied
+    /// selection, a refusal, and an error alike.
+    #[test]
+    fn editor_surface_focus_outcome_always_leaves_an_ops_log_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        // ops.log is anchored to a real project root; without it `log_op` is a
+        // no-op and the assertion below would pass for the wrong reason.
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut receipt = SurfaceObservationReceipt {
+            intent: SurfaceIntent::Focus {
+                document: "/project/payments-ledger.md".to_string(),
+            },
+            idle: false,
+            outcome: None,
+            error: None,
+        };
+
+        record_editor_surface_focus_outcome(
+            dir.path(),
+            &mut receipt,
+            Ok(tmux_focus_receipt(
+                false,
+                "actor_pane_not_visible",
+                Some("payments-ledger".to_string()),
+                Some("%188".to_string()),
+                Some("agent-doc".to_string()),
+                Some("@5".to_string()),
+                Some("stash".to_string()),
+            )),
+        )
+        .unwrap();
+        record_editor_surface_focus_outcome(
+            dir.path(),
+            &mut receipt,
+            Err(anyhow::anyhow!("tmux socket closed")),
+        )
+        .unwrap();
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        let receipts = ops_log
+            .lines()
+            .filter(|line| line.contains("controller_editor_surface_focus_outcome"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            receipts.len(),
+            2,
+            "every focus consequence must leave one receipt: {ops_log}"
+        );
+        assert!(
+            receipts[0].contains("focused=false")
+                && receipts[0].contains("reason=actor_pane_not_visible")
+                && receipts[0].contains("pane=%188"),
+            "a refusal must name its reason and pane: {receipts:?}"
+        );
+        assert!(
+            receipts[1].contains("reason=focus_error")
+                && receipts[1].contains("tmux socket closed"),
+            "an error must be distinguishable from a refusal: {receipts:?}"
+        );
+    }
+
+    /// `#focusstashescalate`: the escalation is the whole fix, so it must leave
+    /// proof that it ran — and must refuse rather than republish an empty
+    /// layout, which `publish_pane_layout_desired_invocation` rejects anyway.
+    #[test]
+    fn focus_escalation_records_its_handoff_and_skips_an_empty_editor_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity().unwrap()),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            "/project/payments-ledger.md",
+            &[],
+            "actor_pane_not_visible",
+        );
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            "/project/payments-ledger.md",
+            &[
+                SurfaceColumn {
+                    files: vec!["/project/payments-ledger.md".to_string()],
+                },
+                SurfaceColumn {
+                    files: vec!["/project/infra.md".to_string()],
+                },
+            ],
+            "actor_pane_not_visible",
+        );
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains(
+                "controller_editor_surface_focus_escalation_skipped \
+                 document=/project/payments-ledger.md \
+                 reason=actor_pane_not_visible cause=no_editor_columns"
+            ),
+            "an empty editor layout must be refused, not republished: {ops_log}"
+        );
+        assert!(
+            ops_log.contains(
+                "controller_editor_surface_focus_escalated \
+                 document=/project/payments-ledger.md \
+                 reason=actor_pane_not_visible columns=2"
+            ),
+            "the handoff to the structural layout owner must be provable: {ops_log}"
+        );
+    }
+
+    /// `#focusstashescalate` end to end at the observe boundary: a same-layout
+    /// tab switch derives `Focus`, and that consequence must now be visible in
+    /// ops.log. A refusal that is NOT about pane placement must not republish a
+    /// layout.
+    #[test]
+    fn a_same_layout_tab_switch_records_its_focus_consequence_without_escalating() {
+        let dir = tempfile::tempdir().unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity().unwrap()),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let ledger = dir.path().join("payments-ledger.md");
+        let infra = dir.path().join("infra.md");
+
+        let observe = |focused: &Path, sequence: u64| {
+            let observation = EditorSurfaceObservation {
+                client_id: "idea:switch".to_string(),
+                generation: 7,
+                sequence,
+                surface: agent_doc_editor_surface::EditorSurface {
+                    focused: focused.to_string_lossy().to_string(),
+                    visible: vec![
+                        ledger.to_string_lossy().to_string(),
+                        infra.to_string_lossy().to_string(),
+                    ],
+                    open: vec![
+                        ledger.to_string_lossy().to_string(),
+                        infra.to_string_lossy().to_string(),
+                    ],
+                    columns: vec![
+                        SurfaceColumn {
+                            files: vec![ledger.to_string_lossy().to_string()],
+                        },
+                        SurfaceColumn {
+                            files: vec![infra.to_string_lossy().to_string()],
+                        },
+                    ],
+                    force_reconcile: false,
+                    focus_only: false,
+                    preserve_focus: false,
+                },
+            };
+            let payload = serde_json::to_string(&observation).unwrap();
+            handle_editor_surface_observe(
+                &bootstrap,
+                runtime.as_ref(),
+                ControllerRequest {
+                    command: "editor_surface_observe".to_string(),
+                    file: Some(PathBuf::from(&observation.surface.focused)),
+                    session_id: None,
+                    pane_id: None,
+                    window_id: None,
+                    generation: Some(7),
+                    state: None,
+                    caller: Some(observation.client_id.clone()),
+                    reason: Some("editor_surface_observation".to_string()),
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: Some(payload),
+                },
+            )
+            .unwrap()
+        };
+
+        // First observation: a layout tmux was never reconciled against.
+        let first = observe(&ledger, 1);
+        assert!(
+            matches!(first.intent, SurfaceIntent::Sync { .. }),
+            "a new layout must reconcile structurally: {:?}",
+            first.intent
+        );
+        // Second observation: same columns, different tab — the shape that used
+        // to dead-end silently forever.
+        let second = observe(&infra, 2);
+        assert!(
+            matches!(second.intent, SurfaceIntent::Focus { .. }),
+            "a same-layout tab switch is a pure focus move: {:?}",
+            second.intent
+        );
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("controller_editor_surface_focus_outcome"),
+            "the focus consequence must not be silent: {ops_log}"
+        );
+        assert!(
+            !ops_log.contains("controller_editor_surface_focus_escalated"),
+            "a non-placement refusal must not republish a layout: {ops_log}"
+        );
     }
 
     /// `#tmuxautosyncreactive`: the background worker publishes the actual tmux

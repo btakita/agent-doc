@@ -34,7 +34,7 @@ The checks do not evaluate `passage`.
 | `Makefile` | `f8bdf25baefbcf421b3dd8ff9626061f3632de9fd0ca5416482949ce8de5f21e` |
 | `src/module-harness/Makefile` | `9118a00b4b0ceeebc21edce85c79896708192e1481c56e08dd052eef8edae718` |
 | `src/corky/Makefile` | `b916ec15aff54522381a9ae3684d872391caa9b8aa1d169de4914ce58dc1bfe3` |
-| `src/agent-doc/Makefile` | `d922c0547cd68b07cf577157295b8648d0e07bb7197483fbd1a961dfe963205a` |
+| `src/agent-doc/Makefile` | `3de14f9d851a2153ec3410e65967d8aaaca6eb308c3481ac774b564980476b0e` |
 | `src/lazily-py/Makefile` | `9800bc245c846bea80d6f5de1bd73c6bdd9226482c876dfdbc46644394baeb54` |
 | `src/lazily-js/.env` | `b2aa4db4666435d210c0a711739b0c7a55637431b8236b7566d3fd8e489f0023` |
 | `src/ctx-core-dev/lib/monorepo/bin/publish--force.sh` | `ce5ebd5f0f431b30b534a1e12a0535608c5836f9706574f8613ee8506d9246d1` |
@@ -134,7 +134,7 @@ diff --git a/Makefile b/Makefile
 diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
-@@ -334 +334,4 @@
+@@ -340 +340,4 @@
 -	.venv/bin/python -m twine upload --skip-existing dist/*
 +	@set +x; \
 +		token="$$(passage btak/PYPI_PUBLISH_TOKEN)" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup failed' >&2; exit 1; }; \

@@ -243,6 +243,84 @@ That reproduces every number the item recorded by hand — 8.4 GiB of 10.0, 20 t
 **No reinstall this cycle.** Nothing under `src/` or any crate changed — this is a script, a Makefile target and an `AGENTS.md` paragraph — so the installed binary is already current at this commit's Rust content, and a redundant `make install` would only re-fan `reload_library` at the live editor replicas mid-drain.
 
 **CI.** Run `36301000202` (the captured-splice scenario push) was `in_progress` at 7m48s when I checked. Recorded, not awaited; this turn closes from local evidence. Exchange is at 170 lines across 7 sections — noted, not stalling the queue for it.
+
+### Re: agent-doc causes of the admission refusal — opus-5 · 2026-09-27T04:13-04:00
+
+> **Queue prompt:** re [#readbackeditor]: Add to the logs what you need to verify. Then verify. Automate testing yourself.
+
+Your chat messages redirected this turn to the refusal I'd just reported, so that is what I fixed. `#readbackeditor` is untouched this cycle; I rewrote its backlog text to carry your instruction (automate it, stop asking an operator to type) — see the bottom.
+
+**Two agent-doc causes, both in the shared `admission_divergence` classifier. Fixed, tested, mutation-checked, committed as `8eb8eca5b`.**
+
+#### What actually happened
+
+`ops.log` at 07:13:25Z, in order:
+
+```
+commit_document_via_controller_error ... live editor commit projection is not durable yet
+controller_commit_projection_pending ... decision=NativeSaveRequired disk_projection_ready=false
+commit_staging          snap_len=31112  file_len=31220
+document_baseline_checkpoint generation=1792 len=31112
+commit_blocked_unproved_head_current_component_drift ... verdict=unanswered_edit_pending
+crdt_current_text       len=31220 hash=af296d601d98   live_editors=1
+queue_maintenance_deferred ... baseline_hash=d317f989cd3d authority_hash=af296d601d98 disk_hash=b6c8f269b535
+```
+
+There was no second writer. The commit was **blocked**, so disk kept the older revision — and the baseline was still checkpointed, at 31112 bytes, against a 31220-byte authority. That 108-byte delta is transient agent-doc markers.
+
+#### Cause 1 — `#admissionmarkersplit`: the planes were compared as raw bytes
+
+The merge baseline is checkpointed in the **durable** (marker-stripped) domain; the editor authority carries the transport markers agent-doc writes into the live buffer and strips on the durable path — `<!-- agent:boundary:… -->`, the ` (HEAD)` heading suffix, `❯ 🚧`, per-cycle guard comments, the managed pipeline frontmatter block. Comparing raw bytes let agent-doc's own transport state *be* the third revision.
+
+This is worse than a stall because it is **permanent**: the remedy printed is "save or close the editor tab", and a save cannot converge planes agent-doc re-splits on the next write. Two refusals 2h35m apart, same shape.
+
+Every other durable comparison in the workspace already normalizes first — `authoritative_current_monotonically_extends_capture_baseline` says so in its own doc comment ("so transport-only state does not manufacture a conflict"), as does `agent_doc_git_io::transient_cleanup`. This module was the outlier.
+
+#### Cause 2 — `#admissionancestorsplit`: "no unchanged branch" ≠ "a writer would be dropped"
+
+Under the blocked commit above, the baseline advances to the live snapshot, disk keeps the older commit, and the operator keeps typing. Three distinct revisions — but the live buffer **preserves every durable line already on disk**. Disk is an ancestor, not a rival. Admission can proceed on the authority and the next commit converges disk; that is the same monotonic proof that already gates rebasing a retained response onto concurrent operator steering.
+
+#### Cause 3 — the refusal could not name its own class
+
+Every case printed the same three raw hashes, so diagnosing one meant reconstructing byte lengths out of surrounding `commit_staging` / `document_baseline_checkpoint` lines (which is exactly what I had to do above). That is the "add to the logs what you need to verify" part:
+
+```
+admission_divergence file=… reason=<token> action=<token>
+  baseline_hash= authority_hash= disk_hash=
+  durable_baseline_hash= durable_authority_hash= durable_disk_hash=
+  baseline_len= authority_len= disk_len=
+```
+
+Four classifications, each naming itself; refusals also print the durable hashes inline, and `session_check_steering_admission_refused` carries the same `reason=`.
+
+| reason | meaning | action |
+|---|---|---|
+| `verbatim_branch_unchanged` | a plane matches another byte-for-byte | proceed / fast-forward — **not logged**, it is the every-preflight case |
+| `transient_markers_only` | differ only by transport markers; a durable branch is unchanged | same, decided on durable content |
+| `authority_subsumes_disk` | three durable revisions, live buffer contains all of disk | proceed on authority, adopt nothing |
+| `unmergeable_three_way_split` | disk carries content the authority never received | refuse + operator remedy |
+
+The `reason=`/`action=` pair is rendered by `AdmissionAssessment::diagnostic_fields` in the crate that owns the decision, not spelled in the IO shell — that is what the FlowCore hot-path gate is asking for (it caught my first draft at 15 tokens against a budget of 11).
+
+#### Why this is safe
+
+`assess()` runs the **verbatim** equality tests first and unchanged, so it is a strict widening: an observation that resolved before resolves identically, and only observations that previously *refused* can change verdict. Adopting disk still requires an unchanged durable authority branch; `authority_subsumes_disk` adopts **nothing** (adopting an ancestor would drop your steering). Disk content the authority never received still refuses.
+
+#### Proof
+
+- 11 classifier unit tests + 4 preflight IO-shell tests (marker-only, ancestor, genuine refusal, and *silence* on a converged observation).
+- **Mutation check** — reverted `assess` to the raw/no-subsumption behaviour; both new IO tests went red with the exact refusal text from the live wedge. Restored from a scratch copy with an mtime refresh (not `git checkout`), then re-confirmed green.
+- `admission_subsumption_matches_the_capture_monotonic_rule` in `agent-doc-capture-io` pins the inlined subsumption predicate to `agent_doc_workflow::capture::current_monotonically_extends_baseline`. The classifier can't import it — `workflow → turn → document` would close a cycle — so the copy is deliberate and now cannot drift.
+- `make check`: **exit 0, 9857/9857 passed**, 259 skipped, zero `result: FAILED`. Latest CI run is green.
+- Spec: `specs/14-realtime-workflow.md` § "Admission Divergence Across Baseline, Authority, And Disk"; `SPEC.md` indexes it.
+
+#### Ordering note
+
+`make install` runs **after** this closeout, not before — a mid-session cdylib reload strands an attached document's Lazily replica and only an editor-tab reopen clears it. Push follows.
+
+#### Not fixed, deliberately
+
+The blocked commit itself (`NativeSaveRequired` + `disk_projection_ready=false` leaving disk behind while the baseline advances) is untouched. The baseline checkpoint arguably should not advance past a commit that never landed — that would restore the strict common-ancestor invariant instead of tolerating its violation. I fixed the classifier because that is where the refusal is decided and where a wrong answer costs an operator their session; the checkpoint ordering is a separate, wider change across ~30 call sites. Filed at the top of the backlog.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -252,18 +330,20 @@ That reproduces every number the item recorded by hand — 8.4 GiB of 10.0, 20 t
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- re [#readbackeditor]: Add to the logs what you need to verify. Then verify. Automate testing yourself.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#readbackeditor] [opcaptureliveread] [agent-doc] [operator-verify] Read back an editor-op capture receipt from a real typing burst, now that every reporter refusal names itself (65c865f24, plugin 0.2.429). Type a few characters into tasks/agent-doc/agent-doc-bugs.md in IntelliJ once the recycled plugin holds a live registration, then run agent-doc verify-op-capture on it. Three outcomes, all now diagnosable: editor_ops_recorded ... transaction=batch means capture works and activateinstalledjetbrai is unblocked; editor_op_capture_refused reason=<token> names which guard fired (all_ops_non_operator points back at isOperatorDocumentEvent, shadow_replay_mismatch at the burst replay, doc_advanced_during_drain is benign and self-retrying, base_hash_unavailable at the merge base); no receipt at all means the reporter chain never ran, so check that the plugin generation actually reloaded. Blocks activateinstalledjetbrai and splicesimcov.
+- [ ] [#baselinecommitblocked] [agent-doc] Do not advance the merge-baseline checkpoint past a commit that never landed. Observed 2026-09-27 07:13Z: controller_commit_projection_pending decision=NativeSaveRequired disk_projection_ready=false -> commit_document_via_controller_error -> commit_blocked_unproved_head_current_component_drift, yet commit_staging/document_baseline_checkpoint still wrote generation=1792 len=31112 while disk kept the older revision. The baseline is documented as the common ancestor of disk and authority; checkpointing it from the live snapshot on a blocked commit breaks that invariant and is what produced the three-plane admission split 8eb8eca5b now tolerates in agent_doc_document::admission_divergence. Gate the checkpoint on a proven durable projection (or record a blocked-commit baseline generation that admission treats as provisional) across the ~30 checkpoint_document_baseline call sites, with a preflight-io regression test that a blocked commit leaves the baseline at the last durably-projected revision.
+- [ ] [#readbackeditor] [opcaptureliveread] [agent-doc] Automate the editor-op capture proof instead of asking an operator to type (operator instruction 2026-09-27: "Add to the logs what you need to verify. Then verify. Automate testing yourself."). Add the reporter-side logging that names each thing the proof needs — live registration generation, isOperatorDocumentEvent classification, shadow replay agreement, merge-base availability — then drive a synthetic typing burst through the plugin/FFI reporter path and assert editor_ops_recorded ... transaction=batch from the receipt in a deterministic test, so verify-op-capture no longer depends on a human IntelliJ burst. Keep the refusal-token diagnosis from 65c865f24 (all_ops_non_operator, shadow_replay_mismatch, doc_advanced_during_drain, base_hash_unavailable). Blocks activateinstalledjetbrai and splicesimcov.
 - [ ] [#activateinstalledjetbrai] [agent-doc] [operator-verify] Prove captured local editor edits recover across an independently advanced canonical response — BLOCKED ON #opcapturedormant, and no longer validatable from logs. Asked to validate from logs 2026-09-26 and the answer is that the evidence class is ABSENT, not inconclusive: the splice-recovery path itself is healthy (15 captured-local-splice-recovery invocations 2026-09-24..27, all status=current authority=cp_model, with the canonical text demonstrably advancing between them — the 2026-09-26T00:11:48..52 burst runs text_len 42885 -> 42885 -> 42892 -> 42900 across three distinct hashes), but all 317 editor_op_epoch_closed events in that window are cause=non_operator_projection, so not one of those recoveries carried an operator-authored edit. Order of work: (1) fix #opcapturedormant so operator edits are recorded as ops at all; (2) re-run `agent-doc verify-op-capture <FILE>` — it now accepts the batch producer the JetBrains TypingTracker actually drives (6b0eabc0c), so a pass is meaningful and a failure names both producers; (3) only then does the disposable-document live proof have anything to prove. Do NOT re-narrow this gate to "just needs the live check" until step 1 lands. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] 🚧 [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically now: a human reply on pypi/support#12214, or `make pypi-quota-check` exiting non-zero. As of 2026-09-27 that check exits 0 — 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 151 releases (0.35.113..0.35.417), room for ~49,662 further post-cutover releases — so there is nothing to act on and nothing to delete. pypi/support#12214 is still open with one comment (the acknowledgement bot) and untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check actually reports (next tranche would be 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
+- [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically now: a human reply on pypi/support#12214, or `make pypi-quota-check` exiting non-zero. As of 2026-09-27 that check exits 0 — 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 151 releases (0.35.113..0.35.417), room for ~49,662 further post-cutover releases — so there is nothing to act on and nothing to delete. pypi/support#12214 is still open with one comment (the acknowledgement bot) and untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check actually reports (next tranche would be 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 <!-- /agent:review -->

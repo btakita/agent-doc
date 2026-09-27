@@ -196,18 +196,38 @@ Disk and the editor buffer currently agree exactly (both tails identical, `text_
 The item stays open and `[operator-verify]` either way — this turn answered your question rather than executing the deletion, so there is nothing to mark done yet.
 
 One note while I was in here: preflight reports `queue_maintenance_not_persisted` (`pending add: custom id already exists: lzdocorphanresidue`). The queue add was a no-op because the id was already queued, so the queue text you see is current — no action needed.
+
+### Re: orphan residue cleared — opus-5 · 2026-09-27T00:39-04:00
+
+> **Queue prompt:**
+>
+> do [#lzdocorphanresidue]
+
+Closing `#lzdocorphanresidue` — you deleted the three lines, and I verified the removal rather than taking the queue re-add as proof.
+
+- **Disk:** the byte range after `&lt;!-- /agent:done --&gt;` is now empty; the close marker is the last content in the file. Non-blank line count in that gap: `0` (was `3`).
+- **Editor authority:** `agent-doc read` returns the same — `0` non-blank lines past the close marker. Disk and the CRDT replica agree, so there is no disk-change candidate left for the editor to arbitrate.
+- The preflight diff independently confirms it, attributing all three removals to you: `[user-] eturn typed satisfied/…`, `[user-] cate orphan line remains outside…`, `[user-] ebc036`.
+
+Every `agent:*` component is now the full extent of the document, which is what the item asked for. Nothing was archived or lost — those lines were truncated tails whose heads had already been archived by an earlier compaction.
+
+Marked `--done`. The queue is empty and the four review items remain gated: `#lzmacosrunner` (needs Darwin hardware), `#lzgithubbudget20` (needs a payment method on the personal GitHub account), plus `#lzambienttokenresolve` and `#lzagentdocartifactpurge`.
+
+Two things worth noting from this stretch, neither of them blockers:
+
+- The exchange is at 171 lines across 7 response sections, past the 160-line warn threshold. No `agent_doc_auto_compact` opt-in is set, so I am not compacting — flagging it since compaction residue is exactly what this item was cleaning up.
+- `agent-doc doctor` reported `no issues detected` on this document the whole time those three orphan lines were present, and `agent-doc autofix` had no catalog entry for the class. Text stranded outside every component is undetected by both, which is why this needed a human to notice it. If you want that detector built, queue it and I will take it.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdocorphanresidue] [operator-verify] Three truncated orphan fragment lines sit after the agent:done close marker in `tasks/software/lazily.md`, beginning `eturn typed satisfied/`, `cate orphan line remains outside`, and `ebc036`. They are residue from a prior compaction, outside every agent-doc component, so component writes cannot clear them and a disk edit under the live JetBrains editor would contend with the editor authority. Operator: delete exactly those three lines in IDEA, save, and send `continue`.
 <!-- /agent:backlog -->
 
 ## Review
@@ -230,6 +250,3 @@ One note while I was in here: preflight reports `queue_maintenance_not_persisted
 
 <!-- completed work archived in tasks/software/lazily.done.md -->
 <!-- /agent:done -->
-eturn typed satisfied/timed-out/cancelled/disposed-or-unavailable outcomes; optionally prove keyed side-effect receipts while leaving receipt storage and transport policy outside the primitive. Test lost wakeups, already-satisfied state, revision races, cancellation, deadlines, disposal, and keyed receipts; document using the stdlib Timer as the deadline budget.
-cate orphan line remains outside all agent-doc components at line 158. Please delete only the stray `- [ ] [#lzstdlibbarrier] ...` line in IDEA, save, and send `continue`. The completed item is already archived, so removing this duplicate is the only remaining closeout step.
-ebc036

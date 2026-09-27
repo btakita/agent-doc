@@ -14,9 +14,14 @@ verbatim.
 Three phases:
 
 1. **Static** — recompute each preimage SHA-256 recorded in the plan, and run
-   `git apply --unidiff-zero --check` for every fenced patch in its named
-   repository. Also detects whether the plan is already applied, by checking
-   whether each patch reverse-applies.
+   `git apply --check` for every fenced patch in its named repository. The plan's
+   patches carry context, which is what self-test control K measures: an edit to
+   the line BESIDE a hunk is now refused, where the same change rendered
+   zero-context under `--unidiff-zero` used to apply blindly. Context is not what
+   buys offset tolerance — git locates a zero-context hunk by its removed lines,
+   so a pure shift above the change applied either way, and with context present
+   `--unidiff-zero` is a no-op. Also detects whether the plan is already applied,
+   by checking whether each patch reverse-applies.
 
 2. **Fake publisher** — for each production call site, rebuild the *patched* file
    in a scratch checkout, extract the patched recipe lines, and run exactly those
@@ -233,8 +238,14 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def git_apply_check(repo: Path, patch_text: str, *, reverse: bool = False) -> tuple[bool, str]:
-    command = ["git", "apply", "--unidiff-zero", "--check"]
+def git_apply_check(
+    repo: Path, patch_text: str, *, reverse: bool = False, unidiff_zero: bool = False
+) -> tuple[bool, str]:
+    command = ["git", "apply", "--check"]
+    if unidiff_zero:
+        # Only control K passes this, to show what the plan's patches no longer
+        # need. The real checks must never waive git's context verification.
+        command.append("--unidiff-zero")
     if reverse:
         command.append("--reverse")
     command.append("-")
@@ -340,7 +351,7 @@ def build_patched_file(root: Path, patch: FilePatch) -> str:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
         completed = subprocess.run(
-            ["git", "apply", "--unidiff-zero", "-"],
+            ["git", "apply", "-"],
             cwd=scratch,
             input=patch.text,
             capture_output=True,
@@ -354,6 +365,47 @@ def build_patched_file(root: Path, patch: FilePatch) -> str:
                 f"could not build the patched {patch.repo}/{patch.path}: {completed.stderr.strip()}"
             )
         return target.read_text(encoding="utf-8")
+
+
+def zero_context_rendering(root: Path, patch: FilePatch) -> str:
+    """Re-render a patch with NO context, preserving its postimage.
+
+    Control K compares the two renderings against a line-shifted target. Without
+    this, "context buys offset tolerance" would be an argument rather than a
+    measurement.
+    """
+    source = (root / patch.path) if patch.repo == "." else (root / patch.repo / patch.path)
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = Path(tmp)
+        for command in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "proof@local"],
+            ["git", "config", "user.name", "proof"],
+        ):
+            subprocess.run(command, cwd=scratch, check=True, capture_output=True)
+        target = scratch / patch.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        subprocess.run(["git", "add", "-A", "-f"], cwd=scratch, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "base"], cwd=scratch, check=True, capture_output=True
+        )
+        applied = subprocess.run(
+            ["git", "apply", "-"], cwd=scratch, input=patch.text, capture_output=True, text=True
+        )
+        if applied.returncode != 0:
+            raise ProofFailure(
+                f"could not re-render {patch.repo}/{patch.path} zero-context: "
+                f"{applied.stderr.strip()}"
+            )
+        diff = subprocess.run(
+            ["git", "diff", "--no-color", "-U0", "--", patch.path],
+            cwd=scratch,
+            capture_output=True,
+            text=True,
+        )
+    body = [line for line in diff.stdout.split("\n") if not line.startswith("index ")]
+    return "\n".join(body)
 
 
 def make_recipes(text: str) -> dict[str, list[str]]:
@@ -376,12 +428,52 @@ def make_recipes(text: str) -> dict[str, list[str]]:
     return recipes
 
 
-def added_recipe_lines(hunk: list[str]) -> list[str]:
-    return [line[1:] for line in hunk if line.startswith("+") and line[1:].startswith("\t")]
+def added_recipe_runs(hunk: list[str]) -> list[list[str]]:
+    """Maximal runs of added recipe lines that are contiguous in the postimage.
+
+    A context-bearing diff can merge two adjacent recipes into one hunk, so a
+    hunk's added lines are not necessarily one block. Only a context line
+    separates two postimage regions; a removed line does not exist in the
+    postimage and therefore never breaks a run.
+    """
+    runs: list[list[str]] = []
+    current: list[str] = []
+    for line in hunk:
+        if not line or line.startswith("\\"):
+            continue
+        if line.startswith("-"):
+            continue
+        if line.startswith("+") and line[1:].startswith("\t"):
+            current.append(line[1:])
+            continue
+        if current:
+            runs.append(current)
+            current = []
+    if current:
+        runs.append(current)
+    return runs
 
 
-def added_shell_lines(hunk: list[str]) -> list[str]:
-    return [line[1:] for line in hunk if line.startswith("+")]
+def patched_block_lines(hunk: list[str]) -> list[str]:
+    """Postimage lines of a hunk, from its first added line to its end.
+
+    The plan's patches carry context, so a line the change leaves untouched is
+    rendered as context even when it closes a block the change opens. Extracting
+    only `+` lines would therefore hand back a truncated snippet. Leading
+    context precedes the change and is dropped; trailing context follows it in
+    the patched file and is kept.
+    """
+    block: list[str] = []
+    started = False
+    for line in hunk:
+        if not line or line.startswith(("-", "\\")):
+            continue
+        if line.startswith("+"):
+            started = True
+        elif not started:
+            continue
+        block.append(line[1:])
+    return block
 
 
 def contiguous_index(haystack: list[str], needle: list[str]) -> int:
@@ -401,17 +493,20 @@ def patched_recipe_for(root: Path, patch: FilePatch, target: str, must_contain: 
         raise ProofFailure(f"{patch.repo}/{patch.path} has no `{target}:` target after patching")
     recipe = recipes[target]
     for hunk in patch.hunks:
-        added = added_recipe_lines(hunk)
-        if added and contiguous_index(recipe, added) >= 0:
-            if must_contain not in "\n".join(added):
-                raise ProofFailure(
-                    f"{patch.repo}/{patch.path} `{target}` patched lines do not mention "
-                    f"{must_contain!r}; the plan's hunk no longer matches this call site"
-                )
-            return added
+        for added in added_recipe_runs(hunk):
+            # The lines this patch adds must land contiguously inside the
+            # patched recipe. A recipe may legitimately keep pre-existing lines
+            # (lazily-py's `publish` keeps its confirmation prompt), which is why
+            # the added run — not the whole recipe — is what gets run in the
+            # sandbox.
+            if contiguous_index(recipe, added) >= 0:
+                if must_contain not in "\n".join(added):
+                    continue
+                return added
     raise ProofFailure(
-        f"no hunk of {patch.repo}/{patch.path} lands contiguously inside `{target}`'s recipe; "
-        "the plan's hunk offsets have drifted from the file"
+        f"no added run of {patch.repo}/{patch.path} lands contiguously inside `{target}`'s "
+        f"recipe while mentioning {must_contain!r}; the plan's patch no longer matches this "
+        "call site"
     )
 
 
@@ -752,10 +847,16 @@ def recipe_for(site: CallSite, root: Path, patches: list[FilePatch]) -> list[str
     if not matching:
         raise ProofFailure(f"the plan has no patch for {site.repo}/{site.path}")
     if site.kind == "shell":
+        patched_lines = build_patched_file(root, matching[0]).split("\n")
         for hunk in matching[0].hunks:
-            added = added_shell_lines(hunk)
-            if site.must_contain in "\n".join(added):
-                return added
+            block = patched_block_lines(hunk)
+            if site.must_contain in "\n".join(block):
+                if contiguous_index(patched_lines, block) < 0:
+                    raise ProofFailure(
+                        f"{site.repo}/{site.path}: the extracted block is not a contiguous "
+                        "region of the patched file; the plan's hunk no longer matches it"
+                    )
+                return block
         raise ProofFailure(
             f"no hunk of {site.repo}/{site.path} adds {site.must_contain!r}"
         )
@@ -1262,6 +1363,97 @@ def self_test() -> int:
             lambda: assert_success(cargo_site, sandbox, result),
             "no root alias",
         )
+
+        # Control K: every patch must carry context, and context is what buys
+        # offset tolerance. Against a line-shifted target the context rendering
+        # must still apply while the zero-context rendering of the SAME change
+        # must not -- otherwise this control would prove nothing.
+        for patch in patches:
+            if any(line.startswith(" ") for hunk in patch.hunks for line in hunk):
+                continue
+            # A patch whose hunks cover the whole preimage has no context to give
+            # and no line above it to drift: src/lazily-js/.env is one line long.
+            source = (root / patch.path) if patch.repo == "." else (root / patch.repo / patch.path)
+            preimage_lines = len(source.read_text(encoding="utf-8").rstrip("\n").split("\n"))
+            covered = 0
+            whole_file = False
+            for header in re.findall(r"^@@ -(\d+)(?:,(\d+))? ", patch.text, re.MULTILINE):
+                start = int(header[0])
+                count = int(header[1]) if header[1] else 1
+                covered += count
+                whole_file = whole_file or (start == 1 and count >= preimage_lines)
+            if whole_file or covered >= preimage_lines:
+                continue
+            raise AssertionError(
+                f"{patch.repo}/{patch.path} patch carries no context lines; a zero-context "
+                "patch is located by absolute line number and drifts on every edit above it"
+            )
+
+        # K2/K3. What context actually buys is NOT offset tolerance: git locates a
+        # zero-context hunk by its removed lines, so a pure shift above the change
+        # applies either way (K2 pins that the conversion did not lose it). The real
+        # gain is K3: `--unidiff-zero` WAIVES verification of the lines around the
+        # change, so an edit beside the patch site used to apply silently. With
+        # context it is refused. Both halves are measured, never argued.
+        agentdoc = next(patch for patch in patches if patch.repo == "src/agent-doc")
+        live = (root / agentdoc.repo / agentdoc.path).read_text(encoding="utf-8")
+        zero = zero_context_rendering(root, agentdoc)
+        assert "@@" in zero, "zero-context re-rendering produced no hunk"
+
+        def _accepts(content: str, patch_text: str, *, unidiff_zero: bool) -> bool:
+            scratch = base / f"apply-{abs(hash((content, patch_text, unidiff_zero)))}"
+            scratch.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "init", "-q"], cwd=scratch, check=True, capture_output=True)
+            (scratch / agentdoc.path).write_text(content, encoding="utf-8")
+            accepted, _ = git_apply_check(scratch, patch_text, unidiff_zero=unidiff_zero)
+            return accepted
+
+        shifted = "".join(f"# proof offset shift {n}\n" for n in range(7)) + live
+        assert _accepts(shifted, agentdoc.text, unidiff_zero=False), (
+            "the context patch stopped applying after a 7-line shift above the hunk"
+        )
+
+        neighbour = next(
+            (
+                line[1:]
+                for hunk in agentdoc.hunks
+                for line in hunk
+                if line.startswith(" ") and line[1:].strip() and live.count(line[1:]) == 1
+            ),
+            None,
+        )
+        assert neighbour is not None, "the agent-doc hunk has no uniquely identifiable context line"
+        beside = live.replace(neighbour, neighbour + " # proof neighbour edit", 1)
+        assert beside != live, "the neighbour perturbation changed nothing"
+        assert not _accepts(beside, agentdoc.text, unidiff_zero=False), (
+            "the context patch accepted an edit to the line beside the change; the conversion "
+            "to context-bearing diffs bought nothing"
+        )
+        assert _accepts(beside, zero, unidiff_zero=True), (
+            "the zero-context rendering ALSO refused the neighbour edit, so this control does not "
+            "measure the waiver that `--unidiff-zero` used to grant"
+        )
+
+        # Control L: the added-run split is load-bearing, not decorative. Neuter
+        # it into a single merged run and the corky call site must stop resolving.
+        corky_site = next(site for site in CALL_SITES if site.name == "crates.io/corky-six-crates")
+        corky_patch = next(patch for patch in patches if patch.repo == "src/corky")
+        assert recipe_for(corky_site, root, patches), "corky recipe must resolve before neutering"
+        real_runs = added_recipe_runs
+        globals()["added_recipe_runs"] = lambda hunk: (
+            [[line for run in real_runs(hunk) for line in run]] if real_runs(hunk) else []
+        )
+        try:
+            _expect_failure(
+                "merged added runs",
+                lambda: patched_recipe_for(
+                    root, corky_patch, corky_site.target, corky_site.must_contain
+                ),
+                "lands contiguously inside",
+            )
+        finally:
+            globals()["added_recipe_runs"] = real_runs
+        assert recipe_for(corky_site, root, patches), "corky recipe must resolve after restoring"
 
     print("[self-test] proof_point_of_use_publish_credentials: ok", file=sys.stderr)
     return 0

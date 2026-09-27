@@ -24,7 +24,10 @@ credential value.
 
 Each code block is a complete zero-context unified diff relative to the
 repository named in its heading. First verify the preimage hash below, save each
-block verbatim, and run `git apply --unidiff-zero --check` in that repository.
+block verbatim, and run `git apply --check` in that repository. The patches
+carry context, so the check refuses a patch whose surroundings have changed
+rather than applying it blindly; a pure line shift above a hunk still applies,
+and the preimage hash below is what catches any other edit to a patched file.
 Apply only after all checks pass and the ignored-file edits have been reviewed.
 The checks do not evaluate `passage`.
 
@@ -48,7 +51,7 @@ unchanged.
 diff --git a/.env b/.env
 --- a/.env
 +++ b/.env
-@@ -1,3 +1,4 @@
+@@ -1,13 +1,14 @@
 -PYPI_PUBLISH_TOKEN="$(passage btak/PYPI_PUBLISH_TOKEN)"
 -UV_PUBLISH_TOKEN="$(passage btak/PYPI_PUBLISH_TOKEN)"
 -MATURIN_PYPI_TOKEN="$(passage btak/PYPI_PUBLISH_TOKEN)"
@@ -56,19 +59,34 @@ diff --git a/.env b/.env
 +# PYPI_PUBLISH_TOKEN="$(passage btak/PYPI_PUBLISH_TOKEN)"
 +# UV_PUBLISH_TOKEN="$(passage btak/PYPI_PUBLISH_TOKEN)"
 +# MATURIN_PYPI_TOKEN="$(passage btak/PYPI_PUBLISH_TOKEN)"
-@@ -5 +6 @@
+ 
 -CARGO_REGISTRY_TOKEN="$(passage btak/CARGO_REGISTRY_TOKEN)"
 +# CARGO_REGISTRY_TOKEN="$(passage btak/CARGO_REGISTRY_TOKEN)"
-@@ -10 +11 @@
+ 
+ CORKY_LINKEDIN_CLIENT_ID="$(passage btak/CORKY_LINKEDIN_CLIENT_ID)"
+ CORKY_LINKEDIN_CLIENT_SECRET="$(passage btak/CORKY_LINKEDIN_CLIENT_SECRET)"
+ 
 -NPM_PUBLISH_TOKEN="$(passage btak/NPM_PUBLISH_TOKEN)"
 +# NPM_PUBLISH_TOKEN="$(passage btak/NPM_PUBLISH_TOKEN)"
-@@ -23 +24 @@
+ 
+ CONTABO_CLIENT_ID="$(passage contabo/client_id)"
+ CONTABO_CLIENT_SECRET="$(passage contabo/client_secret)"
+@@ -20,7 +21,7 @@ R2_SECRET_ACCESS_KEY="$(passage btak/R2_SECRET_ACCESS_KEY)"
+ LUCAS_PAT="$(passage lucas/github/pat)"
+ 
+ GOOGLE_API_KEY="$(passage btak/GOOGLE_API_KEY)"
 -NPM_TOKEN="$(passage btak/GRANULAR_NPM_TOKEN)"
 +# NPM_TOKEN="$(passage btak/GRANULAR_NPM_TOKEN)"
+ 
+ OVSX_TOKEN="$(passage btak/OVSX_TOKEN)"
+ 
 diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
-@@ -45 +45,6 @@
+@@ -42,7 +42,12 @@ update:
+ # Publish: shared crate first, then both projects
+ publish:
+ 	@echo "=== instruction-files: cargo publish ==="
 -	@cd src/instruction-files && cargo publish
 +	@cd src/instruction-files && { \
 +		set +x; \
@@ -76,6 +94,9 @@ diff --git a/Makefile b/Makefile
 +		test -n "$$token" || { printf '%s\n' 'CARGO_REGISTRY_TOKEN lookup returned empty' >&2; exit 1; }; \
 +		CARGO_REGISTRY_TOKEN="$$token" cargo publish; \
 +	}
+ 	@for dir in $(SUBMODULES); do \
+ 		echo "=== $$dir: make publish ==="; \
+ 		$(MAKE) -C $$dir publish || exit 1; \
 ```
 
 The independent root-path defect is fixed: both `publish` and `clean` now enter
@@ -90,12 +111,18 @@ hunk above is refreshed against this corrected preimage.
 diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
-@@ -38 +38,4 @@
+@@ -35,7 +35,10 @@ install-hooks:
+ 
+ # Publish to crates.io
+ publish:
 -	cargo publish
 +	@set +x; \
 +		token="$$(passage btak/CARGO_REGISTRY_TOKEN)" || { printf '%s\n' 'CARGO_REGISTRY_TOKEN lookup failed' >&2; exit 1; }; \
 +		test -n "$$token" || { printf '%s\n' 'CARGO_REGISTRY_TOKEN lookup returned empty' >&2; exit 1; }; \
 +		CARGO_REGISTRY_TOKEN="$$token" cargo publish
+ 
+ # Remove build artifacts
+ clean:
 ```
 
 ### `src/corky`
@@ -104,7 +131,10 @@ diff --git a/Makefile b/Makefile
 diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
-@@ -88,6 +88,9 @@
+@@ -85,16 +85,22 @@ wheel: require-local-gpu
+ 
+ # Publish to crates.io
+ publish-crate:
 -	cargo publish -p corky-core
 -	cargo publish -p corky-transcribe
 -	cargo publish -p corky-google
@@ -120,12 +150,17 @@ diff --git a/Makefile b/Makefile
 +		CARGO_REGISTRY_TOKEN="$$token" cargo publish -p corky-social && \
 +		CARGO_REGISTRY_TOKEN="$$token" cargo publish -p corky-mail && \
 +		CARGO_REGISTRY_TOKEN="$$token" cargo publish -p corky
-@@ -97 +100,4 @@
+ 
+ # Publish to PyPI
+ publish-pypi:
 -	.venv/bin/maturin publish --skip-existing
 +	@set +x; \
 +		token="$$(passage btak/PYPI_PUBLISH_TOKEN)" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup failed' >&2; exit 1; }; \
 +		test -n "$$token" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup returned empty' >&2; exit 1; }; \
 +		MATURIN_PYPI_TOKEN="$$token" .venv/bin/maturin publish --skip-existing
+ 
+ # Publish to both crates.io and PyPI
+ publish: publish-crate publish-pypi
 ```
 
 ### `src/agent-doc`
@@ -134,12 +169,18 @@ diff --git a/Makefile b/Makefile
 diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
-@@ -355 +355,4 @@
+@@ -352,7 +352,10 @@ wheel: python-bootstrap-test
+ 
+ # Publish to PyPI
+ publish-pypi:
 -	.venv/bin/python -m twine upload --skip-existing dist/*
 +	@set +x; \
 +		token="$$(passage btak/PYPI_PUBLISH_TOKEN)" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup failed' >&2; exit 1; }; \
 +		test -n "$$token" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup returned empty' >&2; exit 1; }; \
 +		TWINE_USERNAME=__token__ TWINE_PASSWORD="$$token" .venv/bin/python -m twine upload --skip-existing dist/*
+ 
+ # agent-doc's Rust workspace is private; release binaries through GitHub and PyPI.
+ publish: publish-pypi
 ```
 
 ### `src/lazily-py`
@@ -150,12 +191,18 @@ The TestPyPI target deliberately receives no production credential.
 diff --git a/Makefile b/Makefile
 --- a/Makefile
 +++ b/Makefile
-@@ -140 +140,4 @@
+@@ -137,7 +137,10 @@ publish-test: build
+ publish: build
+ 	@echo "WARNING: This will publish to the real PyPI!"
+ 	@read -p "Are you sure? (y/N) " confirm && [ "$$confirm" = "y" ]
 -	python -m twine upload dist/*
 +	@set +x; \
 +		token="$$(passage btak/PYPI_PUBLISH_TOKEN)" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup failed' >&2; exit 1; }; \
 +		test -n "$$token" || { printf '%s\n' 'PYPI_PUBLISH_TOKEN lookup returned empty' >&2; exit 1; }; \
 +		TWINE_USERNAME=__token__ TWINE_PASSWORD="$$token" python -m twine upload dist/*
+ 
+ # Conformance-coverage guard (#portconformancecoverage). Static: fails when the
+ # canonical corpus grows a fixture no test in this repo even names. Naming is not
 ```
 
 ### `src/lazily-js`
@@ -177,12 +224,12 @@ diff --git a/.env b/.env
 diff --git a/lib/monorepo/bin/publish--force.sh b/lib/monorepo/bin/publish--force.sh
 --- a/lib/monorepo/bin/publish--force.sh
 +++ b/lib/monorepo/bin/publish--force.sh
-@@ -61,5 +61,16 @@
+@@ -58,8 +58,19 @@ if [ "$VERSION" = "$LATEST" ]; then
+ 	exit 0
+ fi
+ if [ -z $DRY ]; then
 -	bun publish --tag latest --access public
 -	if [ $? -ne 0 ]; then
--		not_published 'Publish failed'
--		exit 1
--	fi
 +	set +x
 +	if ! publish_token="$(passage btak/GRANULAR_NPM_TOKEN)"; then
 +		printf '%s\n' 'NPM_CONFIG_TOKEN lookup failed' >&2
@@ -196,9 +243,9 @@ diff --git a/lib/monorepo/bin/publish--force.sh b/lib/monorepo/bin/publish--forc
 +	publish_status=$?
 +	unset publish_token
 +	if [ "$publish_status" -ne 0 ]; then
-+		not_published 'Publish failed'
-+		exit 1
-+	fi
+ 		not_published 'Publish failed'
+ 		exit 1
+ 	fi
 ```
 
 ## Call-site and automation inventory
@@ -229,7 +276,7 @@ publish.
 
 Before application:
 
-1. Extract each patch block and run `git apply --unidiff-zero --check` in its
+1. Extract each patch block and run `git apply --check` in its
    named repository.
    For the ignored `.env` files, also inspect the exact before/after lines; do
    not stage or commit them.
@@ -241,7 +288,7 @@ Before application:
 
 Latest preparation proof (2026-09-26): the call-site/workflow inventory still
 matches the table above; all seven fenced patch sets pass
-`git apply --unidiff-zero --check` in their named repositories; every recorded
+`git apply --check` in their named repositories; every recorded
 preimage SHA-256 matches; and root `publish`/`clean` path checks pass under
 `make -n`. The root `make check` suite also passes. These checks neither
 evaluated `passage` nor invoked a publisher.
@@ -249,7 +296,7 @@ evaluated `passage` nor invoked a publisher.
 Steps 1-5 below are now a committed runnable target rather than a manual
 procedure: `make publish-credential-proof` (implemented by
 `scripts/proof-point-of-use-publish-credentials.py`). It recomputes every
-preimage hash, runs `git apply --unidiff-zero --check` per patch, rebuilds each
+preimage hash, runs `git apply --check` per patch, rebuilds each
 patched file in a scratch checkout, and exercises all eight production call
 sites in success, failure, and empty modes against fake `passage`, `cargo`,
 `maturin`, `bun`, and `python -m twine` recorders. It resolves no credential and

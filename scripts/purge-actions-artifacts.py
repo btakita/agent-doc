@@ -1005,11 +1005,22 @@ def self_test() -> int:
         raise AssertionError("re-derivation must refuse a repository the audit cannot verify")
     assert_rederivation_scope(audit, "btakita/agent-doc")
 
-    # 24. The committed handoff itself loads and structurally validates.
+    # 24. The committed handoff itself loads and structurally validates. The two
+    # counts are a deliberate tripwire: the reviewed handoff is the authorization
+    # basis, so a regenerated one must be re-reviewed rather than silently adopted.
+    # Regenerating the audit is expected to trip this; update both pins in the same
+    # commit that lands the new handoff.
     if (DEFAULT_HANDOFF_DIR / SUMMARY_JSON).is_file():
         committed = load_handoff(DEFAULT_HANDOFF_DIR, max_age_days=None)
-        assert len(committed.candidates) == 2666, len(committed.candidates)
-        assert len(committed.withheld) == 569, len(committed.withheld)
+        pinned = (2666, 569)
+        observed = (len(committed.candidates), len(committed.withheld))
+        assert observed == pinned, (
+            f"committed handoff {DEFAULT_HANDOFF_DIR.name} has "
+            f"{observed[0]} candidates / {observed[1]} withheld, but this self-test pins "
+            f"{pinned[0]} / {pinned[1]}. If the audit was just regenerated, restate the new "
+            "counts in the operator authorization and update these pins; otherwise the "
+            "committed handoff was replaced without review."
+        )
         assert not (set(committed.candidates) & set(committed.withheld))
 
     print("[self-test] purge_actions_artifacts: ok")

@@ -123,3 +123,98 @@ installing after, or expect to hand the operator a tab reopen. The product fix
 attached document's replica into the new instance before dropping the old one, or
 to defer the reload while an attached document has an open cycle — the supervisor
 already has `supervisor_recycle_deferred_cycle_open` for exactly that shape.
+
+---
+
+## 2026-09-20 correction: TWO `.so` is NOT sufficient proof, and bare `missing_replica` is background noise
+
+Both discriminators above were re-measured and are weaker than this file implied.
+Do not open an investigation on either one alone.
+
+**`crdt_current_text_unavailable ... reason=missing_replica` is benign transient
+churn.** Measured on agent-loop 2026-09-20: **988 occurrences across 7 documents**
+(agent-doc-bugs, existence-lang, tsift, lazily, agent-loop, chromium-bridge,
+equityfundingsource), 04:16Z-21:05Z, **including hours with no install at all**.
+Every sampled one is immediately followed by a successful
+`crdt_commit_barrier ready=true visible_delivery_projected=true` and a
+full-length `crdt_current_text`, with replicas pulling normally (210
+`crdt_replica_pull`, generations advancing 7→8→9). It resolves on the next
+attempt. Filed as `#missingreplicanoise` because the benign and terminal cases
+are logged identically.
+
+The terminal signature is the FOLLOW-ON, never the bare line:
+`realtime_doc_resolve_missing_replica_terminal_rebuild_failed` +
+`editor_attached_model_missing` surviving a bounded observation +
+`realtime_doc_resolve_disk_read_refused`. Grep for those, not for
+`missing_replica`.
+
+**TWO mapped `libagent_doc-<epoch>.so` also does not prove a strand.** Same day,
+IDEA PID 1023909 mapped two (16:07:57 and 16:42:13 installs) while every document
+in the project converged fine. An old generation stays mapped until the JVM
+unmaps it; that is ordinary. The two-`.so` check is a *consistency hint*, not the
+finding.
+
+## Better probe: the mapped jar's inode, not its version string
+
+For "is the running IDE on the staged plugin", version strings and mtime
+arithmetic both lie, because `make install` reuses the same filename and
+**version number** for different bytes. Resolve what the JVM actually mapped:
+
+```bash
+for f in /proc/<idea-pid>/map_files/*; do readlink "$f"; done | grep agent-doc-jetbrains
+# → .../agent-doc-jetbrains-0.2.388.jar (deleted)
+```
+
+`(deleted)` means the install unlinked the inode the JVM is still executing: the
+IDE runs superseded bytes under an identical version string, so every
+version-string check reports "activated" and is wrong.
+
+**Check `(deleted)` FIRST and short-circuit — inode numbers are reused.**
+Measured 2026-09-20 across two installs on this machine: the replacement jar came
+back on the SAME inode 76585058 the unlinked one had. An inode-only comparison
+returns "current" for a process demonstrably running unlinked bytes. Only fall
+back to comparing the mapped inode against the on-disk jar when the link does
+*not* carry the suffix. Measured 2026-09-20: mapped
+jar `(deleted)`, on-disk inode 76585058 written 16:42:24, both labelled 0.2.388.
+Filed as `#pluginbyteidentity`; it makes plugin-activation review items
+machine-checkable instead of operator-gated.
+
+
+## `agent-doc repair --apply-recovery` can contradict `session-check`
+
+2026-09-20: `session-check` reported `INTERRUPTED: document still contains
+completed tracked item(s) after closeout: #pluginbyteidentity. Re-run
+preflight/repair so the reap is persisted`, and `agent-doc repair
+--apply-recovery` on that same document answered `is clean — no recovery
+needed`. Repair's drift classifier does not recognise an unreaped `[x]` backlog
+item, so the remedy session-check names does not implement it. The response had
+committed fine; only the archive move was outstanding. Do not read repair's
+"clean" as proof the interruption is spurious, and do not loop past the
+interruption — preflight is the half of that remedy that actually owns the reap.
+
+**REFINEMENT 2026-09-26 23:38 — the strand hits SIBLING documents, not the one you
+closed out.** Following this file's own ordering ("close out the document FIRST,
+install after"), `make install` + `agent-doc admin recycle` ran only after
+`tasks/agent-doc/agent-doc-bugs.md` reached `committed` with a drained queue. That
+document came through clean. Three OTHER attached documents did not:
+
+```
+[03:38:18Z] realtime_doc_resolve_missing_replica_terminal_rebuild_failed file=tasks/software/agent-loop.md      source=prepare_start_runtime pass=bypassed_no_content_identity reason=missing_replica
+[03:38:18Z] realtime_doc_resolve_disk_read_refused                       file=tasks/software/agent-loop.md      editor_open=true recovery=upstream_replica_refresh_exhausted invariant=attached_editor_never_descends_to_disk
+[03:38:18Z] ... file=tasks/software/chromium-bridge.md   (same pair)
+[03:38:19Z] ... file=tasks/software/lazily.md            (same pair)
+```
+
+`source=prepare_start_runtime` is the tell: the strand lands on whichever attached
+documents have their start-runtime prepared *after* the reload, which is every
+other open session document — including one owned by a different live session
+(`lazily.md`). So closing out your own document protects your own closeout and
+nothing else.
+
+**Practical consequence:** after a mid-session install, grep ops.log for
+`terminal_rebuild_failed` and report the FILE LIST, not just "a replica was
+stranded" — each of those tabs needs reopening, and one of them may belong to a
+pane you do not own. Counting bare `missing_replica` (139 occurrences here) or
+`editor_attached_model_missing` (112) still tells you nothing; only the
+`terminal_rebuild_failed` + `disk_read_refused` pair does, and there were exactly
+3 of each.

@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -316,22 +316,38 @@ The filter refuses exactly 530 rows — the same 530 the summary classifies as p
 **Verification.** Seven new self-test regressions: both filter directions, the `--only` widening refusal, the report fields, and the three load guards. Then I attacked each new guard rather than reasoning about it — neutering the filter, the per-row classification check, the summary check, and the missing-column check each reddened the suite in place, and all four restored green. Live: unfiltered plans 2,666 with 0 refused; `--durability durable` plans 2,136 refusing 530. Regenerating the handoff moved withheld 569 → 571 (two artifacts from the CI run that started at 05:23Z), so the self-test's committed-handoff pin is now `(2666, 571)`.
 
 Same scope note as the last cycle: `make artifact-purge-check` is the `make check` leg that owns these files and it is green, but I did not run the full suite — the change is Python-only and the submodule tree still holds another session's uncommitted edits across 14 Rust files. `git commit --only` kept this to my six paths; superproject pointer is `d0c8b7a75`. Exchange is at 255 lines / 10 response sections, noted and still draining.
+
+### Re: do [#lzstrikereceiptflake] — opus-5 · 2026-09-27T02:43-04:00
+
+> **Queue prompt:**
+>
+> do [#lzstrikereceiptflake]
+
+
+Fixed and pushed as `agent-doc@545b0792c`.
+
+**Root cause.** The strike worker writes the document *first* and publishes its application receipt *second* (`complete_answered_free_text_strike` sets `answered_free_text_strike_applied` only after the invocation returns `Ok`). The test polled the document text for `queue: stop`, then read the receipt with no wait at all — so the successful file write was the signal, and the receipt `set` could still be in flight. Under the full parallel run the read landed first and observed `None`. The 3 s budget was never the problem; the missing barrier was.
+
+**Fix.** Added an Effect-driven `await_source_map_entry` barrier over a `ThreadSafeSourceMap` entry: it subscribes to the entry (membership edge plus value edge, the same pattern the production strike Effect uses), publishes into a `parking_lot` `Mutex`/`Condvar` pair when the value satisfies a predicate, and releases on the exact `set`. Both eventual receipts in the test now use it — the adapter failure and the application receipt — and the two polling loops are gone. Because the receipt strictly follows the write it acknowledges, the receipt barrier now also orders the document-text read that follows it, so the ordering is asserted rather than assumed. The remaining 60 s timeout is a liveness backstop that only reports a lost publication; it no longer carries the correctness of the wait.
+
+The failure-side loop got the same treatment: barrier on `answered_free_text_strike_failure` becoming `Some`, then one `document_queue_authority_observe` call that must return `Err` — which is a stronger contract than "poll until it eventually errors".
+
+**Verification.** `make test` green, exit 0: **9845 tests run, 9845 passed**, 259 skipped, 0 `result: FAILED`. The target test passed inside that full parallel run, and 1/1 in isolation at 0.01 s. `cargo clippy -p agent-doc-controller-io --all-targets -- -D warnings` exit 0; `cargo fmt --check` clean for the file I touched.
+
+Two notes on the shared tree. A concurrent session held uncommitted rustfmt hunks in the same file (at lines ~3653 and ~10251, far from the test) plus edits in five other files, so I staged a hand-built blob — HEAD plus my hunks only — and verified it differs from HEAD solely inside lines 17848–18027 and from the worktree solely by their two reformat hunks. Their edits survive uncommitted. The first `make test` did die, but in the doctest phase on a missing `libagent_doc_document_realtime-*.rlib` that a concurrent `cargo check` removed mid-run; doctests pass on their own (exit 0) and the clean re-run of `make test` was green end to end.
+
+CI run 36299889075 was still `in_progress` at closeout, so this rests on local evidence. No `make install` — the change is test-only, and a mid-session install against the live supervisor risks stranding this document's editor replica.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~#advance-review~~
-- ~~do [#lzauditrefresh]~~
-- ~~do [#lzpypiperishable]~~
-- 🚧 do [#lzstrikereceiptflake]
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzstrikereceiptflake] Make agent-doc-controller-io project_controller::tests::queue_authority_observation_requires_exact_strike_application_receipt deterministic. Under the full 9,820-test nextest run it failed with the retry receipt None instead of Some(projection_id) after 1.14s, while passing 5/5 in isolation at 0.02s; it waits on a bounded receive, so parallel load starves it. Not fixed 2026-09-27 because a concurrent session held uncommitted rustfmt edits across agent-doc-controller-io/src/project_controller.rs and editing it would have collided. Replace the timing budget with a deterministic barrier or SimWorld step.
 <!-- /agent:backlog -->
 
 ## Review

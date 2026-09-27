@@ -285,6 +285,43 @@ object TypingTracker : DocumentListener {
         }
     }
 
+    /**
+     * State the four facts a handed-over burst proved (`#opcaptureliveread`).
+     *
+     * The refusal receipt made a dormant ledger diagnosable; this is its positive
+     * counterpart. Without it, a burst that DID reach the record FFI proved the live
+     * epoch generation, the operator/non-operator classification, shadow-replay
+     * agreement, and merge-base availability only by the ABSENCE of a refusal — and
+     * a reporter whose listener never ran writes neither, so reading "no refusal" as
+     * "all four held" is the same absence-is-evidence inversion
+     * `#idlerevisionreactive` names.
+     */
+    private fun logOpCaptureProof(
+        lib: AgentDocLib,
+        filePath: String,
+        operatorOps: Int,
+        nonOperatorOps: Int,
+        shadowReplayAgreed: Boolean,
+        baseHash: String?,
+    ) {
+        try {
+            lib.agent_doc_log_editor_op_capture_proof(
+                filePath,
+                CrdtReplicaManager.liveOpCaptureEpochGeneration(filePath),
+                operatorOps.toLong(),
+                nonOperatorOps.toLong(),
+                if (shadowReplayAgreed) 1 else 0,
+                baseHash,
+            )
+        } catch (_: UnsatisfiedLinkError) {
+            // older cdylib without the proof-receipt ABI; capture still proceeds
+        } catch (_: NoSuchMethodError) {
+            // older cdylib without the proof-receipt ABI; capture still proceeds
+        } catch (e: Throwable) {
+            LOG.debug("[op-capture] proof receipt skipped: ${e.message}")
+        }
+    }
+
     private fun logOpCaptureRefusal(
         lib: AgentDocLib,
         filePath: String,
@@ -651,7 +688,8 @@ object TypingTracker : DocumentListener {
             )
             return
         }
-        reportEditorOps(lib, filePath, opReports)
+        val operatorOps = drainedOps.count { !it.nonOperatorMutation }
+        reportEditorOps(lib, filePath, opReports, operatorOps, drainedOps.size - operatorOps)
     }
 
 /**
@@ -664,6 +702,8 @@ private fun reportEditorOps(
     lib: AgentDocLib,
     filePath: String,
     ops: List<PreparedEditorOp>,
+    operatorOps: Int,
+    nonOperatorOps: Int,
 ) {
     if (ops.isEmpty()) return
     // Resolve the base hash captured ops must align to; skip (diff-guess
@@ -706,6 +746,17 @@ private fun reportEditorOps(
             }
         })
     }
+    // `#opcaptureliveread`: state the four facts BEFORE the record call, so a proof
+    // receipt with no `editor_ops_recorded` beside it is itself the diagnosis —
+    // the reporter got all the way here and the FFI still wrote nothing.
+    logOpCaptureProof(
+        lib,
+        filePath,
+        operatorOps = operatorOps,
+        nonOperatorOps = nonOperatorOps,
+        shadowReplayAgreed = true,
+        baseHash = baseHash,
+    )
     lib.agent_doc_record_editor_ops_json(filePath, baseHash, batch.toString())
 }
 

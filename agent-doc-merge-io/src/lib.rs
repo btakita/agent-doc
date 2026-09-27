@@ -117,7 +117,7 @@ pub fn merge_contents_crdt_with_ops(
                     agent_doc_hash::content_hash(&base_text)
                         .get(..12)
                         .unwrap_or_default(),
-                    summarize_editor_ops_for_log(ops)
+                    agent_doc_merge::crdt::summarize_editor_ops_for_log(ops)
                 ),
             );
             agent_doc_merge::crdt::merge_with_editor_ops(base_state, ours, theirs, Some(ops))
@@ -137,33 +137,6 @@ pub fn merge_contents_crdt_with_ops(
     let state = crdt_doc.encode_state();
     eprintln!("[write] CRDT merge successful - no conflicts possible.");
     Ok((merged, state))
-}
-
-fn summarize_editor_ops_for_log(ops: &[agent_doc_merge::crdt::EditorOp]) -> String {
-    let mut offsets = Vec::new();
-    let mut delete_bytes = 0usize;
-    let mut insert_bytes = 0usize;
-    let mut insert_non_ascii = false;
-    for op in ops {
-        match op {
-            agent_doc_merge::crdt::EditorOp::Insert { offset, text } => {
-                offsets.push(offset.to_string());
-                insert_bytes = insert_bytes.saturating_add(text.len());
-                insert_non_ascii |= !text.is_ascii();
-            }
-            agent_doc_merge::crdt::EditorOp::Delete { offset, len } => {
-                offsets.push(offset.to_string());
-                delete_bytes = delete_bytes.saturating_add(*len);
-            }
-        }
-    }
-    format!(
-        "offsets={} delete_bytes={} insert_bytes={} insert_non_ascii={}",
-        offsets.join(","),
-        delete_bytes,
-        insert_bytes,
-        insert_non_ascii
-    )
 }
 
 #[cfg(test)]

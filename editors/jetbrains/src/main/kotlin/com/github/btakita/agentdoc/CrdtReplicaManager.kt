@@ -574,6 +574,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val pendingLocalEditorEdits =
         ConcurrentHashMap<String, MutableList<CapturedLocalEditorEdit>>()
     private val remoteEditorEffectGenerations = ConcurrentHashMap<String, AtomicLong>()
+
+    /** Latest published remote-editor effect generation for [filePath], or `-1`. */
+    internal fun remoteEditorEffectGeneration(filePath: String): Long =
+        remoteEditorEffectGenerations[filePath]?.get() ?: -1L
     private val localEditorFlushPendingPaths = ConcurrentHashMap.newKeySet<String>()
     private val drainQueued = AtomicBoolean(false)
     private val drainAllRequested = AtomicBoolean(false)
@@ -4007,6 +4011,19 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             applyingAgentMutations.contains(filePath) ||
                 isApplyingRemote(filePath) ||
                 isReloadingFileContent(filePath)
+
+        /**
+         * The live op-capture epoch generation for [filePath], or `-1` when none.
+         *
+         * `#opcaptureliveread`: a captured operator burst is replayable only while
+         * its path is still at the epoch it was captured in — every remote/agent
+         * projection closes the epoch first (`agent_doc_clear_editor_op_epoch`). The
+         * op-capture proof receipt states this generation so a burst that was
+         * recorded against a retired epoch is readable in `ops.log` rather than
+         * inferred from the absence of a refusal.
+         */
+        fun liveOpCaptureEpochGeneration(filePath: String): Long =
+            managerForFilePath(filePath)?.remoteEditorEffectGeneration(filePath) ?: -1L
 
         fun isOperatorDocumentEvent(filePath: String, event: DocumentEvent): Boolean =
             isOperatorDocumentEventUtil(

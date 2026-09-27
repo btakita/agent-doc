@@ -18,6 +18,7 @@ struct OpCaptureVerification {
     accepted_count: usize,
     failed_count: usize,
     refused_count: usize,
+    proof_count: usize,
     cafe_demo: bool,
 }
 
@@ -26,13 +27,14 @@ pub fn run(file: &Path, expect_cafe_demo: bool) -> Result<()> {
     println!("op-capture verification ok for {}", file.display());
     println!("ops_log={}", report.ops_log.display());
     println!(
-        "doc={} editor_op_recorded={} editor_ops_recorded={} editor_ops_for_base_accepted={} failures={} capture_refusals={}",
+        "doc={} editor_op_recorded={} editor_ops_recorded={} editor_ops_for_base_accepted={} failures={} capture_refusals={} capture_proofs={}",
         report.doc_tag,
         report.recorded_count,
         report.batch_recorded_count,
         report.accepted_count,
         report.failed_count,
-        report.refused_count
+        report.refused_count,
+        report.proof_count
     );
     if expect_cafe_demo {
         println!("cafe_demo=ok offset=6 delete_len=6 insert_non_ascii=true");
@@ -95,14 +97,26 @@ fn verify(file: &Path, expect_cafe_demo: bool) -> Result<OpCaptureVerification> 
         .filter(|line| OpsLogEvent::EditorOpCaptureRefused.is_line(line))
         .collect();
     let refused_count = refused.len();
+    // `#opcaptureliveread`: the positive counterpart. A reporter that reached the
+    // record FFI states the four facts this verification depends on — live
+    // op-capture epoch generation, the operator/non-operator classification split,
+    // shadow-replay agreement, and merge-base availability — so a producer marker
+    // that IS present no longer rests on the absence of a refusal as its evidence.
+    let proofs: Vec<&str> = doc_lines
+        .iter()
+        .copied()
+        .filter(|line| OpsLogEvent::EditorOpCaptureProof.is_line(line))
+        .collect();
+    let proof_count = proofs.len();
     if recorded.is_empty() && batch_recorded.is_empty() {
         bail!(
             "missing editor-op producer marker for {doc_tag} in {} — expected either \
              `{}` (one-op FFI, #qnodemerge4wire) or `{EDITOR_OPS_RECORDED_MARKER} ... transaction=batch` \
-             (batch FFI, #qbasehashmemo, the path the JetBrains TypingTracker uses).{}",
+             (batch FFI, #qbasehashmemo, the path the JetBrains TypingTracker uses).{}{}",
             ops_log.display(),
             OpsLogEvent::EditorOpRecorded,
             describe_capture_refusals(&refused),
+            describe_capture_proofs(&proofs),
         );
     }
 
@@ -138,7 +152,7 @@ fn verify(file: &Path, expect_cafe_demo: bool) -> Result<OpCaptureVerification> 
     }
 
     if expect_cafe_demo {
-        verify_cafe_demo(&recorded, &accepted, &ops_log, &doc_tag)?;
+        verify_cafe_demo(&recorded, &batch_recorded, &accepted, &ops_log, &doc_tag)?;
     }
 
     Ok(OpCaptureVerification {
@@ -149,6 +163,7 @@ fn verify(file: &Path, expect_cafe_demo: bool) -> Result<OpCaptureVerification> 
         accepted_count: accepted.len(),
         failed_count,
         refused_count,
+        proof_count,
         cafe_demo: expect_cafe_demo,
     })
 }
@@ -183,8 +198,37 @@ fn describe_capture_refusals(refused: &[&str]) -> String {
     )
 }
 
+/// Summarize `editor_op_capture_proof` receipts for a producer-marker failure.
+///
+/// `#opcaptureliveread`: a proof receipt beside a missing producer marker is the
+/// sharpest shape available — the reporter got as far as stating the four facts and
+/// the record FFI still wrote nothing, which is neither a dormant chain nor a
+/// refusal. Name the last proof's fields so the failing fact is read, not guessed.
+fn describe_capture_proofs(proofs: &[&str]) -> String {
+    let Some(last) = proofs.last() else {
+        return String::new();
+    };
+    let fields: Vec<&str> = last
+        .split_whitespace()
+        .filter(|field| {
+            field.starts_with("epoch_generation=")
+                || field.starts_with("operator_ops=")
+                || field.starts_with("non_operator_ops=")
+                || field.starts_with("shadow_replay=")
+                || field.starts_with("merge_base=")
+        })
+        .collect();
+    format!(
+        " {} `{}` receipt(s) show the reporter reached the record FFI; the latest states {}.",
+        proofs.len(),
+        OpsLogEvent::EditorOpCaptureProof,
+        fields.join(" "),
+    )
+}
+
 fn verify_cafe_demo(
     recorded: &[&str],
+    batch_recorded: &[&str],
     accepted: &[&str],
     ops_log: &Path,
     doc_tag: &str,
@@ -199,14 +243,25 @@ fn verify_cafe_demo(
         bail!("internal non-ASCII byte contract check failed");
     }
 
+    // `#opcaptureliveread`: read the byte contract off EITHER producer. The one-op
+    // FFI renders it per op (`kind=delete offset=6 delete_len=6`); the batch FFI the
+    // JetBrains TypingTracker drives renders the whole burst through the shared
+    // summary (`offsets=6,6 delete_bytes=6 insert_non_ascii=true`). Demanding only
+    // the per-op form made cafe-demo mode unsatisfiable on every real JetBrains
+    // session — the same false negative `#opcaptureverifybatchproducer` removed from
+    // plain mode, which survived here because cafe-demo had its own reader.
     let recorded_delete = recorded.iter().any(|line| {
         line.contains("kind=delete") && line.contains("offset=6") && line.contains("delete_len=6")
-    });
+    }) || batch_recorded
+        .iter()
+        .any(|line| line.contains("offsets=6,6") && line.contains("delete_bytes=6"));
     let recorded_non_ascii_insert = recorded.iter().any(|line| {
         line.contains("kind=insert")
             && line.contains("offset=6")
             && line.contains("insert_non_ascii=true")
-    });
+    }) || batch_recorded
+        .iter()
+        .any(|line| line.contains("offsets=6,6") && line.contains("insert_non_ascii=true"));
     let accepted_delete = accepted
         .iter()
         .any(|line| line.contains("offsets=") && line.contains("delete_bytes=6"));
@@ -220,7 +275,9 @@ fn verify_cafe_demo(
         && accepted_non_ascii_insert)
     {
         bail!(
-            "missing cafe-demo byte evidence for {doc_tag} in {}; expected delete offset=6/delete_len=6 and accepted non-ASCII insert",
+            "missing cafe-demo byte evidence for {doc_tag} in {}; expected a producer \
+             delete at byte offset 6 of 6 bytes (one-op `offset=6 delete_len=6`, or batch \
+             `offsets=6,6 delete_bytes=6`) plus an accepted non-ASCII insert",
             ops_log.display()
         );
     }
@@ -365,6 +422,186 @@ mod tests {
         assert!(
             err.contains("missing editor_ops_for_base accepted=true"),
             "unexpected error: {err}"
+        );
+    }
+
+    /// `#opcaptureliveread`: drive the real producers and let the verifier read the
+    /// ops.log they wrote, so the `editor_ops_recorded ... transaction=batch`
+    /// contract stops depending on a human typing into IntelliJ.
+    ///
+    /// Every other test in this module hands the verifier ops-log text written by
+    /// the test, which proves the PARSER and nothing about the producers. A parser
+    /// test cannot catch a producer whose marker text drifts — exactly the
+    /// `#opcaptureverifybatchproducer` defect, where the verifier demanded a marker
+    /// the shipped plugin never wrote and no test noticed. This one calls the batch
+    /// FFI the JetBrains `TypingTracker` calls, the proof FFI beside it, and the
+    /// merge consumer, then verifies the log none of them were told about.
+    #[test]
+    fn a_synthetic_burst_through_the_real_producers_satisfies_verification() {
+        use std::ffi::CString;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("plan.md");
+
+        // The canonical non-ASCII byte contract: "café " is 6 UTF-8 bytes and
+        // "日本" is 6, so a synthetic burst can assert byte offsets the UTF-16
+        // editor side would get wrong.
+        let base_text = "café 日本 😀\n";
+        std::fs::write(&doc, base_text).unwrap();
+        let base_hash = agent_doc_hash::content_hash(base_text);
+
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+        let base_c = CString::new(base_hash.as_str()).unwrap();
+        let ops_c = CString::new(
+            r#"[{"kind":"delete","offset":6,"len":6},{"kind":"insert","offset":6,"text":"世界"}]"#,
+        )
+        .unwrap();
+
+        // 1. The reporter states the four facts it resolved for this burst.
+        let rc = unsafe {
+            agent_doc::ffi::agent_doc_log_editor_op_capture_proof(
+                file_c.as_ptr(),
+                7,
+                2,
+                0,
+                1,
+                base_c.as_ptr(),
+            )
+        };
+        assert_eq!(rc, 1, "the proof receipt must be written");
+
+        // 2. The batch producer the JetBrains TypingTracker actually drives.
+        let rc = unsafe {
+            agent_doc::ffi::agent_doc_record_editor_ops_json(
+                file_c.as_ptr(),
+                base_c.as_ptr(),
+                ops_c.as_ptr(),
+            )
+        };
+        assert_eq!(rc, 1, "the synthetic burst must record");
+
+        // 3. The merge consumer, which writes the acceptance receipt.
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(base_text).encode_state();
+        let (merged, _state) = agent_doc_merge_io::merge_contents_crdt_with_ops(
+            &doc,
+            Some(&base_state),
+            "café 日本 😀\n\nAgent response.\n",
+            "café 世界 😀\n",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert!(
+            merged.contains("世界") && merged.contains("Agent response."),
+            "the synthetic burst must survive the merge it proves:\n{merged}"
+        );
+
+        // 4. The verifier reads only what the producers above wrote.
+        let ops_log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("transaction=batch"),
+            "the batch producer marker must come from the FFI, not from the test:\n{ops_log}"
+        );
+        let report = verify(&doc, true).unwrap();
+        assert_eq!(
+            report.batch_recorded_count, 1,
+            "the batch producer receipt must satisfy verification:\n{ops_log}"
+        );
+        assert_eq!(report.accepted_count, 1, "merge acceptance missing:\n{ops_log}");
+        assert_eq!(report.failed_count, 0);
+        assert_eq!(report.refused_count, 0, "a clean burst refuses nothing:\n{ops_log}");
+        assert_eq!(
+            report.proof_count, 1,
+            "the reporter proof must be counted:\n{ops_log}"
+        );
+        assert!(report.cafe_demo, "the non-ASCII byte contract must hold");
+    }
+
+    /// The proof receipt names all four facts on one parseable line, and an absent
+    /// generation or merge base reads as `unknown` / `unavailable` rather than as a
+    /// dangling field or a plausible-looking `0`.
+    #[test]
+    fn the_capture_proof_receipt_names_every_fact_the_verification_depends_on() {
+        use std::ffi::CString;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+
+        let base_c = CString::new("abcdef0123456789").unwrap();
+        let rc = unsafe {
+            agent_doc::ffi::agent_doc_log_editor_op_capture_proof(
+                file_c.as_ptr(),
+                12,
+                3,
+                1,
+                1,
+                base_c.as_ptr(),
+            )
+        };
+        assert_eq!(rc, 1);
+
+        // No registration, no base, replay disagreed: the three "not available"
+        // shapes must be distinguishable from real values.
+        let rc = unsafe {
+            agent_doc::ffi::agent_doc_log_editor_op_capture_proof(
+                file_c.as_ptr(),
+                -1,
+                0,
+                4,
+                0,
+                std::ptr::null(),
+            )
+        };
+        assert_eq!(rc, 1);
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let receipts: Vec<&str> = ops_log
+            .lines()
+            .filter(|line| OpsLogEvent::EditorOpCaptureProof.is_line(line))
+            .collect();
+        assert_eq!(receipts.len(), 2, "both receipts must be written:\n{ops_log}");
+        assert!(
+            receipts[0].contains("epoch_generation=12")
+                && receipts[0].contains("operator_ops=3")
+                && receipts[0].contains("non_operator_ops=1")
+                && receipts[0].contains("shadow_replay=agreed")
+                && receipts[0].contains("merge_base=abcdef012345")
+                && receipts[0].contains("#opcaptureliveread"),
+            "the receipt must name all four facts on one line: {}",
+            receipts[0]
+        );
+        assert!(
+            receipts[1].contains("epoch_generation=unknown")
+                && receipts[1].contains("shadow_replay=disagreed")
+                && receipts[1].contains("merge_base=unavailable"),
+            "an absent generation or base must not read as a real value: {}",
+            receipts[1]
+        );
+    }
+
+    /// A proof receipt beside a missing producer marker is its own diagnosis: the
+    /// reporter reached the record FFI and the FFI still wrote nothing.
+    #[test]
+    fn verify_names_the_proof_fields_when_the_producer_marker_is_still_missing() {
+        let (_dir, doc) = setup_log(
+            "[2026-06-24T00:00:00Z] editor_op_capture_proof epoch_generation=4 operator_ops=2 non_operator_ops=0 shadow_replay=agreed merge_base=abcdef012345 #opcaptureliveread doc=plan\n",
+        );
+
+        let err = verify(&doc, false).unwrap_err().to_string();
+        assert!(
+            err.contains("reached the record FFI")
+                && err.contains("operator_ops=2")
+                && err.contains("merge_base=abcdef012345"),
+            "a proof beside a missing producer must name the fields it proved: {err}"
+        );
+        assert!(
+            err.contains("reporter chain is unobserved"),
+            "the refusal half of the diagnosis stays intact: {err}"
         );
     }
 

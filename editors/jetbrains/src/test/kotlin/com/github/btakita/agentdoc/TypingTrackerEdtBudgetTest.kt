@@ -514,6 +514,63 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
+    fun `a handed-over burst states the four facts verification depends on`() {
+        // #opcaptureliveread: the refusal receipt made a dormant ledger diagnosable,
+        // but a ledger that DOES record still proved the live epoch generation, the
+        // isOperatorDocumentEvent split, shadow-replay agreement, and merge-base
+        // availability only by the ABSENCE of a refusal. A reporter whose listener
+        // never ran writes neither, so "no refusal" is not evidence that all four
+        // held — the same absence-is-evidence inversion #idlerevisionreactive names.
+        val trackerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+        ).first { Files.exists(it) }
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(trackerPath)
+        val manager = Files.readString(managerPath)
+
+        assertTrue(
+            "the reporter must resolve the live op-capture epoch, not a stand-in",
+            source.contains("CrdtReplicaManager.liveOpCaptureEpochGeneration(filePath)") &&
+                manager.contains("fun liveOpCaptureEpochGeneration(filePath: String): Long"),
+        )
+        assertTrue(
+            "an absent epoch must read as unknown, not as generation 0",
+            manager.contains("remoteEditorEffectGenerations[filePath]?.get() ?: -1L"),
+        )
+        assertTrue(
+            "the isOperatorDocumentEvent split must reach the proof, not be recomputed there",
+            source.contains("val operatorOps = drainedOps.count { !it.nonOperatorMutation }") &&
+                source.contains("reportEditorOps(lib, filePath, opReports, operatorOps, drainedOps.size - operatorOps)"),
+        )
+        val reportBody = source.substringAfter("private fun reportEditorOps")
+        assertTrue(
+            "the success path must state the four facts before handing the burst over",
+            reportBody.indexOf("logOpCaptureProof(") in 0 until
+                reportBody.indexOf("agent_doc_record_editor_ops_json("),
+        )
+        assertTrue(
+            "the proof must carry the merge base the ops are actually stamped against",
+            reportBody.contains("baseHash = baseHash"),
+        )
+        assertTrue(
+            "an older cdylib without the proof ABI must not break capture",
+            source.substringAfter("private fun logOpCaptureProof")
+                .substringBefore("private fun logOpCaptureRefusal")
+                .contains("catch (_: UnsatisfiedLinkError)"),
+        )
+        assertFalse(
+            "the proof is the success receipt; a refusal path must not also claim it",
+            source.substringAfter("private fun reportDrainedEditorOps")
+                .substringBefore("#qnodemerge4wire Phase 4")
+                .contains("logOpCaptureProof("),
+        )
+    }
+
+    @Test
     fun `crdt document listener uses shadows instead of copying full editor text`() {
         val managerPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),

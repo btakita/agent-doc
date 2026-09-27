@@ -861,6 +861,41 @@ names these reasons when both producer markers are absent, and reports the
 absence of receipts as an unobserved reporter chain — a different diagnosis from
 a named refusal.
 
+A handed-over burst states its evidence too (`#opcaptureliveread`). The refusal
+receipt made a *dormant* ledger diagnosable, but a ledger that DOES record still
+proved the four facts verification depends on only by the **absence** of a
+refusal — and a reporter whose listener never ran writes neither, so reading "no
+refusal" as "all four held" is the same absence-is-evidence inversion
+`#idlerevisionreactive` names. The success path therefore writes
+`editor_op_capture_proof epoch_generation=<n|unknown> operator_ops=<n>
+non_operator_ops=<n> shadow_replay=agreed|disagreed merge_base=<h12|unavailable>`
+through `agent_doc_log_editor_op_capture_proof`, immediately **before** handing the
+burst to the record FFI — so a proof receipt with no producer marker beside it is
+itself a distinct diagnosis: the reporter got all the way there and the FFI still
+wrote nothing. `epoch_generation` is the live op-capture epoch that bounds the
+burst's validity (every projection closes the epoch first), not a count of live
+editors: the reporter cannot observe the latter without a controller round trip per
+burst.
+
+Both producers render the same byte vocabulary, so the byte contract is readable
+off either. `editor_ops_recorded` carries the shared
+`agent_doc_merge::crdt::summarize_editor_ops_for_log` summary (`offsets=…
+delete_bytes=… insert_bytes=… insert_non_ascii=…`) that `editor_ops_for_base
+accepted=true` already carried. Before that, only the ONE-OP producer logged
+per-op bytes, which left `verify-op-capture --expect-cafe-demo` — documented for
+live JB/VS Code plugin tests — satisfiable only by the FFI the JetBrains
+`TypingTracker` never calls: the same false negative
+`#opcaptureverifybatchproducer` removed from plain mode, surviving in cafe-demo
+mode because that mode had its own reader.
+
+The producer contract is proven by a synthetic burst, not by a human. A
+deterministic test drives the proof FFI, the batch record FFI, and the merge
+consumer against a temporary project, then runs the verifier over the `ops.log`
+those producers wrote — including the `café 日本 😀` byte contract. Tests that hand
+the verifier ops-log text written by the test prove the parser and nothing about
+the producers, which is why a verifier demanding a marker the shipped plugin never
+wrote went unnoticed.
+
 A captured burst is replayed only against a buffer snapshot it can reach. The
 reporter reads the editor text and drains the pending burst off the EDT, so each
 captured op carries the `Document` modification stamp it left behind and the

@@ -1611,12 +1611,18 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
 
     let file_path_buf = std::path::PathBuf::from(file);
     let op_count = ops.len();
+    // `#opcaptureliveread`: carry the same per-op byte summary the merge consumer
+    // renders. Without it the batch marker proved only that N ops were recorded, so
+    // `verify-op-capture --expect-cafe-demo` — documented for live JB/VS Code plugin
+    // tests — could be satisfied ONLY by the one-op FFI the JetBrains TypingTracker
+    // never calls. Same false-negative shape as `#opcaptureverifybatchproducer`.
+    let op_log_summary = agent_doc_merge::crdt::summarize_editor_ops_for_log(&ops);
     match agent_doc_op_capture_io::record_editor_ops(&file_path_buf, base, ops) {
         Ok(()) => {
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!(
-                    "editor_ops_recorded count={op_count} base={} transaction=batch #qbasehashmemo",
+                    "editor_ops_recorded count={op_count} base={} transaction=batch {op_log_summary} #qbasehashmemo",
                     base.get(..12).unwrap_or(base),
                 ),
             );
@@ -1676,6 +1682,93 @@ pub unsafe extern "C" fn agent_doc_log_editor_op_capture_refusal(
             OpsLogEvent::EditorOpCaptureRefused,
             sanitize_op_capture_refusal_field(reason),
             sanitize_op_capture_refusal_field(detail),
+        ),
+    );
+    1
+}
+
+/// Record the positive evidence a captured operator burst was handed over.
+///
+/// `#opcaptureliveread`: the refusal receipt
+/// ([`agent_doc_log_editor_op_capture_refusal`]) made a *dormant* ledger
+/// diagnosable, but a ledger that DOES record still proved the four facts
+/// `verify-op-capture` depends on only by the absence of a refusal. Absence of a
+/// refusal is not evidence: a reporter whose listener never ran writes neither,
+/// and reading "no refusal" as "all four held" is the same inversion
+/// `#idlerevisionreactive` names. So the success path states them.
+///
+/// The four facts, in the order the reporter resolves them:
+/// - `epoch_generation` — the live op-capture epoch the burst belongs to. A
+///   captured burst is replayable only while its path is still at the epoch it was
+///   captured in, because every remote/agent projection closes the epoch first
+///   ([`agent_doc_clear_editor_op_epoch`]). `-1` when the reporter holds none,
+///   logged as `unknown`. This is the generation that bounds the burst's validity,
+///   not a count of live editors — the reporter cannot observe the latter without
+///   a controller round trip per burst, which is exactly the load
+///   `#idlerevisionreactive` forbids on a hot path.
+/// - `operator_ops` / `non_operator_ops` — the `isOperatorDocumentEvent`
+///   classification split across the drained burst.
+/// - `shadow_replay_agreed` — whether the recorded ops reconstructed the reported
+///   buffer (`prepareEditorOpReports` returned reports rather than `null`).
+/// - `base_hash` — the merge base the ops are stamped against; empty or NULL is
+///   logged as `unavailable`.
+///
+/// Returns `1` when the receipt was written and `0` on invalid UTF-8.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string. `base_hash` may be
+/// NULL; when non-NULL it must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_log_editor_op_capture_proof(
+    file_path: *const c_char,
+    epoch_generation: i64,
+    operator_ops: i64,
+    non_operator_ops: i64,
+    shadow_replay_agreed: i32,
+    base_hash: *const c_char,
+) -> i32 {
+    let Ok(file) = unsafe { CStr::from_ptr(file_path) }.to_str() else {
+        eprintln!(
+            "[op-capture] agent_doc_log_editor_op_capture_proof: non-UTF-8 file path; dropping receipt"
+        );
+        return 0;
+    };
+    let base = if base_hash.is_null() {
+        None
+    } else {
+        match unsafe { CStr::from_ptr(base_hash) }.to_str() {
+            Ok(base) => Some(base),
+            Err(_) => {
+                eprintln!(
+                    "[op-capture] agent_doc_log_editor_op_capture_proof: non-UTF-8 base hash; dropping receipt"
+                );
+                return 0;
+            }
+        }
+    };
+    let file_path_buf = std::path::PathBuf::from(file);
+    let generation = if epoch_generation < 0 {
+        "unknown".to_string()
+    } else {
+        epoch_generation.to_string()
+    };
+    let merge_base = match base {
+        Some(base) if !base.is_empty() => base.get(..12).unwrap_or(base).to_string(),
+        _ => "unavailable".to_string(),
+    };
+    agent_doc_ops_log_io::log_op(
+        &file_path_buf,
+        &format!(
+            "{} epoch_generation={generation} operator_ops={operator_ops} \
+             non_operator_ops={non_operator_ops} shadow_replay={} merge_base={merge_base} \
+             #opcaptureliveread",
+            OpsLogEvent::EditorOpCaptureProof,
+            if shadow_replay_agreed != 0 {
+                "agreed"
+            } else {
+                "disagreed"
+            },
         ),
     );
     1

@@ -2211,6 +2211,42 @@ pub enum EditorOp {
     Delete { offset: usize, len: usize },
 }
 
+/// Byte-level `ops.log` summary for an ordered editor-op burst.
+///
+/// One vocabulary, two receipts (`#opcaptureliveread`): the batch producer
+/// (`agent_doc_record_editor_ops_json`) and the merge consumer
+/// (`editor_ops_for_base accepted=true`) both render their burst through this, so
+/// `verify-op-capture --expect-cafe-demo` can read the non-ASCII byte contract off
+/// either. Before this was shared, only the ONE-OP producer carried per-op bytes,
+/// which made cafe-demo mode unsatisfiable on the batch path the JetBrains
+/// `TypingTracker` actually drives — the same false negative
+/// `#opcaptureverifybatchproducer` fixed for plain mode, left in place here.
+///
+/// Byte counts and an `insert_non_ascii` flag only; never inserted text.
+pub fn summarize_editor_ops_for_log(ops: &[EditorOp]) -> String {
+    let mut offsets = Vec::new();
+    let mut delete_bytes = 0usize;
+    let mut insert_bytes = 0usize;
+    let mut insert_non_ascii = false;
+    for op in ops {
+        match op {
+            EditorOp::Insert { offset, text } => {
+                offsets.push(offset.to_string());
+                insert_bytes = insert_bytes.saturating_add(text.len());
+                insert_non_ascii |= !text.is_ascii();
+            }
+            EditorOp::Delete { offset, len } => {
+                offsets.push(offset.to_string());
+                delete_bytes = delete_bytes.saturating_add(*len);
+            }
+        }
+    }
+    format!(
+        "offsets={} delete_bytes={delete_bytes} insert_bytes={insert_bytes} insert_non_ascii={insert_non_ascii}",
+        offsets.join(","),
+    )
+}
+
 /// Replay captured editor ops onto `base`, reconstructing the editor's final
 /// text. Ops apply in sequence with each offset absolute against the running
 /// buffer (matching the editor's own event semantics).

@@ -851,6 +851,27 @@ interface AgentDocLib : Library {
     ): Int
 
     /**
+     * Record the positive evidence that a captured operator burst was handed to
+     * [agent_doc_record_editor_ops_json] (`#opcaptureliveread`).
+     *
+     * The refusal receipt made a dormant ledger diagnosable, but a ledger that DOES record still
+     * proved the four facts `verify-op-capture` depends on only by the ABSENCE of a refusal — and a
+     * reporter whose listener never ran writes neither. [epochGeneration] is the live op-capture
+     * epoch the burst belongs to (`-1` when unknown), [operatorOps]/[nonOperatorOps] the
+     * `isOperatorDocumentEvent` split, [shadowReplayAgreed] whether the recorded ops reconstructed
+     * the reported buffer, and [baseHash] the merge base they are stamped against (null when
+     * unavailable).
+     */
+    fun agent_doc_log_editor_op_capture_proof(
+        filePath: String,
+        epochGeneration: Long,
+        operatorOps: Long,
+        nonOperatorOps: Long,
+        shadowReplayAgreed: Int,
+        baseHash: String?,
+    ): Int
+
+    /**
      * Compute the base hash captured ops must be stamped with so the write-time merge accepts them
      * (`#qnodemerge4wire`) — the SHA256 hex of the resolved CRDT merge base text. Returns a string
      * pointer (null on error → skip op capture this edit). Caller must free with

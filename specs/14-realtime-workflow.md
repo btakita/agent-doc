@@ -619,11 +619,24 @@ Four classifications, each naming itself in `ops.log` as
 
 `authority_subsumes_disk` is what a **blocked commit** looks like. When the
 controller reports `NativeSaveRequired` with `disk_projection_ready=false`, the
-commit does not land, yet the baseline is still checkpointed from the live
-snapshot; disk keeps the older committed revision and the operator keeps typing.
-All three planes then differ with no rival writer at all. The monotonic
-subsequence proof is the same one that gates rebasing a retained response onto
-concurrent operator steering.
+commit does not land; disk keeps the older committed revision and the operator
+keeps typing. All three planes then differ with no rival writer at all. The
+monotonic subsequence proof is the same one that gates rebasing a retained
+response onto concurrent operator steering.
+
+A blocked commit leaves the baseline at the last **durably-projected** revision.
+The merge baseline is content-addressed, so re-asserting the same content is not a
+new revision: `checkpoint_document_baseline` compares the incoming content hash
+against the projected baseline and, on a match, rewrites only the write-only
+crash-state sidecar and logs `document_baseline_checkpoint_unchanged
+… generation=<unchanged>` instead of appending a `DocumentBaselineCheckpointed`
+fact. The gate lives in the one function that owns the fact, so it holds for every
+call site rather than asking each of them to re-derive the same answer. Without it
+a blocked commit and its retries each emitted a fresh
+`document_baseline_checkpoint generation=N+1` at identical content, and the ledger
+read as though the baseline had advanced past a commit that never happened —
+observed 2026-09-27 on `tasks/agent-doc/agent-doc-bugs.md` as `generation=1791`
+then `generation=1792`, both at `len=31112`.
 
 Only the durable authority branch being unchanged authorizes adopting disk
 (`fast_forward_authority_to_disk`). That compare-and-swap rechecks the authority

@@ -2576,6 +2576,192 @@ Duplicate replay should stay live.
         );
     }
 
+    /// `#baselinecommitblocked`: a commit that never landed must leave the merge
+    /// baseline at the last durably-projected revision.
+    ///
+    /// Observed 2026-09-27 07:13Z on `tasks/agent-doc/agent-doc-bugs.md`: the
+    /// controller refused the projection (`decision=NativeSaveRequired
+    /// disk_projection_ready=false`), commit blocked on
+    /// `commit_blocked_unproved_head_current_component_drift`, and yet the run
+    /// emitted `document_baseline_checkpoint generation=1791` and then
+    /// `generation=1792` — both at `len=31112`, the unchanged HEAD content. The
+    /// `snapshot_repair … reason=committed_capture basis=head_local_drift` branch
+    /// re-asserts HEAD as the baseline on every blocked retry, so each retry burned
+    /// another generation and the ledger read as though the baseline had advanced
+    /// past a commit that never happened.
+    ///
+    /// This reproduces that loop: a committed capture materialized in HEAD, the
+    /// operator still typing on disk, and the repair driven repeatedly. The first
+    /// pass legitimately converges the baseline to HEAD; every pass after it
+    /// re-asserts the same content and must not move the generation.
+    #[test]
+    fn a_blocked_commit_leaves_the_baseline_at_the_last_durably_projected_revision() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let doc = root.join("session.md");
+        let stale_snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- [ ] [#old] old work\n",
+            "<!-- /agent:queue -->\n",
+        );
+        commit_file(root, "session.md", stale_snapshot, "initial session");
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: go-mode backlog - gpt-5\n\n",
+            "The response is already committed.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n\n",
+            "Done.\n",
+            "### Re: go-mode backlog - gpt-5 (HEAD)\n\n",
+            "The response is already committed.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- [x] [#old] old work\n",
+            "- [ ] [#next] next work\n",
+            "<!-- /agent:queue -->\n",
+        );
+        commit_file(root, "session.md", head, "committed response");
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(stale_snapshot),
+            Some(head),
+        )
+        .unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+
+        // The operator keeps typing while the commit is blocked, so disk never
+        // equals HEAD and the repair takes the `basis=head_local_drift` branch on
+        // every pass — the shape the live trace ran in a loop.
+        fs::write(
+            &doc,
+            head.replace("- [ ] [#next] next work", "- [ ] [#next] next work, revised"),
+        )
+        .unwrap();
+
+        let repaired = agent_doc_repair_io::repair_committed_historical_snapshot_drift(&doc)
+            .expect("the committed capture must converge the baseline to HEAD");
+        assert_eq!(repaired, Some("committed_capture"));
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            Some(head.to_string()),
+            "the first pass legitimately converges the baseline to HEAD"
+        );
+        let converged_generation = agent_doc_snapshot_io::load_document_baseline_generation(&doc)
+            .unwrap()
+            .expect("the converged baseline is projected");
+
+        for pass in 0..3 {
+            agent_doc_repair_io::repair_committed_historical_snapshot_drift(&doc).unwrap();
+            assert_eq!(
+                agent_doc_snapshot_io::load_document_baseline_generation(&doc).unwrap(),
+                Some(converged_generation),
+                "blocked-commit retry {pass} re-asserted the same baseline content and \
+                 must not advance the generation"
+            );
+            assert_eq!(
+                agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+                Some(head.to_string()),
+                "a commit that never landed must not move the baseline content"
+            );
+        }
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("reason=committed_capture") && log.contains("basis=head_local_drift"),
+            "the fixture must run the branch that churned the generation live:\n{log}"
+        );
+        assert!(
+            log.contains("document_baseline_checkpoint_unchanged"),
+            "a re-assertion of unchanged baseline content must audit itself:\n{log}"
+        );
+        assert!(
+            !log.contains(&format!(
+                "document_baseline_checkpoint file={} generation={}",
+                doc.display(),
+                converged_generation + 1
+            )),
+            "no retry may emit a fresh baseline generation at identical content:\n{log}"
+        );
+    }
+
+    /// Content identity is the gate, not "checkpointing is now a no-op": a genuinely
+    /// newer baseline revision must still advance the generation.
+    #[test]
+    fn a_changed_baseline_revision_still_advances_the_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+        let doc = root.join("session.md");
+        fs::write(&doc, "# doc\n").unwrap();
+
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            "first\n",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let first = agent_doc_snapshot_io::load_document_baseline_generation(&doc)
+            .unwrap()
+            .expect("first checkpoint projects a baseline");
+
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            "first\n",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline_generation(&doc).unwrap(),
+            Some(first),
+            "identical content is the same revision"
+        );
+
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            "second\n",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline_generation(&doc).unwrap(),
+            Some(first + 1),
+            "a newer baseline revision must still advance the generation"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            Some("second\n".to_string())
+        );
+    }
+
     #[test]
     fn commit_recovers_exact_late_free_text_strike_or_its_reaped_target() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -2614,9 +2800,8 @@ Duplicate replay should stay live.
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
             .unwrap();
-        let captured_response = format!(
-            "<!-- patch:exchange -->\n{response}<!-- /patch:exchange -->\n"
-        );
+        let captured_response =
+            format!("<!-- patch:exchange -->\n{response}<!-- /patch:exchange -->\n");
         let capture = agent_doc_capture_io::capture_response(&doc, &captured_response).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,

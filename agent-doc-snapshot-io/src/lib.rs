@@ -47,6 +47,18 @@ pub fn load_document_baseline(doc: &Path) -> Result<Option<String>> {
         .map(|baseline| baseline.content))
 }
 
+/// Generation of the currently projected content-bearing merge baseline.
+///
+/// `None` when no baseline is projected at all (never checkpointed, or cleared).
+/// Callers assert on this to prove a revision that never landed did not advance
+/// the baseline; it is deliberately separate from the generation counter, which
+/// also advances on `DocumentBaselineCleared`.
+pub fn load_document_baseline_generation(doc: &Path) -> Result<Option<u64>> {
+    Ok(load_document_state_projection(doc)?
+        .and_then(|projection| projection.document.merge_baseline)
+        .map(|baseline| baseline.generation))
+}
+
 /// Checkpoint the content-bearing merge baseline in the durable state ledger.
 pub fn checkpoint_document_baseline(
     doc: &Path,
@@ -68,11 +80,51 @@ pub fn checkpoint_document_baseline_with_effects(
 ) -> Result<()> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
-    let generation = load_document_state_projection(doc)?
+    let projection = load_document_state_projection(doc)?;
+    let content_hash = agent_doc_hash::content_hash(content);
+    // `#baselinecommitblocked`: the baseline is the common ancestor of disk and
+    // the live authority, and it is content-addressed — so re-asserting the SAME
+    // content is not a new revision and must not advance the generation.
+    //
+    // Observed 2026-09-27 07:13Z on `tasks/agent-doc/agent-doc-bugs.md`: a commit
+    // that never landed (`controller_commit_projection_pending
+    // decision=NativeSaveRequired disk_projection_ready=false` ->
+    // `commit_document_via_controller_error` ->
+    // `commit_blocked_unproved_head_current_component_drift`) still emitted
+    // `document_baseline_checkpoint generation=1791` and then `generation=1792`,
+    // both at `len=31112` — the unchanged HEAD content. Every blocked retry burned
+    // another generation, so the ledger read as if the baseline had advanced past a
+    // commit that never happened, and diagnosing the three planes out of
+    // surrounding `commit_staging` / `document_baseline_checkpoint` lines was
+    // impossible: identical content, moving generation.
+    //
+    // Gating on content identity here, at the one function that owns the fact,
+    // fixes it for every call site at once. Gating ~30 individual call sites on a
+    // "proven durable projection" would instead ask each of them to re-derive the
+    // same answer this function already holds. The crash-state sidecar is still
+    // rewritten, because it is a write-only effect of the projected baseline and
+    // may be missing on disk even when the typed fact is current.
+    if let Some(existing) = projection
+        .as_ref()
+        .and_then(|projection| projection.document.merge_baseline.as_ref())
+        && existing.content_hash == content_hash
+    {
+        effects.write_markdown_crash_state(doc, content)?;
+        logger(
+            doc,
+            &format!(
+                "document_baseline_checkpoint_unchanged file={} generation={} len={}",
+                doc.display(),
+                existing.generation,
+                content.len()
+            ),
+        );
+        return Ok(());
+    }
+    let generation = projection
         .map(|projection| projection.document.merge_baseline_generation)
         .unwrap_or(0)
         .saturating_add(1);
-    let content_hash = agent_doc_hash::content_hash(content);
     let fact = agent_doc_state_backbone::StateFact::DocumentBaselineCheckpointed {
         document_hash: document_hash.clone(),
         generation,

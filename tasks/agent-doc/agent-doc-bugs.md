@@ -157,6 +157,45 @@ Counting stayed in the binary on purpose: `grep -q` cannot express "exactly one 
 **Verification.** `make check` green: 9844 tests passed (7 new for the verifier), zero `make: ***` lines, plus clippy, sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap, Lean and TLA+. Smoke-tested scaffold → verify → clean on the installed binary, including the fail-closed path (exit 1 with the operator step named). `specs/supervisor.md` records the command, its four outcomes, and why the counting is not in the shell.
 
 Worth saying plainly: this is `[recommended]`, and `#hswspawncount` already covers the codex → claude → codex case deterministically. Use the live check only when a case genuinely needs a live editor and pane — the script's header says so too.
+
+### Re: do [#splicesimcov] — opus-5 · 2026-09-27T02:45-04:00
+
+> **Queue prompt:**
+>
+> do [#splicesimcov]
+
+
+Done. `captured_editor_splice_recovery_lands_translated_offsets_across_an_independent_response` is in `tests/cross_editor_simworld.rs`, running through the real controller alongside the two existing peering scenarios. Committed `56c161b08` (submodule) + `6db05fd95` (pointer), both pushed, `make install` clean.
+
+**The scenario.** JetBrains and VS Code both attach as production-shaped protocol harnesses. JetBrains captures a two-splice typing burst against its exact base and never publishes it — that base is the stale one recovery has to deal with. VS Code then inserts a `### Re:` block into `exchange` and pulls, so canonical advances independently while the burst is still retained. Recovery then runs the plan's sequence in order: observe the controller cut, plan the bounded splices **before** replacing membership, CAS-register that exact cut, forward the splices, assert both changes landed on both peers.
+
+**Three things the scenario pins that the ABI test could not.**
+
+- **The registration CAS refuses over the socket, not just in-process.** Registering with `expected_canonical_hash` = the hash of the *stale* captured base fails with `replica_register_canonical_precondition_failed` while the live replica is still the document's only JetBrains peer. The existing coverage for that precondition (`replica_registration_rpc_preserves_the_peer_when_captured_base_is_stale`) calls `controller_crdt_replica_data` directly; this one goes through the controller process.
+
+- **A replacement replica must acknowledge the retained canonical projection before its splices are relayed.** This is the part I had wrong on the first two runs, and it is the most useful thing the scenario now documents. The CAS register returns `canonical_projection_retained: true` (delivery had not converged — the JetBrains member still owed an ACK for VS Code's response), which queues a `crdt-bootstrap:` delivery for that member. Until it is projected, `awaits_canonical_projection` holds and every additive update from that member is dropped: `crdt_replica_update_quarantined ... recovery=lazy_canonical_projection`, `crdt_replica_fanout ... targets=0 update_bytes=0`. The forwarded splices vanished silently and the peer never converged. The replacement holds exactly the cut it registered against, so it projects that cut first, and only then forwards. That ordering is now a test, not a comment.
+
+- **The untranslated offsets are asserted *not* to produce the right cut.** `assert_ne!(apply_splices(&canonical, &captured.edits), expected, ...)` — without it, a planner that skipped translation could pass on a fixture where the response insertion happened to be a no-op. The exact translated offsets are pinned too (`bug_offset + shift`, `bug_offset + "queue ".len() + shift`), not just the resulting text.
+
+**Code-point scoping is load-bearing in the fixture.** The baseline carries `do the 🌍 thing` in `exchange`, ahead of the edited `- fix bug` line in `queue`, so every captured offset has byte ≠ code-point. A byte-offset regression cannot slip through on an ASCII fixture.
+
+**One new helper, feature-gated.** `agent_doc_controller_io::project_controller::request_crdt_current_text_for_test` mirrors `CpSocketReplicaTransport.currentCanonicalText` exactly — existing controller, `flush_barrier: false`, `recover_projection: false` — behind `cfg(any(test, feature = "test-support"))`. The `crdt_replica` test helper only speaks the `crdt_replica` command, and the cut observation is a separate `crdt_current_text` command, so there was no existing route.
+
+**Verification.** `make check` exit 0, nextest runner-native `9845 tests run: 9845 passed (2 slow), 259 skipped`, plus clippy, sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap, Lean and TLA+. No `result: FAILED` lines.
+
+**Mutation-checked three ways**, each restored from a scratch copy with an `mtime` refresh so Cargo could not reuse a mutated rlib:
+
+- drop the offset translation (`mapped = Some(start)`) → red;
+- shift it by one (`... + 1`) → red;
+- neuter the registration CAS (`true || hash == expected`) → red at the stale-base refusal, which is the assertion that exists for it.
+
+M0 green after restoring both files, with `git status` clean on each.
+
+**CI.** Run `36299889075` was still `in_progress` when I checked (14m in, the harness-switch verifier push). Recorded, not waited on — this turn closes from local evidence.
+
+**Unrelated, one line:** `.bin/agent-doc` is a broken symlink here — its target `src/agent-doc/target/release/agent-doc` does not exist, because the dev loop builds `release-local`. The cargo-installed `agent-doc` on PATH is current (0.35.418), so nothing in this turn was affected; I did not run `cargo build --release` to repair it, since that is the `#installfulloom` fat-LTO build and this was not a release.
+
+`#activateinstalledjetbrai` stays gated: `#readbackeditor` is still the operator read-back it depends on.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -171,7 +210,7 @@ Worth saying plainly: this is `[recommended]`, and `#hswspawncount` already cove
 - ~~do [#bkqattrcli]~~
 - ~~do [#hswspawncount]~~
 - ~~do [#hswdisposabledoc]~~
-- do [#splicesimcov]
+- ~~do [#splicesimcov]~~
 - do [#pypiquotarecheck]
 <!-- /agent:queue -->
 
@@ -179,7 +218,6 @@ Worth saying plainly: this is `[recommended]`, and `#hswspawncount` already cove
 <!-- agent:backlog -->
 - [ ] [#readbackeditor] [opcaptureliveread] [agent-doc] [operator-verify] Read back an editor-op capture receipt from a real typing burst, now that every reporter refusal names itself (65c865f24, plugin 0.2.429). Type a few characters into tasks/agent-doc/agent-doc-bugs.md in IntelliJ once the recycled plugin holds a live registration, then run agent-doc verify-op-capture on it. Three outcomes, all now diagnosable: editor_ops_recorded ... transaction=batch means capture works and activateinstalledjetbrai is unblocked; editor_op_capture_refused reason=<token> names which guard fired (all_ops_non_operator points back at isOperatorDocumentEvent, shadow_replay_mismatch at the burst replay, doc_advanced_during_drain is benign and self-retrying, base_hash_unavailable at the merge base); no receipt at all means the reporter chain never ran, so check that the plugin generation actually reloaded. Blocks activateinstalledjetbrai and splicesimcov.
 - [ ] [#activateinstalledjetbrai] [agent-doc] [operator-verify] Prove captured local editor edits recover across an independently advanced canonical response — BLOCKED ON #opcapturedormant, and no longer validatable from logs. Asked to validate from logs 2026-09-26 and the answer is that the evidence class is ABSENT, not inconclusive: the splice-recovery path itself is healthy (15 captured-local-splice-recovery invocations 2026-09-24..27, all status=current authority=cp_model, with the canonical text demonstrably advancing between them — the 2026-09-26T00:11:48..52 burst runs text_len 42885 -> 42885 -> 42892 -> 42900 across three distinct hashes), but all 317 editor_op_epoch_closed events in that window are cause=non_operator_projection, so not one of those recoveries carried an operator-authored edit. Order of work: (1) fix #opcapturedormant so operator edits are recorded as ops at all; (2) re-run `agent-doc verify-op-capture <FILE>` — it now accepts the batch producer the JetBrains TypingTracker actually drives (6b0eabc0c), so a pass is meaningful and a failure names both producers; (3) only then does the disposable-document live proof have anything to prove. Do NOT re-narrow this gate to "just needs the live check" until step 1 lands. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
-- [ ] [#splicesimcov] [agent-doc] Add a cross-editor SimWorld scenario for captured-edit splice recovery across an INDEPENDENTLY ADVANCED canonical response — the single remaining proof in the #activateinstalledjetbrai review gate. Grounding (2026-09-26): tests/cross_editor_simworld.rs holds only three tests (cargo_target_debug_dir_honors_default_relative_and_absolute_targets, cross_editor_plugin_protocol_harnesses_peer_through_real_agent_doc_controller, native_plugin_harnesses_peer_through_real_agent_doc_controller) and none exercises the splice path; per tasks/agent-doc/plan-captured-editor-splice-recovery.md the native side is proven only through the ABI test plus one manual installed-native call. Cover the plugin-side sequence the plan describes: observe the controller cut, plan before replacing membership, CAS-register that cut, forward bounded splices, and assert the translated offsets land while an unrelated response change is in flight. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [ ] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision so the next PyPI ceiling is raised rather than cleared by another mass deletion. Context changed 2026-09-26: #pypiquotafix is DONE — the 34 oldest releases (0.35.0 through 0.35.112, 1.63 GiB) are deleted and PyPI settings now reports 8.4 GiB of the 10.0 GiB limit, so there is no urgency. #12214 is still open with only the github-actions bot auto-reply from 2026-09-10T22:46:21Z. Growth is already bounded: the 20 releases at or after the 0.35.383 thin-wheel cutover total 0.7 MiB, against roughly 68 MiB apiece before it, so the remaining 8.36 GiB is 131 historical fat wheels and is not growing. If the grant lands, record it and drop this item. If it is refused or stalls past the next ceiling, the next clean tranche is 0.35.113 through 0.35.152 (another 2.10 GiB) — but do not delete anything until a ceiling is actually in reach. Verify deletions from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json, which served a stale CDN view claiming 27 of the 34 deleted releases were still present.
 <!-- /agent:backlog -->
 

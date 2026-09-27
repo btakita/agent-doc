@@ -23,6 +23,20 @@ pub struct AuthorityRecoveryFacts {
     /// Some adapters own a distinct model-rebuild effect after their bounded
     /// retry loop. Others already performed that work and must not repeat it.
     pub rebuild_after_retry_exhaustion: bool,
+    /// The live editor endpoint ANSWERED and refused to serve this document.
+    ///
+    /// This is proof, not a guess, and it is the fact `editor_open` cannot
+    /// supply: attachment is a latch that outlives the endpoint's own refusal.
+    /// Without it the resolver had a reachable state with no outgoing
+    /// transition — an attached latch plus a missing replica plus an endpoint
+    /// that will never rebuild it — and only an operator reopening the editor
+    /// tab could clear it. `formal/tla/EditorReplicaStrand.tla` proves that state
+    /// is a genuine state-graph deadlock, and that this fact is what removes it.
+    ///
+    /// Must never be set for a timeout, a refused connection, or a missing
+    /// socket: those are retryable, and treating them as refusals would turn the
+    /// disk-descent guard into a silent `--force-disk`.
+    pub endpoint_definitively_refused: bool,
 }
 
 /// The effect an I/O adapter must apply next.
@@ -37,9 +51,25 @@ pub enum AuthorityRecoveryDecision {
 
 /// Decide the next read-authority transition.
 ///
-/// The load-bearing invariant is that disk is reachable only after the editor
-/// is proven detached. An attached editor with an unavailable model retries,
-/// rebuilds, or fails closed; it never silently adopts disk as current text.
+/// The load-bearing invariant is that disk is reachable only after the editor is
+/// proven not to be serving this document. An attached editor with an unavailable
+/// model retries, rebuilds, or fails closed; it never silently adopts disk as
+/// current text.
+///
+/// "Proven not serving" has two witnesses, and for months there was only one.
+/// `Detached` is the ordinary witness. The second is
+/// `endpoint_definitively_refused`: a live endpoint that answers and rejects has
+/// told us it will not serve this document, which the `editor_open` latch cannot
+/// express. With only the first witness, an attachment latch left over from a
+/// cdylib generation swap made this function total in appearance only — its
+/// `FailClosed` arm was a dead end no in-binary action could leave, so every
+/// recovery attempt was a retry of an already-exhausted path and the operator had
+/// to reopen the editor tab. `formal/tla/EditorReplicaStrand.tla` checks that
+/// dead end as a state-graph deadlock, and its wedge configuration is required to
+/// keep failing so this arm cannot quietly become unreachable-by-modelling.
+///
+/// A refusal is only consulted after the retry budget is spent, so a plugin that
+/// rejects while mid-reload still gets every retry it would have had.
 pub const fn decide_authority_recovery(facts: AuthorityRecoveryFacts) -> AuthorityRecoveryDecision {
     use AuthorityObservation::{Current, Detached, Error, MissingReplica, SyncPending};
     use AuthorityRecoveryDecision::{
@@ -52,6 +82,12 @@ pub const fn decide_authority_recovery(facts: AuthorityRecoveryFacts) -> Authori
         MissingReplica | SyncPending | Error if facts.retries_remaining => Retry {
             request_plugin_refresh: matches!(facts.observation, MissingReplica),
         },
+        // Retries are spent and the endpoint itself said no. Rebuilding from the
+        // plugin would ask the same endpoint that just refused, and failing
+        // closed would park in the dead end, so descend on the proof.
+        MissingReplica | SyncPending | Error if facts.endpoint_definitively_refused => {
+            DescendToDisk
+        }
         MissingReplica | SyncPending
             if facts.editor_open && facts.rebuild_after_retry_exhaustion =>
         {
@@ -77,7 +113,139 @@ mod tests {
             editor_open,
             retries_remaining,
             rebuild_after_retry_exhaustion,
+            endpoint_definitively_refused: false,
         })
+    }
+
+    const OBSERVATIONS: [AuthorityObservation; 5] = [
+        AuthorityObservation::Current,
+        AuthorityObservation::Detached,
+        AuthorityObservation::MissingReplica,
+        AuthorityObservation::SyncPending,
+        AuthorityObservation::Error,
+    ];
+
+    fn all_facts() -> impl Iterator<Item = AuthorityRecoveryFacts> {
+        OBSERVATIONS.into_iter().flat_map(|observation| {
+            [false, true].into_iter().flat_map(move |editor_open| {
+                [false, true].into_iter().flat_map(move |retries_remaining| {
+                    [false, true].into_iter().flat_map(move |rebuild| {
+                        [false, true]
+                            .into_iter()
+                            .map(move |refused| AuthorityRecoveryFacts {
+                                observation,
+                                editor_open,
+                                retries_remaining,
+                                rebuild_after_retry_exhaustion: rebuild,
+                                endpoint_definitively_refused: refused,
+                            })
+                    })
+                })
+            })
+        })
+    }
+
+    /// The totality property `formal/tla/EditorReplicaStrand.tla` checks, asserted
+    /// here over the WHOLE fact space this policy can be asked about (5 x 2^4 = 80
+    /// combinations, exhaustive — not a sample).
+    ///
+    /// `FailClosed` is the only decision an attached document cannot leave on its
+    /// own, so it may be selected only while the endpoint has NOT refused. If a
+    /// refusal can still reach `FailClosed`, the dead end is back: the attachment
+    /// latch is held by an endpoint that will never rebuild the replica, and no
+    /// in-binary action makes progress.
+    #[test]
+    fn a_definitive_refusal_never_selects_the_one_decision_that_cannot_make_progress() {
+        for facts in all_facts() {
+            if !facts.endpoint_definitively_refused {
+                continue;
+            }
+            let decision = decide_authority_recovery(facts);
+            assert_ne!(
+                decision,
+                AuthorityRecoveryDecision::FailClosed,
+                "a proven refusal must never park in the dead end: {facts:?}"
+            );
+            assert_ne!(
+                decision,
+                AuthorityRecoveryDecision::RebuildFromPlugin,
+                "rebuilding asks the endpoint that just refused: {facts:?}"
+            );
+        }
+    }
+
+    /// The safety half. A refusal is the ONLY thing that may unlock disk for an
+    /// attached document; without one, an attached document must never descend.
+    /// This is what keeps the fix from becoming a disguised `--force-disk`.
+    #[test]
+    fn an_attached_document_descends_only_on_a_proven_refusal() {
+        for facts in all_facts() {
+            if decide_authority_recovery(facts) != AuthorityRecoveryDecision::DescendToDisk {
+                continue;
+            }
+            assert!(
+                !facts.editor_open
+                    || facts.endpoint_definitively_refused
+                    || facts.observation == AuthorityObservation::Detached,
+                "disk descended for an attached document with no proof it stopped serving: {facts:?}"
+            );
+        }
+    }
+
+    /// A refusal must not short-circuit the retry budget: a plugin that rejects
+    /// while mid-reload still gets every retry it would have had.
+    #[test]
+    fn a_refusal_is_consulted_only_after_the_retry_budget_is_spent() {
+        for observation in [
+            AuthorityObservation::MissingReplica,
+            AuthorityObservation::SyncPending,
+            AuthorityObservation::Error,
+        ] {
+            assert_eq!(
+                decide_authority_recovery(AuthorityRecoveryFacts {
+                    observation,
+                    editor_open: true,
+                    retries_remaining: true,
+                    rebuild_after_retry_exhaustion: false,
+                    endpoint_definitively_refused: true,
+                }),
+                AuthorityRecoveryDecision::Retry {
+                    request_plugin_refresh: matches!(
+                        observation,
+                        AuthorityObservation::MissingReplica
+                    ),
+                },
+                "retries outrank a refusal while any remain"
+            );
+        }
+    }
+
+    /// The exact production shape: attached latch, replica gone, endpoint answers
+    /// and rejects, retries spent, rebuild already performed. Before the fix this
+    /// was `FailClosed` forever.
+    #[test]
+    fn the_stranded_replica_shape_descends_instead_of_wedging() {
+        assert_eq!(
+            decide_authority_recovery(AuthorityRecoveryFacts {
+                observation: AuthorityObservation::MissingReplica,
+                editor_open: true,
+                retries_remaining: false,
+                rebuild_after_retry_exhaustion: true,
+                endpoint_definitively_refused: true,
+            }),
+            AuthorityRecoveryDecision::DescendToDisk
+        );
+        // And with no refusal proof it still fails closed, unchanged.
+        assert_eq!(
+            decide_authority_recovery(AuthorityRecoveryFacts {
+                observation: AuthorityObservation::MissingReplica,
+                editor_open: true,
+                retries_remaining: false,
+                rebuild_after_retry_exhaustion: false,
+                endpoint_definitively_refused: false,
+            }),
+            AuthorityRecoveryDecision::FailClosed
+        );
     }
 
     #[test]

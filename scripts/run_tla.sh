@@ -35,10 +35,25 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand)
+
+# Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
+# a violation. A safety or liveness property that cannot fail is not evidence,
+# and this harness had been certifying exactly that: `JetBrainsFileCache` proved
+# `EventuallyConverged` while production wedged for months, because its
+# reregister step was an unconditional assignment that could not be rejected.
+#
+# Every module that models a recovery path should therefore also ship a config
+# with the recovery edge disabled, and prove the wedge is genuinely reachable.
+# That is what makes the positive run mean something.
+must_violate=(EditorReplicaStrand:EditorReplicaStrandWedge)
+
 for module in "${modules[@]}"; do
     cp "${repo_root}/formal/tla/${module}.tla" "${work_dir}/"
     cp "${repo_root}/formal/tla/${module}.cfg" "${work_dir}/"
+done
+for entry in "${must_violate[@]}"; do
+    cp "${repo_root}/formal/tla/${entry#*:}.cfg" "${work_dir}/"
 done
 
 (
@@ -48,5 +63,29 @@ for module in "${modules[@]}"; do
       java -XX:+UseParallelGC -cp "${tools_jar}" pcal.trans "${module}.tla"
     fi
 java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto "${module}.tla"
+done
+
+for entry in "${must_violate[@]}"; do
+    module="${entry%%:*}"
+    config="${entry#*:}"
+    log="${module}-${config}.log"
+    # `set -e` is active, so guard the intentionally-failing run.
+    if java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto \
+        -config "${config}.cfg" "${module}.tla" >"${log}" 2>&1; then
+        echo "[tla] NON-VACUITY FAILURE: ${module} with ${config}.cfg was expected to" >&2
+        echo "[tla] report a violation and instead passed. The recovery edge that" >&2
+        echo "[tla] config disables is no longer load-bearing, or the property no" >&2
+        echo "[tla] longer constrains it - the positive run is now vacuous." >&2
+        tail -40 "${log}" >&2
+        exit 1
+    fi
+    if ! grep -Eq 'Error: (Deadlock reached|Temporal properties were violated|Invariant .* is violated)' "${log}"; then
+        echo "[tla] NON-VACUITY FAILURE: ${module} with ${config}.cfg failed, but not" >&2
+        echo "[tla] with a deadlock / property violation - so the wedge it is meant to" >&2
+        echo "[tla] exhibit was not what TLC actually reported." >&2
+        tail -40 "${log}" >&2
+        exit 1
+    fi
+    echo "[tla] non-vacuity confirmed: ${module} with ${config}.cfg violates as required"
 done
 )

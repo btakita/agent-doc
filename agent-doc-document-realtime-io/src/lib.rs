@@ -7046,6 +7046,47 @@ fn clear_terminal_missing_replica_rebuild(file: &std::path::Path) {
     MISSING_REPLICA_TERMINAL_REBUILD_ASKED.lock().remove(file);
 }
 
+/// Documents whose live editor endpoint ANSWERED and refused to serve them,
+/// remembered against the liveness witness current when it refused.
+///
+/// This is the proof `observe_editor_open` cannot supply. Attachment is a latch;
+/// it survives a cdylib generation swap that leaves the old endpoint unable to
+/// rebuild the replica, and the authority resolver then holds a lock nothing can
+/// open — see `formal/tla/EditorReplicaStrand.tla`, which checks that state as a
+/// state-graph deadlock.
+///
+/// Keyed on the witness like its two siblings above, so a re-registration that
+/// actually lands clears the refusal for free rather than latching it forever.
+/// Only a rejected IPC receipt records here: a timeout or missing socket is
+/// retryable and must keep failing closed.
+static EDITOR_ENDPOINT_DEFINITIVELY_REFUSED: std::sync::LazyLock<
+    Mutex<std::collections::HashMap<std::path::PathBuf, EditorReplicaLivenessWitness>>,
+> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+fn record_editor_endpoint_definitive_refusal(
+    file: &std::path::Path,
+    witness: EditorReplicaLivenessWitness,
+) {
+    EDITOR_ENDPOINT_DEFINITIVELY_REFUSED
+        .lock()
+        .insert(file.to_path_buf(), witness);
+}
+
+fn clear_editor_endpoint_definitive_refusal(file: &std::path::Path) {
+    EDITOR_ENDPOINT_DEFINITIVELY_REFUSED.lock().remove(file);
+}
+
+/// Whether the endpoint's refusal is still current for this document.
+///
+/// Stale by construction once the witness advances: a newer registration means a
+/// different endpoint answered, so the old refusal proves nothing about it.
+fn editor_endpoint_definitively_refused(file: &std::path::Path) -> bool {
+    EDITOR_ENDPOINT_DEFINITIVELY_REFUSED
+        .lock()
+        .get(file)
+        .is_some_and(|refused| *refused == editor_replica_liveness_witness(file))
+}
+
 /// A verified healthy observation supersedes both missing-replica recovery
 /// memos. Keeping either memo after editor authority is current would make a
 /// later loss at the same reliable-sync registration witness permanently
@@ -7053,6 +7094,7 @@ fn clear_terminal_missing_replica_rebuild(file: &std::path::Path) {
 fn clear_editor_replica_recovery_latches(file: &std::path::Path) {
     clear_editor_replica_self_heal_exhausted(file);
     clear_terminal_missing_replica_rebuild(file);
+    clear_editor_endpoint_definitive_refusal(file);
 }
 
 fn reobserve_missing_editor_replica_with_reregistration(
@@ -7081,13 +7123,24 @@ fn reobserve_missing_editor_replica_with_reregistration(
     let attempts = editor_replica_reobserve_attempts();
     let mut current = observed;
     for attempt in 1..=attempts {
-        let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event_counting(
+        let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event_reporting(
             file,
             agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
             0,
         ) {
-            Ok(0) => "not_delivered".to_string(),
-            Ok(notified) => format!("delivered:{notified}"),
+            // Every live route answered and refused. Record the proof against the
+            // current liveness witness so the authority resolver can stop holding
+            // an attachment latch for an endpoint that will not serve this
+            // document. Retrying is what never converged.
+            Ok(outcome) if outcome.notified == 0 && outcome.definitive_refusals > 0 => {
+                record_editor_endpoint_definitive_refusal(
+                    file,
+                    editor_replica_liveness_witness(file),
+                );
+                format!("definitively_refused:{}", outcome.definitive_refusals)
+            }
+            Ok(outcome) if outcome.notified == 0 => "not_delivered".to_string(),
+            Ok(outcome) => format!("delivered:{}", outcome.notified),
             Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
         };
         agent_doc_ops_log_io::log_op(
@@ -7401,6 +7454,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
         retries_remaining: false,
         // Missing-replica already spent its plugin refresh loop upstream.
         rebuild_after_retry_exhaustion: reason == "sync_pending",
+        endpoint_definitively_refused: editor_endpoint_definitively_refused(file),
     });
     let rebuild_eligible = matches!(
         initial_decision,
@@ -7608,6 +7662,9 @@ fn resolve_editor_unavailable_disk_read_fallback(
         editor_open: observe_editor_open(file),
         retries_remaining: false,
         rebuild_after_retry_exhaustion: false,
+        // The second witness for "proven not serving". Without it this decision
+        // had no way out of an attachment latch left behind by a generation swap.
+        endpoint_definitively_refused: editor_endpoint_definitively_refused(file),
     });
     if descent_decision == AuthorityRecoveryDecision::FailClosed {
         agent_doc_ops_log_io::log_op(

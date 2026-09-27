@@ -208,6 +208,11 @@ fn observe_current_text_with_bounded_retry(
             // the exhausted observation to the caller rather than duplicating
             // realtime-io's model-rebuild effect.
             rebuild_after_retry_exhaustion: false,
+            // Preflight never sends the re-registration event, so it observes no
+            // receipt and holds no refusal proof. The realtime resolver owns that
+            // fact; claiming it here would descend to disk on someone else's
+            // evidence.
+            endpoint_definitively_refused: false,
         });
         let AuthorityRecoveryDecision::Retry {
             request_plugin_refresh,

@@ -4524,6 +4524,15 @@ pub struct ReplicaSignalOutcome {
     /// Live native-save registrations fenced before delivery because their
     /// reported plugin generation did not exactly match this controller.
     pub generation_mismatches: usize,
+    /// Routes whose listener ANSWERED and explicitly rejected the event.
+    ///
+    /// Distinct from every other zero-delivery shape: a rejection proves the
+    /// endpoint is alive and will not serve this document, so retrying it cannot
+    /// succeed, whereas an absent or timing-out endpoint should be retried. The
+    /// two used to be indistinguishable — both produced `notified == 0` — which
+    /// left the authority resolver holding an attachment latch it could never
+    /// open. See `formal/tla/EditorReplicaStrand.tla`.
+    pub definitive_refusals: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4608,6 +4617,7 @@ pub fn request_native_save_for_current_projection(
     let found = routes.len() + generation_mismatches.len();
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let mut notified = 0usize;
+    let mut native_save_definitive_refusals = 0usize;
     let mut build_mismatches = Vec::new();
     for mismatch in &generation_mismatches {
         agent_doc_ops_log_io::log_op(
@@ -4654,6 +4664,9 @@ pub fn request_native_save_for_current_projection(
                 if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) {
                     build_mismatches.push(route.clone());
                 }
+                if agent_doc_ipc_io::is_ipc_receipt_rejected_error(&error) {
+                    native_save_definitive_refusals += 1;
+                }
                 agent_doc_ops_log_io::log_op(
                     &canonical,
                     &format!(
@@ -4671,6 +4684,7 @@ pub fn request_native_save_for_current_projection(
         notified,
         build_mismatches,
         generation_mismatches: generation_mismatches.len(),
+        definitive_refusals: native_save_definitive_refusals,
     })
 }
 
@@ -4683,6 +4697,13 @@ impl ReplicaSignalOutcome {
             (0, _) => "no_live_registration".to_string(),
             (found, 0) if self.generation_mismatches == found => {
                 format!("plugin_generation_mismatch:{found}")
+            }
+            // Every live route ANSWERED and refused. This is not a delivery
+            // fault and retrying cannot fix it, so it must not share a token
+            // with one: the caller's correct response is to stop treating the
+            // endpoint as serving this document, not to try again.
+            (found, 0) if self.definitive_refusals == found => {
+                format!("definitively_refused_by_all:{found}")
             }
             (found, 0) => format!("delivery_failed_to_all:{found}"),
             (found, notified) if notified < found => {
@@ -4709,6 +4730,22 @@ pub fn signal_crdt_replica_event_counting(
     targets: usize,
 ) -> Result<usize> {
     signal_crdt_replica_event_counting_inner(file, reason, targets).map(|outcome| outcome.notified)
+}
+
+/// [`signal_crdt_replica_event_counting`] without discarding WHY zero routes were
+/// notified.
+///
+/// The counting form collapses "the endpoint answered and refused" into the same
+/// `0` as "nothing answered", which is the information loss the attached-replica
+/// strand depended on: the caller could only retry, and retrying a refusal never
+/// converges. Callers that must decide whether an endpoint still serves a document
+/// need the outcome, not the count.
+pub fn signal_crdt_replica_event_reporting(
+    file: &Path,
+    reason: CrdtReplicaEventReason,
+    targets: usize,
+) -> Result<ReplicaSignalOutcome> {
+    signal_crdt_replica_event_counting_inner(file, reason, targets)
 }
 
 fn signal_crdt_replica_event_counting_inner(
@@ -4742,6 +4779,7 @@ fn signal_crdt_replica_event_counting_inner(
     let found = routes.len();
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let mut notified = 0usize;
+    let mut definitive_refusals = 0usize;
     let mut build_mismatches = Vec::new();
     for route in routes {
         let payload = serde_json::json!({
@@ -4789,10 +4827,18 @@ fn signal_crdt_replica_event_counting_inner(
                         ),
                     );
                 }
+                // A live listener that answers and rejects is a terminal answer,
+                // not a deferral. Counting it lets the authority resolver tell
+                // "the editor will not serve this document" apart from "nothing
+                // answered yet" — the distinction the strand depended on losing.
+                let definitive = agent_doc_ipc_io::is_ipc_receipt_rejected_error(&error);
+                if definitive {
+                    definitive_refusals += 1;
+                }
                 agent_doc_ops_log_io::log_op(
                     &canonical,
                     &format!(
-                        "crdt_replica_notify_deferred reason={} editor_pid={} error={error:#}",
+                        "crdt_replica_notify_deferred reason={} editor_pid={} definitive_refusal={definitive} error={error:#}",
                         reason.token(),
                         route.editor_pid,
                     ),
@@ -4805,6 +4851,7 @@ fn signal_crdt_replica_event_counting_inner(
         notified,
         build_mismatches,
         generation_mismatches: 0,
+        definitive_refusals,
     })
 }
 
@@ -5169,6 +5216,7 @@ mod tests {
                 notified: 0,
                 build_mismatches: Vec::new(),
                 generation_mismatches: 0,
+                definitive_refusals: 0,
             }
             .diagnosis(),
             "no_live_registration",
@@ -5180,6 +5228,7 @@ mod tests {
                 notified: 0,
                 build_mismatches: Vec::new(),
                 generation_mismatches: 0,
+                definitive_refusals: 0,
             }
             .diagnosis(),
             "delivery_failed_to_all:1",
@@ -5191,6 +5240,7 @@ mod tests {
                 notified: 1,
                 build_mismatches: Vec::new(),
                 generation_mismatches: 0,
+                definitive_refusals: 0,
             }
             .diagnosis(),
             "requested:1/3",
@@ -5202,6 +5252,7 @@ mod tests {
                 notified: 2,
                 build_mismatches: Vec::new(),
                 generation_mismatches: 0,
+                definitive_refusals: 0,
             }
             .diagnosis(),
             "requested:2"
@@ -5212,6 +5263,7 @@ mod tests {
                 notified: 0,
                 build_mismatches: Vec::new(),
                 generation_mismatches: 1,
+                definitive_refusals: 0,
             }
             .diagnosis(),
             "plugin_generation_mismatch:1"

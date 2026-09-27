@@ -530,7 +530,11 @@ fn send_message_with_timeout_inner_with_identity(
                         return Err(anyhow::anyhow!("IPC receipt already_applied: {}", receipt));
                     }
                     SocketReceiptClassification::Rejected => {
-                        return Err(anyhow::anyhow!("IPC receipt rejected: {}", receipt));
+                        return Err(anyhow::anyhow!(
+                            "{}: {}",
+                            IPC_RECEIPT_REJECTED_PREFIX,
+                            receipt
+                        ));
                     }
                     SocketReceiptClassification::Unsupported => {
                         return Err(anyhow::anyhow!(
@@ -602,6 +606,36 @@ pub fn is_ipc_build_mismatch_error(error: &anyhow::Error) -> bool {
         )
     })
 }
+
+/// Whether an IPC failure is a **definitive negative answer** from a live editor
+/// listener, as opposed to a transport failure.
+///
+/// The distinction is load-bearing and was previously unavailable to callers. A
+/// rejected receipt means the listener received the message, understood it, and
+/// declined — so retrying the same request against the same endpoint cannot
+/// succeed. A timeout, refused connection, or missing socket means the opposite:
+/// nothing answered, and a retry is exactly right.
+///
+/// Collapsing the two is what let an attached-document replica strand
+/// indefinitely: the replica re-registration path counted a rejection as "not
+/// delivered", identical to "no endpoint was there", so the authority resolver
+/// kept the attachment latch closed and had no transition left. See
+/// `formal/tla/EditorReplicaStrand.tla`, whose wedge configuration proves that
+/// state is a genuine state-graph deadlock.
+///
+/// Matched on the producer's message prefix rather than a typed cause, matching
+/// the `IPC handshake` fallback above. `receipt_rejection_is_recognized_by_its_own_predicate`
+/// pins the producer and this predicate together so a reworded message reddens
+/// instead of silently making every rejection look like a transport failure.
+pub fn is_ipc_receipt_rejected_error(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().starts_with(IPC_RECEIPT_REJECTED_PREFIX))
+}
+
+/// The one spelling of the rejected-receipt failure, shared by the producer and
+/// [`is_ipc_receipt_rejected_error`].
+const IPC_RECEIPT_REJECTED_PREFIX: &str = "IPC receipt rejected";
 
 fn send_legacy_reload_to_pid(
     project_root: &Path,
@@ -2184,14 +2218,41 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         let msg = serde_json::json!({"type": "apply_canonical"});
-        let err = send_message(&root, &msg).unwrap_err().to_string();
+        let error = send_message(&root, &msg).unwrap_err();
+        let err = error.to_string();
         assert!(
             err.contains("IPC receipt rejected"),
             "rejected receipt should fail the socket IPC send, got: {err}"
         );
+        // Producer and predicate are pinned together through the REAL socket
+        // path, not a hand-built string. A reworded message reddens here instead
+        // of silently reclassifying every definitive rejection as a transport
+        // failure, which is what let an attached replica strand indefinitely.
+        assert!(
+            is_ipc_receipt_rejected_error(&error),
+            "a live listener's rejection must be recognizable as definitive, got: {err}"
+        );
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
+    }
+
+    /// The other half of the distinction: a transport failure must NOT read as a
+    /// definitive refusal, or the authority resolver would descend to disk while
+    /// an editor is merely slow to answer.
+    #[test]
+    fn a_transport_failure_is_not_a_definitive_receipt_rejection() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        // No listener at all: the send fails at the transport, not with a receipt.
+        let msg = serde_json::json!({"type": "apply_canonical"});
+        let error = send_message(&root, &msg).unwrap_err();
+        assert!(
+            !is_ipc_receipt_rejected_error(&error),
+            "nothing answered, so this must stay retryable: {error:#}"
+        );
     }
 
     #[test]

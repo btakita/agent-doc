@@ -17,6 +17,16 @@ pub struct RouteQueueEffects {
 const ROUTE_QUEUE_MAX_WRITE_ATTEMPTS: usize = 3;
 const ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS: usize = 2;
 
+/// `#witnessretrygate` — how long the refused resolve retry waits for the editor
+/// replica registration to actually land before re-asking.
+///
+/// Matches `DOCUMENT_MODEL_ENSURE_TIMEOUT_MS`, the full-window budget the model
+/// ensure grants a registration that arrives late. This is spent only on a path
+/// that otherwise fails the route outright, so it trades latency for a dispatch
+/// that used to be a hard `Run Agent Doc` error.
+const ROUTE_QUEUE_RESOLVE_WITNESS_WAIT: std::time::Duration =
+    std::time::Duration::from_millis(5_000);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteQueueEnqueueOutcome {
     pub prompt_text: String,
@@ -299,7 +309,26 @@ fn is_retryable_crdt_merge_error(err: &anyhow::Error) -> bool {
 fn resolve_route_queue_document_content(
     file: &Path,
     reason: &str,
+    resolve: impl FnMut() -> Result<String>,
+) -> Result<String> {
+    resolve_route_queue_document_content_awaiting(file, reason, resolve, |file| {
+        agent_doc_document_realtime_io::wait_for_editor_replica_liveness_change(
+            file,
+            ROUTE_QUEUE_RESOLVE_WITNESS_WAIT,
+        )
+    })
+}
+
+/// `#witnessretrygate` — resolve the document, retrying once across a *proven*
+/// editor replica registration change.
+///
+/// The witness wait is injected so tests drive the retry gate without a live
+/// reliable-sync plane.
+fn resolve_route_queue_document_content_awaiting(
+    file: &Path,
+    reason: &str,
     mut resolve: impl FnMut() -> Result<String>,
+    mut await_liveness_change: impl FnMut(&Path) -> bool,
 ) -> Result<String> {
     for attempt in 1..=ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS {
         match resolve() {
@@ -308,16 +337,27 @@ fn resolve_route_queue_document_content(
                 if attempt < ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS
                     && is_retryable_editor_authority_recovery_error(&err) =>
             {
+                // Re-asking against the same liveness witness is a provable
+                // no-op: both missing-replica recovery latches are keyed on it,
+                // so the second attempt would skip the re-registration loop and
+                // the terminal rebuild and bail on this same refusal. Only a
+                // registration that actually landed earns the retry.
+                let witness_changed = await_liveness_change(file);
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "{reason}_resolve_retry file={} attempt={} max_attempts={} reason=editor_authority_recovery error={}",
+                        "{reason}_resolve_retry file={} attempt={} max_attempts={} reason=editor_authority_recovery witness_changed={} decision={} error={}",
                         file.display(),
                         attempt,
                         ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS,
+                        witness_changed,
+                        if witness_changed { "retry" } else { "fail_closed" },
                         agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
                     ),
                 );
+                if !witness_changed {
+                    return Err(err);
+                }
             }
             Err(err) => return Err(err),
         }
@@ -325,10 +365,18 @@ fn resolve_route_queue_document_content(
     unreachable!("bounded route queue resolver always returns from the loop")
 }
 
+/// Whether `err` is the attached-editor refusal raised when authority recovery
+/// exhausts, for either family the resolver can report.
+///
+/// `resolve_editor_unavailable_disk_read_fallback` interpolates the observation
+/// family into one message — `"<reason> recovery exhausted and disk read
+/// authority is refused"` — and `reason` is `missing_replica` or `sync_pending`.
+/// Matching the `sync_pending` spelling alone left the whole missing-replica
+/// family without the bounded retry, which is the family that turns a JetBrains
+/// `Run Agent Doc` into `route_queue_activation: failed to resolve current
+/// document ...` on the first refusal.
 fn is_retryable_editor_authority_recovery_error(err: &anyhow::Error) -> bool {
-    let message = format!("{err:#}");
-    message.contains("sync_pending recovery exhausted")
-        && message.contains("disk read authority is refused")
+    format!("{err:#}").contains("recovery exhausted and disk read authority is refused")
 }
 
 fn log_route_queue_write_retry(
@@ -357,23 +405,96 @@ fn log_route_queue_write_retry(
 mod tests {
     use super::*;
 
+    /// A witness wait that reports a landed registration, so the retry is armed.
+    fn witness_advanced(_file: &Path) -> bool {
+        true
+    }
+
+    /// A witness wait that reports nothing landed inside the budget.
+    fn witness_unchanged(_file: &Path) -> bool {
+        false
+    }
+
     #[test]
     fn route_queue_resolution_retries_editor_authority_recovery_once() {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("session.md");
         let mut calls = 0usize;
 
-        let content = resolve_route_queue_document_content(&file, "route_queue_activation", || {
-            calls += 1;
-            if calls == 1 {
-                anyhow::bail!("sync_pending recovery exhausted and disk read authority is refused");
-            }
-            Ok("live editor content".to_string())
-        })
+        let content = resolve_route_queue_document_content_awaiting(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                if calls == 1 {
+                    anyhow::bail!(
+                        "sync_pending recovery exhausted and disk read authority is refused"
+                    );
+                }
+                Ok("live editor content".to_string())
+            },
+            witness_advanced,
+        )
         .unwrap();
 
         assert_eq!(content, "live editor content");
         assert_eq!(calls, 2);
+    }
+
+    /// `#witnessretrygate` — the `missing_replica` family is the one a JetBrains
+    /// `Run Agent Doc` actually hits, and the predicate used to match only the
+    /// `sync_pending` spelling, so route failed the dispatch on the first refusal.
+    #[test]
+    fn route_queue_resolution_retries_missing_replica_authority_recovery() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+
+        let content = resolve_route_queue_document_content_awaiting(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                if calls == 1 {
+                    anyhow::bail!(
+                        "editor is still attached for {}; missing_replica recovery exhausted and disk read authority is refused",
+                        file.display()
+                    );
+                }
+                Ok("live editor content".to_string())
+            },
+            witness_advanced,
+        )
+        .unwrap();
+
+        assert_eq!(content, "live editor content");
+        assert_eq!(calls, 2);
+    }
+
+    /// Re-asking against an unchanged witness is a no-op by construction, so the
+    /// gate must fail closed instead of spending a second controller round-trip.
+    #[test]
+    fn route_queue_resolution_does_not_retry_without_a_witness_change() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+
+        let err = resolve_route_queue_document_content_awaiting(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                anyhow::bail!(
+                    "editor is still attached for {}; missing_replica recovery exhausted and disk read authority is refused",
+                    file.display()
+                )
+            },
+            witness_unchanged,
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        assert!(format!("{err:#}").contains("missing_replica recovery exhausted"));
     }
 
     #[test]
@@ -381,14 +502,25 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("session.md");
         let mut calls = 0usize;
+        let mut waits = 0usize;
 
-        let err = resolve_route_queue_document_content(&file, "route_queue_activation", || {
-            calls += 1;
-            anyhow::bail!("unrelated resolver failure")
-        })
+        let err = resolve_route_queue_document_content_awaiting(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                anyhow::bail!("unrelated resolver failure")
+            },
+            |_| {
+                waits += 1;
+                true
+            },
+        )
         .unwrap_err();
 
         assert_eq!(calls, 1);
+        // An unrelated failure must not even pay the witness wait.
+        assert_eq!(waits, 0);
         assert!(format!("{err:#}").contains("unrelated resolver failure"));
     }
 
@@ -398,10 +530,15 @@ mod tests {
         let file = dir.path().join("session.md");
         let mut calls = 0usize;
 
-        let err = resolve_route_queue_document_content(&file, "route_queue_activation", || {
-            calls += 1;
-            anyhow::bail!("sync_pending recovery exhausted and disk read authority is refused")
-        })
+        let err = resolve_route_queue_document_content_awaiting(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                anyhow::bail!("sync_pending recovery exhausted and disk read authority is refused")
+            },
+            witness_advanced,
+        )
         .unwrap_err();
 
         assert_eq!(calls, ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS);

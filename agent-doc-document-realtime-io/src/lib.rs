@@ -6961,6 +6961,41 @@ fn editor_replica_liveness_witness(file: &std::path::Path) -> EditorReplicaLiven
     }
 }
 
+/// `#witnessretrygate` — bounded wait for `file`'s editor replica liveness
+/// witness to advance, for callers that want to retry a refused resolution.
+///
+/// Returns `true` when a registration actually landed inside `budget` (a new
+/// editor, a dropped one, or a re-registration bumping `timestamp_ms`), and
+/// `false` when the witness is still the one the refusal was recorded against.
+///
+/// Every missing-replica recovery latch in this module is keyed on that witness:
+/// [`should_pause_editor_replica_self_heal`] skips the re-registration loop and
+/// [`claim_terminal_missing_replica_rebuild`] skips the terminal rebuild while it
+/// is unchanged. So a caller that retries `try_resolve_current_document_content`
+/// *immediately* after a refusal re-runs a provable no-op and bails on the same
+/// refusal. Gating the retry on a real witness change is what makes it mean
+/// something — and it is exactly the case `#ensurewindowsize` describes, where a
+/// large document on a busy IDE registers after the 400ms missing-replica ensure
+/// window has already closed.
+pub fn wait_for_editor_replica_liveness_change(
+    file: &std::path::Path,
+    budget: std::time::Duration,
+) -> bool {
+    const POLL: std::time::Duration = std::time::Duration::from_millis(50);
+    let before = editor_replica_liveness_witness(file);
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        if editor_replica_liveness_witness(file) != before {
+            return true;
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        std::thread::sleep(POLL.min(deadline - now));
+    }
+}
+
 /// Files whose replica self-heal was exhausted without recovering, remembered
 /// against the liveness witness that was current when it failed.
 static EDITOR_REPLICA_SELF_HEAL_EXHAUSTED: std::sync::LazyLock<
@@ -8845,6 +8880,51 @@ mod tests {
             "the terminal-rebuild latch must not leak into the upstream self-heal memo"
         );
         clear_terminal_missing_replica_rebuild(file);
+    }
+
+    /// `#witnessretrygate` — the retry gate a refused route resolution consults.
+    ///
+    /// With no editor registered for the path the witness cannot advance, so the
+    /// wait must spend its whole budget and report `false` — the answer that
+    /// makes the caller fail closed instead of re-asking into the same latches.
+    /// The bound is the property under test: an unbounded wait here would hang
+    /// `Run Agent Doc` instead of erroring it.
+    #[test]
+    fn witness_wait_reports_no_change_and_stays_inside_its_budget() {
+        let file = std::path::Path::new("/tmp/agent-doc-witness-retry-gate.md");
+        let budget = std::time::Duration::from_millis(120);
+
+        let started = std::time::Instant::now();
+        let changed = wait_for_editor_replica_liveness_change(file, budget);
+        let elapsed = started.elapsed();
+
+        assert!(
+            !changed,
+            "no editor is registered for this path, so no registration can land"
+        );
+        assert!(
+            elapsed >= budget,
+            "the wait must actually give a late registration its full budget, \
+             spent {elapsed:?} of {budget:?}"
+        );
+        assert!(
+            elapsed < budget * 8,
+            "the wait must stay bounded so a refused route errors instead of \
+             hanging, spent {elapsed:?} of {budget:?}"
+        );
+    }
+
+    /// A zero budget is one immediate observation, not a poll interval's sleep.
+    #[test]
+    fn witness_wait_with_no_budget_returns_immediately() {
+        let file = std::path::Path::new("/tmp/agent-doc-witness-retry-gate-zero.md");
+
+        let started = std::time::Instant::now();
+        assert!(!wait_for_editor_replica_liveness_change(
+            file,
+            std::time::Duration::ZERO
+        ));
+        assert!(started.elapsed() < std::time::Duration::from_millis(50));
     }
 
     /// A controller transport error while the editor is still registered is

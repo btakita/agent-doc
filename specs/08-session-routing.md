@@ -323,11 +323,46 @@ closes the bare-foreign-session gap that the `.md`-document cross-document check
 `claude`/`codex` pane carries no agent-doc document path in its command line, but its git
 repository still identifies it as foreign.
 
+### Refused Queue-Resolution Retry Gate (`#witnessretrygate`)
+
+Route activates a document's `agent:queue` before dispatch, and that step must resolve
+the **current** document text. While an editor is attached and its replica cannot
+answer, `resolve_editor_unavailable_disk_read_fallback` refuses to read disk — disk is a
+non-authoritative replica of a live buffer — and bails with one message shaped
+`editor is still attached for <path>; <reason> recovery exhausted and disk read authority
+is refused`, where `<reason>` is `missing_replica` or `sync_pending`.
+
+`resolve_route_queue_document_content` (`agent-doc-route-io/src/queue_dispatch.rs`) grants
+that refusal one bounded retry. Two properties are normative:
+
+- **The retry covers both observation families.** The predicate matches the shared
+  `recovery exhausted and disk read authority is refused` tail, not one family's
+  spelling. Matching `sync_pending` alone left the entire missing-replica family with no
+  retry at all, which is what surfaced a JetBrains `Run Agent Doc` as
+  `⚠ agent-doc: route failed: route_queue_activation: failed to resolve current document
+  …` on the first refusal.
+- **The retry is gated on a proven registration change.** Every missing-replica recovery
+  latch in `agent-doc-document-realtime-io` is keyed on the editor replica **liveness
+  witness** (`should_pause_editor_replica_self_heal`,
+  `claim_terminal_missing_replica_rebuild`). Re-asking against an unchanged witness skips
+  the re-registration loop *and* the terminal rebuild and bails on the same refusal, so
+  an immediate retry is a provable no-op. `wait_for_editor_replica_liveness_change`
+  waits up to `ROUTE_QUEUE_RESOLVE_WITNESS_WAIT` (5s, matching the full
+  `DOCUMENT_MODEL_ENSURE_TIMEOUT_MS` window) for a registration to actually land; route
+  retries only when it does, and otherwise fails closed immediately. This is the
+  `#ensurewindowsize` case seen from the caller: a large document on a busy IDE registers
+  *after* the 400ms missing-replica ensure window has already closed.
+
+`<reason>_resolve_retry` records `witness_changed=` and `decision=retry|fail_closed`, so
+the ops log distinguishes "waited and something landed" from "waited and nothing did".
+An error that is not this refusal never pays the wait.
+
 ### Invariants
 
 | Invariant | Enforcement |
 |-----------|-------------|
 | One document per pane | Registry check in `claim::run()` and transaction-level actor-store handoff that closes and clears displaced cross-document owners |
+| A refused queue resolution retries only across a proven replica registration change (`#witnessretrygate`) | `resolve_route_queue_document_content` matches the family-agnostic refusal tail and gates its single retry on `wait_for_editor_replica_liveness_change`; an unchanged witness fails closed rather than re-asking into the same witness-keyed latches |
 | A pane never owns a document from a different git repository (`#cross-repo-owner-guard`) | `reject_cross_document_owner_pane` drops any owner candidate whose working directory resolves to a different `git rev-parse --show-toplevel` than the document, so a nested submodule pane cannot be re-attached to a superproject document (and vice versa) |
 | Document drives, pane follows | Sync resolves files first, then matches to panes |
 | Editor-selected document owns the requested pane | `auto_start` creates new panes when needed; actor-store writes recover stale aliases by making the incoming document authoritative and clearing displaced owners |

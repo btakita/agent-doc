@@ -330,7 +330,6 @@ The blocked commit itself (`NativeSaveRequired` + `disk_projection_ready=false` 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- re [#readbackeditor]: Add to the logs what you need to verify. Then verify. Automate testing yourself.
 <!-- /agent:queue -->
 
 

@@ -89,6 +89,29 @@ reload recovery — a mismatch there is a first observation, not an exhausted on
 A transport failure with no typed handshake answer stays retryable everywhere;
 promoting silence to proof would be a silent `--force-disk`.
 
+## The recurring class: a signal that is classified and then discarded
+
+Four instances found in one chain, all the same shape — the code computes the
+right classification and no caller consumes it:
+
+1. `definitively_refused_by_all` — its own comment said the caller "must stop
+   treating the endpoint as serving this document". No caller did. (Fixed.)
+2. An exhausted IPC build mismatch — collected into `build_mismatches`, logged
+   `..._recovery_failed`, then classified `definitive_refusal=false`. (Fixed.)
+3. `#planinactivequeuedone` — preflight resolved `queue_active: false` with zero
+   drainable heads; `plan` derived its contract from the queue prose anyway.
+   (Gating had since landed; the regression coverage it asked for had not —
+   added, mutation-verified, plus `formal/tla/PlanClosureContract.tla`.)
+4. `#adqueueclobber21` — its own report says it plainly: "The session-check
+   warning already DETECTS the loss; nothing acts on it." The detector exists
+   with a Warn/Strict knob (`PendingCaptureGuardMode`); the default is Warn.
+   NOT fixed — flipping the default is a behaviour change for every session and
+   wants an operator decision, not an agent's.
+
+**When you find a classification in this codebase, grep for its consumers before
+assuming it does anything.** Deriving the action and the log token from one
+`classify()` is what stops them drifting apart again.
+
 **Likely trigger:** a mid-session `make install` cdylib reload leaves the old
 plugin registration alive but no longer serving the document — see
 [[reference_cdylib_reload_strands_attached_document_replica]]. Prefer a

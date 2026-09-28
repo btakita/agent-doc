@@ -235,6 +235,20 @@ A response-bound preflight invoked from the authoritative actor's own pane may r
 
 `agent-doc outline <FILE> [--json]` reports markdown heading structure, line counts, and approximate token counts.
 
+## board
+
+`agent-doc board [ROOT] [--json] [--dag] [--all] [--no-submodules]` (alias `dashboard`) renders one severity-ordered fleet **work** view: the queue and backlog of every session document across a superproject and its submodules, grouped into one section per project.
+
+It is the complement of `admin dashboard`, not a replacement: `admin dashboard` answers "which controllers are alive", `board` answers "where is the work, and what is not moving". Both may be open at once.
+
+- **Root discovery** climbs to the outermost working tree with `git rev-parse --show-superproject-working-tree`, then takes every `.gitmodules` path that exists and carries its own `.agent-doc/`. Each such root is its own section, so `src/haiven-dev`, `src/boost-client`, and `src/equityfundingsource-dev` never share a section with the superproject. `--no-submodules` restricts the board to the given root; a root with no session documents produces no section.
+- **Document discovery** per root is the durable session registry plus a bounded filesystem scan. The scan never descends into another board root, a hidden directory, a leading-underscore aside/quarantine directory, or `node_modules` / `target` / `dist` / `build` / `vendor` / `tmp`, and it skips `*.done.md` archives. A document therefore belongs to exactly one project section.
+- **States are severity-ordered, worst first**: `BLOCKED` (an auto-DAG item is blocked on a decision), `STALLED` (a drainable queue head with no live actor), `OPERATOR` (only operator-gated heads remain), `DRAINING` (a live actor is draining), `READY` (open work, nothing queued), `CLEAR` (nothing open; hidden unless `--all`). The first three count as needing attention; both rows within a section and sections themselves sort by worst state.
+- **The load-bearing signal is `STALLED`**: the queue says there is agent-drainable work and no live actor is draining it. Everything else on the board is ordered under that.
+- **Columns** are `state`, `document`, `queue` (drainable, or `drainable+deferred`, or `stopped` for a parked queue), `backlog`, `review`, `auto-dag` (the per-document lane rollup), `actor`, and `needs` (one phrase naming why an attention row needs a person). `--dag` appends the per-project auto-DAG lane rollup.
+- **Read-only.** `board` never writes a document, claims a pane, or mutates controller state, and a project that fails to load degrades to a missing section rather than aborting the board.
+- `--json` emits the whole board under the stable `agent-doc-fleet-board-v1` contract version. Classification, ordering, and rendering are pure and live in `agent_doc_work_graph::fleet_board`; discovery and parsing live in the binary.
+
 ## upgrade
 
 `lib-path` is a machine-only native bootstrap query: it prints exactly the

@@ -2783,6 +2783,7 @@ dependencies = [
  "agent-doc-flow",
  "anyhow",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

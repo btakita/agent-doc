@@ -10,6 +10,7 @@ use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
+pub mod fleet_board;
 pub mod schedule;
 
 /// Which completion "lane" an item belongs to: the Auto-DAG's edge classes.

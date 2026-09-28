@@ -13,6 +13,8 @@
 //!   - `GET /doc/<path-or-hash>` → current text for a project session document.
 //!   - `GET /api/auth` → current auth mode and token scope.
 //!   - `GET /api/sessions` → project session list.
+//!   - `GET /board` → embedded fleet work board page (`BOARD_HTML`).
+//!   - `GET /api/board` → read-only fleet work board JSON (`agent-doc board --json`).
 //!   - `POST /save` → body = full document text; calls `write --commit`,
 //!     returns JSON with the new HEAD short SHA.
 //!   - `GET /events` → Server-Sent Events stream with `ready`, `doc-changed`,
@@ -49,6 +51,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Response, Server, SslConfig, StatusCode};
 
 const INDEX_HTML: &str = include_str!("../assets/serve/index.html");
+const BOARD_HTML: &str = include_str!("../assets/serve/board.html");
 const DEFAULT_PORT: u16 = 7333;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024; // 4 MiB cap for the MVP
@@ -413,6 +416,13 @@ fn handle_request(request: tiny_http::Request, state: &ServeState) -> Result<()>
         ),
         (Method::Get, "/api/auth") => handle_auth(request, state, scope),
         (Method::Get, "/api/sessions") => handle_sessions(request, state),
+        (Method::Get, "/board") => respond(
+            request,
+            BOARD_HTML,
+            "text/html; charset=utf-8",
+            StatusCode(200),
+        ),
+        (Method::Get, "/api/board") => handle_board(request, state),
         (Method::Get, "/doc") => handle_doc(request, state, None),
         (Method::Get, route) if route.starts_with("/doc/") => {
             handle_doc(request, state, Some(&route["/doc/".len()..]))
@@ -478,6 +488,18 @@ fn handle_sessions(request: tiny_http::Request, state: &ServeState) -> Result<()
     respond(
         request,
         &serde_json::to_string(&payload)?,
+        "application/json; charset=utf-8",
+        StatusCode(200),
+    )
+}
+
+/// Read-only fleet work board over this server's project root and its
+/// submodules. Same model as `agent-doc board`; see `fleet_board_cmd`.
+fn handle_board(request: tiny_http::Request, state: &ServeState) -> Result<()> {
+    let board = crate::fleet_board_cmd::board_for_root(&state.root, false, false);
+    respond(
+        request,
+        &serde_json::to_string(&board)?,
         "application/json; charset=utf-8",
         StatusCode(200),
     )
@@ -1598,6 +1620,10 @@ mod tests {
     #[test]
     fn serve_index_html_loads_sessions_and_hash_routes() {
         assert!(INDEX_HTML.contains("/api/sessions"));
+        assert!(
+            BOARD_HTML.contains("/api/board"),
+            "the board page must fetch its own read-only endpoint"
+        );
         assert!(INDEX_HTML.contains("docNav"));
         assert!(INDEX_HTML.contains("hashchange"));
     }

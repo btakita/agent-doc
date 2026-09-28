@@ -56,7 +56,9 @@ mod describe_image;
 mod env_cmd;
 mod exchange;
 mod extract;
+mod fleet_board_cmd;
 mod focus_effects;
+mod harness_switch_verify;
 mod history;
 mod hook_cmd;
 mod init;
@@ -69,7 +71,6 @@ mod mcp;
 mod migrate;
 mod mode;
 mod notify;
-mod harness_switch_verify;
 mod op_capture_verify;
 mod ops_report;
 mod orchestrate;
@@ -2520,6 +2521,27 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Fleet work board: the queue + backlog of every session document across a
+    /// superproject and its submodules, grouped by project and ordered by
+    /// severity. `admin dashboard` shows which controllers are alive; this shows
+    /// where the work is and what is not moving
+    #[command(alias = "dashboard")]
+    Board {
+        /// Project or superproject directory (defaults to the nearest project root from CWD)
+        root: Option<PathBuf>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Also print the per-project auto-DAG lane rollup
+        #[arg(long)]
+        dag: bool,
+        /// Include documents with nothing queued and nothing open
+        #[arg(long)]
+        all: bool,
+        /// Only inspect the given root, never its submodules
+        #[arg(long)]
+        no_submodules: bool,
+    },
     /// Validate the durable session registry against live tmux panes, remove stale entries
     Resync {
         /// Limit checks/fixes to a single session document
@@ -4818,6 +4840,19 @@ fn try_main() -> anyhow::Result<()> {
         }
         Commands::Outline { file, json } => outline_cmd::run_outline(&file, json),
         Commands::AutoDag { file, json } => auto_dag::run_command(&file, json),
+        Commands::Board {
+            root,
+            json,
+            dag,
+            all,
+            no_submodules,
+        } => fleet_board_cmd::run_command(fleet_board_cmd::BoardOptions {
+            root,
+            json,
+            dag,
+            all,
+            no_submodules,
+        }),
         Commands::Resync { file, fix, session } => {
             if fix {
                 agent_doc_sync_io::resync::run_fix(file.as_deref(), session.as_deref())

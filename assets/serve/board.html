@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-doc board</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #12100c;
+        --fg: #d8d2c4;
+        --dim: #8a8477;
+        --rule: #332f27;
+        --blocked: #f0736a;
+        --stalled: #f0a94c;
+        --operator: #e3d06a;
+        --draining: #7fc98a;
+        --ready: #7aa6d6;
+        --clear: #6b6559;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.55 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      }
+      main { padding: 24px 16px 64px; max-width: 1400px; margin: 0 auto; }
+      h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+      .lede { color: var(--dim); margin: 0 0 28px; max-width: 78ch; }
+      .project { margin: 0 0 32px; }
+      .project h2 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0 0 8px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .project h2 .root { color: var(--dim); font-weight: 400; margin-left: 8px; }
+      .scroll { overflow-x: auto; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td {
+        text-align: left;
+        padding: 4px 14px 4px 0;
+        white-space: nowrap;
+        vertical-align: top;
+      }
+      th { color: var(--dim); font-weight: 400; }
+      td.num { text-align: right; padding-right: 22px; }
+      td.doc { white-space: normal; word-break: break-word; }
+      .state { font-weight: 600; }
+      .state-blocked { color: var(--blocked); }
+      .state-stalled { color: var(--stalled); }
+      .state-operator_verify { color: var(--operator); }
+      .state-draining { color: var(--draining); }
+      .state-ready { color: var(--ready); }
+      .state-clear { color: var(--clear); }
+      .muted { color: var(--dim); }
+      .status { color: var(--dim); margin-bottom: 16px; }
+      .status.err { color: var(--blocked); }
+      footer { color: var(--dim); border-top: 1px solid var(--rule); padding-top: 12px; }
+      @media (max-width: 640px) { main { padding: 16px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="headline">agent-doc board</h1>
+      <p class="lede">
+        Ordered by severity, not alphabetically. The load-bearing signal is a drainable queue head
+        with no live actor: the queue says there is agent work and nothing is draining it. A
+        document that is draining does not need a person; anything counted above does.
+      </p>
+      <p class="status" id="status">loading…</p>
+      <div id="projects"></div>
+      <footer id="footer"></footer>
+    </main>
+    <script>
+      const STATE_LABEL = {
+        blocked: "BLOCKED",
+        stalled: "STALLED",
+        operator_verify: "OPERATOR",
+        draining: "DRAINING",
+        ready: "READY",
+        clear: "CLEAR",
+      };
+      const COLUMNS = [
+        "state",
+        "document",
+        "queue",
+        "backlog",
+        "review",
+        "auto-dag",
+        "actor",
+        "needs",
+      ];
+
+      function readToken() {
+        const fromQuery = new URLSearchParams(window.location.search).get("token");
+        if (fromQuery) {
+          window.localStorage.setItem("agentDocServeToken", fromQuery);
+          return fromQuery;
+        }
+        try {
+          return window.localStorage.getItem("agentDocServeToken") || "";
+        } catch (_) {
+          return "";
+        }
+      }
+      const authToken = readToken();
+
+      function withAuth(url) {
+        if (!authToken) return url;
+        return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(authToken);
+      }
+      function authHeaders() {
+        return authToken ? { Authorization: "Bearer " + authToken } : {};
+      }
+
+      function queueCell(row) {
+        if (row.queue_stopped) return "stopped";
+        if (!row.queue_active) return "—";
+        return row.deferred_heads > 0
+          ? row.drainable_heads + "+" + row.deferred_heads
+          : String(row.drainable_heads);
+      }
+      function reviewCell(row) {
+        if (!row.review_gated || row.review_gated >= row.review_open) return String(row.review_open);
+        return row.review_open + " (" + row.review_gated + " gated)";
+      }
+      function dagCell(row) {
+        const l = row.lanes || {};
+        const total = (l.implementable || 0) + (l.live_verify || 0) + (l.ipc_capture || 0) +
+          (l.blocked || 0) + (l.likely_done || 0);
+        if (!total) return "—";
+        return `impl:${l.implementable || 0} live:${l.live_verify || 0} ipc:${l.ipc_capture || 0} blk:${l.blocked || 0}`;
+      }
+      function actorCell(row) {
+        if (!row.actor_pane) return "—";
+        if (!row.actor_alive) return row.actor_pane + " dead";
+        return row.actor_harness ? row.actor_pane + " " + row.actor_harness : row.actor_pane;
+      }
+
+      function cell(text, className) {
+        const td = document.createElement("td");
+        td.textContent = text;
+        if (className) td.className = className;
+        return td;
+      }
+
+      function renderProject(group) {
+        const section = document.createElement("section");
+        section.className = "project";
+
+        const heading = document.createElement("h2");
+        heading.textContent = `${group.project} · ${group.attention_count} of ${group.rows.length} need attention`;
+        const root = document.createElement("span");
+        root.className = "root";
+        root.textContent = group.project_root;
+        heading.appendChild(root);
+        section.appendChild(heading);
+
+        const scroll = document.createElement("div");
+        scroll.className = "scroll";
+        const table = document.createElement("table");
+        const head = document.createElement("tr");
+        for (const name of COLUMNS) {
+          const th = document.createElement("th");
+          th.textContent = name;
+          head.appendChild(th);
+        }
+        table.appendChild(head);
+
+        for (const row of group.rows) {
+          const tr = document.createElement("tr");
+          tr.appendChild(cell(STATE_LABEL[row.state] || row.state, "state state-" + row.state));
+          tr.appendChild(cell(row.path, "doc"));
+          tr.appendChild(cell(queueCell(row), "num"));
+          tr.appendChild(cell(String(row.backlog_open), "num"));
+          tr.appendChild(cell(reviewCell(row), "num"));
+          tr.appendChild(cell(dagCell(row), "muted"));
+          tr.appendChild(cell(actorCell(row), "muted"));
+          tr.appendChild(cell(row.reason || "—", row.reason ? "" : "muted"));
+          table.appendChild(tr);
+        }
+        scroll.appendChild(table);
+        section.appendChild(scroll);
+        return section;
+      }
+
+      function setStatus(text, isError) {
+        const el = document.getElementById("status");
+        el.textContent = text;
+        el.className = isError ? "status err" : "status";
+      }
+
+      async function load() {
+        try {
+          const response = await fetch(withAuth("/api/board"), {
+            cache: "no-store",
+            headers: authHeaders(),
+          });
+          if (!response.ok) {
+            setStatus(`/api/board returned ${response.status}`, true);
+            return;
+          }
+          const board = await response.json();
+          document.getElementById("headline").textContent =
+            `agent-doc board — ${board.attention_count} of ${board.document_count} document(s) need attention`;
+          const projects = document.getElementById("projects");
+          projects.textContent = "";
+          for (const group of board.groups) {
+            projects.appendChild(renderProject(group));
+          }
+          setStatus(
+            board.groups.length
+              ? `${board.groups.length} project(s) · refreshed ${new Date().toLocaleTimeString()}`
+              : "No session documents found.",
+            false,
+          );
+          document.getElementById("footer").textContent = board.contract_version;
+        } catch (error) {
+          setStatus(String(error), true);
+        }
+      }
+
+      load();
+      setInterval(load, 15000);
+    </script>
+  </body>
+</html>

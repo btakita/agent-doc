@@ -16,6 +16,7 @@
     button { background: var(--accent); color: #fff; border: 0; border-radius: 4px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 600; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     button.secondary { background: #2a2f3a; color: var(--fg); }
+    a.secondary { background: #2a2f3a; color: var(--fg); border-radius: 4px; padding: 6px 14px; font-size: 13px; font-weight: 600; text-decoration: none; line-height: 1; }
     .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; }
     .workspace.single-doc { grid-template-columns: minmax(0, 1fr) 340px; }
     .doc-nav { min-width: 0; min-height: 0; overflow: auto; background: #12151c; border-right: 1px solid #232735; }
@@ -54,6 +55,7 @@
   <header>
     <h1>agent-doc</h1>
     <div class="status" id="status">loading…</div>
+    <a id="boardLink" class="secondary" href="/board" title="Fleet work board: queue + backlog across every project">board</a>
     <button id="reload" class="secondary" title="Discard unsaved edits and reload from disk">reload</button>
     <button id="save" disabled>save (Ctrl+S)</button>
   </header>
@@ -173,6 +175,9 @@
       if (!authToken) return url;
       return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(authToken);
     }
+
+    // The board is a plain link, so it carries the bearer token in its query.
+    document.getElementById("boardLink").href = withAuth("/board");
 
     function authHeaders(extra) {
       const headers = extra || {};

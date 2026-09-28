@@ -352,6 +352,34 @@ fn try_connect_with_timeout_for_pid(
     })
 }
 
+/// Whether something is currently bound and reachable at `path`.
+///
+/// Connect-only by design: a successful connect proves a live listener owns the
+/// socket name, which is all the bind guard in
+/// [`start_listener_with_logger_and_read_timeout`] needs to decide whether
+/// evicting it would strand a peer.
+///
+/// The bounded deadline is the load-bearing part. A wedged listener with a
+/// saturated accept backlog *blocks* `connect` rather than refusing it, so an
+/// unbounded probe would hang the caller and a naive `exists()` check would call
+/// the dead endpoint live. Timing out has to read as "does not answer", so a
+/// listener that stopped accepting can still be replaced.
+fn endpoint_answers(path: &Path) -> bool {
+    let path_for_thread = path.to_path_buf();
+    run_connect_with_timeout(
+        path,
+        Duration::from_secs(IPC_CONNECT_TIMEOUT_SECS),
+        move || {
+            let name = path_for_thread.to_fs_name::<GenericFilePath>()?;
+            interprocess::local_socket::ConnectOptions::new()
+                .name(name)
+                .connect_sync()
+                .context("failed to connect to IPC socket")
+        },
+    )
+    .is_ok()
+}
+
 fn run_connect_with_timeout<T, F>(path: &Path, connect_timeout: Duration, connect: F) -> Result<T>
 where
     T: Send + 'static,
@@ -1128,9 +1156,61 @@ where
 {
     let sock_path = socket_path(project_root);
 
-    // Clean up stale socket
+    // `#ipcdupelistener`: the socket file is the ONLY state two native
+    // generations share, so the live-peer check has to happen here.
+    //
+    // `socket_path` is keyed by pid, and inside an embedded editor host every
+    // hot-reloaded cdylib generation shares one pid. The FFI's own
+    // `IPC_LISTENER_GENERATIONS` guard cannot see across that boundary — that
+    // static is per-`.so`, so generation N+1 starts with an empty map, finds no
+    // listener of its own, and (before this guard) unlinked generation N's
+    // *live* socket and rebound the same name. Both listeners then survive: the
+    // evicted one holds an orphaned inode no client can ever reach, and the new
+    // one owns the name. If the new one is unhealthy the endpoint is dead for
+    // good, because `reload_library` — the one intent that would replace the bad
+    // generation — is delivered over the very socket that was stolen. Observed
+    // live as two `LISTEN` fds on one path in one IDE pid, the name-owning one
+    // sitting at 4090/4096 unaccepted connections while every client reported
+    // `IPC handshake timeout`.
+    //
+    // So only an endpoint that cannot answer is evicted. A genuinely stale
+    // socket (dead process, or a file nothing is bound to) is still removed
+    // exactly as before; a live peer makes this start fail closed and say so.
     if sock_path.exists() {
-        let _ = std::fs::remove_file(&sock_path);
+        if endpoint_answers(&sock_path) {
+            ops_logger(
+                project_root,
+                &format!(
+                    "ipc_listener_bind_refused_live_peer path={} pid={} \
+                     reason=live_listener_owns_endpoint",
+                    sock_path.display(),
+                    std::process::id()
+                ),
+            );
+            return Err(anyhow::anyhow!(
+                "refusing to evict the live IPC listener at {}: another native \
+                 generation in this process still serves this endpoint. Stop it \
+                 (native generation quiesce) before starting a replacement \
+                 listener; stealing the socket name strands both peers.",
+                sock_path.display()
+            ));
+        }
+        ops_logger(
+            project_root,
+            &format!(
+                "ipc_listener_evicted_unresponsive_endpoint path={} pid={}",
+                sock_path.display(),
+                std::process::id()
+            ),
+        );
+        if let Err(error) = std::fs::remove_file(&sock_path)
+            && error.kind() != ErrorKind::NotFound
+        {
+            eprintln!(
+                "[ipc-socket] warning: failed to remove unresponsive listener socket {}: {error}",
+                sock_path.display()
+            );
+        }
     }
 
     // Ensure parent directory exists
@@ -1462,6 +1542,126 @@ mod tests {
 
         assert_eq!(prune_stale_editor_sockets(dir.path()).unwrap(), 1);
         assert!(!stale.exists());
+    }
+
+    /// Wait until `path` accepts a connection, or give up.
+    fn await_endpoint(path: &Path) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if endpoint_answers(path) {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    /// `#ipcdupelistener`: a second native generation must not steal the socket
+    /// name from a live listener in the same process.
+    ///
+    /// `socket_path` is keyed by pid, so every hot-reloaded cdylib generation
+    /// inside one editor host resolves to this same path. Unlinking and
+    /// rebinding it leaves two listeners for one name — the evicted one
+    /// unreachable, the new one owning the name — and `reload_library`, the
+    /// intent that would replace a bad generation, only travels over the stolen
+    /// socket. This test is that deadlock's regression: it runs both listeners
+    /// in one process precisely because that is the shape the FFI's per-`.so`
+    /// `IPC_LISTENER_GENERATIONS` guard cannot see.
+    #[test]
+    fn a_live_listener_is_not_evicted_when_a_second_generation_binds_the_same_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let sock_path = socket_path(&root);
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let listener_root = root.clone();
+        let listener_shutdown = Arc::clone(&shutdown);
+        let listener = thread::spawn(move || {
+            let _ = start_listener_with_logger_until(
+                &listener_root,
+                |_| None,
+                noop_ops_logger,
+                listener_shutdown,
+            );
+        });
+        assert!(
+            await_endpoint(&sock_path),
+            "the first generation's listener never came up at {}",
+            sock_path.display()
+        );
+
+        // The second start runs off-thread with a bounded wait. A regressed
+        // guard does not return an error — it binds the stolen name and blocks
+        // in `accept` forever — so waiting on the thread is what turns that
+        // regression into a clean failure instead of a hung suite.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let second_root = root.clone();
+        thread::spawn(move || {
+            let _ = tx.send(start_listener(&second_root, |_| None).err().map(|e| format!("{e:#}")));
+        });
+        let outcome = rx.recv_timeout(Duration::from_secs(10)).unwrap_or_else(|_| {
+            panic!(
+                "the second generation neither refused nor returned: it bound {} \
+                 out from under the live listener",
+                sock_path.display()
+            )
+        });
+        let message =
+            outcome.expect("a second generation must refuse to evict a live listener, not bind it");
+        assert!(message.contains("refusing to evict"), "{message}");
+        assert!(
+            message.contains(&sock_path.display().to_string()),
+            "the refusal must name the contested endpoint: {message}"
+        );
+
+        assert!(
+            endpoint_answers(&sock_path),
+            "the refused start must leave the first listener serving its endpoint"
+        );
+
+        shutdown.store(true, Ordering::SeqCst);
+        let _ = wake_listener(&root);
+        let _ = listener.join();
+    }
+
+    /// The other half of `#ipcdupelistener`: the guard must only protect an
+    /// endpoint that actually answers. A socket path left behind by a dead
+    /// process has no listener, so it is still evicted and the new listener
+    /// binds — otherwise the guard would turn every crash into a permanent
+    /// refusal, which is the wedge it exists to prevent.
+    #[test]
+    fn a_socket_path_with_no_listener_is_still_evicted() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let sock_path = socket_path(&root);
+        std::fs::create_dir_all(sock_path.parent().unwrap()).unwrap();
+        std::fs::write(&sock_path, b"not a bound socket").unwrap();
+
+        assert!(
+            !endpoint_answers(&sock_path),
+            "a plain file is not a reachable endpoint"
+        );
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let listener_root = root.clone();
+        let listener_shutdown = Arc::clone(&shutdown);
+        let listener = thread::spawn(move || {
+            let _ = start_listener_with_logger_until(
+                &listener_root,
+                |_| None,
+                noop_ops_logger,
+                listener_shutdown,
+            );
+        });
+
+        assert!(
+            await_endpoint(&sock_path),
+            "the unresponsive socket must be replaced by a working listener"
+        );
+
+        shutdown.store(true, Ordering::SeqCst);
+        let _ = wake_listener(&root);
+        let _ = listener.join();
     }
 
     #[test]

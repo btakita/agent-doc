@@ -7042,6 +7042,41 @@ fn record_editor_replica_self_heal_exhausted(
         .insert(file.to_path_buf(), witness);
 }
 
+/// One observation of "the endpoint accepted every request and the replica never
+/// appeared", keyed by the liveness witness it was made at.
+///
+/// Corroboration, not a clock. The re-registration budget is under a second, so a
+/// single exhausted loop cannot tell a retired native generation from an IDE in a
+/// GC pause — both accept and both stay missing. A second, independent resolve at
+/// the SAME witness can: a slow editor that lands its replica in between reports
+/// healthy, which clears this memo along with the others.
+static EDITOR_REPLICA_ACCEPTED_UNSERVED: std::sync::LazyLock<
+    Mutex<std::collections::HashMap<std::path::PathBuf, EditorReplicaLivenessWitness>>,
+> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+fn record_editor_replica_accepted_unserved(
+    file: &std::path::Path,
+    witness: EditorReplicaLivenessWitness,
+) {
+    EDITOR_REPLICA_ACCEPTED_UNSERVED
+        .lock()
+        .insert(file.to_path_buf(), witness);
+}
+
+fn editor_replica_accepted_unserved_corroborated(
+    file: &std::path::Path,
+    witness: &EditorReplicaLivenessWitness,
+) -> bool {
+    EDITOR_REPLICA_ACCEPTED_UNSERVED
+        .lock()
+        .get(file)
+        .is_some_and(|recorded| recorded == witness)
+}
+
+fn clear_editor_replica_accepted_unserved(file: &std::path::Path) {
+    EDITOR_REPLICA_ACCEPTED_UNSERVED.lock().remove(file);
+}
+
 fn clear_editor_replica_self_heal_exhausted(file: &std::path::Path) {
     EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock().remove(file);
 }
@@ -7130,6 +7165,7 @@ fn clear_editor_replica_recovery_latches(file: &std::path::Path) {
     clear_editor_replica_self_heal_exhausted(file);
     clear_terminal_missing_replica_rebuild(file);
     clear_editor_endpoint_definitive_refusal(file);
+    clear_editor_replica_accepted_unserved(file);
 }
 
 fn reobserve_missing_editor_replica_with_reregistration(
@@ -7144,7 +7180,34 @@ fn reobserve_missing_editor_replica_with_reregistration(
         clear_editor_replica_recovery_latches(file);
         return observed;
     }
-    if should_pause_editor_replica_self_heal(file, &editor_replica_liveness_witness(file)) {
+    let paused_witness = editor_replica_liveness_witness(file);
+    if should_pause_editor_replica_self_heal(file, &paused_witness) {
+        // This is the corroborating observation, and it costs nothing: the
+        // document is STILL in the missing-replica family at the same liveness
+        // witness that an earlier spent budget already saw accepted-and-unserved.
+        // Two independent resolves, no clock, and a slow editor that landed its
+        // replica in between would have cleared the memo instead of reaching here.
+        if let Some(proof) =
+            agent_doc_document_realtime::not_serving_proof::reregistration_not_serving_proof(
+                0,
+                1,
+                true,
+                editor_replica_accepted_unserved_corroborated(file, &paused_witness),
+            )
+        {
+            record_editor_endpoint_definitive_refusal(file, paused_witness);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "editor_replica_endpoint_proven_not_serving file={} source={} proof={} \
+                     evidence=corroborated_at_unchanged_witness \
+                     recovery=demote_stale_attachment_latch",
+                    file.display(),
+                    source,
+                    proof.token(),
+                ),
+            );
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -7238,26 +7301,22 @@ fn reobserve_missing_editor_replica_with_reregistration(
     // about whether the endpoint CAN serve, so `decide_authority_recovery` had
     // no fact to leave `FailClosed` on and the attachment latch outlived the
     // replica it stood for — the cdylib-generation strand, whose only recovery
-    // was an operator reopening the tab. If every request was accepted across
-    // the whole budget and the witness never moved, the endpoint has said yes N
-    // times and still holds no model for this document: proof, and keyed to the
-    // witness so a genuine re-attach clears it for free.
-    if let Some(proof) = agent_doc_document_realtime::not_serving_proof::reregistration_not_serving_proof(
-        0,
-        accepted_requests,
-        // Reachable only by falling out of the loop: every early exit above
-        // returns, so arriving here IS the spent budget.
-        true,
-    ) {
-        record_editor_endpoint_definitive_refusal(file, witness.clone());
+    // was an operator reopening the tab.
+    //
+    // Deliberately records an OBSERVATION here, not the proof. This budget is
+    // under a second; an IDE in a GC pause accepts every request inside it with
+    // a healthy re-registration still in flight, and demoting on that would read
+    // stale disk over a live buffer. The proof is taken on the next resolve that
+    // still finds the document unserved at this same witness.
+    if accepted_requests > 0 {
+        record_editor_replica_accepted_unserved(file, witness.clone());
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "editor_replica_endpoint_proven_not_serving file={} source={} proof={} \
-                 accepted_requests={} attempts={} recovery=demote_stale_attachment_latch",
+                "editor_replica_accepted_without_serving file={} source={} \
+                 accepted_requests={} attempts={} evidence=awaiting_corroboration",
                 file.display(),
                 source,
-                proof.token(),
                 accepted_requests,
                 attempts,
             ),

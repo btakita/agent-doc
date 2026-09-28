@@ -132,9 +132,11 @@ VARIABLES
     attempts,    (* re-registration attempts spent *)
     refusals,    (* attempts the endpoint ANSWERED with a rejection *)
     accepted,    (* attempts the endpoint ANSWERED with a yes *)
+    corroborated,(* a spent budget of acceptances was already observed HERE *)
     authority    (* "none" | "editor" | "disk" - what a resolve produced *)
 
-vars == << replica, mode, registration, attempts, refusals, accepted, authority >>
+vars == << replica, mode, registration, attempts, refusals, accepted,
+           corroborated, authority >>
 
 Init ==
     /\ replica = "present"
@@ -143,6 +145,7 @@ Init ==
     /\ attempts = 0
     /\ refusals = 0
     /\ accepted = 0
+    /\ corroborated = FALSE
     /\ authority = "editor"
 
 TypeOK ==
@@ -152,6 +155,7 @@ TypeOK ==
     /\ attempts \in 0..MaxReregisterAttempts
     /\ refusals \in 0..MaxReregisterAttempts
     /\ accepted \in 0..MaxReregisterAttempts
+    /\ corroborated \in BOOLEAN
     /\ authority \in {"none", "editor", "disk"}
 
 (*************************************************************************)
@@ -165,7 +169,7 @@ LibraryReload ==
     /\ replica' = "missing"
     /\ mode' \in NotServing
     /\ authority' = "none"
-    /\ UNCHANGED << registration, attempts, refusals, accepted >>
+    /\ UNCHANGED << registration, attempts, refusals, accepted, corroborated >>
 
 (* There is deliberately NO action that changes the failure mode, and none that
    restores serving. `LibraryReload` already picks nondeterministically among the
@@ -185,6 +189,7 @@ ReregisterAccepted ==
     /\ attempts' = 0
     /\ refusals' = 0
     /\ accepted' = 0
+    /\ corroborated' = FALSE
     /\ UNCHANGED << mode, registration, authority >>
 
 (* The endpoint answers and REJECTS - a receipt, not a timeout. *)
@@ -194,7 +199,7 @@ ReregisterRejected ==
     /\ attempts < MaxReregisterAttempts
     /\ attempts' = attempts + 1
     /\ refusals' = refusals + 1
-    /\ UNCHANGED << replica, mode, registration, accepted, authority >>
+    /\ UNCHANGED << replica, mode, registration, accepted, corroborated, authority >>
 
 (* `#acceptedneverserved` - the shape this module used to assume away.
    The endpoint answers YES and the replica never appears, because the model it
@@ -206,7 +211,7 @@ ReregisterAcceptedWithoutServing ==
     /\ attempts < MaxReregisterAttempts
     /\ attempts' = attempts + 1
     /\ accepted' = accepted + 1
-    /\ UNCHANGED << replica, mode, registration, refusals, authority >>
+    /\ UNCHANGED << replica, mode, registration, refusals, corroborated, authority >>
 
 (* Nothing answered. Spends a loop iteration exactly like the others - the
    binary's budget counts attempts, not answers - but increments NEITHER counter.
@@ -218,19 +223,19 @@ ReregisterUnanswered ==
     /\ mode = "silent"
     /\ attempts < MaxReregisterAttempts
     /\ attempts' = attempts + 1
-    /\ UNCHANGED << replica, mode, registration, refusals, accepted, authority >>
+    /\ UNCHANGED << replica, mode, registration, refusals, accepted, corroborated, authority >>
 
 ResolveOnEditor ==
     /\ replica = "present"
     /\ authority' = "editor"
-    /\ UNCHANGED << replica, mode, registration, attempts, refusals, accepted >>
+    /\ UNCHANGED << replica, mode, registration, attempts, refusals, accepted, corroborated >>
 
 (* Legal only once the editor is PROVEN not serving. *)
 DescendToDisk ==
     /\ replica = "missing"
     /\ registration = "detached"
     /\ authority' = "disk"
-    /\ UNCHANGED << replica, mode, registration, attempts, refusals, accepted >>
+    /\ UNCHANGED << replica, mode, registration, attempts, refusals, accepted, corroborated >>
 
 (* The original edge: an answered rejection demotes the stale latch. *)
 DemoteOnRejection ==
@@ -240,20 +245,38 @@ DemoteOnRejection ==
     /\ refusals > 0
     /\ attempts = MaxReregisterAttempts
     /\ registration' = "detached"
-    /\ UNCHANGED << replica, mode, attempts, refusals, accepted, authority >>
+    /\ UNCHANGED << replica, mode, attempts, refusals, accepted, corroborated, authority >>
 
-(* The second edge. The endpoint ANSWERED - repeatedly - and still holds no
-   model for this document across a spent budget. A statement about what the
-   endpoint reported, not about how long we waited: `accepted > 0` is reachable
-   only through `ReregisterAcceptedWithoutServing`, never through silence. *)
+(* One spent budget is not enough. In the binary that budget is 3 attempts at a
+   250ms backoff, and an IDE in a GC pause accepts every request inside it while
+   a healthy re-registration is still in flight, so a single exhausted round
+   cannot tell a retired generation from a slow one. This records the first
+   observation; the demotion below waits for a second, independent resolve that
+   still finds the document unserved at the same liveness witness. A slow editor
+   that lands its replica in between reports healthy and clears everything. *)
+RecordUnservedObservation ==
+    /\ ~corroborated
+    /\ replica = "missing"
+    /\ accepted > 0
+    /\ attempts = MaxReregisterAttempts
+    /\ corroborated' = TRUE
+    /\ UNCHANGED << replica, mode, registration, attempts, refusals, accepted,
+                     authority >>
+
+(* The second edge. The endpoint ANSWERED - repeatedly, across two independent
+   resolves - and still holds no model for this document. A statement about what
+   the endpoint reported, not about how long we waited: `accepted > 0` is
+   reachable only through `ReregisterAcceptedWithoutServing`, never through
+   silence. *)
 DemoteOnAcceptanceWithoutService ==
     /\ DemoteOnAcceptedWithoutServing
     /\ registration = "attached"
     /\ replica = "missing"
     /\ accepted > 0
+    /\ corroborated
     /\ attempts = MaxReregisterAttempts
     /\ registration' = "detached"
-    /\ UNCHANGED << replica, mode, attempts, refusals, accepted, authority >>
+    /\ UNCHANGED << replica, mode, attempts, refusals, accepted, corroborated, authority >>
 
 Next ==
     \/ LibraryReload
@@ -261,6 +284,7 @@ Next ==
     \/ ReregisterRejected
     \/ ReregisterAcceptedWithoutServing
     \/ ReregisterUnanswered
+    \/ RecordUnservedObservation
     \/ ResolveOnEditor
     \/ DescendToDisk
     \/ DemoteOnRejection
@@ -277,6 +301,7 @@ Spec ==
     /\ WF_vars(ReregisterRejected)
     /\ WF_vars(ReregisterAcceptedWithoutServing)
     /\ WF_vars(ReregisterUnanswered)
+    /\ WF_vars(RecordUnservedObservation)
     /\ WF_vars(ResolveOnEditor)
     /\ WF_vars(DescendToDisk)
     /\ WF_vars(DemoteOnRejection)

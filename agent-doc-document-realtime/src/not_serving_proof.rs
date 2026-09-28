@@ -82,15 +82,30 @@ impl NotServingProof {
 /// `budget_spent` must mean the loop ran to exhaustion: a caller that gave up
 /// early has not shown the endpoint anything, and reporting proof from a partial
 /// attempt is how a bound becomes a guess.
+///
+/// `corroborated` is what keeps the acceptance clause away from a busy editor.
+/// The budget is 3 attempts at a 250ms backoff -- under a second -- and an IDE
+/// that is indexing or in a GC pause will accept every request inside that
+/// window while a perfectly healthy re-registration is still in flight. One
+/// spent budget is therefore not enough to distinguish "retired generation" from
+/// "slow": both look identical for ~750ms. So the acceptance clause requires the
+/// document to have been observed unserved at the SAME liveness witness on an
+/// earlier, independent resolve. A slow editor that lands its replica between the
+/// two observations reports healthy, which clears the memo and the corroboration
+/// with it, so it can never reach this clause.
+///
+/// A refusal needs no corroboration: the endpoint stated the answer, and a second
+/// identical statement adds nothing.
 pub fn reregistration_not_serving_proof(
     definitive_refusals: usize,
     accepted_requests: usize,
     budget_spent: bool,
+    corroborated: bool,
 ) -> Option<NotServingProof> {
     if definitive_refusals > 0 {
         return Some(NotServingProof::AnsweredAndRefused);
     }
-    if budget_spent && accepted_requests > 0 {
+    if budget_spent && accepted_requests > 0 && corroborated {
         return Some(NotServingProof::AcceptedWithoutServing);
     }
     None
@@ -105,19 +120,28 @@ mod tests {
     #[test]
     fn a_refusal_proves_it_immediately() {
         assert_eq!(
-            reregistration_not_serving_proof(1, 0, false),
+            reregistration_not_serving_proof(1, 0, false, false),
             Some(NotServingProof::AnsweredAndRefused)
         );
     }
 
-    /// The cdylib strand. The endpoint said yes to every request and the replica
-    /// never appeared, so the latch has a proof it can demote on.
+    /// The cdylib strand. The endpoint said yes to every request, the replica
+    /// never appeared, and an earlier resolve at the same witness saw the same
+    /// thing — so the latch has a proof it can demote on.
     #[test]
-    fn acceptance_across_a_spent_budget_proves_it() {
+    fn corroborated_acceptance_across_a_spent_budget_proves_it() {
         assert_eq!(
-            reregistration_not_serving_proof(0, 3, true),
+            reregistration_not_serving_proof(0, 3, true, true),
             Some(NotServingProof::AcceptedWithoutServing)
         );
+    }
+
+    /// The busy-editor guard. One spent budget is under a second; an IDE in a GC
+    /// pause accepts every request in that window with a healthy re-registration
+    /// still in flight. A single observation must not demote it.
+    #[test]
+    fn a_single_uncorroborated_budget_does_not_prove_it() {
+        assert_eq!(reregistration_not_serving_proof(0, 3, true, false), None);
     }
 
     /// The half that must not move. Nothing answered, so nothing is proven —
@@ -125,13 +149,13 @@ mod tests {
     /// against an editor that is merely slow or briefly unreachable.
     #[test]
     fn silence_proves_nothing_however_long_it_lasts() {
-        assert_eq!(reregistration_not_serving_proof(0, 0, true), None);
+        assert_eq!(reregistration_not_serving_proof(0, 0, true, true), None);
     }
 
     /// A caller that gave up early has not shown the endpoint anything.
     #[test]
     fn an_unspent_budget_proves_nothing() {
-        assert_eq!(reregistration_not_serving_proof(0, 3, false), None);
+        assert_eq!(reregistration_not_serving_proof(0, 3, false, true), None);
     }
 
     /// A refusal outranks acceptance when both occurred: it is the stronger and
@@ -139,7 +163,7 @@ mod tests {
     #[test]
     fn a_refusal_outranks_acceptance_in_the_diagnosis() {
         assert_eq!(
-            reregistration_not_serving_proof(1, 3, true),
+            reregistration_not_serving_proof(1, 3, true, false),
             Some(NotServingProof::AnsweredAndRefused)
         );
     }

@@ -3401,19 +3401,27 @@ fn signal_nonconverging_replica_recovery(
         CrdtReplicaEventReason::EditorReplicaReregister,
         1,
     ) {
-        Ok(outcome) => agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "crdt_nonconverging_replica_recovery file={} client_id={} redeliveries={} source={} reregister={} found={} notified={}",
-                file.display(),
-                client_id,
-                redeliveries_without_ack,
-                source,
-                outcome.diagnosis(),
-                outcome.found,
-                outcome.notified,
-            ),
-        ),
+        Ok(outcome) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_nonconverging_replica_recovery file={} client_id={} redeliveries={} source={} reregister={} found={} notified={} disposition={:?}",
+                    file.display(),
+                    client_id,
+                    redeliveries_without_ack,
+                    source,
+                    outcome.diagnosis(),
+                    outcome.found,
+                    outcome.notified,
+                    outcome.nonconverging_disposition(),
+                ),
+            );
+            if outcome.nonconverging_disposition()
+                == NonconvergingReplicaDisposition::DropFromDeliveryCut
+            {
+                drop_definitively_refused_replica(file, client_id, source);
+            }
+        }
         Err(error) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -3421,6 +3429,41 @@ fn signal_nonconverging_replica_recovery(
                 file.display(),
                 client_id,
                 redeliveries_without_ack,
+                source,
+            ),
+        ),
+    }
+}
+
+/// Apply [`NonconvergingReplicaDisposition::DropFromDeliveryCut`].
+///
+/// `#refusedreceiptveto`: the refusal classification existed and was logged,
+/// but no caller acted on it, so a replica whose endpoint answered and refused
+/// stayed in the live delivery cut and held `visible_delivery_projected` false
+/// forever — the native-save gate never opened and closeout could never settle.
+/// See `formal/tla/VisibleDeliveryReceipt.tla`, whose wedge configuration
+/// proves this is the edge that removes the deadlock.
+fn drop_definitively_refused_replica(file: &Path, client_id: u64, source: &str) {
+    match with_existing_hub(file, |hub| hub.drop_definitively_refused_replica(client_id)) {
+        Ok(Some(true)) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_dropped_from_delivery_cut file={} client_id={} source={} reason=endpoint_definitively_refused recovery=disconnect_replica_state_retained",
+                file.display(),
+                client_id,
+                source,
+            ),
+        ),
+        // The hub refused: the member reconnected, ACKed, or still holds the
+        // barrier. All three mean it is converging again, so leaving it alone
+        // is correct.
+        Ok(Some(false)) | Ok(None) => {}
+        Err(error) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_drop_from_delivery_cut_deferred file={} client_id={} source={} error={error:#}",
+                file.display(),
+                client_id,
                 source,
             ),
         ),
@@ -4688,28 +4731,113 @@ pub fn request_native_save_for_current_projection(
     })
 }
 
+/// How a signal outcome classifies, independent of its printed token.
+///
+/// `#refusedreceiptveto`: the token and the action a caller must take were
+/// derived separately, and only the token was ever computed. So
+/// `definitively_refused_by_all` — whose own documentation says the caller must
+/// "stop treating the endpoint as serving this document" — was logged and
+/// discarded, and the refused replica kept vetoing the visible-delivery receipt
+/// forever. Deriving both from one classification is what stops them drifting
+/// apart again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplicaSignalClass {
+    /// No registration was found at all: a stale-attachment wedge inside
+    /// agent-doc.
+    NoLiveRegistration,
+    /// Every live route was fenced on a plugin generation mismatch.
+    PluginGenerationMismatch(usize),
+    /// Every live route ANSWERED and refused.
+    DefinitivelyRefusedByAll(usize),
+    /// Routes exist but none could be reached: a delivery fault.
+    DeliveryFailedToAll(usize),
+    /// Some, but not all, routes were reached.
+    PartiallyRequested { notified: usize, found: usize },
+    /// Every discovered route was reached.
+    Requested(usize),
+}
+
+/// What the caller must do with a live replica after its recovery signal
+/// answered. Pure policy; the adapter applies the effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonconvergingReplicaDisposition {
+    /// A live endpoint accepted the request; leave the replica in the delivery
+    /// cut and let the rebuild land.
+    AwaitRebuild,
+    /// Absent, unreachable, or generation-fenced endpoints are retryable. Leave
+    /// the replica alone; a later signal may reach it.
+    ///
+    /// Must never collapse into [`Self::DropFromDeliveryCut`]: a timeout or a
+    /// missing socket is not proof the endpoint stopped serving, and treating
+    /// it as one would turn this into a silent `--force-disk`.
+    Retry,
+    /// Every live route answered and refused. Retrying cannot succeed, so stop
+    /// treating the endpoint as serving this document and drop it from the
+    /// delivery cut. Modelled as `DropRefusedFromDeliveryCut` in
+    /// `formal/tla/VisibleDeliveryReceipt.tla`.
+    DropFromDeliveryCut,
+}
+
 impl ReplicaSignalOutcome {
-    /// The diagnosis token for ops logs. `found == 0` is a stale-attachment
-    /// wedge inside agent-doc; `found > 0` with `notified == 0` is a delivery
-    /// failure to a registration that *does* exist.
-    pub fn diagnosis(&self) -> String {
+    /// Classify this outcome once; [`Self::diagnosis`] and
+    /// [`Self::nonconverging_disposition`] both derive from it.
+    pub fn classify(&self) -> ReplicaSignalClass {
         match (self.found, self.notified) {
-            (0, _) => "no_live_registration".to_string(),
+            (0, _) => ReplicaSignalClass::NoLiveRegistration,
             (found, 0) if self.generation_mismatches == found => {
-                format!("plugin_generation_mismatch:{found}")
+                ReplicaSignalClass::PluginGenerationMismatch(found)
             }
             // Every live route ANSWERED and refused. This is not a delivery
             // fault and retrying cannot fix it, so it must not share a token
             // with one: the caller's correct response is to stop treating the
             // endpoint as serving this document, not to try again.
             (found, 0) if self.definitive_refusals == found => {
+                ReplicaSignalClass::DefinitivelyRefusedByAll(found)
+            }
+            (found, 0) => ReplicaSignalClass::DeliveryFailedToAll(found),
+            (found, notified) if notified < found => {
+                ReplicaSignalClass::PartiallyRequested { notified, found }
+            }
+            (_, notified) => ReplicaSignalClass::Requested(notified),
+        }
+    }
+
+    /// The diagnosis token for ops logs. `found == 0` is a stale-attachment
+    /// wedge inside agent-doc; `found > 0` with `notified == 0` is a delivery
+    /// failure to a registration that *does* exist.
+    pub fn diagnosis(&self) -> String {
+        match self.classify() {
+            ReplicaSignalClass::NoLiveRegistration => "no_live_registration".to_string(),
+            ReplicaSignalClass::PluginGenerationMismatch(found) => {
+                format!("plugin_generation_mismatch:{found}")
+            }
+            ReplicaSignalClass::DefinitivelyRefusedByAll(found) => {
                 format!("definitively_refused_by_all:{found}")
             }
-            (found, 0) => format!("delivery_failed_to_all:{found}"),
-            (found, notified) if notified < found => {
+            ReplicaSignalClass::DeliveryFailedToAll(found) => {
+                format!("delivery_failed_to_all:{found}")
+            }
+            ReplicaSignalClass::PartiallyRequested { notified, found } => {
                 format!("requested:{notified}/{found}")
             }
-            (_, notified) => format!("requested:{notified}"),
+            ReplicaSignalClass::Requested(notified) => format!("requested:{notified}"),
+        }
+    }
+
+    /// What to do with the non-converging replica this signal was sent for.
+    pub fn nonconverging_disposition(&self) -> NonconvergingReplicaDisposition {
+        match self.classify() {
+            ReplicaSignalClass::DefinitivelyRefusedByAll(_) => {
+                NonconvergingReplicaDisposition::DropFromDeliveryCut
+            }
+            ReplicaSignalClass::PartiallyRequested { .. } | ReplicaSignalClass::Requested(_) => {
+                NonconvergingReplicaDisposition::AwaitRebuild
+            }
+            ReplicaSignalClass::NoLiveRegistration
+            | ReplicaSignalClass::PluginGenerationMismatch(_)
+            | ReplicaSignalClass::DeliveryFailedToAll(_) => {
+                NonconvergingReplicaDisposition::Retry
+            }
         }
     }
 }
@@ -5208,6 +5336,101 @@ mod tests {
     /// blames a stale attachment for what is really a delivery failure —
     /// which is what sent this investigation after payload size and
     /// generation fencing while the plane reported `live_editors=1`.
+    /// `#refusedreceiptveto`: the disposition must follow the classification.
+    ///
+    /// `definitively_refused_by_all` already documented that the caller must
+    /// stop treating the endpoint as serving this document, but nothing derived
+    /// an action from it — the token was logged and discarded, so a refused
+    /// replica kept vetoing the visible-delivery receipt forever. Deriving both
+    /// from `classify()` is what stops them drifting apart again; this test
+    /// pins the mapping in both directions.
+    #[test]
+    fn only_a_definitive_refusal_drops_a_replica_from_the_delivery_cut() {
+        let outcome = |found, notified, generation_mismatches, definitive_refusals| {
+            ReplicaSignalOutcome {
+                found,
+                notified,
+                build_mismatches: Vec::new(),
+                generation_mismatches,
+                definitive_refusals,
+            }
+        };
+
+        assert_eq!(
+            outcome(1, 0, 0, 1).nonconverging_disposition(),
+            NonconvergingReplicaDisposition::DropFromDeliveryCut,
+            "every live route ANSWERED and refused: retrying cannot succeed"
+        );
+        assert_eq!(
+            outcome(2, 0, 0, 2).nonconverging_disposition(),
+            NonconvergingReplicaDisposition::DropFromDeliveryCut,
+        );
+
+        // The force-disk guard. None of these is proof the endpoint stopped
+        // serving, so none of them may drop a replica out of the cut.
+        assert_eq!(
+            outcome(0, 0, 0, 0).nonconverging_disposition(),
+            NonconvergingReplicaDisposition::Retry,
+            "an absent registration is retryable, not a refusal"
+        );
+        assert_eq!(
+            outcome(1, 0, 0, 0).nonconverging_disposition(),
+            NonconvergingReplicaDisposition::Retry,
+            "a delivery fault is retryable, not a refusal"
+        );
+        assert_eq!(
+            outcome(1, 0, 1, 0).nonconverging_disposition(),
+            NonconvergingReplicaDisposition::Retry,
+            "a generation-fenced route is retryable, not a refusal"
+        );
+        assert_eq!(
+            outcome(2, 0, 0, 1).nonconverging_disposition(),
+            NonconvergingReplicaDisposition::Retry,
+            "one refusal among two routes is not proof about the other"
+        );
+
+        assert_eq!(
+            outcome(2, 1, 0, 1).nonconverging_disposition(),
+            NonconvergingReplicaDisposition::AwaitRebuild,
+            "a route that accepted owns the rebuild; leave the replica in place"
+        );
+        assert_eq!(
+            outcome(1, 1, 0, 0).nonconverging_disposition(),
+            NonconvergingReplicaDisposition::AwaitRebuild,
+        );
+    }
+
+    /// The token and the action are derived from one classification, so a
+    /// change to either must move both. This pins the pairing itself.
+    #[test]
+    fn replica_signal_diagnosis_and_disposition_agree() {
+        for found in 0..3usize {
+            for notified in 0..=found {
+                for generation_mismatches in 0..=found {
+                    for definitive_refusals in 0..=found {
+                        let outcome = ReplicaSignalOutcome {
+                            found,
+                            notified,
+                            build_mismatches: Vec::new(),
+                            generation_mismatches,
+                            definitive_refusals,
+                        };
+                        let drops = outcome.nonconverging_disposition()
+                            == NonconvergingReplicaDisposition::DropFromDeliveryCut;
+                        assert_eq!(
+                            drops,
+                            outcome.diagnosis().starts_with("definitively_refused_by_all:"),
+                            "disposition must drop exactly when the token says \
+                             every live route refused (found={found} \
+                             notified={notified} mismatches={generation_mismatches} \
+                             refusals={definitive_refusals})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn replica_signal_diagnosis_separates_missing_registration_from_failed_delivery() {
         assert_eq!(

@@ -7543,7 +7543,16 @@ fn controller_commit_projection_decision(
     Ok((decision, current))
 }
 
-fn ensure_controller_commit_projection_saved(
+/// Observe whether the live editor has already projected the canonical cut to
+/// disk. This is a READINESS PROBE, not a driver: it sends nothing, which is
+/// why it logs `request_sent=false`. The native save is requested by the
+/// retained-write recovery path
+/// (`agent_doc_document_realtime_io`'s `canonical_editor_projection_is_persisted`),
+/// which owns the visible-delivery receipt gate. `#refusedreceiptveto`: the
+/// former name claimed to `ensure` the save, and session-check repeated that
+/// claim to operators as "the controller has requested the ... save" while no
+/// request had been made.
+fn controller_commit_projection_is_saved(
     canonical: &Path,
     barrier_ready: bool,
 ) -> Result<bool> {
@@ -7592,7 +7601,7 @@ fn handle_commit_document_rpc(
     // mutations; skipping this distinct save proof lost queue strikes.
     let barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
     let disk_projection_ready =
-        ensure_controller_commit_projection_saved(&canonical, barrier_ready)?;
+        controller_commit_projection_is_saved(&canonical, barrier_ready)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -7634,7 +7643,7 @@ fn handle_commit_document_rpc(
     // Fence and save that new exact revision before git observes the document.
     let strike_barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
     let strike_disk_projection_ready =
-        ensure_controller_commit_projection_saved(&canonical, strike_barrier_ready)?;
+        controller_commit_projection_is_saved(&canonical, strike_barrier_ready)?;
     if !strike_barrier_ready || !strike_disk_projection_ready {
         anyhow::bail!(
             "answered free-text queue projection is not durable yet for {} (barrier_ready={} disk_projection_ready={})",

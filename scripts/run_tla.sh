@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -56,6 +56,12 @@ modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtL
 # leaves a way to go vacuous.
 must_violate=(
     EditorReplicaStrand:EditorReplicaStrandWedge
+    # The write-side dual of `EditorReplicaStrand`: a definitively refusing
+    # endpoint that keeps vetoing the visible-delivery receipt. Wedge proves
+    # the drop edge is load-bearing; reach proves the editor-native save was
+    # not abandoned in favour of the detached-write path.
+    VisibleDeliveryReceipt:VisibleDeliveryReceiptWedge
+    VisibleDeliveryReceipt:VisibleDeliveryReceiptReach
     JetBrainsFileCache:JetBrainsFileCacheWedge
     JetBrainsFileCache:JetBrainsFileCacheReach
     # `TransientRefusalLatch` has one wedge PER KNOB rather than one for the

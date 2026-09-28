@@ -80,6 +80,28 @@ tables and external-system assumptions.
 - commit is impossible until the retained agent intent is applied and the exact
   still-current editor version is saved to disk.
 
+`VisibleDeliveryReceipt.tla` checks the write-side dual of
+`EditorReplicaStrand`: the visible-delivery receipt that gates the editor-native
+save. `RelayHub` derives availability (`delivery_converged`) and the receipt
+(`visible_delivery_projected`) over the live membership cut, and the
+non-convergence budget releases a stalled replica from only the first of them.
+The module checks:
+
+- an availability release is never a receipt, so the tempting collapse of the
+  two predicates is rejected rather than adopted as a fix;
+- a native save is authorized by the receipt alone;
+- a replica leaves the delivery cut only on proof that its endpoint answered and
+  refused, so the detached-write path is never a disguised `--force-disk`;
+- a replica still inside its convergence budget is never preempted; and
+- the canonical cut eventually reaches disk with no operator action.
+
+Its wedge config removes the drop edge and must deadlock — that is the
+production wedge, where a refused replica held the receipt false forever, the
+native-save gate never opened, and every later cycle was refused admission. Its
+reach config asserts the negation of a save through a still-serving live editor
+and must be violated, proving the fix did not quietly route every document
+through the detached-write path instead.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

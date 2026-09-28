@@ -2447,6 +2447,50 @@ impl RelayHub {
         Ok(true)
     }
 
+    /// Drop a live replica from the delivery cut after its endpoint ANSWERED
+    /// and definitively refused to serve this document.
+    ///
+    /// `#refusedreceiptveto`: barrier release restores availability but leaves
+    /// `pending` untouched, so [`Self::visible_delivery_projected`] stays false.
+    /// Nothing decrements the streaks (only an ACK or a fresh obligation on an
+    /// empty queue does), nothing drains `pending` (only an ACK does), and the
+    /// one-shot [`Self::claim_nonconverging_recovery`] does not retry. So a
+    /// replica whose endpoint refuses the rebuild vetoes the visible-delivery
+    /// receipt forever: the native-save gate never opens, disk never receives
+    /// the canonical cut, the retained write never settles, and preflight
+    /// refuses every later cycle. Observed 2026-09-28 on
+    /// `tasks/agent-doc/agent-doc-bugs.md` — 38 minutes of `replica_pull` at
+    /// ~4/s against a frozen authority hash after one
+    /// `reregister=definitively_refused_by_all:1`.
+    ///
+    /// A definitive refusal is proof the endpoint no longer serves this
+    /// document — the same proof `formal/tla/EditorReplicaStrand.tla` uses to
+    /// demote a stale attachment latch on the read side.
+    /// `formal/tla/VisibleDeliveryReceipt.tla` checks the write-side dual, and
+    /// its wedge configuration proves this edge is what removes the deadlock.
+    ///
+    /// This is [`Self::disconnect`], not [`Self::deregister`]: the member's own
+    /// replica state survives, so a genuine reconnect still performs the
+    /// bidirectional state-vector catch-up. Nothing authoritative is lost — the
+    /// pending queue holds updates flowing canonical → member, which is content
+    /// the member is MISSING, never content only it holds.
+    ///
+    /// Refuses a member that still holds the barrier: a replica inside its
+    /// budget is still converging and must never be preempted, exactly as the
+    /// read side consults a refusal only after the retry budget is spent.
+    pub fn drop_definitively_refused_replica(&mut self, client_id: u64) -> bool {
+        let Some(member) = self.members.get(&client_id) else {
+            return false;
+        };
+        if !self.is_live(client_id)
+            || member.pending.is_empty()
+            || Self::member_holds_delivery_barrier(member)
+        {
+            return false;
+        }
+        self.disconnect(client_id)
+    }
+
     /// ACK one delivered update. Returns `Ok(false)` when the ACK is stale or
     /// unknown; this is non-fatal because editors may retry idempotent deliveries.
     pub fn ack_delivery(
@@ -5292,6 +5336,132 @@ mod tests {
         hub.reconnect(4).unwrap();
         assert!(hub.canonical_text().contains("CC"));
         assert_eq!(hub.member_text(4).unwrap(), hub.canonical_text());
+    }
+
+    /// `#refusedreceiptveto`: a replica whose endpoint ANSWERED and refused must
+    /// leave the delivery cut, or it vetoes the visible-delivery receipt forever.
+    ///
+    /// Observed 2026-09-28 on `tasks/agent-doc/agent-doc-bugs.md`. The barrier
+    /// released the replica for availability (`delivery_converged` true) but
+    /// `pending` was untouched, so `visible_delivery_projected` stayed false. The
+    /// one-shot recovery answered `reregister=definitively_refused_by_all:1` and
+    /// nothing escalated: 38 minutes of `replica_pull` at ~4/s against a frozen
+    /// authority hash, `save_diagnosis=native_save_gate_not_ready` on every
+    /// recovery attempt, `request_sent=false`, and every later turn refused with
+    /// `retained_write_blocks_new_cycle cause=authority_disk_diverged`.
+    /// `formal/tla/VisibleDeliveryReceipt.tla` checks that state as a genuine
+    /// state-graph deadlock and its wedge cfg keeps this edge load-bearing.
+    #[test]
+    fn a_definitively_refused_replica_leaves_the_delivery_cut() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        let editor2 = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        editor2.apply_local_edit(0, 0, "never-acked");
+        let update = editor2.diff(&ReplicaState::new(99).state_vector()).unwrap();
+        hub.relay_update(2, &update).unwrap();
+
+        // Drive replica 3 into the released-but-still-pending state.
+        for _ in 0..=MAX_REDELIVERIES_WITHOUT_ACK {
+            hub.pending_updates(3).unwrap();
+        }
+        assert!(
+            hub.delivery_converged(),
+            "precondition: the barrier released the non-ACKing replica"
+        );
+        assert!(
+            !hub.visible_delivery_projected(),
+            "precondition: the release is availability, not a receipt — and this \
+             is the predicate the native-save gate reads"
+        );
+
+        let canonical_before = hub.canonical_text();
+        assert!(
+            hub.drop_definitively_refused_replica(3),
+            "a refused endpoint must be droppable once the barrier let it go"
+        );
+
+        assert!(
+            hub.visible_delivery_projected(),
+            "with the refused replica out of the cut the receipt is reachable \
+             again — this is the edge the wedge removes"
+        );
+        assert_eq!(
+            hub.canonical_text(),
+            canonical_before,
+            "dropping a replica must never touch the canonical authority"
+        );
+        assert!(
+            hub.nonconverging_replicas().is_empty(),
+            "the released replica is no longer a live non-converging member"
+        );
+    }
+
+    /// The drop must never preempt a replica that is merely slow. A member still
+    /// inside its budget holds the barrier and is still converging; dropping it
+    /// would be a disguised `--force-disk`, which is what
+    /// `DropRequiresDefinitiveRefusal` rejects in the model.
+    #[test]
+    fn dropping_refuses_a_replica_that_still_holds_the_barrier() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        assert!(hub.ensure_canonical_projection_receipt(3).unwrap());
+        assert!(
+            !hub.delivery_converged(),
+            "precondition: the queued receipt still holds the barrier"
+        );
+
+        assert!(
+            !hub.drop_definitively_refused_replica(3),
+            "a replica inside its convergence budget must not be dropped"
+        );
+        assert_eq!(
+            hub.pending_updates(3).unwrap().len(),
+            1,
+            "and its queued delivery must survive the refusal to drop it"
+        );
+    }
+
+    /// A member with nothing pending is already converged; there is no veto to
+    /// clear, so the drop is a no-op rather than a gratuitous disconnect.
+    #[test]
+    fn dropping_is_a_no_op_for_a_converged_replica() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        assert!(hub.visible_delivery_projected());
+        assert!(!hub.drop_definitively_refused_replica(3));
+        assert_eq!(hub.live_count(), 2, "a converged replica stays in the cut");
+    }
+
+    /// The drop is `disconnect`, not `deregister`: the member's own replica state
+    /// survives so a genuine reconnect still performs the bidirectional
+    /// state-vector catch-up. Nothing the editor holds locally is lost.
+    #[test]
+    fn dropping_a_refused_replica_preserves_its_state_for_reconnect() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        // Replica 3 typed locally, and has an undelivered canonical receipt.
+        hub.local_edit(3, 0, 0, "local-3 ").unwrap();
+        assert!(hub.ensure_canonical_projection_receipt(3).unwrap());
+        for _ in 0..=MAX_BARRIER_WAITS_WITHOUT_PROGRESS {
+            hub.charge_barrier_wait_without_progress();
+        }
+        assert!(hub.drop_definitively_refused_replica(3));
+
+        hub.apply_local(2, 0, 0, "while-dropped").unwrap();
+        hub.reconnect(3).unwrap();
+
+        let text = hub.member_text(3).unwrap();
+        assert!(text.contains("local-3"), "local edits survive the drop");
+        assert!(text.contains("while-dropped"), "missed updates catch up");
+        assert_eq!(text, hub.canonical_text(), "reconnect converges");
     }
 
     #[test]

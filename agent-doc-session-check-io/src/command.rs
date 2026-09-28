@@ -1137,8 +1137,20 @@ fn run_with_options_inner(
         );
         let divergence_owner_note = match ownership.verdict() {
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred => {
-                "The controller has requested the generation-fenced native editor save and owns the next closeout attempt. \
-                 The editor buffer remains authoritative; Git, disk, and snapshots are evidence only. \
+                // `#refusedreceiptveto`: this used to assert the controller
+                // "has requested the generation-fenced native editor save".
+                // That is not something this site knows. The save is gated on
+                // the visible-delivery receipt, and when the gate is closed no
+                // request is sent at all — `request_sent=false`,
+                // `save_diagnosis=native_save_gate_not_ready`. Observed
+                // 2026-09-28 on `tasks/agent-doc/agent-doc-bugs.md`: the
+                // operator was told a request was in flight and to stand down,
+                // for 38 minutes, while no request had ever been made. Name the
+                // owner, which is true, and not the request, which may not have
+                // happened.
+                "The controller owns the next closeout attempt; it retries the native editor save as the \
+                 delivery receipt allows. The editor buffer remains authoritative; Git, disk, and snapshots \
+                 are evidence only. \
                  Do not patch or restore the file, ask the operator to save, rerun session-check, or resubmit finalize"
                     .to_string()
             }

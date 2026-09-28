@@ -3065,6 +3065,11 @@ pub enum PreDispatchStrandedDraftAction {
     /// unsubmitted. Submit that draft instead of appending a second trigger to
     /// it.
     ResubmitStrandedDraft,
+    /// The composer holds a draft that is NOT this trigger. Injecting appends to
+    /// it with no separator, so the harness receives one concatenated line
+    /// (`#concatdraftinject`). Nothing here is agent-doc's text to clear, so the
+    /// dispatch fails closed and leaves the draft exactly as it is.
+    DeferForeignDraft,
 }
 
 impl PreDispatchStrandedDraftAction {
@@ -3074,6 +3079,7 @@ impl PreDispatchStrandedDraftAction {
             Self::DispatchFresh => "dispatch_fresh",
             Self::DeferPaneBusy => "defer_pane_busy",
             Self::ResubmitStrandedDraft => "resubmit_stranded_draft",
+            Self::DeferForeignDraft => "defer_foreign_draft",
         }
     }
 }
@@ -3091,6 +3097,10 @@ pub struct PreDispatchStrandedDraftFacts {
     pub trigger_drafted: bool,
     /// Whether the harness shows a busy cue.
     pub pane_busy: bool,
+    /// Whether the composer holds a draft that is not this trigger
+    /// (`#concatdraftinject`). Derive it from the composer projection's
+    /// `OperatorDraft` preview, never from raw scrollback.
+    pub foreign_draft: bool,
 }
 
 /// (`#strandeddraftresubmit`) Classify the composer BEFORE a routed dispatch
@@ -3119,7 +3129,11 @@ pub const fn classify_pre_dispatch_stranded_draft_action(
     if !facts.pane_captured {
         PreDispatchStrandedDraftAction::ObserveUnavailable
     } else if !facts.trigger_drafted {
-        PreDispatchStrandedDraftAction::DispatchFresh
+        if facts.foreign_draft && !facts.pane_busy {
+            PreDispatchStrandedDraftAction::DeferForeignDraft
+        } else {
+            PreDispatchStrandedDraftAction::DispatchFresh
+        }
     } else if facts.pane_busy {
         PreDispatchStrandedDraftAction::DeferPaneBusy
     } else {
@@ -6566,6 +6580,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             pane_captured: true,
             trigger_drafted: true,
             pane_busy: false,
+            foreign_draft: false,
         }
     }
 
@@ -6591,6 +6606,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 pane_captured: false,
                 trigger_drafted: true,
                 pane_busy: false,
+                foreign_draft: false,
             }),
             PreDispatchStrandedDraftAction::ObserveUnavailable
         );
@@ -6611,6 +6627,61 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 ..idle_ready_composer_facts()
             }),
             PreDispatchStrandedDraftAction::DispatchFresh
+        );
+    }
+
+    /// `#concatdraftinject`: operator-reported 2026-09-28. A composer holding
+    /// `agent-doc tasks/api.md` received `agent-doc /abs/.../tasks/api.md`
+    /// appended with no separator, and the harness submitted the single line
+    /// `agent-doc tasks/api.mdagent-doc /abs/.../tasks/api.md`. Preflight refused
+    /// a path that never existed, and no cycle contract was created.
+    ///
+    /// `#strandeddraftresubmit` does not cover it: its whole condition is that
+    /// the draft holds *this* trigger, and these two triggers differ, so the
+    /// concatenating case classified as a clean fresh dispatch.
+    #[test]
+    fn pre_dispatch_refuses_to_append_a_trigger_to_someone_elses_draft() {
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
+                trigger_drafted: false,
+                foreign_draft: true,
+                ..idle_ready_composer_facts()
+            }),
+            PreDispatchStrandedDraftAction::DeferForeignDraft,
+            "a draft that is not this trigger must never be appended to"
+        );
+        assert_eq!(
+            PreDispatchStrandedDraftAction::DeferForeignDraft.as_str(),
+            "defer_foreign_draft"
+        );
+        // An empty composer is still the ordinary dispatch, and a busy pane is
+        // still the busy case — the new state is a strict tightening of neither.
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
+                trigger_drafted: false,
+                foreign_draft: false,
+                ..idle_ready_composer_facts()
+            }),
+            PreDispatchStrandedDraftAction::DispatchFresh
+        );
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
+                trigger_drafted: false,
+                foreign_draft: true,
+                pane_busy: true,
+                ..idle_ready_composer_facts()
+            }),
+            PreDispatchStrandedDraftAction::DispatchFresh,
+            "a busy pane keeps its existing short-circuit rather than acquiring a new refusal"
+        );
+        // The draft that DOES hold this trigger still submits: the foreign-draft
+        // state must not swallow the case #strandeddraftresubmit owns.
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
+                foreign_draft: true,
+                ..idle_ready_composer_facts()
+            }),
+            PreDispatchStrandedDraftAction::ResubmitStrandedDraft
         );
     }
 

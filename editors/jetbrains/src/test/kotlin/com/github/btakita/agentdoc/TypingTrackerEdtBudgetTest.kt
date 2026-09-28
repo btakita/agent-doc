@@ -514,6 +514,43 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
+    fun `an unresolvable merge base keeps the burst for a bounded number of boundaries`() {
+        // #basehashdropsops: a null base hash is a property of the READER — the
+        // native resolver failed to project document state this once — not of the
+        // operator's typing. Dropping the burst on the first failure destroys
+        // captured operator text a later boundary could still have stamped, which
+        // is what every observed `base_hash_unavailable` refusal did.
+        assertFalse("the first failure must retry", baseHashRetriesExhaustedUtil(1))
+        assertFalse("a burst may wait several boundaries", baseHashRetriesExhaustedUtil(4))
+        assertTrue(
+            "the wait is bounded so a permanent failure cannot grow the ledger forever",
+            baseHashRetriesExhaustedUtil(5),
+        )
+        assertTrue("and stays exhausted past the bound", baseHashRetriesExhaustedUtil(9))
+
+        val trackerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(trackerPath)
+        val drainBody = source.substringAfter("private fun reportDrainedEditorOps")
+            .substringBefore("#qnodemerge4wire Phase 4")
+        assertTrue(
+            "a retryable refusal must requeue the burst rather than drop it",
+            drainBody.contains("ReportOutcome.RETRYABLE") &&
+                drainBody.contains("requeuePendingEditorOps(filePath, drainedOps)"),
+        )
+        assertTrue(
+            "giving up must be its own receipt, never a silent discard",
+            drainBody.contains("OpCaptureRefusal.BASE_HASH_RETRIES_EXHAUSTED"),
+        )
+        assertTrue(
+            "an unresolvable base is the only retryable refusal",
+            source.split("return ReportOutcome.RETRYABLE").size - 1 == 2,
+        )
+    }
+
+    @Test
     fun `a handed-over burst states the four facts verification depends on`() {
         // #opcaptureliveread: the refusal receipt made a dormant ledger diagnosable,
         // but a ledger that DOES record still proved the live epoch generation, the

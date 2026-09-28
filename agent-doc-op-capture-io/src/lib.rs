@@ -406,7 +406,27 @@ where
     R: FnOnce(&Path, &str) -> Result<Vec<u8>>,
 {
     let baseline = agent_doc_snapshot_io::load_document_baseline(doc)?.unwrap_or_default();
-    let fingerprint = content_hash(&baseline);
+    current_base_hash_from_baseline_with(doc, &baseline, resolve_base_state)
+}
+
+/// [`current_base_hash_with`] for a caller that already holds the merge baseline.
+///
+/// `#basehashforbiddenstatedb`: an embedded editor host may not open `state.db`
+/// at all (`forbid_state_db_connections_for_process`), so the baseline load in
+/// [`current_base_hash_with`] cannot run inside a JetBrains IDE — it fails
+/// closed, and every captured operator burst is then refused with
+/// `base_hash_unavailable`. Such a host reads the same baseline from the project
+/// controller's projection plane and hands it here, so both worlds share one
+/// hash computation and one cache.
+pub fn current_base_hash_from_baseline_with<R>(
+    doc: &Path,
+    baseline: &str,
+    resolve_base_state: R,
+) -> Result<String>
+where
+    R: FnOnce(&Path, &str) -> Result<Vec<u8>>,
+{
+    let fingerprint = content_hash(baseline);
     let cache_key = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
 
     if let Some((cached_fp, cached_hash)) = base_hash_cache().lock().get(&cache_key)
@@ -418,7 +438,7 @@ where
     BASE_HASH_RECOMPUTES.fetch_add(1, Ordering::Relaxed);
     #[cfg(test)]
     record_base_hash_recompute_for_tests(&cache_key);
-    let base_state = resolve_base_state(doc, &baseline)?;
+    let base_state = resolve_base_state(doc, baseline)?;
     let base_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&base_state)
         .map(|d| d.to_text())
         .unwrap_or_default();

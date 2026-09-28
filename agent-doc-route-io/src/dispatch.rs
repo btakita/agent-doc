@@ -673,6 +673,13 @@ fn observe_pre_dispatch_stranded_draft(
         pane_busy: capture
             .as_deref()
             .is_some_and(|content| harness.has_busy_cue(content)),
+        // `#concatdraftinject`: the composer projection already distinguishes an
+        // empty ready composer from one holding a draft. A draft that is not this
+        // trigger is exactly the state that concatenates.
+        foreign_draft: capture.as_deref().is_some_and(|content| {
+            agent_doc_harness::pane_composer_draft_at_cursor(harness, content, cursor_y)
+                .is_some_and(|preview| !preview.trim().is_empty())
+        }),
     })
 }
 
@@ -695,6 +702,29 @@ fn try_pre_dispatch_stranded_draft_submit(
 ) -> Result<Option<RoutedDispatchStartProof>> {
     let trigger = harness.trigger_command(file_path);
     let action = observe_pre_dispatch_stranded_draft(tmux, pane, harness, &trigger);
+    if action == PreDispatchStrandedDraftAction::DeferForeignDraft {
+        // `#concatdraftinject`: operator-reported 2026-09-28 — a composer holding
+        // `agent-doc tasks/api.md` received `agent-doc /abs/.../tasks/api.md`
+        // appended with no separator, and the harness submitted the single line
+        // `agent-doc tasks/api.mdagent-doc /abs/.../tasks/api.md`. Preflight then
+        // refused a document path that never existed. The draft is not ours to
+        // clear and appending to it can only produce a wrong path, so fail closed.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_pre_dispatch_draft_observation file={} pane={} harness={} action={} note=composer holds a different draft; injecting would concatenate it with this trigger",
+                file.display(),
+                pane,
+                harness.binary,
+                action.as_str(),
+            ),
+        );
+        anyhow::bail!(
+            "pane {pane} composer already holds an unsubmitted draft that is not this trigger; \
+             injecting would concatenate the two into one line. Submit or clear that draft in the \
+             pane, then re-run the trigger."
+        );
+    }
     if action != PreDispatchStrandedDraftAction::ResubmitStrandedDraft {
         // Only log the states that diverted or could not be observed; a clean
         // fresh dispatch is the common case and stays silent.

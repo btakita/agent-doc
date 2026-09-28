@@ -108,21 +108,45 @@ resolve_window() {
 
 # Focus-guard: the active window must be the intended scratch editor before any
 # type/key. Aborts otherwise so a stray keystroke cannot corrupt real work.
+#
+# `#activateinstalledjetbrai`: an IDE window's TITLE follows its selected editor
+# tab, so a concurrent agent-doc session switching tabs in the SAME IDE moves this
+# guard's title off the scratch doc without the window ever losing focus. During a
+# queue drain that happens every 1-3s, which made a single-shot guard abort the
+# recipe as a matter of course — correctly refusing, but never able to finish.
+# Losing the tab is recoverable and the recovery is the one the harness already
+# owns: ask the running IDE to open the scratch doc again, which re-selects its
+# tab. So re-acquire on a bounded deadline and abort only if the scratch doc
+# cannot be brought back — the refusal stays exactly as strict, it just stops
+# being permanent.
 focus_guard() {
-  local wid="$1" base="$2" active active_title
+  local wid="$1" base="$2" doc="${3:-}" active active_title deadline reopened=0
   if [[ "$DRY_RUN" == 1 && "$wid" == "$DRYRUN_WID" ]]; then
     log "[dry-run] would focus-guard '$base' before typing"
     return 0
   fi
-  active="$(xdotool getactivewindow 2>/dev/null || true)"
-  [[ -n "$active" ]] || die "focus-guard: no active window"
-  if [[ "$active" != "$wid" ]]; then
-    xdotool windowactivate --sync "$wid" 2>/dev/null || die "focus-guard: cannot activate scratch window $wid"
+  deadline=$(( $(date +%s) + TIMEOUT ))
+  while :; do
     active="$(xdotool getactivewindow 2>/dev/null || true)"
-  fi
-  active_title="$(xdotool getwindowname "$active" 2>/dev/null || true)"
-  [[ "$active_title" == *"$base"* ]] \
-    || die "focus-guard: active window '$active_title' is not the scratch doc '$base' — ABORT (would corrupt real work)"
+    [[ -n "$active" ]] || die "focus-guard: no active window"
+    if [[ "$active" != "$wid" ]]; then
+      xdotool windowactivate --sync "$wid" 2>/dev/null || die "focus-guard: cannot activate scratch window $wid"
+      active="$(xdotool getactivewindow 2>/dev/null || true)"
+    fi
+    active_title="$(xdotool getwindowname "$active" 2>/dev/null || true)"
+    [[ "$active_title" == *"$base"* ]] && return 0
+    (( $(date +%s) >= deadline )) \
+      && die "focus-guard: active window '$active_title' is not the scratch doc '$base' after ${TIMEOUT}s — ABORT (would corrupt real work)"
+    # The window is focused but showing another document: a concurrent session
+    # selected a different tab. Re-open the scratch doc to select it back. Only
+    # the IDE can do that; xdotool cannot address an editor tab.
+    if [[ -n "$doc" && "$reopened" == 0 ]]; then
+      log "focus-guard: '$active_title' took the tab — asking the IDE to re-open '$base'"
+      reopened=1
+      open_scratch_in_ide "$doc" "$base" >/dev/null 2>&1 || true
+    fi
+    sleep 0.2
+  done
 }
 
 # --- marker-timed typing ----------------------------------------------------
@@ -149,8 +173,8 @@ wait_for_marker() {
 }
 
 type_into_scratch() {
-  local wid="$1" base="$2" text="$3"
-  focus_guard "$wid" "$base"
+  local wid="$1" base="$2" text="$3" doc="${4:-}"
+  focus_guard "$wid" "$base" "$doc"
   if [[ "$DRY_RUN" == 1 ]]; then
     log "[dry-run] would type into $wid ($base): '$text'"
     return 0
@@ -284,7 +308,7 @@ case_exch_intermix() {
   wid="$(require_window "$base" "$doc")"
   log "#exch-intermix-verify: type a mid-finalize edit, expect live_prompt_drift_auto_recovered"
   wait_for_marker "ipc.*apply\|reposition boundary signal sent" || warn "no IPC-apply marker seen before timeout; injecting edit anyway"
-  type_into_scratch "$wid" "$base" "mid-finalize concurrent edit"
+  type_into_scratch "$wid" "$base" "mid-finalize concurrent edit" "$doc"
   assert_marker exch-intermix-verify "live_prompt_drift_auto_recovered" \
     && assert_no_marker exch-intermix-verify "looks like a manual cleanup"
 }
@@ -318,7 +342,7 @@ case_saevon() {
   log "#saevon: requires EARLY_ACK_ENABLED=true + cargo build --release + agent-doc lib-install first"
   log "         expect '[ipc-socket] early-ack pending emitted before apply' with NO false-success / NO false ack-timeout"
   wait_for_marker "ipc.*apply\|reposition boundary signal sent" || warn "no IPC-apply marker before timeout; injecting edit anyway"
-  type_into_scratch "$wid" "$base" "early-ack load edit"
+  type_into_scratch "$wid" "$base" "early-ack load edit" "$doc"
   assert_marker saevon "early-ack pending emitted before apply" \
     && assert_no_marker saevon "ack-timeout"
 }
@@ -355,7 +379,7 @@ case_captured_splice() {
   rel="${doc#"$REPO"/}"
   log "#activateinstalledjetbrai: operator edit → independent response advance → operator edit"
 
-  type_into_scratch "$wid" "$base" "operator edit one before the advance"
+  type_into_scratch "$wid" "$base" "operator edit one before the advance" "$doc"
   # Time on the capture receipt, not a sleep: no receipt means the reporter chain
   # never ran and the rest of the recipe would prove nothing.
   wait_for_marker "editor_op_capture_proof" \
@@ -369,7 +393,7 @@ case_captured_splice() {
       || warn "response advance did not complete; the verifier will report an unadvanced canonical text"
   fi
 
-  type_into_scratch "$wid" "$base" "operator edit two after the advance"
+  type_into_scratch "$wid" "$base" "operator edit two after the advance" "$doc"
 
   if [[ "$DRY_RUN" == 1 ]]; then
     log "[dry-run] would assert: agent-doc verify-captured-splice-recovery $rel"

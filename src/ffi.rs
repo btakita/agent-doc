@@ -1838,6 +1838,15 @@ pub unsafe extern "C" fn agent_doc_clear_editor_op_epoch(file_path: *const c_cha
 /// skips op capture for this edit and the merge falls back to the diff-guess —
 /// never worse than today. Caller must free with `agent_doc_free_string`.
 ///
+/// `#basehashsilentnull`: a null return used to name its cause only on the
+/// cdylib's stderr, which a JetBrains IDE discards — so the reporter wrote
+/// `editor_op_capture_refused reason=base_hash_unavailable ... base_hash=null`
+/// and the cause was unobservable from anywhere an operator or agent can read.
+/// Observed live 2026-09-28: 16 such refusals across two repositories with zero
+/// `editor_ops_recorded` ever written, and no diagnosis available for any of
+/// them. The failure is now a typed ops.log receipt beside the refusal that
+/// quotes it.
+///
 /// # Safety
 ///
 /// `file_path` must be a valid, NUL-terminated UTF-8 string.
@@ -1847,18 +1856,79 @@ pub unsafe extern "C" fn agent_doc_document_base_hash(file_path: *const c_char) 
         eprintln!("[op-capture] agent_doc_document_base_hash: non-UTF-8 path; returning null");
         return std::ptr::null_mut();
     };
-    match agent_doc_op_capture_io::current_base_hash_with(
-        std::path::Path::new(path),
-        |_doc, baseline| Ok(agent_doc_merge::crdt::CrdtDoc::from_text(baseline).encode_state()),
-    ) {
+    let file_path_buf = std::path::PathBuf::from(path);
+    match ffi_document_base_hash(&file_path_buf) {
         Ok(hash) => CString::new(hash)
             .map(|c| c.into_raw())
             .unwrap_or(std::ptr::null_mut()),
         Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                &file_path_buf,
+                &format!(
+                    "{} error={} #basehashsilentnull",
+                    OpsLogEvent::EditorOpBaseHashUnresolved,
+                    sanitize_op_capture_refusal_field(&format!("{e:#}")),
+                ),
+            );
             eprintln!("[op-capture] agent_doc_document_base_hash: {e}; returning null");
             std::ptr::null_mut()
         }
     }
+}
+
+/// Resolve the merge base hash for `doc` from whichever plane this process is
+/// allowed to read.
+///
+/// `#basehashforbiddenstatedb`: every shipped cdylib entrypoint calls
+/// [`mark_embedded_editor_host`], which permanently forbids `state.db`
+/// connections for the process — an IDE must consume the controller's
+/// projection, never map its WAL. `load_document_baseline` opens `state.db`
+/// directly, so inside a JetBrains IDE the base-hash resolver could not succeed
+/// **once**: `open_state_db` refused, the reporter got null, and the batch
+/// op-capture path was structurally dead. Observed 2026-09-28 across two
+/// repositories: 16 `base_hash_unavailable` refusals, zero `editor_ops_recorded`
+/// and zero `editor_op_capture_proof` in the whole history of either ops.log.
+///
+/// An embedded host therefore reads the same baseline over the controller's
+/// projection plane. Both planes report "no document state yet" the same way —
+/// an absent projection or an absent merge baseline is the empty baseline, which
+/// is exactly the base the write-time merge resolves for an unseeded document —
+/// so a cold document still stamps the matching hash rather than failing.
+fn ffi_document_base_hash(doc: &std::path::Path) -> anyhow::Result<String> {
+    ffi_document_base_hash_on_plane(
+        doc,
+        agent_doc_sqlite::state_store::state_db_connections_forbidden_for_process(),
+    )
+}
+
+/// [`ffi_document_base_hash`] with the plane named explicitly.
+///
+/// The embedded-host flag is a process-global latch, so taking it as an argument
+/// is what lets a test exercise the editor plane without forbidding `state.db`
+/// for every other test sharing the process.
+fn ffi_document_base_hash_on_plane(
+    doc: &std::path::Path,
+    state_db_forbidden: bool,
+) -> anyhow::Result<String> {
+    let resolve_base_state = |_doc: &std::path::Path, baseline: &str| -> anyhow::Result<Vec<u8>> {
+        Ok(agent_doc_merge::crdt::CrdtDoc::from_text(baseline).encode_state())
+    };
+    if !state_db_forbidden {
+        return agent_doc_op_capture_io::current_base_hash_with(doc, resolve_base_state);
+    }
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(doc)?;
+    let baseline = agent_doc_controller_io::project_controller::document_state_projection_existing(
+        &project_root,
+        doc,
+    )?
+    .and_then(|projection| projection.document.merge_baseline)
+    .map(|baseline| baseline.content)
+    .unwrap_or_default();
+    agent_doc_op_capture_io::current_base_hash_from_baseline_with(
+        doc,
+        &baseline,
+        resolve_base_state,
+    )
 }
 
 fn ffi_normalize_transient_agent_doc_markers(content: &str) -> String {
@@ -3694,6 +3764,98 @@ mod tests {
         let mut wrong_len = exact_noop;
         wrong_len.content_len += 1;
         assert!(!cp_projection_reached_exact_target(&wrong_len, target));
+    }
+
+    /// `#basehashforbiddenstatedb`: inside an editor host the merge base must be
+    /// resolvable from the controller's projection plane alone. Every shipped
+    /// cdylib entrypoint forbids `state.db` connections for the process, so a
+    /// resolver that reaches for `state.db` cannot succeed even once there —
+    /// which is what left `editor_ops_recorded` and `editor_op_capture_proof` at
+    /// zero for the entire recorded history of two repositories.
+    #[test]
+    fn document_base_hash_resolves_on_the_editor_plane_without_the_state_db() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let agent_dir = tmp.path().join(".agent-doc");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        // Unreadable to any direct `state.db` open: the editor plane must never
+        // touch it, so this must not change the editor-plane answer.
+        std::fs::write(agent_dir.join("state.db"), b"not a sqlite database").unwrap();
+        let doc = tmp.path().join("tasks/session.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body\n").unwrap();
+
+        let direct = ffi_document_base_hash_on_plane(&doc, false)
+            .expect_err("the direct state.db plane still fails closed on an unreadable ledger");
+        assert!(
+            format!("{direct:#}").contains("state db"),
+            "the direct plane fails on the ledger it opens, got: {direct:#}"
+        );
+
+        // No controller is running for this temporary root, so the editor plane
+        // cannot resolve a baseline either — but it must fail on the projection
+        // plane it is allowed to read, never on the forbidden ledger. That
+        // difference is the whole defect: the old resolver reported the ledger
+        // error inside every IDE, where the ledger can never be opened at all.
+        let editor = ffi_document_base_hash_on_plane(&doc, true)
+            .expect_err("no controller is live for this root");
+        let editor = format!("{editor:#}");
+        assert!(
+            editor.contains("controller"),
+            "the editor plane must fail on the controller projection, got: {editor}"
+        );
+        assert!(
+            !editor.contains("state db"),
+            "the editor plane must never reach the forbidden state.db, got: {editor}"
+        );
+    }
+
+    /// `#basehashsilentnull`: a merge base the resolver cannot project must name
+    /// its cause where an operator or agent can read it. Before this, the only
+    /// record of the failure was the cdylib's stderr — which a JetBrains IDE
+    /// discards — so `editor_op_capture_refused reason=base_hash_unavailable`
+    /// stood alone with no cause attached to it anywhere.
+    #[test]
+    fn document_base_hash_failure_writes_a_named_ops_log_receipt() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let agent_dir = tmp.path().join(".agent-doc");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        // An unreadable state store is the shape of every observed failure: the
+        // projection load errors, so no baseline can be resolved at all.
+        std::fs::write(agent_dir.join("state.db"), b"not a sqlite database").unwrap();
+        let doc = tmp.path().join("tasks/session.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body\n").unwrap();
+
+        let file = CString::new(doc.to_string_lossy().as_bytes()).unwrap();
+        let hash = unsafe { agent_doc_document_base_hash(file.as_ptr()) };
+        assert!(
+            hash.is_null(),
+            "an unresolvable merge base must still return null to the reporter"
+        );
+
+        let ops_log = std::fs::read_to_string(agent_dir.join("logs/ops.log"))
+            .expect("a base-hash failure must write an ops.log receipt");
+        let line = ops_log
+            .lines()
+            .find(|line| line.contains(OpsLogEvent::EditorOpBaseHashUnresolved.as_str()))
+            .expect("the receipt must name editor_op_base_hash_unresolved");
+        assert!(
+            line.contains("error="),
+            "the receipt must quote the resolver error, got: {line}"
+        );
+        assert!(
+            !line.contains("error=none"),
+            "the receipt must carry the actual cause, not an empty field: {line}"
+        );
+        let error_field = line
+            .split("error=")
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .expect("the receipt must carry an error= field");
+        assert!(
+            error_field.len() > "none".len(),
+            "the error field must survive whitespace collapsing as one token: {line}"
+        );
     }
 
     #[test]

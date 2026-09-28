@@ -79,7 +79,40 @@ internal object OpCaptureRefusal {
     const val SHADOW_REPLAY_MISMATCH = "shadow_replay_mismatch"
     const val DOC_ADVANCED_DURING_DRAIN = "doc_advanced_during_drain"
     const val BASE_HASH_UNAVAILABLE = "base_hash_unavailable"
+    const val BASE_HASH_RETRIES_EXHAUSTED = "base_hash_retries_exhausted"
 }
+
+/**
+ * How many quiet boundaries a burst may wait for a resolvable merge base before
+ * it is dropped (`#basehashdropsops`).
+ *
+ * A null base hash is a property of the *reader*, not of the operator's typing:
+ * the native resolver failed to project document state this once. Dropping the
+ * burst on the first failure destroys captured operator text that a later
+ * boundary could still have stamped. Retrying forever instead grows the pending
+ * ledger without bound whenever the failure is permanent, so the wait is bounded
+ * and its exhaustion is its own receipt rather than a silent discard.
+ */
+private const val BASE_HASH_RETRY_LIMIT = 5
+
+/**
+ * Whether a refused hand-over may be retried with the same captured burst.
+ *
+ * `RETRYABLE` states that the burst itself is still valid and only the reader's
+ * side failed; `TERMINAL` states that this burst can never be handed over (it was
+ * reported, or replay disagreed, or nothing in it was operator text).
+ */
+internal enum class ReportOutcome { TERMINAL, RETRYABLE }
+
+/**
+ * Whether a burst that has waited `attempts` quiet boundaries for a resolvable
+ * merge base must now be given up on.
+ *
+ * Separate from the drain so the bound is assertable without an IDE, a native
+ * library, or a live controller.
+ */
+internal fun baseHashRetriesExhaustedUtil(attempts: Int): Boolean =
+    attempts >= BASE_HASH_RETRY_LIMIT
 
 /** A buffer text and the modification stamp it was read with, from one read action. */
 internal data class DocumentSnapshot(
@@ -228,6 +261,11 @@ object TypingTracker : DocumentListener {
 
     private val pendingContentReports = ConcurrentHashMap<String, ContentReportState>()
     private val pendingEditorOps = ConcurrentHashMap<String, MutableList<PendingEditorOp>>()
+
+    // `#basehashdropsops`: consecutive quiet boundaries at which the native
+    // resolver returned no merge base for this path. Reset whenever a base hash
+    // does resolve, so a transient failure never counts toward the bound.
+    private val baseHashRetries = ConcurrentHashMap<String, Int>()
 
     // #falsetyping-guard: paths with an unsaved *local operator* edit ahead of
     // disk. Set only when an operator-attributable document change lands; cleared whenever
@@ -689,7 +727,29 @@ object TypingTracker : DocumentListener {
             return
         }
         val operatorOps = drainedOps.count { !it.nonOperatorMutation }
-        reportEditorOps(lib, filePath, opReports, operatorOps, drainedOps.size - operatorOps)
+        val outcome =
+            reportEditorOps(lib, filePath, opReports, operatorOps, drainedOps.size - operatorOps)
+        if (outcome == ReportOutcome.RETRYABLE) {
+            // `#basehashdropsops`: the burst is intact and still replayable — only
+            // the merge base was unresolvable at this boundary. Keep it, exactly as
+            // a drain that raced the buffer does, and let the next quiet boundary
+            // try again against a resolver that may have recovered.
+            val attempts = baseHashRetries.merge(filePath, 1, Int::plus) ?: 1
+            if (baseHashRetriesExhaustedUtil(attempts)) {
+                baseHashRetries.remove(filePath)
+                logOpCaptureRefusal(
+                    lib,
+                    filePath,
+                    OpCaptureRefusal.BASE_HASH_RETRIES_EXHAUSTED,
+                    "ops=${drainedOps.size} attempts=$attempts",
+                )
+                return
+            }
+            requeuePendingEditorOps(filePath, drainedOps)
+            scheduleFullContentReport(filePath, document)
+            return
+        }
+        baseHashRetries.remove(filePath)
     }
 
 /**
@@ -704,8 +764,8 @@ private fun reportEditorOps(
     ops: List<PreparedEditorOp>,
     operatorOps: Int,
     nonOperatorOps: Int,
-) {
-    if (ops.isEmpty()) return
+): ReportOutcome {
+    if (ops.isEmpty()) return ReportOutcome.TERMINAL
     // Resolve the base hash captured ops must align to; skip (diff-guess
     // fallback) when unavailable. One burst resolves this once, rather than
     // making a native base-hash call per keystroke.
@@ -717,7 +777,7 @@ private fun reportEditorOps(
             OpCaptureRefusal.BASE_HASH_UNAVAILABLE,
             "ops=${ops.size} base_hash=null",
         )
-        return
+        return ReportOutcome.RETRYABLE
     }
     val baseHash = try {
         baseHashPtr.getString(0)
@@ -731,7 +791,7 @@ private fun reportEditorOps(
             OpCaptureRefusal.BASE_HASH_UNAVAILABLE,
             "ops=${ops.size} base_hash=empty",
         )
-        return
+        return ReportOutcome.RETRYABLE
     }
 
     val batch = JsonArray()
@@ -758,6 +818,7 @@ private fun reportEditorOps(
         baseHash = baseHash,
     )
     lib.agent_doc_record_editor_ops_json(filePath, baseHash, batch.toString())
+    return ReportOutcome.TERMINAL
 }
 
 }

@@ -158,6 +158,7 @@ ops_log_events! {
     EditorOpRecordFailed => "editor_op_record_failed",
     EditorOpCaptureRefused => "editor_op_capture_refused",
     EditorOpCaptureProof => "editor_op_capture_proof",
+    EditorOpBaseHashUnresolved => "editor_op_base_hash_unresolved",
     ControllerCrdtCurrentText => "controller_crdt_current_text",
     ConvergenceGateBlocked => "convergence_gate_blocked",
 }

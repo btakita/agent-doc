@@ -2529,6 +2529,34 @@ where
                     ));
                 }
                 Err(CommitTransactionError::IgnoredPath { path }) => {
+                    // `#ignoredpathwedge`: refusing to commit an ignored path is
+                    // correct and deliberate, but leaving the cycle at
+                    // `write_applied` is not. That phase means "the write landed,
+                    // a terminal commit is still expected" — and for a path
+                    // `.gitignore` matches, no commit will EVER follow. The cycle
+                    // then reads as INTERRUPTED forever and no recovery path can
+                    // clear it: `repair` retires the retained intent and then hits
+                    // this same refusal, and `reset` clears the session without
+                    // touching the cycle. Observed on
+                    // `.agent-doc/live-repro/xdotool-captured-splice.md`, whose
+                    // whole directory is ignored by design, so every live-repro
+                    // run wedged its own scratch document.
+                    //
+                    // Abandon is the honest terminal phase here: the write is real
+                    // and stays on disk, and the cycle is closed because its
+                    // commit is unreachable, not because it succeeded. The refusal
+                    // itself is unchanged — same message, same error, still never
+                    // committed.
+                    if let Err(abandon_error) = agent_doc_cycle_state_io::mark_abandoned(
+                        file,
+                        "commit_refused_ignored_path",
+                        None,
+                        None,
+                    ) {
+                        eprintln!(
+                            "[commit] WARNING: could not close the cycle for ignored path {path}: {abandon_error:#}"
+                        );
+                    }
                     break Err(
                         agent_doc_git_io::commit_result_reporting::ignored_untracked_path_error(
                             ports.commit_result_reporting,

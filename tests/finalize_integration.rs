@@ -1,6 +1,7 @@
 use agent_doc_hash::content_hash;
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
+use predicates::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -258,6 +259,17 @@ fn finalize_skips_ignored_untracked_session_doc() {
         !show.status.success(),
         "ignored untracked session doc must not be committed"
     );
+
+    // `#ignoredpathwedge`: refusing the commit is correct; leaving the cycle
+    // open is not. `write_applied` means "a terminal commit is still expected",
+    // and for an ignored path none can ever follow — so the document read as
+    // INTERRUPTED forever, and neither `repair` nor `reset` could clear it.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .stdout(predicates::str::contains("INTERRUPTED").not())
+        .stdout(predicates::str::contains("write_applied").not());
 }
 
 #[test]

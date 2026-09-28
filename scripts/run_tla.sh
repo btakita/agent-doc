@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch SubmoduleFocusRoot)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -65,6 +65,12 @@ must_violate=(
     TransientRefusalLatch:TransientRefusalLatchBlindRetry
     TransientRefusalLatch:TransientRefusalLatchCrashAsVerdict
     TransientRefusalLatch:TransientRefusalLatchReach
+    # `SubmoduleFocusRoot` needs both: the wedge proves the owning-root
+    # resolution edge is load-bearing (without it the nested document never
+    # focuses), and the reach proves both in-scope documents actually do focus,
+    # so the liveness property cannot pass on an antecedent that never holds.
+    SubmoduleFocusRoot:SubmoduleFocusRootWedge
+    SubmoduleFocusRoot:SubmoduleFocusRootReach
 )
 
 for module in "${modules[@]}"; do

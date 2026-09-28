@@ -21674,6 +21674,22 @@ pub(crate) fn handle_focus_document_pane(
     handle_focus_document_pane_with_policy(bootstrap, None, request, policy, None)
 }
 
+/// `#focussubmodulerecord`: resolve the project root that actually owns `file`'s
+/// session state — the nearest enclosing `.agent-doc/` project, which for a
+/// submodule document is the submodule root rather than the controller's root.
+///
+/// Bounded to at-or-below `controller_root` on purpose: resolution must never
+/// escape the controller's scope, so an unresolvable or outside root falls back
+/// to the controller root and preserves the previous behavior exactly. When the
+/// document is not nested this returns `controller_root`, so every non-submodule
+/// focus keeps its existing code path unchanged.
+fn focus_document_lookup_root(controller_root: &Path, file: &Path) -> PathBuf {
+    match agent_doc_project_root_io::project_root_containing(file) {
+        Some(root) if root.starts_with(controller_root) => root,
+        _ => controller_root.to_path_buf(),
+    }
+}
+
 fn handle_focus_document_pane_with_policy(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -21683,13 +21699,31 @@ fn handle_focus_document_pane_with_policy(
 ) -> Result<ControllerTmuxFocusReceipt> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    // `#focussubmodulerecord`: a document inside a NESTED agent-doc project (a git
+    // submodule such as `src/haiven-dev`) registers its actor and its session
+    // registry entry under THAT project's root, never the superproject's. Looking
+    // both up under `bootstrap.project_root` therefore finds nothing and reports
+    // `missing_actor_record` with `pane=-`, so editor auto-focus silently lands
+    // nowhere for every submodule document while top-level documents work. The
+    // observed line is exactly that shape:
+    //   controller_editor_surface_focus_outcome document=.../src/haiven-dev/tasks/infra.md
+    //   focused=false reason=missing_actor_record pane=- doc=agent-loop
+    let document_root = focus_document_lookup_root(&bootstrap.project_root, &canonical);
+    let nested_project = document_root != bootstrap.project_root;
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(
-        &bootstrap.project_root,
+        &document_root,
         &canonical.to_string_lossy(),
     );
-    let actor_record = actor_record_from_authority(bootstrap, runtime, &document_id)?;
+    let actor_record = if nested_project {
+        // The nested project's OWN controller owns this actor, so this
+        // controller's reactive store legitimately never holds it. Read that
+        // project's durable sink instead of reporting the actor as absent.
+        load_actor_record(&document_root, &document_id)?
+    } else {
+        actor_record_from_authority(bootstrap, runtime, &document_id)?
+    };
     let registry_entry =
-        agent_doc_session_registry_io::lookup_file_entry_in(&bootstrap.project_root, &canonical)?;
+        agent_doc_session_registry_io::lookup_file_entry_in(&document_root, &canonical)?;
     let tmux = agent_doc_tmux_io::configured_tmux();
     let session_id =
         current_document_session_id(&canonical, actor_record.as_ref(), registry_entry.as_ref());
@@ -27448,6 +27482,63 @@ mod tests {
                 reason: FocusPaneRejectReason::ActorNotFocusable,
                 pane_id: Some("%closed"),
             },
+        );
+    }
+
+    #[test]
+    fn focus_lookup_root_resolves_a_submodule_document_to_its_own_project_root() {
+        // `#focussubmodulerecord` regression. A document inside a NESTED agent-doc
+        // project registers its actor and registry entry under that project's
+        // root. Resolving it against the controller root is what produced
+        // `missing_actor_record pane=-` for every submodule document.
+        let tmp = tempfile::tempdir().unwrap();
+        let controller_root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(controller_root.join(".agent-doc")).unwrap();
+        let nested = controller_root.join("src/haiven-dev");
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        let doc = nested.join("tasks/infra.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# infra\n").unwrap();
+
+        assert_eq!(focus_document_lookup_root(&controller_root, &doc), nested);
+    }
+
+    #[test]
+    fn focus_lookup_root_keeps_the_controller_root_for_a_top_level_document() {
+        // The non-nested path must be byte-identical to the previous behavior,
+        // so no existing focus resolution changes.
+        let tmp = tempfile::tempdir().unwrap();
+        let controller_root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(controller_root.join(".agent-doc")).unwrap();
+        let doc = controller_root.join("tasks/plan.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        assert_eq!(
+            focus_document_lookup_root(&controller_root, &doc),
+            controller_root
+        );
+    }
+
+    #[test]
+    fn focus_lookup_root_refuses_a_root_outside_the_controller_root() {
+        // Resolution must never escape the controller's scope. A document whose
+        // own project root is NOT under this controller falls back to the
+        // controller root rather than steering focus into another project.
+        let outside = tempfile::tempdir().unwrap();
+        let outside_root = outside.path().canonicalize().unwrap();
+        std::fs::create_dir_all(outside_root.join(".agent-doc")).unwrap();
+        let doc = outside_root.join("tasks/other.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# other\n").unwrap();
+
+        let controller = tempfile::tempdir().unwrap();
+        let controller_root = controller.path().canonicalize().unwrap();
+        std::fs::create_dir_all(controller_root.join(".agent-doc")).unwrap();
+
+        assert_eq!(
+            focus_document_lookup_root(&controller_root, &doc),
+            controller_root
         );
     }
 

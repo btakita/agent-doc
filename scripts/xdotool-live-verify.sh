@@ -8,7 +8,7 @@
 # Plan: tasks/agent-doc/plan-xdotool-live-verification.md  (#xdotool-lvbatch)
 #
 # SAFETY (every run; see plan "Safety guards"):
-#   1. Types ONLY into a throwaway scratch doc .agent-doc/live-repro/xdotool-<case>.md,
+#   1. Types ONLY into a throwaway scratch doc tmp/live-repro/xdotool-<case>.md,
 #      never the real working doc.
 #   2. Focus-guards getactivewindow/getwindowname before every type/key; aborts on
 #      any mismatch so a stray keystroke cannot land in the wrong window.
@@ -18,7 +18,7 @@
 #   4. Times keystrokes by an ops.log IPC-apply marker, not a fixed sleep.
 #   5. Opens the scratch doc in the ALREADY-RUNNING IDE itself (via $AGENT_DOC_IDE_LAUNCHER
 #      or `idea`) so no human has to open a file first; the open is refused for any
-#      path outside .agent-doc/live-repro/. It still never launches a cold IDE.
+#      path outside tmp/live-repro/. It still never launches a cold IDE.
 #
 # Usage:
 #   scripts/xdotool-live-verify.sh check-env
@@ -59,8 +59,25 @@ parse_args() {
   done
 }
 
-ops_log()    { printf '%s/.agent-doc/logs/ops.log' "$REPO"; }
-scratch_doc(){ printf '%s/.agent-doc/live-repro/xdotool-%s.md' "$REPO" "$1"; }
+# The binary logs a document's events under ITS project root: the nearest
+# ancestor holding a `.agent-doc/` directory. A scratch doc lives inside
+# `$REPO/tmp/live-repro/`. Scratch docs used to live under
+# `$REPO/.agent-doc/live-repro/`, which made `$REPO/.agent-doc` the nearest
+# ancestor with a `.agent-doc/` child once any write created
+# `$REPO/.agent-doc/.agent-doc/`: every scratch doc became its own nested project
+# with its own controller, lease and log, and the recipe waited on the wrong log.
+# Resolve the log exactly as the binary does, starting from the scratch doc.
+OPS_LOG_DOC=""
+ops_log() {
+  local dir
+  dir="$(dirname "${OPS_LOG_DOC:-$REPO/x}")"
+  while [[ "$dir" != "/" ]]; do
+    [[ -d "$dir/.agent-doc" ]] && { printf '%s/.agent-doc/logs/ops.log' "$dir"; return; }
+    dir="$(dirname "$dir")"
+  done
+  printf '%s/.agent-doc/logs/ops.log' "$REPO"
+}
+scratch_doc(){ printf '%s/tmp/live-repro/xdotool-%s.md' "$REPO" "$1"; }
 
 # --- environment preflight --------------------------------------------------
 check_env() {
@@ -94,11 +111,23 @@ assert_fresh_session() {
 # --- window resolution + focus guard ----------------------------------------
 # Resolve the editor window for the scratch doc by title (basename). Confirms the
 # title before returning the id; callers re-confirm focus immediately before typing.
+# Match the scratch doc by its absolute path whenever it is known. The IDE title
+# ends with the active file's absolute path; a basename match accepted a stale
+# tab of an older scratch doc with the same filename and typed into it.
+title_is_scratch() {
+  local title="$1" base="$2" doc="${3:-}"
+  if [[ -n "$doc" ]]; then
+    [[ "$title" == *"$doc" ]]
+  else
+    [[ "$title" == *"$base"* ]]
+  fi
+}
+
 resolve_window() {
-  local base="$1" wid title
+  local base="$1" doc="${2:-}" wid title
   for wid in $(xdotool search --name "$base" 2>/dev/null || true); do
     title="$(xdotool getwindowname "$wid" 2>/dev/null || true)"
-    if [[ "$title" == *"$base"* ]]; then
+    if title_is_scratch "$title" "$base" "$doc"; then
       printf '%s' "$wid"
       return 0
     fi
@@ -134,7 +163,7 @@ focus_guard() {
       active="$(xdotool getactivewindow 2>/dev/null || true)"
     fi
     active_title="$(xdotool getwindowname "$active" 2>/dev/null || true)"
-    [[ "$active_title" == *"$base"* ]] && return 0
+    title_is_scratch "$active_title" "$base" "$doc" && return 0
     (( $(date +%s) >= deadline )) \
       && die "focus-guard: active window '$active_title' is not the scratch doc '$base' after ${TIMEOUT}s — ABORT (would corrupt real work)"
     # The window is focused but showing another document: a concurrent session
@@ -152,9 +181,32 @@ focus_guard() {
 # --- marker-timed typing ----------------------------------------------------
 # Wait for an IPC-apply sentinel to appear in ops.log (timing by marker, not sleep),
 # then return so the caller can inject the concurrent edit at the drift window.
+# ops.log byte offset captured before an action; wait_for_marker only counts
+# lines written after it. Matching the whole file returned instantly on any
+# historical line, so "timed by a marker" timed nothing.
+MARK_OFFSET=0
+mark_ops_log() {
+  local olog; olog="$(ops_log)"
+  MARK_OFFSET="$( [[ -f "$olog" ]] && stat -c %s "$olog" || echo 0 )"
+}
+
+# wait_for_marker <marker> [doc-stem]: with a stem, only lines carrying
+# `doc=<stem>` count, so another document's receipt cannot satisfy the wait.
 wait_for_marker() {
-  local marker="$1" olog deadline now
+  local marker="$1" stem="${2:-}" olog deadline now
   olog="$(ops_log)"
+  if [[ -n "$stem" && "$DRY_RUN" != 1 ]]; then
+    deadline=$(( $(date +%s) + TIMEOUT ))
+    while :; do
+      if [[ -f "$olog" ]] && tail -c +"$(( MARK_OFFSET + 1 ))" "$olog" 2>/dev/null \
+          | grep -F -- "$marker" | grep -qF -- "doc=$stem "; then
+        return 0
+      fi
+      now=$(date +%s)
+      (( now >= deadline )) && return 1
+      sleep 0.1
+    done
+  fi
   # --dry-run types nothing, so no NEW marker can arrive; poll once instead of
   # burning the whole timeout. Cases that assert pre-existing markers still match.
   if [[ "$DRY_RUN" == 1 ]]; then
@@ -179,7 +231,23 @@ type_into_scratch() {
     log "[dry-run] would type into $wid ($base): '$text'"
     return 0
   fi
-  xdotool type --window "$wid" --delay 40 -- "$text"
+  # Type through XTEST at the proven-active window, NOT `type --window`.
+  # `--window` routes through XSendEvent, which stamps every event with
+  # `send_event=True`; the JetBrains AWT toolkit drops those, so the old path
+  # "typed" into the IDE while nothing ever reached the editor (zero doc-scoped
+  # ops.log events for any xdotool scratch doc, ever). XTEST goes to whatever
+  # holds focus, so focus is re-proven before every short chunk: a focus change
+  # can misdirect at most one chunk, and the guard aborts before the next.
+  local chunk rest="$text"
+  # Type at the end of the document: the caret opens at offset 0, and text typed
+  # there lands above the frontmatter and unmakes the session document.
+  focus_guard "$wid" "$base" "$doc"
+  xdotool key --clearmodifiers ctrl+End Return
+  while [[ -n "$rest" ]]; do
+    chunk="${rest:0:8}"; rest="${rest:8}"
+    focus_guard "$wid" "$base" "$doc"
+    xdotool type --delay 40 -- "$chunk"
+  done
 }
 
 # Assert a per-item marker landed in ops.log within the timeout; report pass/fail.
@@ -222,7 +290,7 @@ agent_doc_write: crdt
 
 <!-- agent:exchange patch=append -->
 ### Scratch — #xdotool-lvbatch live-verify ($case_name)
-<!-- agent:boundary:initial -->
+<!-- agent:boundary:00000000:scratch -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -254,8 +322,8 @@ ide_launcher() {
 open_scratch_in_ide() {
   local doc="$1" base="$2" launcher deadline
   # Safety: refuse to hand anything but a live-repro scratch doc to the IDE.
-  [[ "$doc" == *"/.agent-doc/live-repro/"* ]] \
-    || die "refusing to IDE-open '$doc' — only .agent-doc/live-repro/ scratch docs may be opened automatically"
+  [[ "$doc" == "$REPO/tmp/live-repro/"* && "$doc" != *"/.agent-doc/"* ]] \
+    || die "refusing to IDE-open '$doc' — only tmp/live-repro/ scratch docs may be opened automatically"
   if ! launcher="$(ide_launcher)"; then
     warn "no IDE launcher found (tried \$AGENT_DOC_IDE_LAUNCHER, idea)"
     return 1
@@ -270,7 +338,7 @@ open_scratch_in_ide() {
   # fixed sleep would either flake or pad every run.
   deadline=$(( $(date +%s) + TIMEOUT ))
   while :; do
-    resolve_window "$base" >/dev/null 2>&1 && return 0
+    resolve_window "$base" "$doc" >/dev/null 2>&1 && return 0
     (( $(date +%s) >= deadline )) && return 1
     sleep 0.2
   done
@@ -278,9 +346,9 @@ open_scratch_in_ide() {
 
 require_window() {
   local base="$1" doc="${2:-}" wid
-  if ! wid="$(resolve_window "$base")"; then
+  if ! wid="$(resolve_window "$base" "$doc")"; then
     if [[ -n "$doc" ]] && open_scratch_in_ide "$doc" "$base"; then
-      wid="$(resolve_window "$base")" \
+      wid="$(resolve_window "$base" "$doc")" \
         || die "the IDE accepted the open but no window titled '*$base*' resolved within ${TIMEOUT}s"
     elif [[ "$DRY_RUN" == 1 ]]; then
       # --dry-run exists to review the recipe without touching a live desktop, so it
@@ -375,21 +443,28 @@ case_tmux_switch() {
 case_captured_splice() {
   local doc base wid rel
   doc="$(ensure_scratch_doc captured-splice)"; base="$(basename "$doc")"
-  wid="$(require_window "$base" "$doc")"
+  OPS_LOG_DOC="$doc"
+  log "receipts for this doc are read from $(ops_log)"
   rel="${doc#"$REPO"/}"
+  assert_scratch_authority "$rel"
+  wid="$(require_window "$base" "$doc")"
+  # Opening the doc can bind it to a pane for the first time; re-read before typing.
+  assert_scratch_authority "$rel"
   log "#activateinstalledjetbrai: operator edit → independent response advance → operator edit"
 
+  mark_ops_log
   type_into_scratch "$wid" "$base" "operator edit one before the advance" "$doc"
-  # Time on the capture receipt, not a sleep: no receipt means the reporter chain
-  # never ran and the rest of the recipe would prove nothing.
-  wait_for_marker "editor_op_capture_proof" \
-    || warn "no editor_op_capture_proof yet — the plugin may predate #opcaptureliveread, or the epoch was refused (verify-op-capture names which)"
+  # Time on THIS document's capture receipt, not a sleep and not any historical
+  # line: no fresh receipt means the reporter chain never ran and the rest of the
+  # recipe would prove nothing.
+  wait_for_marker "editor_op_capture_proof" "${base%.md}" \
+    || die "no fresh editor_op_capture_proof for ${base%.md} within ${TIMEOUT}s — the keystrokes did not reach the editor, or the epoch was refused (agent-doc verify-op-capture $rel names which)"
 
   if [[ "$DRY_RUN" == 1 ]]; then
-    log "[dry-run] would advance the canonical response via: agent-doc write --commit $rel"
+    log "[dry-run] would advance the canonical response via: agent-doc write --commit $rel (in pane ${SCRATCH_OWNER_PANE:-self})"
   else
     log "advancing the canonical response independently of the editor"
-    (cd "$REPO" && agent-doc write --commit "$rel") \
+    advance_in_owner_pane "$rel" \
       || warn "response advance did not complete; the verifier will report an unadvanced canonical text"
   fi
 
@@ -431,6 +506,65 @@ case_lvbatch_markers() {
 # Read-only and tmux-native on purpose: `agent-doc route` dispatches rather than
 # reports, so there is no read-only authority query to call here. An agent-doc pane
 # whose cwd is the target repo owns that repo's controller.
+# The scratch doc is a session document in its own right: once any IDE opened
+# it, pane layout bound it to its own pane, and `write --commit` is refused from
+# every other pane. Ownership is per DOCUMENT, so read the scratch doc's actor.
+SCRATCH_OWNER_PANE=""
+scratch_owner_pane() {
+  local rel="$1"
+  (cd "$REPO" && agent-doc session status "$rel" 2>/dev/null) \
+    | awk '/^actor:/ { for (i=1;i<=NF;i++) if ($i ~ /^pane=%/) { sub("pane=","",$i); print $i; exit } }' \
+    || true  # a doc with no agent_doc_session has no owner; never abort the caller
+}
+
+# An owner pane can host the advance only when it is an idle shell: typing a
+# command into a live agent pane would be an operator prompt, not a write.
+owner_pane_is_idle_shell() {
+  local pane="$1" cmd
+  cmd="$(tmux display-message -p -t "$pane" '#{pane_current_command}' 2>/dev/null)" || return 1
+  [[ "$cmd" =~ ^(zsh|bash|sh|fish)$ ]]
+}
+
+assert_scratch_authority() {
+  local rel="$1" self="${TMUX_PANE:-}"
+  command -v tmux >/dev/null 2>&1 || return 0
+  SCRATCH_OWNER_PANE="$(scratch_owner_pane "$rel")"
+  [[ -z "$SCRATCH_OWNER_PANE" || "$SCRATCH_OWNER_PANE" == "$self" ]] && { SCRATCH_OWNER_PANE=""; return 0; }
+  if owner_pane_is_idle_shell "$SCRATCH_OWNER_PANE"; then
+    log "scratch doc is owned by idle shell pane $SCRATCH_OWNER_PANE; the canonical advance will run there"
+    return 0
+  fi
+  [[ "$DRY_RUN" == 1 ]] && { warn "[dry-run] scratch owner $SCRATCH_OWNER_PANE is not an idle shell"; return 0; }
+  die "scratch doc is owned by pane $SCRATCH_OWNER_PANE, which is not an idle shell — refusing to inject keystrokes for a recipe whose advance cannot run"
+}
+
+# Run the advance in the owning pane and wait for its exit status via a sentinel.
+advance_in_owner_pane() {
+  local rel="$1" sentinel rc deadline body
+  # The advance must carry a response: `write --commit` with empty stdin is
+  # refused ("empty response — nothing to write"), so the canonical text never
+  # moved and the verifier could only ever report an unadvanced document.
+  body="$(mktemp "${TMPDIR:-/tmp}/xdotool-advance-body.XXXXXX")"
+  printf '<!-- patch:exchange -->\n### Re: captured-splice advance — xdotool\n\nCanonical response advanced independently of the editor at %s.\n<!-- /patch:exchange -->\n' \
+    "$(date -u +%FT%TZ)" > "$body"
+  if [[ -z "$SCRATCH_OWNER_PANE" ]]; then
+    (cd "$REPO" && agent-doc write --commit "$rel" < "$body")
+    rc=$?; rm -f "$body"; return $rc
+  fi
+  sentinel="$(mktemp -u "${TMPDIR:-/tmp}/xdotool-advance.XXXXXX")"
+  tmux send-keys -t "$SCRATCH_OWNER_PANE" -l -- \
+    "cd $(printf '%q' "$REPO") && agent-doc write --commit $(printf '%q' "$rel") < $(printf '%q' "$body"); echo \$? > $(printf '%q' "$sentinel")"
+  tmux send-keys -t "$SCRATCH_OWNER_PANE" Enter
+  deadline=$(( $(date +%s) + TIMEOUT * 4 ))
+  until [[ -s "$sentinel" ]]; do
+    (( $(date +%s) >= deadline )) && { warn "advance in $SCRATCH_OWNER_PANE did not finish"; return 1; }
+    sleep 0.2
+  done
+  rc="$(cat "$sentinel")"; rm -f "$sentinel" "$body"
+  log "advance in $SCRATCH_OWNER_PANE exited $rc"
+  [[ "$rc" == 0 ]]
+}
+
 assert_pane_authority() {
   command -v tmux >/dev/null 2>&1 || return 0
   local self owners

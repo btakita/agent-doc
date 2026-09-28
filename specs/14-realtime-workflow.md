@@ -970,6 +970,28 @@ response advance between two of them — is driven by
 a throwaway scratch document under the harness's focus guards, runs a response
 cycle between the two edits, and then defers the verdict to the binary.
 
+The recipe's own harness must satisfy four live invariants, each of which was
+violated and each of which silently produced a recipe that could not pass:
+
+- **Keystrokes go through XTEST, never `xdotool type --window`.** `--window`
+  delivers through `XSendEvent`, whose events carry `send_event=True`, and the
+  JetBrains AWT toolkit discards them — the editor never saw a keystroke.
+  XTEST types at the focused window, so focus is re-proven before every short
+  chunk, and the caret is moved to end of document before the first chunk.
+- **The focus guard matches the scratch document's absolute path**, not its
+  basename; a stale tab of an older scratch document with the same filename
+  otherwise passes the guard and receives the keystrokes.
+- **Scratch documents live in `tmp/live-repro/`**, not `.agent-doc/live-repro/`.
+  Under `.agent-doc/`, once `.agent-doc/.agent-doc/` exists, the scratch document
+  resolves its project root to `.agent-doc/` and becomes a nested project with
+  its own controller, lease and `ops.log`. The harness reads receipts from the
+  log of the root the binary resolves for the scratch document.
+- **Receipt waits are fresh and document-scoped**: only `ops.log` lines written
+  after the action and carrying `doc=<scratch stem>` satisfy a wait. The
+  canonical advance carries a real response patch (empty stdin is refused) and
+  runs in the scratch document's owning pane when another idle shell pane owns
+  it; the harness refuses before typing when the owner is not an idle shell.
+
 Document-scoped editor actions must not create cross-document authority edges.
 In particular, JetBrains Compact Exchange saves only its selected document
 before routing; `saveAllDocuments()` is forbidden because it can synchronously

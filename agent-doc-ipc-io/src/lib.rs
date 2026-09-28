@@ -47,7 +47,7 @@ use agent_doc_ipc_protocol::{
 };
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
-    GenericFilePath, ListenerOptions, ToFsName,
+    GenericFilePath, ListenerNonblockingMode, ListenerOptions, ToFsName,
     traits::{Listener as _, Stream as _},
 };
 use parking_lot::Mutex;
@@ -110,6 +110,16 @@ const IPC_CONNECT_TIMEOUT_SECS: u64 = 3;
 const IPC_LISTENER_READ_TIMEOUT_SECS: u64 = 30;
 const IPC_LISTENER_MAX_INFLIGHT_HANDLERS: u64 = 64;
 const IPC_LISTENER_RESOURCE_BACKOFF: Duration = Duration::from_millis(250);
+
+/// `#ipcstopneedsnowake`: how long an idle accept loop sleeps between polls.
+///
+/// This is the latency a shutdown request waits before the listener notices it
+/// unaided, so it bounds native generation handoff rather than ordinary IPC —
+/// an actual connection is still delivered as soon as the kernel queues it, and
+/// `wake_listener` still makes shutdown immediate. Kept coarse on purpose: the
+/// only cost of a tick is one `accept` syscall returning `EAGAIN`, and an
+/// editor host runs a handful of these listeners at once.
+const IPC_LISTENER_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 static LOCAL_IPC_BUILD_ID: OnceLock<String> = OnceLock::new();
 
 /// Inject the top-level binary/native-library build identity used by the IPC
@@ -1255,6 +1265,25 @@ where
         )
     })?;
 
+    // `#ipcstopneedsnowake`: a listener must be able to observe its own shutdown
+    // token. With a blocking `accept` it cannot — it only wakes when a client
+    // connects, so `stop_ipc_listener_generation` has to poke it via
+    // `wake_listener`, which connects to the socket *name*. A listener that no
+    // longer owns that name (it was evicted, correctly, for not serving) can
+    // never be woken, never terminates, and fails the native generation handoff
+    // closed. Observed live as `[native] reload failed closed; an IPC listener
+    // did not terminate` every ~14s for hours, which is what pinned the IDE to a
+    // stale cdylib and made every downstream wedge permanent.
+    //
+    // Accept is therefore non-blocking and the loop polls, so shutdown is
+    // honoured within one tick whether or not anything can still reach us.
+    // Accepted streams stay blocking — the per-connection code relies on
+    // blocking reads bounded by `set_recv_timeout`. `wake_listener` still works
+    // and simply makes shutdown immediate instead of up to one tick.
+    listener
+        .set_nonblocking(ListenerNonblockingMode::Accept)
+        .context("set editor IPC listener accept to non-blocking")?;
+
     // Handle each connection on its own thread so a slow/blocking apply handler
     // can never stall the accept loop and pile up connections in the socket
     // backlog (the "22 unaccepted connections" wedge, #jbacceptwedge). The
@@ -1502,6 +1531,12 @@ where
                 }
                 connection_threads = still_running;
             }
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                // `#ipcstopneedsnowake`: the idle tick. Nothing is pending, so
+                // loop back to the shutdown check. This is not an error and must
+                // not clear or trip the resource-exhaustion backoff.
+                std::thread::sleep(IPC_LISTENER_ACCEPT_POLL_INTERVAL);
+            }
             Err(e) => {
                 if ipc_accept_error_is_resource_exhaustion(&e) {
                     if !resource_exhaustion_logged {
@@ -1643,6 +1678,59 @@ mod tests {
         shutdown.store(true, Ordering::SeqCst);
         let _ = wake_listener(&root);
         let _ = listener.join();
+    }
+
+    /// `#ipcstopneedsnowake`: a listener must terminate on its shutdown token
+    /// even when nothing can reach it any more.
+    ///
+    /// `stop_ipc_listener_generation` pokes a blocked listener with
+    /// `wake_listener`, which connects to the socket *name*. A listener that no
+    /// longer owns that name cannot be woken that way, so with a blocking
+    /// `accept` it never observed its token and never exited — and the native
+    /// generation handoff failed closed on it, forever, which is what pinned an
+    /// IDE to a stale cdylib for hours (`[native] reload failed closed; an IPC
+    /// listener did not terminate`).
+    ///
+    /// This test deliberately never calls `wake_listener`: the property is that
+    /// shutdown needs no help.
+    #[test]
+    fn a_listener_that_lost_its_socket_name_still_terminates_on_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let sock_path = socket_path(&root);
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let listener_root = root.clone();
+        let listener_shutdown = Arc::clone(&shutdown);
+        let listener = thread::spawn(move || {
+            let _ = start_listener_with_logger_until(
+                &listener_root,
+                |_| None,
+                noop_ops_logger,
+                listener_shutdown,
+            );
+        });
+        assert!(await_endpoint(&sock_path), "listener never came up");
+
+        // Take the name away, exactly as an eviction does. From here nothing can
+        // connect to the original listener, so no wake can ever reach it.
+        std::fs::remove_file(&sock_path).unwrap();
+        let name = sock_path.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let impostor = ListenerOptions::new().name(name).create_sync().unwrap();
+
+        shutdown.store(true, Ordering::SeqCst);
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !listener.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            listener.is_finished(),
+            "an unreachable listener must still honour its shutdown token; \
+             blocking on accept is what made the reload handoff fail closed forever"
+        );
+        let _ = listener.join();
+        drop(impostor);
     }
 
     /// `#ipcdupelistener`, the case a connect-only probe gets backwards: a

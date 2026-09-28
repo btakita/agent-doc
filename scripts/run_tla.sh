@@ -56,6 +56,15 @@ modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtL
 # leaves a way to go vacuous.
 must_violate=(
     EditorReplicaStrand:EditorReplicaStrandWedge
+    # `#acceptedneverserved` — one wedge PER EDGE, not one for the module. This
+    # config leaves the ORIGINAL rejection edge enabled and disables only the
+    # acceptance edge: if the rejection edge covered an endpoint that accepts
+    # every request and never serves, it would pass. It must violate, which is
+    # what proves the first fix never reached the state a cdylib reload actually
+    # produces. A single module-level wedge would have stayed green on the
+    # shipped edge while the production wedge stayed open — exactly how this one
+    # survived the first fix.
+    EditorReplicaStrand:EditorReplicaStrandAcceptedWedge
     # The write-side dual of `EditorReplicaStrand`: a definitively refusing
     # endpoint that keeps vetoing the visible-delivery receipt. Wedge proves
     # the drop edge is load-bearing; reach proves the editor-native save was

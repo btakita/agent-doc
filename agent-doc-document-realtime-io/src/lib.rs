@@ -7157,6 +7157,11 @@ fn reobserve_missing_editor_replica_with_reregistration(
     }
     let attempts = editor_replica_reobserve_attempts();
     let mut current = observed;
+    // `#acceptedneverserved`: an endpoint that ACCEPTS every request and never
+    // produces the replica is neither a refusal nor silence, and it was the
+    // shape with no exit. Counting acceptances is what lets the loop tell it
+    // apart from "nothing answered", which must stay retryable.
+    let mut accepted_requests = 0usize;
     for attempt in 1..=attempts {
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event_reporting(
             file,
@@ -7175,7 +7180,10 @@ fn reobserve_missing_editor_replica_with_reregistration(
                 format!("definitively_refused:{}", outcome.definitive_refusals)
             }
             Ok(outcome) if outcome.notified == 0 => "not_delivered".to_string(),
-            Ok(outcome) => format!("delivered:{}", outcome.notified),
+            Ok(outcome) => {
+                accepted_requests += outcome.notified;
+                format!("delivered:{}", outcome.notified)
+            }
             Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
         };
         agent_doc_ops_log_io::log_op(
@@ -7225,7 +7233,37 @@ fn reobserve_missing_editor_replica_with_reregistration(
     // as of the END of the loop: a registration that landed while we were
     // retrying is already reflected here, so only genuinely newer realtime state
     // re-arms the retry. Later reads in this operation fall through for free.
-    record_editor_replica_self_heal_exhausted(file, editor_replica_liveness_witness(file));
+    let witness = editor_replica_liveness_witness(file);
+    // The exhaustion record only stops the retrying. It never said anything
+    // about whether the endpoint CAN serve, so `decide_authority_recovery` had
+    // no fact to leave `FailClosed` on and the attachment latch outlived the
+    // replica it stood for — the cdylib-generation strand, whose only recovery
+    // was an operator reopening the tab. If every request was accepted across
+    // the whole budget and the witness never moved, the endpoint has said yes N
+    // times and still holds no model for this document: proof, and keyed to the
+    // witness so a genuine re-attach clears it for free.
+    if let Some(proof) = agent_doc_document_realtime::not_serving_proof::reregistration_not_serving_proof(
+        0,
+        accepted_requests,
+        // Reachable only by falling out of the loop: every early exit above
+        // returns, so arriving here IS the spent budget.
+        true,
+    ) {
+        record_editor_endpoint_definitive_refusal(file, witness.clone());
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_replica_endpoint_proven_not_serving file={} source={} proof={} \
+                 accepted_requests={} attempts={} recovery=demote_stale_attachment_latch",
+                file.display(),
+                source,
+                proof.token(),
+                accepted_requests,
+                attempts,
+            ),
+        );
+    }
+    record_editor_replica_self_heal_exhausted(file, witness);
     current
 }
 

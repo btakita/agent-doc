@@ -72,6 +72,32 @@ that is the non-vacuity obligation, enforced by `EditorReplicaStrandWedge.cfg`
 and `scripts/run_tla.sh`'s must-violate list. A property that cannot fail is not
 evidence, which is the lesson this whole module encodes.
 
+2026-09-28 -- THE SAME FLAW, ON THE ACCEPTANCE EDGE
+--------------------------------------------------
+This module was written because `JetBrainsFileCache` made re-registration an
+unconditional assignment, so convergence was an axiom rather than a property. It
+then did the same thing one edge over: `ReregisterAccepted` was guarded by
+`endpointServes`, which makes "the endpoint accepted" imply "the replica was
+rebuilt" BY CONSTRUCTION. The production shape it assumed away is the common one
+after a cdylib reload -- the editor process is alive, answers its socket, serves
+every other document, accepts each re-registration request, and never produces a
+model for THIS document, because the one it would serve from belonged to the
+retired native generation.
+
+That lands in neither existing bucket. It is not a refusal, so no proof is
+recorded; it is not silence, so `notified > 0` reads as progress and the caller
+waits. In the binary the re-registration loop spent its whole budget, wrote
+`self_heal_exhausted` (which only stops the retrying), and nothing ever promoted
+that to a fact `decide_authority_recovery` could leave `FailClosed` on. Measured
+2026-09-28 on four attached documents after one `make install`; the recovery was
+an operator reopening each tab, which is the action this module's own closing
+note says the design must not require.
+
+`endpointAccepts` is now separate from `endpointServes` so the two can disagree,
+which is the whole point. `ReregisterUnanswered` keeps the other half honest: an
+endpoint that never answers is never demoted, however long it stays silent, and
+it deliberately does not spend the budget.
+
 Note what is deliberately ABSENT: any action that restores `endpointServes`.
 Reopening the editor tab is the operator action the design must not require, so
 modelling it would reintroduce the same assumption that made the existing model
@@ -79,89 +105,166 @@ vacuous. Progress here must come from agent-doc alone.
 ***************************************************************************)
 
 CONSTANTS
-    MaxReregisterAttempts,       (* bounded re-registration budget, 3 in production *)
-    DemoteOnDefinitiveRejection  (* the fix under test *)
+    MaxReregisterAttempts,         (* bounded re-registration budget, 3 in production *)
+    DemoteOnDefinitiveRejection,   (* the original fix: an ANSWERED refusal *)
+    DemoteOnAcceptedWithoutServing (* `#acceptedneverserved`: an answered YES that never lands *)
+
+(*************************************************************************)
+(* How the live endpoint behaves toward THIS document. One mode, because  *)
+(* these are mutually exclusive observations: a request is refused, or    *)
+(* accepted, or unanswered. Modelling "accepts" and "serves" as separate  *)
+(* booleans let both the rejection and the acceptance action fire in the  *)
+(* same state, and the rejection edge then rescued the acceptance case -  *)
+(* which would have made the per-edge wedge below pass vacuously.         *)
+(*                                                                        *)
+(*   "serves"   - answers and rebuilds the replica                        *)
+(*   "refuses"  - answers with a rejection (receipt, exhausted mismatch)  *)
+(*   "accepts"  - answers YES and never produces a model for this doc     *)
+(*   "silent"   - nothing answers                                         *)
+(*************************************************************************)
+Modes == {"serves", "refuses", "accepts", "silent"}
+NotServing == {"refuses", "accepts", "silent"}
 
 VARIABLES
-    replica,        (* "present" | "missing" - agent-doc's Lazily replica *)
-    endpointServes, (* TRUE iff the live editor endpoint will serve this document *)
-    registration,   (* "attached" | "detached" - the attachment latch *)
-    attempts,       (* re-registration attempts spent against a definitive refusal *)
-    authority       (* "none" | "editor" | "disk" - what a resolve produced *)
+    replica,     (* "present" | "missing" - agent-doc's Lazily replica *)
+    mode,        (* how the endpoint behaves toward this document *)
+    registration,(* "attached" | "detached" - the attachment latch *)
+    attempts,    (* re-registration attempts spent *)
+    refusals,    (* attempts the endpoint ANSWERED with a rejection *)
+    accepted,    (* attempts the endpoint ANSWERED with a yes *)
+    authority    (* "none" | "editor" | "disk" - what a resolve produced *)
 
-vars == << replica, endpointServes, registration, attempts, authority >>
+vars == << replica, mode, registration, attempts, refusals, accepted, authority >>
 
 Init ==
     /\ replica = "present"
-    /\ endpointServes = TRUE
+    /\ mode = "serves"
     /\ registration = "attached"
     /\ attempts = 0
+    /\ refusals = 0
+    /\ accepted = 0
     /\ authority = "editor"
 
 TypeOK ==
     /\ replica \in {"present", "missing"}
-    /\ endpointServes \in BOOLEAN
+    /\ mode \in Modes
     /\ registration \in {"attached", "detached"}
     /\ attempts \in 0..MaxReregisterAttempts
+    /\ refusals \in 0..MaxReregisterAttempts
+    /\ accepted \in 0..MaxReregisterAttempts
     /\ authority \in {"none", "editor", "disk"}
 
 (*************************************************************************)
-(* A cdylib generation swap drops the replica and leaves the OLD endpoint *)
-(* unable to serve this document. The attachment latch is untouched -     *)
-(* that divergence between latch and endpoint IS the bug.                *)
+(* A cdylib generation swap drops the replica and leaves the OLD endpoint  *)
+(* unable to serve this document. The attachment latch is untouched -      *)
+(* that divergence between latch and endpoint IS the bug. Which non-serving*)
+(* mode it lands in is nondeterministic: TLC explores all three.           *)
 (*************************************************************************)
 LibraryReload ==
     /\ replica = "present"
     /\ replica' = "missing"
-    /\ endpointServes' = FALSE
+    /\ mode' \in NotServing
     /\ authority' = "none"
-    /\ UNCHANGED << registration, attempts >>
+    /\ UNCHANGED << registration, attempts, refusals, accepted >>
 
-(* The endpoint answers and accepts: the replica is rebuilt. *)
+(* There is deliberately NO action that changes the failure mode, and none that
+   restores serving. `LibraryReload` already picks nondeterministically among the
+   three non-serving modes, so every one is explored with no coverage lost; an
+   additional shift action only added an infinite oscillation that starves the
+   fair recovery actions and reports a liveness violation which is an artifact of
+   the model rather than a fact about the design. The design must recover from a
+   failure mode that never changes, which is the observed case: a retired native
+   generation does not start serving again on its own, and reopening the tab is
+   the operator action this module exists to eliminate. *)
+
+(* The endpoint answers and rebuilds. Unreachable after a reload, by design. *)
 ReregisterAccepted ==
     /\ replica = "missing"
-    /\ endpointServes
+    /\ mode = "serves"
     /\ replica' = "present"
     /\ attempts' = 0
-    /\ UNCHANGED << endpointServes, registration, authority >>
+    /\ refusals' = 0
+    /\ accepted' = 0
+    /\ UNCHANGED << mode, registration, authority >>
 
-(* The endpoint answers and REJECTS - a receipt, not a timeout. Bounded budget. *)
+(* The endpoint answers and REJECTS - a receipt, not a timeout. *)
 ReregisterRejected ==
     /\ replica = "missing"
-    /\ ~endpointServes
+    /\ mode = "refuses"
     /\ attempts < MaxReregisterAttempts
     /\ attempts' = attempts + 1
-    /\ UNCHANGED << replica, endpointServes, registration, authority >>
+    /\ refusals' = refusals + 1
+    /\ UNCHANGED << replica, mode, registration, accepted, authority >>
+
+(* `#acceptedneverserved` - the shape this module used to assume away.
+   The endpoint answers YES and the replica never appears, because the model it
+   would serve from belonged to the retired native generation. Not a refusal, so
+   nothing was proven; not silence, so `notified > 0` read as progress. *)
+ReregisterAcceptedWithoutServing ==
+    /\ replica = "missing"
+    /\ mode = "accepts"
+    /\ attempts < MaxReregisterAttempts
+    /\ attempts' = attempts + 1
+    /\ accepted' = accepted + 1
+    /\ UNCHANGED << replica, mode, registration, refusals, authority >>
+
+(* Nothing answered. Spends a loop iteration exactly like the others - the
+   binary's budget counts attempts, not answers - but increments NEITHER counter.
+   That is the whole safety margin: absence of an answer is not evidence that no
+   answer will come, so a budget spent entirely on silence proves nothing and
+   demoting on it would make the latch's exit a silent `--force-disk`. *)
+ReregisterUnanswered ==
+    /\ replica = "missing"
+    /\ mode = "silent"
+    /\ attempts < MaxReregisterAttempts
+    /\ attempts' = attempts + 1
+    /\ UNCHANGED << replica, mode, registration, refusals, accepted, authority >>
 
 ResolveOnEditor ==
     /\ replica = "present"
     /\ authority' = "editor"
-    /\ UNCHANGED << replica, endpointServes, registration, attempts >>
+    /\ UNCHANGED << replica, mode, registration, attempts, refusals, accepted >>
 
 (* Legal only once the editor is PROVEN not serving. *)
 DescendToDisk ==
     /\ replica = "missing"
     /\ registration = "detached"
     /\ authority' = "disk"
-    /\ UNCHANGED << replica, endpointServes, registration, attempts >>
+    /\ UNCHANGED << replica, mode, registration, attempts, refusals, accepted >>
 
-(* The missing edge: a definitive rejection demotes the stale latch. *)
-DemoteStaleRegistration ==
+(* The original edge: an answered rejection demotes the stale latch. *)
+DemoteOnRejection ==
     /\ DemoteOnDefinitiveRejection
     /\ registration = "attached"
     /\ replica = "missing"
-    /\ ~endpointServes
+    /\ refusals > 0
     /\ attempts = MaxReregisterAttempts
     /\ registration' = "detached"
-    /\ UNCHANGED << replica, endpointServes, attempts, authority >>
+    /\ UNCHANGED << replica, mode, attempts, refusals, accepted, authority >>
+
+(* The second edge. The endpoint ANSWERED - repeatedly - and still holds no
+   model for this document across a spent budget. A statement about what the
+   endpoint reported, not about how long we waited: `accepted > 0` is reachable
+   only through `ReregisterAcceptedWithoutServing`, never through silence. *)
+DemoteOnAcceptanceWithoutService ==
+    /\ DemoteOnAcceptedWithoutServing
+    /\ registration = "attached"
+    /\ replica = "missing"
+    /\ accepted > 0
+    /\ attempts = MaxReregisterAttempts
+    /\ registration' = "detached"
+    /\ UNCHANGED << replica, mode, attempts, refusals, accepted, authority >>
 
 Next ==
     \/ LibraryReload
     \/ ReregisterAccepted
     \/ ReregisterRejected
+    \/ ReregisterAcceptedWithoutServing
+    \/ ReregisterUnanswered
     \/ ResolveOnEditor
     \/ DescendToDisk
-    \/ DemoteStaleRegistration
+    \/ DemoteOnRejection
+    \/ DemoteOnAcceptanceWithoutService
 
 (*************************************************************************)
 (* Every recovery action is weakly fair. `LibraryReload` is NOT fair - it *)
@@ -172,9 +275,12 @@ Spec ==
     /\ [][Next]_vars
     /\ WF_vars(ReregisterAccepted)
     /\ WF_vars(ReregisterRejected)
+    /\ WF_vars(ReregisterAcceptedWithoutServing)
+    /\ WF_vars(ReregisterUnanswered)
     /\ WF_vars(ResolveOnEditor)
     /\ WF_vars(DescendToDisk)
-    /\ WF_vars(DemoteStaleRegistration)
+    /\ WF_vars(DemoteOnRejection)
+    /\ WF_vars(DemoteOnAcceptanceWithoutService)
 
 (*************************************************************************)
 (* SAFETY                                                                *)
@@ -183,12 +289,19 @@ Spec ==
 (* The invariant the disk refusal exists to protect, stated in terms of what  *)
 (* is actually being protected (a serving endpoint) rather than the latch.    *)
 NeverReadsDiskWhileEndpointServes ==
-    (authority = "disk") => ~endpointServes
+    (authority = "disk") => mode # "serves"
 
-(* Demotion is only ever justified by a definitive refusal. This is what stops *)
-(* the fix from becoming a disguised `--force-disk`.                           *)
-DemotionRequiresDefinitiveRefusal ==
-    (registration = "detached") => ~endpointServes
+(* Demotion is only ever justified by proof. This is what stops either edge   *)
+(* from becoming a disguised `--force-disk`.                                  *)
+DemotionRequiresProof ==
+    (registration = "detached") => mode # "serves"
+
+(* The sharper half, and what the new edge has to earn: an endpoint that never *)
+(* answered is never demoted. Both counters are reachable only through an      *)
+(* action the endpoint participated in, so this says demotion follows          *)
+(* something REPORTED, never a spent clock.                                    *)
+DemotionRequiresAnAnswer ==
+    (registration = "detached") => (refusals > 0 \/ accepted > 0)
 
 (* A present replica always outranks disk. *)
 EditorReplicaOutranksDisk ==
@@ -197,11 +310,19 @@ EditorReplicaOutranksDisk ==
 (*************************************************************************)
 (* LIVENESS - the property the whole class of wedges violates.            *)
 (*                                                                       *)
-(* Resolution must remain reachable forever, WITHOUT any operator action. *)
-(* With `DemoteOnDefinitiveRejection = FALSE` this is violated by the     *)
-(* exact production trace above, which is the point.                     *)
+(* Resolution must follow WITHOUT any operator action, once the endpoint  *)
+(* has answered at all. Conditional on having answered, and that is not a *)
+(* weakening: an endpoint that stays silent forever legitimately never    *)
+(* resolves, because silence is not proof and this design will not demote *)
+(* on it. Stating it unconditionally would demand exactly the             *)
+(* `--force-disk` the invariants above forbid.                            *)
+(*                                                                       *)
+(* Both counters are reachable only through an action the endpoint took,  *)
+(* so the antecedent cannot be satisfied by waiting.                      *)
 (*************************************************************************)
-AuthorityAlwaysEventuallyResolves ==
-    []<>(authority # "none")
+EndpointHasAnswered == refusals > 0 \/ accepted > 0
+
+AnsweredEndpointAlwaysEventuallyResolves ==
+    EndpointHasAnswered ~> (authority # "none")
 
 =============================================================================

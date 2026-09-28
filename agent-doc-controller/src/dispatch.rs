@@ -2231,6 +2231,78 @@ pub fn recycle_inflight_is_abandoned(marked_secs: u64, now_secs: u64, ttl_secs: 
     marked_secs != 0 && now_secs.saturating_sub(marked_secs) > ttl_secs
 }
 
+/// What a dispatch-only reopen must do when one settle-wait RPC returned without
+/// the `InFlight` recycle having settled.
+///
+/// `#recyclesettlewaitshort`: the abandonment TTL above and the settle *wait* are
+/// two different budgets, and they were incoherent. The controller's blocking
+/// `supervisor_recycle_wait_settled` RPC gives up after
+/// `SUPERVISOR_RECYCLE_SETTLE_WAIT` (10s), while abandonment is only declared at
+/// 120s. Between those two bounds sat a 110-second window in which a recycle was
+/// *neither settled nor abandoned*, and a single-shot wait refused the dispatch
+/// there — handing the operator `unblocker=wait_for_supervisor_recycle_settle`,
+/// which is the very thing the binary had just stopped doing. The named remedy
+/// and the action taken contradicted each other, so every refusal inside that
+/// window was a false negative.
+///
+/// The 10s wait was calibrated against a bare `execve` (observed at 3-7s), but
+/// the reason that actually gates dispatch here is `auto_install_reexec`, whose
+/// `InFlight` phase spans a full `make install` *before* the `execve`. Observed
+/// live 2026-09-28 on `src/haiven-dev/tasks/infra.md`: the wait opened at
+/// 17:00:48, gave up at 17:00:58 (`waited_ms=10050`, `recycle_epoch=8443`), and
+/// the recycle settled and injected normally at 17:01:47 — 49 seconds in, well
+/// inside the TTL and long past the wait.
+///
+/// Raising the 10s constant would only move the window: the fix is to stop
+/// treating one RPC timeout as a verdict and re-arm the wait until the *TTL*
+/// decides. The two budgets are then coherent by construction rather than by a
+/// pair of constants that can drift apart again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecycleInflightUnsettledVerdict {
+    /// Still inside the TTL: the recycle is pending, not lost. Re-arm the wait.
+    KeepWaiting,
+    /// Past the TTL: the settle transition was lost (`#recycleinflightwedge`).
+    /// Proceed loudly — the hot-reload boundary this gate protects is long over.
+    ProceedAbandoned,
+    /// Unstamped projection. Unknown is not stale, and an unbounded wait on an
+    /// unknown mark cannot terminate, so this stays fail-closed.
+    FailClosed,
+}
+
+/// How many times the gated recycle may be replaced by a NEW epoch before the
+/// dispatch stops waiting.
+///
+/// The TTL bounds one recycle. It does not bound a *succession* of them: each
+/// new epoch re-stamps `marked_secs`, so a project that recycles continuously
+/// would keep the re-arm loop inside the TTL forever and the dispatch would
+/// hang instead of refusing — trading the false refusal for a livelock, which
+/// is not a fix. Re-keying onto a fresh mark is correct (the new recycle is the
+/// one actually gating dispatch), so the bound is on the number of successions,
+/// not on total elapsed time.
+///
+/// Three is generous: a single install fan-out settles in one epoch, and an
+/// operator who recycles twice while one dispatch waits is already unusual.
+pub const RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES: u32 = 3;
+
+/// Classify one unsettled settle-wait return.
+///
+/// Total over the three shapes, so a caller cannot fall through to a refusal it
+/// did not intend: a stamped recycle always terminates in a *proceed* — settled
+/// or abandoned — and only an unstamped one refuses.
+pub fn recycle_inflight_unsettled_verdict(
+    marked_secs: u64,
+    now_secs: u64,
+    ttl_secs: u64,
+) -> RecycleInflightUnsettledVerdict {
+    if marked_secs == 0 {
+        return RecycleInflightUnsettledVerdict::FailClosed;
+    }
+    if recycle_inflight_is_abandoned(marked_secs, now_secs, ttl_secs) {
+        return RecycleInflightUnsettledVerdict::ProceedAbandoned;
+    }
+    RecycleInflightUnsettledVerdict::KeepWaiting
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchOnlyRecycleInflightMessageFacts<'a> {
     pub harness_binary: &'a str,
@@ -5295,6 +5367,73 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
         // A clock that ran backwards must not read as abandoned either.
         assert!(!recycle_inflight_is_abandoned(marked, marked - 500, ttl));
+    }
+
+    /// `#recyclesettlewaitshort`: the live `infra.md` refusal, as a table.
+    ///
+    /// The shipped gate read ONE 10s RPC timeout as a verdict, so every elapsed
+    /// value strictly between the wait and the TTL refused. The verdict is what
+    /// closes that window: inside the TTL it keeps waiting, outside it proceeds,
+    /// and only an unstamped mark refuses.
+    #[test]
+    fn recycle_inflight_unsettled_verdict_never_refuses_a_stamped_pending_recycle() {
+        let marked = 1_790_000_000u64;
+        let ttl = RECYCLE_INFLIGHT_SETTLE_TTL_SECS;
+
+        // The observed live gap: the 10s wait gave up at 17:00:58 and the recycle
+        // settled at 17:01:47 — 59s in, which the shipped code refused.
+        for elapsed in [0, 7, 10, 11, 49, 59, ttl - 1, ttl] {
+            assert_eq!(
+                recycle_inflight_unsettled_verdict(marked, marked + elapsed, ttl),
+                RecycleInflightUnsettledVerdict::KeepWaiting,
+                "a stamped recycle {elapsed}s in is pending, not refusable"
+            );
+        }
+
+        // Past the TTL the settle transition is lost, not pending.
+        for elapsed in [ttl + 1, 19 * 60] {
+            assert_eq!(
+                recycle_inflight_unsettled_verdict(marked, marked + elapsed, ttl),
+                RecycleInflightUnsettledVerdict::ProceedAbandoned,
+            );
+        }
+
+        // Unstamped stays fail-closed: an unbounded wait on an unknown mark
+        // cannot terminate, so there is nothing to keep waiting for.
+        assert_eq!(
+            recycle_inflight_unsettled_verdict(0, marked + 19 * 60, ttl),
+            RecycleInflightUnsettledVerdict::FailClosed,
+        );
+
+        // A clock that ran backwards is pending, never abandoned.
+        assert_eq!(
+            recycle_inflight_unsettled_verdict(marked, marked - 500, ttl),
+            RecycleInflightUnsettledVerdict::KeepWaiting,
+        );
+    }
+
+    /// The coherence obligation itself: no elapsed value may be classified
+    /// `FailClosed` merely because it outran the settle-wait RPC. Stated over the
+    /// whole window rather than sampled, so a future constant change cannot
+    /// silently reopen the gap.
+    #[test]
+    fn recycle_inflight_unsettled_verdict_has_no_refusal_window_below_the_ttl() {
+        let marked = 1_000_000u64;
+        let ttl = 120u64;
+        for elapsed in 0..=(ttl * 2) {
+            let verdict = recycle_inflight_unsettled_verdict(marked, marked + elapsed, ttl);
+            assert_ne!(
+                verdict,
+                RecycleInflightUnsettledVerdict::FailClosed,
+                "a stamped recycle must never refuse, at {elapsed}s"
+            );
+            let expected = if elapsed > ttl {
+                RecycleInflightUnsettledVerdict::ProceedAbandoned
+            } else {
+                RecycleInflightUnsettledVerdict::KeepWaiting
+            };
+            assert_eq!(verdict, expected, "at {elapsed}s");
+        }
     }
 
     #[test]

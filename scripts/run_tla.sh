@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -115,6 +115,16 @@ must_violate=(
     RefusedSaveOperatorAction:RefusedSaveOperatorActionReach
     StopHookFailClosed:StopHookFailClosedWedge
     StopHookFailClosed:StopHookFailClosedReach
+    # `#recyclesettlewaitshort` — the dispatch gate across an upgrade re-exec.
+    # The wedge restores the shipped one-timeout-is-a-verdict rule and must
+    # violate, which is what proves the re-arm edge carries the invariant. Two
+    # reach configs because this fix REMOVES a refusal: "it stopped refusing
+    # wrongly" and "it stopped refusing at all" are indistinguishable from the
+    # outside, so delivery across a live recycle AND the surviving unstamped
+    # fail-closed refusal must both stay reachable.
+    RecycleSettleDispatch:RecycleSettleDispatchWedge
+    RecycleSettleDispatch:RecycleSettleDispatchReach
+    RecycleSettleDispatch:RecycleSettleDispatchUnstampedReach
 )
 
 for module in "${modules[@]}"; do

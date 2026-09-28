@@ -5,11 +5,12 @@ use std::time::Duration;
 use agent_doc_controller::dispatch::{
     DispatchOnlyProofOutcomeFacts, DispatchOnlyRecycleInflightMessageFacts,
     DispatchOnlyReopenDelivery, DispatchStartProofDecision, DispatchStartProofFacts,
-    RoutedDispatchStartProof, RoutedReopenGuardReason, accepted_only_dispatch_start_log_message,
-    accepted_only_dispatch_start_refusal_message,
+    RecycleInflightUnsettledVerdict, RoutedDispatchStartProof, RoutedReopenGuardReason,
+    accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_recycle_inflight_message, dispatch_only_sent_console_message,
-    dispatch_only_sent_log_message, dispatch_proof_failed_event, recycle_inflight_is_abandoned,
+    dispatch_only_sent_log_message, dispatch_proof_failed_event,
+    RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES, recycle_inflight_unsettled_verdict,
     routed_dispatch_start_timeout_for_binary,
 };
 use agent_doc_harness::HarnessConfig;
@@ -37,88 +38,251 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
     }
 
     let started = std::time::Instant::now();
-    let reason = status.reason.unwrap_or_else(|| "unknown".to_string());
+    let mut reason = status.reason.unwrap_or_else(|| "unknown".to_string());
+    let mut marked_secs = status.marked_secs;
+    let mut recycle_epoch = status.recycle_epoch;
+    let mut attempt: u32 = 0;
+    let mut epoch_changes: u32 = 0;
 
-    // `#recycleinflightwedge`: a recycle older than the settle TTL lost its
-    // settle transition — the supervisor died between publishing `InFlight` and
-    // its replacement reaching the watch loop. Waiting for it is waiting for an
-    // event that will never arrive, and refusing afterwards hands the operator an
-    // unblocker they cannot perform. Proceed instead, loudly: the hot-reload
-    // boundary this gate protects is long over.
-    if recycle_inflight_is_abandoned(
-        status.marked_secs,
-        now_secs(),
-        recycle_inflight_settle_ttl_secs(),
-    ) {
+    // `#recycleinflightwedge` / `#recyclesettlewaitshort`: a recycle older than
+    // the settle TTL lost its settle transition — the supervisor died between
+    // publishing `InFlight` and its replacement reaching the watch loop. Waiting
+    // for it is waiting for an event that will never arrive, and refusing
+    // afterwards hands the operator an unblocker they cannot perform. Proceed
+    // instead, loudly: the hot-reload boundary this gate protects is long over.
+    //
+    // Anything younger than the TTL is pending, not lost, so the single blocking
+    // `supervisor_recycle_wait_settled` RPC is re-armed rather than read as a
+    // verdict. The controller owns that trigger and blocks inside it; this is a
+    // re-arm of an external wait, not a poll, so it owns no wait/poll constant of
+    // its own (the TTL policy stays in `agent-doc-controller`).
+    loop {
+        let ttl_secs = recycle_inflight_settle_ttl_secs();
+        match recycle_inflight_unsettled_verdict(marked_secs, now_secs(), ttl_secs) {
+            RecycleInflightUnsettledVerdict::ProceedAbandoned => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_recycle_inflight_abandoned file={} pane={} harness={} reason={} marked_secs={} ttl_secs={} recycle_epoch={} waited_ms={} attempts={}",
+                        file.display(),
+                        pane,
+                        harness_binary,
+                        reason,
+                        marked_secs,
+                        ttl_secs,
+                        recycle_epoch,
+                        started.elapsed().as_millis(),
+                        attempt
+                    ),
+                );
+                return Ok(());
+            }
+            RecycleInflightUnsettledVerdict::FailClosed => {
+                return Err(recycle_inflight_refusal(
+                    file,
+                    pane,
+                    harness_binary,
+                    &reason,
+                    marked_secs,
+                    recycle_epoch,
+                    started.elapsed().as_millis(),
+                    attempt,
+                    "unstamped_recycle_mark",
+                ));
+            }
+            RecycleInflightUnsettledVerdict::KeepWaiting => {}
+        }
+
+        attempt += 1;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_dispatch_only_recycle_inflight_abandoned file={} pane={} harness={} reason={} marked_secs={} ttl_secs={} recycle_epoch={}",
+                "route_dispatch_only_recycle_inflight_wait file={} pane={} harness={} reason={} marked_secs={} ttl_secs={} recycle_epoch={} attempt={}",
                 file.display(),
                 pane,
                 harness_binary,
                 reason,
-                status.marked_secs,
-                recycle_inflight_settle_ttl_secs(),
-                status.recycle_epoch
+                marked_secs,
+                ttl_secs,
+                recycle_epoch,
+                attempt
             ),
         );
-        return Ok(());
-    }
 
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "route_dispatch_only_recycle_inflight_wait file={} pane={} harness={} reason={}",
-            file.display(),
-            pane,
-            harness_binary,
-            reason
-        ),
-    );
-    if let Err(err) =
-        agent_doc_controller_io::project_controller::wait_for_supervisor_recycle_settle_for_file(
-            Path::new(file_path),
-        )
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_dispatch_only_recycle_inflight_unsettled file={} pane={} harness={} reason={} waited_ms={} error={:?}",
-                file.display(),
-                pane,
-                harness_binary,
-                reason,
-                started.elapsed().as_millis(),
-                err.to_string()
-            ),
-        );
-        let file_display = file.display().to_string();
-        let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
-            "wait_for_supervisor_recycle_settle",
-        );
-        anyhow::bail!(dispatch_only_recycle_inflight_message(
-            DispatchOnlyRecycleInflightMessageFacts {
-                harness_binary,
-                pane,
-                file_display: &file_display,
-                reason: &reason,
-                outcome_fields: &outcome_fields,
-            },
-        ));
+        let waited =
+            agent_doc_controller_io::project_controller::wait_for_supervisor_recycle_settle_for_file(
+                Path::new(file_path),
+            );
+        match waited {
+            Ok(projection) => {
+                if !matches!(
+                    projection.phase,
+                    agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+                ) {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_only_recycle_inflight_settled file={} pane={} harness={} reason={} waited_ms={} attempts={}",
+                            file.display(),
+                            pane,
+                            harness_binary,
+                            reason,
+                            started.elapsed().as_millis(),
+                            attempt
+                        ),
+                    );
+                    return Ok(());
+                }
+                // Settled RPC that still reports `InFlight` is a *new* recycle
+                // generation, not this one finishing. Re-key on it so the TTL is
+                // measured against the mark that is actually gating dispatch.
+                if projection.recycle_epoch != recycle_epoch {
+                    epoch_changes += 1;
+                }
+                marked_secs = projection.marked_secs;
+                recycle_epoch = projection.recycle_epoch;
+                if let Some(next) = projection.reason {
+                    reason = next;
+                }
+                if epoch_changes > RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES {
+                    return Err(recycle_inflight_refusal(
+                        file,
+                        pane,
+                        harness_binary,
+                        &reason,
+                        marked_secs,
+                        recycle_epoch,
+                        started.elapsed().as_millis(),
+                        attempt,
+                        "recycle_epoch_churn",
+                    ));
+                }
+            }
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_recycle_inflight_unsettled file={} pane={} harness={} reason={} waited_ms={} attempt={} error={:?}",
+                        file.display(),
+                        pane,
+                        harness_binary,
+                        reason,
+                        started.elapsed().as_millis(),
+                        attempt,
+                        err.to_string()
+                    ),
+                );
+                // Re-read the mark before deciding: the loop head re-classifies
+                // against the TTL, and a recycle that settled between the RPC
+                // giving up and this read must not be refused.
+                match agent_doc_controller_io::project_controller::supervisor_recycle_status_for_file(
+                    Path::new(file_path),
+                ) {
+                    Ok(refreshed) => {
+                        if !matches!(
+                            refreshed.phase,
+                            agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+                        ) {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "route_dispatch_only_recycle_inflight_settled file={} pane={} harness={} reason={} waited_ms={} attempts={}",
+                                    file.display(),
+                                    pane,
+                                    harness_binary,
+                                    reason,
+                                    started.elapsed().as_millis(),
+                                    attempt
+                                ),
+                            );
+                            return Ok(());
+                        }
+                        if refreshed.recycle_epoch != recycle_epoch {
+                            epoch_changes += 1;
+                        }
+                        marked_secs = refreshed.marked_secs;
+                        recycle_epoch = refreshed.recycle_epoch;
+                        if let Some(next) = refreshed.reason {
+                            reason = next;
+                        }
+                        if epoch_changes > RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES {
+                            return Err(recycle_inflight_refusal(
+                                file,
+                                pane,
+                                harness_binary,
+                                &reason,
+                                marked_secs,
+                                recycle_epoch,
+                                started.elapsed().as_millis(),
+                                attempt,
+                                "recycle_epoch_churn",
+                            ));
+                        }
+                    }
+                    Err(status_err) => {
+                        // The controller itself is unreachable. That is not a
+                        // pending recycle, and re-arming a wait against an
+                        // endpoint that cannot answer never terminates.
+                        return Err(recycle_inflight_refusal(
+                            file,
+                            pane,
+                            harness_binary,
+                            &reason,
+                            marked_secs,
+                            recycle_epoch,
+                            started.elapsed().as_millis(),
+                            attempt,
+                            &format!("recycle_status_unreadable: {status_err}"),
+                        ));
+                    }
+                }
+            }
+        }
     }
+}
+
+/// The one refusal shape for the recycle gate, so both fail-closed paths carry
+/// the same operator-facing message and the same forensic fields.
+#[allow(clippy::too_many_arguments)]
+fn recycle_inflight_refusal(
+    file: &Path,
+    pane: &str,
+    harness_binary: &str,
+    reason: &str,
+    marked_secs: u64,
+    recycle_epoch: u64,
+    waited_ms: u128,
+    attempts: u32,
+    refusal: &str,
+) -> anyhow::Error {
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "route_dispatch_only_recycle_inflight_settled file={} pane={} harness={} reason={} waited_ms={}",
+            "route_dispatch_only_recycle_inflight_refused file={} pane={} harness={} reason={} marked_secs={} recycle_epoch={} waited_ms={} attempts={} refusal={}",
             file.display(),
             pane,
             harness_binary,
             reason,
-            started.elapsed().as_millis()
+            marked_secs,
+            recycle_epoch,
+            waited_ms,
+            attempts,
+            refusal
         ),
     );
-    Ok(())
+    let file_display = file.display().to_string();
+    let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+        "wait_for_supervisor_recycle_settle",
+    );
+    anyhow::anyhow!(dispatch_only_recycle_inflight_message(
+        DispatchOnlyRecycleInflightMessageFacts {
+            harness_binary,
+            pane,
+            file_display: &file_display,
+            reason,
+            outcome_fields: &outcome_fields,
+        },
+    ))
 }
 
 fn now_secs() -> u64 {

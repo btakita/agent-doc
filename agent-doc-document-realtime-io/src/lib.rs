@@ -1485,25 +1485,44 @@ fn canonical_editor_projection_is_persisted(
     {
         return Ok(true);
     }
-    let ready_for_native_save = visible_editor_receipt
-        && matches!(
-        observe_live_editor_authority_after_model_ensure(
-            path,
-            "editor_projection_native_save_gate",
-        )?,
+    // `#savegateopaque`: observe the gate's authority input ONCE and keep it, so
+    // the closed-gate diagnosis can name which conjunct is shut. Re-observing to
+    // classify would race the very state being reported.
+    let gate_authority =
+        observe_live_editor_authority_after_model_ensure(path, "editor_projection_native_save_gate")?;
+    let gate_observation = match gate_authority {
         agent_doc_crdt_relay_io::CurrentText::Current {
             ref text,
             live_editors,
             delivery_converged,
             ..
-        } if editor_save_authority_is_sufficient(
-            text,
-            canonical,
-            live_editors,
-            delivery_converged,
-        )
-        );
-    let mut save_diagnosis = "native_save_gate_not_ready".to_string();
+        } => Some(
+            agent_doc_document_realtime::native_save_gate::NativeSaveAuthorityObservation {
+                authoritative_text: text,
+                canonical,
+                live_editors,
+                delivery_converged,
+            },
+        ),
+        _ => None,
+    };
+    let ready_for_native_save = visible_editor_receipt
+        && gate_observation.is_some_and(|observation| {
+            editor_save_authority_is_sufficient(
+                observation.authoritative_text,
+                canonical,
+                observation.live_editors,
+                observation.delivery_converged,
+            )
+        });
+    // Only meaningful while the gate is shut; the request path below overwrites
+    // both the diagnosis and the action from the save outcome.
+    let gate_blocker = agent_doc_document_realtime::native_save_gate::NativeSaveGateBlocker::classify(
+        visible_editor_receipt,
+        editor_endpoint_definitively_refused(path),
+        gate_observation,
+    );
+    let mut save_diagnosis = gate_blocker.diagnosis_token().to_string();
     if ready_for_native_save {
         let outcome = agent_doc_crdt_relay_io::request_native_save_for_current_projection(
             path,
@@ -1568,14 +1587,24 @@ fn canonical_editor_projection_is_persisted(
     // because that attempt could never succeed. Ask the typed class instead, so
     // a token this predicate has never heard of cannot silently mean "nothing to
     // do".
-    let operator_action =
+    // `#savegateopaque`: the class above answers for *save outcomes*. A gate that
+    // never opened produced no outcome, so its token was never one of these, the
+    // lookup returned `None`, and every closed-gate shape alike reported
+    // `operator_action=none` — including the ones only a human can clear. Ask the
+    // gate's own classification when the gate is what is shut.
+    let operator_action = if ready_for_native_save {
         if agent_doc_crdt_relay_io::ReplicaSignalClass::from_diagnosis_token(&save_diagnosis)
             .is_some_and(agent_doc_crdt_relay_io::ReplicaSignalClass::needs_operator_inspection)
         {
             "inspect_editor_endpoint"
         } else {
             "none"
-        };
+        }
+    } else if gate_blocker.needs_operator_inspection() {
+        "inspect_editor_endpoint"
+    } else {
+        "none"
+    };
     agent_doc_ops_log_io::log_op(
         path,
         &format!(

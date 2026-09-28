@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -207,7 +207,8 @@ With this, all three dependency-gating items are done: protobuf codec (`#lzktopt
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 #advance-review
 <!-- /agent:queue -->
 
 ## Backlog

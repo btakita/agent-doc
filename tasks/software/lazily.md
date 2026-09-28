@@ -2,8 +2,8 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0da83-7762-7810-8ddf-49eda4e9a807
-agent: claude
+  codex: 01a0e8bc-26bd-7993-a500-468e9bd767ab
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: start
+queue: go
 ---
 
 ## Status
@@ -202,6 +202,15 @@ Done and pushed to `lazily-hub/lazily-kt` main (`4909788`).
 The README gained an `## Optional feature — JNA FFI binding` section with the Gradle capability and Maven classifier forms, using version placeholders and stating that the split lands in the release after v0.42.0, since v0.42.0 is already tagged without it. I left `AGENTS.md` alone again — still modified by another session.
 
 With this, all three dependency-gating items are done: protobuf codec (`#lzktoptionaldeps`), lazily-go's pgx (`#lzgooptionalpgx`), and JNA. Every published graph in the family that had a leak now requires only what its default surface actually uses.
+### Re: recovered response
+
+Review work is complete, but document closeout is not yet committed.
+
+- All four review gates remain freshly blocked or intentionally unprobeable; none has stale evidence.
+- No artifacts were deleted, accounts changed, credentials resolved, or source changes retained.
+- The scoped review and credential proofs passed; latest agent-doc CI is green.
+- Finalization failed closed because the live editor authority diverges from disk and the shell pane is not the registered owner.
+- A reopen is queued in owner pane `%188`; the controller owns recovery. No force-write or resubmission was attempted, and nothing was pushed.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  

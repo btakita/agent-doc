@@ -3030,11 +3030,25 @@ fn automatic_editor_surface_sync_invocation(
     document: &str,
     preserve_focus: bool,
 ) -> ControllerTmuxLayoutSyncInvocation {
-    ControllerTmuxLayoutSyncInvocation {
-        columns: columns
+    automatic_layout_sync_invocation(
+        columns
             .iter()
             .map(|column| column.files.join(","))
             .collect(),
+        document,
+        preserve_focus,
+    )
+}
+
+/// The same automatic-caller desired layout, from columns that are already in
+/// the controller's flattened `file,file` form rather than an editor surface.
+fn automatic_layout_sync_invocation(
+    columns: Vec<String>,
+    document: &str,
+    preserve_focus: bool,
+) -> ControllerTmuxLayoutSyncInvocation {
+    ControllerTmuxLayoutSyncInvocation {
+        columns,
         window: None,
         focus: (!preserve_focus).then(|| document.to_string()),
         // The visible editor surface is desired state, including during
@@ -18921,13 +18935,59 @@ fn focus_refusal_requires_structural_layout(reason: &str) -> bool {
     matches!(reason, "actor_pane_not_visible" | "outside_agent_doc_window")
 }
 
+/// The desired-layout columns a focus escalation republishes
+/// (`#focusstashedactor`).
+///
+/// `#focusstashescalate` read the *observation's* columns, which made the
+/// escalation unreachable on the one shape that needs it. A plain tab switch
+/// publishes `EditorTabSyncListener.buildFocusProjection`, whose `columns` is
+/// deliberately `emptyList()` — that narrow per-document payload "must never be
+/// mistaken for a one-column layout replacement" — and `focus_only` is also the
+/// only surface shape that derives `SurfaceIntent::Focus` for a selection.
+/// So the empty-columns guard fired every single time the escalation mattered:
+/// on agent-loop between 2026-09-27 17:00 and 00:52 ops.log holds 47
+/// `cause=no_editor_columns` lines and zero escalations, and the stashed pane
+/// stayed stashed across all 92 `actor_pane_not_visible` refusals.
+///
+/// The structural layout is already retained in the pane layout graph, which is
+/// the owner this hand-off is addressed to, so fall back to its columns and let
+/// the caller move the focus onto `document`. A document the retained layout
+/// does not cover gets its own column: `exact_visible` would otherwise hide the
+/// very pane the escalation exists to un-stash.
+fn focus_escalation_columns(
+    runtime: &ControllerRuntime,
+    document: &str,
+    columns: &[SurfaceColumn],
+) -> Option<(Vec<String>, &'static str)> {
+    if !columns.is_empty() {
+        return Some((
+            columns
+                .iter()
+                .map(|column| column.files.join(","))
+                .collect(),
+            "editor_surface",
+        ));
+    }
+    let mut retained = runtime.pane_layout_desired()?.invocation.columns;
+    if retained.is_empty() {
+        return None;
+    }
+    if !retained
+        .iter()
+        .any(|column| column.split(',').any(|file| file == document))
+    {
+        retained.push(document.to_string());
+    }
+    Some((retained, "retained_layout"))
+}
+
 /// Hand a `Focus` intent the selection lane could not apply to the structural
 /// layout owner (`#focusstashescalate`).
 ///
 /// `SurfaceIntent::Focus` is derived exactly when the editor's visible columns
 /// are *unchanged*, so once tmux holds the target pane in the `stash` window no
 /// later observation derives `Sync` on its own and every subsequent tab switch
-/// dead-ends. Republishing the editor's own columns as desired layout is the
+/// dead-ends. Republishing the structural columns as desired layout is the
 /// same effect the first, layout-changing switch already runs successfully;
 /// `CoalesceIdentical` keeps a repeated selection from republishing work the
 /// worker has already converged.
@@ -18938,7 +18998,7 @@ fn escalate_focus_to_structural_layout(
     columns: &[SurfaceColumn],
     reason: &str,
 ) {
-    if columns.is_empty() {
+    let Some((columns, source)) = focus_escalation_columns(runtime, document, columns) else {
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
@@ -18946,17 +19006,17 @@ fn escalate_focus_to_structural_layout(
             ),
         );
         return;
-    }
+    };
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
-            "controller_editor_surface_focus_escalated document={document} reason={reason} columns={}",
+            "controller_editor_surface_focus_escalated document={document} reason={reason} columns={} source={source}",
             columns.len()
         ),
     );
     // The intent is "select this document", so the republished layout must carry
     // the focus rather than preserve whatever tmux happens to have selected.
-    let invocation = automatic_editor_surface_sync_invocation(columns, document, false);
+    let invocation = automatic_layout_sync_invocation(columns, document, false);
     if let Err(error) = publish_pane_layout_desired_invocation(
         bootstrap,
         runtime,
@@ -25121,10 +25181,11 @@ mod tests {
     }
 
     /// `#focusstashescalate`: the escalation is the whole fix, so it must leave
-    /// proof that it ran — and must refuse rather than republish an empty
-    /// layout, which `publish_pane_layout_desired_invocation` rejects anyway.
+    /// proof that it ran — and with no editor columns AND no retained
+    /// structural layout to fall back on there is nothing to republish, which
+    /// `publish_pane_layout_desired_invocation` rejects anyway.
     #[test]
-    fn focus_escalation_records_its_handoff_and_skips_an_empty_editor_layout() {
+    fn focus_escalation_records_its_handoff_and_skips_when_no_layout_is_known() {
         let dir = tempfile::tempdir().unwrap();
         let bootstrap = ControllerBootstrap {
             project_root: dir.path().to_path_buf(),
@@ -25179,6 +25240,108 @@ mod tests {
                  reason=actor_pane_not_visible columns=2"
             ),
             "the handoff to the structural layout owner must be provable: {ops_log}"
+        );
+    }
+
+    /// `#focusstashedactor`: the regression `#focusstashescalate` shipped with.
+    ///
+    /// A plain tab switch publishes `buildFocusProjection`, which carries
+    /// `columns: []` by design, and that `focus_only` shape is the *only* one
+    /// that derives `SurfaceIntent::Focus` for a selection. Reading the
+    /// observation's own columns therefore skipped the escalation every time it
+    /// mattered — 47 `cause=no_editor_columns` lines and zero escalations on
+    /// agent-loop, with the pane still stashed. The retained structural layout
+    /// is the fallback, and the document must survive `exact_visible`.
+    #[test]
+    fn a_focus_only_switch_escalates_from_the_retained_structural_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        // The layout owner resolves desired columns against real documents, so
+        // the escalation only retains anything if these exist.
+        let path = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+            path.canonicalize().unwrap().display().to_string()
+        };
+        let ledger = path("payments-ledger.md");
+        let infra = path("infra.md");
+        let treasury = path("treasury.md");
+
+        // A layout-changing switch converges a structural layout first; that is
+        // the state a later focus-only switch escalates against.
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &ledger,
+            &[
+                SurfaceColumn {
+                    files: vec![ledger.clone()],
+                },
+                SurfaceColumn {
+                    files: vec![infra.clone()],
+                },
+            ],
+            "actor_pane_not_visible",
+        );
+        assert!(
+            runtime.pane_layout_desired().is_some(),
+            "the editor-surface escalation must retain a structural layout"
+        );
+
+        // The tab switch itself: focus-only, so no columns at all.
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &infra,
+            &[],
+            "actor_pane_not_visible",
+        );
+        // A document the retained layout does not cover still has to reach the
+        // layout owner, or `exact_visible` hides the pane being un-stashed.
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &treasury,
+            &[],
+            "outside_agent_doc_window",
+        );
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            !ops_log.contains("controller_editor_surface_focus_escalation_skipped"),
+            "a focus-only switch must not be refused for carrying no columns: {ops_log}"
+        );
+        assert!(
+            !ops_log.contains("controller_editor_surface_focus_escalation_failed"),
+            "the republished layout must be one the layout owner accepts: {ops_log}"
+        );
+        assert!(
+            ops_log.contains(&format!(
+                "controller_editor_surface_focus_escalated document={infra} \
+                 reason=actor_pane_not_visible columns=2 source=retained_layout"
+            )),
+            "the retained layout must be republished as-is when it covers the document: {ops_log}"
+        );
+        assert!(
+            ops_log.contains(&format!(
+                "controller_editor_surface_focus_escalated document={treasury} \
+                 reason=outside_agent_doc_window columns=3 source=retained_layout"
+            )),
+            "an uncovered document must be added to the republished layout: {ops_log}"
+        );
+
+        let desired = runtime.pane_layout_desired().unwrap();
+        assert_eq!(
+            desired.invocation.focus.as_deref(),
+            Some(treasury.as_str()),
+            "the escalation's whole point is moving the focus onto the switched-to document"
+        );
+        assert!(
+            desired.invocation.columns.contains(&treasury),
+            "the focused document must be visible in the layout it is focused in: {desired:?}"
         );
     }
 

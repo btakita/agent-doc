@@ -61,6 +61,7 @@ must_violate=(
     # the drop edge is load-bearing; reach proves the editor-native save was
     # not abandoned in favour of the detached-write path.
     VisibleDeliveryReceipt:VisibleDeliveryReceiptWedge
+    VisibleDeliveryReceipt:VisibleDeliveryReceiptBuildMismatchWedge
     VisibleDeliveryReceipt:VisibleDeliveryReceiptReach
     JetBrainsFileCache:JetBrainsFileCacheWedge
     JetBrainsFileCache:JetBrainsFileCacheReach

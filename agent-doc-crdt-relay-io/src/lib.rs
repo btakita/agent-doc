@@ -3383,6 +3383,36 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
     }))
 }
 
+/// Classify one failed send from
+/// [`agent_doc_ipc_io::send_message_to_pid_recovering_build_mismatch`].
+///
+/// **Contract: the caller must have used the recovery-attempting send.** That
+/// function only surfaces a typed `BuildMismatch` after it has already tried the
+/// reload-only compatibility request and that request did not deliver. So the
+/// two facts together — the listener ANSWERED with a version rejection, and the
+/// one recovery for a version rejection failed — are a terminal answer. Neither
+/// version number changes by retrying the same handshake.
+///
+/// `#refusedreceiptveto`: a receipt rejection was already counted; a failed
+/// build-mismatch recovery was collected into `build_mismatches`, logged as
+/// `crdt_replica_build_mismatch_recovery_failed`, and then classified
+/// `definitive_refusal=false`. So the authority resolver kept an attachment
+/// latch for an endpoint that could not speak to it, `decide_authority_recovery`
+/// stayed in its `FailClosed` arm, and the replica could never be rebuilt.
+/// Observed 2026-09-28 02:43 on `tasks/agent-doc/agent-doc-bugs.md` after the
+/// controller advanced to a build the editor's loaded cdylib predated:
+/// `listener=0.35.418+1790563363, client=0.35.418+1790545416`.
+///
+/// Deliberately NOT applied to the native-save send path, which does not attempt
+/// the reload recovery: a build mismatch observed there is a first observation,
+/// not an exhausted one, and must stay retryable.
+const fn recovering_send_error_is_definitive(
+    receipt_rejected: bool,
+    build_mismatch_recovery_failed: bool,
+) -> bool {
+    receipt_rejected || build_mismatch_recovery_failed
+}
+
 /// Ask the editor host to discard and rebuild a replica that stopped making
 /// visible-delivery progress.
 ///
@@ -4944,7 +4974,9 @@ fn signal_crdt_replica_event_counting_inner(
                 );
             }
             Err(error) => {
-                if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) {
+                let build_mismatch_recovery_failed =
+                    agent_doc_ipc_io::is_ipc_build_mismatch_error(&error);
+                if build_mismatch_recovery_failed {
                     build_mismatches.push(route.clone());
                     agent_doc_ops_log_io::log_op(
                         &canonical,
@@ -4959,7 +4991,10 @@ fn signal_crdt_replica_event_counting_inner(
                 // not a deferral. Counting it lets the authority resolver tell
                 // "the editor will not serve this document" apart from "nothing
                 // answered yet" — the distinction the strand depended on losing.
-                let definitive = agent_doc_ipc_io::is_ipc_receipt_rejected_error(&error);
+                let definitive = recovering_send_error_is_definitive(
+                    agent_doc_ipc_io::is_ipc_receipt_rejected_error(&error),
+                    build_mismatch_recovery_failed,
+                );
                 if definitive {
                     definitive_refusals += 1;
                 }
@@ -5336,6 +5371,70 @@ mod tests {
     /// blames a stale attachment for what is really a delivery failure —
     /// which is what sent this investigation after payload size and
     /// generation fencing while the plane reported `live_editors=1`.
+    /// `#refusedreceiptveto`: an exhausted build mismatch is a DEFINITIVE
+    /// answer, not a deferral.
+    ///
+    /// `send_message_to_pid_recovering_build_mismatch` surfaces a typed
+    /// `BuildMismatch` only after its reload-only compatibility request has
+    /// already failed, so both halves of the proof are in hand: the listener
+    /// answered with a version rejection, and the one recovery for that
+    /// rejection did not deliver. Retrying re-runs the same handshake between
+    /// the same two builds.
+    ///
+    /// Observed 2026-09-28T02:43Z on `tasks/agent-doc/agent-doc-bugs.md` after
+    /// the controller advanced past the editor's loaded cdylib:
+    /// `listener=0.35.418+1790563363, client=0.35.418+1790545416`, logged as
+    /// `crdt_replica_build_mismatch_recovery_failed` and then
+    /// `definitive_refusal=false` on every one of 36 attempts. The authority
+    /// resolver therefore kept its attachment latch, `decide_authority_recovery`
+    /// stayed in `FailClosed`, and the replica could never be rebuilt.
+    #[test]
+    fn an_exhausted_build_mismatch_is_a_definitive_answer() {
+        let handshake = anyhow::Error::new(agent_doc_ipc_protocol::IpcHandshakeError::BuildMismatch {
+            expected: "0.35.418+1790545416".to_string(),
+            received: "0.35.418+1790563363".to_string(),
+        });
+        let exhausted = handshake.context(
+            "IPC build mismatch recovery failed to deliver reload_library: \
+             failed to connect to IPC socket: No such file or directory (os error 2)",
+        );
+        assert!(
+            agent_doc_ipc_io::is_ipc_build_mismatch_error(&exhausted),
+            "the typed BuildMismatch must survive the recovery-failure context"
+        );
+        assert!(
+            !agent_doc_ipc_io::is_ipc_receipt_rejected_error(&exhausted),
+            "precondition: this is NOT a receipt rejection — that is the whole \
+             reason it used to be classified as retryable"
+        );
+        assert!(
+            recovering_send_error_is_definitive(
+                agent_doc_ipc_io::is_ipc_receipt_rejected_error(&exhausted),
+                agent_doc_ipc_io::is_ipc_build_mismatch_error(&exhausted),
+            ),
+            "an answered version rejection whose reload recovery failed is terminal"
+        );
+    }
+
+    /// The force-disk guard: silence is never promoted to proof. A transport
+    /// failure with no typed handshake answer stays retryable.
+    #[test]
+    fn a_transport_failure_is_never_a_definitive_answer() {
+        let transport = anyhow::anyhow!(
+            "failed to connect to IPC socket: No such file or directory (os error 2)"
+        );
+        assert!(!agent_doc_ipc_io::is_ipc_build_mismatch_error(&transport));
+        assert!(!agent_doc_ipc_io::is_ipc_receipt_rejected_error(&transport));
+        assert!(
+            !recovering_send_error_is_definitive(
+                agent_doc_ipc_io::is_ipc_receipt_rejected_error(&transport),
+                agent_doc_ipc_io::is_ipc_build_mismatch_error(&transport),
+            ),
+            "an endpoint that never answered must stay retryable — promoting \
+             silence to proof is a silent --force-disk"
+        );
+    }
+
     /// `#refusedreceiptveto`: the disposition must follow the classification.
     ///
     /// `definitively_refused_by_all` already documented that the caller must

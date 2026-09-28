@@ -94,22 +94,24 @@ by deleting the receipt - and `AvailabilityIsNotAReceipt` rejects it.
 ***************************************************************************)
 
 CONSTANTS
-    MaxNonconvergence,      (* the streak budget; 50 redeliveries / 12 waits in production *)
-    DropOnDefinitiveRefusal (* the fix under test *)
+    MaxNonconvergence,           (* the streak budget; 50 redeliveries / 12 waits in production *)
+    DropOnDefinitiveRefusal,     (* the fix under test *)
+    BuildMismatchIsDefinitive    (* the second fix: classify an exhausted build mismatch *)
 
 VARIABLES
     pending,            (* TRUE iff the live member has a queued undelivered update *)
     streak,             (* non-convergence evidence: redeliveries + expired barrier waits *)
     member,             (* "live" | "offline" - membership in the delivery cut *)
     endpointServes,     (* TRUE iff the editor endpoint will serve this document *)
+    answerKind,         (* "none" | "refusal" | "buildMismatch" - HOW it stops serving *)
     recoverySignalled,  (* the one-shot `claim_nonconverging_recovery` was taken *)
     refused,            (* the recovery answered `definitively_refused_by_all` *)
     disk,               (* "stale" | "current" - disk against the canonical authority *)
     savedWithoutReceipt (* history: a native save was authorized with no receipt *)
 
 vars ==
-    << pending, streak, member, endpointServes, recoverySignalled, refused,
-       disk, savedWithoutReceipt >>
+    << pending, streak, member, endpointServes, answerKind, recoverySignalled,
+       refused, disk, savedWithoutReceipt >>
 
 (*************************************************************************)
 (* The two RelayHub predicates, transcribed from                          *)
@@ -129,6 +131,7 @@ Init ==
     /\ streak = 0
     /\ member = "live"
     /\ endpointServes = TRUE
+    /\ answerKind = "none"
     /\ recoverySignalled = FALSE
     /\ refused = FALSE
     /\ disk = "stale"
@@ -139,6 +142,7 @@ TypeOK ==
     /\ streak \in 0..MaxNonconvergence
     /\ member \in {"live", "offline"}
     /\ endpointServes \in BOOLEAN
+    /\ answerKind \in {"none", "refusal", "buildMismatch"}
     /\ recoverySignalled \in BOOLEAN
     /\ refused \in BOOLEAN
     /\ disk \in {"stale", "current"}
@@ -150,13 +154,25 @@ TypeOK ==
 (* outstanding, which is the scope of this module; an endpoint that stops *)
 (* with nothing queued is `EditorReplicaStrand`'s read-side ladder.       *)
 (*************************************************************************)
-EndpointStopsServing ==
+EndpointStopsServing(kind) ==
     /\ endpointServes
     /\ pending
     /\ member = "live"
     /\ endpointServes' = FALSE
+    /\ answerKind' = kind
     /\ UNCHANGED << pending, streak, member, recoverySignalled, refused, disk,
                     savedWithoutReceipt >>
+
+(*************************************************************************)
+(* `buildMismatch`: the controller advanced to a build the editor's loaded *)
+(* cdylib predates. The listener ANSWERS - it returns a typed version      *)
+(* rejection - and the ONE recovery for that (the reload-only compatibility *)
+(* request) also fails to deliver, because the reload target the editor     *)
+(* would load does not exist. Neither version number changes by retrying.   *)
+(*************************************************************************)
+EndpointAnswers ==
+    \/ EndpointStopsServing("refusal")
+    \/ EndpointStopsServing("buildMismatch")
 
 (*************************************************************************)
 (* The observed ~4/s pull loop. Handing out the same unacked head again is *)
@@ -168,8 +184,8 @@ PullWithoutAck ==
     /\ pending
     /\ streak < MaxNonconvergence
     /\ streak' = streak + 1
-    /\ UNCHANGED << pending, member, endpointServes, recoverySignalled, refused,
-                    disk, savedWithoutReceipt >>
+    /\ UNCHANGED << pending, member, endpointServes, answerKind,
+                    recoverySignalled, refused, disk, savedWithoutReceipt >>
 
 (* Only a serving endpoint can ACK. An ACK drains the queue and clears the  *)
 (* streaks - the sole way `pending` becomes empty without leaving the cut.  *)
@@ -179,8 +195,8 @@ AckDelivery ==
     /\ endpointServes
     /\ pending' = FALSE
     /\ streak' = 0
-    /\ UNCHANGED << member, endpointServes, recoverySignalled, refused, disk,
-                    savedWithoutReceipt >>
+    /\ UNCHANGED << member, endpointServes, answerKind, recoverySignalled,
+                    refused, disk, savedWithoutReceipt >>
 
 (* `RelayHub::claim_nonconverging_recovery` - one-shot, and only once the   *)
 (* member has been released from the barrier.                              *)
@@ -190,8 +206,8 @@ ClaimRecovery ==
     /\ ~HoldsBarrier
     /\ ~recoverySignalled
     /\ recoverySignalled' = TRUE
-    /\ UNCHANGED << pending, streak, member, endpointServes, refused, disk,
-                    savedWithoutReceipt >>
+    /\ UNCHANGED << pending, streak, member, endpointServes, answerKind,
+                    refused, disk, savedWithoutReceipt >>
 
 (* The endpoint answers and rebuilds. *)
 RecoveryAccepted ==
@@ -201,18 +217,48 @@ RecoveryAccepted ==
     /\ pending
     /\ pending' = FALSE
     /\ streak' = 0
-    /\ UNCHANGED << member, endpointServes, recoverySignalled, refused, disk,
-                    savedWithoutReceipt >>
+    /\ UNCHANGED << member, endpointServes, answerKind, recoverySignalled,
+                    refused, disk, savedWithoutReceipt >>
 
-(* The endpoint answers and REFUSES - a receipt, not a timeout. This is the *)
-(* `definitively_refused_by_all:1` the logs record.                         *)
+(* The endpoint answers and REFUSES the receipt - not a timeout. This is the *)
+(* `definitively_refused_by_all:1` the logs record, and it is already        *)
+(* classified as definitive (`is_ipc_receipt_rejected_error`).               *)
 RecoveryDefinitivelyRefused ==
     /\ recoverySignalled
     /\ ~endpointServes
+    /\ answerKind = "refusal"
     /\ ~refused
     /\ refused' = TRUE
-    /\ UNCHANGED << pending, streak, member, endpointServes, recoverySignalled,
-                    disk, savedWithoutReceipt >>
+    /\ UNCHANGED << pending, streak, member, endpointServes, answerKind,
+                    recoverySignalled, disk, savedWithoutReceipt >>
+
+(*************************************************************************)
+(* THE SECOND MISSING EDGE. The endpoint answers with a typed BUILD        *)
+(* MISMATCH, and the one recovery for a version rejection - the            *)
+(* reload-only compatibility request - also fails to deliver. Both facts    *)
+(* together are terminal: neither version number changes by retrying the    *)
+(* same handshake.                                                          *)
+(*                                                                          *)
+(* `send_message_to_pid_recovering_build_mismatch` only surfaces a typed    *)
+(* `BuildMismatch` AFTER attempting that reload, so reaching this state is   *)
+(* exactly "answered, and the recovery is exhausted". It was nonetheless    *)
+(* collected into `build_mismatches`, logged as                             *)
+(* `crdt_replica_build_mismatch_recovery_failed`, and then classified       *)
+(* `definitive_refusal=false` - retryable forever.                          *)
+(*                                                                          *)
+(* Observed 2026-09-28T02:43Z on `tasks/agent-doc/agent-doc-bugs.md`:       *)
+(*   listener=0.35.418+1790563363, client=0.35.418+1790545416               *)
+(* with `definitive_refusal=false` on every attempt.                        *)
+(*************************************************************************)
+RecoveryBuildMismatchExhausted ==
+    /\ BuildMismatchIsDefinitive
+    /\ recoverySignalled
+    /\ ~endpointServes
+    /\ answerKind = "buildMismatch"
+    /\ ~refused
+    /\ refused' = TRUE
+    /\ UNCHANGED << pending, streak, member, endpointServes, answerKind,
+                    recoverySignalled, disk, savedWithoutReceipt >>
 
 (*************************************************************************)
 (* THE MISSING EDGE. A definitive refusal drops the replica from the      *)
@@ -230,8 +276,8 @@ DropRefusedFromDeliveryCut ==
     /\ member' = "offline"
     /\ pending' = FALSE      (* `disconnect` clears the delivery queue ... *)
     /\ streak' = 0           (* ... and the non-convergence streaks.       *)
-    /\ UNCHANGED << endpointServes, recoverySignalled, refused, disk,
-                    savedWithoutReceipt >>
+    /\ UNCHANGED << endpointServes, answerKind, recoverySignalled, refused,
+                    disk, savedWithoutReceipt >>
 
 (*************************************************************************)
 (* The editor projects its buffer to disk. Gated on the RECEIPT, never on  *)
@@ -244,23 +290,24 @@ NativeSave ==
     /\ VisibleDeliveryProjected
     /\ disk' = "current"
     /\ savedWithoutReceipt' = (savedWithoutReceipt \/ ~VisibleDeliveryProjected)
-    /\ UNCHANGED << pending, streak, member, endpointServes, recoverySignalled,
-                    refused >>
+    /\ UNCHANGED << pending, streak, member, endpointServes, answerKind,
+                    recoverySignalled, refused >>
 
 (* With no live editor in the cut, agent-doc's own authority write owns disk. *)
 DetachedWrite ==
     /\ member = "offline"
     /\ disk' = "current"
-    /\ UNCHANGED << pending, streak, member, endpointServes, recoverySignalled,
-                    refused, savedWithoutReceipt >>
+    /\ UNCHANGED << pending, streak, member, endpointServes, answerKind,
+                    recoverySignalled, refused, savedWithoutReceipt >>
 
 Next ==
-    \/ EndpointStopsServing
+    \/ EndpointAnswers
     \/ PullWithoutAck
     \/ AckDelivery
     \/ ClaimRecovery
     \/ RecoveryAccepted
     \/ RecoveryDefinitivelyRefused
+    \/ RecoveryBuildMismatchExhausted
     \/ DropRefusedFromDeliveryCut
     \/ NativeSave
     \/ DetachedWrite
@@ -273,6 +320,7 @@ Spec ==
     /\ WF_vars(ClaimRecovery)
     /\ WF_vars(RecoveryAccepted)
     /\ WF_vars(RecoveryDefinitivelyRefused)
+    /\ WF_vars(RecoveryBuildMismatchExhausted)
     /\ WF_vars(DropRefusedFromDeliveryCut)
     /\ WF_vars(NativeSave)
     /\ WF_vars(DetachedWrite)
@@ -299,6 +347,13 @@ NeverSavesWithoutReceipt == ~savedWithoutReceipt
 (* write path is reachable only behind proof the endpoint stopped serving.   *)
 DropRequiresDefinitiveRefusal ==
     (member = "offline") => (refused /\ ~endpointServes)
+
+(* A refusal is only ever recorded from an ANSWER. `answerKind = "none"`     *)
+(* means the endpoint never answered, and no amount of retrying may promote  *)
+(* silence to proof - that is what would turn this into a silent             *)
+(* `--force-disk`.                                                           *)
+RefusalRequiresAnAnswer ==
+    refused => (answerKind \in {"refusal", "buildMismatch"})
 
 (*************************************************************************)
 (* LIVENESS - the property the production wedge violates.                 *)

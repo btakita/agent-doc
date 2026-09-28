@@ -95,11 +95,20 @@ The module checks:
 - a replica still inside its convergence budget is never preempted; and
 - the canonical cut eventually reaches disk with no operator action.
 
-Its wedge config removes the drop edge and must deadlock — that is the
-production wedge, where a refused replica held the receipt false forever, the
-native-save gate never opened, and every later cycle was refused admission. Its
-reach config asserts the negation of a save through a still-serving live editor
-and must be violated, proving the fix did not quietly route every document
+It has one wedge config PER KNOB, because the two fixes are independent and a
+single wedge would let one go vacuous the moment the other landed:
+
+- `VisibleDeliveryReceiptWedge` removes the drop edge and must deadlock — the
+  production wedge where a refused replica held the receipt false forever, the
+  native-save gate never opened, and every later cycle was refused admission;
+- `VisibleDeliveryReceiptBuildMismatchWedge` keeps the drop edge but declines to
+  classify an exhausted build mismatch as definitive, and must also deadlock. The
+  endpoint answered with a typed version rejection AND the one recovery for that
+  rejection failed to deliver, yet it stayed "retryable" forever, so nothing ever
+  proved it had stopped serving.
+
+Its reach config asserts the negation of a save through a still-serving live
+editor and must be violated, proving the fix did not quietly route every document
 through the detached-write path instead.
 
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing

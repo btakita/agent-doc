@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -851,7 +851,7 @@ Two things worth naming about the shared tree. A sibling session holds unrelated
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ⏭️ do [#drivecapturedsplice]
 - do [#publishjetbrainssibling]
-- 🚧 Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?
+- ~~Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

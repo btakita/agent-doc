@@ -741,6 +741,26 @@ Because it is unmeasured, it is deliberately conservative. The first version dem
 `make check` exit 0 across all of it: 9957 tests run, 9957 passed, 259 skipped, 22 non-vacuity obligations confirmed.
 
 **Left open, deliberately:** `stopneedsclosedcycle` is referenced by code comments but is no longer a tracked id, so the PreToolUse guard blocks any commit naming it. That guard also scans the whole Bash command, which means a script written to strip the id is blocked too — worth fixing, since the remedy it suggests is unreachable from inside the tool that enforces it.
+
+### Re: the coined-id guard, which I had left open — opus-5 · 2026-09-28T10:05-04:00
+
+I closed the one item I had listed as deliberately open, because it turned out to be the same defect as everything else today and `#diagnose-then-fix` says a session that understands a defect should not hand it back.
+
+**The guard was not scanning a commit message.** Its own module doc says "a commit message is prose end to end", and that is true of a message and false of the shell command that writes one — which is what it actually handed to the scanner, for any Bash call containing a `git commit` segment anywhere in it. A proxy for the thing, wrong in both directions, exactly like the build identity this morning.
+
+The false positive is the one that bit: a commit whose message file held zero occurrences of an id was refused because a `python3` heredoc in the same call mentioned it. That heredoc existed to strip the id from the message. So the guard refused the remedy it had just recommended, and there is no way to write that remedy without naming the id — the fix it suggests is unreachable from inside the tool enforcing it.
+
+The false negative is worse for its stated purpose: `-F <file>` was never read. Any message long enough to need a file could carry an untracked id straight through, which is most of the ones I write.
+
+It now scans the commit segment plus the contents of a literal `-F` message file. A path built from a shell variable stays unscanned rather than approximated by the surrounding command — the module fails open by policy, and approximating is what caused the false positive.
+
+Verified live, both directions, on the installed binary. The superproject commit `6cb79fab9d` carries an untracked id in a heredoc and a clean message: allowed, where the same shape was refused twice earlier today. A `git commit -m` naming an untracked id is still refused.
+
+No new model for this one. The property is soundness and completeness of a single pure function with no temporal component, and it is the same pair `IpcBuildIdentity.tla` already states; exhaustive unit tests are the right instrument and a near-duplicate module would be ceremony. Mutation-checked both ways: restoring the whole-command scan reddens three tests, dropping the `-F` read reddens the message-file test.
+
+`make check` exit 0 — 9962 tests run, 9962 passed, 259 skipped. Three CI runs are queued or in progress; the last completed one is green.
+
+**One thing I am leaving alone on purpose.** `stopneedsclosedcycle` is still referenced by code comments without being tracked. Now that the guard no longer blocks the remedy, re-filing it is a one-line queue item rather than a fight with the tooling — but it is a record-keeping decision about what belongs in this document's backlog, and that is yours to make rather than mine to assume.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

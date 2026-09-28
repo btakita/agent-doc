@@ -268,7 +268,23 @@ pub fn handle_stop() -> Result<()> {
 /// durably proven another drainable queue head. Bindings are exact-session
 /// scoped so an unrelated Claude conversation can never inherit this work.
 pub fn handle_claude_stop() -> Result<()> {
-    let response = match read_stdin_payload()
+    // Read stdin exactly once; every later decision reads this payload.
+    let payload = read_stdin_payload();
+    // Recover `stop_hook_active` even from a payload that will not parse as
+    // `ClaudeStopInput`. It is what bounds the fail-closed branch below, so
+    // losing it to the very failure it bounds would defeat the bound.
+    let stop_hook_active = payload
+        .as_deref()
+        .ok()
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+        .and_then(|value| {
+            value
+                .get("stop_hook_active")
+                .and_then(serde_json::Value::as_bool)
+        })
+        .unwrap_or(false);
+
+    let response = match payload
         .and_then(|payload| {
             serde_json::from_str::<ClaudeStopInput>(&payload).context("parse Claude Stop JSON")
         })
@@ -277,6 +293,22 @@ pub fn handle_claude_stop() -> Result<()> {
         Ok(response) => response
             .map(|response| serde_json::to_value(response).expect("serialize Claude Stop block"))
             .unwrap_or_else(|| serde_json::json!({})),
+        // Failing closed is right the FIRST time: the operator needs to hear
+        // that the continuation check could not run. Repeating it is not. A
+        // hook error is overwhelmingly persistent — an unreadable document, a
+        // refused authority resolve, a state ledger that will not open — so
+        // re-blocking re-runs the same failing check against the same inputs
+        // and produces the same error, forever. `stop_hook_active` is the only
+        // fact that distinguishes the two, and this branch was the one path
+        // through the hook that never consulted it.
+        Err(err) if stop_hook_active => {
+            eprintln!(
+                "[agent-doc] Claude Stop hook failed again while checking queue continuation: \
+                 {err:#}. Already blocked once for this stop; allowing the final answer so the \
+                 failure is reported instead of looped."
+            );
+            serde_json::json!({})
+        }
         Err(err) => serde_json::to_value(ClaudeStopBlock {
             decision: "block",
             reason: format!(
@@ -314,13 +346,19 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
     // A failed closeout is already first in SKILL.md's exhaustive skip list, so
     // an open cycle must fail this gate before either document-level read is
     // consulted: looping a retained write re-answers an answered head.
-    if agent_doc_cycle_state_io::load(&file)?.is_some_and(|cycle| cycle.is_open()) {
+    let cycle = agent_doc_cycle_state_io::load(&file)?;
+    if cycle.as_ref().is_some_and(|cycle| cycle.is_open()) {
         agent_doc_ops_log_io::log_op(
             &file,
             "claude_stop_queue_continuation_skipped reason=cycle_open action=allow_final_answer",
         );
         return Ok(None);
     }
+    // The run this stop is deciding about: the cycle that has just closed. A
+    // continuation request is a request that THIS run be followed by another,
+    // so it is the run, not the document text, that the repeat guard below
+    // reconciles against.
+    let run_id = cycle.as_ref().map(|cycle| cycle.cycle_id.clone());
     // A continuation marker or the session-check stall projection proves that
     // the prior item reached a clean closeout. This avoids redirecting an
     // unfinished response back through `/loop` merely because its current head
@@ -338,30 +376,37 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
     };
 
     // `#stopneedsclosedcycle`, second half: `stop_hook_active` only breaks
-    // recursion WITHIN one stop. Across separate turns nothing stopped the
-    // Claude path from naming the same head forever, and it is the only caller
-    // that writes `last_requested_head` without ever reading it — the Codex
-    // path has had this guard since the field was added for it.
+    // recursion WITHIN one stop. Across separate turns the bound is this
+    // request ledger.
     //
-    // A drained head is struck, so a head that has not advanced since the last
-    // request means the drain did not happen. Re-blocking then re-asks for work
-    // the loop has already proven it cannot take (`#qchurn`): the head survived
-    // its own reap because it is malformed, or preflight refused admission so
-    // no cycle ran at all. Both surfaced on
-    // tasks/agent-doc/agent-doc-bugs.md 2026-09-27 with `do [#focusstashedactor`
-    // — an unclosed bracket parses as free text, so the id-keyed strike matched
-    // nothing and the head outlived the work. Falling through hands the turn
-    // back to the agent, which is what lets the operator hear about it.
-    if marker
-        .as_ref()
-        .and_then(|marker| marker.last_requested_head.as_deref())
-        == Some(prompt.as_str())
-    {
+    // It used to live on `ContinuationMarker::last_requested_head`, and the
+    // comparison was right while the storage was not. The marker belongs to
+    // queue reconciliation: it can be absent on exactly the branch reached here
+    // (`continuation_proven` is satisfied by the stall projection alone), where
+    // the arming write documented itself as a no-op — so the bound was absent,
+    // not weak — and a reconcile between two stops deletes it, disarming a
+    // guard that had been armed. Measured 24 blocks against 2 skips on
+    // tasks/agent-doc/agent-doc-bugs.md 2026-09-28, every repeat inside one run.
+    //
+    // Keying on the run is also strictly sharper than keying on the head. At
+    // 00:30:47 the head moved 62 -> 26 bytes while `turn` stayed on
+    // `cycle-1790552355729`: a head can move because the operator edited the
+    // document or a reconcile rewrote the queue, and neither is drain progress.
+    // Only a completed run is. Falling through hands the turn back to the
+    // agent, which is what lets the operator hear about it.
+    let previous_request =
+        agent_doc_queue_io::continuation_request::load_continuation_request(&file)?;
+    if let Some(reason) = agent_doc_queue_io::continuation_request::non_advancing_continuation(
+        previous_request.as_ref(),
+        run_id.as_deref(),
+        &prompt,
+    ) {
         agent_doc_ops_log_io::log_op(
             &file,
             &format!(
-                "claude_stop_queue_continuation_skipped reason=head_did_not_advance \
+                "claude_stop_queue_continuation_skipped reason={} \
                  head_bytes={} action=allow_final_answer",
+                reason.token(),
                 prompt.len(),
             ),
         );
@@ -383,13 +428,27 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
         return Ok(None);
     }
 
-    let _ =
-        agent_doc_queue_io::continuation_marker::record_continuation_requested_head(&file, &prompt);
+    // Arm the bound BEFORE blocking, and propagate a failure instead of
+    // discarding it: an unarmed guard is an unbounded loop, so a ledger write
+    // that cannot land must fail the hook closed rather than quietly produce
+    // the block it can no longer bound.
+    agent_doc_queue_io::continuation_request::record_continuation_request(
+        &file,
+        run_id.as_deref(),
+        &prompt,
+    )
+    .with_context(|| {
+        format!(
+            "record the Stop-hook continuation request for {}",
+            file.display()
+        )
+    })?;
     agent_doc_ops_log_io::log_op(
         &file,
         &format!(
-            "claude_stop_queue_continuation head_bytes={} source=exact_session_binding action=block_and_loop",
+            "claude_stop_queue_continuation head_bytes={} run={} source=exact_session_binding action=block_and_loop",
             prompt.len(),
+            run_id.as_deref().unwrap_or("none"),
         ),
     );
     Ok(Some(ClaudeStopBlock {
@@ -1311,10 +1370,6 @@ fn tracked_repeated_queue_recovery_response(
     next_state.last_auto_queue_head = Some(next_prompt.clone());
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
-    let _ = agent_doc_queue_io::continuation_marker::record_continuation_requested_head(
-        file,
-        &next_prompt,
-    );
     let context_reset_reason =
         agent_doc_codex_hook_io::codex_continuation_clear_reason(file, state.last_context_clear_at);
     if let Some(response) = background_context_clear_suppression_response(
@@ -1392,10 +1447,6 @@ fn auto_queue_continuation_response(
     next_state.last_auto_queue_head = Some(prompt.clone());
     next_state.updated_at = now_secs();
     save_state_across_roots(cleanup_roots, loaded_root, &next_state)?;
-    // Keep the durable marker's requested-head in sync for document-level
-    // diagnostics. Ambient hooks still require this exact tracked session.
-    let _ =
-        agent_doc_queue_io::continuation_marker::record_continuation_requested_head(file, &prompt);
     let context_reset_reason =
         agent_doc_codex_hook_io::codex_continuation_clear_reason(file, state.last_context_clear_at);
     agent_doc_codex_hook_io::log_codex_stop_queue_continuation(file, &prompt, "tracked_state");
@@ -3781,16 +3832,36 @@ Reviewed the gated items.\n\
         );
     }
 
-    /// `#stopneedsclosedcycle`, second half: a head that never advances.
+    /// Complete one run against `doc`, producing a fresh committed cycle id.
+    fn complete_run(doc: &std::path::Path) -> String {
+        let content = std::fs::read_to_string(doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            doc,
+            "commit_success",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap()
+        .cycle_id
+    }
+
+    /// `#stopneedsclosedcycle`, second half: one continuation request per run.
     ///
     /// `stop_hook_active` bounds recursion within one stop, not across turns.
-    /// `do [#focusstashedactor` (unclosed bracket) parses as free text, so the
-    /// id-keyed strike matched nothing and the head outlived its own reap —
-    /// the hook then re-asked for it on three separate turns. The marker field
-    /// that fixes this already existed for the Codex path; Claude wrote it and
-    /// never read it.
+    /// The cross-turn bound used to live on `ContinuationMarker`, a record queue
+    /// reconciliation creates and deletes, so it was absent whenever the marker
+    /// was and disarmed whenever a reconcile cleared it — 24 blocks against 2
+    /// skips on tasks/agent-doc/agent-doc-bugs.md 2026-09-28.
+    ///
+    /// The third step is the one that changed meaning. The old test asserted
+    /// "an advanced head is progress, not churn", and the production log
+    /// disproved it: at 00:30:47 the head moved 62 -> 26 bytes while `turn`
+    /// stayed on `cycle-1790552355729`. A head moves when the operator edits the
+    /// document or a reconcile rewrites the queue. Only a completed run is
+    /// progress, so only a completed run re-earns a request.
     #[test]
-    fn claude_stop_stops_re_asking_for_a_head_that_never_advances() {
+    fn claude_stop_makes_at_most_one_continuation_request_per_run() {
         let dir = setup_project();
         let doc = write_auto_queue_doc(&dir, &["fix the next queue item"]);
         init_git_repo(dir.path(), &doc);
@@ -3798,43 +3869,101 @@ Reviewed the gated items.\n\
         agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
             .expect("continuation required");
 
-        let first = apply_claude_stop(&ClaudeStopInput {
-            session_id: "codex-session".to_string(),
-            cwd: dir.path().display().to_string(),
-            stop_hook_active: false,
-        })
-        .unwrap();
-        assert!(
-            first.is_some(),
-            "the first request for a head must still drive the loop"
-        );
-
-        // The drain did not strike the head — the document is unchanged.
-        assert!(
+        let stop = |dir: &tempfile::TempDir| {
             apply_claude_stop(&ClaudeStopInput {
                 session_id: "codex-session".to_string(),
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
             })
             .unwrap()
-            .is_none(),
-            "re-asking for an unchanged head is churn; the agent must be able to report it"
+        };
+
+        assert!(
+            stop(&dir).is_some(),
+            "the first request for a run must still drive the loop"
         );
 
-        // A head that DID advance is ordinary drain progress and still blocks.
+        // Same run, unchanged head: the drain did not strike it.
+        assert!(
+            stop(&dir).is_none(),
+            "re-asking within one run is churn; the agent must be able to report it"
+        );
+
+        // Same run, head MOVED. Not drain progress — no run has completed since
+        // the request, so the run being asked has already ended either way.
         let advanced = write_auto_queue_doc(&dir, &["fix the following queue item"]);
         assert_eq!(advanced, doc, "the fixture must rewrite the same document");
         agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
             .expect("continuation required");
         assert!(
+            stop(&dir).is_none(),
+            "a head that moves without a run is an edit, not a drain"
+        );
+
+        // A completed run re-earns the request: this is ordinary loop progress,
+        // and the guard must not have latched continuation off.
+        complete_run(&doc);
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+        assert!(
+            stop(&dir).is_some(),
+            "a completed run with a new head is progress, not churn"
+        );
+
+        // `#qchurn`: the run completed and the head survived it. Still a repeat.
+        complete_run(&doc);
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+        assert!(
+            stop(&dir).is_none(),
+            "a run that completes without striking the head must not be re-asked"
+        );
+    }
+
+    /// The DISARM half: queue reconciliation clears the marker between two
+    /// stops, and the bound must survive it.
+    ///
+    /// Scoped deliberately. The other half — the hook reaching its block with no
+    /// marker at all, because the drain-stall projection proved the continuation
+    /// on its own, where the old arming write was a documented no-op — cannot be
+    /// reached from here: with no marker and no stall projection the hook never
+    /// blocks, so the fixture cannot put itself in that state. It is pinned
+    /// instead by `queue_continuation::tests::the_continuation_request_arms_with_no_marker_present`,
+    /// which is the test that reddens when arming is made marker-dependent
+    /// again. Naming that claim here would have been a false green: restoring the
+    /// shipped semantics leaves this test passing.
+    #[test]
+    fn claude_stop_bound_survives_a_reconcile_clearing_the_marker() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+
+        let stop = || {
             apply_claude_stop(&ClaudeStopInput {
                 session_id: "codex-session".to_string(),
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
             })
             .unwrap()
-            .is_some(),
-            "an advanced head is progress, not churn"
+        };
+
+        assert!(stop().is_some(), "the first request must drive the loop");
+
+        // Queue reconciliation drops the marker between the two stops. Under the
+        // old storage this deleted the bound along with it.
+        agent_doc_queue_io::continuation_marker::clear_continuation_marker(&doc).unwrap();
+        assert!(
+            agent_doc_queue_io::continuation_marker::load_continuation_marker(&doc)
+                .unwrap()
+                .is_none()
+        );
+
+        assert!(
+            stop().is_none(),
+            "clearing the marker must not disarm the recursion bound"
         );
     }
 

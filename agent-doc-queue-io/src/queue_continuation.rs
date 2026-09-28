@@ -106,6 +106,12 @@ pub fn reconcile_marker(
             Some(continuation)
         }
         Ok(None) => {
+            if let Err(err) = crate::continuation_request::clear_continuation_request(file) {
+                eprintln!(
+                    "[queue] failed to clear the Stop-hook continuation request for {}: {err:#}",
+                    file.display()
+                );
+            }
             if let Err(err) = clear_continuation_marker(file) {
                 eprintln!(
                     "[queue-continuation] WARNING: failed to clear continuation marker for {}: {}",
@@ -201,9 +207,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::continuation_marker::{
-        load_continuation_marker, record_continuation_requested_head,
-    };
+    use crate::continuation_marker::{clear_continuation_marker, load_continuation_marker};
+    use crate::continuation_request::{load_continuation_request, record_continuation_request};
     use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
     use agent_doc_queue::queue_continuation::{
         DrainScope, deferred_backlog_ids, deferred_head_count, drainable_head_count,
@@ -1296,17 +1301,70 @@ mod tests {
         );
     }
 
+    /// The recursion bound must survive a re-detect, which the marker-hosted
+    /// version did by copying the field forward on every rewrite.
     #[test]
-    fn record_continuation_requested_head_persists_for_nonadvancing_guard() {
+    fn the_continuation_request_persists_across_a_reconcile() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(dir.path(), &["do [#seopdp]"], true, true);
         reconcile_marker(&doc, "commit").expect("marker written");
-        record_continuation_requested_head(&doc, "do [#seopdp]").unwrap();
-        let marker = load_continuation_marker(&doc).unwrap().unwrap();
-        assert_eq!(marker.last_requested_head.as_deref(), Some("do [#seopdp]"));
-        // A re-detect/reconcile preserves the requested head.
+        record_continuation_request(&doc, Some("cycle-1"), "do [#seopdp]").unwrap();
         reconcile_marker(&doc, "commit");
-        let marker = load_continuation_marker(&doc).unwrap().unwrap();
-        assert_eq!(marker.last_requested_head.as_deref(), Some("do [#seopdp]"));
+        let request = load_continuation_request(&doc).unwrap().unwrap();
+        assert_eq!(request.run_id.as_deref(), Some("cycle-1"));
+        assert_eq!(request.head_prompt, "do [#seopdp]");
+    }
+
+    /// The first condition that defeated the marker-hosted bound: the hook can
+    /// reach its block with NO marker at all, because `continuation_proven` is
+    /// satisfied by the drain-stall projection on its own. The old arming write
+    /// was documented as a no-op in exactly that case, so the bound was absent
+    /// rather than weak. Arming must not depend on the marker existing.
+    #[test]
+    fn the_continuation_request_arms_with_no_marker_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#seopdp]"], true, true);
+        assert!(
+            load_continuation_marker(&doc).unwrap().is_none(),
+            "this test is only meaningful with no marker"
+        );
+        record_continuation_request(&doc, Some("cycle-1"), "do [#seopdp]").unwrap();
+        let request = load_continuation_request(&doc).unwrap().unwrap();
+        assert_eq!(request.run_id.as_deref(), Some("cycle-1"));
+    }
+
+    /// The second condition: a reconcile that clears the marker deleted the
+    /// bound with it, disarming a guard that had been armed. The ledger is a
+    /// separate row, so only a genuinely drained queue clears it.
+    #[test]
+    fn clearing_the_marker_does_not_disarm_the_continuation_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#seopdp]"], true, true);
+        reconcile_marker(&doc, "commit").expect("marker written");
+        record_continuation_request(&doc, Some("cycle-1"), "do [#seopdp]").unwrap();
+        clear_continuation_marker(&doc).unwrap();
+        assert!(load_continuation_marker(&doc).unwrap().is_none());
+        assert!(
+            load_continuation_request(&doc).unwrap().is_some(),
+            "clearing the marker must not disarm the Stop-hook recursion bound"
+        );
+    }
+
+    /// ... and a drained queue is the reconciliation point that DOES clear it,
+    /// so one non-advancing head cannot latch continuation off forever.
+    #[test]
+    fn a_drained_queue_clears_the_continuation_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#seopdp]"], true, true);
+        reconcile_marker(&doc, "commit").expect("marker written");
+        record_continuation_request(&doc, Some("cycle-1"), "do [#seopdp]").unwrap();
+
+        let drained = write_doc(dir.path(), &[], true, true);
+        std::fs::copy(&drained, &doc).unwrap();
+        assert!(reconcile_marker(&doc, "commit").is_none(), "queue is drained");
+        assert!(
+            load_continuation_request(&doc).unwrap().is_none(),
+            "a drained queue must release the bound"
+        );
     }
 }

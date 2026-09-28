@@ -22386,11 +22386,36 @@ fn test_agent_doc_queue_owns_operator_clear_preemption_policy() {
         "pub fn write_continuation_marker(",
         "pub fn load_continuation_marker(",
         "pub fn scan_pending_marker_continuations_for_roots",
-        "pub fn record_continuation_requested_head(",
     ] {
         assert!(
             queue_io_marker.contains(required),
             "agent-doc-queue-io must own queue continuation marker IO: {required}"
+        );
+    }
+    // The Stop-hook recursion bound is owned by a sibling module and keyed to
+    // the run that asked, precisely so the marker's create/delete lifecycle
+    // cannot disarm it.
+    assert!(
+        !queue_io_marker.contains("last_requested_head"),
+        "the Stop-hook recursion bound must not move back onto ContinuationMarker: that record \
+         is created and deleted by queue reconciliation, so a bound stored there is absent \
+         whenever the marker is (the stall projection can prove a continuation alone) and \
+         disarmed whenever a reconcile clears it"
+    );
+    let queue_io_request =
+        fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/continuation_request.rs"))
+            .unwrap();
+    for required in [
+        "pub struct ContinuationRequest",
+        "pub enum NonAdvancingContinuation",
+        "pub fn non_advancing_continuation(",
+        "pub fn record_continuation_request(",
+        "pub fn load_continuation_request(",
+        "pub fn clear_continuation_request(",
+    ] {
+        assert!(
+            queue_io_request.contains(required),
+            "agent-doc-queue-io must own the Stop-hook continuation request ledger: {required}"
         );
     }
     for forbidden in [

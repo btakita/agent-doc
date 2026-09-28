@@ -2,6 +2,7 @@
 
 pub mod continuation_detect;
 pub mod continuation_marker;
+pub mod continuation_request;
 pub mod controller_pause;
 pub mod drain_owner;
 pub mod one_shot_sync;

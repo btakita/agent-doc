@@ -16,6 +16,13 @@ const QUEUE_CONTINUATION_STATE_KIND: &str = "continuation";
 
 /// Durable ledger proof that a closed-out document still owes an auto-queue
 /// continuation. Survives missing Codex hook session state.
+///
+/// Owns "a continuation is owed" and nothing else. The Stop-hook recursion
+/// bound deliberately does NOT live here: this record is created and deleted by
+/// queue reconciliation, and a bound stored inside it was absent whenever the
+/// marker was (the stall projection can prove a continuation on its own) and
+/// disarmed whenever a reconcile cleared it. It lives in
+/// [`crate::continuation_request`], keyed to the run that asked.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContinuationMarker {
     pub file: String,
@@ -26,11 +33,6 @@ pub struct ContinuationMarker {
     pub source_command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_head: Option<String>,
-    /// The head prompt last surfaced to a Codex Stop hook as a continuation
-    /// request. Lets the hook fail closed when a repeated stop sees the same,
-    /// non-advancing head.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_requested_head: Option<String>,
 }
 
 /// Caller-owned decision for a parsed continuation marker during a directory
@@ -69,10 +71,6 @@ pub fn write_continuation_marker(
     let Some((_, _, _)) = state_identity(file)? else {
         return Ok(());
     };
-    // Preserve the last continuation request across reconciles so the Stop-hook
-    // non-advancing-head guard still works after a re-detect.
-    let last_requested_head =
-        load_continuation_marker(file)?.and_then(|marker| marker.last_requested_head);
     let marker = ContinuationMarker {
         file: file.display().to_string(),
         head_prompt: continuation.head_prompt.clone(),
@@ -80,7 +78,6 @@ pub fn write_continuation_marker(
         created_at: now_secs(),
         source_command: source_command.to_string(),
         commit_head: head_oid(file),
-        last_requested_head,
     };
     save_marker(file, &marker)
 }
@@ -160,17 +157,6 @@ where
     Ok(None)
 }
 
-/// Record that the head prompt was surfaced to a Codex Stop hook as a
-/// continuation request, so a subsequent stop with the same head can fail
-/// closed instead of looping. No-op when no marker exists.
-pub fn record_continuation_requested_head(file: &Path, head_prompt: &str) -> Result<()> {
-    let Some(mut marker) = load_continuation_marker(file)? else {
-        return Ok(());
-    };
-    marker.last_requested_head = Some(head_prompt.to_string());
-    save_marker(file, &marker)
-}
-
 fn save_marker(file: &Path, marker: &ContinuationMarker) -> Result<()> {
     let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
         return Ok(());
@@ -229,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_marker_roundtrips_and_preserves_requested_head() {
+    fn continuation_marker_roundtrips() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(dir.path());
 
@@ -239,11 +225,9 @@ mod tests {
         assert_eq!(marker.head_id.as_deref(), Some("a"));
         assert_eq!(marker.source_command, "commit");
 
-        record_continuation_requested_head(&doc, "do [#a]").unwrap();
         write_continuation_marker(&doc, &continuation(), "commit2").unwrap();
         let marker = load_continuation_marker(&doc).unwrap().unwrap();
         assert_eq!(marker.source_command, "commit2");
-        assert_eq!(marker.last_requested_head.as_deref(), Some("do [#a]"));
 
         clear_continuation_marker(&doc).unwrap();
         assert!(load_continuation_marker(&doc).unwrap().is_none());

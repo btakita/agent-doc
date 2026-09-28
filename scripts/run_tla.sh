@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -84,6 +84,15 @@ must_violate=(
     IpcBuildIdentity:IpcBuildIdentityFalseMismatchWedge
     IpcBuildIdentity:IpcBuildIdentityFalseMatchWedge
     IpcBuildIdentity:IpcBuildIdentityReach
+    # The Stop hook's continuation bound. One wedge per way the shipped bound
+    # could be missing (nothing armed it, or a reconcile disarmed it), and two
+    # reach configs because this fix ADDS a reason to allow the final answer --
+    # "it stopped looping" and "it stopped working" are indistinguishable from
+    # the outside, so both the block and the second block must stay reachable.
+    StopHookContinuation:StopHookContinuationMarkerHostedWedge
+    StopHookContinuation:StopHookContinuationUnrememberedWedge
+    StopHookContinuation:StopHookContinuationReach
+    StopHookContinuation:StopHookContinuationNoLatchReach
 )
 
 for module in "${modules[@]}"; do

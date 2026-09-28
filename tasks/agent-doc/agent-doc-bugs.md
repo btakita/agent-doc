@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -840,6 +840,42 @@ The decision is pure and separately testable (`agent_doc_controller::focus_routi
 **Verification.** `make check` exit 0, `9993 tests run: 9993 passed, 259 skipped`, zero `result: FAILED`, plus the full gate. The first run caught a real architecture guard — `test_agent_doc_ipc_protocol_owns_receipt_classification` requires the adapter to reach root resolution through `agent-doc-project-root-io`, not `agent_doc_fs::find_project_root` directly — and the fix went through that crate. Installed and pushed. Latest CI run `36438177702` was still in progress at closeout; the prior run is green. Recorded, not waited on.
 
 Two things worth naming about the shared tree. A sibling session holds unrelated uncommitted hunks in the same `rpc.rs` (including a dangling `#[test]` with no function under it), so rather than commit around them I built a blob of `HEAD` plus only my three hunks, compiled it and ran its tests in a clean detached worktree, and committed that exact blob — their working-tree changes are untouched and still uncommitted. And the remaining step is genuinely yours: the controllers pick up `730d74600` at their next idle boundary, after which switching an IDE tab to a submodule document should focus its pane and leave `controller_focus_delegated` in agent-loop's ops.log. Filed as `[operator-verify]` rather than claimed.
+
+### Re: do [#drivecapturedsplice] — opus-5 · 2026-09-28T11:08-04:00
+
+Ran it live. It failed closed in the right place, the blocker this item names turned out to be stale, and the run surfaced a third agent-doc defect that I fixed and pushed (`2ef0c0bfa`). The item stays open on two *different*, now precisely-named blockers.
+
+**The stated blocker is gone.** This item says the run is "blocked only by pane execution authority — refused from a non-owning pane". That is no longer true, and I checked rather than assumed:
+
+- `assert_pane_authority` passes from this pane. It looks for another pane running `agent-doc` with `pane_current_path` = the repo; `tmux list-panes -a` shows exactly one pane in `src/agent-doc` — `%241` — and it is sitting at **zsh**. The dry run confirms the guard does not fire.
+- `%241`'s actor row still reads `pane=%241 (alive) gen=3 ready pid=507031`, but `ps -p 507031` is empty. The record is stale: the pane survived, the owning process did not.
+- The canonical-advance step (`agent-doc write --commit`) is no longer refused here either — it applied the patch.
+
+So the recipe is now drivable from a non-owning pane, and re-resolving before running (as this item instructs) is what showed it.
+
+**Where it actually stopped.** Real run, IDE pid 1303966, plugin `0.2.431` (current — so none of this is staleness):
+
+```
+[xdotool-live] resolved scratch editor window 29360405 for 'xdotool-captured-splice.md'
+[xdotool-live] WARN: no editor_op_capture_proof yet
+[xdotool-live] advancing the canonical response independently of the editor
+[xdotool-live] WARN: response advance did not complete
+[xdotool-live] ERROR: focus-guard: active window 'agent-doc-bugs.md' is not the
+  scratch doc 'xdotool-captured-splice.md' — ABORT (would corrupt real work)
+```
+
+Two distinct failures, neither one pane authority:
+
+1. **No `editor_op_capture_proof` for the first typed edit.** The keystrokes went into the resolved scratch window and the plugin produced no capture receipt. Step 1 of the property therefore never happened, so steps 2–4 had nothing to recover across — which is exactly what the verifier has been reporting all along, for a reason nobody had pinned.
+2. **The focus guard aborted the second edit**, because by then the IDE's active window was `agent-doc-bugs.md` — *this* document. That is the guard doing its job (it refused to type operator text into real work), but it also means the recipe cannot complete while another agent-doc session is actively driving focus in the same IDE. Given the focus churn in this repo's ops.log — a focus intent every 1–3s during a drain — that is not an occasional race, it is the normal condition.
+
+**The third defect, fixed: `2ef0c0bfa`.** The recipe's scratch documents live under `.agent-doc/live-repro/`, a directory `.gitignore` matches by design. Refusing to commit an ignored path is correct and already tested. Leaving the cycle at `write_applied` afterwards is not — that phase means "a terminal commit is still expected", and for an ignored path none can ever follow, so the document reads `INTERRUPTED` forever. I tried every documented recovery against the live document and none could clear it: `repair` retires the retained intent and hits the same refusal, `reset` clears the session and leaves the cycle untouched, a second `write --commit` reproduces it. Unrecoverable state, and every live-repro run had been wedging its own scratch document permanently. `Abandoned` is now the terminal phase — the refusal is unchanged, only the dead cycle is reaped, and `session-check` on the real wedged document is clean again.
+
+Worth naming: my first regression test for that was a **false green**. It asserted on stderr, and `[session-check] INTERRUPTED` goes to stdout, so it passed against the unfixed binary. Caught it by running the mutation check rather than trusting the pass; corrected to stdout and re-proven FAILED-without / ok-with, touching the source between runs so Cargo could not serve a stale rlib.
+
+**Why this item stays open rather than done or gated.** It is still agent-executable — nothing here needs a human verdict — so it belongs in `agent:backlog`, not `agent:review`. What it needs is (1) the plugin's op-capture path to actually emit a receipt for an xdotool-typed edit, and (2) the recipe to hold exclusive IDE focus, or the focus guard to tolerate a scratch window losing focus to a concurrent agent-doc drain. I have rewritten the item to say that instead of the pane-authority claim, which would otherwise send the next drain chasing a blocker that no longer exists.
+
+`make check` exit 0, `9993 tests run: 9993 passed, 259 skipped`, zero `result: FAILED`, plus the full gate. Installed and pushed. This exchange is at 27 response sections; noting the size rather than stalling the queue for it.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -850,15 +886,14 @@ Two things worth naming about the shared tree. A sibling session holds unrelated
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ⏭️ do [#drivecapturedsplice]
-- do [#publishjetbrainssibling]
-- ~~Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?~~ — auto-struck: answered this cycle (#ftstrike)
+- ⏭️ do [#publishjetbrainssibling]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.
 - [ ] [#publishjetbrainssibling] [agent-doc] Publish a `-signed` JetBrains sibling from the release `plugins` job. The client half shipped in 7649ccafd — `find_asset` now matches `<prefix>*-signed.<ext>` by shape, so a signed asset would be selected the moment one exists — but the job publishes only the unsigned zip. `signPlugin` in editors/jetbrains/build.gradle.kts reads CERTIFICATE_CHAIN / PRIVATE_KEY / PRIVATE_KEY_PASSWORD from the environment and none are available to that job, so wiring `signPlugin` in today would fail the release rather than produce a sibling. UNBLOCK: decide whether either IDE host actually requires a signed package, and if so add those three repo secrets; then add signPlugin + a second cp to the plugins job and extend the two-asset verify to four. [recommended]
-- [ ] [#drivecapturedsplice] [agent-doc] Drive the captured-splice live proof from the pane that OWNS the src/agent-doc controller. The automation is complete (scripts/xdotool-live-verify.sh captured-splice opens the scratch doc itself and the binary decides the receipts); the run is blocked only by pane execution authority —  is refused from a non-owning pane, so the canonical-advance step never runs and the verifier correctly reports that captured-local-splice-recovery never ran. Repro: from a pane that is not the owner, the harness now fails closed naming the owning pane instead of typing into a live desktop. Run it from the owning pane (pane %241 held src/agent-doc at the time of writing; re-resolve before running) and expect a splice-recovery status=current read, an editor_op_capture_proof with operator_ops>=1 and shadow_replay=agreed, then a later status=current read with a different text_hash. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
+- [ ] [#drivecapturedsplice] [agent-doc] Complete the captured-splice live proof (`#activateinstalledjetbrai`). RE-DIAGNOSED 2026-09-28: the old pane-execution-authority blocker is STALE and gone — scripts/xdotool-live-verify.sh captured-splice now passes assert_pane_authority from a non-owning pane (the only pane in src/agent-doc, %241, is sitting at zsh; its actor row still says alive/ready pid=507031 but that pid is dead), and `agent-doc write --commit` is no longer refused. A real run with IDE pid 1303966 and plugin 0.2.431 (current) stops on two different things: (1) NO `editor_op_capture_proof` is emitted for the xdotool-typed edit, so step 1 of the property never happens and there is nothing for the later splice to recover across — this is why the verifier has always reported captured-local-splice-recovery never ran; (2) the focus guard then ABORTS the second edit because the IDE active window has moved to tasks/agent-doc/agent-doc-bugs.md, correctly refusing to type operator text into real work — so the recipe cannot complete while another agent-doc session drives focus in the same IDE, which during a drain is every 1-3s. UNBLOCK: make the plugin op-capture path emit a receipt for a synthetic/xdotool keystroke (verify with `agent-doc verify-op-capture`), and either give the recipe exclusive IDE focus or let the focus guard tolerate the scratch window losing focus to a concurrent drain. The gitignored-scratch-doc cycle wedge found during this run is FIXED in 2ef0c0bfa. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 <!-- /agent:backlog -->
 
 ## Review

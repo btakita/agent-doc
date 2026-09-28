@@ -235,6 +235,19 @@ jobs:
           (cd artifacts && sha256sum agent-doc-* | sort -k2) > artifacts/SHA256SUMS
           cat artifacts/SHA256SUMS
 
+      # `#editorpkgdigest`: the editor packages are code loaded into an IDE and
+      # were the only release assets with no published integrity value.
+      # `SHA256SUMS` above must stay platform-archives-only (its consumers parse
+      # exactly that manifest), so the editor packages get one of their own.
+      # `agent-doc plugin install/update` fetches this file and verifies the
+      # downloaded zip/vsix before extracting or handing it to the editor CLI.
+      - name: Generate editor-package checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd editor-packages && sha256sum agent-doc-* | sort -k2) > editor-packages/EDITOR-PACKAGES.sha256
+          cat editor-packages/EDITOR-PACKAGES.sha256
+
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3077,6 +3077,9 @@ enum Commands {
         /// Target directory (default: directory containing agent-doc binary)
         #[arg(long)]
         target_dir: Option<String>,
+        /// List what would be removed, and why, without deleting anything
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Install versioned shared library with atomic symlink swap
     LibInstall {
@@ -5500,7 +5503,10 @@ fn try_main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::GcLibs { target_dir } => lib_gc::run(target_dir.as_deref()),
+        Commands::GcLibs {
+            target_dir,
+            dry_run,
+        } => lib_gc::run(target_dir.as_deref(), dry_run),
         Commands::LibInstall {
             source,
             profile,

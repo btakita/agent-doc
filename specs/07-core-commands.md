@@ -254,6 +254,20 @@ binary was installed: a Cargo build tree is told to `cargo build --release`, and
 a package install is pointed at a release asset or `agent-doc lib-install
 --source <dir>` rather than at a toolchain it does not have.
 
+Every `lib-install` writes a new `libagent_doc-<version>.so` beside the binary
+and swaps the unversioned symlink onto it, so the directory used to grow by one
+library per install with nothing ever reaping the predecessors
+(`#gclibsoninstall`, GH #58). A successful `lib-install` now sweeps its own
+target directory: it removes every versioned library that is neither the current
+symlink target nor held by a live PID lock, and removes `\*.pid.<pid>` locks
+whose PID is no longer alive — an indefinitely-trusted dead lock would otherwise
+make its version look held forever once that PID is reused. The sweep is
+best-effort and never fails an install that already succeeded. The same policy
+is reachable on demand as `agent-doc gc-libs`, and `agent-doc gc-libs --dry-run`
+reports what it would remove, and why (superseded by the current library, or not
+the installed library — in either case with no live holder), without deleting
+anything.
+
 Tags and the four automated Linux and Windows targets are publishable on demand.
 GitHub Actions must not run macOS jobs. Operator-built Darwin artifacts follow a
 weekly cadence (`#weekly-macos-assets`): `make release-macos-assets TAG=v<version>`
@@ -290,9 +304,29 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 
 - Supports JetBrains and VS Code.
 - Pulls assets from GitHub Releases, preferring signed assets when available.
+  Published asset names are versioned (`agent-doc-jetbrains-0.2.392.zip`), so the
+  signed preference matches on SHAPE — any `<prefix>*-signed.<ext>` — rather than
+  on an exact unversioned filename that no release has ever carried (GH #55).
+  Selection must not depend on the order the API returns assets in.
+- Downloaded editor packages are verified before they are extracted or handed to
+  the editor CLI (`#editorpkgdigest`, GH #55). The expected digest comes from the
+  release's `EDITOR-PACKAGES.sha256` manifest, and from GitHub's per-asset
+  `digest` field when the release predates that manifest. A declared digest that
+  disagrees with the downloaded bytes refuses the install; a release that
+  publishes neither installs with an explicit warning, so `plugin update`'s
+  fallback walk can still reach an older asset. `SHA256SUMS` stays
+  platform-archives-only — its consumers (the PyPI bootstrap launcher and
+  `make release-macos-assets`) parse exactly that manifest.
+- VS Code-family installs resolve the editor CLI (`cursor`, `codium`, `code`)
+  BEFORE downloading, and report an absent CLI as a missing prerequisite with
+  install guidance (GH #57). Detection returning a candidate it has just proven
+  absent is a defect: the resulting `No such file or directory` reads as if the
+  vsix were missing.
 - JetBrains install/update success reports the installed plugin package version
   from the extracted plugin JAR, matching `plugin list`, rather than reporting the
   enclosing agent-doc release tag.
+- An exhausted GitHub API rate limit reports the wait (`resets in 12m 3s`)
+  alongside the raw epoch, not the epoch alone (GH #57).
 
 ## rename
 

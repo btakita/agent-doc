@@ -106,11 +106,36 @@ pub fn resolve_lib_dir() -> Result<PathBuf> {
         .map(|p| p.to_path_buf())
 }
 
-pub fn gc_libs(lib_dir: &Path) -> Result<GcResult> {
-    gc_libs_with_pid_alive(lib_dir, is_pid_alive)
+/// Whether a sweep deletes, or only reports what it would delete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GcMode {
+    Apply,
+    /// `#gclibsdryrun` (GH #58): the first use of a cleanup command should not
+    /// be its first destructive one. A plan run reports the same decisions
+    /// without touching the directory.
+    DryRun,
 }
 
-fn gc_libs_with_pid_alive(lib_dir: &Path, pid_alive: impl Fn(u32) -> bool) -> Result<GcResult> {
+impl GcMode {
+    fn deletes(self) -> bool {
+        self == Self::Apply
+    }
+}
+
+pub fn gc_libs(lib_dir: &Path) -> Result<GcResult> {
+    gc_libs_with_pid_alive(lib_dir, is_pid_alive, GcMode::Apply)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn plan_gc_libs(lib_dir: &Path) -> Result<GcResult> {
+    gc_libs_with_pid_alive(lib_dir, is_pid_alive, GcMode::DryRun)
+}
+
+fn gc_libs_with_pid_alive(
+    lib_dir: &Path,
+    pid_alive: impl Fn(u32) -> bool,
+    mode: GcMode,
+) -> Result<GcResult> {
     let symlink_path = lib_dir.join(platform_lib_name());
     let current_target = if symlink_path.is_symlink() {
         std::fs::read_link(&symlink_path).ok()
@@ -157,12 +182,16 @@ fn gc_libs_with_pid_alive(lib_dir: &Path, pid_alive: impl Fn(u32) -> bool) -> Re
         }
 
         for lock in &dead_locks {
-            std::fs::remove_file(lock).ok();
+            if mode.deletes() {
+                std::fs::remove_file(lock).ok();
+            }
             result.locks_removed += 1;
         }
 
         if live_pids.is_empty() {
-            std::fs::remove_file(&so_path).ok();
+            if mode.deletes() {
+                std::fs::remove_file(&so_path).ok();
+            }
             result.libs_removed.push(name_str.to_string());
         } else {
             result.kept_locked.push((name_str.to_string(), live_pids));
@@ -180,13 +209,29 @@ pub struct GcResult {
     pub locks_removed: usize,
 }
 
-pub fn run(target_dir: Option<&str>) -> Result<()> {
+impl GcResult {
+    /// Why the entries in `libs_removed` are reapable, phrased for an operator
+    /// reading a `--dry-run` plan.
+    fn removal_reason(&self) -> String {
+        match self.kept_current {
+            Some(ref current) => format!("superseded by {current}, no live holder"),
+            None => "not the installed library, no live holder".to_string(),
+        }
+    }
+}
+
+pub fn run(target_dir: Option<&str>, dry_run: bool) -> Result<()> {
     let lib_dir = match target_dir {
         Some(d) => PathBuf::from(d),
         None => resolve_lib_dir()?,
     };
 
-    let result = gc_libs(&lib_dir)?;
+    let mode = if dry_run {
+        GcMode::DryRun
+    } else {
+        GcMode::Apply
+    };
+    let result = gc_libs_with_pid_alive(&lib_dir, is_pid_alive, mode)?;
 
     if let Some(ref current) = result.kept_current {
         eprintln!("[gc-libs] kept current: {}", current);
@@ -194,17 +239,53 @@ pub fn run(target_dir: Option<&str>) -> Result<()> {
     for (name, pids) in &result.kept_locked {
         eprintln!("[gc-libs] kept (live PIDs {:?}): {}", pids, name);
     }
+    let verb = if dry_run { "would remove" } else { "removed" };
     for name in &result.libs_removed {
-        eprintln!("[gc-libs] removed: {}", name);
+        eprintln!("[gc-libs] {verb}: {name} ({})", result.removal_reason());
     }
     if result.locks_removed > 0 {
-        eprintln!("[gc-libs] cleaned {} stale lock(s)", result.locks_removed);
+        let lock_verb = if dry_run { "would clean" } else { "cleaned" };
+        eprintln!(
+            "[gc-libs] {lock_verb} {} stale lock(s) (naming a PID that is not alive)",
+            result.locks_removed
+        );
     }
     if result.libs_removed.is_empty() && result.locks_removed == 0 {
         eprintln!("[gc-libs] nothing to clean");
     }
+    if dry_run && !(result.libs_removed.is_empty() && result.locks_removed == 0) {
+        eprintln!("[gc-libs] dry run: nothing was deleted; re-run without --dry-run to apply");
+    }
 
     Ok(())
+}
+
+/// One-line quiet sweep for the install path (`#gclibsoninstall`, GH #58).
+///
+/// The reaper had exactly one caller — the `gc-libs` subcommand — so nothing
+/// reaped on install, on upgrade, on startup, or from a timer, and
+/// `~/.cargo/bin` grew by one cdylib per `lib-install` forever. A failure here
+/// is reported and swallowed: cleanup must never fail an install that already
+/// succeeded.
+pub fn gc_libs_after_install(lib_dir: &Path) {
+    match gc_libs(lib_dir) {
+        Ok(result) => {
+            if result.libs_removed.is_empty() && result.locks_removed == 0 {
+                return;
+            }
+            eprintln!(
+                "[lib-install] gc-libs reaped {} superseded librar{} and {} stale lock(s)",
+                result.libs_removed.len(),
+                if result.libs_removed.len() == 1 {
+                    "y"
+                } else {
+                    "ies"
+                },
+                result.locks_removed
+            );
+        }
+        Err(err) => eprintln!("[lib-install] gc-libs skipped: {err:#}"),
+    }
 }
 
 #[cfg(test)]
@@ -280,7 +361,8 @@ mod tests {
         let my_pid = std::process::id();
         write_pid_lock(&v1, my_pid);
 
-        let result = gc_libs_with_pid_alive(tmp.path(), |pid| pid == my_pid).unwrap();
+        let result =
+            gc_libs_with_pid_alive(tmp.path(), |pid| pid == my_pid, GcMode::Apply).unwrap();
 
         assert!(v1.exists());
         assert!(result.libs_removed.is_empty());
@@ -301,12 +383,86 @@ mod tests {
         let dead_pid = std::process::id();
         let lock = write_pid_lock(&v1, dead_pid);
 
-        let result = gc_libs_with_pid_alive(tmp.path(), |_| false).unwrap();
+        let result = gc_libs_with_pid_alive(tmp.path(), |_| false, GcMode::Apply).unwrap();
 
         assert!(!v1.exists());
         assert!(!lock.exists());
         assert_eq!(result.libs_removed.len(), 1);
         assert_eq!(result.locks_removed, 1);
+    }
+
+    /// A dry run must report exactly what an apply run would do, and touch
+    /// nothing. Asserting only "reports something" would pass against a sweep
+    /// that still deleted, so the files are checked too.
+    #[test]
+    fn dry_run_reports_the_same_plan_without_deleting_anything() {
+        let tmp = setup_dir();
+        let v1 = write_versioned(tmp.path(), "1.0.0");
+        write_versioned(tmp.path(), "2.0.0");
+        let v2_name = crate::lib_install::versioned_lib_name("2.0.0");
+        create_symlink(tmp.path(), &v2_name);
+        let dead_lock = write_pid_lock(&v1, std::process::id());
+
+        let planned = gc_libs_with_pid_alive(tmp.path(), |_| false, GcMode::DryRun).unwrap();
+
+        assert_eq!(planned.libs_removed.len(), 1);
+        assert!(planned.libs_removed[0].contains("1.0.0"));
+        assert_eq!(planned.locks_removed, 1);
+        assert!(v1.exists(), "dry run deleted the library");
+        assert!(dead_lock.exists(), "dry run deleted the lock");
+        assert!(
+            planned.removal_reason().contains("superseded by"),
+            "{}",
+            planned.removal_reason()
+        );
+
+        let applied = gc_libs_with_pid_alive(tmp.path(), |_| false, GcMode::Apply).unwrap();
+        assert_eq!(applied.libs_removed, planned.libs_removed);
+        assert_eq!(applied.locks_removed, planned.locks_removed);
+        assert!(!v1.exists());
+        assert!(!dead_lock.exists());
+    }
+
+    /// The install path is the reaper's new caller (GH #58). It must reap the
+    /// predecessor and keep the just-installed symlink target.
+    #[test]
+    fn install_sweep_reaps_predecessors_and_keeps_the_new_current() {
+        let tmp = setup_dir();
+        let v1 = write_versioned(tmp.path(), "1.0.0");
+        let v2 = write_versioned(tmp.path(), "2.0.0");
+        let v2_name = crate::lib_install::versioned_lib_name("2.0.0");
+        create_symlink(tmp.path(), &v2_name);
+
+        gc_libs_after_install(tmp.path());
+
+        assert!(!v1.exists());
+        assert!(v2.exists());
+    }
+
+    /// Without a symlink (a tarball install replaces the library in place) the
+    /// sweep has no "current" to protect, so it must not invent one — but it
+    /// must still leave the unversioned library itself alone.
+    #[test]
+    fn a_plain_file_install_keeps_the_unversioned_library_and_reaps_the_versioned_pile() {
+        let tmp = setup_dir();
+        let v1 = write_versioned(tmp.path(), "1.0.0");
+        let plain = tmp.path().join(platform_lib_name());
+        fs::write(&plain, "regular file").unwrap();
+
+        let planned = plan_gc_libs(tmp.path()).unwrap();
+        assert!(planned.kept_current.is_none());
+        assert_eq!(planned.libs_removed.len(), 1);
+        assert!(
+            planned
+                .removal_reason()
+                .contains("not the installed library"),
+            "{}",
+            planned.removal_reason()
+        );
+
+        gc_libs(tmp.path()).unwrap();
+        assert!(!v1.exists());
+        assert!(plain.exists());
     }
 
     #[test]

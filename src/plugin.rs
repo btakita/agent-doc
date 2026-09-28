@@ -7,8 +7,9 @@
 //! - `update(editor)` — for JetBrains, skips re-install if the installed plugin.xml version matches the latest release tag; for VS Code, always reinstalls (handled idempotently by the CLI).
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
-//! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`).
-//! - Asset selection: prefers `<prefix>-signed.<ext>`, falls back to any `<prefix>*.<ext>` match. For local JetBrains installs, prefers `-signed.zip` over `.zip`. Local VS Code installs require the VSIX version to match `package.json` exactly so stale artifacts cannot be installed by accident.
+//! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
+//! - Asset selection: prefers a `-signed.<ext>` variant matched by *shape* (published assets are versioned, so an exact `<prefix>-signed.<ext>` name never occurs), falls back to the first `<prefix>*.<ext>` match. For local JetBrains installs, prefers `-signed.zip` over `.zip`. Local VS Code installs require the VSIX version to match `package.json` exactly so stale artifacts cannot be installed by accident.
+//! - Downloaded editor packages are verified before installation against the release's `EDITOR-PACKAGES.sha256` manifest, falling back to GitHub's per-asset `digest`. A declared digest that disagrees with the bytes fails closed.
 //!
 //! ## Agentic Contracts
 //! - `install(editor)` — returns `Err` on network failure, missing asset, or CLI install failure.
@@ -26,8 +27,9 @@
 //! - install_unknown_editor: `install("emacs")` → Err containing "Unknown editor"
 //! - update_already_current: JetBrains plugin at matching version → early Ok, no download
 //! - list_no_plugins: no IDE dirs, `code` absent → stderr "No agent-doc editor plugins found", Ok
-//! - detect_code_cmd: cursor available → returns "cursor"; only code available → returns "code"
-//! - find_asset_prefers_signed: release with both signed and unsigned zip → signed asset selected
+//! - detect_code_cmd: cursor available → returns "cursor"; only code available → returns "code"; none available → `None`, and the caller fails with install guidance before downloading
+//! - find_asset_prefers_signed: release with both signed and unsigned *versioned* zips → signed asset selected in either API order
+//! - editor package integrity: a manifest or API digest that disagrees with the downloaded bytes refuses the install
 //! - find_local_zip_prefers_signed: dist dir with both zips → signed path returned
 //! - find_local_vscode_vsix_requires_manifest_version: stale VSIX files are ignored and a missing current build fails closed
 //! - jetbrains_discovery_excludes_config_and_service_roots: only versioned IDE data roots are candidates
@@ -43,6 +45,7 @@ use std::io::{self, IsTerminal as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 #[cfg(not(test))]
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const GITHUB_REPO: &str = "btakita/agent-doc";
 
@@ -97,7 +100,7 @@ fn ensure_github_api_success<T>(response: &ureq::http::Response<T>, context: &st
             .headers()
             .get("x-ratelimit-reset")
             .and_then(|value| value.to_str().ok())
-            .map(|value| format!("; resets at Unix timestamp {value}"))
+            .map(format_rate_limit_reset)
             .unwrap_or_default();
         bail!(
             "GitHub API rate limit exhausted{reset}; set GITHUB_TOKEN or GH_TOKEN to authenticate"
@@ -105,6 +108,37 @@ fn ensure_github_api_success<T>(response: &ureq::http::Response<T>, context: &st
     }
 
     bail!("{context}: GitHub returned HTTP {status}")
+}
+
+/// Render `x-ratelimit-reset` so the diagnostic is actionable on its own
+/// (GH #57). A bare `Unix timestamp 1789999999` does not tell the operator
+/// whether to wait one minute or fifty, so the wait is spelled out; the epoch
+/// stays alongside it for scripted consumers.
+fn format_rate_limit_reset(raw: &str) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+    format_rate_limit_reset_at(raw, now)
+}
+
+fn format_rate_limit_reset_at(raw: &str, now_epoch_secs: u64) -> String {
+    let Ok(reset_epoch_secs) = raw.trim().parse::<u64>() else {
+        // Unparseable header: report it verbatim rather than inventing a wait.
+        return format!("; resets at Unix timestamp {raw}");
+    };
+    let remaining = reset_epoch_secs.saturating_sub(now_epoch_secs);
+    if remaining == 0 {
+        return format!("; the reset is due now (Unix timestamp {reset_epoch_secs})");
+    }
+    let minutes = remaining / 60;
+    let seconds = remaining % 60;
+    let human = if minutes > 0 {
+        format!("{minutes}m {seconds}s")
+    } else {
+        format!("{seconds}s")
+    };
+    format!("; resets in {human} (Unix timestamp {reset_epoch_secs})")
 }
 
 fn fetch_github(url: &str, context: &str) -> Result<ureq::http::Response<ureq::Body>> {
@@ -200,35 +234,63 @@ fn is_stable_release(release: &Value) -> bool {
         && !release["draft"].as_bool().unwrap_or(false)
 }
 
-fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<(&'a str, &'a str)> {
+/// One release asset resolved by [`find_asset`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ReleaseAsset<'a> {
+    name: &'a str,
+    url: &'a str,
+    /// GitHub's per-asset checksum, `sha256:<hex>` when the API reports one.
+    digest: Option<&'a str>,
+}
+
+fn asset_matches(name: &str, prefix: &str, ext: &str) -> bool {
+    name.starts_with(prefix) && name.ends_with(&format!(".{ext}"))
+}
+
+fn read_asset<'a>(asset: &'a Value) -> Result<ReleaseAsset<'a>> {
+    let name = asset["name"]
+        .as_str()
+        .context("Release asset has no name")?;
+    let url = asset["browser_download_url"]
+        .as_str()
+        .context("No download URL for asset")?;
+    Ok(ReleaseAsset {
+        name,
+        url,
+        digest: asset["digest"].as_str(),
+    })
+}
+
+fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<ReleaseAsset<'a>> {
     let assets = release["assets"]
         .as_array()
         .context("No assets in release")?;
 
-    // Prefer signed variant
-    let signed_name = format!("{prefix}-signed.{ext}");
-    if let Some(asset) = assets
-        .iter()
-        .find(|a| a["name"].as_str().is_some_and(|n| n == signed_name))
-    {
-        let name = asset["name"].as_str().unwrap();
-        let url = asset["browser_download_url"]
-            .as_str()
-            .context("No download URL for asset")?;
-        return Ok((name, url));
+    // Prefer a signed variant, matched by SHAPE (GH #55). The previous code
+    // compared against the exact string `format!("{prefix}-signed.{ext}")`, but
+    // every published asset is versioned — `agent-doc-jetbrains-0.2.386-signed.zip`
+    // — so that equality could never fire and selection silently fell through to
+    // whatever order the API happened to return. It read as a preference while
+    // being unreachable.
+    let signed_suffix = format!("-signed.{ext}");
+    let mut first_match: Option<&'a Value> = None;
+    for asset in assets {
+        let Some(name) = asset["name"].as_str() else {
+            continue;
+        };
+        if !asset_matches(name, prefix, ext) {
+            continue;
+        }
+        if name.ends_with(&signed_suffix) {
+            return read_asset(asset);
+        }
+        if first_match.is_none() {
+            first_match = Some(asset);
+        }
     }
 
-    // Fall back to any matching asset
-    if let Some(asset) = assets.iter().find(|a| {
-        a["name"]
-            .as_str()
-            .is_some_and(|n| n.starts_with(prefix) && n.ends_with(&format!(".{ext}")))
-    }) {
-        let name = asset["name"].as_str().unwrap();
-        let url = asset["browser_download_url"]
-            .as_str()
-            .context("No download URL for asset")?;
-        return Ok((name, url));
+    if let Some(asset) = first_match {
+        return read_asset(asset);
     }
 
     bail!("No {prefix}*.{ext} asset found in latest release");
@@ -236,6 +298,102 @@ fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<(&'a st
 
 fn has_asset(release: &Value, prefix: &str, ext: &str) -> bool {
     find_asset(release, prefix, ext).is_ok()
+}
+
+/// `#editorpkgdigest` (GH #55): the editor packages are code loaded into an
+/// IDE and were the only release assets carrying no published integrity value.
+/// `SHA256SUMS` deliberately covers the platform archives only — it is consumed
+/// by the PyPI bootstrap launcher and `make release-macos-assets` — so the
+/// editor packages get a manifest of their own instead.
+const EDITOR_PACKAGE_MANIFEST: &str = "EDITOR-PACKAGES.sha256";
+
+/// Look up `name` in a `sha256sum`-format manifest (`<hex>  <name>`).
+fn editor_package_manifest_digest<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
+    manifest.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let digest = fields.next()?;
+        // `sha256sum` marks binary-mode entries with a leading `*`.
+        let raw_entry = fields.next()?;
+        let entry = raw_entry.strip_prefix('*').unwrap_or(raw_entry);
+        (entry == name && fields.next().is_none()).then_some(digest)
+    })
+}
+
+/// Strip GitHub's `sha256:` prefix from a release asset `digest` field.
+fn parse_asset_digest(digest: &str) -> Option<&str> {
+    digest.strip_prefix("sha256:").filter(|hex| !hex.is_empty())
+}
+
+fn compare_digest(name: &str, expected: &str, actual: &str, source: &str) -> Result<()> {
+    if expected.eq_ignore_ascii_case(actual) {
+        eprintln!("Verified {name} against {source}.");
+        return Ok(());
+    }
+    bail!(
+        "Integrity check failed for {name}: {source} declares sha256 {expected}, but the downloaded bytes hash to {actual}. Refusing to install."
+    )
+}
+
+fn editor_package_manifest_url(release: &Value) -> Option<&str> {
+    release["assets"].as_array()?.iter().find_map(|asset| {
+        if asset["name"].as_str()? == EDITOR_PACKAGE_MANIFEST {
+            asset["browser_download_url"].as_str()
+        } else {
+            None
+        }
+    })
+}
+
+fn fetch_text(url: &str) -> Result<String> {
+    let mut body = String::new();
+    build_agent()
+        .get(url)
+        .header("User-Agent", "agent-doc")
+        .call()
+        .context("Download failed")?
+        .body_mut()
+        .as_reader()
+        .read_to_string(&mut body)
+        .context("Failed to read response")?;
+    Ok(body)
+}
+
+/// Verify a downloaded editor package before it is extracted or handed to the
+/// editor CLI. Transport integrity already comes from HTTPS to GitHub; this is
+/// the defence-in-depth the platform archives have had all along.
+fn verify_editor_package(release: &Value, asset: &ReleaseAsset<'_>, path: &Path) -> Result<()> {
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    let actual = agent_doc_hash::bytes_hash(&bytes);
+
+    if let Some(url) = editor_package_manifest_url(release) {
+        let manifest = fetch_text(url)
+            .with_context(|| format!("Failed to fetch {EDITOR_PACKAGE_MANIFEST}"))?;
+        let Some(expected) = editor_package_manifest_digest(&manifest, asset.name) else {
+            bail!(
+                "{EDITOR_PACKAGE_MANIFEST} on this release has no entry for {}; refusing to install an editor package the manifest does not cover",
+                asset.name
+            );
+        };
+        return compare_digest(asset.name, expected, &actual, EDITOR_PACKAGE_MANIFEST);
+    }
+
+    if let Some(expected) = asset.digest.and_then(parse_asset_digest) {
+        return compare_digest(
+            asset.name,
+            expected,
+            &actual,
+            "the GitHub release asset digest",
+        );
+    }
+
+    // Releases cut before `#editorpkgdigest` carry neither a manifest nor an API
+    // digest. Warn rather than fail closed, so `plugin update`'s fallback walk
+    // can still reach an older asset.
+    eprintln!(
+        "Warning: {} carries no published checksum (no {EDITOR_PACKAGE_MANIFEST} asset and no API digest); installing without an integrity check.",
+        asset.name
+    );
+    Ok(())
 }
 
 fn fetch_release_for_asset(prefix: &str, ext: &str) -> Result<Value> {
@@ -391,11 +549,12 @@ fn choose_plugins_dir(dirs: &[PathBuf], explicit: Option<&Path>) -> Result<PathB
 }
 
 fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<()> {
-    let (asset_name, url) = find_asset(release, "agent-doc-jetbrains", "zip")?;
-    eprintln!("Found asset: {asset_name}");
+    let asset = find_asset(release, "agent-doc-jetbrains", "zip")?;
+    eprintln!("Found asset: {}", asset.name);
     fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
 
-    let tmp = download_to_temp(url)?;
+    let tmp = download_to_temp(asset.url)?;
+    verify_editor_package(release, &asset, tmp.path())?;
 
     let expected_version = jetbrains_zip_plugin_version(tmp.path())?;
     if let Some(installed_version) = installed_jetbrains_plugin_version(target_dir)
@@ -434,26 +593,42 @@ fn install_jetbrains(release: &Value, plugins_dir: Option<&Path>) -> Result<()> 
 
 // --- VS Code ---
 
-fn detect_code_cmd() -> &'static str {
+/// Resolve the VS Code-family CLI, or `None` when none is installed.
+///
+/// GH #57: this used to return `"code"` after proving all three candidates
+/// absent, so the caller discarded the absence it had just measured and spawned
+/// a binary known to be missing — surfacing as a bare `No such file or
+/// directory (os error 2)` that reads like the *vsix* is missing.
+fn detect_code_cmd() -> Option<&'static str> {
     // Check for cursor first, then codium, then code
-    for cmd in ["cursor", "codium", "code"] {
-        if std::process::Command::new(cmd)
+    ["cursor", "codium", "code"].into_iter().find(|cmd| {
+        std::process::Command::new(cmd)
             .arg("--version")
             .output()
             .is_ok_and(|o| o.status.success())
-        {
-            return cmd;
-        }
-    }
-    "code"
+    })
+}
+
+fn missing_code_cli_message() -> &'static str {
+    "No VS Code-family CLI on PATH: tried `cursor`, `codium`, and `code`. \
+Install the editor's shell command (VS Code / VSCodium: run `Shell Command: Install 'code' command in PATH` from the command palette; Cursor: `Install 'cursor' command`), or put the CLI on PATH, then re-run."
+}
+
+fn require_code_cmd() -> Result<&'static str> {
+    detect_code_cmd().context(missing_code_cli_message())
 }
 
 fn install_vscode(release: &Value) -> Result<()> {
-    let (asset_name, url) = find_asset(release, "agent-doc", "vsix")?;
-    eprintln!("Found asset: {asset_name}");
+    let asset = find_asset(release, "agent-doc", "vsix")?;
+    eprintln!("Found asset: {}", asset.name);
 
-    let tmp = download_to_temp(url)?;
-    let code = detect_code_cmd();
+    // Resolve the prerequisite BEFORE paying for the download (GH #57): a
+    // machine with no `code` CLI used to fetch the whole vsix only to fail on
+    // something knowable up front.
+    let code = require_code_cmd()?;
+
+    let tmp = download_to_temp(asset.url)?;
+    verify_editor_package(release, &asset, tmp.path())?;
 
     let status = std::process::Command::new(code)
         .args(["--install-extension"])
@@ -1050,13 +1225,13 @@ fn install_jetbrains_local_zip_into(
 }
 
 fn install_vscode_local() -> Result<()> {
+    let code = require_code_cmd()?;
     let project_root = find_local_build_dir()?;
     let dist_dir = project_root.join("editors/vscode");
     let vsix = find_local_vscode_vsix(&dist_dir)?;
 
     eprintln!("Installing from local build: {}", vsix.display());
 
-    let code = detect_code_cmd();
     let status = std::process::Command::new(code)
         .args(["--install-extension"])
         .arg(&vsix)
@@ -1220,6 +1395,11 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
+    use super::{
+        EDITOR_PACKAGE_MANIFEST, compare_digest, editor_package_manifest_digest,
+        editor_package_manifest_url, format_rate_limit_reset_at, missing_code_cli_message,
+        parse_asset_digest, verify_editor_package,
+    };
     use super::{
         JetbrainsLocalInstallOutcome, RELEASE_SEARCH_MAX_PAGES, RELEASES_PER_PAGE,
         choose_plugins_dir_with_interactivity, ensure_github_api_success,
@@ -1484,19 +1664,163 @@ mod tests {
         );
     }
 
+    /// Published assets are versioned, which is exactly what the old exact-name
+    /// comparison could not match. Both API orders are asserted: before the fix
+    /// the unsigned-first order passed only because the signed zip happened to
+    /// come back first, so order is the discriminator between a real preference
+    /// and an accident.
     #[test]
     fn find_asset_prefers_signed_variant() {
+        let signed = json!({"name": "agent-doc-jetbrains-0.2.75-signed.zip", "browser_download_url": "https://example.com/signed.zip"});
+        let unsigned = json!({"name": "agent-doc-jetbrains-0.2.75.zip", "browser_download_url": "https://example.com/unsigned.zip"});
+
+        for assets in [
+            json!([unsigned.clone(), signed.clone()]),
+            json!([signed.clone(), unsigned.clone()]),
+        ] {
+            let release = json!({"tag_name": "v0.33.11", "assets": assets});
+            let asset = find_asset(&release, "agent-doc-jetbrains", "zip").unwrap();
+            assert_eq!(asset.name, "agent-doc-jetbrains-0.2.75-signed.zip");
+            assert_eq!(asset.url, "https://example.com/signed.zip");
+        }
+    }
+
+    #[test]
+    fn find_asset_falls_back_to_the_unsigned_package_and_reads_its_digest() {
         let release = json!({
-            "tag_name": "v0.33.11",
+            "tag_name": "v0.35.417",
             "assets": [
-                {"name": "agent-doc-jetbrains-0.2.75.zip", "browser_download_url": "https://example.com/unsigned.zip"},
-                {"name": "agent-doc-jetbrains-signed.zip", "browser_download_url": "https://example.com/signed.zip"}
+                {"name": "SHA256SUMS", "browser_download_url": "https://example.com/sums"},
+                {"name": "agent-doc-jetbrains-0.2.392.zip", "browser_download_url": "https://example.com/jb.zip", "digest": "sha256:abc123"}
             ]
         });
 
-        let (name, url) = find_asset(&release, "agent-doc-jetbrains", "zip").unwrap();
-        assert_eq!(name, "agent-doc-jetbrains-signed.zip");
-        assert_eq!(url, "https://example.com/signed.zip");
+        let asset = find_asset(&release, "agent-doc-jetbrains", "zip").unwrap();
+        assert_eq!(asset.name, "agent-doc-jetbrains-0.2.392.zip");
+        assert_eq!(asset.digest, Some("sha256:abc123"));
+        assert_eq!(parse_asset_digest(asset.digest.unwrap()), Some("abc123"));
+        assert_eq!(parse_asset_digest("md5:abc123"), None);
+        assert_eq!(parse_asset_digest("sha256:"), None);
+    }
+
+    #[test]
+    fn editor_package_manifest_lookup_matches_sha256sum_output() {
+        let manifest = "\
+11112222333344445555666677778888999900001111222233334444555566ab  agent-doc-0.2.71.vsix
+aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetbrains-0.2.392.zip
+";
+        assert_eq!(
+            editor_package_manifest_digest(manifest, "agent-doc-0.2.71.vsix"),
+            Some("11112222333344445555666677778888999900001111222233334444555566ab")
+        );
+        // Binary-mode `*` prefixes are part of the format, not part of the name.
+        assert_eq!(
+            editor_package_manifest_digest(manifest, "agent-doc-jetbrains-0.2.392.zip"),
+            Some("aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd")
+        );
+        assert_eq!(
+            editor_package_manifest_digest(manifest, "agent-doc-0.2.70.vsix"),
+            None
+        );
+    }
+
+    #[test]
+    fn editor_package_manifest_url_is_found_by_exact_name() {
+        let release = json!({
+            "assets": [
+                {"name": "agent-doc-0.2.71.vsix", "browser_download_url": "https://example.com/vsix"},
+                {"name": EDITOR_PACKAGE_MANIFEST, "browser_download_url": "https://example.com/manifest"}
+            ]
+        });
+        assert_eq!(
+            editor_package_manifest_url(&release),
+            Some("https://example.com/manifest")
+        );
+        assert_eq!(editor_package_manifest_url(&json!({"assets": []})), None);
+    }
+
+    #[test]
+    fn digest_mismatch_refuses_the_install() {
+        compare_digest("agent-doc-0.2.71.vsix", "abcd", "abcd", "a manifest").unwrap();
+        compare_digest("agent-doc-0.2.71.vsix", "ABCD", "abcd", "a manifest").unwrap();
+        let err = compare_digest("agent-doc-0.2.71.vsix", "abcd", "ef01", "a manifest")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Integrity check failed"), "{err}");
+        assert!(err.contains("Refusing to install"), "{err}");
+    }
+
+    /// A release with no manifest asset and no API digest still installs, but it
+    /// must say so — silently skipping verification is how the gap survived.
+    #[test]
+    fn a_release_without_any_published_digest_warns_instead_of_verifying() {
+        let dir = TempDir::new().unwrap();
+        let package = dir.path().join("agent-doc-0.2.71.vsix");
+        fs::write(&package, b"payload").unwrap();
+        let release = json!({
+            "assets": [{"name": "agent-doc-0.2.71.vsix", "browser_download_url": "https://example.com/vsix"}]
+        });
+        let asset = find_asset(&release, "agent-doc", "vsix").unwrap();
+        assert!(asset.digest.is_none());
+        verify_editor_package(&release, &asset, &package).unwrap();
+    }
+
+    #[test]
+    fn an_api_digest_that_disagrees_with_the_bytes_refuses_the_install() {
+        let dir = TempDir::new().unwrap();
+        let package = dir.path().join("agent-doc-0.2.71.vsix");
+        fs::write(&package, b"payload").unwrap();
+        let truth = agent_doc_hash::bytes_hash(b"payload");
+
+        let good = json!({
+            "assets": [{"name": "agent-doc-0.2.71.vsix", "browser_download_url": "https://example.com/vsix", "digest": format!("sha256:{truth}")}]
+        });
+        let asset = find_asset(&good, "agent-doc", "vsix").unwrap();
+        verify_editor_package(&good, &asset, &package).unwrap();
+
+        let bad = json!({
+            "assets": [{"name": "agent-doc-0.2.71.vsix", "browser_download_url": "https://example.com/vsix", "digest": "sha256:deadbeef"}]
+        });
+        let asset = find_asset(&bad, "agent-doc", "vsix").unwrap();
+        let err = verify_editor_package(&bad, &asset, &package)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Integrity check failed"), "{err}");
+    }
+
+    #[test]
+    fn the_rate_limit_reset_is_reported_as_a_wait_not_a_bare_epoch() {
+        assert_eq!(
+            format_rate_limit_reset_at("1789999999", 1_789_999_999 - 723),
+            "; resets in 12m 3s (Unix timestamp 1789999999)"
+        );
+        assert_eq!(
+            format_rate_limit_reset_at("1789999999", 1_789_999_999 - 9),
+            "; resets in 9s (Unix timestamp 1789999999)"
+        );
+        assert_eq!(
+            format_rate_limit_reset_at("1789999999", 1_789_999_999),
+            "; the reset is due now (Unix timestamp 1789999999)"
+        );
+        // A clock already past the reset must not underflow into a huge wait.
+        assert_eq!(
+            format_rate_limit_reset_at("1789999999", 1_790_000_600),
+            "; the reset is due now (Unix timestamp 1789999999)"
+        );
+        // Unparseable headers are reported verbatim rather than guessed at.
+        assert_eq!(
+            format_rate_limit_reset_at("soon", 0),
+            "; resets at Unix timestamp soon"
+        );
+    }
+
+    #[test]
+    fn the_missing_code_cli_message_names_the_prerequisite_not_the_vsix() {
+        let message = missing_code_cli_message();
+        assert!(message.contains("cursor"), "{message}");
+        assert!(message.contains("codium"), "{message}");
+        assert!(message.contains("PATH"), "{message}");
+        assert!(!message.contains("No such file or directory"), "{message}");
     }
 
     #[test]
@@ -1876,11 +2200,12 @@ pub fn list() -> Result<()> {
         }
     }
 
-    // VS Code
-    let code = detect_code_cmd();
-    if let Ok(output) = std::process::Command::new(code)
-        .args(["--list-extensions", "--show-versions"])
-        .output()
+    // VS Code. No CLI is not an error here — `list` reports what is installed,
+    // and an absent editor simply contributes nothing.
+    if let Some(code) = detect_code_cmd()
+        && let Ok(output) = std::process::Command::new(code)
+            .args(["--list-extensions", "--show-versions"])
+            .output()
         && output.status.success()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);

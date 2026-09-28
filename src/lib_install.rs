@@ -287,6 +287,15 @@ pub(crate) fn run_paths(
         installed.display(),
         ext,
     );
+    // `#gclibsoninstall` (GH #58): every install writes a new
+    // `libagent_doc-<version>.so` beside the binary, and until now nothing ever
+    // removed the predecessor — 14 superseded libraries / 425 MB on one
+    // workspace, with 11 pid locks naming processes that had long since exited.
+    // Reap here, where the current symlink is freshly correct, so the pile is
+    // bounded by what is actually held rather than by release cadence. Stale
+    // locks go with it: a lock naming a dead PID that is later reused would
+    // otherwise make its version look held forever.
+    crate::lib_gc::gc_libs_after_install(&target);
     // #autorecycle-on-install (upgrades #ctlrecycle R4 from print-only to action):
     // the JetBrains plugin hot-reloads this cdylib by mtime, but already-running
     // agent-doc controllers/supervisors keep serving the PRIOR binary until they

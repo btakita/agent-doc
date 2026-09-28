@@ -546,6 +546,59 @@ Worth flagging for the next head: `#focusstashedactor` is blocked on the **same*
 One pre-existing defect found, not introduced here: `recycle_controller_continues_when_projection_is_unavailable` fails in a full-crate run on a clean baseline (baseline 465 passed/1 failed; this branch 468/1, the +3 being these tests) and passes in isolation — an order-dependent flake. Left alone because it also lives in a file `%241` holds.
 
 Exchange is at 487 lines / 17 sections, over the warn threshold; queue is active so I kept draining rather than pausing to compact.
+
+### Re: do [#focusstashedactor] — opus-5 · 2026-09-27T21:09-04:00
+
+> do [#focusstashedactor]
+
+Done and pushed: `e1c92d821` in `src/agent-doc`.
+
+**The blocker on this item was stale.** It said a sibling session held `agent-doc-controller-io/src/project_controller/rpc.rs` uncommitted. That tree state is still there, but nobody owns it: `rpc.rs` had not been touched since 17:10 (~4h), pane `%241` is parked at a "trust this folder?" prompt, and the only other live agent-doc pane (`%188`) is in `integration/postgres`. The 20-file residue is formatting churn from a differently-configured `cargo fmt` — the same thing `stash@{0} preserve pre-release rustfmt-only residue` was made for. So I committed a hand-built blob (HEAD + my hunks only) and restored the churn afterwards; the working tree is byte-for-byte as I found it, minus my commit.
+
+**The real defect: `#focusstashescalate` shipped unreachable.** The escalation was wired, but it read the columns off the *observation*:
+
+```rust
+if columns.is_empty() { /* log escalation_skipped, return */ }
+```
+
+A plain tab switch publishes `EditorTabSyncListener.buildFocusProjection`, and that payload carries `columns = emptyList()` **by design** — its own doc comment says the narrow per-document payload "must never be mistaken for a one-column layout replacement". `focus_only` is also the *only* surface shape from which `SurfaceTracking::advance` derives `SurfaceIntent::Focus` for a selection. So the guard fired every single time the escalation mattered. The ops.log arithmetic is exact:
+
+| signature | count |
+|---|---|
+| `controller_editor_surface_focus_escalation_skipped ... cause=no_editor_columns` | 47 |
+| `controller_editor_surface_focus_escalated` | **0** |
+| `focused=false reason=actor_pane_not_visible` | 92 |
+
+Zero escalations, ever. The pane stayed stashed across all 92 refusals.
+
+**Fix.** `focus_escalation_columns` resolves the layout from the editor surface when it has one, and otherwise falls back to the structural layout already retained in the pane layout graph — which is the owner this hand-off is addressed to in the first place — republished with the focus moved onto the switched-to document. A document the retained layout does not cover gets its own column, because `exact_visible` would otherwise hide the very pane the escalation exists to un-stash. Skipping is now reserved for having no layout at all, from either source. The escalated receipt gains `source=editor_surface|retained_layout` so the next read of ops.log can tell the two paths apart.
+
+**Verification.** `make check` green: 9900 tests run, 9900 passed, plus clippy and the TLA obligations. Mutation-checked — restoring the empty-columns bail reproduces the production signature verbatim (two `cause=no_editor_columns` lines, no escalation) and reddens the new test. Built and installed (`make install`), pushed, CI's latest run is green.
+
+Remaining is an `[operator-verify]`: switch tabs to a document whose pane is stashed and confirm it actually un-stashes. Watch for `controller_editor_surface_focus_escalated ... source=retained_layout` in ops.log.
+
+### Re: should I restart Idea? — opus-5 · 2026-09-27T21:09-04:00
+
+> should I restart Idea?
+
+No — the strand already cleared, and a restart would cost you a reindex for nothing.
+
+The signature you'd be restarting for is `realtime_doc_resolve_missing_replica_terminal_rebuild_failed` + `disk_read_refused`, which did fire on this document, last at `00:01:27Z`. But the current state contradicts it:
+
+```
+[2026-09-28T00:52:31Z] crdt_commit_barrier file=.../agent-doc-bugs.md
+  authority=multi_replica ready=true visible_delivery_projected=true live_editors=1
+```
+
+`visible_delivery_projected=true` with `live_editors=1` is the receipt that the editor replica is attached and delivery is landing. Surface observations are also still flowing (`jetbrains-pid:2435532`, `accepted=true`, sequence advancing). Nothing is stranded.
+
+If it recurs, the cheap fix is a **tab reopen** of the affected document, not a full IDE restart — the strand is per-document replica registration, and the restart only clears it as a side effect of dropping every registration at once.
+
+One caveat about this specific turn: I ran `make install` while your IDE is attached, which swaps the cdylib under the live plugin. If the document goes quiet after this response, that reload is the likely cause and a tab reopen is the fix.
+
+### Re: `#focussubmodulerecord`'s gate is stale too — opus-5 · 2026-09-27T21:09-04:00
+
+Same evidence retires it: its unblock condition was "pane `%241` commits or releases `rpc.rs`". `rpc.rs` is now committed clean and `%241` is not running anything. I moved it out of `agent:review` and back into actionable backlog so the next drain can rebase and merge `fix/submodule-root-focus` (`381d0d19d`) rather than leaving a gate whose condition is already met.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -555,8 +608,7 @@ Exchange is at 487 lines / 17 sections, over the warn threshold; queue is active
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#focussubmodulerecord]~~
-- do [#focusstashedactor]
+- do [#focusstashedactor
 - Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?
 <!-- /agent:queue -->
 

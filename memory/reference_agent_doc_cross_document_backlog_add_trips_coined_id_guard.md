@@ -31,3 +31,22 @@ write path.
 
 Related: [[reference-agent-doc-coined-id-hook-blocks-c-preprocessor-directives]],
 [[reference-agent-doc-backlog-queue-attribute-required-for-any-mirror]]
+
+## The guard scans the WHOLE Bash command, not just the message file
+
+2026-09-28, committing a Stop-hook fix on `tasks/agent-doc/agent-doc-bugs.md`: an id
+that had been tracked earlier in the session stopped resolving (the document was
+wedged, so nothing could re-file it), and the hook blocked the commit.
+
+The trap is the second attempt. A `python3` heredoc that rewrites the message file to
+*remove* the id is itself blocked — the guard matches the id anywhere in the Bash
+command text, including inside the very script written to strip it. So you cannot
+launder the message in-place; every attempt carries the literal.
+
+**Workaround:** regenerate the message file from a fresh heredoc whose text never
+contains the id at all, then commit in a later call. Reference the prior commit hash
+instead of the id when the work is a follow-up — that stays traceable without coining
+anything. The bare-word workaround above (drop the `#`) also still applies.
+
+Note a `git add` that shares a blocked command never runs: the hook rejects the whole
+call, so re-issue the add before retrying the commit.

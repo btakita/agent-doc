@@ -46,6 +46,14 @@ const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferred_clear";
 const CONTEXT_CLEAR_SOURCE_QUEUE_SLASH: &str = "queue_slash_command";
 const CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET: &str = "supervisor_background_context_reset";
 const ZERO_REPLICA_IDLE_WATCH_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
+/// `#suprecyclespin-staleopencycle`: how many consecutive open-cycle recycle
+/// deferrals pass between orphaned-empty-preflight reclaim attempts. The reclaim
+/// itself is authority-gated and only succeeds once the cycle is stalled past
+/// `STALLED_CYCLE_RESOLVE_SECS`, so attempting on every ~1s tick would emit a
+/// protected receipt per second for the entire life of a live first response.
+/// Throttling keeps that quiet while still reclaiming an orphan well inside a
+/// minute of it becoming eligible.
+const RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL: u32 = 30;
 static ZERO_REPLICA_IDLE_WATCH_LAST_PROBE: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
@@ -1424,6 +1432,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut idle_busy_ticks: u32 = 0;
             let mut ready_busy_ticks: u32 = 0;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
+            // `#suprecyclespin-staleopencycle`: consecutive recycle deferrals on an
+            // open cycle. The orphaned-empty-preflight reclaim is attempted only
+            // once every `RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL` deferrals so a
+            // live first response — correctly `Protected` until it passes the stall
+            // deadline — cannot emit one protected receipt per second.
+            let mut recycle_cycle_open_deferrals: u32 = 0;
             // `#clearcontresume`: consecutive idle-prompt polls observed while a
             // manual clear cooldown is active and a go-mode head is waiting.
             // Used to debounce the cooldown auto-expiry so a resumed drain never
@@ -3406,14 +3420,49 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 );
                 match recycle_action {
                     SupervisorRecycleAction::DeferCycleOpen => {
+                        // `#suprecyclespin-staleopencycle`: an ORPHANED empty
+                        // preflight must not hold the recycle forever. The route
+                        // closeout drain already reclaims exactly this cycle via
+                        // `cancel_empty_preflight_after_owner_release`
+                        // (`#duplicatepreflightunblock`), but a stale supervisor
+                        // deferring at idle never reaches that drain, so nothing
+                        // ever closed the cycle: observed 8752 consecutive
+                        // `supervisor_recycle_deferred_cycle_open` ticks over 77
+                        // minutes on `tasks/agent-doc/agent-doc-bugs.md`, with the
+                        // operator's advertised `admin recycle` equally unable to
+                        // clear it (an explicit recycle defers on this same gate).
+                        //
+                        // This does NOT weaken the `effective_cycle_open`
+                        // interlock, which must never be inferred away from
+                        // elapsed time or a scraped prompt. The reclaim is
+                        // authorized by the durable `closeout_owner_released`
+                        // fact, and the authority additionally requires a
+                        // `preflight_started` phase, no response capture, and a
+                        // cycle stalled past `STALLED_CYCLE_RESOLVE_SECS` — so a
+                        // first response still generating is protected
+                        // (`#suprecyclespin-falseabandon`). A successful reclaim
+                        // closes the cycle, and the next watch tick observes
+                        // `cycle_open == false` and recycles normally.
+                        let attempt_reclaim = recycle_cycle_open_deferrals
+                            .is_multiple_of(RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL);
+                        recycle_cycle_open_deferrals =
+                            recycle_cycle_open_deferrals.saturating_add(1);
+                        let reclaimed = attempt_reclaim
+                            && matches!(
+                                agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(
+                                    &path,
+                                ),
+                                Ok(agent_doc_turn::repair::CancelOutcome::Abandoned)
+                            );
                         agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
-                                "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open (#midturn-recycle-resume)",
+                                "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open reclaimed_empty_preflight={} (#midturn-recycle-resume) (#suprecyclespin-staleopencycle)",
                                 path.display(),
                                 shared.inject_pane.as_deref().unwrap_or("<pty>"),
                                 supervisor_stale,
                                 inflight_handlers,
+                                reclaimed,
                             ),
                         );
                     }
@@ -3430,7 +3479,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             ),
                         );
                     }
-                    _ => {}
+                    _ => {
+                        // A new open-cycle deferral episode attempts the reclaim on
+                        // its first tick rather than waiting out the throttle.
+                        recycle_cycle_open_deferrals = 0;
+                    }
                 }
                 // `#installstrandsreplica`: an install that landed mid-cycle
                 // deferred its `reload_library` fan-out rather than retiring the
@@ -5363,6 +5416,54 @@ mod tests {
                 "idle-watch must not weaken or retire an open cycle via `{forbidden}`"
             );
         }
+    }
+
+    /// `#suprecyclespin-staleopencycle`: an ORPHANED empty preflight must not
+    /// hold a stale supervisor's recycle forever.
+    ///
+    /// Observed 2026-09-28 on `tasks/agent-doc/agent-doc-bugs.md`: `preflight`
+    /// opened `cycle-1790612453335`, the owner durably recorded
+    /// `closeout_owner_released` without ever capturing a response, and the idle
+    /// watch then logged `supervisor_recycle_deferred_cycle_open stale=true
+    /// inflight=0` **8752 consecutive times across 77 minutes**. The operator's
+    /// advertised remedy could not clear it either, because an explicit
+    /// `admin recycle` defers on this identical gate, so the session was pinned
+    /// to a stale binary until a human intervened.
+    ///
+    /// The route closeout drain already reclaims exactly this cycle
+    /// (`#duplicatepreflightunblock`), but a supervisor deferring at idle never
+    /// reaches that drain. Assert the recycle gate carries the same reclaim so a
+    /// future edit cannot silently restore the unbounded spin.
+    #[test]
+    fn recycle_cycle_open_deferral_reclaims_an_orphaned_empty_preflight() {
+        let source = include_str!("idle_watch.rs");
+        // Built from fragments so this guard never matches its own source text.
+        let reclaim = [
+            "cancel_preflight_cycle",
+            "_after_owner",
+            "_release(",
+        ]
+        .concat();
+        assert!(
+            source.contains(&reclaim),
+            "the open-cycle recycle deferral must attempt the owner-released \
+             empty-preflight reclaim, or a stale supervisor blocked by an \
+             orphaned preflight defers forever (#suprecyclespin-staleopencycle)"
+        );
+        // The reclaim must be throttled, not attempted on every ~1s tick: a live
+        // first response is correctly `Protected` until it passes the stall
+        // deadline, and an unthrottled attempt emits one protected receipt per
+        // second for that whole window.
+        assert!(
+            source.contains("RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL"),
+            "the empty-preflight reclaim attempt must be throttled per deferral episode"
+        );
+        // The deferral receipt must say whether it reclaimed, so the 8752-tick
+        // signature is distinguishable from a single benign deferral in ops.log.
+        assert!(
+            source.contains("reclaimed_empty_preflight={}"),
+            "the open-cycle deferral receipt must report the reclaim outcome"
+        );
     }
 
     #[test]

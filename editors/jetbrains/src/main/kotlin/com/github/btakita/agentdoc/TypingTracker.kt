@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
@@ -406,8 +407,22 @@ object TypingTracker : DocumentListener {
         val filePath = file.path
         val application = com.intellij.openapi.application.ApplicationManager.getApplication()
         val closingDocument =
-            if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
+            if (application.isReadAccessAllowed) {
                 FileDocumentManager.getInstance().getDocument(file)
+            } else if (SwingUtilities.isEventDispatchThread()) {
+                // `#edt-no-implicit-read`: being ON the EDT is NOT read access.
+                // Older platforms granted the EDT an implicit read lock, so
+                // `isEventDispatchThread()` was a valid stand-in; modern ones
+                // require an explicit read (or write-intent) action and
+                // `softAssertReadAccess` throws instead. Operator-reported
+                // 2026-09-28 closing a tab: `fileClosed` is delivered on the EDT,
+                // took this branch with `isReadAccessAllowed == false`, and
+                // `FileDocumentManagerBase.getDocument` raised
+                // `Read access is allowed from inside read-action only`.
+                // Take the read action explicitly rather than asserting one.
+                ReadAction.compute<Document?, RuntimeException> {
+                    FileDocumentManager.getInstance().getDocument(file)
+                }
             } else {
                 val applicationEx = application as? ApplicationEx
                 val document = AtomicReference<Document?>()

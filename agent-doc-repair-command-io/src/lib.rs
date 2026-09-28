@@ -99,6 +99,28 @@ pub fn cancel_preflight_cycle_after_run_cancel(
     )
 }
 
+/// Reclaim the empty preflight left behind by an owner the controller proved
+/// RELEASED the cycle.
+///
+/// `#suprecyclespin-staleopencycle`: the supervisor idle-watch recycle gate
+/// needs this same reclaim the route closeout drain already performs. A stale
+/// supervisor whose recycle is blocked by an orphaned empty preflight otherwise
+/// defers on `cycle_open` forever, and `admin recycle` cannot clear it either
+/// because an explicit operator recycle defers on the identical gate.
+///
+/// The underlying authority stays twice-proven: it reclaims only a
+/// `preflight_started` cycle with no response capture that ALSO sat untouched
+/// past `STALLED_CYCLE_RESOLVE_SECS`, so a first response still generating into
+/// a fresh cycle is never abandoned.
+pub fn cancel_preflight_cycle_after_owner_release(
+    file: &Path,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
+        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+        file,
+    )
+}
+
 /// Return the stable operation key only when the durable cycle contains a
 /// non-empty captured response that is eligible for binary-owned closeout.
 pub fn captured_finalize_resume_key(file: &Path) -> Result<Option<CapturedFinalizeResumeKey>> {

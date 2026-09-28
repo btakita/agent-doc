@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.command.CommandProcessor
 import com.intellij.openapi.command.UndoConfirmationPolicy
@@ -2647,8 +2648,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun editorBufferText(filePath: String): String? {
         val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return null
         val application = ApplicationManager.getApplication()
-        if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
+        if (application.isReadAccessAllowed) {
             return FileDocumentManager.getInstance().getDocument(targetFile)?.text
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+            // `#edt-no-implicit-read`: take the read action explicitly; the EDT
+            // does not imply read access on modern IntelliJ platforms. Workers
+            // still use the non-blocking attempt below.
+            return ReadAction.compute<String?, RuntimeException> {
+                FileDocumentManager.getInstance().getDocument(targetFile)?.text
+            }
         }
         val applicationEx = application as? ApplicationEx ?: return null
         val text = AtomicReference<String?>()
@@ -2665,14 +2674,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     /**
      * Native/replica workers must never queue indefinitely behind IDEA's
-     * write-intent permit. EDT callers already own safe editor access; workers
-     * use ApplicationEx's immediate read attempt and let their retained event
-     * retry when a writer has priority.
+     * write-intent permit: they use ApplicationEx's immediate read attempt and let
+     * their retained event retry when a writer has priority.
+     *
+     * `#edt-no-implicit-read`: an EDT caller does **not** already own safe editor
+     * access. Older platforms gave the EDT an implicit read lock, which is why
+     * `isEventDispatchThread()` used to stand in for one; modern platforms require
+     * an explicit read (or write-intent) action and assert otherwise. An EDT caller
+     * therefore takes a real read action here — blocking is correct on the EDT
+     * because write actions also run there, so no writer can hold the lock.
      */
     private fun tryReadDocumentText(document: Document): String? {
         val application = ApplicationManager.getApplication()
-        if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
+        if (application.isReadAccessAllowed) {
             return document.text
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+            return ReadAction.compute<String?, RuntimeException> { document.text }
         }
         val applicationEx = application as? ApplicationEx ?: return null
         val text = AtomicReference<String?>()

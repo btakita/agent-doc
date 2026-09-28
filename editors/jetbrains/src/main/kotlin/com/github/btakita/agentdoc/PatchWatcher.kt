@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.sun.jna.Pointer
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
@@ -147,8 +148,17 @@ class PatchWatcher(private val project: Project) : Disposable {
         // binary retains the intent and can retry when an immediate read is
         // unavailable.
         val application = ApplicationManager.getApplication()
-        if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
+        if (application.isReadAccessAllowed) {
             return FileDocumentManager.getInstance().getDocument(file)?.text
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+            // `#edt-no-implicit-read`: the EDT is not read access on modern
+            // platforms. This does NOT weaken the note above — the native socket
+            // callback runs on a background thread and still takes the
+            // non-blocking `tryRunReadAction` path below.
+            return ReadAction.compute<String?, RuntimeException> {
+                FileDocumentManager.getInstance().getDocument(file)?.text
+            }
         }
         val applicationEx = application as? ApplicationEx ?: return null
         val content = AtomicReference<String?>()

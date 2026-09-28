@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
@@ -156,12 +157,29 @@ class VisualHighlighterManager private constructor(private val project: Project)
         return try {
             val application = ApplicationManager.getApplication()
             val snapshot =
-                if (SwingUtilities.isEventDispatchThread() || application.isReadAccessAllowed) {
+                if (application.isReadAccessAllowed) {
                     if (!isMarkdown(document)) return null
                     VisualDocumentText(
                         text = document.text,
                         modificationStamp = document.modificationStamp,
                     )
+                } else if (SwingUtilities.isEventDispatchThread()) {
+                    // `#edt-no-implicit-read`: the EDT does not carry an implicit
+                    // read lock on modern IntelliJ platforms, so reading
+                    // `document.text` here asserts instead of succeeding. Take the
+                    // read action explicitly. Unlike the background branch below
+                    // this may block, which is correct on the EDT: write actions
+                    // also run on the EDT, so no writer can be holding the lock.
+                    ReadAction.compute<VisualDocumentText?, RuntimeException> {
+                        if (isMarkdown(document)) {
+                            VisualDocumentText(
+                                text = document.text,
+                                modificationStamp = document.modificationStamp,
+                            )
+                        } else {
+                            null
+                        }
+                    } ?: return null
                 } else {
                     val applicationEx = application as? ApplicationEx ?: return null
                     val result = AtomicReference<VisualDocumentText?>()

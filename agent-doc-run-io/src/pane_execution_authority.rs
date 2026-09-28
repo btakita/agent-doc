@@ -146,12 +146,22 @@ pub fn require_in(scope: &DocumentScope, file: &Path) -> Result<AuthorityVerdict
     if verdict.permits() {
         return Ok(verdict);
     }
+    // `#ownerremedyabsolutepath`: the remedy names the document by its ABSOLUTE
+    // path. It used to say only "run the command in the owning pane", so whoever
+    // relayed it supplied the path from the operator's own words — which is how a
+    // relative `agent-doc tasks/infra.md` got recommended for a pane whose cwd
+    // makes that path a DIFFERENT (here, nonexistent) file. Two panes with
+    // different working directories cannot share a relative trigger, and the
+    // owning pane is by definition not the pane the refusal was printed in.
+    let document = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document = document.display();
     match &verdict {
         AuthorityVerdict::RejectLiveOwnerMismatch {
             owner_pane_id,
             invocation_pane_id,
         } => anyhow::bail!(
-            "pane execution authority rejected before mutation: live owner pane {owner_pane_id}, invocation pane {invocation_pane_id}. Run the command in the owning pane; this command did not open or repair a cycle."
+            "{}",
+            live_owner_mismatch_remedy(&document.to_string(), owner_pane_id, invocation_pane_id)
         ),
         AuthorityVerdict::RejectStaleOwner {
             owner_pane_id,
@@ -182,6 +192,24 @@ pub fn require_in(scope: &DocumentScope, file: &Path) -> Result<AuthorityVerdict
     .with_context(|| format!("pane authority for {}", file.display()))
 }
 
+/// The live-owner-mismatch refusal, as one operator-facing sentence.
+///
+/// `#ownerremedyabsolutepath`: extracted so the remedy's one load-bearing
+/// property — that it names the document absolutely — is assertable without a
+/// live tmux server, two panes, and a registered owner.
+pub fn live_owner_mismatch_remedy(
+    document: &str,
+    owner_pane_id: &str,
+    invocation_pane_id: &str,
+) -> String {
+    format!(
+        "pane execution authority rejected before mutation: live owner pane {owner_pane_id}, \
+         invocation pane {invocation_pane_id}. Run `agent-doc {document}` in pane \
+         {owner_pane_id} — use that absolute path, since a relative one resolves against each \
+         pane's own working directory. This command did not open or repair a cycle."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -201,6 +229,39 @@ mod tests {
         assert!(
             !source.contains(&forged_absence),
             "the adapter must not forge owner absence for a headless invocation"
+        );
+    }
+
+    /// `#ownerremedyabsolutepath`: operator-reported 2026-09-28 on
+    /// `src/haiven-dev/tasks/infra.md`. The refusal named no document, so the
+    /// agent relaying it supplied the path from the operator's own words and
+    /// recommended `agent-doc tasks/infra.md` — which, from the refusing pane's
+    /// working directory (the superproject), names a file that does not exist,
+    /// and from the owning pane's (the submodule) names the real one. A remedy
+    /// addressed to a pane with a different working directory cannot use a
+    /// relative path.
+    #[test]
+    fn the_owner_mismatch_remedy_names_the_document_absolutely() {
+        let remedy = super::live_owner_mismatch_remedy(
+            "/home/u/work/agent-loop/src/haiven-dev/tasks/infra.md",
+            "%214",
+            "%231",
+        );
+        assert!(
+            remedy.contains("`agent-doc /home/u/work/agent-loop/src/haiven-dev/tasks/infra.md`"),
+            "the remedy must carry the runnable absolute command: {remedy}"
+        );
+        assert!(
+            remedy.contains("%214") && remedy.contains("%231"),
+            "both panes stay named so the operator can tell them apart: {remedy}"
+        );
+        assert!(
+            !remedy.contains("`agent-doc tasks/"),
+            "no relative form may appear — it is the exact ambiguity this fixes: {remedy}"
+        );
+        assert!(
+            !remedy.contains("claim"),
+            "taking a live owner's session is never offered as a recovery: {remedy}"
         );
     }
 }

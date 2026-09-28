@@ -1654,6 +1654,164 @@ Done.
         );
     }
 
+    /// `#planinactivequeuedone`: the reported shape, which the
+    /// `build_plan_ignores_inactive_queue_edit_as_repo_action` case above does
+    /// NOT cover. There the `do [#id]` line is an ADDITION in the diff, so
+    /// `suppress_inactive_queue_additions` has something to suppress. Here the
+    /// id-backed heads are already in the baseline and the operator's edit is
+    /// the STOP itself — nothing is added, so suppression is a no-op and the
+    /// heads can only reach the plan through the queue-head path.
+    ///
+    /// Observed on `tasks/software/lazily.md` at cycle-1790447018749: preflight
+    /// correctly reported `queue_active: false`,
+    /// `queue_drainable_head_count: 0`, `queue_continuation_required: false` and
+    /// warned `inactive_queue_residue`, while `plan` still emitted
+    /// `repo_actions` for all three inactive heads plus
+    /// `required_commands: agent-doc finalize ... --done ... --done ... --done ...`.
+    /// SKILL.md step 0d makes `required_commands` the execution contract, so
+    /// following it literally marks three unexecuted items complete — including
+    /// an `[operator-verify]` item no agent turn can satisfy. That is a
+    /// false-closeout hazard, not cosmetic drift, which is why the `--done`
+    /// assertion below is the load-bearing one.
+    #[test]
+    fn build_plan_emits_no_done_for_preexisting_heads_when_the_operator_stops_the_queue() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue_active: true
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:queue -->
+- do [#lzfakepublisherproof]
+- do [#lzartifactpurgeexec]
+- do [#lzdocorphanresidue]
+<!-- /agent:queue -->
+
+<!-- agent:backlog queue -->
+- [ ] [#lzfakepublisherproof] Prove the fake publisher.
+- [ ] [#lzartifactpurgeexec] Execute the artifact purge.
+- [ ] [#lzdocorphanresidue] [operator-verify] Clear the doc orphan residue.
+<!-- /agent:backlog -->
+"#;
+        // The operator stops the queue and, in the same edit, appends one more
+        // id-backed head. Both shapes must stay inert: the three pre-existing
+        // heads are not in the diff at all (so suppression has nothing to
+        // suppress and only a content-derived head path could surface them),
+        // and the fourth IS an addition, which is what keeps
+        // `suppress_inactive_queue_additions` load-bearing here.
+        let current = baseline
+            .replace("queue_active: true", "queue_active: false")
+            .replace(
+                "- do [#lzdocorphanresidue]\n<!-- /agent:queue -->",
+                "- do [#lzdocorphanresidue]\n- do [#lzlatehead]\n<!-- /agent:queue -->",
+            )
+            .replace(
+                "- [ ] [#lzdocorphanresidue] [operator-verify] Clear the doc orphan residue.",
+                "- [ ] [#lzdocorphanresidue] [operator-verify] Clear the doc orphan residue.\n- [ ] [#lzlatehead] Added in the same edit that stopped the queue.",
+            );
+        std::fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            plan.repo_actions.is_empty(),
+            "a stopped queue's residue must not become repo actions: {:?}",
+            plan.repo_actions
+        );
+        assert!(
+            plan.pending_mutations.is_empty(),
+            "a stopped queue's residue must not capture pending work: {:?}",
+            plan.pending_mutations
+        );
+        let done_flags: Vec<&String> = plan
+            .required_commands
+            .iter()
+            .filter(|command| command.contains("--done"))
+            .collect();
+        assert!(
+            done_flags.is_empty(),
+            "a plan must never pre-fill `--done` for heads the turn did not \
+             execute — following this literally is a false closeout: {done_flags:?}"
+        );
+    }
+
+    /// The same invariant from the other direction: no document diff at all, so
+    /// `build` reaches the queue-head path (`#planhead`). A stopped queue must
+    /// yield no dispatchable head, and therefore still no `--done`.
+    #[test]
+    fn build_plan_emits_no_done_for_a_stopped_queue_with_no_document_diff() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue_active: false
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:queue -->
+- do [#lzfakepublisherproof]
+- do [#lzartifactpurgeexec]
+<!-- /agent:queue -->
+
+<!-- agent:backlog queue -->
+- [ ] [#lzfakepublisherproof] Prove the fake publisher.
+- [ ] [#lzartifactpurgeexec] Execute the artifact purge.
+<!-- /agent:backlog -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            plan.repo_actions.is_empty(),
+            "a stopped queue has no drainable head: {:?}",
+            plan.repo_actions
+        );
+        let done_flags: Vec<&String> = plan
+            .required_commands
+            .iter()
+            .filter(|command| command.contains("--done"))
+            .collect();
+        assert!(
+            done_flags.is_empty(),
+            "no head was dispatched, so no `--done` may be pre-filled: {done_flags:?}"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn build_plan_downgrades_locked_graph_db_to_manual_packet_only_warning() {

@@ -111,6 +111,26 @@ Its reach config asserts the negation of a save through a still-serving live
 editor and must be violated, proving the fix did not quietly route every document
 through the detached-write path instead.
 
+`PlanClosureContract.tla` checks what a dispatch plan may assert was completed.
+The other modules model liveness wedges — a reachable state with no outgoing
+transition. This one models the opposite: a transition enabled when it should
+not be, whose effect is unrecoverable. A wedge costs time; a false closeout
+marks unexecuted work complete and destroys the evidence it was never done. It
+checks:
+
+- closeout never completes an id the turn did not dispatch;
+- an `[operator-verify]` id, which no agent turn can execute, is never closed;
+- queue residue is not dispatch — "present in the component" earns no `--done`;
+  and
+- a genuinely dispatched head still closes out (the reach obligation, so the
+  safety invariants cannot pass vacuously by never emitting `--done` at all).
+
+Its wedge config derives the contract from the queue prose instead of the
+resolved activity and dispatch state, and must violate — each of the three
+safety invariants independently, which is how the production report read: on a
+queue preflight had already resolved inactive with zero drainable heads, the
+plan emitted three `--done` flags, one of them for an `[operator-verify]` item.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

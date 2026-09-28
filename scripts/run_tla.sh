@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -63,6 +63,11 @@ must_violate=(
     VisibleDeliveryReceipt:VisibleDeliveryReceiptWedge
     VisibleDeliveryReceipt:VisibleDeliveryReceiptBuildMismatchWedge
     VisibleDeliveryReceipt:VisibleDeliveryReceiptReach
+    # The safety counterpart: a plan that pre-fills `--done` for work the
+    # turn did not execute. Wedge proves the dispatch gate is load-bearing;
+    # reach proves the plan still closes a genuinely dispatched head.
+    PlanClosureContract:PlanClosureContractWedge
+    PlanClosureContract:PlanClosureContractReach
     JetBrainsFileCache:JetBrainsFileCacheWedge
     JetBrainsFileCache:JetBrainsFileCacheReach
     # `TransientRefusalLatch` has one wedge PER KNOB rather than one for the

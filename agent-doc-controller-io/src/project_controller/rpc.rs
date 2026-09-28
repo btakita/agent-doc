@@ -3852,9 +3852,24 @@ pub fn schedule_stale_editor_replica_cp_recycle(file: &Path, source: &str) -> St
             // exists to nudge, so session-check stops implying an automatic
             // re-registration is in flight and falls through to disk/committed
             // authority.
+            // `#refusedsaveopaque`: an endpoint that ANSWERED and refused every
+            // route is as terminal as no registration at all — both mean no
+            // editor will serve this document, and the only difference is
+            // whether the refusal was spoken or absent. Reporting the spoken one
+            // as `editor_reregister_primary` told session-check a primary repair
+            // was still in flight, so `src/haiven-dev/tasks/sdk.md` re-requested
+            // a refused re-registration every ~90s with no terminal state.
             let status = if outcome.found == 0 {
                 "request_skipped reason=no_live_editor editor_replica_reregister=no_live_registration"
                     .to_string()
+            } else if matches!(
+                outcome.classify(),
+                agent_doc_crdt_relay_io::ReplicaSignalClass::DefinitivelyRefusedByAll(_)
+            ) {
+                format!(
+                    "request_skipped reason=editor_endpoint_refused editor_replica_reregister={}",
+                    outcome.diagnosis()
+                )
             } else {
                 format!(
                     "request_skipped reason=editor_reregister_primary editor_replica_reregister={}",
@@ -7552,10 +7567,7 @@ fn controller_commit_projection_decision(
 /// former name claimed to `ensure` the save, and session-check repeated that
 /// claim to operators as "the controller has requested the ... save" while no
 /// request had been made.
-fn controller_commit_projection_is_saved(
-    canonical: &Path,
-    barrier_ready: bool,
-) -> Result<bool> {
+fn controller_commit_projection_is_saved(canonical: &Path, barrier_ready: bool) -> Result<bool> {
     let (decision, _) = controller_commit_projection_decision(canonical, barrier_ready)?;
     let ready = decision == ControllerCommitProjectionDecision::Ready;
     if !ready {
@@ -7600,8 +7612,7 @@ fn handle_commit_document_rpc(
     // normalized "already current" comparison deliberately ignores queue-only
     // mutations; skipping this distinct save proof lost queue strikes.
     let barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
-    let disk_projection_ready =
-        controller_commit_projection_is_saved(&canonical, barrier_ready)?;
+    let disk_projection_ready = controller_commit_projection_is_saved(&canonical, barrier_ready)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -9046,11 +9057,8 @@ fn handle_editor_route_rpc(
         layout_invocation.focus.as_deref() == Some(routed_document.as_str()),
         "editor route refused before layout publication: focused document does not match routed document"
     );
-    let (layout_receipt, _route_layout_lease) = handle_editor_route_layout(
-        bootstrap,
-        runtime,
-        layout_invocation,
-    )?;
+    let (layout_receipt, _route_layout_lease) =
+        handle_editor_route_layout(bootstrap, runtime, layout_invocation)?;
     anyhow::ensure!(
         tmux_layout_command_applied(&layout_receipt),
         "editor route layout did not converge before dispatch: {}",
@@ -15631,11 +15639,8 @@ fn run_closeout_owner_claim(
         );
     }
     let ordinary_outcome = current.decide_owner_claim(&claim, current_owner_alive);
-    let outcome = current.decide_owner_claim_with_authorization(
-        &claim,
-        current_owner_alive,
-        &authorization,
-    );
+    let outcome =
+        current.decide_owner_claim_with_authorization(&claim, current_owner_alive, &authorization);
     let retained_handoff = matches!(ordinary_outcome, CloseoutOwnerClaimOutcome::HeldByOther(_))
         && matches!(&outcome, CloseoutOwnerClaimOutcome::Acquired(_));
     if let CloseoutOwnerClaimOutcome::Acquired(owner) = &outcome {
@@ -18941,7 +18946,10 @@ pub(crate) fn handle_tmux_layout_sync_state(
 /// other refusal names a missing actor, session, or pane, which republishing a
 /// layout cannot conjure.
 fn focus_refusal_requires_structural_layout(reason: &str) -> bool {
-    matches!(reason, "actor_pane_not_visible" | "outside_agent_doc_window")
+    matches!(
+        reason,
+        "actor_pane_not_visible" | "outside_agent_doc_window"
+    )
 }
 
 /// The desired-layout columns a focus escalation republishes
@@ -19961,9 +19969,10 @@ fn publish_pinned_captured_finalize_wake_with_hook(
     };
     let snapshot = {
         let mut wakes = runtime.captured_finalize_wakes.lock();
-        if wakes.get(document_hash).is_some_and(|current| {
-            !captured_finalize_wake_should_replace(current, &payload)
-        }) {
+        if wakes
+            .get(document_hash)
+            .is_some_and(|current| !captured_finalize_wake_should_replace(current, &payload))
+        {
             return true;
         }
         wakes.insert(document_hash.to_string(), payload);
@@ -22467,7 +22476,10 @@ fn handle_editor_route_layout<'a>(
     bootstrap: &ControllerBootstrap,
     runtime: &'a ControllerRuntime,
     invocation: ControllerTmuxLayoutSyncInvocation,
-) -> Result<(ControllerTmuxLayoutSyncReceipt, PaneLayoutRouteLeaseGuard<'a>)> {
+) -> Result<(
+    ControllerTmuxLayoutSyncReceipt,
+    PaneLayoutRouteLeaseGuard<'a>,
+)> {
     let (desired, invocation) = publish_pane_layout_desired_invocation(
         bootstrap,
         runtime,
@@ -25926,6 +25938,7 @@ mod tests {
     /// what stalled #tmuxfocussyncverify. Assert the ingress receipt exists for BOTH
     /// outcomes, and that the logged `accepted=` matches the graph's own verdict
     /// rather than a constant.
+    #[test]
     /// The churn half of `#surfaceobservesilent`. Logging every ingress literally
     /// produced a steady 30 lines/min per attached editor at an unchanging
     /// generation — ~43k lines/day, the bulk of an 11.5MB ops.log — which buried
@@ -25938,9 +25951,7 @@ mod tests {
         // First observation of a state always logs.
         assert!(logged("idea|7|true|idle"));
         // Then 1, 2, 4, 8, ... — never every repeat.
-        let steady = (0..64)
-            .filter(|_| logged("idea|7|true|idle"))
-            .count();
+        let steady = (0..64).filter(|_| logged("idea|7|true|idle")).count();
         assert!(
             steady <= 8,
             "a 64-observation steady state must fold to a handful of lines, got {steady}"
@@ -27599,8 +27610,8 @@ mod tests {
         .expect("a cross-root focus must resolve, not error");
         assert!(!receipt.focused, "no actor exists in either root here");
 
-        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             ops.contains("controller_focus_delegated"),
             "the outer controller must record that it re-addressed the request; got:\n{ops}"
@@ -27647,8 +27658,8 @@ mod tests {
         assert!(!receipt.focused);
         assert_eq!(receipt.reason, "missing_actor_record");
 
-        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             !ops.contains("controller_focus_delegated"),
             "a local document must be answered locally; got:\n{ops}"
@@ -29555,12 +29566,8 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
         let doc = dir.path().join("tasks/session.md");
         std::fs::write(&doc, "body\n").unwrap();
-        let cycle = agent_doc_cycle_state_io::start_preflight(
-            &doc,
-            Some("body\n"),
-            Some("body\n"),
-        )
-        .unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
+            .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
 
@@ -29590,9 +29597,7 @@ mod tests {
         });
 
         assert!(
-            result_rx
-                .recv_timeout(Duration::from_millis(200))
-                .is_err(),
+            result_rx.recv_timeout(Duration::from_millis(200)).is_err(),
             "the claim must be waiting behind the held durable writer"
         );
         assert!(

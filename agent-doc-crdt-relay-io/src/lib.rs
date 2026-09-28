@@ -4853,7 +4853,77 @@ impl ReplicaSignalOutcome {
             ReplicaSignalClass::Requested(notified) => format!("requested:{notified}"),
         }
     }
+}
 
+impl ReplicaSignalClass {
+    /// Whether this outcome means no automatic path can converge, so the
+    /// operator must inspect the editor endpoint.
+    ///
+    /// `#refusedsaveopaque`: this question used to be answered by string-matching
+    /// diagnosis tokens at the consumer, and the list named
+    /// `delivery_failed_to_all` and `no_live_registration` while omitting
+    /// `definitively_refused_by_all` — the STRONGEST of the three. "Could not be
+    /// reached" and "nothing is registered" asked the operator to look; "was
+    /// reached, answered, and refused" reported `operator_action=none`. Observed
+    /// 2026-09-28 on `src/haiven-dev/tasks/sdk.md`: `IPC receipt rejected` every
+    /// ~90s against `editor_replica_reregister=definitively_refused_by_all:1`
+    /// while session-check told the operator the controller owned the next
+    /// attempt — true, and useless, because that attempt could never succeed.
+    ///
+    /// Deriving it from the class by exhaustive match is the point: a new class
+    /// cannot default into "nothing to do" by being absent from a token list.
+    ///
+    /// A generation mismatch stays automatic — a library reload clears it, which
+    /// is why [`NonconvergingReplicaDisposition`] also treats it as retryable.
+    pub const fn needs_operator_inspection(self) -> bool {
+        match self {
+            Self::NoLiveRegistration
+            | Self::DeliveryFailedToAll(_)
+            | Self::DefinitivelyRefusedByAll(_) => true,
+            Self::PluginGenerationMismatch(_)
+            | Self::PartiallyRequested { .. }
+            | Self::Requested(_) => false,
+        }
+    }
+
+    /// Recover the class from a [`ReplicaSignalOutcome::diagnosis`] token.
+    ///
+    /// Consumers that only hold the logged string can still ask the typed
+    /// question instead of re-deriving it from substrings. Unknown tokens answer
+    /// `None` rather than guessing a class.
+    pub fn from_diagnosis_token(token: &str) -> Option<Self> {
+        let (name, rest) = match token.split_once(':') {
+            Some((name, rest)) => (name, Some(rest)),
+            None => (token, None),
+        };
+        // `requested` is the one token with two shapes: `requested:N` for a full
+        // fan-out and `requested:N/M` for a partial one. Parsing only the first
+        // number collapsed the partial case into the full one — caught by the
+        // round-trip test, not by reading the code.
+        let counts = |rest: Option<&str>| -> Option<(usize, Option<usize>)> {
+            let rest = rest?;
+            match rest.split_once('/') {
+                Some((notified, found)) => {
+                    Some((notified.parse().ok()?, Some(found.parse().ok()?)))
+                }
+                None => Some((rest.parse().ok()?, None)),
+            }
+        };
+        match name {
+            "no_live_registration" => Some(Self::NoLiveRegistration),
+            "plugin_generation_mismatch" => Some(Self::PluginGenerationMismatch(counts(rest)?.0)),
+            "definitively_refused_by_all" => Some(Self::DefinitivelyRefusedByAll(counts(rest)?.0)),
+            "delivery_failed_to_all" => Some(Self::DeliveryFailedToAll(counts(rest)?.0)),
+            "requested" => match counts(rest)? {
+                (notified, Some(found)) => Some(Self::PartiallyRequested { notified, found }),
+                (notified, None) => Some(Self::Requested(notified)),
+            },
+            _ => None,
+        }
+    }
+}
+
+impl ReplicaSignalOutcome {
     /// What to do with the non-converging replica this signal was sent for.
     pub fn nonconverging_disposition(&self) -> NonconvergingReplicaDisposition {
         match self.classify() {
@@ -4865,9 +4935,7 @@ impl ReplicaSignalOutcome {
             }
             ReplicaSignalClass::NoLiveRegistration
             | ReplicaSignalClass::PluginGenerationMismatch(_)
-            | ReplicaSignalClass::DeliveryFailedToAll(_) => {
-                NonconvergingReplicaDisposition::Retry
-            }
+            | ReplicaSignalClass::DeliveryFailedToAll(_) => NonconvergingReplicaDisposition::Retry,
         }
     }
 }
@@ -5087,6 +5155,105 @@ pub fn route_disk_change_signal_with(
 
 #[cfg(test)]
 mod tests {
+    /// `#refusedsaveopaque`: the three not-yet-served outcomes are not equally
+    /// weak. "Was reached, answered, and REFUSED" is the strongest evidence that
+    /// no automatic attempt can converge — stronger than "could not be reached"
+    /// and stronger than "nothing is registered", both of which may be transient
+    /// or a race. The shipped predicate surfaced an operator action for the two
+    /// weaker ones and reported `operator_action=none` for the strongest,
+    /// because it matched diagnosis STRINGS and its list happened to name those
+    /// two tokens. Observed 2026-09-28 on `src/haiven-dev/tasks/sdk.md`: an
+    /// `IPC receipt rejected` against `definitively_refused_by_all:1` every ~90s
+    /// while session-check told the operator the controller owned the next
+    /// attempt. Formal dual: `formal/tla/RefusedSaveOperatorAction.tla`.
+    #[test]
+    fn an_answered_refusal_is_never_weaker_evidence_than_an_unreachable_endpoint() {
+        use super::ReplicaSignalClass;
+        assert!(
+            ReplicaSignalClass::DefinitivelyRefusedByAll(1).needs_operator_inspection(),
+            "an endpoint that answered and refused must ask the operator to look"
+        );
+        // The two that already did, kept — the fix orders the evidence, it does
+        // not trade one signal for another.
+        assert!(ReplicaSignalClass::NoLiveRegistration.needs_operator_inspection());
+        assert!(ReplicaSignalClass::DeliveryFailedToAll(2).needs_operator_inspection());
+
+        // And the outcomes that genuinely do resolve themselves stay quiet, or
+        // the signal carries no information when it matters: an operator told to
+        // inspect the endpoint on every ordinary retry learns nothing from being
+        // told it during a real refusal.
+        assert!(!ReplicaSignalClass::Requested(1).needs_operator_inspection());
+        assert!(
+            !ReplicaSignalClass::PartiallyRequested {
+                notified: 1,
+                found: 2
+            }
+            .needs_operator_inspection()
+        );
+        assert!(
+            !ReplicaSignalClass::PluginGenerationMismatch(1).needs_operator_inspection(),
+            "a library reload clears a generation fence, so it is not an operator's problem"
+        );
+    }
+
+    /// The consumer holds only the logged diagnosis string, so the token must
+    /// round-trip back to the class that produced it — otherwise the typed
+    /// question silently degrades to the string matching it replaced.
+    #[test]
+    fn every_diagnosis_token_round_trips_to_the_class_that_wrote_it() {
+        use super::{ReplicaSignalClass, ReplicaSignalOutcome};
+        for (found, notified, refusals, mismatches, expected) in [
+            (
+                0usize,
+                0usize,
+                0usize,
+                0usize,
+                ReplicaSignalClass::NoLiveRegistration,
+            ),
+            (1, 0, 1, 0, ReplicaSignalClass::DefinitivelyRefusedByAll(1)),
+            (2, 0, 0, 0, ReplicaSignalClass::DeliveryFailedToAll(2)),
+            (
+                2,
+                1,
+                0,
+                0,
+                ReplicaSignalClass::PartiallyRequested {
+                    notified: 1,
+                    found: 2,
+                },
+            ),
+            (1, 1, 0, 0, ReplicaSignalClass::Requested(1)),
+        ] {
+            let outcome = ReplicaSignalOutcome {
+                found,
+                notified,
+                definitive_refusals: refusals,
+                generation_mismatches: mismatches,
+                build_mismatches: Vec::new(),
+            };
+            assert_eq!(outcome.classify(), expected, "classify {found}/{notified}");
+            let token = outcome.diagnosis();
+            assert_eq!(
+                ReplicaSignalClass::from_diagnosis_token(&token),
+                Some(expected),
+                "token `{token}` must parse back to the class that wrote it"
+            );
+            assert_eq!(
+                ReplicaSignalClass::from_diagnosis_token(&token)
+                    .is_some_and(ReplicaSignalClass::needs_operator_inspection),
+                expected.needs_operator_inspection(),
+                "the consumer's composed question must match the class's own answer for `{token}`"
+            );
+        }
+        // An unrecognized token answers `None` rather than guessing a class —
+        // and `None` must not read as "nothing to do" by accident, which is why
+        // the consumer composes it with `is_some_and`.
+        assert_eq!(
+            ReplicaSignalClass::from_diagnosis_token("something_new"),
+            None
+        );
+    }
+
     /// `#missingreplicanoise`: the defect was that a benign probe miss and a
     /// genuinely exhausted recovery printed the SAME bytes, so the needle could
     /// not be grepped out of ~988 benign lines a day. The property under test is
@@ -5390,10 +5557,11 @@ mod tests {
     /// stayed in `FailClosed`, and the replica could never be rebuilt.
     #[test]
     fn an_exhausted_build_mismatch_is_a_definitive_answer() {
-        let handshake = anyhow::Error::new(agent_doc_ipc_protocol::IpcHandshakeError::BuildMismatch {
-            expected: "0.35.418+1790545416".to_string(),
-            received: "0.35.418+1790563363".to_string(),
-        });
+        let handshake =
+            anyhow::Error::new(agent_doc_ipc_protocol::IpcHandshakeError::BuildMismatch {
+                expected: "0.35.418+1790545416".to_string(),
+                received: "0.35.418+1790563363".to_string(),
+            });
         let exhausted = handshake.context(
             "IPC build mismatch recovery failed to deliver reload_library: \
              failed to connect to IPC socket: No such file or directory (os error 2)",
@@ -5445,15 +5613,14 @@ mod tests {
     /// pins the mapping in both directions.
     #[test]
     fn only_a_definitive_refusal_drops_a_replica_from_the_delivery_cut() {
-        let outcome = |found, notified, generation_mismatches, definitive_refusals| {
-            ReplicaSignalOutcome {
+        let outcome =
+            |found, notified, generation_mismatches, definitive_refusals| ReplicaSignalOutcome {
                 found,
                 notified,
                 build_mismatches: Vec::new(),
                 generation_mismatches,
                 definitive_refusals,
-            }
-        };
+            };
 
         assert_eq!(
             outcome(1, 0, 0, 1).nonconverging_disposition(),
@@ -5518,7 +5685,9 @@ mod tests {
                             == NonconvergingReplicaDisposition::DropFromDeliveryCut;
                         assert_eq!(
                             drops,
-                            outcome.diagnosis().starts_with("definitively_refused_by_all:"),
+                            outcome
+                                .diagnosis()
+                                .starts_with("definitively_refused_by_all:"),
                             "disposition must drop exactly when the token says \
                              every live route refused (found={found} \
                              notified={notified} mismatches={generation_mismatches} \

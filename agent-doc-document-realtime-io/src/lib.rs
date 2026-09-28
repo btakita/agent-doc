@@ -1556,13 +1556,26 @@ fn canonical_editor_projection_is_persisted(
     // no-force-disk contract: a retained write still commits itself once
     // delivery converges, and disk fallback remains forbidden. It changes only
     // whether the operator can tell the two states apart.
-    let operator_action = if save_diagnosis.starts_with("delivery_failed_to_all")
-        || save_diagnosis == "no_live_registration"
-    {
-        "inspect_editor_endpoint"
-    } else {
-        "none"
-    };
+    // `#refusedsaveopaque`: this predicate used to string-match the diagnosis and
+    // its list named `delivery_failed_to_all` and `no_live_registration` while
+    // omitting `definitively_refused_by_all` — the STRONGEST of the three. So
+    // "could not be reached" and "nothing is registered" asked the operator to
+    // look, and "was reached, answered, and REFUSED" reported
+    // `operator_action=none`. Observed 2026-09-28 on
+    // `src/haiven-dev/tasks/sdk.md`: an `IPC receipt rejected` against
+    // `definitively_refused_by_all:1` every ~90s while session-check told the
+    // operator the controller owned the next attempt — true, and useless,
+    // because that attempt could never succeed. Ask the typed class instead, so
+    // a token this predicate has never heard of cannot silently mean "nothing to
+    // do".
+    let operator_action =
+        if agent_doc_crdt_relay_io::ReplicaSignalClass::from_diagnosis_token(&save_diagnosis)
+            .is_some_and(agent_doc_crdt_relay_io::ReplicaSignalClass::needs_operator_inspection)
+        {
+            "inspect_editor_endpoint"
+        } else {
+            "none"
+        };
     agent_doc_ops_log_io::log_op(
         path,
         &format!(

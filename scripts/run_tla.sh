@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -105,6 +105,14 @@ must_violate=(
     # The hook's other refusal path, kept separate because its bound is a
     # different fact: within-stop (`stop_hook_active`) rather than cross-turn.
     # Modelling them together would let one bound stand in for the other.
+    # `#refusedsaveopaque`: an endpoint that ANSWERED and refused every route
+    # reported `operator_action=none`, so a retained write that could never
+    # converge was indistinguishable from one in flight. Wedge proves the
+    # terminal classification is what carries the invariant; Reach proves the
+    # fix did not satisfy it by telling the operator to inspect the endpoint on
+    # every ordinary retry.
+    RefusedSaveOperatorAction:RefusedSaveOperatorActionWedge
+    RefusedSaveOperatorAction:RefusedSaveOperatorActionReach
     StopHookFailClosed:StopHookFailClosedWedge
     StopHookFailClosed:StopHookFailClosedReach
 )

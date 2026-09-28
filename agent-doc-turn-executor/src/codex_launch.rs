@@ -18,6 +18,26 @@ pub const CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER: &str = "AGENT_DOC_WRITABLE_ROO
 pub const OPENCODE_CHILD_SSH_PROBE_MARKER: &str = "AGENT_DOC_OPENCODE_SSH_PROBE_OK";
 const CODEX_TEXT_FILE_BUSY_RETRIES: usize = 3;
 
+/// Codex TUI flag that runs the conversation in its own app-server instead of
+/// the shared background daemon.
+pub const CODEX_NO_DAEMON_FLAG: &str = "--no-daemon";
+
+/// Run an agent-doc-launched Codex TUI on its own app-server.
+///
+/// Codex 0.158 attaches every TUI to one shared `codex app-server` daemon, and
+/// that daemon — not the TUI — spawns hooks and tool commands. They inherit the
+/// daemon's environment, so `TMUX_PANE` names whichever pane happened to start
+/// the daemon. Observed 2026-09-28: `agent-doc tasks/infra.md` typed into pane
+/// `%12`, the document's own owner, was refused as coming from pane `%3`, because
+/// the daemon had been started by the Codex TUI in `%3`. Pane execution
+/// authority is proven from `TMUX_PANE`, so a pane-bound harness must not share
+/// a daemon. `--no-daemon` is accepted by both a fresh launch and `codex resume`.
+pub fn ensure_codex_no_daemon(args: &mut Vec<String>) {
+    if !args.iter().any(|arg| arg == CODEX_NO_DAEMON_FLAG) {
+        args.push(CODEX_NO_DAEMON_FLAG.to_string());
+    }
+}
+
 pub fn default_base_args() -> Vec<String> {
     vec![
         "exec".to_string(),

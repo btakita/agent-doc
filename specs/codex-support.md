@@ -109,6 +109,8 @@ Managed Codex instructions and generated prompt context must also scope remote-h
 
 For resumed Codex sessions, agent-doc must not pass legacy sandbox flags through blindly. `codex resume` / `codex exec resume` policy is expressed with `-c sandbox_mode="..."`; supervisor restart and backend resume paths translate `-s <SANDBOX>` / `--sandbox=<SANDBOX>` into that form, strip `--add-dir` entries that resume cannot accept, and fail closed on malformed or conflicting sandbox args before a resumed session can run task work. A direct backend turn that has a saved Codex resume id but whose current launch args require `--add-dir` roots must fresh-start with the full root set, because resume cannot add missing git metadata roots. This prevents a document requesting `danger-full-access` or extra writable roots from silently resuming under Codex's older launch policy.
 
+Every agent-doc-launched Codex TUI runs with `--no-daemon` — fresh, exact resume, and supervisor restart alike. Codex otherwise attaches each TUI to one shared `codex app-server` daemon, and the daemon, not the TUI, spawns hooks and tool commands, so they inherit the daemon's `TMUX_PANE`: the pane that happened to start it. Pane execution authority is proven from `TMUX_PANE`, so a shared daemon makes a document's own owner pane look like a foreign invocation (observed: `agent-doc tasks/infra.md` typed into its owner `%12` refused as coming from `%3`). An operator-supplied `--no-daemon` is not duplicated.
+
 Key differences from Claude Code:
 - No `-p` (pipe mode) — `exec` is the non-interactive equivalent
 - No `--permission-mode` — uses `-s` sandbox mode instead

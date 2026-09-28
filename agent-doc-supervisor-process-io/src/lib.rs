@@ -416,6 +416,12 @@ pub fn build_harness_launch_spec_with_resume(
     if harness.supports_no_mcp && fm.no_mcp.unwrap_or(false) {
         base_args.push("--no-mcp".into());
     }
+    // Before `fresh_base_args` so fresh, restart and exact-resume launches all
+    // carry it: a shared Codex daemon makes every pane's hooks report the pane
+    // that started the daemon, and pane authority then refuses the real owner.
+    if harness.binary == "codex" {
+        agent_doc_turn_executor::codex_launch::ensure_codex_no_daemon(&mut base_args);
+    }
     let fresh_base_args = base_args.clone();
 
     // Resume only an exact document-bound conversation. In particular, Codex
@@ -682,6 +688,75 @@ mod tests {
             ]
         );
         assert!(!spec.capability_proof_required);
+    }
+
+    /// A shared Codex daemon spawns every pane's hooks with the TMUX_PANE of
+    /// whichever pane started it, so pane authority refused the document's own
+    /// owner (`infra.md` in `%12` reported as `%3`). Every Codex launch shape —
+    /// fresh, exact resume, and the supervisor's restart — must run unshared.
+    #[test]
+    fn codex_launch_runs_its_own_app_server_in_every_shape() {
+        let dir = TempDir::new().unwrap();
+        let document = dir.path().join("infra.md");
+        let config = agent_doc_config::Config::default();
+        let has_no_daemon = |args: &[String]| {
+            args.iter()
+                .filter(|arg| arg.as_str() == "--no-daemon")
+                .count()
+                == 1
+        };
+
+        let (fresh_fm, _) =
+            frontmatter::parse("---\nagent: codex\ncodex_args: -s danger-full-access\n---\n")
+                .unwrap();
+        let fresh = build_harness_launch_spec(
+            &fresh_fm,
+            &config,
+            &document,
+            &mut RecordingLaunchLog::default(),
+        )
+        .unwrap();
+        assert!(has_no_daemon(&fresh.base_args), "{:?}", fresh.base_args);
+        let restart = fresh.harness.restart_args(&fresh.fresh_base_args).unwrap();
+        assert!(has_no_daemon(&restart), "{restart:?}");
+
+        let (resume_fm, _) = frontmatter::parse(
+            "---\nagent: codex\ncodex_args: -s danger-full-access\nresume:\n  codex: codex-thread\n---\n",
+        )
+        .unwrap();
+        let resumed = build_harness_launch_spec_with_resume(
+            &resume_fm,
+            &config,
+            &document,
+            &mut RecordingLaunchLog::default(),
+            Some(&agent_doc_harness::ResumeRequest::Latest),
+        )
+        .unwrap();
+        assert!(resumed.base_args.iter().any(|arg| arg == "codex-thread"));
+        assert!(has_no_daemon(&resumed.base_args), "{:?}", resumed.base_args);
+
+        // An operator who already passes the flag does not get it twice.
+        let (explicit_fm, _) =
+            frontmatter::parse("---\nagent: codex\ncodex_args: --no-daemon\n---\n").unwrap();
+        let explicit = build_harness_launch_spec(
+            &explicit_fm,
+            &config,
+            &document,
+            &mut RecordingLaunchLog::default(),
+        )
+        .unwrap();
+        assert!(has_no_daemon(&explicit.base_args), "{:?}", explicit.base_args);
+
+        // Other harnesses have no such flag.
+        let (claude_fm, _) = frontmatter::parse("---\nagent: claude\n---\n").unwrap();
+        let claude = build_harness_launch_spec(
+            &claude_fm,
+            &config,
+            &document,
+            &mut RecordingLaunchLog::default(),
+        )
+        .unwrap();
+        assert!(!claude.base_args.iter().any(|arg| arg == "--no-daemon"));
     }
 
     #[test]

@@ -485,6 +485,34 @@ I stopped short of fixing either, for one reason each. `actor_pane_not_visible` 
 ---
 
 **One note on this turn's verification.** Every `make check` I ran was green — final run exit 0, nextest runner-native `9892 tests run: 9892 passed`, 259 skipped, zero `result: FAILED`, and all seven TLA non-vacuity obligations confirmed. But it ran over a shared tree holding ~20 uncommitted files from the sibling session, including `rpc.rs` and `project_controller.rs`. So it proves my changes work *alongside* theirs, not that `HEAD` is green on its own. I staged every shared file as a hand-built blob of `HEAD` plus only my own hunks, so nothing of theirs was swept into my three commits — but CI on `HEAD` is the check that actually settles it.
+
+### Re: do [#activateinstalledjetbrai] — opus-5 · 2026-09-27T19:58-04:00
+
+> **Queue prompt:**
+>
+> do [#activateinstalledjetbrai]: automate the verification
+
+Automation done and committed: `2bcf269c7` (submodule, pushed) + `850c537a3` (plan records). The live proof did **not** pass, and the reason is worth more than the automation was.
+
+**What was actually still manual.** The receipt evaluation was already automated (`verify-captured-splice-recovery`, `0cd957382`) and so was the driver recipe (`case_captured_splice`). The thing keeping this item off the agent's hands was one line: `require_window` *died* telling a human to open the scratch doc in IntelliJ first — "this harness drives an already-open editor; it does not launch the IDE". The running IDE will open a file on request, so the harness now does that itself (`$AGENT_DOC_IDE_LAUNCHER`, else `idea`) and polls for the window. Proven live: `asking the running IDE to open it (idea)` → `resolved scratch editor window 81789184`.
+
+The open is refused for any path outside `.agent-doc/live-repro/`, asserted in both directions, because an IDE-open of a real working doc is the same class of mistake the focus guard already exists to prevent. A cold IDE is still never launched.
+
+**The stale gate the plan was holding.** `plan-captured-editor-splice-recovery.md` recorded "IntelliJ still advertises plugin 0.2.376" as the blocking prerequisite. That is no longer true — `live_plugin_generation_refresh` for this document reports `running=0.2.431 expected=0.2.431 stale=false`. The gate was cleared and nothing had retired it.
+
+**Why the live run still failed, and the second defect it exposed.** The canonical-advance step was rejected: `pane execution authority rejected before mutation: live owner pane %241, invocation pane %231`. Pane `%241` is a live agent-doc session whose cwd *is* `src/agent-doc`, so it owns that repo's controller; this session can never advance a response under that root. The verifier then said exactly the right thing — no `controller_crdt_current_text` receipts with `source=captured-local-splice-recovery`, so "the captured-local-splice-recovery path never ran, so there is nothing for an operator edit to have recovered across." That is the verifier working, not failing.
+
+The defect is the **ordering**: the harness injected keystrokes into your live desktop and only *then* discovered it had no authority to finish. A live side effect for a recipe that could never complete. `assert_pane_authority` now fails closed before any desktop contact and names the owning pane. It is read-only and tmux-native on purpose — `agent-doc route` dispatches rather than reports, so there is no read-only authority query to call.
+
+**Also fixed while in there.** `--dry-run` no longer needs a live desktop; it prints the whole recipe against a placeholder window, and `wait_for_marker` polls once instead of burning the timeout for a marker dry-run cannot produce. 30s → 0.02s.
+
+**Verification, and one thing I did not run.** `bash -n`; the IDE-open proven live; the authority guard refuses before typing and names `%241`, stays **silent** on a repo no agent-doc pane owns (negative control — otherwise it would just block everything), and warns-but-continues under `--dry-run`; the live-repro path guard asserted both ways. My first test harness was wrong and I caught it: sourcing the script also ran `main`, so every `exit=2` came from the harness, and a "PASS: refused" was read off the wrong exit status — the guard message had never fired. Rebuilt against a copy with the `main` call stripped.
+
+I did **not** run `make check`. No Rust changed, and this tree carries 20 other uncommitted Rust files from the session in `%241`; a green there would have described that work, not mine. Both commits are scoped with `--only` for the same reason.
+
+`#activateinstalledjetbrai` closes as done — "automate the verification" is what it asked, and that is complete. The live proof is now a distinct, genuinely blocked item at the top of the backlog: it needs driving from the owning pane, not a human eyeball. Re-resolve the owner before running; `%241` was current at the time of writing.
+
+Exchange is at 459 lines / 16 sections, over the warn threshold, but the queue is active so I kept draining rather than pausing to compact.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -495,15 +523,17 @@ I stopped short of fixing either, for one reason each. `actor_pane_not_visible` 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#fixrunmonsterrodholders]~~
-- do [#activateinstalledjetbrai]: automate the verification
+- ~~do [#activateinstalledjetbrai]: automate the verification~~
+- do [#focussubmodulerecord]
+- do [#focusstashedactor]
 - Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#drivecapturedsplice] [agent-doc] Drive the captured-splice live proof from the pane that OWNS the src/agent-doc controller. The automation is complete (scripts/xdotool-live-verify.sh captured-splice opens the scratch doc itself and the binary decides the receipts); the run is blocked only by pane execution authority —  is refused from a non-owning pane, so the canonical-advance step never runs and the verifier correctly reports that captured-local-splice-recovery never ran. Repro: from a pane that is not the owner, the harness now fails closed naming the owning pane instead of typing into a live desktop. Run it from the owning pane (pane %241 held src/agent-doc at the time of writing; re-resolve before running) and expect a splice-recovery status=current read, an editor_op_capture_proof with operator_ops>=1 and shadow_replay=agreed, then a later status=current read with a different text_hash. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [ ] [#focussubmodulerecord] [agent-doc] Focus a submodule document to the right tmux pane. `controller_editor_surface_focus_outcome ... focused=false reason=missing_actor_record pane=-` fired 13x, and 11 of those are submodule documents (devops.md, infra.md, docs.md). Those submodules carry their own `.agent-doc/`, so the actor record lives in the SUBMODULE controller store while the focus request reaches the superproject controller (`doc=agent-loop`), which correctly answers "no record" — so focus lands nowhere and the previous pane keeps it. Decide the routing: forward the focus request to the owning submodule controller, or have the superproject controller learn submodule actor records. Evidence: .agent-doc/logs/ops.log, grep controller_editor_surface_focus_outcome.
 - [ ] [#focusstashedactor] [agent-doc] Focus a stashed actor pane instead of declining. `controller_editor_surface_focus_outcome ... focused=false reason=actor_pane_not_visible` fired 42x on superproject documents: the pane exists but is stashed, and focus declines rather than un-stashing it. Routes through `focus_refusal_requires_structural_layout` in agent-doc-controller-io/src/project_controller/rpc.rs. BLOCKED ON A CONCURRENT SESSION: as of 2026-09-27 17:00 a sibling agent-doc session holds that exact function uncommitted in the shared tree; do not edit it until that lands (never two agents in one repo region).
-- [ ] [#activateinstalledjetbrai] [agent-doc] Prove captured local editor edits recover across an independently advanced canonical response. The VERIFICATION IS NOW AUTOMATED (0cd957382): `agent-doc verify-captured-splice-recovery <FILE>` decides it from receipts — a splice-recovery `status=current` read, then an `editor_op_capture_proof` with `operator_ops>=1` and `shadow_replay=agreed`, then a later `status=current` read with a different `text_hash`; every failure names its missing link. Do NOT reason from `editor_op_epoch_closed cause=` — `non_operator_projection` is that field s only possible value, so it discriminates nothing (the verifier says so in its failure text). Remaining step is one live driver run: `scripts/xdotool-live-verify.sh captured-splice`, which injects real keystrokes into the operator s desktop and runs a response cycle between two operator edits. Agent-executable, but confirm with the operator first because it types into a live session. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 <!-- /agent:backlog -->
 
 ## Review

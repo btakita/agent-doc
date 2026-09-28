@@ -53,6 +53,14 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
         agent_doc_closeout_runtime_io::closeout_effects().cancel_preflight_cycle(file)
     }
 
+    fn cancel_preflight_cycle_after_owner_release(
+        &self,
+        file: &Path,
+    ) -> Result<agent_doc_turn::repair::CancelOutcome> {
+        agent_doc_closeout_runtime_io::closeout_effects()
+            .cancel_preflight_cycle_after_owner_release(file)
+    }
+
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool> {
         agent_doc_closeout_runtime_io::closeout_effects()
             .detect_jb_cache_conflict_cancel_recoverable(file)

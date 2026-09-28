@@ -673,6 +673,75 @@ mod tests {
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
     }
 
+    /// `#suprecyclespin-staleopencycle`: `repair --apply-recovery` must be able to
+    /// clear an ORPHANED empty preflight.
+    ///
+    /// `apply_closeout_recovery` asked only `cancel_preflight_cycle`, which carries
+    /// `Unproven` authority and therefore refused an orphan exactly as it refuses a
+    /// live cycle — reporting "cancellation was not proven" and recommending the
+    /// operator cancel the harness run. On the pane that OWNS the document that
+    /// remedy interrupts the very turn asking for it, so a stale supervisor blocked
+    /// by this cycle had no non-destructive exit. Observed 2026-09-28 on
+    /// `tasks/agent-doc/agent-doc-bugs.md`.
+    #[test]
+    fn apply_closeout_recovery_abandons_a_stalled_orphan_empty_preflight() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        age_cycle_state(
+            &doc,
+            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS + 1,
+        );
+
+        let applied = agent_doc_flow_io::closeout::apply_closeout_recovery(
+            &doc,
+            &agent_doc_closeout_runtime_io::closeout_effects(),
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                applied,
+                agent_doc_flow_io::closeout::RecoveryApplication::Applied { .. }
+            ),
+            "a stalled orphan empty preflight must be reclaimable without \
+             interrupting the owning pane, got {applied:?}"
+        );
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
+    }
+
+    /// The same escalation must NOT overtake a live first response: a fresh empty
+    /// preflight is the normal state while a model is still generating, so
+    /// `repair --apply-recovery` keeps refusing it (`#suprecyclespin-falseabandon`).
+    #[test]
+    fn apply_closeout_recovery_protects_a_fresh_empty_preflight() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let applied = agent_doc_flow_io::closeout::apply_closeout_recovery(
+            &doc,
+            &agent_doc_closeout_runtime_io::closeout_effects(),
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                applied,
+                agent_doc_flow_io::closeout::RecoveryApplication::NotApplied { .. }
+            ),
+            "a fresh empty preflight may still be generating its first response, \
+             got {applied:?}"
+        );
+        assert_ne!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::Abandoned,
+        );
+    }
+
     /// Release alone must NOT reclaim: the route drain's projection await also
     /// reports `OwnerReleased` when there was no owner to release, and that is
     /// indistinguishable from a fresh cycle whose model has not answered yet.

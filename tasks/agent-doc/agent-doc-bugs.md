@@ -513,6 +513,39 @@ I did **not** run `make check`. No Rust changed, and this tree carries 20 other 
 `#activateinstalledjetbrai` closes as done — "automate the verification" is what it asked, and that is complete. The live proof is now a distinct, genuinely blocked item at the top of the backlog: it needs driving from the owning pane, not a human eyeball. Re-resolve the owner before running; `%241` was current at the time of writing.
 
 Exchange is at 459 lines / 16 sections, over the warn threshold, but the queue is active so I kept draining rather than pausing to compact.
+
+### Re: do [#focussubmodulerecord] — opus-5 · 2026-09-27T20:35-04:00
+
+> **Queue prompt:**
+>
+> do [#focussubmodulerecord]
+
+Implemented, formally validated, committed — `381d0d19d` on `fix/submodule-root-focus` (pushed). Gated rather than done for one reason only: it cannot be landed yet, and landing it now would silently lose it.
+
+**Your diagnosis in this item was right, including the part I could confirm.** `handle_focus_document_pane_with_policy` read *three* bindings under `bootstrap.project_root` — the canonical document id, the actor record, and the session-registry entry. A submodule document registers all three under its own root, so every lookup hit a project holding no binding and focus answered `missing_actor_record` with `pane=-`, leaving the previous pane focused. Top-level documents were untouched, which is exactly why this read as flaky rather than structural.
+
+**Of the two routings the item posed, this takes the second** — teach the superproject controller to read submodule actor records, rather than forwarding to the owning controller. Forwarding is the cleaner architecture but a much larger change; reading the nested project's durable sink is minimal and sufficient, because the nested controller owns the reactive store and this controller's runtime legitimately never holds that actor.
+
+`focus_document_lookup_root` resolves the nearest enclosing `.agent-doc` project, **bounded at-or-below the controller root**, so resolution can never steer focus into another project's state. A non-nested document returns the controller root and keeps its exact previous code path — the fix cannot perturb what already worked.
+
+**Formal validation, since you asked for it.** `formal/tla/SubmoduleFocusRoot.tla`, registered in `run_tla.sh`, checks the bounded-escape guard, behavior preservation, no-foreign-focus, and liveness. Both non-vacuity obligations are registered and confirmed by the harness:
+
+```
+[tla] non-vacuity confirmed: SubmoduleFocusRoot with SubmoduleFocusRootWedge.cfg violates as required
+[tla] non-vacuity confirmed: SubmoduleFocusRoot with SubmoduleFocusRootReach.cfg violates as required
+```
+
+The wedge disables the owning-root edge and the nested document then never focuses, proving the edge is load-bearing. The reach asserts the negation of the end state and is violated, proving liveness is not passing on an antecedent that never holds. Full suite green, all pre-existing modules included.
+
+On the Rust side the three regression tests are mutation-checked: reverting resolution to the pre-fix controller root makes the submodule test **fail** while both behavior-preservation tests still pass — so they catch the real defect without over-constraining.
+
+**Why this is gated and not done.** Pane `%241` is a live agent-doc session holding `agent-doc-controller-io/src/project_controller/rpc.rs` uncommitted (19 files, still alive at 20:35). If I merged now, its next `git commit --only` on that file would commit a blob without my change and revert the fix. This document's own `#focusstashedactor` records that rule for this exact file. The unblocker is concrete and checkable: `%241` commits or releases `rpc.rs`, then the branch rebases and merges.
+
+Worth flagging for the next head: `#focusstashedactor` is blocked on the **same** session and the same file, so it will gate for the same reason until that tree frees up.
+
+One pre-existing defect found, not introduced here: `recycle_controller_continues_when_projection_is_unavailable` fails in a full-crate run on a clean baseline (baseline 465 passed/1 failed; this branch 468/1, the +3 being these tests) and passes in isolation — an order-dependent flake. Left alone because it also lives in a file `%241` holds.
+
+Exchange is at 487 lines / 17 sections, over the warn threshold; queue is active so I kept draining rather than pausing to compact.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -522,9 +555,7 @@ Exchange is at 459 lines / 16 sections, over the warn threshold, but the queue i
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fixrunmonsterrodholders]~~
-- ~~do [#activateinstalledjetbrai]: automate the verification~~
-- do [#focussubmodulerecord]
+- ~~do [#focussubmodulerecord]~~
 - do [#focusstashedactor]
 - Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?
 <!-- /agent:queue -->
@@ -532,13 +563,13 @@ Exchange is at 459 lines / 16 sections, over the warn threshold, but the queue i
 
 <!-- agent:backlog -->
 - [ ] [#drivecapturedsplice] [agent-doc] Drive the captured-splice live proof from the pane that OWNS the src/agent-doc controller. The automation is complete (scripts/xdotool-live-verify.sh captured-splice opens the scratch doc itself and the binary decides the receipts); the run is blocked only by pane execution authority —  is refused from a non-owning pane, so the canonical-advance step never runs and the verifier correctly reports that captured-local-splice-recovery never ran. Repro: from a pane that is not the owner, the harness now fails closed naming the owning pane instead of typing into a live desktop. Run it from the owning pane (pane %241 held src/agent-doc at the time of writing; re-resolve before running) and expect a splice-recovery status=current read, an editor_op_capture_proof with operator_ops>=1 and shadow_replay=agreed, then a later status=current read with a different text_hash. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
-- [ ] [#focussubmodulerecord] [agent-doc] Focus a submodule document to the right tmux pane. `controller_editor_surface_focus_outcome ... focused=false reason=missing_actor_record pane=-` fired 13x, and 11 of those are submodule documents (devops.md, infra.md, docs.md). Those submodules carry their own `.agent-doc/`, so the actor record lives in the SUBMODULE controller store while the focus request reaches the superproject controller (`doc=agent-loop`), which correctly answers "no record" — so focus lands nowhere and the previous pane keeps it. Decide the routing: forward the focus request to the owning submodule controller, or have the superproject controller learn submodule actor records. Evidence: .agent-doc/logs/ops.log, grep controller_editor_surface_focus_outcome.
 - [ ] [#focusstashedactor] [agent-doc] Focus a stashed actor pane instead of declining. `controller_editor_surface_focus_outcome ... focused=false reason=actor_pane_not_visible` fired 42x on superproject documents: the pane exists but is stashed, and focus declines rather than un-stashing it. Routes through `focus_refusal_requires_structural_layout` in agent-doc-controller-io/src/project_controller/rpc.rs. BLOCKED ON A CONCURRENT SESSION: as of 2026-09-27 17:00 a sibling agent-doc session holds that exact function uncommitted in the shared tree; do not edit it until that lands (never two agents in one repo region).
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] 🚧 [#focussubmodulerecord] [agent-doc] Focus a submodule document to the right tmux pane. IMPLEMENTED + FORMALLY VALIDATED, awaiting land: commit 381d0d19d on branch fix/submodule-root-focus (pushed). Root cause: handle_focus_document_pane_with_policy read the canonical document id, the actor record AND the session-registry entry under bootstrap.project_root, so a submodule document resolved against a project holding no binding -> missing_actor_record pane=-. Fix takes the second routing this item posed: focus_document_lookup_root resolves the nearest enclosing .agent-doc project, bounded at-or-below the controller root, and reads a nested document's actor from that project's durable sink. 3 regression tests, mutation-checked (pre-fix root makes the submodule test fail, both behavior-preservation tests still pass). formal/tla/SubmoduleFocusRoot.tla registered in run_tla.sh with wedge+reach non-vacuity obligations, both confirmed violating as required. UNBLOCK: pane %241 must commit or release agent-doc-controller-io/src/project_controller/rpc.rs (19 files uncommitted as of 2026-09-27 20:35); then rebase the branch and merge. Do NOT land before that — its next --only commit on that file would silently revert the fix.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically now: a human reply on pypi/support#12214, or `make pypi-quota-check` exiting non-zero. As of 2026-09-27 that check exits 0 — 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 151 releases (0.35.113..0.35.417), room for ~49,662 further post-cutover releases — so there is nothing to act on and nothing to delete. pypi/support#12214 is still open with one comment (the acknowledgement bot) and untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check actually reports (next tranche would be 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.

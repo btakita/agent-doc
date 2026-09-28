@@ -6,6 +6,49 @@ metadata:
   type: reference
 ---
 
+## 2026-09-28: SELF-HEALS NOW — the operator tab reopen below is obsolete
+
+Everything in this file that says the clearing action is editor-side and
+operator-gated was true and is no longer. Measured on `agent-doc-bugs.md` after a
+`make install` reload:
+
+```
+13:25:19-20  editor_replica_reregister_attempt x3   reregister=definitively_refused:1
+13:25:21     realtime_doc_resolve_missing_replica_terminal_rebuild_failed
+13:25:22     realtime_doc_resolve authority=disk          reason=editor_absent     diverged=false
+13:25:25     realtime_doc_resolve authority=editor_buffer reason=crdt_relay_current diverged=false
+```
+
+Three seconds, three documents, no operator action, `diverged=false` on both
+sides and zero `disk_read_refused` after. Do not hand the operator a tab reopen
+for this any more; wait one resolve and re-check.
+
+**The strand never needed a new recovery edge — it needed the refusal to be
+legible.** `EditorReplicaStrand`'s demotion edge already covered an endpoint that
+answers and refuses. What blocked it was the IPC build identity: while it was a
+build-script wall clock (see
+[[reference_ipc_build_mismatch_was_a_clock_not_a_code_difference]]) client and
+listener never matched, so every re-registration died in a handshake mismatch
+that the running binary classified as NON-definitive, and the latch had nothing
+to demote on. Content-derived ids (`88b21fea6`) plus `9e398b6ab` — an exhausted
+build mismatch IS a definitive answer — made it legible. That is why this file
+recorded the strand as operator-gated for months: the symptom was the replica,
+the cause was the identity.
+
+**Diagnostic that settles it in one command:**
+
+```bash
+grep -a editor_replica_reregister_attempt .agent-doc/logs/ops.log | grep -o 'reregister=[a-z_:0-9]*' | sort | uniq -c
+```
+
+`definitively_refused:N` means the exit exists and the document will recover on
+its own. `not_delivered` or `failed:` means it will not — that is silence, which
+this design deliberately never demotes on, and it is the shape to investigate.
+
+A third shape, an endpoint that ACCEPTS every request and never serves, is
+covered by `582822a9c` but has never been observed here; it is a state-machine
+completion, not a measured failure.
+
 **FIXED in 0.35.384 (`#reloadgateperprocess`).** The reload planner now groups
 all project endpoints and document evidence by editor PID before making one
 native-generation decision. Exact reliable-sync registrations retain
@@ -37,6 +80,30 @@ serialized document lane before shutdown or unload; any missing checkpoint
 retains the old generation and live managers. After a successful generation
 swap, the coordinator waits for every current Markdown tab to register and logs
 an exact converged or failed-path report before releasing the gate.
+
+**2026-09-27 21:09 variant: the strand can land POST-capture, and then
+`reload-lib` deadlocks against the open cycle.** Same project, same document,
+one `make install` at 21:08 (three cdylibs mapped in idea pid 2435532:
+`libagent_doc-1790536729489.so`, `-1790542028715.so`, `-1790557728283.so`).
+Two things differ from the 2026-09-11 record:
+
+- **The failure was post-capture, not pre-capture.** `respond` got as far as
+  reaping the tracked-work mutation (`[pending] completed and reaped 1 item(s)
+  atomically`) and retained a 4939-byte response; `session-check` then reported
+  `INTERRUPTED: cycle ... is still response_captured`, and
+  `agent-doc repair <FILE>` found and re-applied the orphaned response only to
+  fail at the same `editor_attached_model_missing`. So the "no capture is
+  retained, re-send once the replica is back" note above is **not** universal —
+  check `session-check` for `response_captured` before assuming a re-send is
+  duplicate-safe. Here `repair` is the correct resume, and it is idempotent.
+- **`admin reload-lib` cannot break the cycle it is blocked by.** It reported
+  `typed reload delivered to 0/1 editor endpoints ... (1 deferred mid-cycle)`.
+  The open cycle defers the reload; the stranded replica keeps the cycle open.
+  That is a closed loop with no in-band exit — do not retry it.
+
+Also note the plugin registers at the *correct* version through all of this
+(`[editor] live jetbrains plugin 0.2.431 registered (expected 0.2.431)`), so a
+healthy plugin-version line is not evidence the document replica survived.
 
 Everything below is the original 2026-09-11 forensic record, and it remains the
 live recovery procedure.

@@ -275,6 +275,28 @@ thread or in a detached periodic timer.
   ordered pane list is not a visible column and must not satisfy a layout slot or
   stand in as `expected_focus_pane`, so a stashed pane never counts toward
   `observation=synced`.
+- A focus request for a document this controller does not own is re-addressed,
+  not refused (`#focuscrossroot`). Each project controller answers focus from
+  its own actor store, keyed on its own `project_root`. An IDE rooted at the
+  superproject publishes one editor surface per IDE process, so selecting a tab
+  inside a submodule that carries its own `.agent-doc/` delivers that focus
+  intent to the *superproject's* controller, whose store has no row for it. The
+  honest local answer there was `missing_actor_record` and nothing focused,
+  while the submodule's controller held the live, correct binding and was never
+  asked. So `handle_focus_document_pane` resolves the document's own project
+  root through `agent_doc_project_root_io::project_root_containing` first: when
+  it differs from the controller's root, the request is delegated to that
+  root's controller and its receipt is returned verbatim, with
+  `controller_focus_delegated document=<doc> owner_root=<root> focused=<b>
+  reason=<r>` recorded on the receiving controller. The decision is pure
+  (`agent_doc_controller::focus_routing::focus_owner`) and terminates: the
+  delegated call re-enters it on the owning controller, where the roots now
+  match. An unknown document root is never delegated — with no proof of another
+  owner, the local answer stands. A delegation that cannot reach the owning
+  controller reports `cross_root_controller_unavailable`, never
+  `missing_actor_record`: "the owning controller is unreachable" and "this
+  controller has no actor for the document" are different faults, and reporting
+  the second for the first is what kept this invisible.
 - A selection effect uses the document's **bound** pane; a live probe may only
   invalidate that binding, never replace it (`#fpeselectstashpane`). The actor
   row and the durable registry entry are the binding. The live-owner signals are

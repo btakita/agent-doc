@@ -21743,6 +21743,54 @@ pub(crate) fn handle_focus_document_pane(
     handle_focus_document_pane_with_policy(bootstrap, None, request, policy, None)
 }
 
+/// Ask the controller that actually owns `document` to focus it.
+///
+/// `#focuscrossroot`: a failure here is reported as its own reason rather than
+/// collapsed back into `missing_actor_record`. "The owning controller could not
+/// be reached" and "this controller has no actor for the document" are
+/// different faults, and reporting the second for the first is what made the
+/// original bug invisible.
+fn delegate_focus_to_owning_controller(
+    controller_root: &Path,
+    owner_root: &Path,
+    document: &Path,
+) -> ControllerTmuxFocusReceipt {
+    match focus_document_pane(owner_root, document) {
+        Ok(receipt) => {
+            agent_doc_ops_log_io::log_op(
+                controller_root,
+                &format!(
+                    "controller_focus_delegated document={} owner_root={} focused={} reason={}",
+                    document.display(),
+                    owner_root.display(),
+                    receipt.focused,
+                    receipt.reason,
+                ),
+            );
+            receipt
+        }
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                controller_root,
+                &format!(
+                    "controller_focus_delegation_failed document={} owner_root={} error={error:#}",
+                    document.display(),
+                    owner_root.display(),
+                ),
+            );
+            tmux_focus_receipt(
+                false,
+                "cross_root_controller_unavailable",
+                Some(document.to_string_lossy().to_string()),
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+    }
+}
+
 fn handle_focus_document_pane_with_policy(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -21752,6 +21800,25 @@ fn handle_focus_document_pane_with_policy(
 ) -> Result<ControllerTmuxFocusReceipt> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    // `#focuscrossroot`: an IDE rooted at the superproject publishes one editor
+    // surface, so selecting a tab inside a submodule that owns its own
+    // `.agent-doc/` sends that focus intent here. This controller's actor store
+    // is keyed on its own root and has no row for it, so the honest local
+    // answer was `missing_actor_record` and nothing focused — while the
+    // submodule's controller held the live binding and was never asked.
+    // Re-address the request instead of refusing it.
+    if let agent_doc_controller::focus_routing::FocusOwner::Delegate(owner_root) =
+        agent_doc_controller::focus_routing::focus_owner(
+            &bootstrap.project_root,
+            agent_doc_project_root_io::project_root_containing(&canonical).as_deref(),
+        )
+    {
+        return Ok(delegate_focus_to_owning_controller(
+            &bootstrap.project_root,
+            owner_root,
+            &canonical,
+        ));
+    }
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &canonical.to_string_lossy(),
@@ -27491,6 +27558,101 @@ mod tests {
         assert_eq!(response["payload"]["focused"], false);
         assert_eq!(response["payload"]["reason"], "missing_actor_record");
         assert_eq!(response["projection"]["commands"][0]["status"], "applied");
+    }
+
+    /// `#focuscrossroot`: the superproject controller used to answer
+    /// `missing_actor_record` for a submodule document — an honest local answer
+    /// to a request that was simply addressed to the wrong controller, while
+    /// the submodule's controller held the live binding and was never asked.
+    #[test]
+    fn focus_for_a_submodule_document_is_delegated_to_its_own_controller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let submodule = dir.path().join("src/haiven-dev");
+        std::fs::create_dir_all(submodule.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(submodule.join("tasks")).unwrap();
+        let doc = submodule.join("tasks/api.md");
+        std::fs::write(&doc, "---\nagent_doc_session: api\n---\nBody\n").unwrap();
+
+        let bootstrap = test_bootstrap(&dir);
+        let receipt = handle_focus_document_pane_with_policy(
+            &bootstrap,
+            None,
+            ControllerRequest {
+                command: "focus_document_pane".to_string(),
+                file: Some(doc.clone()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+            MissingFocusPanePolicy::ObserveOnly,
+            None,
+        )
+        .expect("a cross-root focus must resolve, not error");
+        assert!(!receipt.focused, "no actor exists in either root here");
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            ops.contains("controller_focus_delegated"),
+            "the outer controller must record that it re-addressed the request; got:\n{ops}"
+        );
+        assert!(
+            ops.contains(&format!("owner_root={}", submodule.display())),
+            "delegation must name the submodule root that owns the document; got:\n{ops}"
+        );
+    }
+
+    /// The delegation must not fire for this controller's own documents, or
+    /// every ordinary focus would round-trip through itself.
+    #[test]
+    fn focus_for_a_local_document_is_not_delegated() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/one.md");
+        std::fs::write(&doc, "---\nagent_doc_session: one\n---\nBody\n").unwrap();
+
+        let bootstrap = test_bootstrap(&dir);
+        let receipt = handle_focus_document_pane_with_policy(
+            &bootstrap,
+            None,
+            ControllerRequest {
+                command: "focus_document_pane".to_string(),
+                file: Some(doc.clone()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+            MissingFocusPanePolicy::ObserveOnly,
+            None,
+        )
+        .unwrap();
+        assert!(!receipt.focused);
+        assert_eq!(receipt.reason, "missing_actor_record");
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            !ops.contains("controller_focus_delegated"),
+            "a local document must be answered locally; got:\n{ops}"
+        );
     }
 
     /// Bound actor whose live process tree was NOT proven to still own the

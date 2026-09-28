@@ -298,6 +298,29 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
         return Ok(None);
     }
 
+    // `#stopneedsclosedcycle`: the marker and the stall projection are both
+    // document-level and OUTLIVE the cycle that wrote them, so neither one
+    // proves that *this* turn closed. A marker left by the last clean closeout
+    // satisfied both reads while the current cycle sat at `response_captured`
+    // with nothing committed, and the hook then told the agent "the completed
+    // cycle durably proved another drainable head" and forbade its final
+    // answer. The head it named was the one the failed turn had already
+    // answered and reaped in authority — the disk mirror the queue head is read
+    // from is exactly what a retained write has not updated yet. Observed
+    // 2026-09-27 on tasks/agent-doc/agent-doc-bugs.md (`#focusstashedactor`,
+    // stranded on `editor_attached_model_missing` after a mid-session install)
+    // and the same day on tasks/software/lazily.md (`#lzgooptionalpgx`).
+    //
+    // A failed closeout is already first in SKILL.md's exhaustive skip list, so
+    // an open cycle must fail this gate before either document-level read is
+    // consulted: looping a retained write re-answers an answered head.
+    if agent_doc_cycle_state_io::load(&file)?.is_some_and(|cycle| cycle.is_open()) {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            "claude_stop_queue_continuation_skipped reason=cycle_open action=allow_final_answer",
+        );
+        return Ok(None);
+    }
     // A continuation marker or the session-check stall projection proves that
     // the prior item reached a clean closeout. This avoids redirecting an
     // unfinished response back through `/loop` merely because its current head
@@ -3670,6 +3693,61 @@ Reviewed the gated items.\n\
         assert!(response.reason.contains("fix the next queue item"));
         assert!(response.reason.contains("`loop` skill"));
         assert!(response.reason.contains("Do NOT shell-run `agent-doc"));
+    }
+
+    /// `#stopneedsclosedcycle`: the marker is document-level and outlives the
+    /// cycle that wrote it, so a clean closeout's marker used to satisfy the
+    /// "completed cycle" gate for a LATER turn whose write was still retained.
+    /// The hook then forbade the final answer and named a head the failed turn
+    /// had already answered and reaped in authority — the disk mirror the head
+    /// is read from is precisely what a retained write has not updated. Seen on
+    /// tasks/agent-doc/agent-doc-bugs.md and tasks/software/lazily.md the same
+    /// day. A failed closeout heads SKILL.md's exhaustive skip list, so an open
+    /// cycle must beat the marker.
+    #[test]
+    fn claude_stop_does_not_loop_a_cycle_whose_write_is_still_retained() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        // An earlier clean closeout leaves the marker behind.
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+        assert!(
+            apply_claude_stop(&ClaudeStopInput {
+                session_id: "codex-session".to_string(),
+                cwd: dir.path().display().to_string(),
+                stop_hook_active: false,
+            })
+            .unwrap()
+            .is_some(),
+            "a closed cycle with a marker must still drive the loop"
+        );
+
+        // This turn captures a response and never reaches a write/commit —
+        // exactly the `session-check INTERRUPTED ... response_captured` state.
+        let original = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&original),
+            Some(&original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            apply_claude_stop(&ClaudeStopInput {
+                session_id: "codex-session".to_string(),
+                cwd: dir.path().display().to_string(),
+                stop_hook_active: false,
+            })
+            .unwrap()
+            .is_none(),
+            "a retained write is a failed closeout: the agent must be free to report it"
+        );
     }
 
     #[test]

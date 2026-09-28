@@ -602,6 +602,11 @@ Same evidence retires it: its unblock condition was "pane `%241` commits or rele
 
 ### Re: GH #54, #55, #57, #58 — all four closed — opus-5 · 2026-09-27T21:58-04:00
 
+> **Queue prompt:**
+>
+> /goal Fix the bugs that you filed. Use formal logic to fix the class of bugs.
+
+
 > **Queue prompt:** fix https://github.com/btakita/agent-doc/issues/54
 > **Queue prompt:** fix https://github.com/btakita/agent-doc/issues/55
 > **Queue prompt:** fix https://github.com/btakita/agent-doc/issues/57
@@ -624,6 +629,89 @@ I did not add `-signed` publishing. `signPlugin` reads `CERTIFICATE_CHAIN` / `PR
 **Verification.** `make check` exit 0, nextest runner-native `9913 tests run: 9913 passed (2 slow), 259 skipped`, zero `result: FAILED`, clippy clean, plus version-sync, audit-docs, editor-parity, Lean and TLA+ with all non-vacuity obligations confirmed violating. 11 new tests. Mutation-checked, each redden-exactly-one: restoring the exact-name signed match, neutering the digest comparison, making the dry run delete, and removing the install sweep. `gc-libs --dry-run` then `gc-libs` smoke-tested end to end against a scratch directory. CI `36367927222` was still in progress at closeout — recorded, not waited on; the preceding run was green.
 
 **Two things worth naming about the shared tree.** My `cargo fmt` reformatted five files a sibling session holds uncommitted (`queue_dispatch.rs`, `replay_guard.rs`, `authority_recovery.rs`, `transport.rs`, `captured_splice_verify.rs`) — rustfmt line-wrapping only, and I left every one of them uncommitted. And `src/main.rs` was committed from a hand-built blob (HEAD + this cycle's hunk) rather than `--only`, so that session's uncommitted `mod harness_switch_verify;` reorder stayed in its working tree instead of landing under my commit. Install is deliberately deferred until after this closeout.
+
+### Re: /goal Fix the bug report. Use formal logic to verify — opus-5 · 2026-09-28T01:39-04:00
+
+The bug report was agent-doc's own: every command against this document died at
+`read_command_document` with `editor is still attached ... missing_replica recovery
+exhausted and disk read authority is refused`, preceded by a handshake-rejection storm
+at roughly two per second. The `[dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT
+issue_class=terminal_failure` line says to fix the defect rather than retry, so I did.
+
+**The rejection was fabricated.** The two peers were `0.35.418+1790563363` and
+`0.35.418+1790567494` — same version, different suffix. That suffix is the IPC build
+identity from `#ipcverhandshake`, and it was `SystemTime::now()` captured when the
+build script ran. Every consumer reads a mismatch as proof that two processes run
+different code, and a clock cannot carry that proof. It failed in both directions, which
+is why neither direction had been noticed: each one looked like the other one working.
+
+*False mismatch.* Identical sources built twice get different stamps, and this repo's own
+Makefile guarantees it — `make check` builds into `target/`, `make install` into
+`target/local-install`, so each runs its own build script and stamps its own second. The
+handshake then rejects two processes that behave identically. That rejection is terminal
+for an attached document: `editor_attached_model_missing` survives its bounded
+observation, `realtime_doc_resolve_missing_replica_terminal_rebuild_failed` fires, and
+`realtime_doc_resolve_disk_read_refused` closes the last door with `operator_action=none`.
+The disk refusal is correct — `attached_editor_never_descends_to_disk` protects unsaved
+buffer text — but it was keyed on a difference that did not exist.
+
+*False match.* `build.rs` declared `rerun-if-changed=src/`, which names only the root
+package. A cargo build script is never re-run for a change in a *different* package, and
+all ~140 workspace members are different packages — the IPC crates included. So editing
+`agent-doc-ipc-io` or `agent-doc-crdt-relay-io` rebuilt the binary and carried the old
+stamp over verbatim. That is visible in the artifacts: `~/.cargo/bin/agent-doc` was
+written at 23:51:45 advertising `+1790563363` (22:42:43), from a tree whose
+`agent-doc-crdt-relay-io/src/lib.rs` changed at 23:25. The check the handshake exists to
+perform was silently not running for the majority of the codebase — and it is the reason
+the wedge diagnosis above had to be made from mtimes rather than from the identity.
+
+**The fix is one line of policy.** `build.rs` now emits `AGENT_DOC_BUILD_ID`: a SHA-256
+digest of the build-relevant workspace sources (`agent-doc-hash`'s new `source_digest`),
+so the identity is a function of the code and of nothing else. The same enumeration that
+is hashed emits the `rerun-if-changed` declarations — 1043 of them, against one before —
+because deriving those two separately is how the old declaration came to cover a single
+directory. Integration tests, benches and build artifacts stay out, scoped to a package
+root so a `tests` module inside `src/` is still part of the identity.
+
+**Formal verification.** `formal/tla/IpcBuildIdentity.tla` models the identity function
+against three build events that each correspond to something done daily: rebuild the same
+tree, edit a member package (the script does not re-run), edit the root package (it
+does). Two safety properties, stated against the code as judged at handshake time:
+
+- `EquivalentCodeIsAdmitted` — soundness. A rejection is consumed as proof of divergence
+  and acted on irreversibly, so rejecting equivalent peers is a fabricated proof.
+- `DivergentCodeIsRejected` — completeness. Admitting divergent peers is the check not
+  running.
+
+With `ContentDerived = TRUE` both hold across 936 distinct states. With `FALSE`, TLC
+produces the two production stories in three states each:
+
+```
+EquivalentCodeIsAdmitted violated:  RebuildUnchanged(listener)  → code equal, stamp 0 vs 1 → "rejected"
+DivergentCodeIsRejected  violated:  EditMemberPackage(client)   → code 2 vs 1, stamp equal → "admitted"
+```
+
+Both are registered in `scripts/run_tla.sh`'s must-violate list — one wedge config per
+direction, because a single wedge would let the surviving half go vacuous, which is
+precisely how the stamp hid its false matches behind its false mismatches. A third
+config requires the fixed handshake to still reach *both* outcomes, so neither implication
+can pass by having become a constant.
+
+Nine unit tests in `agent-doc-hash` pin the properties directly (rewriting bytes
+identically at a later time digests the same; a member-crate edit does not), and five
+guards in `tests/ipc_build_identity_guard.rs` pin the producer — including that the wire
+identity does not parse as a bare integer, so the clock cannot come back quietly. That
+guard reddened on its first run against `build.rs`'s own prose explaining the old stamp;
+scanning code with comments stripped is the correct reading, and the explanation stays.
+
+**Not touched, deliberately.** `recovering_send_error_is_definitive` (`9e398b6ab`) is the
+other half of this class and it is right as it stands: once the identity is trustworthy, a
+genuine mismatch whose reload-only recovery is exhausted *is* a definitive refusal, and the
+resolver needs that to demote the latch. Its explicit exclusion of the native-save path —
+where a build mismatch is a first observation, not an exhausted one — is also correct.
+This change makes that classifier's input honest rather than changing the classifier.
+
+**Live verification.** `make check` exit 0 — 9937 tests run, 9937 passed, 259 skipped, zero `result: FAILED`, plus clippy, sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap, Lean and TLA+. Committed `88b21fea6`, pushed, `make install` exit 0. The proof that matters is cross-target-directory: `target/` (built 01:1x) and `target/local-install` (built 05:5x) ran the build script independently, four and a half hours apart, and both emitted `AGENT_DOC_BUILD_ID=1049840dd7278c82`. Under the clock those two runs differed by construction, and that difference was the wedge. This document then read normally for the first time since 05:08 — the last `ipc_handshake_rejected` in ops.log is 05:08:57Z, against roughly two per second before, and no editor tab reopen was needed.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -633,22 +721,19 @@ I did not add `-signed` publishing. `signPlugin` reads `CERTIFICATE_CHAIN` / `PR
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixhttpsgithub-2p7z]
-- do [#fixhttpsgithub-bf0x]
-- do [#fixhttpsgithub-cmjy]
-- do [#fixhttpsgithub]
+- ~~/goal Fix the bugs that you filed. Use formal logic to fix the class of bugs.~~
 - do [#drivecapturedsplice]
 - do [#focusstashedactor]
+- fix https://github.com/btakita/agent-doc/issues/54
+- fix https://github.com/btakita/agent-doc/issues/55
+- fix https://github.com/btakita/agent-doc/issues/57
+- fix https://github.com/btakita/agent-doc/issues/58
 - Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
 - [ ] [#publishjetbrainssibling] [agent-doc] Publish a `-signed` JetBrains sibling from the release `plugins` job. The client half shipped in 7649ccafd — `find_asset` now matches `<prefix>*-signed.<ext>` by shape, so a signed asset would be selected the moment one exists — but the job publishes only the unsigned zip. `signPlugin` in editors/jetbrains/build.gradle.kts reads CERTIFICATE_CHAIN / PRIVATE_KEY / PRIVATE_KEY_PASSWORD from the environment and none are available to that job, so wiring `signPlugin` in today would fail the release rather than produce a sibling. UNBLOCK: decide whether either IDE host actually requires a signed package, and if so add those three repo secrets; then add signPlugin + a second cp to the plugins job and extend the two-asset verify to four. [recommended]
-- [ ] 🚧 [#fixhttpsgithub-2p7z] fix https://github.com/btakita/agent-doc/issues/54
-- [ ] [#fixhttpsgithub-bf0x] fix https://github.com/btakita/agent-doc/issues/55
-- [ ] [#fixhttpsgithub-cmjy] fix https://github.com/btakita/agent-doc/issues/57
-- [ ] [#fixhttpsgithub] fix https://github.com/btakita/agent-doc/issues/58
 - [ ] [#drivecapturedsplice] [agent-doc] Drive the captured-splice live proof from the pane that OWNS the src/agent-doc controller. The automation is complete (scripts/xdotool-live-verify.sh captured-splice opens the scratch doc itself and the binary decides the receipts); the run is blocked only by pane execution authority —  is refused from a non-owning pane, so the canonical-advance step never runs and the verifier correctly reports that captured-local-splice-recovery never ran. Repro: from a pane that is not the owner, the harness now fails closed naming the owning pane instead of typing into a live desktop. Run it from the owning pane (pane %241 held src/agent-doc at the time of writing; re-resolve before running) and expect a splice-recovery status=current read, an editor_op_capture_proof with operator_ops>=1 and shadow_replay=agreed, then a later status=current read with a different text_hash. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [ ] [#focusstashedactor] [agent-doc] Focus a stashed actor pane instead of declining. `controller_editor_surface_focus_outcome ... focused=false reason=actor_pane_not_visible` fired 42x on superproject documents: the pane exists but is stashed, and focus declines rather than un-stashing it. Routes through `focus_refusal_requires_structural_layout` in agent-doc-controller-io/src/project_controller/rpc.rs. BLOCKED ON A CONCURRENT SESSION: as of 2026-09-27 17:00 a sibling agent-doc session holds that exact function uncommitted in the shared tree; do not edit it until that lands (never two agents in one repo region).
 <!-- /agent:backlog -->
@@ -656,7 +741,7 @@ I did not add `-signed` publishing. `signPlugin` reads `CERTIFICATE_CHAIN` / `PR
 ## Review
 
 <!-- agent:review -->
-- [/] [#focussubmodulerecord] [agent-doc] Focus a submodule document to the right tmux pane. IMPLEMENTED + FORMALLY VALIDATED, awaiting land: commit 381d0d19d on branch fix/submodule-root-focus (pushed). Root cause: handle_focus_document_pane_with_policy read the canonical document id, the actor record AND the session-registry entry under bootstrap.project_root, so a submodule document resolved against a project holding no binding -> missing_actor_record pane=-. Fix takes the second routing this item posed: focus_document_lookup_root resolves the nearest enclosing .agent-doc project, bounded at-or-below the controller root, and reads a nested document's actor from that project's durable sink. 3 regression tests, mutation-checked (pre-fix root makes the submodule test fail, both behavior-preservation tests still pass). formal/tla/SubmoduleFocusRoot.tla registered in run_tla.sh with wedge+reach non-vacuity obligations, both confirmed violating as required. UNBLOCK: pane %241 must commit or release agent-doc-controller-io/src/project_controller/rpc.rs (19 files uncommitted as of 2026-09-27 20:35); then rebase the branch and merge. Do NOT land before that — its next --only commit on that file would silently revert the fix.
+- [/] 🚧 [#focussubmodulerecord] [agent-doc] Focus a submodule document to the right tmux pane. IMPLEMENTED + FORMALLY VALIDATED, awaiting land: commit 381d0d19d on branch fix/submodule-root-focus (pushed). Root cause: handle_focus_document_pane_with_policy read the canonical document id, the actor record AND the session-registry entry under bootstrap.project_root, so a submodule document resolved against a project holding no binding -> missing_actor_record pane=-. Fix takes the second routing this item posed: focus_document_lookup_root resolves the nearest enclosing .agent-doc project, bounded at-or-below the controller root, and reads a nested document's actor from that project's durable sink. 3 regression tests, mutation-checked (pre-fix root makes the submodule test fail, both behavior-preservation tests still pass). formal/tla/SubmoduleFocusRoot.tla registered in run_tla.sh with wedge+reach non-vacuity obligations, both confirmed violating as required. UNBLOCK: pane %241 must commit or release agent-doc-controller-io/src/project_controller/rpc.rs (19 files uncommitted as of 2026-09-27 20:35); then rebase the branch and merge. Do NOT land before that — its next --only commit on that file would silently revert the fix.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically now: a human reply on pypi/support#12214, or `make pypi-quota-check` exiting non-zero. As of 2026-09-27 that check exits 0 — 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 151 releases (0.35.113..0.35.417), room for ~49,662 further post-cutover releases — so there is nothing to act on and nothing to delete. pypi/support#12214 is still open with one comment (the acknowledgement bot) and untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check actually reports (next tranche would be 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.

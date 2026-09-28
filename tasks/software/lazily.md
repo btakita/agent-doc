@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -162,20 +162,57 @@ Restores came from scratch copies with a `touch`, never `git checkout --`, every
 I left `AGENTS.md` alone — it is modified by another session, and documenting the gate there would entangle this commit with theirs. The Makefile comment, the script header, `integration/postgres/doc.go` and the CHANGELOG carry it instead.
 
 With this and `#lzktoptionaldeps` landed, `#lzktoptionaljna` (lazily-kt's 1.9 MB JNA in the default published graph) is the last dependency leak in the queue.
+
+### Re: #lzktoptionaljna JNA gated, the pin became a map — opus-5 · 2026-09-28T11:43-04:00
+
+> **Queue prompt:**
+>
+> do [#lzktoptionaljna]
+
+Done and pushed to `lazily-hub/lazily-kt` main (`4909788`).
+
+**The last leak is closed.** `net.java.dev.jna:jna` — **2,001,532 bytes**, measured from the resolved jar in the Gradle cache, not quoted from the item — now lives behind an `io.github.lazily:lazily-ffi` feature variant. The default POM graph went from four artifacts to three: `kotlin-stdlib`, `kotlinx-coroutines-core`, `kotlinx-serialization-json`.
+
+**The item's open question has a clean answer: none of `LazilyFfiBoundary.kt` needs JNA.** It asked how much of that file genuinely needs JNA "rather than the pure-JVM channel", flagging it as the hard part. It is all pure JVM. Despite the name, `LazilyFfiNative` is the entry-table *shape* a native peer links against — Graal `--export-symbols`, or a JNI shim — and it delegates to `LazilyFfiChannel`, which encodes and decodes `IpcMessage` in Kotlin. The file has **no imports at all** and never references `LazilyFFI`. `LazilyFfiBoundaryTest` exercises `Channel`/`Native`, never the JNA interface, and nothing outside its own file referenced `LazilyFFI` — no test, no conformance fixture, no other main source. So the conformance surface stays in `main`, compiled and replayed exactly as before, and only the 63-line binding moved.
+
+**The guard change is the substantive part, and it is structural rather than additive.** The pin held one `REQUIRED_FEATURE_CAPABILITY` and one `GATED_MODULE_RUNTIME`. Adding a string to a set would have been the wrong fix: with a single capability pinned, a publication that gated jna under a variant nobody named — or under the codec's own capability — satisfies every comparison, because nothing asks *which* variant carries *which* graph. `GATED_MODULE_RUNTIME_BY_CAPABILITY` now measures each capability against its own runtime graph, and a new floor refuses a coordinate pinned under two features, since neither variant's pin could then fail on it.
+
+**Mutation-checked, eight cases, green control before and after:**
+
+| mutation | result |
+|---|---|
+| M0 control | exit 0 GREEN |
+| pin names an undeclared dependency | exit 1 — `org.example:ghost` pinned but not published |
+| a gated pin emptied | exit 2 — empty runtime graph |
+| the capability map emptied | exit 2 — names no capability |
+| one dep pinned under BOTH capabilities | exit 2 — neither capability's graph can fail on it |
+| jna ungated in main only | exit 2 — REFUSED, the Gradle build breaks first |
+| the `lazily-ffi` capability renamed | exit 2 — 0 runtime variants carry the pinned capability |
+| jna declared in BOTH main and ffi | exit 1 — caught **three times over** |
+| a new unconditional dependency | exit 1 — `okio` published but not pinned |
+
+**My first harness run was the instrument failing, not the guard working.** It reported `exit=127` for all four mutations — and for the M0 control. zsh does not word-split an unquoted command variable, so nothing had executed; read naively, four non-zero exits look like four catches. A non-zero exit is not a catch. Re-run with the command inline, the control went green and the mutations separated into 1s and 2s.
+
+**Verified against the generated artifacts, not `build.gradle.kts`.** The POM carries `<optional>true</optional>` for jna; `ffiRuntimeElements` carries the pinned capability with jna + kotlin-stdlib and publishes a real `lazily-0.42.0-ffi.jar`; the main jar contains **0** `LazilyFFI` classes and all **4** `LazilyFfi` boundary classes. My first size reading came off a stale `lazily-kt-0.40.0.jar` still sitting in `build/libs` and was discarded — the current jar is `0.42.0`.
+
+**`make check` exit 0, and the test count is read from the Gradle XML results rather than console output** — `511 tests, 0 failures, 0 skipped` across 79 result files, matching the count before the split. That distinction matters here: the RTK filter strips Gradle task lines, so a skipped test task reads as a passing one on stdout.
+
+**CI.** lazily-kt run `36445762527` is queued; the previous run on main is green. And the pending run from last cycle has landed: **lazily-go `36364741036` completed successfully** (1m57s), so `#lzgooptionalpgx` is CI-green as well as locally verified.
+
+The README gained an `## Optional feature — JNA FFI binding` section with the Gradle capability and Maven classifier forms, using version placeholders and stating that the split lands in the release after v0.42.0, since v0.42.0 is already tagged without it. I left `AGENTS.md` alone again — still modified by another session.
+
+With this, all three dependency-gating items are done: protobuf codec (`#lzktoptionaldeps`), lazily-go's pgx (`#lzgooptionalpgx`), and JNA. Every published graph in the family that had a leak now requires only what its default surface actually uses.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzgooptionalpgx]~~
-- do [#lzktoptionaljna]
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzktoptionaljna] lazily-kt's `net.java.dev.jna:jna:5.15.0` is now the largest dependency left in the default published graph (~1.9 MB — the jar embeds native stubs for every supported platform), and exactly ONE main source imports it: LazilyFFI.kt. LazilyFfiBoundary.kt is the JVM-side surface and the README already calls that plane "State-projection consumer (optional FFI)". Apply the same treatment #lzktoptionaldeps just landed for protobuf: move LazilyFFI.kt (and whatever of LazilyFfiBoundary.kt genuinely needs JNA rather than the pure-JVM channel) into an `ffi` source set, register it as a Gradle feature variant with an explicit `io.github.lazily:lazily-ffi` capability, and extend the ALLOWED_POM_DEFAULT / GATED_* pins in scripts/check-published-dependencies.py in the same commit. The hard part is NOT the Gradle wiring — it is deciding how much of LazilyFfiBoundary the conformance suite exercises through the JNA path versus the pure-JVM channel, because the conformance replays must keep running against the same surface. Mutation-check the extended pin (the existing scratch harness shape: mutate, assert applied, restore from a scratch copy, require a green control before and after). Run `make check` green, then commit and push per lazily-kt's standing rule.
 <!-- /agent:backlog -->
 
 ## Review

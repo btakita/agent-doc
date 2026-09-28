@@ -268,56 +268,71 @@ pub fn handle_stop() -> Result<()> {
 /// durably proven another drainable queue head. Bindings are exact-session
 /// scoped so an unrelated Claude conversation can never inherit this work.
 pub fn handle_claude_stop() -> Result<()> {
-    // Read stdin exactly once; every later decision reads this payload.
-    let payload = read_stdin_payload();
-    // Recover `stop_hook_active` even from a payload that will not parse as
-    // `ClaudeStopInput`. It is what bounds the fail-closed branch below, so
-    // losing it to the very failure it bounds would defeat the bound.
-    let stop_hook_active = payload
-        .as_deref()
-        .ok()
-        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
-        .and_then(|value| {
-            value
-                .get("stop_hook_active")
-                .and_then(serde_json::Value::as_bool)
-        })
+    // Read stdin exactly once; `claude_stop_response` owns every decision made
+    // from it, so the tests exercise the same function the hook does.
+    let response = claude_stop_response(read_stdin_payload().as_deref().ok())?;
+    println!("{}", serde_json::to_string(&response)?);
+    Ok(())
+}
+
+/// The JSON the Claude Stop hook prints for `payload`.
+///
+/// Every path that can refuse a final answer has to be bounded, and this
+/// function is where that is decided:
+///
+/// * the continuation guard is bounded by the run-keyed request ledger
+///   (`apply_claude_stop`);
+/// * a hook error is bounded by `stop_hook_active` — errors here are
+///   overwhelmingly persistent (an unreadable document, a refused authority
+///   resolve, a state ledger that will not open), so re-blocking re-runs the
+///   same failing check against the same inputs forever. This was the one path
+///   through the hook that never consulted it;
+/// * a payload that is not JSON at all cannot carry `stop_hook_active`, so a
+///   refusal there could never be bounded — and there is nothing to bound it
+///   FOR: with no parseable envelope there is no session, no document, and no
+///   continuation to protect. A refusal issued on no evidence about a document
+///   is just an unbounded loop.
+///
+/// Modelled in `formal/tla/StopHookContinuation.tla`.
+fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
+    let envelope = payload.and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok());
+    let Some(envelope) = envelope else {
+        eprintln!(
+            "[agent-doc] Claude Stop hook received a payload that is not JSON; it names no \
+             session or document, so there is no queue continuation to check. Allowing the \
+             final answer."
+        );
+        return Ok(serde_json::json!({}));
+    };
+    let stop_hook_active = envelope
+        .get("stop_hook_active")
+        .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
 
-    let response = match payload
-        .and_then(|payload| {
-            serde_json::from_str::<ClaudeStopInput>(&payload).context("parse Claude Stop JSON")
-        })
+    match serde_json::from_value::<ClaudeStopInput>(envelope)
+        .context("parse Claude Stop JSON")
         .and_then(|input| apply_claude_stop(&input))
     {
-        Ok(response) => response
+        Ok(response) => Ok(response
             .map(|response| serde_json::to_value(response).expect("serialize Claude Stop block"))
-            .unwrap_or_else(|| serde_json::json!({})),
+            .unwrap_or_else(|| serde_json::json!({}))),
         // Failing closed is right the FIRST time: the operator needs to hear
-        // that the continuation check could not run. Repeating it is not. A
-        // hook error is overwhelmingly persistent — an unreadable document, a
-        // refused authority resolve, a state ledger that will not open — so
-        // re-blocking re-runs the same failing check against the same inputs
-        // and produces the same error, forever. `stop_hook_active` is the only
-        // fact that distinguishes the two, and this branch was the one path
-        // through the hook that never consulted it.
+        // that the continuation check could not run. Repeating it is not.
         Err(err) if stop_hook_active => {
             eprintln!(
                 "[agent-doc] Claude Stop hook failed again while checking queue continuation: \
                  {err:#}. Already blocked once for this stop; allowing the final answer so the \
                  failure is reported instead of looped."
             );
-            serde_json::json!({})
+            Ok(serde_json::json!({}))
         }
-        Err(err) => serde_json::to_value(ClaudeStopBlock {
+        Err(err) => Ok(serde_json::to_value(ClaudeStopBlock {
             decision: "block",
             reason: format!(
                 "agent-doc Claude Stop hook failed closed while checking queue continuation: {err:#}. Do not send the final answer; report this hook failure to the operator."
             ),
-        })?,
-    };
-    println!("{}", serde_json::to_string(&response)?);
-    Ok(())
+        })?),
+    }
 }
 
 fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>> {
@@ -3918,6 +3933,47 @@ Reviewed the gated items.\n\
             stop(&dir).is_none(),
             "a run that completes without striking the head must not be re-asked"
         );
+    }
+
+    /// Every path that can refuse a final answer must be bounded, including the
+    /// fail-closed one. Hook errors are overwhelmingly persistent — an
+    /// unreadable document, a refused authority resolve, a state ledger that
+    /// will not open — so a branch that blocks without consulting
+    /// `stop_hook_active` re-runs the same failing check forever. This was the
+    /// one path through the hook that never consulted it.
+    ///
+    /// Driven through the public entry point rather than `apply_claude_stop`,
+    /// because the branch under test lives in `handle_claude_stop`'s error arm
+    /// and a test that called the inner function would prove nothing about it.
+    #[test]
+    fn the_fail_closed_branch_is_bounded_by_stop_hook_active() {
+        // Valid JSON, wrong shape: `ClaudeStopInput` will not parse, so the
+        // hook errors — but `stop_hook_active` is still recoverable, which is
+        // exactly what the bound needs.
+        let first = claude_stop_response(Some(r#"{"stop_hook_active": false}"#)).unwrap();
+        assert_eq!(
+            first["decision"], "block",
+            "the first stop must fail closed so the operator hears about it"
+        );
+        let repeat = claude_stop_response(Some(r#"{"stop_hook_active": true}"#)).unwrap();
+        assert_eq!(
+            repeat,
+            serde_json::json!({}),
+            "re-blocking re-runs the same failing check against the same inputs"
+        );
+    }
+
+    /// A payload that is not JSON at all names no session and no document, so a
+    /// refusal would be issued on no evidence — and could not be bounded by a
+    /// `stop_hook_active` it cannot read.
+    #[test]
+    fn a_payload_that_is_not_json_does_not_refuse_the_final_answer() {
+        assert_eq!(
+            claude_stop_response(Some("not json")).unwrap(),
+            serde_json::json!({})
+        );
+        assert_eq!(claude_stop_response(Some("")).unwrap(), serde_json::json!({}));
+        assert_eq!(claude_stop_response(None).unwrap(), serde_json::json!({}));
     }
 
     /// The DISARM half: queue reconciliation clears the marker between two

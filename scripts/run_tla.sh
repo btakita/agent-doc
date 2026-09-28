@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -93,6 +93,11 @@ must_violate=(
     StopHookContinuation:StopHookContinuationUnrememberedWedge
     StopHookContinuation:StopHookContinuationReach
     StopHookContinuation:StopHookContinuationNoLatchReach
+    # The hook's other refusal path, kept separate because its bound is a
+    # different fact: within-stop (`stop_hook_active`) rather than cross-turn.
+    # Modelling them together would let one bound stand in for the other.
+    StopHookFailClosed:StopHookFailClosedWedge
+    StopHookFailClosed:StopHookFailClosedReach
 )
 
 for module in "${modules[@]}"; do

@@ -761,6 +761,85 @@ No new model for this one. The property is soundness and completeness of a singl
 `make check` exit 0 — 9962 tests run, 9962 passed, 259 skipped. Three CI runs are queued or in progress; the last completed one is green.
 
 **One thing I am leaving alone on purpose.** `stopneedsclosedcycle` is still referenced by code comments without being tracked. Now that the guard no longer blocks the remedy, re-filing it is a one-line queue item rather than a fight with the tooling — but it is a record-keeping decision about what belongs in this document's backlog, and that is yours to make rather than mine to assume.
+
+### Re: a dashboard showing the queue + backlog of all documents — opus-5 · 2026-09-28T10:44-04:00
+
+> **Queue prompt:** Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?
+
+Yes, and it now exists: `agent-doc board` (alias `dashboard`), plus a `/board` page in `agent-doc serve`. Shipped as `5ef1d5b34`, installed, pushed.
+
+**Why it was not already there.** `agent-doc admin dashboard` looked like the answer and is not. It is one row per *controller actor* in one project root — document path, harness, pane, alive, state, pid, queue-control class, projection lag. Zero queue content, zero backlog, zero review, zero blocked, zero auto-DAG, and it never leaves its own root. It answers "which controllers are alive". Your question is the different one: "where is the work, and what is not moving". Those needed separate commands, so `admin dashboard` is untouched.
+
+**What it renders.** Live, on this superproject:
+
+```
+agent-doc board — 3 of 38 document(s) need attention
+
+agent-loop · 1 of 23 need attention
+  state     document                           queue    backlog  review  auto-dag                    actor             needs
+  STALLED   tasks/brookebrodack-dev.md         12       12       5       impl:14 live:3 ipc:0 blk:0  —                 12 drainable head(s), no live actor
+  DRAINING  tasks/agent-doc/agent-doc-bugs.md  3        2        3       impl:1 live:3 ipc:0 blk:0   %231 claude-code  —
+  READY     tasks/professional/ron-berkes.md   —        10       0       impl:10 live:0 ipc:0 blk:0  —                 —
+
+src/equal-experts-neat-exhilarating-friendly-inspiration · 1 of 1 need attention
+  STALLED   AGENT_SESSION.md                   1        0        1       impl:1 live:0 ipc:0 blk:0   %147 dead         1 drainable head(s), no live actor
+
+src/haiven-dev · 1 of 8 need attention
+  OPERATOR  tasks/devops.md                    stopped  6        2       impl:8 live:0 ipc:0 blk:0   %223 claude-code  1 operator-gated head(s)
+  READY     tasks/api.md                       stopped  0        26      impl:17 live:11 ipc:0 blk:0 %157 claude-code  —
+
+src/boost-client · 0 of 6 need attention
+  DRAINING  tasks/monsterrodholders.md         11       18       31      impl:22 live:35 ipc:0 blk:0 %236 claude-code  —
+```
+
+`src/haiven-dev`, `src/boost-client`, and `src/equityfundingsource-dev` each get their own section, as you asked. (efs-dev shows no section because it genuinely owns no session document — its work lives in `tasks/professional/equityfundingsource.md` under agent-loop. A root with nothing in it is not a row of zeros.)
+
+**The one decision worth arguing about.** Your reference page orders by severity and says the load-bearing signal is unread mail, because a lane that is reading gets nudged automatically — so mail still sitting means no watcher is running. The agent-doc analogue of "no watcher is running" is a **drainable queue head with no live actor**: the queue says there is agent-drainable work and nothing is draining it. That is `STALLED`, and everything else sorts around it — `BLOCKED` above (an auto-DAG item blocked on a decision, which no amount of draining fixes), `OPERATOR` below (only operator-gated heads left, so a person is genuinely required), then `DRAINING` / `READY` / `CLEAR`. A draining document is deliberately *not* attention, which is why this document sits at 3/38 rather than inflating the count. Rows sort worst-first inside a project and projects sort by their own worst row, so the alphabetically-last project can lead the board.
+
+The board earned its keep on first run: `tasks/brookebrodack-dev.md` has been sitting on **12 drainable heads with no actor at all**, and `src/equal-experts-*` holds a binding to a dead `%147`. Neither was visible anywhere before.
+
+**`blocked` and the auto-DAG** are per-row, not a separate screen. The `auto-dag` column is `agent-doc auto-dag`'s own lane classification rolled up per document (`impl` / `live` / `ipc` / `blk`), so `blk:>0` is exactly what promotes a row to `BLOCKED`; `--dag` appends the per-project lane totals with full lane names.
+
+**Discovery.** It climbs to the outermost working tree via `git rev-parse --show-superproject-working-tree`, then takes every `.gitmodules` path that exists and carries its own `.agent-doc/`. Per root it reads the durable session registry plus a bounded scan that stops at any *other* board root — so a document lands in exactly one section and the superproject never absorbs a submodule's rows. The scan also skips hidden directories, leading-underscore aside/quarantine directories (`_stale-aside`, `_quarantine-*` — recovery residue, not live sessions), `node_modules`/`target`/`dist`/`build`/`vendor`/`tmp`, and `*.done.md` archives. That last set is not cosmetic: without it the first run surfaced six rows from `tmp/live-tmux-repro*` and a purge aside.
+
+**In the browser**, matching your screenshot's medium: `agent-doc serve` gains a read-only `GET /api/board`, a `GET /board` page that renders the same model with severity colouring and refreshes every 15s, and a `board` button in the editor header. Verified in a real browser, not just by the endpoint.
+
+`--json` emits the whole board under the stable `agent-doc-fleet-board-v1` contract. Classification, ordering, grouping, and rendering are pure (`agent_doc_work_graph::fleet_board`); discovery and parsing are the binary's.
+
+**Verification.** `make check` exit 0, nextest runner-native `9987 tests run: 9987 passed, 259 skipped`, zero `result: FAILED`, plus clippy, sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap, Lean and TLA+. 22 new tests. Committed `5ef1d5b34`, `make install`, pushed.
+
+One naming call I made without asking, and will change on request: the command is `agent-doc board` with `dashboard` as a visible alias, because a top-level `agent-doc dashboard` sitting beside `agent-doc admin dashboard` reads as the same thing twice. Your word still works; the canonical one is shorter.
+
+### Re: the right tmux pane is not auto-focusing — opus-5 · 2026-09-28T10:44-04:00
+
+Fixed and pushed as `730d74600`. ops.log named it exactly, so this is not a guess.
+
+**The evidence.** Every time you selected a submodule tab, agent-loop's controller logged:
+
+```
+controller_editor_surface_focus_outcome document=…/src/haiven-dev/tasks/api.md
+  focused=false reason=missing_actor_record pane=- doc=agent-loop
+```
+
+repeating every 1–3 seconds, interleaved with a second surface client happily re-focusing `tasks/agent-doc/agent-doc-bugs.md` onto `%231`. So the pane you wanted never took focus and the pane you did not want kept it — which is what "the right pane is not auto-focusing" looks like from the outside.
+
+**Why.** Each project controller answers focus from its own actor store, keyed on its own `project_root`. Your IDE is rooted at the superproject and publishes one editor surface per IDE process, so a tab living in a submodule that carries its own `.agent-doc/` delivers that focus intent to the **superproject's** controller. That controller has no actor row for the document — the row is in `src/haiven-dev/.agent-doc/state.db` — so it refused. Meanwhile `src/haiven-dev`'s own controller held a live, correct binding (`%157`) and was never asked. The request was not unanswerable; it was addressed to the wrong controller.
+
+`missing_actor_record` was locally honest and globally wrong, which is the worst kind of correct answer: it reads as "there is nothing to focus" when the truth is "ask someone else".
+
+**The fix.** `handle_focus_document_pane` now resolves the document's own project root first and, when it differs from the controller's root, delegates to that root's controller and returns its receipt verbatim, recording `controller_focus_delegated document=<doc> owner_root=<root> focused=<b> reason=<r>` on the receiving side.
+
+Three properties the tests pin, because each is a way this could have gone wrong:
+
+- **It terminates.** The delegated call re-enters the same decision on the owning controller, where the roots match and it resolves local.
+- **An unknown document root is never delegated.** Without proof of another owner the local answer stands, so this can only ever add a correct focus — it can never suppress one that works today.
+- **An unreachable owner reports `cross_root_controller_unavailable`, not `missing_actor_record`.** Collapsing "the owner is unreachable" into "no actor here" is precisely what kept this invisible, and I was not going to rebuild that.
+
+The decision is pure and separately testable (`agent_doc_controller::focus_routing::focus_owner`); the adapter owns root resolution and the controller call. Six new tests — four pure, two through the RPC handler asserting both the delegation receipt and that a local document is never delegated.
+
+**Verification.** `make check` exit 0, `9993 tests run: 9993 passed, 259 skipped`, zero `result: FAILED`, plus the full gate. The first run caught a real architecture guard — `test_agent_doc_ipc_protocol_owns_receipt_classification` requires the adapter to reach root resolution through `agent-doc-project-root-io`, not `agent_doc_fs::find_project_root` directly — and the fix went through that crate. Installed and pushed. Latest CI run `36438177702` was still in progress at closeout; the prior run is green. Recorded, not waited on.
+
+Two things worth naming about the shared tree. A sibling session holds unrelated uncommitted hunks in the same `rpc.rs` (including a dangling `#[test]` with no function under it), so rather than commit around them I built a blob of `HEAD` plus only my three hunks, compiled it and ran its tests in a clean detached worktree, and committed that exact blob — their working-tree changes are untouched and still uncommitted. And the remaining step is genuinely yours: the controllers pick up `730d74600` at their next idle boundary, after which switching an IDE tab to a submodule document should focus its pane and leave `controller_focus_delegated` in agent-loop's ops.log. Filed as `[operator-verify]` rather than claimed.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -770,18 +849,14 @@ No new model for this one. The property is soundness and completeness of a singl
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~/goal Fix the bugs that you filed. Use formal logic to fix the class of bugs.~~
-- do [#drivecapturedsplice]
-- do [#focusstashedactor]
-- fix https://github.com/btakita/agent-doc/issues/54
-- fix https://github.com/btakita/agent-doc/issues/55
-- fix https://github.com/btakita/agent-doc/issues/57
-- fix https://github.com/btakita/agent-doc/issues/58
-- Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?
+- ⏭️ do [#drivecapturedsplice]
+- do [#publishjetbrainssibling]
+- 🚧 Can agent-doc have a dashboard like ![img_1.png](img_1.png) showing the queue + backlog of all documents? Perhaps also organize by project + submodule (so haiven-dev + boost-client + equityfundingsource-dev would have their own section)? Also showing what iblocked and the auto-dag?
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.
 - [ ] [#publishjetbrainssibling] [agent-doc] Publish a `-signed` JetBrains sibling from the release `plugins` job. The client half shipped in 7649ccafd — `find_asset` now matches `<prefix>*-signed.<ext>` by shape, so a signed asset would be selected the moment one exists — but the job publishes only the unsigned zip. `signPlugin` in editors/jetbrains/build.gradle.kts reads CERTIFICATE_CHAIN / PRIVATE_KEY / PRIVATE_KEY_PASSWORD from the environment and none are available to that job, so wiring `signPlugin` in today would fail the release rather than produce a sibling. UNBLOCK: decide whether either IDE host actually requires a signed package, and if so add those three repo secrets; then add signPlugin + a second cp to the plugins job and extend the two-asset verify to four. [recommended]
 - [ ] [#drivecapturedsplice] [agent-doc] Drive the captured-splice live proof from the pane that OWNS the src/agent-doc controller. The automation is complete (scripts/xdotool-live-verify.sh captured-splice opens the scratch doc itself and the binary decides the receipts); the run is blocked only by pane execution authority —  is refused from a non-owning pane, so the canonical-advance step never runs and the verifier correctly reports that captured-local-splice-recovery never ran. Repro: from a pane that is not the owner, the harness now fails closed naming the owning pane instead of typing into a live desktop. Run it from the owning pane (pane %241 held src/agent-doc at the time of writing; re-resolve before running) and expect a splice-recovery status=current read, an editor_op_capture_proof with operator_ops>=1 and shadow_replay=agreed, then a later status=current read with a different text_hash. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 <!-- /agent:backlog -->

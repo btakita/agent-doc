@@ -120,13 +120,55 @@ README gained an `## Optional feature` section with the Gradle capability reques
 **CI:** run `36349017938` is pending — pushed minutes ago, not yet started. Local `make check` is the evidence above; nothing in CI differs except a fresh checkout of the siblings.
 
 **Next:** `#lzgooptionalpgx` is the queue head. I also filed `#lzktoptionaljna` (appended, not preempting) — `jna` is now the largest thing left in kt's default graph at ~1.9 MB with exactly one importer, and the pattern to remove it is the one that just landed. Its real question is how much of `LazilyFfiBoundary` the conformance suite drives through JNA versus the pure-JVM channel, which is why it is a separate item rather than something I folded into this commit.
+
+### Re: #lzgooptionalpgx pgx gated by relocation, published graph now empty — opus-5 · 2026-09-27T21:07-04:00
+
+> **Queue prompt:**
+>
+> do [#lzgooptionalpgx]
+
+Done and pushed to `lazily-hub/lazily-go` main (`b68667f`).
+
+**The root `require` block is now empty** — not shortened, empty. `go mod edit -json` reports `Require: None`, and `go.sum` went to zero bytes. pgx plus its six indirects are gone from every consumer's resolution. The suite that needs a driver lives in `integration/postgres`, its own module with a `replace` back to the root, which no consumer reads.
+
+**The item said "the Postgres integration test", and there were two.** `sim_projection_maintenance_integration_test.go` calls `sql.Open("pgx", ...)` twice and imports nothing — it was relying entirely on the blank `_ "github.com/jackc/pgx/v5/stdlib"` import in `postgres_projection_barrier_integration_test.go` to register the driver. Moving only the importing file would have left it opening a driver no longer registered in its binary, and the failure would have surfaced as a runtime `unknown driver "pgx"` rather than a compile error. Both moved. The registration now sits in a shared helper file with a comment, so the package's reason for being a separate module is stated once instead of being incidental to whichever file happened to import it.
+
+**That forced one decision, and it was yours to make.** The sim test called `expectedSimProjectionOutcome`, unexported production logic in `sim_projection_maintenance.go`. Reaching it from another module meant exporting it or forking it. Exporting won, and it closes a real gap that predates this task: `(*SimConsumerTestkit).RunProjectionMaintenance` is **exported**, and it compares every adapter's applied outcome against that oracle — so no out-of-tree consumer could write a correct adapter for an exported entry point. It is now `ExpectedSimProjectionMaintenanceOutcome`, with a doc comment saying callers must not reimplement the switch, because a copy is free to drift from the behaviour it is meant to pin. The other four helpers are test scaffolding, not production logic, so the nested module builds its own purpose-built adapter rather than importing the root's counter-reducer factory — that one carries a reducer this suite immediately overwrites.
+
+**The guard needs both halves to prove either.** `scripts/check-module-dependencies.sh` asserts the root `require` set is empty **and** that the relocated suite still exists, builds, and declares the tests pinned for each module, compared as set equality in both directions. The second half is not belt-and-braces: **deleting the suite satisfies the first check perfectly**, so an emptiness-only guard would report green on the worse regression. It pins the root's two tests as well as the nested module's four, so "move the database tests out" cannot quietly become "move everything out". Half A reads `go mod edit -json`, not go.mod's text — a grep for `^require` is defeated by a single-line require, by a `// require` comment, and by any reformatting `tidy` chooses. Every measurement refuses with exit 2 when it cannot be taken, rather than reading "nothing measured" as "nothing wrong".
+
+**Mutation-checked, eight cases, green control before and after:**
+
+| mutation | result |
+|---|---|
+| M0 control | exit 0 GREEN |
+| pgx re-required in root | exit 1 — `must require NOTHING` |
+| relocated suite deleted | exit 2 — `ZERO matching tests` |
+| nested module's go.mod gone | exit 2 — `relocated suite is gone` |
+| suite stops compiling | exit 2 — `does not build` |
+| pinned nested test renamed | exit 1 — `missing pinned test` |
+| root unit test dragged out | exit 1 — `missing pinned test` |
+| pin emptied | exit 2 — `pins nothing` |
+| observation filter neutered | exit 2 — `ZERO matching tests` |
+
+Restores came from scratch copies with a `touch`, never `git checkout --`, every mutation was asserted applied before the guard ran, and all seven mutated files were verified byte-identical to their pristine copies afterwards.
+
+**Wired and verified.** New `module-dependency-check` target in `make check`, a `Published module dependency floor (#lzgooptionalpgx)` step in `ci.yml`, and both `EXPECTED_CLOSURE_TARGETS` and `EXPECTED_GATE_STEPS` extended so `check-ci-reach` re-proves CI reaches it — it now reports 12 closure targets set-equal, 11 gates step-mapped. `make check` exit 0, zero `FAIL` lines.
+
+**The coverage did not shrink, and I checked rather than assumed.** `go test ./...` does not descend into a nested module, so relocating the suite without updating the runner would have silently stopped running it — green, with the tests gone. `scripts/test-postgres-projection-barrier.sh` now runs both modules. Against a real PostgreSQL 18.6: **6 PASS, 0 SKIP**, the same four integration tests as before the move plus the two unit tests that correctly stayed in the root package. `ok` alone would not have shown this — those tests skip when `LAZILY_POSTGRES_URL` is unset, so the tally is read from `--- PASS` / `--- SKIP` lines, not the package summary.
+
+**CI is pending, not green.** Run `36364741036` was queued seconds after the push; the two prior runs on main are green. Local `make check` is the evidence above.
+
+I left `AGENTS.md` alone — it is modified by another session, and documenting the gate there would entangle this commit with theirs. The Makefile comment, the script header, `integration/postgres/doc.go` and the CHANGELOG carry it instead.
+
+With this and `#lzktoptionaldeps` landed, `#lzktoptionaljna` (lazily-kt's 1.9 MB JNA in the default published graph) is the last dependency leak in the queue.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzgooptionalpgx]
+- ~~do [#lzgooptionalpgx]~~
 - do [#lzktoptionaljna]
 <!-- /agent:queue -->
 
@@ -134,7 +176,6 @@ README gained an `## Optional feature` section with the Gradle capability reques
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzktoptionaljna] lazily-kt's `net.java.dev.jna:jna:5.15.0` is now the largest dependency left in the default published graph (~1.9 MB — the jar embeds native stubs for every supported platform), and exactly ONE main source imports it: LazilyFFI.kt. LazilyFfiBoundary.kt is the JVM-side surface and the README already calls that plane "State-projection consumer (optional FFI)". Apply the same treatment #lzktoptionaldeps just landed for protobuf: move LazilyFFI.kt (and whatever of LazilyFfiBoundary.kt genuinely needs JNA rather than the pure-JVM channel) into an `ffi` source set, register it as a Gradle feature variant with an explicit `io.github.lazily:lazily-ffi` capability, and extend the ALLOWED_POM_DEFAULT / GATED_* pins in scripts/check-published-dependencies.py in the same commit. The hard part is NOT the Gradle wiring — it is deciding how much of LazilyFfiBoundary the conformance suite exercises through the JNA path versus the pure-JVM channel, because the conformance replays must keep running against the same surface. Mutation-check the extended pin (the existing scratch harness shape: mutate, assert applied, restore from a scratch copy, require a green control before and after). Run `make check` green, then commit and push per lazily-kt's standing rule.
-- [ ] 🚧 [#lzgooptionalpgx] lazily-go's root go.mod declares `github.com/jackc/pgx/v5 v5.7.6` plus six indirects (pgpassfile, pgservicefile, puddle, golang.org/x/crypto, x/sync, x/text) in the main `require` block, but pgx is imported by exactly ONE file — postgres_projection_barrier_integration_test.go — and by ZERO non-test files. Go has no optional dependencies, so the fix is a nested module: move the Postgres integration test into its own directory with its own go.mod (a `replace` directive back to the root), leaving the published module graph requiring nothing. Add a guard asserting the root go.mod `require` block is EMPTY and that the nested module still builds the test, with the second half as the anti-vacuity control — a guard that only checks emptiness passes over a deleted test. Mutation-check it. Run `make check` green, then commit and push per lazily-go's standing rule.
 <!-- /agent:backlog -->
 
 ## Review

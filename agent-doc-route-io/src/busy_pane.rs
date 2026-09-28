@@ -133,13 +133,29 @@ pub fn attempt_busy_existing_pane_auto_fix(
     blocker_reason: Option<&str>,
 ) -> Result<BusyPaneAutoFixOutcome> {
     if blocker_reason == Some(CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER) {
+        // `#codexlockholder`: Codex's lock screen tells the operator to close the
+        // conversation "in another app" and names no app. Name the holder, and
+        // say when it is the background daemon rather than a pane they can close.
+        let holders = agent_doc_process_owner_io::codex_thread_locks::codex_thread_lock_holders();
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_busy_existing_pane_auto_fix_skipped file={} pane={} reason={}",
-                file_path, pane, CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER,
+                "route_busy_existing_pane_auto_fix_skipped file={} pane={} reason={} {}",
+                file_path,
+                pane,
+                CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER,
+                agent_doc_process_owner_io::codex_thread_locks::codex_thread_lock_holder_log_fields(
+                    &holders
+                ),
             ),
         );
+        if let Some(described) =
+            agent_doc_process_owner_io::codex_thread_locks::describe_codex_thread_lock_holders(
+                &holders,
+            )
+        {
+            eprintln!("[route] Codex conversation writer locks currently held: {described}");
+        }
         return Ok(BusyPaneAutoFixOutcome::FailClosed);
     }
     eprintln!(

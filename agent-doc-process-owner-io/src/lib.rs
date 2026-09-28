@@ -9,6 +9,7 @@
 //! are the stable call surface; each one reads through the graph when a scope is
 //! open and observes directly when it is not.
 
+pub mod codex_thread_locks;
 pub mod owner_graph;
 pub mod proc_table;
 

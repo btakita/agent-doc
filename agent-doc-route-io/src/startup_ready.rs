@@ -123,6 +123,15 @@ pub fn wait_for_fresh_agent_ready(
             eprintln!(
                 "[route] Codex conversation is open in another app; forking it once in fresh pane {pane_id}"
             );
+            // `#codexlockholder`: say WHICH app, so a fork that does not help is
+            // not the only thing the operator learns.
+            if let Some(described) =
+                agent_doc_process_owner_io::codex_thread_locks::describe_codex_thread_lock_holders(
+                    &agent_doc_process_owner_io::codex_thread_locks::codex_thread_lock_holders(),
+                )
+            {
+                eprintln!("[route] Codex conversation writer locks currently held: {described}");
+            }
             tmux.send_keys_raw(pane_id, "f")?;
             continue;
         }

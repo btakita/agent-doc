@@ -85,10 +85,7 @@ pub fn persisted_text_for_tool(tool_name: &str, tool_input: &serde_json::Value) 
         "Edit" => field("new_string"),
         "Write" => field("content"),
         "NotebookEdit" => field("new_source"),
-        "Bash" => {
-            let command = field("command")?;
-            is_commit_command(&command).then_some(command)
-        }
+        "Bash" => commit_scan_text(&field("command")?),
         _ => None,
     }
 }
@@ -98,7 +95,73 @@ pub fn persisted_text_for_tool(tool_name: &str, tool_input: &serde_json::Value) 
 /// Only `git commit` persists prose into history. `git add`, `git status`, and a
 /// command that merely mentions the word commit must not be inspected.
 pub fn is_commit_command(command: &str) -> bool {
-    command.split(['\n', ';', '&', '|']).any(|segment| -> bool {
+    commit_segment(command).is_some()
+}
+
+/// The text a `git commit` would actually record, or `None` when this command
+/// records none.
+///
+/// The guard used to hand the WHOLE shell command to the scanner whenever any
+/// part of it was a `git commit`. That is a proxy for the message, and it was
+/// wrong in both directions — while this module's own doc claimed "a commit
+/// message is prose end to end", which is true of the message and not of the
+/// command that writes it:
+///
+/// * FALSE POSITIVE. Every other segment got scanned too: a heredoc, an `echo`,
+///   a `git add` argument list. Observed 2026-09-28 — a commit whose message file
+///   contained zero occurrences of an id was blocked because a `python3` heredoc
+///   in the same call mentioned it. The heredoc existed to REMOVE the id from the
+///   message, so the guard blocked the remedy it had just recommended, and there
+///   is no way to write that remedy without naming the id.
+/// * FALSE NEGATIVE. `-F <file>` was never read, so a message file carrying an
+///   untracked id passed whenever the id appeared nowhere in the command text —
+///   which is the normal shape for any message long enough to need a file.
+///
+/// Now: the commit SEGMENT, plus the contents of any `-F`/`--file` message file
+/// whose path is literal. A path built from a shell variable cannot be resolved
+/// here, and this module fails open by policy ("a hook that guesses wrong costs
+/// the operator a turn"), so such a message is not scanned rather than being
+/// approximated by the surrounding command text.
+pub fn commit_scan_text(command: &str) -> Option<String> {
+    let segment = commit_segment(command)?;
+    let mut text = segment.to_string();
+    for path in message_file_paths(segment) {
+        if let Ok(contents) = std::fs::read_to_string(&path) {
+            text.push('\n');
+            text.push_str(&contents);
+        }
+    }
+    Some(text)
+}
+
+/// `-F` / `--file` values that name a readable path as written. A value
+/// containing a shell expansion is skipped: it cannot be resolved from the
+/// unexpanded command, and guessing is how the scan drifted from the message in
+/// the first place.
+fn message_file_paths(segment: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut words = segment.split_whitespace().peekable();
+    while let Some(word) = words.next() {
+        let candidate = if let Some(value) = word.strip_prefix("--file=") {
+            Some(value.to_string())
+        } else if matches!(word, "-F" | "--file") {
+            words.peek().map(|value| value.to_string())
+        } else {
+            None
+        };
+        if let Some(candidate) = candidate {
+            let candidate = candidate.trim_matches(['"', '\'']);
+            if !candidate.contains('$') && !candidate.contains('`') && !candidate.is_empty() {
+                paths.push(candidate.to_string());
+            }
+        }
+    }
+    paths
+}
+
+/// The `;`/`&&`/`|`/newline-separated segment that is a `git commit`, if any.
+fn commit_segment(command: &str) -> Option<&str> {
+    command.split(['\n', ';', '&', '|']).find(|segment| -> bool {
         let mut words = segment.split_whitespace().skip_while(|word| {
             matches!(*word, "sudo" | "env" | "rtk" | "proxy") || word.contains('=')
         });
@@ -420,6 +483,95 @@ mod tests {
 
     /// The durable case this exists for: writing a coined tag into source.
     #[test]
+    /// The false positive that blocked its own remedy. The commit message here
+    /// carries no id; a heredoc in the same call does, and it exists precisely to
+    /// strip the id from the message. Scanning the whole command made that
+    /// impossible to write.
+    #[test]
+    fn a_coined_id_outside_the_commit_segment_does_not_block() {
+        let command = concat!(
+            "python3 - <<'PY'\n",
+            "s = s.replace('#orphandrain', '')\n",
+            "PY\n",
+            "git commit -q -F msg.txt --only -- src/lib.rs"
+        );
+        let decision = pretooluse_decision(
+            "Bash",
+            &serde_json::json!({ "command": command }),
+            &DocumentIds::Known(known(&["tracked"])),
+            None,
+        );
+        assert_eq!(decision, PreToolUseDecision::Allow);
+    }
+
+    /// ... while an id in the message itself still blocks.
+    #[test]
+    fn a_coined_id_inside_the_commit_segment_still_blocks() {
+        let decision = pretooluse_decision(
+            "Bash",
+            &serde_json::json!({
+                "command": "git add -A && git commit -m 'fix(drain): #orphandrain'"
+            }),
+            &DocumentIds::Known(known(&["tracked"])),
+            None,
+        );
+        assert!(matches!(decision, PreToolUseDecision::Deny { .. }));
+    }
+
+    /// The false negative: a `-F` message file was never read, so any message
+    /// long enough to need a file could carry an untracked id past the guard.
+    #[test]
+    fn a_coined_id_in_a_message_file_is_read_and_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let message = dir.path().join("msg.txt");
+        std::fs::write(&message, "fix(drain): close it\n\nRefs #orphandrain\n").unwrap();
+        let decision = pretooluse_decision(
+            "Bash",
+            &serde_json::json!({
+                "command": format!("git commit -F {}", message.display())
+            }),
+            &DocumentIds::Known(known(&["tracked"])),
+            None,
+        );
+        assert!(matches!(decision, PreToolUseDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn a_tracked_id_in_a_message_file_is_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let message = dir.path().join("msg.txt");
+        std::fs::write(&message, "fix(drain): close it\n\nRefs #tracked\n").unwrap();
+        let decision = pretooluse_decision(
+            "Bash",
+            &serde_json::json!({
+                "command": format!("git commit -F {}", message.display())
+            }),
+            &DocumentIds::Known(known(&["tracked"])),
+            None,
+        );
+        assert_eq!(decision, PreToolUseDecision::Allow);
+    }
+
+    /// A path built from a shell variable cannot be resolved from the unexpanded
+    /// command. This module fails open by policy, so it is left unscanned rather
+    /// than approximated by the surrounding command text — which is the
+    /// approximation that caused the false positive above.
+    #[test]
+    fn an_unresolvable_message_path_is_not_approximated_by_the_command() {
+        let command = "S=/tmp/x; git commit -F $S/msg.txt";
+        assert_eq!(
+            commit_scan_text(command).as_deref().map(str::trim),
+            Some("git commit -F $S/msg.txt")
+        );
+    }
+
+    /// A command with no commit records nothing, however much it mentions one.
+    #[test]
+    fn a_command_that_records_no_message_is_not_scanned() {
+        assert_eq!(commit_scan_text("git add -A && echo 'about to commit'"), None);
+        assert_eq!(commit_scan_text("grep -r 'git commit' ."), None);
+    }
+
     fn an_edit_writing_a_coined_id_into_source_is_blocked() {
         let input = json!({
             "file_path": "/repo/src/rpc.rs",

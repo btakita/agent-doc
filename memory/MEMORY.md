@@ -3,6 +3,7 @@
 ## agent-doc Recovery
 
 - **Procedures** → [recovery index](reference_agent_doc_recovery_index.md) (stale-binary, HEAD corruption, queue/pending, no_ack, force-disk, authority/integrity wedges, retained-write states, `state.db` + mutation-flag corruption).
+- **[Pre-`88b21fea6` `IPC build mismatch` was a CLOCK, not a code difference](reference_ipc_build_mismatch_was_a_clock_not_a_code_difference.md)** — same-version mismatch was usually FALSE (`target/` vs `target/local-install`); a member-crate change was INVISIBLE. All-digits suffix = old, hex = fixed.
 - **Two rules that override any recovery instinct**: never `--force-disk` when an editor holds authority; never hand-align disk to the authority.
 - **[A mid-session `make install` strands an attached document's replica](reference_cdylib_reload_strands_attached_document_replica.md)** — only an editor tab reopen clears it; the terminal signature is `..._terminal_rebuild_failed` + `disk_read_refused`, NOT bare `missing_replica` (benign churn) or two `.so` files.
 - **Crash/spin/thrash**: [start-crash](reference_agent_doc_start_crash_cross_root_submodule_autostart.md), [handoff→IPC drift](feedback_stranded_handoff_socket_causes_ipc_snapshot_drift.md), [corrupt HEAD spin](feedback_wedged_controller_and_jb_ide_spin_on_corrupt_crdt_response_in_head.md), [editor thrash](reference_jb_editor_thrash_on_restart_indexing_and_debug_logcat.md), [bugs2.done.md=ARCHIVE](reference_agent_doc_bugs2_done_is_archive_not_session.md), [boundary accum](feedback_boundary_accum_worktree_only_ipc_repair_checkout_head.md).
@@ -16,6 +17,7 @@
 
 ## agent-doc Project Intent
 
+- **[PyPI prunes old agent-doc releases — floor now 0.35.113](reference_pypi_prunes_old_releases_breaking_artifact_purge_premise.md)** — 105 artifact-purge candidates died in ONE day; a PyPI file is a perishable durable counterpart, and the handoff hard-expires at 7 days.
 - [Patchboard markets FIRST](project_product_sequencing_patchboard_first_agentdoc_later.md); [Slint zoom + drag](reference_patchboard_app_slint_zoom_and_drag_technique.md); [merge expertise = alpha](project_realtime_merge_experience_marketable_alpha.md).
 - [IPC root-cause audit](project_ipc_audit_and_stale_plugin_detect.md) (5 causes A-E); [provauth](project_provauth_series_status.md) 3b blocked on crdtauth6; [per-cell CRDT merge isolation](project_agent_doc_percell_crdt_merge_intent.md); [[feedback_stop_cutting_agent_doc_releases]].
 - [Reliable-sync plane IS authority; sidecar = durability](project_reliable_sync_plane_is_authority_sidecar_durability_only.md). Done/gated: [live_editor S1–S6](project_live_editor_reactive_family_initiative.md), [supervisor 08b](project_agent_doc_supervisor_migration_intent.md), [carry-forward](project_fintol_pcwc_carry_forward_invariant.md).
@@ -27,6 +29,7 @@
 - **[A supervisor that dies mid-execve pins `InFlight` forever](reference_agent_doc_inflight_recycle_wedges_dispatch_forever.md)** — every dispatch refuses with an unblocker that can never happen; pair `supervisor_recycle_graph_started`/`_settled` by `document_hash`.
 - **[A SILENT editor replica held the delivery barrier forever — FIXED 6da64a97c](reference_agent_doc_silent_replica_barrier_never_releases.md)** — `delivery_converged` is AVAILABILITY, `visible_delivery_projected` is the receipt; firewall them BEFORE making the release reachable. `live_editors=1` is CORRECT here.
 - **[A pasted report mentioning "a concurrent session" spawned 3 worktrees + 3 `claude -p` agents](reference_pasted_report_prose_spawns_parallel_fanout.md)** — `plan` ordered a `--mode parallel` fan-out beside its OWN `parallelizable: false`; the "tasks" were quoted diff lines. Class: guidance ordering what the receiver must not do.
+- **[A barrier-released replica whose endpoint REFUSED vetoes `visible_delivery_projected` forever](reference_refused_replica_vetoes_visible_delivery_receipt.md)** — no save is ever *requested* (`request_sent=false`); the pull storm at ~4/s on a frozen hash is the tell. FIXED 0.35.418+.
 - **[A /loop drain from a NON-OWNER pane is admitted, then dies at `respond`](reference_agent_doc_loop_drain_into_nonowner_pane_admits_then_fails.md)** — preflight+plan+closeout-lease all pass; check the owning pane FIRST. Never `agent-doc claim` to "fix" it, that hijacks a live session.
 
 ## agent-doc Releases
@@ -127,7 +130,9 @@
 - **[A mutation script that restores with `git checkout --` reverts the fix under test](feedback_mutation_script_restore_must_not_use_git_checkout.md)** — restore from a scratch copy; assert each mutation applied; require a green M0.
 
 ## Misc
+- **[A desk power reset does NOT drop the workstation — only USB re-enumerates](reference_desk_power_reset_spares_workstation_cycles_usb_only.md)** — check `uptime -s`/`last -x reboot` before assuming a reboot; extra `xinput` trackpad ids are normal.
 - **[X11 wedge: climb the `unwedge` ladder](reference_x11_unwedge_ladder.md)** — rungs 0-6, works from a bare TTY; never the power button.
+- **[Black bottom monitor = monitor INPUT, not X; TESmart blocks DDC/CI](reference_tesmart_kvm_blocks_ddcci_while_passing_edid.md)** — NVIDIA `/sys/class/drm` dpms/enabled is a LIE; use `nvidia-settings`.
 - **[Frozen screen + stopped clock = kernel is STILL ALIVE](reference_x11_frozen_clock_kernel_stays_alive.md)** — Win+Shift+r and Ctrl+Alt+Backspace cannot work; `unwedge-watchdog` recovers with no input.
 - **[Bare SAK leaves a DEAD CONSOLE](reference_sak_sigkill_leaves_console_unrepainted.md)** — SIGKILL means X never restores the video mode; always force a VT switch after.
 - **[SliceMK firmware builds from JSON, no browser](reference_slicemk_configurator_build_endpoint.md)** — `slicemk-build`; builds serialise GLOBALLY, "in progress" = refused.

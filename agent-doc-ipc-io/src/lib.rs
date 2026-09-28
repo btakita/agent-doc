@@ -352,32 +352,53 @@ fn try_connect_with_timeout_for_pid(
     })
 }
 
-/// Whether something is currently bound and reachable at `path`.
+/// Whether a peer at `path` is actually **serving**, not merely bound.
 ///
-/// Connect-only by design: a successful connect proves a live listener owns the
-/// socket name, which is all the bind guard in
-/// [`start_listener_with_logger_and_read_timeout`] needs to decide whether
-/// evicting it would strand a peer.
+/// The distinction is the whole point. A successful `connect` proves only that
+/// a socket is bound: the kernel queues the connection in the listener's accept
+/// backlog and returns success even when nothing will ever call `accept`. That
+/// is exactly the wedged listener this guard must be able to replace — observed
+/// live with 4090 connections queued on a listener whose accept loop had stopped
+/// — so a connect-only probe would report the dead endpoint live and make the
+/// refusal in [`start_listener_with_logger_and_read_timeout`] permanent.
 ///
-/// The bounded deadline is the load-bearing part. A wedged listener with a
-/// saturated accept backlog *blocks* `connect` rather than refusing it, so an
-/// unbounded probe would hang the caller and a naive `exists()` check would call
-/// the dead endpoint live. Timing out has to read as "does not answer", so a
-/// listener that stopped accepting can still be replaced.
+/// So the probe completes a round trip: it sends the hello and requires a reply
+/// line. **Any** reply counts, including a handshake rejection — a peer that
+/// rejects our build still accepted the connection and read from it, which is
+/// the property being tested. Silence within the deadline is the negative, and
+/// covers both a saturated backlog and a listener parked mid-request.
 fn endpoint_answers(path: &Path) -> bool {
     let path_for_thread = path.to_path_buf();
-    run_connect_with_timeout(
-        path,
-        Duration::from_secs(IPC_CONNECT_TIMEOUT_SECS),
-        move || {
-            let name = path_for_thread.to_fs_name::<GenericFilePath>()?;
-            interprocess::local_socket::ConnectOptions::new()
-                .name(name)
-                .connect_sync()
-                .context("failed to connect to IPC socket")
-        },
-    )
-    .is_ok()
+    let probe_timeout = Duration::from_secs(IPC_CONNECT_TIMEOUT_SECS);
+    let Ok(stream) = run_connect_with_timeout(path, probe_timeout, move || {
+        let name = path_for_thread.to_fs_name::<GenericFilePath>()?;
+        interprocess::local_socket::ConnectOptions::new()
+            .name(name)
+            .connect_sync()
+            .context("failed to connect to IPC socket")
+    }) else {
+        return false;
+    };
+
+    if stream.set_send_timeout(Some(probe_timeout)).is_err()
+        || stream.set_recv_timeout(Some(probe_timeout)).is_err()
+    {
+        // Without a deadline this probe could park the listener start forever;
+        // treat an unenforceable timeout as no answer rather than risk that.
+        return false;
+    }
+
+    let (reader_half, mut writer_half) = stream.split();
+    let Ok(mut hello) = serde_json::to_string(&ipc_hello_message(&local_ipc_identity())) else {
+        return false;
+    };
+    hello.push('\n');
+    if writer_half.write_all(hello.as_bytes()).is_err() || writer_half.flush().is_err() {
+        return false;
+    }
+
+    let mut reply = String::new();
+    matches!(BufReader::new(reader_half).read_line(&mut reply), Ok(n) if n > 0)
 }
 
 fn run_connect_with_timeout<T, F>(path: &Path, connect_timeout: Duration, connect: F) -> Result<T>
@@ -1622,6 +1643,57 @@ mod tests {
         shutdown.store(true, Ordering::SeqCst);
         let _ = wake_listener(&root);
         let _ = listener.join();
+    }
+
+    /// `#ipcdupelistener`, the case a connect-only probe gets backwards: a
+    /// listener that is **bound but not accepting** must be evicted, not
+    /// protected.
+    ///
+    /// The kernel queues connections into a listener's backlog and reports
+    /// `connect` as successful even when nothing will ever call `accept`, so
+    /// "I connected" is not evidence that anyone is serving. This is the live
+    /// wedge's exact shape — a listener found holding 4090 queued connections
+    /// with its accept loop stopped — and protecting it would make the refusal
+    /// permanent and leave `reload_library` undeliverable forever, which is the
+    /// deadlock this whole guard exists to end.
+    #[test]
+    fn a_bound_but_unaccepting_listener_is_evicted_not_protected() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let sock_path = socket_path(&root);
+        std::fs::create_dir_all(sock_path.parent().unwrap()).unwrap();
+
+        // Bound, never accepted from: the wedged shape.
+        let name = sock_path.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let wedged = ListenerOptions::new().name(name).create_sync().unwrap();
+
+        assert!(
+            !endpoint_answers(&sock_path),
+            "a listener that never accepts must not read as serving merely \
+             because connect() lands in its backlog"
+        );
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let listener_root = root.clone();
+        let listener_shutdown = Arc::clone(&shutdown);
+        let listener = thread::spawn(move || {
+            let _ = start_listener_with_logger_until(
+                &listener_root,
+                |_| None,
+                noop_ops_logger,
+                listener_shutdown,
+            );
+        });
+
+        assert!(
+            await_endpoint(&sock_path),
+            "the wedged listener must be replaced by one that actually serves"
+        );
+
+        shutdown.store(true, Ordering::SeqCst);
+        let _ = wake_listener(&root);
+        let _ = listener.join();
+        drop(wedged);
     }
 
     /// The other half of `#ipcdupelistener`: the guard must only protect an

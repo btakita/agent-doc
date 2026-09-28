@@ -328,6 +328,12 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 # alacritty_terminal, fs2, hex, htmd, interprocess, portable-pty, regex,
 # rusqlite, serde_yaml, signal-hook, tagpath, yrs.
 
+[build-dependencies]
+# `#ipcverhandshake` — the build script derives the IPC build identity from a
+# digest of the workspace sources. Reuses the project's own SHA-256 helper so
+# the identity and every other content hash agree on one algorithm.
+agent-doc-hash = { path = "agent-doc-hash", version = "0.35.418" }
+
 [dev-dependencies]
 agent-doc-controller-io = { path = "agent-doc-controller-io", version = "0.35.418", features = ["test-support"] }
 agent-doc-document-realtime-io = { path = "agent-doc-document-realtime-io", version = "0.35.418", features = ["test-support"] }

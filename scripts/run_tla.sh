@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -77,6 +77,13 @@ must_violate=(
     TransientRefusalLatch:TransientRefusalLatchBlindRetry
     TransientRefusalLatch:TransientRefusalLatchCrashAsVerdict
     TransientRefusalLatch:TransientRefusalLatchReach
+    # The identity the two modules above both consume. A build id taken from a
+    # clock is wrong in both directions, so it gets one wedge PER DIRECTION: a
+    # single wedge would let the surviving half go vacuous, which is exactly how
+    # the shipped stamp hid its own false matches behind its false mismatches.
+    IpcBuildIdentity:IpcBuildIdentityFalseMismatchWedge
+    IpcBuildIdentity:IpcBuildIdentityFalseMatchWedge
+    IpcBuildIdentity:IpcBuildIdentityReach
 )
 
 for module in "${modules[@]}"; do

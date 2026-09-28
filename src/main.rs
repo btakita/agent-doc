@@ -4347,11 +4347,14 @@ fn try_main() -> anyhow::Result<()> {
     agent_doc_controller_io::project_controller::set_binary_version(env!("CARGO_PKG_VERSION"));
     // `#ipcverhandshake` — use the same build-scoped identity in the CLI and
     // native library so cross-process skew is proven on the wire before any
-    // editor intent is admitted.
+    // editor intent is admitted. The identity is a digest of the workspace
+    // sources, not a build clock: a rejection has to mean "different code", and
+    // a timestamp proved neither direction of that (`agent-doc-hash`'s
+    // `source_digest`, `formal/tla/IpcBuildIdentity.tla`).
     agent_doc_ipc_io::set_local_build_id(concat!(
         env!("CARGO_PKG_VERSION"),
         "+",
-        env!("AGENT_DOC_BUILD_TIMESTAMP")
+        env!("AGENT_DOC_BUILD_ID")
     ))?;
     agent_doc_controller_io::project_controller::install_runtime_effects(
         &PROJECT_CONTROLLER_RUNTIME_EFFECTS,

@@ -753,7 +753,7 @@ where
     if let Err(error) = agent_doc_ipc_io::set_local_build_id(concat!(
         env!("CARGO_PKG_VERSION"),
         "+",
-        env!("AGENT_DOC_BUILD_TIMESTAMP")
+        env!("AGENT_DOC_BUILD_ID")
     )) {
         eprintln!("[ffi] failed to initialize IPC build identity: {error}");
         return 0;

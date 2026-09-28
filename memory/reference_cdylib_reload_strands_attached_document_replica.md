@@ -6,6 +6,38 @@ metadata:
   type: reference
 ---
 
+## 2026-09-28 (later): the self-heal below assumes the handoff RUNS — check that first
+
+The self-heal is real, but it can only fire if a new generation actually loads.
+A second failure wears the same `missing_replica` face and never heals, on any
+timescale: **the generation handoff itself fails closed**, so the IDE keeps
+executing the old cdylib and no re-registration is ever attempted.
+
+Separate them from the IDE log, not from ops.log:
+
+```bash
+grep -a "NativeReloadCoordinator" ~/.cache/JetBrains/*/log/idea.log | tail
+# self-heal case:  "[native] replica restart converged"
+# wedge case:      "[native] reload failed closed; an IPC listener did not terminate"  (repeats forever)
+ls -lt /tmp/agent-doc-native-<IDE_PID>/    # newest .so OLDER than your make install == wedged
+ss -xlp | grep "ipc-<IDE_PID>.sock"        # TWO LISTEN rows for one path == duplicate generations
+```
+
+Cause: `socket_path` is keyed by pid, so every generation in one IDE shares a
+name; a new listener unlinked the live one and rebound it. `wake_listener`
+then reached the wrong listener, the evicted one never saw its shutdown token,
+and `quiesceAllForNativeReload` refused the handoff — permanently. Fixed in
+`36eaa1357` (refuse to evict a serving peer), `23f81e9ac` (prove *serving* with
+a round trip — a bare connect succeeds into a dead listener's backlog) and
+`3b06dcc28` (non-blocking accept, so shutdown needs no wake).
+
+**The fix cannot deploy itself into an already-wedged IDE** — the loaded code is
+the broken code. That process needs one restart; after it, the guards hold.
+Downstream on 2026-09-28: retained writes that never settle on fpe.md /
+monsterrodholders.md / sdk.md, a doubled `agent-doc: persisting` banner (one per
+resident generation), File Cache Conflict, and stale-supervisor warnings — all
+one cause. See [[reference_ipc_build_mismatch_was_a_clock_not_a_code_difference]].
+
 ## 2026-09-28: SELF-HEALS NOW — the operator tab reopen below is obsolete
 
 Everything in this file that says the clearing action is editor-side and

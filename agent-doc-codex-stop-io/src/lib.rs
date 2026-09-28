@@ -325,17 +325,48 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
     // the prior item reached a clean closeout. This avoids redirecting an
     // unfinished response back through `/loop` merely because its current head
     // remains visible in the document.
-    let continuation_proven =
-        agent_doc_queue_io::continuation_marker::load_continuation_marker(&file)?.is_some()
-            || agent_doc_controller_io::project_controller::
-                queue_drain_stall_continuation_pending_for_file(&file)?
-                .is_some();
+    let marker = agent_doc_queue_io::continuation_marker::load_continuation_marker(&file)?;
+    let continuation_proven = marker.is_some()
+        || agent_doc_controller_io::project_controller::
+            queue_drain_stall_continuation_pending_for_file(&file)?
+            .is_some();
     if !continuation_proven {
         return Ok(None);
     }
     let Some(prompt) = active_auto_queue_prompt(&file)? else {
         return Ok(None);
     };
+
+    // `#stopneedsclosedcycle`, second half: `stop_hook_active` only breaks
+    // recursion WITHIN one stop. Across separate turns nothing stopped the
+    // Claude path from naming the same head forever, and it is the only caller
+    // that writes `last_requested_head` without ever reading it — the Codex
+    // path has had this guard since the field was added for it.
+    //
+    // A drained head is struck, so a head that has not advanced since the last
+    // request means the drain did not happen. Re-blocking then re-asks for work
+    // the loop has already proven it cannot take (`#qchurn`): the head survived
+    // its own reap because it is malformed, or preflight refused admission so
+    // no cycle ran at all. Both surfaced on
+    // tasks/agent-doc/agent-doc-bugs.md 2026-09-27 with `do [#focusstashedactor`
+    // — an unclosed bracket parses as free text, so the id-keyed strike matched
+    // nothing and the head outlived the work. Falling through hands the turn
+    // back to the agent, which is what lets the operator hear about it.
+    if marker
+        .as_ref()
+        .and_then(|marker| marker.last_requested_head.as_deref())
+        == Some(prompt.as_str())
+    {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "claude_stop_queue_continuation_skipped reason=head_did_not_advance \
+                 head_bytes={} action=allow_final_answer",
+                prompt.len(),
+            ),
+        );
+        return Ok(None);
+    }
 
     if input.stop_hook_active {
         // Claude explicitly requires Stop hooks to break their own recursion.
@@ -3747,6 +3778,63 @@ Reviewed the gated items.\n\
             .unwrap()
             .is_none(),
             "a retained write is a failed closeout: the agent must be free to report it"
+        );
+    }
+
+    /// `#stopneedsclosedcycle`, second half: a head that never advances.
+    ///
+    /// `stop_hook_active` bounds recursion within one stop, not across turns.
+    /// `do [#focusstashedactor` (unclosed bracket) parses as free text, so the
+    /// id-keyed strike matched nothing and the head outlived its own reap —
+    /// the hook then re-asked for it on three separate turns. The marker field
+    /// that fixes this already existed for the Codex path; Claude wrote it and
+    /// never read it.
+    #[test]
+    fn claude_stop_stops_re_asking_for_a_head_that_never_advances() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+
+        let first = apply_claude_stop(&ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+        assert!(
+            first.is_some(),
+            "the first request for a head must still drive the loop"
+        );
+
+        // The drain did not strike the head — the document is unchanged.
+        assert!(
+            apply_claude_stop(&ClaudeStopInput {
+                session_id: "codex-session".to_string(),
+                cwd: dir.path().display().to_string(),
+                stop_hook_active: false,
+            })
+            .unwrap()
+            .is_none(),
+            "re-asking for an unchanged head is churn; the agent must be able to report it"
+        );
+
+        // A head that DID advance is ordinary drain progress and still blocks.
+        let advanced = write_auto_queue_doc(&dir, &["fix the following queue item"]);
+        assert_eq!(advanced, doc, "the fixture must rewrite the same document");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+        assert!(
+            apply_claude_stop(&ClaudeStopInput {
+                session_id: "codex-session".to_string(),
+                cwd: dir.path().display().to_string(),
+                stop_hook_active: false,
+            })
+            .unwrap()
+            .is_some(),
+            "an advanced head is progress, not churn"
         );
     }
 

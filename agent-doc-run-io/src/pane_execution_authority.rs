@@ -159,10 +159,20 @@ pub fn require_in(scope: &DocumentScope, file: &Path) -> Result<AuthorityVerdict
         AuthorityVerdict::RejectLiveOwnerMismatch {
             owner_pane_id,
             invocation_pane_id,
-        } => anyhow::bail!(
-            "{}",
-            live_owner_mismatch_remedy(&document.to_string(), owner_pane_id, invocation_pane_id)
-        ),
+        } => {
+            if let Some(remedy) = recover_shared_codex_daemon_mismatch(
+                file,
+                &document.to_string(),
+                owner_pane_id,
+                invocation_pane_id,
+            ) {
+                anyhow::bail!("{remedy}");
+            }
+            anyhow::bail!(
+                "{}",
+                live_owner_mismatch_remedy(&document.to_string(), owner_pane_id, invocation_pane_id)
+            )
+        }
         AuthorityVerdict::RejectStaleOwner {
             owner_pane_id,
             invocation_pane_id,
@@ -190,6 +200,61 @@ pub fn require_in(scope: &DocumentScope, file: &Path) -> Result<AuthorityVerdict
         )),
     }
     .with_context(|| format!("pane authority for {}", file.display()))
+}
+
+/// Recover a live-owner mismatch that is an artifact of Codex's shared daemon.
+///
+/// Both proofs are required before acting: this command must descend from a
+/// shared Codex app-server daemon (so `TMUX_PANE` is the daemon's pane, not the
+/// invoker's), and the owner pane must be running a daemon-attached Codex TUI.
+/// The recovery is the operator's own "Restart Agent" intent, which the owner's
+/// live supervisor defers to its turn boundary and completes as an exact resume
+/// — so the conversation survives and the relaunch carries `--no-daemon`. If
+/// the invocation really came from a foreign pane, the only effect is that the
+/// owner is moved onto an unshared app-server, which is the safe configuration.
+fn recover_shared_codex_daemon_mismatch(
+    file: &Path,
+    document: &str,
+    owner_pane_id: &str,
+    invocation_pane_id: &str,
+) -> Option<String> {
+    use crate::codex_shared_daemon as shared;
+    let daemon_pid = shared::invocation_descends_from_shared_codex_daemon()?;
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let pane_pid: u32 =
+        agent_doc_tmux_io::display_message_value_nonempty(&tmux, Some(owner_pane_id), "#{pane_pid}")?
+            .trim()
+            .parse()
+            .ok()?;
+    shared::daemon_attached_codex_tui_under(pane_pid)?;
+    let requested = agent_doc_project_root_io::project_root_containing(file)
+        .ok_or_else(|| "no project root".to_string())
+        .and_then(|root| {
+            agent_doc_controller_io::project_controller::request_supervisor_replacement(
+                &root,
+                agent_doc_controller_io::project_controller::SupervisorReplacementRequest {
+                    file: file.canonicalize().unwrap_or_else(|_| file.to_path_buf()),
+                    mode: "agent:continue".to_string(),
+                    force: false,
+                },
+            )
+            .map(|_| ())
+            .map_err(|err| format!("{err:#}"))
+        });
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "pane_authority_shared_codex_daemon owner_pane={owner_pane_id} reported_pane={invocation_pane_id} daemon_pid={daemon_pid} relaunch_requested={}",
+            requested.is_ok()
+        ),
+    );
+    Some(shared::shared_daemon_owner_mismatch_remedy(
+        document,
+        owner_pane_id,
+        invocation_pane_id,
+        daemon_pid,
+        requested,
+    ))
 }
 
 /// The live-owner-mismatch refusal, as one operator-facing sentence.

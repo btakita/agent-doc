@@ -111,6 +111,8 @@ For resumed Codex sessions, agent-doc must not pass legacy sandbox flags through
 
 Every agent-doc-launched Codex TUI runs with `--no-daemon` — fresh, exact resume, and supervisor restart alike. Codex otherwise attaches each TUI to one shared `codex app-server` daemon, and the daemon, not the TUI, spawns hooks and tool commands, so they inherit the daemon's `TMUX_PANE`: the pane that happened to start it. Pane execution authority is proven from `TMUX_PANE`, so a shared daemon makes a document's own owner pane look like a foreign invocation (observed: `agent-doc tasks/infra.md` typed into its owner `%12` refused as coming from `%3`). An operator-supplied `--no-daemon` is not duplicated.
 
+Sessions launched before that rule, or by hand, can still be daemon-attached. Pane execution authority recovers them: on a live-owner mismatch where the invoking process descends from a Codex app-server daemon AND the owner pane runs a daemon-attached Codex TUI (no `--no-daemon`), the reported pane is treated as non-evidence, agent-doc requests the owner's `agent:continue` replacement (the Restart Agent intent — deferred to the turn boundary, exact resume, conversation preserved, relaunched with `--no-daemon`), logs `pane_authority_shared_codex_daemon`, and the refusal tells the operator to re-run the trigger once the pane is back at its prompt. If the request cannot be made, the refusal names `agent-doc session restart-agent <FILE>` instead.
+
 Key differences from Claude Code:
 - No `-p` (pipe mode) — `exec` is the non-interactive equivalent
 - No `--permission-mode` — uses `-s` sandbox mode instead

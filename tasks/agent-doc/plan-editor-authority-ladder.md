@@ -122,6 +122,46 @@ When the agent's incoming merge and the operator's live edit meet:
   (registration merges forward) and `#editorauth3` (no whole-text replacement
   into a registered editor) are where `reconcileText` gets called.
 
+## `#editorauth3` (done 2026-09-29)
+
+Root cause of the api.md loss, on the controller side: a registration that
+retained the controller projection queued a bootstrap *receipt*, and
+`ensure_canonical_projection_receipt` set the same flag that quarantines a
+member's updates. The editor had adopted that bootstrap, so its typing was in
+the relay's lineage, yet every keystroke was dropped
+(`crdt_replica_update_quarantined`) until the receipt ACK. A handoff before
+the ACK lost the text for good.
+
+- `agent-doc-document-realtime` `RelayHub`: new `replica_updates_fenced`
+  source map, separate from `canonical_projection_required`. A receipt
+  obligation no longer fences updates. Only an unproven lineage
+  (`require_canonical_projection`: a first-contact incremental frame, a retained
+  frontier against an unestablished relay, a quarantined document-op author, a
+  structural/graph rejection) fences them. Both clear on the receipt ACK and on
+  deregister.
+- `agent-doc-crdt-relay-io`: `relay_holds_only_disk_rung` (no established
+  projection, no live member, canonical equals disk; or an empty reseed
+  fence). An unregistered editor's update against such a relay is
+  `RequestEditorReseed`: nothing is registered or projected over the editor, an
+  `editor_replica_reregister` is signalled
+  (`crdt_replica_update_editor_reseed_requested`), and the re-registration with
+  a retained frontier resets that relay to the empty reseed fence
+  (`crdt_replica_register_retained_reseed recovery=cold_relay_editor_authority_ladder`),
+  so the editor's state reseeds it. This is ladder rung 2 over rung 3. A relay
+  whose canonical differs from disk may hold an agent write that isn't on disk,
+  so it keeps authority and the old fenced full bootstrap applies.
+- Tests: `relay_update_after_handoff_reseeds_from_the_editor_not_disk` (api.md
+  replay; it replaced the test that asserted the rollback),
+  `typing_relays_while_a_bootstrap_receipt_is_outstanding`,
+  `relay_ahead_of_disk_keeps_authority_over_a_retained_registration`,
+  `cold_start_decision_prefers_the_editor_only_over_the_disk_rung`. Mutating
+  each fix back fails its test.
+- Still open: two or more editors on a relay that already holds one editor.
+  An unregistered editor there still gets the fenced canonical projection,
+  because a foreign-lineage delta cannot be merged without its text. Reconciling
+  it through `reconcileText` needs the plugin to publish its buffer on
+  registration (`#editorauth2`).
+
 ## Phases
 
 1. `#editorauth1`: Lean + TLA model of the conflict-reconciliation rules above.

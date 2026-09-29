@@ -1096,8 +1096,26 @@ pub fn send_message_to_pid_recovering_build_mismatch(
     match send_message_to_pid(project_root, editor_pid, message) {
         Ok(_) => Ok(BuildMismatchSendOutcome::Delivered),
         Err(handshake_error) if is_ipc_build_mismatch_error(&handshake_error) => {
+            let listener_build = ipc_build_mismatch_listener_build(&handshake_error);
+            let decision = build_mismatch_reload_decision(
+                sender_executable_replaced(),
+                listener_build
+                    .as_deref()
+                    .map(|build| reload_already_requested_for_listener_build(editor_pid, build)),
+            );
+            if let Some(reason) = decision.refusal() {
+                return Err(handshake_error.context(format!(
+                    "IPC build mismatch recovery withheld reload_library ({reason}): \
+                     reloading the editor cannot resolve this mismatch"
+                )));
+            }
             match send_reload_library_to_editor(project_root, editor_pid, editor_id, lib_version) {
-                Ok(true) => Ok(BuildMismatchSendOutcome::ReloadRequested),
+                Ok(true) => {
+                    if let Some(build) = listener_build.as_deref() {
+                        record_reload_requested_for_listener_build(editor_pid, build);
+                    }
+                    Ok(BuildMismatchSendOutcome::ReloadRequested)
+                }
                 Ok(false) => Err(handshake_error
                     .context("IPC build mismatch recovery did not deliver reload_library")),
                 Err(reload_error) => Err(handshake_error.context(format!(
@@ -1107,6 +1125,115 @@ pub fn send_message_to_pid_recovering_build_mismatch(
         }
         Err(error) => Err(error),
     }
+}
+
+/// How long a reload requested for one editor listener build suppresses another
+/// reload aimed at that same build (`#replicachurn12s`).
+///
+/// A successful reload changes the listener build, so a repeat mismatch against
+/// the *same* listener build inside this window proves the reload did not help:
+/// the editor already runs the installed library and the stale side is the
+/// sender. Longer than the reload receipt budget so a slow generation handoff
+/// is not re-triggered mid-swap.
+const BUILD_MISMATCH_RELOAD_COOLDOWN: Duration =
+    Duration::from_secs(IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS * 2);
+
+static BUILD_MISMATCH_RELOADS: std::sync::LazyLock<
+    Mutex<std::collections::HashMap<(u64, String), std::time::Instant>>,
+> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// Whether a build-mismatch recovery may ask the editor to reload
+/// (`#replicachurn12s`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuildMismatchReloadDecision {
+    Reload,
+    /// This process runs an executable that has since been replaced on disk, so
+    /// the mismatch is the sender's. The editor's reload loads the installed
+    /// library, which it already runs: every replica restarts and the mismatch
+    /// survives, forever, once per notify.
+    SenderExecutableReplaced,
+    /// A reload was already requested for this editor while it reported this
+    /// same listener build, and the mismatch outlived it.
+    ReloadAlreadyRequested,
+}
+
+impl BuildMismatchReloadDecision {
+    fn refusal(self) -> Option<&'static str> {
+        match self {
+            Self::Reload => None,
+            Self::SenderExecutableReplaced => Some("sender_executable_replaced"),
+            Self::ReloadAlreadyRequested => Some("reload_already_requested_for_listener_build"),
+        }
+    }
+}
+
+/// `reload_already_requested` is `None` when the mismatch carried no listener
+/// build, in which case only the sender check applies.
+fn build_mismatch_reload_decision(
+    sender_executable_replaced: bool,
+    reload_already_requested: Option<bool>,
+) -> BuildMismatchReloadDecision {
+    if sender_executable_replaced {
+        BuildMismatchReloadDecision::SenderExecutableReplaced
+    } else if reload_already_requested == Some(true) {
+        BuildMismatchReloadDecision::ReloadAlreadyRequested
+    } else {
+        BuildMismatchReloadDecision::Reload
+    }
+}
+
+fn ipc_build_mismatch_listener_build(error: &anyhow::Error) -> Option<String> {
+    error
+        .chain()
+        .find_map(|cause| match cause.downcast_ref::<IpcHandshakeError>() {
+            Some(IpcHandshakeError::BuildMismatch { expected, .. }) => Some(expected.clone()),
+            _ => None,
+        })
+}
+
+/// Whether a delivered reload for `(editor_pid, listener_build)` is still inside
+/// [`BUILD_MISMATCH_RELOAD_COOLDOWN`].
+fn reload_already_requested_for_listener_build(editor_pid: u64, listener_build: &str) -> bool {
+    reload_requested_within_cooldown(
+        &mut BUILD_MISMATCH_RELOADS.lock(),
+        editor_pid,
+        listener_build,
+        std::time::Instant::now(),
+        BUILD_MISMATCH_RELOAD_COOLDOWN,
+    )
+}
+
+/// Only a delivered reload arms the cooldown, so an undelivered one still retries.
+fn record_reload_requested_for_listener_build(editor_pid: u64, listener_build: &str) {
+    BUILD_MISMATCH_RELOADS.lock().insert(
+        (editor_pid, listener_build.to_string()),
+        std::time::Instant::now(),
+    );
+}
+
+fn reload_requested_within_cooldown(
+    reloads: &mut std::collections::HashMap<(u64, String), std::time::Instant>,
+    editor_pid: u64,
+    listener_build: &str,
+    now: std::time::Instant,
+    cooldown: Duration,
+) -> bool {
+    reloads.retain(|_, requested_at| now.saturating_duration_since(*requested_at) < cooldown);
+    reloads.contains_key(&(editor_pid, listener_build.to_string()))
+}
+
+/// Whether this process's executable has been replaced on disk since it started.
+///
+/// `lib-install` / `cargo install` swap the binary by rename, which unlinks the
+/// running inode; Linux then reports `/proc/self/exe` with a ` (deleted)` suffix.
+fn sender_executable_replaced() -> bool {
+    std::fs::read_link("/proc/self/exe")
+        .ok()
+        .is_some_and(|exe| executable_link_is_replaced(&exe))
+}
+
+fn executable_link_is_replaced(exe: &Path) -> bool {
+    exe.to_string_lossy().ends_with(" (deleted)")
 }
 
 /// Start a socket listener (for use by the FFI library / plugin).
@@ -1571,6 +1698,7 @@ where
 mod tests {
     use super::*;
     use std::io::Read as _;
+    use std::sync::atomic::AtomicUsize;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -1971,19 +2099,19 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let shutdown = Arc::new(AtomicBool::new(false));
         let mutation_reached = Arc::new(AtomicBool::new(false));
-        let reload_reached = Arc::new(AtomicBool::new(false));
+        let reloads_reached = Arc::new(AtomicUsize::new(0));
         let listener_identity = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "stale-listener-build");
 
         let root_clone = root.clone();
         let shutdown_clone = Arc::clone(&shutdown);
         let mutation_reached_clone = Arc::clone(&mutation_reached);
-        let reload_reached_clone = Arc::clone(&reload_reached);
+        let reloads_reached_clone = Arc::clone(&reloads_reached);
         let server = thread::spawn(move || {
             start_listener_with_logger_and_read_timeout(
                 &root_clone,
                 move |message| {
                     if message_is_reload_library(message) {
-                        reload_reached_clone.store(true, Ordering::SeqCst);
+                        reloads_reached_clone.fetch_add(1, Ordering::SeqCst);
                     } else {
                         mutation_reached_clone.store(true, Ordering::SeqCst);
                     }
@@ -2027,10 +2155,131 @@ mod tests {
             .expect("build mismatch should request the reload-only compatibility path"),
             BuildMismatchSendOutcome::ReloadRequested,
         );
-        assert!(reload_reached.load(Ordering::SeqCst));
+        assert_eq!(reloads_reached.load(Ordering::SeqCst), 1);
+        assert!(!mutation_reached.load(Ordering::SeqCst));
+
+        // `#replicachurn12s`: the listener still reports the same build, so the
+        // reload did not resolve the skew. Another reload would only restart every
+        // editor replica again; the sender must hear a typed mismatch instead.
+        let repeat = send_message_to_pid_recovering_build_mismatch(
+            &root,
+            u64::from(std::process::id()),
+            "test-editor",
+            &serde_json::json!({"type": "apply_canonical", "file": "/tmp/plan.md"}),
+            env!("CARGO_PKG_VERSION"),
+        )
+        .expect_err("a mismatch that outlived a reload must not reload the editor again");
+        assert!(
+            format!("{repeat:#}").contains("reload_already_requested_for_listener_build"),
+            "unexpected repeat error: {repeat:#}"
+        );
+        assert!(is_ipc_build_mismatch_error(&repeat));
+        assert_eq!(reloads_reached.load(Ordering::SeqCst), 1);
         assert!(!mutation_reached.load(Ordering::SeqCst));
 
         stop_test_listener(&root, shutdown, server);
+    }
+
+    #[test]
+    fn build_mismatch_reload_is_withheld_when_it_cannot_resolve_the_skew() {
+        // `#replicachurn12s`: a supervisor still running a replaced executable sent
+        // `reload_library` on every notify; the editor reloaded the build it already
+        // ran and restarted every replica each time, forever.
+        assert_eq!(
+            build_mismatch_reload_decision(false, Some(false)),
+            BuildMismatchReloadDecision::Reload
+        );
+        assert_eq!(
+            build_mismatch_reload_decision(false, None),
+            BuildMismatchReloadDecision::Reload
+        );
+        assert_eq!(
+            build_mismatch_reload_decision(true, Some(false)),
+            BuildMismatchReloadDecision::SenderExecutableReplaced
+        );
+        assert_eq!(
+            build_mismatch_reload_decision(false, Some(true)),
+            BuildMismatchReloadDecision::ReloadAlreadyRequested
+        );
+        assert_eq!(BuildMismatchReloadDecision::Reload.refusal(), None);
+        assert!(
+            BUILD_MISMATCH_RELOAD_COOLDOWN
+                > Duration::from_secs(IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS),
+            "a slow generation handoff must not be re-triggered mid-swap"
+        );
+    }
+
+    #[test]
+    fn replaced_executable_link_is_recognised() {
+        assert!(executable_link_is_replaced(Path::new(
+            "/home/u/.cargo/bin/agent-doc (deleted)"
+        )));
+        assert!(!executable_link_is_replaced(Path::new(
+            "/home/u/.cargo/bin/agent-doc"
+        )));
+        assert!(
+            !sender_executable_replaced(),
+            "the test binary is not replaced while it runs"
+        );
+    }
+
+    #[test]
+    fn reload_cooldown_is_scoped_to_editor_and_listener_build_and_expires() {
+        let mut reloads = std::collections::HashMap::new();
+        let start = Instant::now();
+        let cooldown = Duration::from_secs(10);
+        assert!(!reload_requested_within_cooldown(
+            &mut reloads,
+            7,
+            "build-a",
+            start,
+            cooldown
+        ));
+        reloads.insert((7, "build-a".to_string()), start);
+        let later = start + Duration::from_secs(5);
+        assert!(reload_requested_within_cooldown(
+            &mut reloads,
+            7,
+            "build-a",
+            later,
+            cooldown
+        ));
+        assert!(
+            !reload_requested_within_cooldown(&mut reloads, 7, "build-b", later, cooldown),
+            "a changed listener build means the reload worked; a fresh skew may reload"
+        );
+        assert!(!reload_requested_within_cooldown(
+            &mut reloads,
+            8,
+            "build-a",
+            later,
+            cooldown
+        ));
+        assert!(!reload_requested_within_cooldown(
+            &mut reloads,
+            7,
+            "build-a",
+            start + Duration::from_secs(11),
+            cooldown
+        ));
+        assert!(reloads.is_empty(), "expired entries are pruned");
+    }
+
+    #[test]
+    fn listener_build_is_read_from_the_typed_mismatch() {
+        let error = anyhow::Error::new(IpcHandshakeError::BuildMismatch {
+            expected: "0.1.0+listener".to_string(),
+            received: "0.1.0+client".to_string(),
+        })
+        .context("outer");
+        assert_eq!(
+            ipc_build_mismatch_listener_build(&error).as_deref(),
+            Some("0.1.0+listener")
+        );
+        assert_eq!(
+            ipc_build_mismatch_listener_build(&anyhow::anyhow!("IPC build mismatch: text")),
+            None
+        );
     }
 
     fn wait_for_test_listener(root: &Path) {

@@ -7,6 +7,33 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
+/** A reload fired because the library file under the running IDE changed (an install). */
+internal const val NATIVE_RELOAD_TRIGGER_MTIME = "mtime"
+
+/** A reload fired because a `reload_library` IPC intent arrived. */
+internal const val NATIVE_RELOAD_TRIGGER_IPC = "ipc"
+
+/**
+ * `#hotreloadversion` (#59): the hot-reload log line. The version is the one the replacement
+ * library reported when it was validated, never the trigger; an IPC intent's announced version is
+ * added only when it disagrees with what actually loaded.
+ */
+internal fun hotReloadLogLineUtil(
+    loadedVersion: String?,
+    trigger: String,
+    announcedLibVersion: String?,
+    path: String,
+): String {
+    val version = loadedVersion?.takeIf { it.isNotBlank() }?.let { "v$it" } ?: "version=unknown"
+    val announced =
+        announcedLibVersion
+            ?.takeIf { it.isNotBlank() && it != loadedVersion }
+            ?.let { " announced=v$it" }
+            .orEmpty()
+    return "[native] hot-reloaded libagent_doc $version (trigger=$trigger$announced) from $path " +
+        "after quiesce/close handoff"
+}
+
 internal class NativeReloadGate {
     internal class Handoff internal constructor(
         internal val completion: CountDownLatch = CountDownLatch(1),
@@ -52,7 +79,12 @@ internal object NativeReloadCoordinator {
     fun awaitReady(timeoutMs: Long = USER_ACTION_AWAIT_MS): Boolean =
         reloadGate.awaitReady(timeoutMs)
 
-    fun requestReload(libVersion: String? = null) {
+    /**
+     * [trigger] says why the reload fired (`mtime`, `ipc`, ...); [announcedLibVersion] is the version
+     * an IPC `reload_library` intent named, when there is one. They used to share one `libVersion`
+     * parameter, so an mtime reload logged `libagent_doc vmtime` (#59).
+     */
+    fun requestReload(trigger: String, announcedLibVersion: String? = null) {
         if (PluginGeneration.retired) {
             // `#pluginunloadresurrect`: the replacement generation owns reloads.
             log.info("[native] reload ignored by an unloaded plugin generation")
@@ -90,7 +122,7 @@ internal object NativeReloadCoordinator {
                         )
                         return@executeOnPooledThread
                     }
-                    when (val outcome = AgentDocLib.hotReload(libVersion)) {
+                    when (val outcome = AgentDocLib.hotReload(trigger, announcedLibVersion)) {
                         NativeReloadOutcome.AlreadyCurrent ->
                             log.debug("[native] reload intent already satisfied")
                         is NativeReloadOutcome.Reloaded ->

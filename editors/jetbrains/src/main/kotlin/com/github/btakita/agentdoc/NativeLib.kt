@@ -970,6 +970,8 @@ interface AgentDocLib : Library {
             private val workerThreads: Set<Thread>,
             val loadTarget: String,
         ) {
+            /** `#hotreloadversion` (#59): the version [verifyVersion] validated for this generation. */
+            @Volatile var version: String? = null
             private val callMonitor = java.lang.Object()
             private val activeCalls = AtomicInteger(0)
             @Volatile private var acceptingCalls = true
@@ -1159,7 +1161,7 @@ interface AgentDocLib : Library {
             if (current != null && path != null) {
                 val currentMtime = File(path).lastModified()
                 if (currentMtime != failedReloadMtime && libMtimeChanged(path, loadedMtime)) {
-                    NativeReloadCoordinator.requestReload("mtime")
+                    NativeReloadCoordinator.requestReload(trigger = NATIVE_RELOAD_TRIGGER_MTIME)
                 }
                 return current
             }
@@ -1190,7 +1192,10 @@ interface AgentDocLib : Library {
         }
 
         @Synchronized
-        internal fun hotReload(libVersion: String? = null): NativeReloadOutcome {
+        internal fun hotReload(
+            trigger: String,
+            announcedLibVersion: String? = null,
+        ): NativeReloadOutcome {
             val path =
                 loadedPath
                     ?: resolveLibPath()
@@ -1294,10 +1299,7 @@ interface AgentDocLib : Library {
             publishGeneration(replacement, path, targetMtime)
             failedReloadMtime = 0L
             pruneRetiredShadow(old.loadTarget, replacement.loadTarget)
-            LOG.info(
-                "[native] hot-reloaded libagent_doc v${libVersion ?: "?"} from $path " +
-                    "after quiesce/close handoff"
-            )
+            LOG.info(hotReloadLogLineUtil(replacement.version, trigger, announcedLibVersion, path))
             return NativeReloadOutcome.Reloaded(targetMtime)
         }
 
@@ -1333,7 +1335,7 @@ interface AgentDocLib : Library {
             val generation = LoadedGeneration.load(loadTarget)
             try {
                 generation.requireReloadAbi()
-                verifyVersion(generation.proxy, canonicalPath)
+                generation.version = verifyVersion(generation.proxy, canonicalPath)
                 return generation
             } catch (error: Throwable) {
                 try {
@@ -1390,7 +1392,7 @@ interface AgentDocLib : Library {
             return !nativePathIsMapped(path, maps)
         }
 
-        private fun verifyVersion(lib: AgentDocLib, path: String) {
+        private fun verifyVersion(lib: AgentDocLib, path: String): String {
             val ptr =
                 lib.agent_doc_version()
                     ?: throw IllegalStateException("agent_doc_version() returned null at $path")
@@ -1400,6 +1402,7 @@ interface AgentDocLib : Library {
                     "agent_doc_version() returned an empty version at $path"
                 }
                 LOG.info("[native] loaded libagent_doc v$version from $path")
+                return version
             } finally {
                 lib.agent_doc_free_string(ptr)
             }

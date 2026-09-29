@@ -75,7 +75,10 @@ describe('typed reload_library intent', () => {
         const start = watcher.indexOf('EditorIntent.ReloadLibrary.token ->');
         assert.ok(start >= 0);
         const handler = watcher.slice(start, start + 500);
-        assert.ok(handler.includes('NativeReloadCoordinator.requestReload(libVersion)'));
+        assert.ok(handler.includes('NativeReloadCoordinator.requestReload('));
+        // #59: the typed intent passes its trigger and the announced version separately.
+        assert.ok(handler.includes('trigger = NATIVE_RELOAD_TRIGGER_IPC'));
+        assert.ok(handler.includes('announcedLibVersion = libVersion'));
         assert.ok(!watcher.includes('newWatchService()'));
         assert.ok(!watcher.includes('reloadBroadcastFile'));
 
@@ -89,7 +92,7 @@ describe('typed reload_library intent', () => {
         );
         assert.ok(coordinator.includes('CrdtReplicaManager.quiesceAllForNativeReload()'));
         assert.ok(coordinator.includes('PatchWatcher.quiesceAllForNativeReload()'));
-        assert.ok(coordinator.includes('AgentDocLib.hotReload(libVersion)'));
+        assert.ok(coordinator.includes('AgentDocLib.hotReload(trigger, announcedLibVersion)'));
         assert.ok(coordinator.includes('CrdtReplicaManager.restartAfterNativeReload(replicaHandoff)'));
         assert.ok(coordinator.includes('if (report.converged)'));
     });

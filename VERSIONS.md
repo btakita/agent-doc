@@ -4,6 +4,29 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.418
 
+- **Hot-reload logs name the library version that actually loaded (#59).** Replacing
+  `libagent_doc` under a running JetBrains IDE (an install) logged `hot-reloaded libagent_doc
+  vmtime`, because the reload trigger rode in the version parameter. The trigger and the version an
+  IPC intent announces are now separate, and the line reports the version the replacement library
+  validated: `hot-reloaded libagent_doc v0.35.418 (trigger=mtime)`. A differing announced version
+  is shown as `announced=v…`. Tests assert the rendered line per trigger (JetBrains plugin).
+
+- **An editor replica refused as an "ambiguous retained projection" can attach again.** When a
+  controller disk projection that moved the boundary marker or added ` (HEAD)` was reloaded into
+  the editor, registration's containment proof counted that bookkeeping as operator text. It was
+  never contained, so the replica was refused every few seconds, `live_editors=0`, and preflight
+  refused every new cycle. The proof now runs over operator text only. Model-checked in
+  `formal/tla/RetainedProjectionHold.tla`, whose Wedge config reproduces the hold.
+
+- **A plugin upgrade no longer leaves a frozen "awaiting response" banner.** Banners a retired
+  plugin generation had attached stayed on open editors after a dynamic upgrade, beside the new
+  generation's live one. Unload now removes them.
+
+- **Codex's "Update available" dialog is a named operator blocker.** A pane parked on it read as
+  `alive-busy` with no blocker, and dispatch stalled silently. Route refusals and `session status`
+  now name it with the operator action (choose Update now or Skip). agent-doc never answers it and
+  suppresses the `session clear` hint that would type into it.
+
 - **Ctrl+D + Enter now resumes the exact document conversation.** The supervisor's Ctrl+D menu previously advertised and selected a fresh restart, so an operator trying to restart the exited Codex child silently received a new thread. The prompt now distinguishes continuation from the Ctrl+C fresh-restart path, preserves the document-bound lineage, and launches the replacement through exact resume.
 
 - **Stale tmux pane identities no longer strand Codex admission and Stop.**

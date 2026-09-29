@@ -539,7 +539,10 @@ class PatchWatcher(private val project: Project) : Disposable {
             EditorIntent.ReloadLibrary.token -> {
                 val libVersion = extractStringField(json, "lib_version") ?: "?"
                 LOG.info("[socket] reload_library received (lib_version=$libVersion); scheduling generation handoff")
-                NativeReloadCoordinator.requestReload(libVersion)
+                NativeReloadCoordinator.requestReload(
+                    trigger = NATIVE_RELOAD_TRIGGER_IPC,
+                    announcedLibVersion = libVersion.takeUnless { it == "?" },
+                )
                 APPLY_APPLIED
             }
             else -> {

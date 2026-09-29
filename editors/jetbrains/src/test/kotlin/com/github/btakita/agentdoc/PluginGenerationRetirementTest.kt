@@ -42,7 +42,7 @@ class PluginGenerationRetirementTest {
         PluginGeneration.retire()
         // Returns before touching the reload gate or the application: a retired
         // generation must not even begin a handoff.
-        NativeReloadCoordinator.requestReload("test")
+        NativeReloadCoordinator.requestReload(trigger = "test")
         assertTrue(NativeReloadCoordinator.awaitReady(1))
     }
 

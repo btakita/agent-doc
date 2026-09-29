@@ -202,7 +202,8 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("else -> {")
         assertTrue(
             "JetBrains reload intents must enter the application-wide generation handoff",
-            reloadIntentBody.contains("NativeReloadCoordinator.requestReload(libVersion)") &&
+            reloadIntentBody.contains("NativeReloadCoordinator.requestReload(") &&
+                reloadIntentBody.contains("trigger = NATIVE_RELOAD_TRIGGER_IPC") &&
                 !reloadIntentBody.contains("markRestartRequired"),
         )
         assertTrue(
@@ -229,7 +230,10 @@ class TypingTrackerEdtBudgetTest {
                 native.contains("native generation retained and unrelated reactive ingress remains available"),
         )
         assertFalse("JNA's path-cached Native.load shortcut must not own generations", native.contains("Native.load("))
-        assertTrue("mtime changes must schedule the same generation handoff", native.contains("requestReload(\"mtime\")"))
+        assertTrue(
+            "mtime changes must schedule the same generation handoff",
+            native.contains("requestReload(trigger = NATIVE_RELOAD_TRIGGER_MTIME)"),
+        )
         assertTrue("reload must have no filesystem watcher", !watcher.contains("newWatchService()"))
 
         val publishBody = tracker.substringAfter("fun observeLazilyCurrentNow")

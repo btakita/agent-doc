@@ -217,6 +217,17 @@ Done in agent-doc `5799eb417` (pushed and installed). `agent-doc session status 
 - **Commit:** I built it through a private index. `src/session_actor_cmd.rs` still holds another session's uncommitted `/clear` settle-timeout change. That change is what fails clippy in the shared tree (8 args on `poll_context_clear_submit_acceptance`), and I left it out and untouched.
 - **Install:** `make install` exited 0.
 - **CI:** the newest run, `36529492455`, has no result yet (status only showed a clock icon).
+
+### Re: #publishjetbrainssibling — opus-5.5 · 2026-09-29T02:12-04:00
+
+Closed with no code change. The unblock question is "does either IDE host actually require a signed package?", and the answer is no:
+
+- **JetBrains:** IntelliJ IDEA 2026.1 (pid 3417877) is running `agent-doc-jetbrains-0.2.439.jar`, installed unsigned from disk into `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/`. `idea.log`/`idea.1.log` contain no signature warnings or refusals for it. IntelliJ enforces plugin signatures only for JetBrains Marketplace publishing, not for disk or GitHub-release installs, and that is the only way agent-doc ships.
+- **VS Code/codium:** `make install` installs the unsigned `.vsix` through `codium --install-extension` ("Extension installed via `codium`" in tonight's install logs).
+
+So a `-signed` sibling has no consumer. Adding `signPlugin` to the release `plugins` job without the three secrets would only fail the release. The client half (7649ccafd, `find_asset` accepting `<prefix>*-signed.<ext>`) stays as harmless forward compatibility. Signing becomes a real requirement only if agent-doc is ever published to JetBrains Marketplace. That would be a new item with its own secrets, not this one.
+
+Queue state: only `#focuscrossrootverify` remains, and it is `[operator-verify]` (a live IDE tab switch into `src/haiven-dev/tasks/api.md`). The loop stops here.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -231,7 +242,7 @@ Done in agent-doc `5799eb417` (pushed and installed). `agent-doc session status 
 - ~~do [#pastetriggeradmit]~~
 - ~~do [#nameelseclaude]: This happened after transitioning from `agent: claude` to `agent: codex`~~
 - do [#focuscrossrootverify]
-- do [#publishjetbrainssibling]
+- ~~do [#publishjetbrainssibling]~~
 <!-- /agent:queue -->
 
 
@@ -239,7 +250,6 @@ Done in agent-doc `5799eb417` (pushed and installed). `agent-doc session status 
 - [ ] [#retaineddeferwedge] [agent-doc] A respond whose tracked-work mutations deferred on retained delivery projection (tracked_work_mutations_deferred_retained_delivery_projection, 2026-09-29T05:23:49Z, cycle-1790658555784) never committed after delivery converged (delivery_converged=true at 05:26, authority==disk 21647B) and nothing retried it. The three verdicts contradicted: session-check said snapshot!=HEAD run agent-doc commit; commit refused 'current authority contains an uncommitted response; use write --commit'; repair --apply-recovery said clean. Recovered by re-piping the identical body through write --commit (deduped: 'response cell already present'). Fix: the retained intent must commit itself on convergence, and session-check/commit/repair must agree on one remedy. Also snapshot_len=22261 differed from converged authority 21647 — find which target the snapshot recorded.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
-- [ ] [#publishjetbrainssibling] [agent-doc] Publish a `-signed` JetBrains sibling from the release `plugins` job. The client half shipped in 7649ccafd — `find_asset` now matches `<prefix>*-signed.<ext>` by shape, so a signed asset would be selected the moment one exists — but the job publishes only the unsigned zip. `signPlugin` in editors/jetbrains/build.gradle.kts reads CERTIFICATE_CHAIN / PRIVATE_KEY / PRIVATE_KEY_PASSWORD from the environment and none are available to that job, so wiring `signPlugin` in today would fail the release rather than produce a sibling. UNBLOCK: decide whether either IDE host actually requires a signed package, and if so add those three repo secrets; then add signPlugin + a second cp to the plugins job and extend the two-asset verify to four. [recommended]
 <!-- /agent:backlog -->
 
 ## Review

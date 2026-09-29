@@ -42,26 +42,35 @@ class TurnStateBannerProvider : EditorNotificationProvider {
         val presentation = refresher.cachedPresentationFor(file.path)
         val label = presentation.label
         if (label.isEmpty() || !presentation.showBanner) return null
-        return Function { _ ->
-            // A very thin single-line strip instead of the full-height
-            // EditorNotificationPanel, so it barely consumes document space.
-            JPanel(BorderLayout()).apply {
-                isOpaque = true
-                background = STRIP_BG
-                border = JBUI.Borders.empty(0, 8)
-                add(
-            JBLabel(label).apply {
-                font = JBUI.Fonts.smallFont()
-                foreground = STRIP_FG
-                toolTipText = presentation.tooltip
-            },
-                    BorderLayout.WEST,
-                )
-                val h = JBUI.scale(STRIP_HEIGHT_DP)
-                minimumSize = Dimension(0, h)
-                preferredSize = Dimension(0, h)
-                maximumSize = Dimension(Int.MAX_VALUE, h)
-            }.also(::trackStrip)
+        // The platform may apply this factory on the EDT after the generation retired
+        // (`#duplicateturnbanner`), so the factory re-checks instead of trusting the check above.
+        return Function { _ -> createStrip(label, presentation.tooltip) }
+    }
+
+    /**
+     * `#duplicateturnbanner`: a turn strip that removes every other agent-doc turn strip beside
+     * it when it attaches. Only one turn phase exists per document, so any sibling strip is one
+     * that an unloaded plugin generation left behind. Its own unload cleanup can miss it: the
+     * platform can apply a provider factory on the EDT after that generation retired, and a
+     * generation built before `#staleturnbanner` has no cleanup at all. lazily.md showed two
+     * stacked "awaiting response" strips after the 2026-09-29 17:38 dynamic reload. The live
+     * generation is the only one that can see and remove such a strip.
+     */
+    private class TurnStateStrip : JPanel(BorderLayout()) {
+        init {
+            putClientProperty(STRIP_MARKER_KEY, GENERATION_TOKEN)
+        }
+
+        override fun addNotify() {
+            super.addNotify()
+            val parent = parent ?: return
+            if (PluginGeneration.retired) {
+                detach(listOf(this))
+            } else {
+                // The platform may wrap each top component, so the siblings can sit one level up.
+                sweepForeignTurnStrips(parent, this)
+                parent.parent?.let { sweepForeignTurnStrips(it, this) }
+            }
         }
     }
 
@@ -70,6 +79,86 @@ class TurnStateBannerProvider : EditorNotificationProvider {
         // Subtle info-tone strip that reads on both light and dark themes.
         private val STRIP_BG = JBColor(0xEAF1FB, 0x2A3A4A)
         private val STRIP_FG = JBColor(0x3B5273, 0xA9C7EA)
+
+        /** A string key, so a strip from another plugin classloader is still recognisable. */
+        internal const val STRIP_MARKER_KEY = "agent-doc.turn-state-strip"
+
+        /** Identifies this classloader's strips; each generation gets its own. */
+        private val GENERATION_TOKEN: String = java.util.UUID.randomUUID().toString()
+
+        private val TURN_LABEL_PREFIXES = listOf("⟳ agent-doc:", "⚠ agent-doc:", "agent-doc:")
+
+        /** Build a strip, or nothing once this generation has retired. */
+        internal fun createStrip(label: String, tooltip: String?): JComponent? {
+            if (PluginGeneration.retired) return null
+            // A very thin single-line strip instead of the full-height
+            // EditorNotificationPanel, so it barely consumes document space.
+            return TurnStateStrip().apply {
+                isOpaque = true
+                background = STRIP_BG
+                border = JBUI.Borders.empty(0, 8)
+                add(
+                    JBLabel(label).apply {
+                        font = JBUI.Fonts.smallFont()
+                        foreground = STRIP_FG
+                        toolTipText = tooltip
+                    },
+                    BorderLayout.WEST,
+                )
+                val h = JBUI.scale(STRIP_HEIGHT_DP)
+                minimumSize = Dimension(0, h)
+                preferredSize = Dimension(0, h)
+                maximumSize = Dimension(Int.MAX_VALUE, h)
+            }.also(::trackStrip)
+        }
+
+        /**
+         * Whether [component] is an agent-doc turn strip: either marked (any generation since
+         * `#duplicateturnbanner`) or, for older generations, a panel whose label is a turn phase.
+         */
+        internal fun isTurnStrip(component: java.awt.Component): Boolean {
+            if (component !is JComponent) return false
+            if (component.getClientProperty(STRIP_MARKER_KEY) != null) return true
+            if (component !is JPanel) return false
+            return component.components.any { child ->
+                child is javax.swing.JLabel &&
+                    TURN_LABEL_PREFIXES.any { prefix -> child.text?.startsWith(prefix) == true }
+            }
+        }
+
+        /**
+         * Remove every turn strip in [container] other than [keep], looking one wrapper level
+         * down because the platform may wrap each top component. Returns the number removed.
+         */
+        internal fun sweepForeignTurnStrips(container: java.awt.Container, keep: JComponent): Int {
+            val stale = container.components.flatMap { child ->
+                when {
+                    child === keep -> emptyList()
+                    isTurnStrip(child) -> listOf(child as JComponent)
+                    child is java.awt.Container && child.components.none { it === keep } ->
+                        child.components.filter { it !== keep && isTurnStrip(it) }.map { it as JComponent }
+                    else -> emptyList()
+                }
+            }
+            if (stale.isNotEmpty()) detach(stale)
+            return stale.size
+        }
+
+        private fun detach(components: List<JComponent>) {
+            val run = {
+                components.forEach { strip ->
+                    strips.remove(strip)
+                    strip.isVisible = false
+                    strip.parent?.let { parent ->
+                        parent.remove(strip)
+                        parent.revalidate()
+                        parent.repaint()
+                    }
+                }
+            }
+            val application = ApplicationManager.getApplication()
+            if (application == null || application.isDispatchThread) run() else application.invokeLater(run)
+        }
 
         /**
          * `#staleturnbanner`: every strip this classloader attached to an editor. A dynamic

@@ -73,6 +73,7 @@ internal class NativeReloadGate {
 internal object NativeReloadCoordinator {
     private val log = Logger.getInstance(NativeReloadCoordinator::class.java)
     private val reloadGate = NativeReloadGate()
+    private val retiredReloadLogged = java.util.concurrent.atomic.AtomicBoolean(false)
 
     internal const val USER_ACTION_AWAIT_MS = 30_000L
 
@@ -87,7 +88,14 @@ internal object NativeReloadCoordinator {
     fun requestReload(trigger: String, announcedLibVersion: String? = null) {
         if (PluginGeneration.retired) {
             // `#pluginunloadresurrect`: the replacement generation owns reloads.
-            log.info("[native] reload ignored by an unloaded plugin generation")
+            // `#reloadignorestorm`: log once, with the caller, so a leaked caller that keeps
+            // this generation alive is identifiable instead of flooding idea.log.
+            if (retiredReloadLogged.compareAndSet(false, true)) {
+                log.info(
+                    "[native] reload ignored by an unloaded plugin generation trigger=$trigger (logged once)",
+                    Throwable("retired-generation reload caller"),
+                )
+            }
             return
         }
         val handoff = reloadGate.begin() ?: return

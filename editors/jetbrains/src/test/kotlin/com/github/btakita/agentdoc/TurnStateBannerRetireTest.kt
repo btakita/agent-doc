@@ -59,3 +59,55 @@ class TurnStateBannerRetireTest {
         )
     }
 }
+
+/**
+ * `#duplicateturnbanner`: lazily.md showed two stacked "awaiting response" strips after the
+ * 2026-09-29 17:38 dynamic reload. The live generation removes any other turn strip beside its own.
+ */
+class TurnStateBannerSweepTest {
+    @After
+    fun tearDown() {
+        PluginGeneration.resetForTest()
+        TurnStateBannerProvider.retireStrips()
+    }
+
+    @Test
+    fun `a new strip removes a previous generation's strip beside it`() {
+        val editorTop = JPanel()
+        val legacy = JPanel().apply { add(JLabel("⟳ agent-doc: awaiting response")) }
+        val marked = JPanel().apply {
+            putClientProperty(TurnStateBannerProvider.STRIP_MARKER_KEY, "another-generation")
+        }
+        val unrelated = JPanel().apply { add(JLabel("Markdown preview is disabled")) }
+        val live = TurnStateBannerProvider.createStrip("⟳ agent-doc: awaiting response", null)!!
+        listOf(legacy, marked, unrelated, live).forEach(editorTop::add)
+
+        assertEquals(2, TurnStateBannerProvider.sweepForeignTurnStrips(editorTop, live))
+
+        assertEquals(listOf(unrelated, live), editorTop.components.toList())
+        assertNull(legacy.parent)
+        assertNull(marked.parent)
+    }
+
+    @Test
+    fun `wrapped top components are swept one level down, never the live strip`() {
+        val editorTop = JPanel()
+        val staleWrapper = JPanel().apply { add(JPanel().apply { add(JLabel("⚠ agent-doc: input required")) }) }
+        val live = TurnStateBannerProvider.createStrip("⟳ agent-doc: persisting", null)!!
+        val liveWrapper = JPanel().apply { add(live) }
+        editorTop.add(staleWrapper)
+        editorTop.add(liveWrapper)
+
+        assertEquals(1, TurnStateBannerProvider.sweepForeignTurnStrips(editorTop, live))
+
+        assertEquals(0, staleWrapper.componentCount)
+        assertEquals(listOf(live), liveWrapper.components.toList())
+    }
+
+    @Test
+    fun `a retired generation builds no strip`() {
+        PluginGeneration.retire()
+        assertNull(TurnStateBannerProvider.createStrip("⟳ agent-doc: awaiting response", null))
+        assertEquals(0, TurnStateBannerProvider.trackedStripCountForTest())
+    }
+}

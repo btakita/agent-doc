@@ -1167,7 +1167,13 @@ interface AgentDocLib : Library {
 
             if (current != null && path != null) {
                 val currentMtime = File(path).lastModified()
-                if (currentMtime != failedReloadMtime && libMtimeChanged(path, loadedMtime)) {
+                // `#reloadignorestorm`: a retired generation never reloads, so it must not probe
+                // either. Every `get()` from a leaked caller used to request a reload that was
+                // then ignored, ~400 log lines a second, rotating idea.log every ~3 minutes.
+                if (!PluginGeneration.retired &&
+                    currentMtime != failedReloadMtime &&
+                    libMtimeChanged(path, loadedMtime)
+                ) {
                     NativeReloadCoordinator.requestReload(trigger = NATIVE_RELOAD_TRIGGER_MTIME)
                 }
                 return current

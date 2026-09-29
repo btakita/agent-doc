@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: a23700d4-d6a6-4148-91d2-39986bd981f2
+  claude: 53cfd339-a350-4cf5-b9c0-ef3ff6bcbe62
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -539,6 +539,28 @@ Codex's "Update available · 0.158.0 → 0.159.0 … enter continue · esc skip"
 **New backlog item `#replayafterack`:** the root cause of the duplicated `fpe.md` response is still unfixed: the response was written again after the editor had already saved it. The debris is still at `src/haiven-dev/tasks/fpe.md` lines 418–426; delete it in the editor.
 
 Queue: `do [#focuscrossrootverify]` stays queued, because it needs someone at a real IDE. The exchange is at 496 lines, which is a size warning only.
+
+### Re: #replayafterack — opus-5 · 2026-09-29T15:08-04:00
+
+Fixed and installed.
+
+- **`#replayafterack` (commit 1e73faf48): duplicated response.** The editor applied the response before the controller's copy of the document caught up. A disk write then added the ` (HEAD)` marker and moved the boundary marker, and you added a queue line. The pending write for the same response saw that the editor text didn't match its target, so it merged its change in again: 64405 bytes against the editor's 56875. The duplicate and the leftover lines after `&lt;!-- /agent:done --&gt;` came from that second merge. Now:
+  - A pending write first checks whether the editor text already contains its change, ignoring agent-doc's own markers. If it does, the write counts as delivered and nothing more is written.
+  - A merge that would add text outside every component, text present in neither the editor text nor the target, is refused as a conflict and never written.
+  - **Formal check:** `formal/tla/RetainedTransitionFixedPoint.tla` proves at most one copy of the response and that the pending write always settles. The config that uses the old whole-text comparison produces a duplicate, which shows the check is load-bearing. The reachability config shows the new "already delivered" path is taken.
+  - **Test:** the controller regression test fails when the check is disabled.
+  - **Verification:** `make check` passed, 10078 tests.
+- **Correction:** the "draft wording" I blamed earlier was the response's own `patch:status` summary. The duplicate came from the second merge, not from a stale draft.
+- **`#installgenskew` (commit 5a01bb5a5): what blocked `api.md`.** The native save was refused with `plugin_generation_mismatch` because IntelliJ had plugin 0.2.443 while the installed binary expected 0.2.442.
+  - **Cause:** `install` and `install-full` built the binary before bumping the editor plugin version. `make bump-plugin` had also changed `pluginVersion` without recording the source digest, so the release install bumped a second time.
+  - **Fix:** the version bump now runs before the binary build and records the digest. A self-test pins that order and fails when the order is broken.
+  - **State now:** installed and aligned. `api.md` is `committed` and its session-check is ok. The haiven-dev controller is `stable` on the fresh binary.
+- **v0.35.418 is published:** the GitHub Release has 8 assets, and PyPI serves 0.35.418.
+- **New top backlog items from your `api.md` reports:**
+  - `#queuetypingsteer`: typing in the queue during a turn must be live steering, not a stuck write.
+  - `#layoutobservehandoff`: a layout observation during a controller handoff must wait for the new controller instead of being refused.
+  - `#syntheticstrike`: the answered #59 queue line was never struck off.
+- **Not run:** a live repeat of the `fpe.md` sequence. The debris lines still in `fpe.md` (418–426) are yours to delete in the editor.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -551,12 +573,16 @@ Queue: `do [#focuscrossrootverify]` stays queued, because it needs someone at a 
 - ~~#advance-review~~
 - ~~do [#codexupdateblocker]~~
 - do [#focuscrossrootverify]
-- 🚧 Fix https://github.com/btakita/agent-doc/issues/59. release + publish
+- ~~do [#replayafterack]~~
+- do [#retainedadvanceadmit]
+- ~~Fix https://github.com/btakita/agent-doc/issues/59. release + publish~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#replayafterack] [agent-doc] The duplicated fpe.md response of 2026-09-29 13:36 left debris in the file. src/haiven-dev/tasks/fpe.md lines 418-426, committed in haiven-dev 739920a6, are fragments of the FPE recommendation plus a torn `60c81193 -->`, after `<!-- /agent:done -->`. Sequence from .agent-doc/logs/ops.log: (1) 13:36:18 the JetBrains editor applied and acked the response (`editor_content_applied_for_editor_v1`, `visible_write_lazily_event_content_recovered … len=52943 authority=durable_editor_ack`). (2) The controller model still read 49902 bytes without it, so reconcile logged `settled_buffer_dropped_response` and `ipc_socket_visible_write_drift_missing_response_materialized repaired_len=56875` wrote a response-bearing disk projection. (3) 13:36:22 `repair_replay_via_strict_write` replayed the captured response onto that lagging model (agent-doc-repair-io replay_orphaned_response judges orphaned from `doc_content`, the model). (4) The editor delta that already carried the response merged in, giving two interleaved copies. Fix: a durable editor ack whose content materializes the response must count as delivery, and must defer a replay against a model behind that ack. Add SimWorld coverage for "ack before model ingest + replay". The operator should delete the debris lines in the editor.
+- [ ] [#queuetypingsteer] [agent-doc] Typing in `agent:queue` (or an exchange prompt) while a turn is running must be realtime steering, never a closeout wedge. That includes typing inside the queue item being worked on. src/haiven-dev/tasks/api.md 2026-09-29 ~14:40–14:55: (1) respond's write was refused, `crdt_cp_write … CP relay write refused` (stale expected hash after an operator queue edit following preflight, recovery=retry_crdt_merge). (2) The retry was refused with "retained document-write delivery from a prior cycle remains unsettled". (3) session-check reported authority/disk divergence with the response already in the editor buffer, and the agent stopped. Fix: the response write must merge over concurrent operator edits to other components (and to non-conflicting spans of the active queue item) through the CRDT instead of refusing on a whole-document expected hash. The operator edit must surface as `RealtimeSteering` for the active item. The retry of the SAME capture must not be refused as a "prior cycle" retained write. Validate with a TLA+ model (operator edit ∥ response write: no loss, no refusal wedge) plus SimWorld coverage.
+- [ ] [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
+- [ ] [#syntheticstrike] [agent-doc] An answered free-text queue head is never struck when its closeout commits as a synthetic cycle. agent-doc-bugs.md 2026-09-29 14:28: the capture belonged to cycle-1790704937323, but the commit landed as synthetic-1790706539439. `active_captured_response_for_queue_strike` requires `closeout.cycle_id == capture.cycle_id` and an open phase, so the controller's answered-free-text Computed never fired and "Fix …/issues/59" stayed live with a 🚧 marker. The pure projection strikes it correctly (probed with the real inputs and baseline). Fix the capture-to-synthetic-cycle ownership, or strike from the committing synthetic cycle when it committed that capture's response.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 - [ ] [#retainedadvanceadmit] [agent-doc] Advances #drivecapturedsplice. The captured-splice live run is refused at `agent-doc-write-runtime-io/src/lib.rs:3135` ("retained document-write delivery from a prior cycle remains unsettled") while the captured operator edit is still unsaved in the editor (`native_editor_save_request_deferred`; authority and disk diverge on `exchange`). Decide whether a separate canonical advance must be admitted while a captured operator edit is retained. The recipe exists to prove that admission. Fix whichever side is wrong: the admission guard, or the harness ordering. Add SimWorld coverage for "retained capture + independent advance". Then rerun the recipe from tasks/agent-doc/plan-captured-editor-splice-recovery.md with a CLI build that matches the IDE cdylib.

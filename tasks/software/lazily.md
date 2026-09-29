@@ -259,24 +259,67 @@ The immediate rule is: **do not release from the current checkouts**. They all c
 The currently published `main` heads and latest CI are green for all audited standalone repositories except `lazily-formal`, which has no hosted CI and relies on its local check. The root Lazily network workflow is intentionally manual/disabled, so its local interop result is required release evidence.
 
 This audit used the repository's `tsift` navigation workflow to bound source and release-workflow inspection. A separate advisory remains: the live JetBrains agent-doc plugin is newer than the binary-bundled plugin; it does not block this release audit and should not be reinstalled during this cycle.
+
+### Re: Lazily release train executed — GPT-5 · 2026-09-29T01:49-04:00
+
+> **Queue prompt:**
+>
+> do the necessary steprs to release + publish
+
+The release train is complete everywhere the existing publication authority could be proven. All release work used isolated clean clones/worktrees; none of the dirty user-owned checkouts was staged or overwritten.
+
+#### Published and verified
+
+| Project | Release | Verification |
+|---|---:|---|
+| `lazily-spec` | `v0.40.0` | Full check green; [GitHub release](https://github.com/lazily-hub/lazily-spec/releases/tag/v0.40.0). |
+| `lazily-formal` | `v0.39.0` | Full check green; [GitHub release](https://github.com/lazily-hub/lazily-formal/releases/tag/v0.39.0). |
+| `lazily-cpp` | `v0.30.0` | Commit `39f14f4`; full check and CI `36526156096` green; [GitHub release](https://github.com/lazily-hub/lazily-cpp/releases/tag/v0.30.0). |
+| `lazily-zig` | `v0.36.0` | Commit `65cdc62`; full check and CI `36526158130` / `36526157274` green; [GitHub release](https://github.com/lazily-hub/lazily-zig/releases/tag/v0.36.0). |
+| `lazily-kt` | `v0.43.0` | Commit `0ecfdfe`; CI and Release workflows green; Maven artifacts verified in GitHub Packages; [GitHub release](https://github.com/lazily-hub/lazily-kt/releases/tag/v0.43.0). |
+| `lazily-go` | `v0.28.0` | Commit `af4d845`; CI green; Go proxy resolves the exact tag/commit; [GitHub release](https://github.com/lazily-hub/lazily-go/releases/tag/v0.28.0). |
+| `lazily-js` | `v0.34.0` | Commit `d0131ea`; CI/Release green; npm `latest` is `0.34.0`; [GitHub release](https://github.com/lazily-hub/lazily-js/releases/tag/v0.34.0). |
+| `lazily-cs` | `v0.6.0` | Commit `3c2d03d`; CI/Release green; both `Lazily` and `Lazily.R3` `0.6.0` verified on NuGet; [GitHub release](https://github.com/lazily-hub/lazily-cs/releases/tag/v0.6.0). The missing [v0.5.0 release object](https://github.com/lazily-hub/lazily-cs/releases/tag/v0.5.0) was also repaired. |
+| `lazily-py` | `0.42.0` | Commit `94177ac`; workflows green; PyPI has 21 wheels plus one sdist, including all six required CPython 3.12–3.14 macOS x86_64/arm64 wheels; [GitHub release](https://github.com/lazily-hub/lazily-py/releases/tag/v0.42.0). |
+| `lazily-dart` | `0.32.0` | Commit `62e0910`; dry-run and authenticated pub.dev publication succeeded; CI green; [GitHub release](https://github.com/lazily-hub/lazily-dart/releases/tag/v0.32.0). |
+| `lazily-gd` | `v0.2.0` | Full check passed with official Godot 4.4.1 and released Spec fixtures; [source GitHub release](https://github.com/lazily-hub/lazily-gd/releases/tag/v0.2.0). |
+
+#### Prepared but intentionally not tagged
+
+- `lazily-rs` `0.59.0`: prep commit `ea2910d942fca5498f811b7ec88248585fb9f5c3` is pushed. Full `make check` and `cargo publish --dry-run --locked` passed. No tag was created because crates.io still reports no Trusted Publishing configuration for `lazily-hub/lazily-rs` / `release.yml`; creating the tag would knowingly trigger a failed release. The dry-run also reports the locked `spin 0.9.8` as yanked, but packaging succeeds.
+- `lazily-react` `0.3.0`: prep commit `dc2198713cdce925bccb5651ae6229ed27cf5347` is pushed, CI and `npm pack --dry-run` pass, and its Lazily JS peer minimum is now `^0.34.0`. No tag or npm publication was created because `npm whoami` failed and first-publication org authority is unproven.
+- `lazily-html` `0.1.0`: not released. Its declared public repository does not exist, npm returns 404, and the private embedded copy still needs repository/history, dependency-hygiene, CI, and trusted-publication bootstrap.
+- Godot Asset Library publication remains separate from the completed `lazily-gd` source release; addon metadata/package preparation and authenticated submission remain.
+
+#### Cross-binding and closeout evidence
+
+`make -C src/lazily-interop check` passed: 13 tests, zero failures, schema validation green, and all 11/11 required mutations caught. `make -C src/lazily-interop network-suite-merge` also passed at seed 29. This ran against the checked-out post-feature heads; the release-only version commits do not alter protocol behavior.
+
+I did not update or push the superproject gitlinks: the superproject is 57 commits ahead of `origin/main` and has extensive unrelated user-owned changes. Folding release pins into that state would violate the scoped-commit boundary. A clean pin update plus exact-release interop rerun is captured as follow-up work.
+
+The agent-doc stale-install warning was advisory and this cycle did not rebuild agent-doc. Its latest CI run `36527892614` is still in progress; local Lazily release verification is the evidence above.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ⏭️ #advance-review
-- 🚧 do [#needsreleasepublish]
+- 🚧 do the necessary steprs to release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzhtmlbootstrap] Bootstrap the public lazily-hub/lazily-html repository with preserved history, dependency hygiene, CI, trusted npm publication, and release 0.1.0.
+- [ ] [#lzgdasset] Prepare Godot Asset Library addon metadata and package for lazily-gd 0.2.0, then complete the authenticated Asset Library submission.
+- [ ] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzreactpublish] [operator-decision] Establish npm org authorization for the first @lazily-hub/lazily-react publication; then publish, tag, and release prepared 0.3.0 commit dc21987. Blocked because npm whoami failed and the package is still absent.
+- [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Measured by `make review-gate-status` (gate `#lzmacosrunner`), which pins the five known incomplete-pair releases — v0.35.399, v0.35.400, v0.35.401, v0.35.406, v0.35.417 — and goes `evidence_stale` if that measured list changes in EITHER direction, so a widening gap surfaces without a hand pass. Underlying probes are `make release-macos-cadence-check` (weekly window, open since 2026-09-22T16:41:49Z) and `make release-macos-coverage-check` (exit 2, names the five); neither is a `make check` dependency, because clearing them needs Mac hardware. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command, or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit with counterpart durability classification (commits 667eb4766, 434b32548) lives at src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-27/ and is confirmed the ONLY handoff on disk, so only one basis can be authorized. Run the plan from src/agent-doc with `python3 scripts/purge-actions-artifacts.py`; the destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000` and the 250 default cap otherwise aborts. TWO authorizable options, both re-proved by live dry run: (a) full plan — 2,666 artifacts (43.83 GB), 0 refused, 0 skipped; (b) `--durability durable` — 2,136 artifacts (34.83 GB), refusing exactly the 530 rows whose only counterpart is a PyPI file. Prefer (b): the prune floor is 0.35.113 and v0.35.119, the oldest PyPI-only-backed version, is only the THIRD live release above it, so option (a) additionally accepts that 9.01 GB rests on a thinner margin than version numbering suggests. 2,136 rows rest on GitHub release assets, which have not decayed. 571 artifacts are withheld at audit time and are never deletable. Hard deadline: the 7-day `--max-handoff-age-days` guard aborts the whole run after 2026-10-04T05:56:08Z unless the audit is regenerated or `--allow-stale-handoff` is passed; `make review-gate-status` imports that guard from the purge script and flips this gate to `evidence_stale` 24h BEFORE it expires rather than after. Blocked solely on explicit destructive authorization; no artifact has been deleted.

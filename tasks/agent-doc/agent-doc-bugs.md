@@ -768,6 +768,7 @@ Next in the queue are `#layoutobservehandoff`, `#syntheticstrike`, `#focuscrossr
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#editorauth2]: ensure plugin parity~~
 - 🚧 do [#editorauth3]
+- Fix multiple `agent-doc: awaiting response` prompts in lazily.md: ![img_2.png](img_2.png)
 - 📌 do [#layoutobservehandoff]
 - 📌 do [#syntheticstrike]
 - 📌 do [#focuscrossrootverify]

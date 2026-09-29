@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 50afa660-8de0-481e-abf5-b182db2d5506
+  claude: a23700d4-d6a6-4148-91d2-39986bd981f2
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -522,6 +522,23 @@ Codex's "Update available · 0.158.0 → 0.159.0 … enter continue · esc skip"
 **Live check:** `%40` (`src/haiven-dev/tasks/devops.md`) has since been dismissed back to an idle composer, so there is no dialog left to classify. The next Codex update prompt will show the new status line.
 
 **Shared tree:** `agent-doc-harness/src/lib.rs` also holds uncommitted `#clearnewchattrailer` work: Codex post-`/clear` trailer handling plus its test. No tracked item owns it. I committed a hand-built blob without those hunks and left them in the working tree untouched. Its test passes in the full suite.
+
+### Re: Fix agent-doc#59 · release + publish — opus-5 · 2026-09-29T14:28-04:00
+
+> **Queue prompt:** Fix https://github.com/btakita/agent-doc/issues/59. release + publish
+
+**Fixed, and v0.35.418 is tagged and released.** Issue #59 closed automatically from the commit. Locally installed: agent-doc 0.35.418, JetBrains plugin 0.2.442, VS Code extension 0.2.72.
+
+**The bug (commit 0cf9735d4):** when a new `libagent_doc` replaced the old one under a running JetBrains IDE (an install), the log read `hot-reloaded libagent_doc vmtime`. The reload parameter meant to carry a version was being passed the word `mtime` (why the reload fired). `requestReload` and `hotReload` now take the reason (`trigger`: `mtime`, `ipc`) separately from the version an IPC intent announces. Each loaded library generation also keeps the version it reported at load, and the log uses that:
+`hot-reloaded libagent_doc v0.35.418 (trigger=mtime)`. It adds `announced=v…` only when an intent named a different version. As the issue suggested, the new `HotReloadLogLineTest` checks the finished log line for each trigger. The JetBrains and VS Code tests that only checked how the call was spelled are updated.
+
+**Release:** `make release` ran `make check`: 10074 Rust tests passed, 0 VS Code failures, and the TLA+ checks passed, including the new `RetainedProjectionHold` model. It then pushed tag `v0.35.418` and ran `install-full`. `VERSIONS.md` 0.35.418 now also lists today's other fixes: the stale turn banner, the ambiguous-projection hold, and the Codex update dialog. Two version bumps were needed first: JetBrains 0.2.442, and VS Code 0.2.72 (commit 9622f405e) because a VS Code test file changed.
+
+**Publish status:** the GitHub Release and PyPI workflows for `v0.35.418` were still running at closeout, and a monitor is watching them. CI for 832bb5e22 passed. CI for the later commits was still in progress.
+
+**New backlog item `#replayafterack`:** the root cause of the duplicated `fpe.md` response is still unfixed: the response was written again after the editor had already saved it. The debris is still at `src/haiven-dev/tasks/fpe.md` lines 418–426; delete it in the editor.
+
+Queue: `do [#focuscrossrootverify]` stays queued, because it needs someone at a real IDE. The exchange is at 496 lines, which is a size warning only.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -534,11 +551,12 @@ Codex's "Update available · 0.158.0 → 0.159.0 … enter continue · esc skip"
 - ~~#advance-review~~
 - ~~do [#codexupdateblocker]~~
 - do [#focuscrossrootverify]
-- Fix https://github.com/btakita/agent-doc/issues/59. release + publish
+- 🚧 Fix https://github.com/btakita/agent-doc/issues/59. release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#replayafterack] [agent-doc] The duplicated fpe.md response of 2026-09-29 13:36 left debris in the file. src/haiven-dev/tasks/fpe.md lines 418-426, committed in haiven-dev 739920a6, are fragments of the FPE recommendation plus a torn `60c81193 -->`, after `<!-- /agent:done -->`. Sequence from .agent-doc/logs/ops.log: (1) 13:36:18 the JetBrains editor applied and acked the response (`editor_content_applied_for_editor_v1`, `visible_write_lazily_event_content_recovered … len=52943 authority=durable_editor_ack`). (2) The controller model still read 49902 bytes without it, so reconcile logged `settled_buffer_dropped_response` and `ipc_socket_visible_write_drift_missing_response_materialized repaired_len=56875` wrote a response-bearing disk projection. (3) 13:36:22 `repair_replay_via_strict_write` replayed the captured response onto that lagging model (agent-doc-repair-io replay_orphaned_response judges orphaned from `doc_content`, the model). (4) The editor delta that already carried the response merged in, giving two interleaved copies. Fix: a durable editor ack whose content materializes the response must count as delivery, and must defer a replay against a model behind that ack. Add SimWorld coverage for "ack before model ingest + replay". The operator should delete the debris lines in the editor.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 - [ ] [#retainedadvanceadmit] [agent-doc] Advances #drivecapturedsplice. The captured-splice live run is refused at `agent-doc-write-runtime-io/src/lib.rs:3135` ("retained document-write delivery from a prior cycle remains unsettled") while the captured operator edit is still unsaved in the editor (`native_editor_save_request_deferred`; authority and disk diverge on `exchange`). Decide whether a separate canonical advance must be admitted while a captured operator edit is retained. The recipe exists to prove that admission. Fix whichever side is wrong: the admission guard, or the harness ordering. Add SimWorld coverage for "retained capture + independent advance". Then rerun the recipe from tasks/agent-doc/plan-captured-editor-splice-recovery.md with a CLI build that matches the IDE cdylib.

@@ -3141,6 +3141,27 @@ where
     )
 }
 
+/// The command-plane response when its terminal result is success, or an error
+/// carrying the handler's output (which [`retry_controller_handoff_refusal`]
+/// inspects for a mid-handoff refusal).
+fn command_submit_response_accepted(
+    name: &str,
+    response: serde_json::Value,
+) -> Result<serde_json::Value> {
+    let exit_code = response
+        .get("exit_code")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(1);
+    if exit_code != 0 {
+        let output = response
+            .get("output")
+            .and_then(|value| value.as_str())
+            .unwrap_or("command-plane request failed");
+        anyhow::bail!("command-plane {name} rejected: {output}");
+    }
+    Ok(response)
+}
+
 #[cfg(not(any(test, feature = "test-support")))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ControllerConnectionPolicy {
@@ -3214,25 +3235,32 @@ where
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(&message)?),
     };
-    let response: serde_json::Value = match connection_policy {
-        ControllerConnectionPolicy::LaunchIfMissing => {
-            request_controller_with_timeout(project_root, request, timeout)
-        }
-        ControllerConnectionPolicy::ExistingOnly => {
-            request_existing_controller_with_timeout(project_root, request, timeout)
-        }
-    }?;
-    let exit_code = response
-        .get("exit_code")
-        .and_then(|value| value.as_i64())
-        .unwrap_or(1);
-    if exit_code != 0 {
-        let output = response
-            .get("output")
-            .and_then(|value| value.as_str())
-            .unwrap_or("command-plane request failed");
-        anyhow::bail!("command-plane {name} rejected: {output}");
-    }
+    // `#layoutobservehandoff`: a command admitted by a controller that is mid-handoff
+    // comes back as a terminal rejection carrying `controller not authoritative`,
+    // not as an RPC error, so the transport-level handoff retry never saw it. On
+    // src/haiven-dev/tasks/api.md 2026-09-29 18:57 the route's layout sync landed in
+    // that window and Run Agent Doc surfaced the raw refusal. The rejected handler
+    // bailed before touching any state, so re-submitting until a stable generation
+    // answers is the whole recovery.
+    let log_path = request.file.clone().unwrap_or_else(|| project_root.to_path_buf());
+    let response = retry_controller_handoff_refusal(
+        &log_path,
+        name,
+        CONTROLLER_HANDOFF_SETTLE_BUDGET,
+        CONTROLLER_HANDOFF_SETTLE_INTERVAL,
+        std::thread::sleep,
+        || {
+            let response: serde_json::Value = match connection_policy {
+                ControllerConnectionPolicy::LaunchIfMissing => {
+                    request_controller_with_timeout(project_root, request.clone(), timeout)
+                }
+                ControllerConnectionPolicy::ExistingOnly => {
+                    request_existing_controller_with_timeout(project_root, request.clone(), timeout)
+                }
+            }?;
+            command_submit_response_accepted(name, response)
+        },
+    )?;
     let payload = response
         .get("payload")
         .cloned()
@@ -24790,6 +24818,48 @@ mod tests {
         anyhow::anyhow!(
             "pane layout observation refused: controller not authoritative (handoff_state=Preparing)"
         )
+    }
+
+    /// `#layoutobservehandoff`: api.md 2026-09-29 18:57. A mid-handoff refusal that
+    /// comes back as a command-plane terminal rejection (the RPC itself succeeded)
+    /// must be retryable, or the route's layout sync fails Run Agent Doc.
+    #[test]
+    fn a_terminal_command_plane_handoff_refusal_is_retried() {
+        let refused = serde_json::json!({
+            "exit_code": 1,
+            "output": "pane layout observation refused: controller not authoritative (handoff_state=Preparing)",
+        });
+        let err = command_submit_response_accepted("sync_tmux_layout", refused).unwrap_err();
+        assert!(controller_handoff_refusal_is_retryable(&err));
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut attempts = 0usize;
+        let answered = retry_controller_handoff_refusal(
+            dir.path(),
+            "sync_tmux_layout",
+            Duration::from_secs(10),
+            Duration::from_millis(1),
+            |_| {},
+            || {
+                attempts += 1;
+                let response = if attempts < 3 {
+                    serde_json::json!({
+                        "exit_code": 1,
+                        "output": "pane layout observation refused: controller not authoritative (handoff_state=Preparing)",
+                    })
+                } else {
+                    serde_json::json!({ "exit_code": 0, "payload": { "applied": true } })
+                };
+                command_submit_response_accepted("sync_tmux_layout", response)
+            },
+        )
+        .unwrap();
+        assert_eq!(attempts, 3);
+        assert_eq!(answered["payload"]["applied"], true);
+
+        let failed = serde_json::json!({ "exit_code": 1, "output": "desired pane layout is empty" });
+        let err = command_submit_response_accepted("sync_tmux_layout", failed).unwrap_err();
+        assert!(!controller_handoff_refusal_is_retryable(&err), "a real failure is not retried");
     }
 
     #[test]

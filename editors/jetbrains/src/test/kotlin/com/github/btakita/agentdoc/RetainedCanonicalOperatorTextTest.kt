@@ -169,6 +169,57 @@ class RetainedCanonicalOperatorTextTest {
         )
     }
 
+    private fun reregisterAction(
+        shadow: String?,
+        buffer: String?,
+        canonical: String?,
+        containsOperatorEdits: Boolean? = null,
+    ) = retainedRegistrationProjectionActionForAttachUtil(
+        deferCanonicalProjectionForPendingLocal = false,
+        canonicalProjectionRetained = false,
+        publishedShadow = shadow,
+        bufferText = buffer,
+        canonicalText = canonical,
+        canonicalContainsOperatorEdits = containsOperatorEdits,
+    )
+
+    @Test
+    fun `a library-reload re-register publishes text typed while detached instead of overwriting it`() {
+        // `#reloadclobbersoperatortext`, tasks/api.md 2026-09-28 23:08:16: the
+        // operator typed during the `make install` reload window; canonical was
+        // still the settled shadow, and the re-register projected it over the buffer.
+        val shadow = "<!-- agent:queue go -->\n- Does PR 591 have a contracts\n<!-- /agent:queue -->\n"
+        val buffer = "<!-- agent:queue go -->\n- Does PR 591 have a contracts PR? Also check SDK.\n<!-- /agent:queue -->\n"
+        assertEquals(
+            RetainedRegistrationProjectionAction.PublishOperatorBuffer,
+            reregisterAction(shadow = shadow, buffer = buffer, canonical = shadow),
+        )
+    }
+
+    @Test
+    fun `a library-reload re-register still adopts remote writes when the operator typed nothing`() {
+        val shadow = "# doc\n\nbefore\n"
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            reregisterAction(shadow = shadow, buffer = shadow, canonical = "# doc\n\nagent response\n"),
+        )
+    }
+
+    @Test
+    fun `a library-reload re-register with three divergent generations holds unless canonical has the edits`() {
+        val shadow = "# doc\n\nbase\n"
+        val buffer = "# doc\n\nbase plus operator\n"
+        val canonical = "# doc\n\nbase plus agent\n"
+        assertEquals(
+            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            reregisterAction(shadow = shadow, buffer = buffer, canonical = canonical),
+        )
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            reregisterAction(shadow = shadow, buffer = buffer, canonical = canonical, containsOperatorEdits = true),
+        )
+    }
+
     @Test
     fun `a restarted IDE has no shadow, so adoption stays the recovery`() {
         // The shadow map is in-memory and does not survive a restart. Without it

@@ -1365,7 +1365,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         bufferText: String?,
         canonicalText: String?,
     ): Boolean? {
-        if (!canonicalProjectionRetained || publishedShadow == null || bufferText == null || canonicalText == null) {
+        // Computed for ordinary re-registers too (`#reloadclobbersoperatortext`):
+        // it is the lossless exit from a hold on either path.
+        if (publishedShadow == null || bufferText == null || canonicalText == null) {
             return null
         }
         if (bufferText == publishedShadow || canonicalText == bufferText || canonicalText == publishedShadow) {
@@ -2962,6 +2964,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                 }
             }
+        } else if (retainedProjectionAction == RetainedRegistrationProjectionAction.HoldOperatorBuffer) {
+            // `#reloadclobbersoperatortext`: the ordinary re-register analogue of the
+            // retained ambiguity hold. The buffer stays exactly as the operator left it.
+            log.warn(
+                "[crdt-replica] refusing re-register projection for ${File(filePath).name}; " +
+                    "the live buffer holds operator text typed after its settled shadow. " +
+                    "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
+                    "buffer_hash=${contentHash(bufferTextAtRegistration!!)} " +
+                    "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
+            )
+            forwarder.deregister()
+            retainedProjectionHoldPaths.add(filePath)
+            recordRegisterFailure(filePath, "ambiguous-reregister-projection")
+            return cached
+        } else if (retainedProjectionAction == RetainedRegistrationProjectionAction.PublishOperatorBuffer) {
+            log.warn(
+                "[crdt-replica] re-register found unpublished operator text for ${File(filePath).name}; " +
+                    "publishing the buffer from its settled shadow instead of projecting canonical over it. " +
+                    "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
+                    "buffer_hash=${contentHash(bufferTextAtRegistration!!)}",
+            )
         }
         if (bootstrapFromControllerCanonical) {
             nativeReloadResumeStates.remove(filePath)
@@ -4198,6 +4221,27 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
     } else if (canonicalProjectionRetained) {
         retainedRegistrationProjectionActionUtil(
             canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
+            publishedShadow = publishedShadow,
+            bufferText = bufferText,
+            canonicalText = canonicalText,
+            canonicalContainsOperatorEdits = canonicalContainsOperatorEdits,
+        )
+    } else if (
+        publishedShadow != null &&
+        bufferText != null &&
+        bufferText != publishedShadow &&
+        canonicalText != bufferText
+    ) {
+        // `#reloadclobbersoperatortext`: an ordinary native-generation re-register
+        // (a `make install` library reload) is not a retained projection, but the
+        // live buffer can still hold text typed while the replica was detached.
+        // tasks/api.md, 2026-09-28 23:08:16: the operator typed and pressed Run
+        // Agent Doc during the reload window; re-register then projected the
+        // controller's pre-edit canonical over that buffer and the text was gone.
+        // A buffer past its settled shadow gets the same causal decision as the
+        // retained path: publish it when canonical is that shadow, adopt canonical
+        // only when it provably contains the edits, otherwise hold.
+        retainedRegistrationProjectionActionUtil(
             publishedShadow = publishedShadow,
             bufferText = bufferText,
             canonicalText = canonicalText,

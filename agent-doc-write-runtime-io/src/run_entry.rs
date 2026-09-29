@@ -208,7 +208,7 @@ fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Resu
         recover(
             file,
             flags.strict_closeout,
-            flags.has_pending_mutation,
+            flags.has_pending_mutation || flags.retained_tracked_work_landed,
             flags.force_disk,
         )
     } else {
@@ -3009,6 +3009,7 @@ mod tests {
             has_pending_add: true,
             has_pending_done: false,
             has_pending_mutation: true,
+            retained_tracked_work_landed: false,
             has_metadata_only_mutation: true,
             pending_done_ids: Vec::new(),
             queue_completion_ids: Vec::new(),
@@ -3082,6 +3083,7 @@ mod tests {
             has_pending_add: false,
             has_pending_done: false,
             has_pending_mutation: true,
+            retained_tracked_work_landed: false,
             has_metadata_only_mutation: true,
             pending_done_ids: Vec::new(),
             queue_completion_ids: Vec::new(),
@@ -3239,6 +3241,7 @@ mod tests {
             has_pending_add: false,
             has_pending_done: true,
             has_pending_mutation: true,
+            retained_tracked_work_landed: false,
             has_metadata_only_mutation: true,
             pending_done_ids: vec!["nextitem".to_string()],
             queue_completion_ids: Vec::new(),

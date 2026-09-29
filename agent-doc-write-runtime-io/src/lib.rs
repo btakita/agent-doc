@@ -422,6 +422,14 @@ pub(crate) struct WriteFlags {
     pub(crate) mutation_plan_json: Option<String>,
     pub(crate) empty_response_recovery: Option<EmptyResponseRecovery>,
     pub(crate) rerun_command_base: Option<String>,
+    /// `#mutonlyretry`: this write carries no tracked-work flags, but the open
+    /// cycle recorded a tracked-work closeout that deferred and has since landed.
+    /// The deferral's own remedy is "re-run `write --commit` without the
+    /// tracked-work flags"; for a mutation-only closeout that retry has an empty
+    /// body, so the empty-response recovery must know there is still work to
+    /// commit. Deliberately separate from `has_pending_mutation`, which also
+    /// demands a mutation plan for THIS invocation.
+    pub(crate) retained_tracked_work_landed: bool,
 }
 
 fn pending_write_flags(flags: &WriteFlags) -> agent_doc_session_check_io::PendingWriteFlags {
@@ -2002,6 +2010,24 @@ fn await_deferred_tracked_work_commit(file: &Path, force_disk: bool) -> Result<(
     }
 }
 
+/// `#mutonlyretry`: the open cycle recorded tracked work and it is now visible
+/// in the authority. Reads the cycle state first so an ordinary flagless write
+/// (the common respond path) never pays for the document resolve.
+fn retained_tracked_work_landed_awaiting_commit(file: &Path, force_disk: bool) -> bool {
+    let Some(state) = agent_doc_cycle_state_io::load(file).ok().flatten() else {
+        return false;
+    };
+    let recorded_tracked_work = state.requested_tracked_work_mutations
+        || !state.pending_done_ids.is_empty()
+        || !state.pending_added_ids.is_empty()
+        || !state.requested_done_ids.is_empty()
+        || !state.requested_added_ids.is_empty();
+    if !state.is_open() || !recorded_tracked_work {
+        return false;
+    }
+    recorded_tracked_work_unlanded_now(file, force_disk) == Some(false)
+}
+
 fn write_outcome_retains_closeout_mutations(write_result: &Result<()>) -> bool {
     write_result.is_ok()
         || write_result
@@ -2360,6 +2386,9 @@ fn run_command_inner_within_pass(
             || !options.review_add.is_empty(),
         has_pending_done: !options.pending_done.is_empty(),
         has_pending_mutation: has_pending_ops,
+        retained_tracked_work_landed: !has_pending_ops
+            && commit_mode != CommitMode::None
+            && retained_tracked_work_landed_awaiting_commit(file, options.force_disk),
         has_metadata_only_mutation: options.has_metadata_only_mutation(),
         pending_done_ids: options.pending_done.clone(),
         queue_completion_ids: options.queue_completion_ids.clone(),
@@ -3803,6 +3832,34 @@ mod tests {
             "- [/] [#flakystatedbfixture] evidence-gated text after repeated verification"
         ));
         assert!(!content.contains("stale text"));
+    }
+
+    /// `#mutonlyretry`: a `--backlog-add id=a --done a` closeout deferred and
+    /// timed out; its remedy said re-run `write --commit` without the flags, and
+    /// that empty-body retry died with "empty response — nothing to write".
+    #[test]
+    fn landed_retained_tracked_work_is_still_work_for_an_empty_retry() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let reaped = "<!-- agent:backlog -->\n- [ ] [#b] open\n<!-- /agent:backlog -->\n";
+        fs::write(&doc, reaped).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(reaped), Some(reaped)).unwrap();
+        assert!(
+            !retained_tracked_work_landed_awaiting_commit(&doc, true),
+            "a cycle that recorded no tracked work has nothing retained"
+        );
+        let a = vec!["a".to_string()];
+        agent_doc_cycle_state_io::record_requested_tracked_work(&doc, &a, &a).unwrap();
+        agent_doc_cycle_state_io::record_requested_tracked_work_mutations(&doc).unwrap();
+        agent_doc_cycle_state_io::mark_tracked_work_mutations_applied(&doc).unwrap();
+        assert!(retained_tracked_work_landed_awaiting_commit(&doc, true));
+
+        fs::write(&doc, "- [ ] [#a] still open\n").unwrap();
+        assert!(
+            !retained_tracked_work_landed_awaiting_commit(&doc, true),
+            "unlanded work is not ready to commit"
+        );
     }
 
     #[test]

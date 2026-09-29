@@ -500,9 +500,20 @@ pub fn recorded_tracked_work_is_unlanded(recorded: RecordedTrackedWork<'_>, disk
         ids.iter()
             .any(|id| disk.contains(&format!("- [ ] [#{}]", normalize(id))))
     };
+    // `#addreapwitness`: an id added AND completed in the same closeout is reaped
+    // into the done archive, so it never appears in the document. Its presence
+    // cannot witness the add; the done witness (not still open) already covers it.
+    let completed: std::collections::HashSet<String> = recorded
+        .done_ids
+        .iter()
+        .chain(recorded.requested_done_ids)
+        .map(|id| normalize(id))
+        .collect();
     let add_unlanded = |ids: &[String]| {
-        ids.iter()
-            .any(|id| !disk.contains(&format!("[#{}]", normalize(id))))
+        ids.iter().any(|id| {
+            let id = normalize(id);
+            !completed.contains(&id) && !disk.contains(&format!("[#{id}]"))
+        })
     };
     done_unlanded(recorded.done_ids)
         || add_unlanded(recorded.added_ids)
@@ -673,6 +684,31 @@ pub fn tracked_work_mutation_failure_message(
 
 #[cfg(test)]
 mod tests {
+
+    /// `#addreapwitness`: 2026-09-29, `--backlog-add "id=a ..." --done a` reaped
+    /// `#a` into the done archive in the same closeout. The add witness looked
+    /// for `[#a]` in the document, never found it, and the deferred closeout
+    /// timed out after 30s with `unlanded=Some(true)` on a converged document.
+    #[test]
+    fn an_id_added_and_completed_in_one_closeout_is_witnessed_by_its_absence() {
+        let ids = vec!["a".to_string(), "b".to_string()];
+        let reaped = "<!-- agent:backlog -->\n- [ ] [#c] still open\n<!-- /agent:backlog -->\n";
+        let record = |done: &'static [String], added: &'static [String]| RecordedTrackedWork {
+            done_ids: done,
+            added_ids: added,
+            requested_done_ids: &[],
+            requested_added_ids: &[],
+            requested_mutations: true,
+            mutations_applied: true,
+        };
+        let ids: &'static [String] = Box::leak(ids.into_boxed_slice());
+        assert!(!recorded_tracked_work_is_unlanded(record(ids, ids), reaped));
+        // Not reaped yet: still open, so the done half has not landed.
+        let open = "- [ ] [#a] x\n- [ ] [#b] y\n";
+        assert!(recorded_tracked_work_is_unlanded(record(ids, ids), open));
+        // A plain add (not completed) still needs its row in the document.
+        assert!(recorded_tracked_work_is_unlanded(record(&[], ids), reaped));
+    }
     use super::*;
 
     /// `#retaineddeferwedge`: a deferral continues to its commit only on an
@@ -680,13 +716,25 @@ mod tests {
     #[test]
     fn deferred_tracked_work_continues_only_when_converged_and_landed() {
         use DeferredTrackedWorkResolution::*;
-        assert_eq!(resolve_deferred_tracked_work(true, Some(false)), ContinueToCommit);
-        assert_eq!(resolve_deferred_tracked_work(true, Some(true)), StillRetained);
+        assert_eq!(
+            resolve_deferred_tracked_work(true, Some(false)),
+            ContinueToCommit
+        );
+        assert_eq!(
+            resolve_deferred_tracked_work(true, Some(true)),
+            StillRetained
+        );
         assert_eq!(resolve_deferred_tracked_work(true, None), StillRetained);
-        assert_eq!(resolve_deferred_tracked_work(false, Some(false)), StillRetained);
+        assert_eq!(
+            resolve_deferred_tracked_work(false, Some(false)),
+            StillRetained
+        );
         let message = deferred_tracked_work_timeout_message("doc.md", 30);
         assert!(message.contains("NOT committed"), "{message}");
-        assert!(message.contains("agent-doc write --commit doc.md"), "{message}");
+        assert!(
+            message.contains("agent-doc write --commit doc.md"),
+            "{message}"
+        );
         assert!(!message.contains("agent-doc commit doc.md"), "{message}");
     }
 

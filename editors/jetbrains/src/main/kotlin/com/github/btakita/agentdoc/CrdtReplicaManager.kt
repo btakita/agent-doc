@@ -1373,12 +1373,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (bufferText == publishedShadow || canonicalText == bufferText || canonicalText == publishedShadow) {
             return null
         }
+        // `#ambiguousholdforever2`: prove containment over operator text only. A controller
+        // disk projection that the IDE reloaded carries binary-owned `(HEAD)` / boundary
+        // placement canonical does not share; left in, that bookkeeping change can never be
+        // "contained" and the hold had no exit (formal/tla/RetainedProjectionHold.tla).
+        val shadowOperatorText = withoutBinaryOwnedMarkersUtil(publishedShadow)
+        val bufferOperatorText = withoutBinaryOwnedMarkersUtil(bufferText)
+        val canonicalOperatorText = withoutBinaryOwnedMarkersUtil(canonicalText)
         val contained =
-            NativePatching.capturedSplicesContained(
-                publishedShadow,
-                canonicalText,
-                singleSpliceBatchUtil(publishedShadow, bufferText),
-            ) ?: return false
+            if (bufferOperatorText == shadowOperatorText || bufferOperatorText == canonicalOperatorText) {
+                true
+            } else {
+                NativePatching.capturedSplicesContained(
+                    shadowOperatorText,
+                    canonicalOperatorText,
+                    singleSpliceBatchUtil(shadowOperatorText, bufferOperatorText),
+                ) ?: return false
+            }
         if (contained) {
             log.info(
                 "[crdt-replica] retained canonical already contains the operator buffer's edits for " +
@@ -4287,6 +4298,19 @@ internal fun retainedRegistrationProjectionActionUtil(
         canonicalContainsOperatorEdits == true -> RetainedRegistrationProjectionAction.ApplyCanonical
         else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
     }
+
+private val BINARY_OWNED_BOUNDARY_LINE =
+    Regex("""(?m)^[ \t]*<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->[ \t]*(?:\r?\n|$)""")
+private val BINARY_OWNED_HEAD_SUFFIX = Regex("""(?m)^(#{1,6} .*?) \(HEAD\)[ \t]*$""")
+
+/**
+ * `#ambiguousholdforever2`: [text] with the markers agent-doc alone writes removed: boundary
+ * marker lines and the transient ` (HEAD)` heading suffix. Their placement differs between a
+ * controller disk projection and canonical without any operator having typed, so they are never
+ * operator edits for a containment proof.
+ */
+internal fun withoutBinaryOwnedMarkersUtil(text: String): String =
+    text.replace(BINARY_OWNED_BOUNDARY_LINE, "").replace(BINARY_OWNED_HEAD_SUFFIX, "$1")
 
 /** One splice turning [before] into [after]: the common code-point prefix and suffix stay. */
 internal fun singleSpliceBatchUtil(before: String, after: String): PreparedLocalEditorBatch {

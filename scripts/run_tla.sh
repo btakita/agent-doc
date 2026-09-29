@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -113,6 +113,10 @@ must_violate=(
     # every ordinary retry.
     RefusedSaveOperatorAction:RefusedSaveOperatorActionWedge
     RefusedSaveOperatorAction:RefusedSaveOperatorActionReach
+    # `#ambiguousholdforever2`: single-splice containment wedges on a marker-only
+    # difference (fpe.md, 2026-09-29); the containment edge must stay reachable.
+    RetainedProjectionHold:RetainedProjectionHoldWedge
+    RetainedProjectionHold:RetainedProjectionHoldReach
     StopHookFailClosed:StopHookFailClosedWedge
     StopHookFailClosed:StopHookFailClosedReach
     # `#recyclesettlewaitshort` — the dispatch gate across an upgrade re-exec.

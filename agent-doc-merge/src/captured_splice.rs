@@ -301,4 +301,72 @@ mod tests {
             .replace("answer\n", "answer\nnew response\n");
         assert!(rebase(base, &canonical, &edits).unwrap().edits.is_empty());
     }
+
+    /// The one splice the JetBrains plugin hands the proof: common prefix and
+    /// suffix kept, everything between replaced.
+    fn single_splice(base: &str, after: &str) -> CapturedSpliceBatch {
+        let old: Vec<char> = base.chars().collect();
+        let new: Vec<char> = after.chars().collect();
+        let mut prefix = 0;
+        while prefix < old.len() && prefix < new.len() && old[prefix] == new[prefix] {
+            prefix += 1;
+        }
+        let mut suffix = 0;
+        while suffix < old.len() - prefix
+            && suffix < new.len() - prefix
+            && old[old.len() - 1 - suffix] == new[new.len() - 1 - suffix]
+        {
+            suffix += 1;
+        }
+        let insert: String = new[prefix..new.len() - suffix].iter().collect();
+        batch(base, vec![edit(prefix, old.len() - prefix - suffix, &insert)])
+    }
+
+    /// Mirrors the plugin's `withoutBinaryOwnedMarkersUtil`.
+    fn without_binary_owned_markers(text: &str) -> String {
+        text.lines()
+            .filter(|line| {
+                let line = line.trim();
+                !(line.starts_with("<!-- agent:boundary:") && line.ends_with("-->"))
+            })
+            .map(|line| {
+                if line.starts_with('#') {
+                    line.strip_suffix(" (HEAD)").unwrap_or(line)
+                } else {
+                    line
+                }
+            })
+            .map(|line| format!("{line}\n"))
+            .collect()
+    }
+
+    /// `#ambiguousholdforever2`: the fpe.md hold (2026-09-29). The buffer was
+    /// reloaded from a controller disk projection that put ` (HEAD)` and the
+    /// boundary at the response heading; canonical kept its boundary at the end
+    /// of the exchange and gained merge debris after the last component. The
+    /// operator's only edit, a queue line, WAS in canonical. With the markers
+    /// left in, the marker change is never "contained" and the hold never ends;
+    /// normalized, the operator edit is proven and canonical is adopted.
+    #[test]
+    fn marker_only_difference_blocks_containment_until_markers_are_normalized() {
+        let shadow = "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n";
+        let buffer = "<!-- agent:exchange -->\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\n";
+        let canonical = "<!-- agent:exchange -->\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- The performance seems slow.\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- /agent:done -->\nIncrease CPU first.\n60c81193 -->\n";
+
+        assert!(
+            !canonical_contains_captured(shadow, canonical, &single_splice(shadow, buffer)).unwrap(),
+            "the raw proof must reproduce the hold"
+        );
+
+        let (shadow, buffer, canonical) = (
+            without_binary_owned_markers(shadow),
+            without_binary_owned_markers(buffer),
+            without_binary_owned_markers(canonical),
+        );
+        assert!(canonical_contains_captured(&shadow, &canonical, &single_splice(&shadow, &buffer)).unwrap());
+
+        // Control: normalization does not excuse an operator edit canonical lacks.
+        let unseen = buffer.replace("- PR #194 is merged. Continue.\n", "- typed while detached\n");
+        assert!(!canonical_contains_captured(&shadow, &canonical, &single_splice(&shadow, &unseen)).unwrap());
+    }
 }

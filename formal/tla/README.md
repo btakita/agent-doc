@@ -131,6 +131,18 @@ safety invariants independently, which is how the production report read: on a
 queue preflight had already resolved inactive with zero drainable heads, the
 plan emitted three `--done` flags, one of them for an `[operator-verify]` item.
 
+`RetainedProjectionHold.tla` checks the JetBrains replica's registration
+decision when the published shadow, the live buffer, and canonical all differ:
+
+- registration never replaces operator text canonical has not seen; and
+- once canonical holds every operator edit, the replica attaches even when a
+  reloaded disk projection moved binary-owned markers (`(HEAD)`, boundary) and
+  canonical carries merge debris.
+
+`RetainedProjectionHoldWedge.cfg` keeps the markers inside the containment proof
+and must violate `EventuallyRegistered` (the 2026-09-29 `fpe.md` hold);
+`RetainedProjectionHoldReach.cfg` must show the containment edge is taken.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

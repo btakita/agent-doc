@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 86748b32-6dfb-4df4-a108-fbd7a235fcad
+  claude: 5f4a77bb-4ad8-4d62-b421-995991d43e82
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -421,6 +421,33 @@ I couldn't pin the exact verdict path from the logs; the refusal text itself was
 ### Re: id correction — opus-5 · 2026-09-29T11:50-04:00
 
 Correction: the follow-up from the previous reply is tracked as **#retainedwriteverdict**. The id I named there doesn't exist.
+
+### Re: do #retainedwriteverdict — opus-5.5 · 2026-09-29T11:59-04:00
+
+**Fixed, committed (`dc67c0495`), pushed, installed.**
+
+**Root cause.** The STRANDED text did not come from `session-check`. It came from the `repair_structural_projection` refusal during codex's preflight repair at 07:09:44. The sequence:
+
+1. Preflight saw a committed capture that had drifted from HEAD (`snapshot_repair reason=committed_capture`).
+2. It re-projected that capture, but no editor replica was registered at that moment (the transient `missing_replica` gap).
+3. So it called `ensure_deferred_document_write_intent` and retained intent `1790665782538740753-1-484a88…`.
+
+The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::retained_write_ownership`) who owned the write. That shell counts a write as owned only through an open cycle or a response capture that is *not yet terminally proven*. Cycle-1790664582720 had committed hours earlier, with its terminal proof recorded, so every input was false and the verdict came out `Stranded`. The same message also said "run only agent-doc session-check", so it contradicted itself. The controller then did exactly what the retained intent promised: `document_write_converged` at 07:09:47 and `captured_finalize_resume_committed` at 07:09:48.
+
+**Fix** (`agent-doc-document-realtime-io`):
+- **New builder.** Added `retained_intent_refusal(file, intent_id, message)`. It carries the just-recorded intent into the shared predicate as `retained_projection`, the same move the delivery-projection refusal already made. The verdict becomes `Deferred`, and its remedy is "run session-check once; do NOT re-send/force disk/recycle".
+- **Six sites routed through it.** These are the sites that hold a durable intent id: the no-registered-replica refusal (this incident), the stale delivery worker refusal, both repair-projection refusals, the editor-save-pending refusal and the post-proof-rebase refusal. Sites with no intent proof keep the stranded reading.
+- **Regression tests:**
+  - `a_just_retained_intent_is_deferred_not_stranded` drives the real builder on a document with no cycle state. It has a control: plain `retained_refusal` and an empty id both still say STRANDED.
+  - `every_refusal_after_a_recorded_intent_carries_it` is a structural guard. I mutation-probed it by reverting one site; the guard went red, and the source was restored from a scratch copy and touched.
+
+**Verification:**
+- `make check`: EXIT=0, nextest 10068/10068 passed.
+- `make install`: the binary and cdylib installed (atomic rename). The JetBrains plugin step failed on `lazily-kt/SimConsumerTestkit.kt:501`, an untracked in-progress file from the concurrent lazily testkit session. Not this change, and I left it alone.
+- CI run 36594060713 is still in progress; I'm not waiting on it.
+- Superproject pointer bumped (`25a359ee0`).
+
+**Shared-tree note.** `agent-doc-document-realtime-io/src/lib.rs` also holds another session's uncommitted 84-line edit. I committed a hand-built blob (HEAD + my hunks only), so their work is untouched in the tree and not in my commit.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -430,13 +457,13 @@ Correction: the follow-up from the previous reply is tracked as **#retainedwrite
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#focuscrossrootverify]
-- ~~do [#replicachurn12s]~~
+- ⏭️ do [#focuscrossrootverify]
+- ~~do [#retainedwriteverdict]~~
+- #advance-review
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#retainedwriteverdict] Retained-write verdict said STRANDED (codex told to run agent-doc commit from the owning pane) for tasks/software/lazily.md at 2026-09-29T07:09:44-49Z while captured_finalize_resume for cycle-1790664582720 was in flight and committed at 07:09:48 (captured_finalize_resume_committed repair_outcome=ContinuedWriteAppliedCapture). Transient missing_replica (disposition=transient_probe) during a replica gap must not produce stranded guidance while a capture resume holds the write; see agent_doc_turn::write_ownership. Evidence: .agent-doc/logs/ops.log.1.zst 07:09:33-07:09:50Z.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 <!-- /agent:backlog -->

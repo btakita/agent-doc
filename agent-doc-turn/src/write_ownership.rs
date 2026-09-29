@@ -582,6 +582,55 @@ pub fn classify_tracked_work_mutation_failure(
     }
 }
 
+/// What a deferred tracked-work closeout does once its bounded convergence
+/// wait ends.
+///
+/// `#retaineddeferwedge`: the deferral used to `return Ok(())` straight out of
+/// the write command, skipping queue consumption and the commit, on the claim
+/// that "the same intent commits itself once delivery converges". Nothing
+/// did. Observed 2026-09-29 on `cycle-1790658555784`: delivery converged
+/// within seconds (authority == disk, 21647 bytes), yet the response sat
+/// uncommitted until an operator re-piped it by hand. The write command is the
+/// only owner of that commit, so it must finish the cycle itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeferredTrackedWorkResolution {
+    /// Delivery converged and this cycle's recorded mutations are visible in
+    /// the authority: continue into the ordinary closeout tail and commit.
+    ContinueToCommit,
+    /// Not proven converged-and-landed within the wait: fail the closeout so
+    /// it is not reported as success while uncommitted.
+    StillRetained,
+}
+
+/// Decide a deferred closeout from the two facts the caller can prove.
+/// Unprovable means unproven: only an observed convergence plus an observed
+/// landing continues to the commit.
+pub fn resolve_deferred_tracked_work(
+    delivery_converged: bool,
+    tracked_work_unlanded: Option<bool>,
+) -> DeferredTrackedWorkResolution {
+    if delivery_converged && tracked_work_unlanded == Some(false) {
+        DeferredTrackedWorkResolution::ContinueToCommit
+    } else {
+        DeferredTrackedWorkResolution::StillRetained
+    }
+}
+
+/// The message a deferred closeout renders when its convergence wait expires.
+/// It names the one remedy every recovery surface agrees on: the response half
+/// is in the authority but not in HEAD, which `commit` refuses and
+/// `write --commit` absorbs (the response cell dedups).
+pub fn deferred_tracked_work_timeout_message(file: &str, waited_secs: u64) -> String {
+    format!(
+        "tracked-work mutations for {file} reached the editor authority but their delivery \
+         projection did not converge (or did not land) within {waited_secs}s, so this closeout \
+         is NOT committed. Once the editor converges, re-pipe the same response body through \
+         `agent-doc write --commit {file}` WITHOUT repeating the tracked-work flags (they are \
+         already retained; the response cell dedups), then run `agent-doc session-check {file}`. \
+         Do NOT force disk or `admin recycle`"
+    )
+}
+
 /// The message a tracked-work mutation failure renders, derived from one owner.
 ///
 /// `file` is the document path as the caller displays it, interpolated into the
@@ -625,6 +674,21 @@ pub fn tracked_work_mutation_failure_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#retaineddeferwedge`: a deferral continues to its commit only on an
+    /// observed convergence AND an observed landing.
+    #[test]
+    fn deferred_tracked_work_continues_only_when_converged_and_landed() {
+        use DeferredTrackedWorkResolution::*;
+        assert_eq!(resolve_deferred_tracked_work(true, Some(false)), ContinueToCommit);
+        assert_eq!(resolve_deferred_tracked_work(true, Some(true)), StillRetained);
+        assert_eq!(resolve_deferred_tracked_work(true, None), StillRetained);
+        assert_eq!(resolve_deferred_tracked_work(false, Some(false)), StillRetained);
+        let message = deferred_tracked_work_timeout_message("doc.md", 30);
+        assert!(message.contains("NOT committed"), "{message}");
+        assert!(message.contains("agent-doc write --commit doc.md"), "{message}");
+        assert!(!message.contains("agent-doc commit doc.md"), "{message}");
+    }
 
     /// `#retainedprojexit1`: the closeout's mutation phase must never call a
     /// retained delivery projection a half-apply.

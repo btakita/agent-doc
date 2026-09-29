@@ -1280,6 +1280,49 @@ mod tests {
     }
 
     #[test]
+    fn classify_recovery_abandoned_cycle_with_response_hidden_from_snapshot_names_write_commit() {
+        // `#retaineddeferwedge`: observed 2026-09-29 on `cycle-1790658555784`.
+        // The cycle was abandoned, a respond then materialized its response
+        // cell and checkpointed the snapshot WITH it, and the tracked-work
+        // deferral exited before the commit. session-check named `agent-doc
+        // commit`, `commit` refused ("current authority contains an
+        // uncommitted response; use `write --commit`"), and repair said clean.
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nDone.\n\ndo the thing\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "cancel_preflight",
+            Some(head),
+            Some(head),
+        )
+        .unwrap();
+        let answered = head.replace(
+            "do the thing\n",
+            "do the thing\n\n### Re: the thing — gpt-5\n\nDid it.\n",
+        );
+        std::fs::write(&doc, &answered).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &answered,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = classify_closeout_recovery_state_for_file(&doc);
+        assert_eq!(state, CloseoutRecoveryState::DirectResponsePatchback);
+        let cmd = closeout_recovery_command_for_file(&doc, state).unwrap();
+        assert!(cmd.contains("agent-doc write --commit"), "{cmd}");
+        assert!(!cmd.contains("`agent-doc commit"), "{cmd}");
+    }
+
+    #[test]
     fn classify_recovery_direct_response_patchback_when_visible_response_uncommitted() {
         // `#closeout-recovery-state-machine`: a `### Re:` response was patched
         // directly into the working file outside the binary write path (snapshot

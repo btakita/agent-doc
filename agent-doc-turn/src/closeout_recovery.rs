@@ -328,6 +328,14 @@ pub struct CloseoutRecoveryStateInput {
     pub snapshot_head_drift: Option<CloseoutRecoveryDrift>,
     pub snapshot_visible_drift: Option<CloseoutRecoveryDrift>,
     pub nested_parent_pointer_stale: bool,
+    /// The current document authority carries a `### Re:` response that `HEAD`
+    /// does not — the exact predicate `commit_document_only_drift` refuses on
+    /// ("current authority contains an uncommitted response; use `write
+    /// --commit`"). `#retaineddeferwedge`: without it the classifier saw only
+    /// snapshot-relative evidence, and a snapshot checkpointed AFTER the
+    /// response materialized hid the response from it, so session-check named
+    /// `agent-doc commit`, `commit` refused, and `repair` reported clean.
+    pub uncommitted_response_vs_head: bool,
 }
 
 /// Open-cycle ledger facts needed to render a durable recovery command.
@@ -528,6 +536,14 @@ pub fn classify_closeout_recovery_state_from_input(
         CyclePhase::PreflightStarted | CyclePhase::ResponseCaptured | CyclePhase::WriteApplied => {
             return CloseoutRecoveryState::OpenCycle;
         }
+        // `#retaineddeferwedge`: an abandoned cycle is terminal for the
+        // ledger, not for the document. A response the authority still holds
+        // uncommitted relative to HEAD is recovered by `write --commit`
+        // exactly as `commit` itself demands; calling it clean is what left
+        // every recovery surface disagreeing with every other.
+        CyclePhase::Abandoned if input.uncommitted_response_vs_head => {
+            return CloseoutRecoveryState::DirectResponsePatchback;
+        }
         CyclePhase::Abandoned => return CloseoutRecoveryState::Clean,
         CyclePhase::Committed => {}
     }
@@ -540,7 +556,7 @@ pub fn classify_closeout_recovery_state_from_input(
     {
         return CloseoutRecoveryState::MissingResponseBody;
     }
-    if input.direct_response_patchback {
+    if input.direct_response_patchback || input.uncommitted_response_vs_head {
         return CloseoutRecoveryState::DirectResponsePatchback;
     }
 
@@ -1389,6 +1405,55 @@ mod tests {
             }),
             CloseoutRecoveryState::DirectResponsePatchback
         );
+    }
+
+    /// `#retaineddeferwedge`: observed 2026-09-29 on `cycle-1790658555784`.
+    /// The cycle was abandoned, the snapshot had been checkpointed after the
+    /// response materialized, and the authority held that response
+    /// uncommitted. session-check named `agent-doc commit`, `commit` refused
+    /// ("current authority contains an uncommitted response; use `write
+    /// --commit`"), and `repair --apply-recovery` said clean. All three must
+    /// resolve to the one remedy `commit` itself demands.
+    #[test]
+    fn uncommitted_response_vs_head_names_write_commit_for_abandoned_and_committed_cycles() {
+        let abandoned = CloseoutRecoveryCycleInput {
+            phase: CyclePhase::Abandoned,
+            ..committed_cycle()
+        };
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(abandoned),
+                uncommitted_response_vs_head: true,
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::DirectResponsePatchback
+        );
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(abandoned),
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::Clean,
+            "an abandoned cycle with no uncommitted response stays clean"
+        );
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(committed_cycle()),
+                uncommitted_response_vs_head: true,
+                snapshot_head_drift: Some(CloseoutRecoveryDrift::MetadataOnly),
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::DirectResponsePatchback,
+            "a response hidden from the snapshot must not read as document-only drift"
+        );
+        let command = closeout_recovery_command(CloseoutRecoveryCommandInput {
+            document: "doc.md".to_string(),
+            state: CloseoutRecoveryState::DirectResponsePatchback,
+            open_cycle: None,
+        })
+        .unwrap();
+        assert!(command.contains("agent-doc write --commit doc.md"), "{command}");
+        assert!(!command.contains("agent-doc commit doc.md"), "{command}");
     }
 
     #[test]

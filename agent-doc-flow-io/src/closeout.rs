@@ -2179,9 +2179,14 @@ pub fn classify_closeout_recovery_state_for_file(
         cycle: Some(cycle),
         ..CloseoutRecoveryStateInput::default()
     };
+    if cycle.phase == agent_doc_turn::CyclePhase::Abandoned {
+        input.uncommitted_response_vs_head = uncommitted_response_vs_head(file, effects);
+        return classify_closeout_recovery_state_from_input(input);
+    }
     if !cycle.needs_file_recovery_evidence() {
         return classify_closeout_recovery_state_from_input(input);
     }
+    input.uncommitted_response_vs_head = uncommitted_response_vs_head(file, effects);
 
     let observed_evidence = load_current_observed_closeout_recovery_evidence(file, effects)
         .ok()
@@ -2264,6 +2269,33 @@ pub fn classify_closeout_recovery_state_for_file(
         .flatten()
         .is_some();
     classify_closeout_recovery_state_from_input(input)
+}
+
+/// `#retaineddeferwedge`: the same HEAD-relative predicate
+/// `commit_document_only_drift` refuses on, so the recovery hint can never name
+/// `agent-doc commit` for a document that `commit` will reject. The
+/// jb-cache-conflict-cancel shape stays `commit`-recoverable, mirroring the
+/// snapshot-relative `direct_response_patchback` fact.
+fn uncommitted_response_vs_head(file: &Path, effects: &dyn CloseoutEffects) -> bool {
+    if effects
+        .detect_jb_cache_conflict_cancel_recoverable(file)
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    let Ok(Some(head)) = agent_doc_git_io::revision::show_head(file) else {
+        return false;
+    };
+    let Ok(current) =
+        effects.resolve_current_document(file, "classify_closeout_recovery_uncommitted_response")
+    else {
+        return false;
+    };
+    agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+        &head,
+        current.content(),
+    )
+    .is_some()
 }
 
 fn head_exchange_has_escaped_markers(file: &Path) -> bool {

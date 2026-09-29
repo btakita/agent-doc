@@ -1925,6 +1925,83 @@ fn recorded_tracked_work_unlanded_now(file: &Path, force_disk: bool) -> Option<b
     )
 }
 
+const DEFERRED_TRACKED_WORK_CONVERGENCE_WAIT: std::time::Duration =
+    std::time::Duration::from_secs(30);
+const DEFERRED_TRACKED_WORK_CONVERGENCE_SLICE: std::time::Duration =
+    std::time::Duration::from_secs(2);
+
+/// `#retaineddeferwedge`: bounded await for a deferred tracked-work closeout.
+///
+/// Returns `Ok(())` once delivery is observed converged and this cycle's
+/// recorded mutations are visible in the authority, so the caller continues
+/// into queue consumption and the commit. Otherwise returns the timeout error:
+/// an uncommitted closeout must never be reported as success.
+fn await_deferred_tracked_work_commit(file: &Path, force_disk: bool) -> Result<()> {
+    use agent_doc_turn::write_ownership::{
+        DeferredTrackedWorkResolution, deferred_tracked_work_timeout_message,
+        resolve_deferred_tracked_work,
+    };
+    let started = std::time::Instant::now();
+    let deadline = started + DEFERRED_TRACKED_WORK_CONVERGENCE_WAIT;
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        // `Ok(None)`: the controller hosts no relay hub for the document, so
+        // there is no editor delivery left to await; the landing check below
+        // is then the whole proof. `Err`: the controller could not be asked —
+        // unproven, keep waiting.
+        let delivery_converged =
+            match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                file,
+                remaining.min(DEFERRED_TRACKED_WORK_CONVERGENCE_SLICE),
+            ) {
+                Ok(Some(status)) => status.converged,
+                Ok(None) => true,
+                Err(_) => false,
+            };
+        let unlanded = if delivery_converged {
+            recorded_tracked_work_unlanded_now(file, force_disk)
+        } else {
+            None
+        };
+        match resolve_deferred_tracked_work(delivery_converged, unlanded) {
+            DeferredTrackedWorkResolution::ContinueToCommit => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "tracked_work_deferral_converged_continue_commit file={} waited_ms={}",
+                        file.display(),
+                        started.elapsed().as_millis()
+                    ),
+                );
+                return Ok(());
+            }
+            DeferredTrackedWorkResolution::StillRetained => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "tracked_work_deferral_convergence_timeout file={} waited_ms={} delivery_converged={} unlanded={:?}",
+                    file.display(),
+                    started.elapsed().as_millis(),
+                    delivery_converged,
+                    unlanded
+                ),
+            );
+            anyhow::bail!(deferred_tracked_work_timeout_message(
+                &file.display().to_string(),
+                DEFERRED_TRACKED_WORK_CONVERGENCE_WAIT.as_secs()
+            ));
+        }
+        if !delivery_converged {
+            continue;
+        }
+        // Converged but not yet landed: the authority read races the
+        // projection; back off briefly instead of spinning the RPC.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 fn write_outcome_retains_closeout_mutations(write_result: &Result<()>) -> bool {
     write_result.is_ok()
         || write_result
@@ -2548,11 +2625,10 @@ fn run_command_inner_within_pass(
                     );
                 if failure.is_deferral() {
                     // The mutation envelope is in the editor's CRDT authority
-                    // and its keyed worker converges on its own. Committing now
-                    // would publish a disk state the projection has not reached
-                    // yet, and erroring out sends recovery at a half-apply that
-                    // did not happen. Defer: report it, exit 0, and let the
-                    // await-and-observe path finish the cycle.
+                    // and its keyed worker converges on its own. Committing
+                    // before it does would publish a disk state the projection
+                    // has not reached yet, and erroring out sends recovery at a
+                    // half-apply that did not happen.
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
@@ -2562,9 +2638,16 @@ fn run_command_inner_within_pass(
                         ),
                     );
                     eprintln!("[write] {rendered}");
-                    return Ok(());
+                    // `#retaineddeferwedge`: this command is the only owner of
+                    // the cycle's commit. Await convergence, then finish the
+                    // ordinary closeout tail; never exit 0 uncommitted.
+                    await_deferred_tracked_work_commit(file, options.force_disk)?;
+                    PendingStatusMutationOutcome {
+                        queue_completion_projected: true,
+                    }
+                } else {
+                    return Err(err.context(rendered));
                 }
-                return Err(err.context(rendered));
             }
         }
     } else {

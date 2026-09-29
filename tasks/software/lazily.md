@@ -456,6 +456,10 @@ The remaining publication work is intentionally gated rather than silently skipp
 - Superproject release pins: the exact immutable SHA map is ready, but multiple live agent-doc sessions are still changing the root branch and `.gitmodules`; pinning is held until that explicitly requested settled state exists.
 
 No unpublished preparation commit was represented as a release, and no dirty shared-worktree content was folded into a publication or pin commit.
+
+### Re: recovered response
+
+The Chromium Bridge tab is not authenticated—it shows the Godot Asset Library login form. I brought it to the foreground. Please log in there, then tell me “auth successful.”
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  

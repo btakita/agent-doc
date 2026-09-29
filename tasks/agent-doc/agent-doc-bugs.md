@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 72fd5a16-900e-4b5d-883f-20e9b5eaf0bf
+  claude: 7401924e-5692-4046-aab2-6a438a9c1b98
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -795,6 +795,16 @@ Next in the queue is your lazily.md "multiple `agent-doc: awaiting response`" it
 - **Not changed, by design:** the "queued draft in composer" refusal on pane %40. Dispatch won't type over text sitting in Codex's input box, because that text may be yours. Clear or submit that draft and Run Agent Doc will go through.
 
 Next in the queue is `#layoutobservehandoff`. The exchange is 750 lines, which is a size warning only.
+
+### Re: the auto-update "still 0.2.444", and the write --commit loop on fpe.md — opus-5 · 2026-09-29T18:50-04:00
+
+**Auto-update:** it worked. IntelliJ loaded 0.2.445 at 18:12:38. The fpe.md agent was told the IDE "still runs 0.2.444" because the haiven-dev controller kept a stale record: the new plugin's liveness report never reached that nested controller, so it still named the retired generation as live. That is the lost-liveness bug fixed in `#rundocdispatchrobust` (plugin 0.2.446). Since the 18:28 reload, both the agent-loop and haiven-dev controllers show `running=0.2.446 expected=0.2.446 stale=false`. Restarting IntelliJ was never needed.
+
+**fpe.md closeout (`#visibleresponseabsorb`, agent-doc `cd484a1b0` + `71fb7934e`, installed):** fpe.md and this document hit the same trap. The cycle was `committed` and the response was visible, but it wasn't in git. session-check said to run `write --commit`, which failed with "empty response" because its recovery only ran for strict closeouts. `agent-doc commit` refused the same state and pointed back to `write --commit`, so neither command could finish. `write --commit` with no new text now commits the visible response when no cycle is open, the snapshot holds a response HEAD lacks, and the exchange still matches the snapshot. A prompt you typed after the closeout makes the exchange differ, so it's never committed away. Changes the binary owns (a queue strike, the frontmatter session id) don't block it. Four tests; `make check` passed (10,121 tests).
+
+It cleared this document: `75cc08d9a2` committed the lazily.md response, and session-check is OK. **For fpe.md:** its owner is pane %51, and the pane guard correctly stops me from writing it here. Rerun `agent-doc write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md` in that pane (or let its session do it), and it will close.
+
+**Not fixed yet:** this document's frontmatter `claude:` session id has changed three times in half an hour. It shows up as leftover drift after each commit. It's harmless, but something keeps rewriting it.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -806,7 +816,7 @@ Next in the queue is `#layoutobservehandoff`. The exchange is 750 lines, which i
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#editorauth2]: ensure plugin parity~~
 - ~~do [#editorauth3]~~
-- 🚧 Fix multiple `agent-doc: awaiting response` prompts in lazily.md: ![img_2.png](img_2.png)
+- ~~Fix multiple `agent-doc: awaiting response` prompts in lazily.md: ![img_2.png](img_2.png)~~
 - 📌 do [#layoutobservehandoff]
 - 📌 do [#syntheticstrike]
 - 📌 do [#focuscrossrootverify]

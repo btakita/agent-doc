@@ -1,1 +1,13 @@
-../src/agent-doc/target/release/agent-doc
+#!/bin/sh
+# Run the newest agent-doc build. `make install` (the dev-loop install) refreshes
+# ~/.cargo/bin but deliberately skips target/release (fat LTO), so a bare
+# symlink to target/release silently ran a stale binary after every install —
+# on 2026-09-28 that stale hook binary replayed an operator-undone response
+# into tasks/agent-doc/agent-doc-bugs.md and wedged preflight.
+here=$(dirname "$0")
+release="$here/../src/agent-doc/target/release/agent-doc"
+installed="${CARGO_HOME:-$HOME/.cargo}/bin/agent-doc"
+if [ -x "$installed" ] && { [ ! -x "$release" ] || [ "$installed" -nt "$release" ]; }; then
+  exec "$installed" "$@"
+fi
+exec "$release" "$@"

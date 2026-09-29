@@ -243,6 +243,13 @@ pub struct CycleState {
     /// retained or failed mutation write leaves it false.
     #[serde(default)]
     pub tracked_work_mutations_applied: bool,
+    /// `#retainedapplywitness`: the tracked-work envelope reached the editor
+    /// authority but its write was retained on the delivery projection. Not
+    /// `applied` yet — nothing ever set that for a retained write, so a deferred
+    /// closeout could never prove landing — but once delivery converges the
+    /// envelope is in every replica, and the landing witness counts it.
+    #[serde(default)]
+    pub tracked_work_mutations_retained: bool,
     /// `#backlogqueuepopulation`: tracked-work ids that became actionable this
     /// cycle and therefore may need insert-only mirroring into an explicit
     /// go-mode `agent:queue`. Adds and ungates record here; gates, done
@@ -1292,6 +1299,7 @@ pub fn start_preflight_with_task(
         requested_added_ids: Vec::new(),
         requested_tracked_work_mutations: false,
         tracked_work_mutations_applied: false,
+        tracked_work_mutations_retained: false,
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
         tracked_work_maintenance_required_at_preflight: file_content
@@ -1911,6 +1919,21 @@ pub fn mark_tracked_work_mutations_applied(file: &Path) -> Result<Option<CycleSt
     };
     if !state.tracked_work_mutations_applied {
         state.tracked_work_mutations_applied = true;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#retainedapplywitness`: record that this cycle's tracked-work envelope was
+/// retained on the delivery projection (reached the editor authority, not yet
+/// delivered).
+pub fn mark_tracked_work_mutations_retained(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.tracked_work_mutations_retained {
+        state.tracked_work_mutations_retained = true;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -3326,6 +3349,7 @@ fn synthetic_state_with_id(
         requested_added_ids: Vec::new(),
         requested_tracked_work_mutations: false,
         tracked_work_mutations_applied: false,
+        tracked_work_mutations_retained: false,
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
         // A synthetic cycle did not observe a preflight document. Preserve

@@ -1907,7 +1907,11 @@ fn record_pending_actionable_mutations(
 /// Reads the SAME predicate `commit`, `session-check` and the captured-closeout
 /// resume decide provenance from, so a message cannot claim "half-applied"
 /// while those three agree the mutations landed.
-fn recorded_tracked_work_unlanded_now(file: &Path, force_disk: bool) -> Option<bool> {
+fn recorded_tracked_work_unlanded_now(
+    file: &Path,
+    force_disk: bool,
+    retained_envelope_delivered: bool,
+) -> Option<bool> {
     let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
     let content = if force_disk {
         resolve_force_disk_document(file, "tracked_work_landing_witness")
@@ -1926,7 +1930,10 @@ fn recorded_tracked_work_unlanded_now(file: &Path, force_disk: bool) -> Option<b
                 requested_done_ids: &state.requested_done_ids,
                 requested_added_ids: &state.requested_added_ids,
                 requested_mutations: state.requested_tracked_work_mutations,
-                mutations_applied: state.tracked_work_mutations_applied,
+                // `#retainedapplywitness`: a retained envelope counts once the
+                // caller has proven delivery converged.
+                mutations_applied: state.tracked_work_mutations_applied
+                    || (state.tracked_work_mutations_retained && retained_envelope_delivered),
             },
             &content,
         ),
@@ -1967,7 +1974,7 @@ fn await_deferred_tracked_work_commit(file: &Path, force_disk: bool) -> Result<(
                 Err(_) => false,
             };
         let unlanded = if delivery_converged {
-            recorded_tracked_work_unlanded_now(file, force_disk)
+            recorded_tracked_work_unlanded_now(file, force_disk, true)
         } else {
             None
         };
@@ -2014,7 +2021,21 @@ fn await_deferred_tracked_work_commit(file: &Path, force_disk: bool) -> Result<(
 /// in the authority. Reads the cycle state first so an ordinary flagless write
 /// (the common respond path) never pays for the document resolve.
 fn retained_tracked_work_landed_awaiting_commit(file: &Path, force_disk: bool) -> bool {
-    let Some(state) = agent_doc_cycle_state_io::load(file).ok().flatten() else {
+    let loaded = agent_doc_cycle_state_io::load(file);
+    let Some(state) = loaded.as_ref().ok().and_then(Option::as_ref).cloned() else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "retained_tracked_work_retry_probe file={} cycle=none load_error={} decision=none #mutonlyretry",
+                file.display(),
+                loaded
+                    .as_ref()
+                    .err()
+                    .map(|err| format!("{err:#}"))
+                    .unwrap_or_default()
+                    .replace(' ', "_"),
+            ),
+        );
         return false;
     };
     let recorded_tracked_work = state.requested_tracked_work_mutations
@@ -2027,26 +2048,59 @@ fn retained_tracked_work_landed_awaiting_commit(file: &Path, force_disk: bool) -
     // cycle still qualifies while its landed work is uncommitted.
     let abandoned = state.phase == agent_doc_turn::CyclePhase::Abandoned;
     if !(state.is_open() || abandoned) || !recorded_tracked_work {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "retained_tracked_work_retry_probe file={} cycle={} phase={} recorded_tracked_work={} decision=none #mutonlyretry",
+                file.display(),
+                state.cycle_id,
+                state.phase.as_str(),
+                recorded_tracked_work,
+            ),
+        );
         return false;
     }
-    if recorded_tracked_work_unlanded_now(file, force_disk) != Some(false) {
-        return false;
-    }
-    if !abandoned {
-        return true;
-    }
-    let content = if force_disk {
-        resolve_force_disk_document(file, "retained_tracked_work_uncommitted")
+    // Retained envelopes count only on proven delivery convergence; `Ok(None)`
+    // means no relay hub hosts the document, so nothing is left to deliver.
+    let delivered =
+        match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+            file,
+            std::time::Duration::from_secs(2),
+        ) {
+            Ok(Some(status)) => status.converged,
+            Ok(None) => true,
+            Err(_) => false,
+        };
+    let unlanded = recorded_tracked_work_unlanded_now(file, force_disk, delivered);
+    let head_differs = if unlanded != Some(false) {
+        None
+    } else if !abandoned {
+        Some(true)
     } else {
-        resolve_current_document(file, "retained_tracked_work_uncommitted")
+        let content = if force_disk {
+            resolve_force_disk_document(file, "retained_tracked_work_uncommitted")
+        } else {
+            resolve_current_document(file, "retained_tracked_work_uncommitted")
+        };
+        content.ok().map(|current| {
+            agent_doc_git_io::revision::show_head(file)
+                .ok()
+                .flatten()
+                .is_some_and(|head| head != current.into_content())
+        })
     };
-    let Ok(content) = content.map(|current| current.into_content()) else {
-        return false;
-    };
-    agent_doc_git_io::revision::show_head(file)
-        .ok()
-        .flatten()
-        .is_some_and(|head| head != content)
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "retained_tracked_work_retry_probe file={} cycle={} phase={} unlanded={:?} uncommitted={:?} #mutonlyretry",
+            file.display(),
+            state.cycle_id,
+            state.phase.as_str(),
+            unlanded,
+            head_differs,
+        ),
+    );
+    head_differs == Some(true)
 }
 
 fn write_outcome_retains_closeout_mutations(write_result: &Result<()>) -> bool {
@@ -2666,7 +2720,7 @@ fn run_command_inner_within_pass(
                     agent_doc_turn::write_ownership::classify_tracked_work_mutation_failure(
                         &message,
                         response_write_retained,
-                        recorded_tracked_work_unlanded_now(file, options.force_disk),
+                        recorded_tracked_work_unlanded_now(file, options.force_disk, false),
                     );
                 let rendered =
                     agent_doc_turn::write_ownership::tracked_work_mutation_failure_message(
@@ -2674,6 +2728,14 @@ fn run_command_inner_within_pass(
                         &file.display().to_string(),
                     );
                 if failure.is_deferral() {
+                    if let Err(record_err) =
+                        agent_doc_cycle_state_io::mark_tracked_work_mutations_retained(file)
+                    {
+                        eprintln!(
+                            "[write] warning: failed to record retained tracked-work mutations for {}: {record_err:#}",
+                            file.display()
+                        );
+                    }
                     // The mutation envelope is in the editor's CRDT authority
                     // and its keyed worker converges on its own. Committing
                     // before it does would publish a disk state the projection
@@ -3853,6 +3915,34 @@ mod tests {
             "- [/] [#flakystatedbfixture] evidence-gated text after repeated verification"
         ));
         assert!(!content.contains("stale text"));
+    }
+
+    /// `#retainedapplywitness`: 2026-09-29 07:25Z, a converged document timed out
+    /// the deferred-closeout await with `unlanded=Some(true)`: the closeout
+    /// recorded `requested_tracked_work_mutations`, and a retained envelope never
+    /// set `tracked_work_mutations_applied`, so no amount of waiting could prove
+    /// landing.
+    #[test]
+    fn a_retained_envelope_lands_once_delivery_is_proven() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let body = "<!-- agent:backlog -->\n- [ ] [#b] open\n<!-- /agent:backlog -->\n";
+        fs::write(&doc, body).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(body), Some(body)).unwrap();
+        agent_doc_cycle_state_io::record_requested_tracked_work_mutations(&doc).unwrap();
+        agent_doc_cycle_state_io::mark_tracked_work_mutations_retained(&doc).unwrap();
+
+        assert_eq!(
+            recorded_tracked_work_unlanded_now(&doc, true, false),
+            Some(true),
+            "retained but undelivered is not landed"
+        );
+        assert_eq!(
+            recorded_tracked_work_unlanded_now(&doc, true, true),
+            Some(false),
+            "retained and delivered is landed"
+        );
     }
 
     /// `#mutonlyretry`: a `--backlog-add id=a --done a` closeout deferred and

@@ -1058,6 +1058,65 @@ pub fn commit_document_only_drift(file: &Path) -> Result<bool> {
     })
 }
 
+/// `#visibleresponseabsorb`: commit a response that is visible in the current
+/// authority but missing from `HEAD` after its cycle already closed.
+///
+/// [`commit_document_only_drift`] refuses exactly this shape and names
+/// `write --commit` as the remedy, but an empty-body `write --commit` had no
+/// step that could absorb it, so the two commands pointed at each other forever
+/// (agent-doc-bugs.md 2026-09-29 18:29: a finalize whose queue consume deferred
+/// behind a missing editor replica left its response visible and uncommitted
+/// with the cycle `committed`). Commits only when no cycle is open, the closed
+/// cycle's snapshot already holds a response `HEAD` lacks, and the current
+/// authority still equals that snapshot. Anything the operator typed after the
+/// closeout makes current differ from the snapshot, so it is never swallowed into
+/// a commit that would hide it from the next turn's diff. Returns `false`
+/// without mutating otherwise.
+pub fn commit_visible_uncommitted_response(file: &Path) -> Result<bool> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        let current = commit_current_document_content(file, "commit_visible_response")?;
+        let cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+        if cycle.as_ref().is_some_and(|state| state.phase.is_open()) {
+            return Ok(false);
+        }
+        let head = agent_doc_git_io::revision::show_head(file)?.unwrap_or_default();
+        let Some(snapshot) = agent_doc_snapshot_io::load_document_baseline(file)? else {
+            return Ok(false);
+        };
+        if !visible_uncommitted_response_is_absorbable(&head, &snapshot, &current) {
+            return Ok(false);
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "visible_response_commit_adopted_current file={} len={} hash={} #visibleresponseabsorb",
+                file.display(),
+                current.len(),
+                agent_doc_hash::content_hash(&current),
+            ),
+        );
+        let outcome = commit_with_outcome_scoped(file)?;
+        let post_head = agent_doc_git_io::revision::show_head(file)?.unwrap_or_default();
+        anyhow::ensure!(
+            agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+                &post_head, &current
+            )
+            .is_none(),
+            "visible-response commit for {} did not land the response in HEAD; the commit is not terminal",
+            file.display()
+        );
+        Ok(outcome.did_commit)
+    })
+}
+
+/// Pure decision for [`commit_visible_uncommitted_response`].
+pub fn visible_uncommitted_response_is_absorbable(head: &str, snapshot: &str, current: &str) -> bool {
+    normalize_transient_agent_doc_markers(current) == normalize_transient_agent_doc_markers(snapshot)
+        && normalize_transient_agent_doc_markers(current) != normalize_transient_agent_doc_markers(head)
+        && agent_doc_turn::document_drift::detect_bypassed_response_write_between(head, snapshot)
+            .is_some()
+}
+
 /// Whether a stale snapshot may be replaced by current document authority for
 /// a document-only commit. This is intentionally read-only so preflight can
 /// decide whether to run the recovery without mutating the document.
@@ -3065,5 +3124,48 @@ mod controller_commit_scope_tests {
             format!("{error:#}").contains("agent:review"),
             "the rejection should name the owning component: {error:#}"
         );
+    }
+}
+
+#[cfg(test)]
+mod visible_response_absorb_tests {
+    use super::visible_uncommitted_response_is_absorbable;
+
+    const HEAD: &str = concat!(
+        "---\nagent_doc_session: t\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Prior question?\n",
+        "<!-- /agent:exchange -->\n",
+    );
+
+    fn with_exchange(body: &str) -> String {
+        format!(
+            "---\nagent_doc_session: t\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n❯ Prior question?\n{body}<!-- /agent:exchange -->\n"
+        )
+    }
+
+    /// `#visibleresponseabsorb`: agent-doc-bugs.md 2026-09-29 18:29. The response was
+    /// visible and uncommitted with the cycle closed; `commit` refused it and named
+    /// `write --commit`, whose empty body could not absorb it.
+    #[test]
+    fn a_visible_response_missing_from_head_is_absorbable() {
+        let snapshot = with_exchange("### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n");
+        assert!(visible_uncommitted_response_is_absorbable(HEAD, &snapshot, &snapshot));
+    }
+
+    #[test]
+    fn an_edit_after_the_closeout_is_never_swallowed() {
+        let snapshot = with_exchange("### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n");
+        let current = with_exchange(
+            "### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n\n❯ A new question?\n",
+        );
+        assert!(!visible_uncommitted_response_is_absorbable(HEAD, &snapshot, &current));
+    }
+
+    #[test]
+    fn identical_or_non_response_drift_is_not_absorbed() {
+        assert!(!visible_uncommitted_response_is_absorbable(HEAD, HEAD, HEAD));
+        let local = HEAD.replace("❯ Prior question?\n", "❯ Prior question, reworded?\n");
+        assert!(!visible_uncommitted_response_is_absorbable(HEAD, &local, &local));
     }
 }

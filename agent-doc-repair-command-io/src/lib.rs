@@ -56,8 +56,9 @@ pub fn recover_empty_response_for_strict_closeout(
     strict_closeout: bool,
     has_pending_mutation: bool,
     force_disk: bool,
+    commit_requested: bool,
 ) -> Result<bool> {
-    agent_doc_repair_io::recover_empty_response_for_strict_closeout(
+    if agent_doc_repair_io::recover_empty_response_for_strict_closeout(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
@@ -65,7 +66,16 @@ pub fn recover_empty_response_for_strict_closeout(
         strict_closeout,
         has_pending_mutation,
         Some(force_disk),
-    )
+    )? {
+        return Ok(true);
+    }
+    // `#visibleresponseabsorb`: the response is already visible in the authority but
+    // missing from HEAD, and `agent-doc commit` refuses it by naming this command.
+    if commit_requested && !force_disk && agent_doc_commit_io::commit_visible_uncommitted_response(file)? {
+        eprintln!("[write] empty response stdin; committed the visible uncommitted response");
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -669,6 +679,15 @@ fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResu
         };
     }
     let lower = reason.to_ascii_lowercase();
+    // An operator-required native-save verdict can be wrapped by the generic
+    // editor-convergence context below. Classify its structural token first so
+    // that context cannot demote a permanent plugin/binary generation fence
+    // into an automatic state-edge retry.
+    if lower.contains(agent_doc_document_realtime_io::EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN) {
+        return CapturedFinalizeResumeOutcome::NeedsOperator {
+            reason: reason.to_string(),
+        };
+    }
     // Every needle here matches error *prose* except one. `#retainconv`:
     // `await_editor_replica` was written for the name of the typed error the
     // whole retained-write class is built from — but `Display` prints only the
@@ -733,6 +752,18 @@ mod captured_finalize_resume_tests {
                 CapturedFinalizeResumeOutcome::WaitingForSignal { .. }
             ));
         }
+    }
+
+    #[test]
+    fn native_save_operator_verdict_outranks_generic_convergence_context() {
+        let reason = format!(
+            "closeout blocked by editor_convergence_required: plugin_generation_mismatch:1 [{}]",
+            agent_doc_document_realtime_io::EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN,
+        );
+        assert!(matches!(
+            classify_captured_finalize_resume_error(&reason),
+            CapturedFinalizeResumeOutcome::NeedsOperator { .. }
+        ));
     }
 
     #[test]

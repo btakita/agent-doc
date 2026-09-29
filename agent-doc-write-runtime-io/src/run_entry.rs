@@ -210,6 +210,7 @@ fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Resu
             flags.strict_closeout,
             flags.has_pending_mutation || flags.retained_tracked_work_landed,
             flags.force_disk,
+            flags.commit_requested,
         )
     } else {
         Ok(false)
@@ -3015,6 +3016,7 @@ mod tests {
             queue_completion_ids: Vec::new(),
             pending_kept_open_ids: Vec::new(),
             strict_closeout: true,
+            commit_requested: true,
             force_disk: false,
             no_pending_capture: false,
             mutation_plan_json: Some(plan_json.clone()),
@@ -3089,6 +3091,7 @@ mod tests {
             queue_completion_ids: Vec::new(),
             pending_kept_open_ids: Vec::new(),
             strict_closeout: true,
+            commit_requested: true,
             force_disk: false,
             no_pending_capture: false,
             mutation_plan_json: Some(serde_json::to_string(&plan).unwrap()),
@@ -3147,6 +3150,7 @@ mod tests {
         let response = "### Re: fpebatchchartobs\n\nBefore and after measurements recorded.";
         let free_text_flags = WriteFlags {
             strict_closeout: true,
+            commit_requested: true,
             ..Default::default()
         };
         assert!(
@@ -3183,6 +3187,7 @@ mod tests {
             .unwrap();
         let flags = WriteFlags {
             strict_closeout: true,
+            commit_requested: true,
             ..Default::default()
         };
 
@@ -3247,6 +3252,7 @@ mod tests {
             queue_completion_ids: Vec::new(),
             pending_kept_open_ids: Vec::new(),
             strict_closeout: true,
+            commit_requested: true,
             force_disk: false,
             no_pending_capture: false,
             mutation_plan_json: Some(serde_json::to_string(&plan).unwrap()),

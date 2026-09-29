@@ -417,6 +417,9 @@ pub(crate) struct WriteFlags {
     pub(crate) queue_completion_ids: Vec<String>,
     pub(crate) pending_kept_open_ids: Vec<String>,
     pub(crate) strict_closeout: bool,
+    /// `#visibleresponseabsorb`: the caller asked for a commit (`write --commit`
+    /// or a strict closeout), so an empty body may absorb a visible response.
+    pub(crate) commit_requested: bool,
     pub(crate) force_disk: bool,
     pub(crate) no_pending_capture: bool,
     pub(crate) mutation_plan_json: Option<String>,
@@ -446,7 +449,8 @@ fn pending_write_flags(flags: &WriteFlags) -> agent_doc_session_check_io::Pendin
 
 pub(crate) const EMPTY_RESPONSE_ERROR: &str = "empty response — nothing to write";
 
-pub(crate) type EmptyResponseRecovery = fn(&Path, bool, bool, bool) -> Result<bool>;
+/// `(file, strict_closeout, has_pending_mutation, force_disk, commit_requested)`.
+pub(crate) type EmptyResponseRecovery = fn(&Path, bool, bool, bool, bool) -> Result<bool>;
 
 thread_local! {
     /// Capability tokens for strict-write recursion on this thread. A repair
@@ -2469,6 +2473,7 @@ fn run_command_inner_within_pass(
         queue_completion_ids: options.queue_completion_ids.clone(),
         pending_kept_open_ids: pending_kept_open_ids.clone(),
         strict_closeout: commit_mode == CommitMode::Required,
+        commit_requested: commit_mode != CommitMode::None,
         force_disk: options.force_disk,
         no_pending_capture: options.no_pending_capture,
         mutation_plan_json: has_pending_ops

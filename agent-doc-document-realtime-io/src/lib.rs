@@ -230,6 +230,33 @@ fn retained_refusal(file: &Path, message: String) -> anyhow::Error {
     await_editor_replica_no_disk_write(format!("{message}. {}", retained_write_remedy_for(file)))
 }
 
+/// [`retained_refusal`] for a site that has just proven a durable deferred
+/// write intent owns this write (`#retainedwriteverdict`).
+///
+/// The capture-only I/O shell cannot see that proof: it counts a retained
+/// write as owned only through an open cycle or a *non-terminal* response
+/// capture. A repair re-projection of an already-committed capture is neither,
+/// so on 2026-09-29 (`tasks/software/lazily.md`, cycle-1790664582720) the
+/// `repair_structural_projection` refusal retained intent
+/// `1790665782538740753-1-484a88…` during a transient `missing_replica` gap and
+/// told the agent the write was STRANDED — while its own message said "run only
+/// agent-doc session-check", and the controller converged and committed that
+/// exact intent four seconds later. The intent id is the ownership fact; carry
+/// it into the one predicate instead of letting the predicate rediscover an edge
+/// that has not settled yet.
+fn retained_intent_refusal(file: &Path, intent_id: &str, message: String) -> anyhow::Error {
+    // An empty id proves nothing, so it adds no ownership.
+    let ownership = agent_doc_capture_io::retained_write_ownership(file)
+        .with_retained_projection(!intent_id.is_empty());
+    await_editor_replica_no_disk_write(format!(
+        "{message}. {}",
+        agent_doc_turn::write_ownership::retained_write_remedy(
+            ownership,
+            &file.display().to_string(),
+        )
+    ))
+}
+
 #[derive(Debug)]
 struct ForceDiskAuthorityChanged(String);
 
@@ -1329,8 +1356,9 @@ fn atomic_write_rebased_through_authority_body(
                             "serialized_atomic_write_editor_save_pending",
                             DocumentWriteDeferredReason::EditorProjectionPending,
                         )?;
-                        return Err(retained_refusal(
+                        return Err(retained_intent_refusal(
                             path,
+                            &intent_id,
                             format!(
                                 "serialized_atomic_write: editor acknowledged the canonical target for {} (content_hash={}) but its native save has not projected that exact editor version to disk (retained intent {})",
                                 path.display(),
@@ -1409,8 +1437,9 @@ fn atomic_write_rebased_through_authority_body(
                     if retry_same_intent {
                         continue;
                     }
-                    return Err(retained_refusal(
+                    return Err(retained_intent_refusal(
                         path,
+                        &intent_id,
                         format!(
                             "serialized_atomic_write: editor authority for {} kept advancing after delivery proof; binary-owned intent {intent_id} remains retained over an unsaved editor cut",
                             path.display(),
@@ -2781,8 +2810,9 @@ fn settle_atomic_repair_projection(
                 agent_doc_hash::content_hash(&disk),
             ),
         );
-        return Err(retained_refusal(
+        return Err(retained_intent_refusal(
             path,
+            &pending.intent_id,
             format!(
                 "{source}: repair projection for {} is retained by the controller's reactive \
              document graph (intent_id={}, target_hash={}, canonical_hash={}, disk_hash={}); \
@@ -2820,8 +2850,9 @@ fn settle_atomic_repair_projection(
                 agent_doc_hash::content_hash(&disk),
             ),
         );
-        return Err(retained_refusal(
+        return Err(retained_intent_refusal(
             path,
+            &intent_id,
             format!(
                 "{source}: repair target for {} reached disk while the document was detached, then the editor registered with the exact pre-repair authority (intent_id={intent_id}, target_hash={target_hash}); the original compare-and-swap lineage is retained for reactive editor delivery. Run only agent-doc session-check for the existing binary-owned repair; do not resubmit, force disk, or recycle the controller; {RETAINED_FOR_RETRY_MARKER}",
                 path.display(),
@@ -3337,8 +3368,9 @@ pub fn apply_canonical_replace_if_attached(
                                     agent_doc_hash::content_hash(&effective_target),
                                 ),
                             );
-                            return Err(retained_refusal(
+                            return Err(retained_intent_refusal(
                                 file,
+                                &intent_id,
                                 format!(
                                     "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but the live editor delivery worker heartbeat is stale; disk was not written; recycle_status={recycle_status}",
                                     file.display(),
@@ -3378,8 +3410,9 @@ pub fn apply_canonical_replace_if_attached(
                 )?;
                                 let recycle_status = agent_doc_controller_io::project_controller::
                     schedule_stale_editor_replica_cp_recycle(file, source);
-                                return Err(retained_refusal(
+                                return Err(retained_intent_refusal(
                                     file,
+                                    &intent_id,
                                     format!(
                                         "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor is the current authority, but no editor replica was registered with the relay; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; {RETAINED_FOR_RETRY_MARKER}",
                                         file.display(),
@@ -6165,6 +6198,85 @@ mod retained_refusal_token_tests {
             err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
                 .is_some(),
             "the supervisor still needs the typed state-edge recovery class"
+        );
+    }
+
+    /// `#retainedwriteverdict`: a refusal that has just recorded a durable
+    /// deferred intent must not tell the agent the write is STRANDED, even with
+    /// no open cycle and no live capture (a repair re-projection of a committed
+    /// capture). Drives the real builder over a document with no cycle state, the
+    /// exact shape the capture-only shell reads as unowned.
+    #[test]
+    fn a_just_retained_intent_is_deferred_not_stranded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "# plan\n").expect("write");
+
+        let owned = format!(
+            "{:#}",
+            retained_intent_refusal(
+                &file,
+                "1790665782538740753-1-484a88",
+                "repair_structural_projection: deferred write".to_string(),
+            )
+        );
+        assert!(
+            agent_doc_turn::write_ownership::is_retained_write_refusal(&owned),
+            "{owned}"
+        );
+        assert!(
+            owned.contains("same intent commits itself once delivery converges"),
+            "a durable intent owns the write: {owned}"
+        );
+        assert!(!owned.contains("STRANDED"), "{owned}");
+
+        // Control: the same state without the intent proof is still stranded,
+        // so the assertion above is measuring the intent, not the fixture.
+        let unproven = format!(
+            "{:#}",
+            retained_refusal(&file, "no intent recorded".to_string())
+        );
+        assert!(unproven.contains("STRANDED"), "{unproven}");
+        let empty = format!(
+            "{:#}",
+            retained_intent_refusal(&file, "", "empty id".to_string())
+        );
+        assert!(
+            empty.contains("STRANDED"),
+            "an empty id proves nothing: {empty}"
+        );
+    }
+
+    /// `#retainedwriteverdict`: every refusal that follows a freshly recorded
+    /// deferred intent carries that intent into the predicate. A new site that
+    /// retains an intent and then reaches the capture-only builder would
+    /// reintroduce the false STRANDED verdict.
+    #[test]
+    fn every_refusal_after_a_recorded_intent_carries_it() {
+        let source = include_str!("lib.rs");
+        let lines: Vec<&str> = source.lines().collect();
+        let tests_start = lines
+            .iter()
+            .position(|line| line.starts_with("mod retained_refusal_token_tests"))
+            .unwrap_or(lines.len());
+        let mut findings = Vec::new();
+        for (index, line) in lines[..tests_start].iter().enumerate() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("return Err(retained_refusal(") {
+                continue;
+            }
+            let window_start = index.saturating_sub(30);
+            let recorded = lines[window_start..index].iter().any(|line| {
+                line.contains("= ensure_deferred_document_write_intent(")
+                    || line.contains("pending_document_write_for_target(")
+            });
+            if recorded {
+                findings.push(format!("lib.rs:{}", index + 1));
+            }
+        }
+        assert!(
+            findings.is_empty(),
+            "retained refusals after a recorded intent must use `retained_intent_refusal`: {findings:?}"
         );
     }
 

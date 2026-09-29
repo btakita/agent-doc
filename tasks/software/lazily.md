@@ -13,6 +13,9 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
+  '#fix-ci': Fix CI
+  '#followup': Add follow-up work into the backlog + queue
+  '#rebase-conflicts': rebase + fix merge conflicts
 queue: stop
 ---
 
@@ -475,6 +478,29 @@ Submitted **Lazily 0.2.0** through the authenticated Godot Asset Library form us
 - Submission page: `https://godotengine.org/asset-library/asset/edit/24451`
 
 The resulting page confirms the computed archive URL and all submitted metadata. No further operator action is required unless moderators request changes.
+
+### Re: actionable review extraction — GPT-5 · 2026-09-29T17:47:26-04:00
+
+> **Queue prompt:**
+>
+> #actionable-review
+
+Audited all seven gated review items against live state. Two contain agent-executable evidence repairs, so I extracted those repairs into backlog + queue without ungating their operator-blocked parent reviews:
+
+- `#lzambientpreimagerefresh`: refresh the single drifted `src/agent-doc/Makefile` preimage hash in the point-of-use credential plan, then rerun the fake-publisher proof and review-gate probe. All eight patches remain appliable, the fake publisher checks pass, the file is clean, and no credential access is needed.
+- `#lzmacosbaselinerefresh`: add newly released `v0.35.418` to the measured incomplete Darwin-pair baseline, refresh `#lzmacosrunner` review evidence from five releases to six, and rerun the self-test plus gate probe. This repairs evidence only; the actual Darwin build remains blocked on Mac access.
+
+The other five stay gated:
+
+- `#lzreleasepins`: other root agent-doc sessions are live, the worktree is heavily dirty, and `.gitmodules` is concurrently modified, so the requested settled-superproject boundary is not present.
+- `#lzreactpublish`: prepared commit `dc21987` remains green, but npm authentication/first-package authorization is absent and the package is still unpublished.
+- `#lzrustpublish`: prepared commit `ea2910d` remains unreleased; crates.io Trusted Publishing is still unconfigured, and the last release run failed at OIDC authentication before publish.
+- `#lzgithubbudget20`: the personal billing controls remain unavailable through the current API/token, so there is no agent-executable slice.
+- `#lzagentdocartifactpurge`: the handoff is still fresh and dry-run-valid, but deletion remains correctly blocked on explicit destructive authorization.
+
+`python3 scripts/review-gate-status.py` independently reported exactly the two extracted items as `evidence_stale`; artifact purge was `blocked_fresh`, and the GitHub budget was `unprobeable`. No credentials were resolved, no patches were applied, no budgets changed, and no artifacts were deleted.
+
+The exchange remains above the accretion warning threshold; because the queue is active, I did not pause it for compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -486,6 +512,8 @@ The resulting page confirms the computed archive URL and all submitted metadata.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzambientpreimagerefresh] [agent-loop superproject] Refresh only the recorded SHA-256 for src/agent-doc/Makefile in tasks/software/plan-ambient-publish-token-point-of-use.md after confirming the file is clean and all eight context-bearing patches remain appliable; rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve no longer reports evidence_stale. Do not resolve or print credentials, apply credential patches, rotate tokens, or run the post-application interactive-shell check.
+- [ ] [#lzmacosbaselinerefresh] [agent-doc/lazily-py] Refresh stale macOS-gap evidence only: add v0.35.418 to MACOS_INCOMPLETE_PAIR_BASELINE in scripts/review-gate-status.py, update #lzmacosrunner review text from five to six incomplete-pair releases and its coverage-probe wording, and run python3 scripts/review-gate-status.py --self-test plus make review-gate-status. Keep the parent review gate blocked on operator Mac access; do not build or upload Darwin assets, change the weekly policy, or alter lazily-py hosted wheels.
 <!-- /agent:backlog -->
 
 ## Review

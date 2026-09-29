@@ -2325,13 +2325,22 @@ fn upgrade_unobserved_clear_from_pane_history(
         );
         return ContextClearSubmitStatus::PaneRestarting;
     }
-    let proven = live_pane_prompt_ready_at_cursor(&harness_config, &history, None)
-        && context_clear_history_proves_cleared_state(
-            &history,
-            command,
-            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
-            |line| harness_config.is_dispatch_ready_prompt_line(line),
-        );
+    // `#clearfreshchatproof`: tmux scrollback keeps the old conversation after
+    // Codex's `/clear` starts a new chat, so the history-length proof below can
+    // never pass on a long session. The visible frame can: Codex paints a
+    // fresh chat's `Context 0% used` footer, or the new-chat banner beside the
+    // previous chat's `codex resume` exit summary.
+    let fresh_chat_visible = harness == "codex"
+        && agent_doc_tmux_io::capture_pane(tmux, pane)
+            .is_ok_and(|viewport| codex_viewport_shows_fresh_chat(&viewport));
+    let proven = fresh_chat_visible
+        || (live_pane_prompt_ready_at_cursor(&harness_config, &history, None)
+            && context_clear_history_proves_cleared_state(
+                &history,
+                command,
+                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+                |line| harness_config.is_dispatch_ready_prompt_line(line),
+            ));
     let retained_lines = history
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -2354,6 +2363,28 @@ fn upgrade_unobserved_clear_from_pane_history(
     } else {
         ContextClearSubmitStatus::Unobserved
     }
+}
+
+/// `#clearfreshchatproof`: true when a Codex viewport shows a freshly started
+/// chat: the status footer reports `Context 0% used`, or the new-chat banner
+/// (`>_ OpenAI Codex`) sits beside the previous chat's exit summary
+/// (`To continue this session, run codex resume`), which Codex prints only when
+/// a chat ends. src/haiven-dev/tasks/api.md, 2026-09-29: the operator's clear
+/// ran, but 12392 lines of retained scrollback made the verifier report it as
+/// "not proven submitted".
+fn codex_viewport_shows_fresh_chat(viewport: &str) -> bool {
+    let lines: Vec<String> = viewport
+        .lines()
+        .map(|line| agent_doc_turn_executor_tmux::prompt::strip_ansi(line).trim().to_string())
+        .collect();
+    let zero_context = lines
+        .iter()
+        .any(|line| line.contains('·') && line.contains("Context 0% used"));
+    let new_chat_banner = lines.iter().any(|line| line.starts_with(">_ OpenAI Codex"));
+    let prior_chat_closed = lines
+        .iter()
+        .any(|line| line.starts_with("To continue this session, run codex resume"));
+    zero_context || (new_chat_banner && prior_chat_closed)
 }
 
 fn poll_context_clear_submit_acceptance(
@@ -5620,6 +5651,22 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         );
 
         assert!(!document_dirty_after_committed_cycle(&doc).unwrap());
+    }
+
+    #[test]
+    fn a_codex_fresh_chat_frame_proves_the_clear_ran() {
+        // Post-`/clear` frame from pane `%33` (2026-09-29).
+        let cleared = "› Ask Codex to do anything\n\n  GPT-5.6-Sol high · ~/work/btakita/agent-loop · Context 0% used\n  ? for shortcuts\n\n  >_ OpenAI Codex (v0.158.0)\n     ~/work/btakita/agent-loop\n\n  Welcome back. Familiar territory or a fresh adventure?\n\nToken usage: total=308,270 input=266,138 output=42,132\nTo continue this session, run codex resume, then select Review lazily task\n";
+        assert!(codex_viewport_shows_fresh_chat(cleared));
+        // Only the banner + exit summary (context already moved on) still proves it.
+        assert!(codex_viewport_shows_fresh_chat(
+            &cleared.replace("Context 0% used", "Context 3% used")
+        ));
+        // An ongoing chat with context in use is not a cleared frame.
+        let busy = "• Working (4m 57s • esc to interrupt)\n› Ask Codex to do anything\n  GPT-5.6-Sol high · ~/work · Context 34% used\n  ? for shortcuts\n";
+        assert!(!codex_viewport_shows_fresh_chat(busy));
+        // Operator prose that merely mentions the phrase is not the footer.
+        assert!(!codex_viewport_shows_fresh_chat("Why does it say Context 0% used?\n"));
     }
 
     #[test]

@@ -38,6 +38,18 @@ pub fn synthetic_diff_from_body(body: &str) -> String {
     agent_doc_diff::synthetic_added_lines_diff(body, "harness")
 }
 
+/// Does this prompt carry more than one non-blank line?
+///
+/// `#pastetriggeradmit`: a multi-line prompt that begins with `agent-doc <FILE>`
+/// is either the supported "trigger plus prompt body" shape or an operator paste
+/// (a transcript, a log excerpt) that merely starts with the command text. The
+/// hooks cannot tell those apart from the text alone, so they only treat a
+/// multi-line prompt as an invocation when its document actually resolves; a
+/// paste naming a path from some other project root is operator content.
+pub fn is_multi_line_prompt(prompt: &str) -> bool {
+    prompt.lines().filter(|line| !line.trim().is_empty()).nth(1).is_some()
+}
+
 pub fn agent_doc_invocation_file_from_text(prompt: &str) -> Option<&str> {
     let mut inside_code_fence = false;
     for raw_line in prompt.lines().rev() {
@@ -165,6 +177,15 @@ mod tests {
         let doc = dir.path().join("task.md");
         fs::write(&doc, "---\n---\n").unwrap();
         (dir, doc)
+    }
+
+    #[test]
+    fn multi_line_prompt_counts_only_non_blank_lines() {
+        assert!(!is_multi_line_prompt("agent-doc tasks/fpe.md"));
+        assert!(!is_multi_line_prompt("\n  agent-doc tasks/fpe.md  \n\n"));
+        assert!(is_multi_line_prompt(
+            "agent-doc tasks/fpe.md\n\u{2022} Ran git status"
+        ));
     }
 
     #[test]

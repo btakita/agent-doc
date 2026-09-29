@@ -355,6 +355,14 @@ pub fn resolve_agent_doc_path(prompt: &str, cwd: &Path) -> Option<PathBuf> {
     } else {
         cwd.join(path)
     };
+    // `#pastetriggeradmit`: a multi-line paste that names a document which does
+    // not exist here is operator content, not a binding. Returning `None` lets
+    // tracking keep the thread's previously admitted document instead of
+    // failing on (or rebinding to) a path from another project root.
+    if agent_doc_prompt_contract::harness_prompt::is_multi_line_prompt(prompt) && !joined.is_file()
+    {
+        return None;
+    }
     Some(joined.canonicalize().unwrap_or(joined))
 }
 

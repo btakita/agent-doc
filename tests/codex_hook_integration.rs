@@ -380,6 +380,43 @@ fn codex_hook_cli_wraps_admission_failure_in_one_json_document() {
 }
 
 #[test]
+fn codex_hook_cli_leaves_a_pasted_transcript_that_begins_with_a_trigger_alone() {
+    // `#pastetriggeradmit`: an operator pasted a transcript whose first line was
+    // `agent-doc tasks/fpe.md` (a document under another project root). The
+    // hook resolved it against its own cwd, failed to canonicalize, and told the
+    // agent admission was refused. A multi-line prompt whose document does not
+    // resolve is operator content, not an invocation.
+    let tmp = TempDir::new().unwrap();
+    let submit_payload = json!({
+        "session_id": "codex-session-paste",
+        "turn_id": "turn-1",
+        "cwd": tmp.path().display().to_string(),
+        "prompt": "agent-doc tasks/fpe.md\n\u{2022} Ran git status --short\n  \u{2514} M tasks/fpe.md\n",
+    });
+
+    let submit = agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit_payload.to_string())
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&submit.get_output().stdout);
+    assert!(
+        !stdout.contains("cycle contract UNAVAILABLE"),
+        "a pasted transcript must not be reported as a refused admission: {stdout}"
+    );
+    assert!(
+        !stdout.contains("failed to canonicalize"),
+        "a pasted transcript must not be resolved as a document binding: {stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&submit.get_output().stderr);
+    assert!(
+        !stderr.contains("Codex session tracking failed"),
+        "tracking must not try to bind the pasted path: {stderr}"
+    );
+}
+
+#[test]
 fn codex_hook_cli_resumes_original_capture_over_editor_convergence_block() {
     let (tmp, doc) = setup_template_doc();
     init_git_repo(tmp.path(), &doc);

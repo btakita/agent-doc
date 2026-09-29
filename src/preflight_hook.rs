@@ -231,6 +231,22 @@ fn run_preflight_for_prompt(
     // trigger that reached preflight must never produce silence". The same is
     // true one line earlier.
     let Some(file) = resolve_document(cwd, &target) else {
+        // `#pastetriggeradmit`: a multi-line prompt that merely BEGINS with the
+        // trigger text (a pasted transcript whose first line was
+        // `agent-doc tasks/fpe.md`, from another project root) is operator
+        // content. The supported "trigger plus prompt body" shape always names
+        // a document that resolves, so an unresolved multi-line prompt is left
+        // alone instead of being reported as a refused admission. A single-line
+        // trigger still fails loudly (`#hooktriggerunresolved`).
+        if agent_doc_prompt_contract::harness_prompt::is_multi_line_prompt(prompt) {
+            eprintln!(
+                "[agent-doc] preflight hook: multi-line prompt begins with `agent-doc {target}` \
+                 but that document does not resolve from cwd `{}`; treating it as pasted \
+                 content, not a trigger",
+                cwd.display()
+            );
+            return HookAdmission::NotATrigger;
+        }
         let err = anyhow::anyhow!(
             "`{target}` did not resolve to a file from cwd `{}`. A relative document path \
              resolves against the hook's working directory; re-run from the project root, or \

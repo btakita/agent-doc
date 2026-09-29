@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 322cd20d-d440-49dc-9da0-c9fd53bfabbb
+  claude: e6325f72-1329-4ebb-8513-6f76aba7334d
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -34,6 +34,70 @@ queue: go
 Compacted content:
 - Archived 31 response topic(s): infra.md "owned by pane %12, invocation from pane %3"; api.md reverted by queue updates; #pastetriggeradmit; 28 more
 - Prior summary/context: Fix api.md issue ``` • Failed (exit 1) agent-doc write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/ta...
+Fix fpe.md issue
+```
+• The controller and owning actor are healthy and report no projection lag; the only mismatch is that the installed
+  plugin is already 0.2.445 while the live IDE still runs 0.2.444. Reloading the IDE would disrupt the user’s editor,
+  and forcing disk authority would violate the recovery guard, so I’m ending the recovery attempt with the mandated
+  session check to capture the exact remaining state.
+
+• Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+  └ [session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in the owning repo (sna…
+    [session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in the owning repo (sna…
+    [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md total_ms=1617…
+    + 5 lines (ctrl+t to expand)
+
+• Agent-doc closeout is blocked by the live JetBrains plugin: 0.2.445 is installed, but the IDE still runs 0.2.444.
+  Please reload/restart IntelliJ to activate 0.2.445; then I can complete agent-doc write --commit and the final
+  session check.
+
+  The implementation and green PRs are unaffected. I did not force disk authority or stage unrelated workspace edits.
+
+• Hook stopped
+  └ agent-doc Stop hook already continued once for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md, but
+the cycle is still open. [session-check] INTERRUPTED: cycle state is committed but the snapshot does not match HEAD in
+the owning repo (snapshot_len=73242, head_len=71543). The response patchback is visible but was never committed;
+tracked side-effect edits: .gitignore, .gitmodules, AGENTS.md (+11 more) Recovery [direct_response_patchback]: `agent-
+doc write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md` to absorb the visible `### Re:`
+response through the snapshot/commit boundary.
+
+  Worked for 45m 22s • 6:16 PM
+
+
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+
+
+• Agent-doc admission failed because tasks/fpe.md’s editor snapshot differs from Git HEAD, with no open or safely
+  recoverable cycle. The visible ### Re: response remains uncommitted.
+
+  Per agent-doc’s contract, I did not rerun preflight or modify anything. Recovery requires:
+
+  agent-doc write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+
+  Worked for 5m 16s • 6:58 PM
+```
+
+### Re: Fix fpe.md issue — opus-5 · 2026-09-29T19:10-04:00
+
+Your paste arrived empty (a bare `` `````` `` fence), so I worked from the fpe.md logs. **fpe.md is healthy now:** its "parameterize a GPU instance" response committed at 19:04 EDT (`a50bb890` in haiven-dev). The remaining diff there is your queue/frontmatter steering, which the codex pane is draining.
+
+**What happened (22:11–23:04Z):**
+- While codex was finalizing, a `make install` recycled the supervisor mid-turn and dropped the JetBrains replica (plugin 0.2.444, expected 0.2.445): `editor_attached_model_missing`, `missing_replica_terminal_rebuild_failed`.
+- The response reached the editor and snapshot but not HEAD. The Codex Stop hook reported it **STRANDED** and told you to run `agent-doc commit`.
+- At 22:53Z you re-routed. Preflight **bailed**: "snapshot differs from HEAD without an open or recoverable agent-doc cycle" and told you to run `write --commit`. Neither suggestion could run inside the blocked turn, so no contract was produced.
+- At 23:04Z the next route was on a fresh binary with plugin 0.2.446. Preflight's pending maintenance happened to commit it.
+
+**Fix (`bcc560566`, #preflightvisibleabsorb):**
+- Before bailing on that drift, preflight now runs the `#visibleresponseabsorb` commit (`commit_visible_uncommitted_response`) itself.
+- `agent-doc commit` tries the same absorb first, so the command the Stranded message names actually clears the state.
+- The absorb still declines if the exchange differs from the snapshot, so a newer operator prompt is never swallowed. It commits only the session document.
+- Regressions: a new git-backed commit-io test (absorb lands the response; a newer prompt blocks it) and a preflight-command test. The old test that expected preflight to fail here now asserts the absorb and that other tracked edits stay uncommitted. The source-contract markers are updated too.
+
+**CI:** the latest CI run was red on my earlier `c0864bca9`: `command_submit_response_accepted` was dead code under `test-support`. The `allow(dead_code)` fix was sitting uncommitted in the shared tree, so I committed and pushed it (`d44acade0`).
+
+**Verification:** `make check` passed, 10123/10123 (exit 0). `make install` exit 0. Both commits are pushed to agent-doc main.
+
+There were no actionable follow-up items; the fix is complete and nothing is left to capture.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -43,9 +107,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#editorauth2]: ensure plugin parity~~
-- ~~do [#editorauth3]~~
-- ~~Fix multiple `agent-doc: awaiting response` prompts in lazily.md: ![img_2.png](img_2.png)~~
 - 🚧 📌 do [#layoutobservehandoff]
 - 📌 do [#syntheticstrike]
 - 📌 do [#focuscrossrootverify]

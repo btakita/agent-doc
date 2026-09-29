@@ -766,10 +766,8 @@ Next in the queue are `#layoutobservehandoff`, `#syntheticstrike`, `#focuscrossr
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#editorauth1]~~
 - ~~do [#editorauth2]: ensure plugin parity~~
-- ⏭️ do [#editorauth3]
-- ~~do [#editorauth4]~~
+- 🚧 do [#editorauth3]
 - 📌 do [#layoutobservehandoff]
 - 📌 do [#syntheticstrike]
 - 📌 do [#focuscrossrootverify]
@@ -779,7 +777,7 @@ Next in the queue are `#layoutobservehandoff`, `#syntheticstrike`, `#focuscrossr
 
 <!-- agent:backlog -->
 - [ ] [#editorauth2] [agent-doc][jetbrains][vscode] Plugin registration never adopts canonical over a buffer that differs, in BOTH editor plugins (operator: ensure plugin parity) (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome in JetBrains and VS Code, preferably in the shared FFI registration path so both plugins get one behaviour; registration publishes the editor state and then merges forward. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register) against both plugins, plus an editor-parity check.
-- [ ] [#editorauth3] [agent-doc] Controller: no whole-text canonical replacement into a registered editor. Fold quarantined editor updates (`crdt_replica_update_quarantined recovery=lazy_canonical_projection`) before any handoff or checkpoint, and reseed the in-memory CRDT from the ladder on handoff/restart: the open editors' states, else disk (plan: tasks/agent-doc/plan-editor-authority-ladder.md; proof: formal/authority_ladder/EditorAuthorityLadder.lean).
+- [ ] 🚧 [#editorauth3] [agent-doc] Controller: no whole-text canonical replacement into a registered editor. Fold quarantined editor updates (`crdt_replica_update_quarantined recovery=lazy_canonical_projection`) before any handoff or checkpoint, and reseed the in-memory CRDT from the ladder on handoff/restart: the open editors' states, else disk (plan: tasks/agent-doc/plan-editor-authority-ladder.md; proof: formal/authority_ladder/EditorAuthorityLadder.lean).
 - [ ] [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
 - [ ] [#syntheticstrike] [agent-doc] An answered free-text queue head is never struck when its closeout commits as a synthetic cycle. agent-doc-bugs.md 2026-09-29 14:28: the capture belonged to cycle-1790704937323, but the commit landed as synthetic-1790706539439. `active_captured_response_for_queue_strike` requires `closeout.cycle_id == capture.cycle_id` and an open phase, so the controller's answered-free-text Computed never fired and "Fix …/issues/59" stayed live with a 🚧 marker. The pure projection strikes it correctly (probed with the real inputs and baseline). Fix the capture-to-synthetic-cycle ownership, or strike from the committing synthetic cycle when it committed that capture's response.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.

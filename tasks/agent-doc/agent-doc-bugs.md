@@ -266,7 +266,7 @@ Warning from preflight: 1 gated item is still in `agent:backlog` (`legacy_gated_
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#retaineddeferwedge]~~
-- ⏭️ do [#focuscrossrootverify]
+- do [#focuscrossrootverify]
 <!-- /agent:queue -->
 
 

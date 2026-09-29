@@ -6,6 +6,7 @@
 //! scheduling crates own those responsibilities.
 
 pub mod captured_splice;
+pub mod conflict_render;
 pub mod ownership;
 
 pub mod crdt;

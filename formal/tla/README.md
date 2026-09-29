@@ -167,6 +167,19 @@ rollback; `EditorAuthorityLadderReach.cfg` must show agent writes still reach
 editors. `formal/authority_ladder/EditorAuthorityLadder.lean` proves the same
 safety property for every instance, not only the bounded ones TLC explores.
 
+`ConflictReconciliation.tla` checks where text lands when the operator's live
+edit and the agent's merge meet (`#editorauth1`): same-point appends put the
+agent's content first with the cursor at the end of the operator's edit, edits
+of independent regions both apply, and a same-span conflict is surfaced in the
+buffer with the text both sides share kept outside the marks, resolving to
+either side exactly. The operator keeps typing at the cursor afterwards.
+`ConflictReconciliationOperatorFirstWedge.cfg` (operator's append first) must
+violate `SamePointAgentFirst`, `ConflictReconciliationDropWedge.cfg` (last
+writer wins on an overlap) must violate `AgentPreserved`, and
+`ConflictReconciliationReach.cfg` must show a conflict is actually surfaced.
+`formal/authority_ladder/ConflictReconciliation.lean` proves the same merge for
+every base and every pair of edits.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

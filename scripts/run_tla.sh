@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -129,6 +129,12 @@ must_violate=(
     # (api.md, 2026-09-29); forward merging still delivers agent work.
     EditorAuthorityLadder:EditorAuthorityLadderWedge
     EditorAuthorityLadder:EditorAuthorityLadderReach
+    # `#editorauth1`: the conflict-reconciliation merge. One wedge per rule it
+    # could silently break (operator-first ordering, last-writer-wins on an
+    # overlap); reach proves a same-span conflict is actually surfaced.
+    ConflictReconciliation:ConflictReconciliationOperatorFirstWedge
+    ConflictReconciliation:ConflictReconciliationDropWedge
+    ConflictReconciliation:ConflictReconciliationReach
     StopHookFailClosed:StopHookFailClosedWedge
     StopHookFailClosed:StopHookFailClosedReach
     # `#recyclesettlewaitshort` — the dispatch gate across an upgrade re-exec.

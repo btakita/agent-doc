@@ -1,9 +1,15 @@
 name = "authorityLadder"
-defaultTargets = ["EditorAuthorityLadder"]
+defaultTargets = ["EditorAuthorityLadder", "ConflictReconciliation"]
 
 # Self-contained and offline: proves the editor authority ladder never rolls an
 # open editor back, for any editors and any content (formal/tla checks bounded
 # instances of the same design, including convergence and non-vacuity).
+# ConflictReconciliation proves where text lands when the operator's edit and
+# the agent's merge meet: agent-first same-point appends, independent regions,
+# and lossless compact same-span conflicts (#editorauth1).
 
 [[lean_lib]]
 name = "EditorAuthorityLadder"
+
+[[lean_lib]]
+name = "ConflictReconciliation"

@@ -22000,6 +22000,10 @@ fn test_agent_doc_preflight_runtime_io_owns_closeout_drift_recovery_graph() {
         "preflight_document_only_drift_auto_commit_attempt file=",
         "preflight_document_only_drift_auto_commit_succeeded file=",
         "preflight_document_only_drift_auto_commit_failed file=",
+        // `#preflightvisibleabsorb`: a stranded visible response is committed in
+        // place, not reported with a `write --commit` remedy.
+        "agent_doc_commit_io::commit_visible_uncommitted_response(file)",
+        "preflight_visible_response_absorb_succeeded file=",
     ] {
         assert!(
             preflight_runtime.contains(required),

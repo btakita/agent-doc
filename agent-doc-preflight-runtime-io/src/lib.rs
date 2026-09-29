@@ -341,6 +341,40 @@ pub fn enforce_no_uncommitted_closeout_drift(
                 }
             }
         }
+        // `#preflightvisibleabsorb`: haiven-dev fpe.md 2026-09-29 22:53. A finalize
+        // stranded behind a mid-turn install left its response visible and
+        // uncommitted with no open cycle; preflight bailed naming `write --commit`,
+        // so the re-dispatched turn never got a contract. The absorb commits only
+        // when the exchange still equals the snapshot, so a newer operator prompt is
+        // never swallowed.
+        match agent_doc_commit_io::commit_visible_uncommitted_response(file) {
+            Ok(true) => {
+                rc.invalidate_head_content();
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "preflight_visible_response_absorb_succeeded file={}",
+                        file.display()
+                    ),
+                );
+                eprintln!(
+                    "[preflight] committed the visible uncommitted response for {}",
+                    file.display()
+                );
+                return Ok(());
+            }
+            Ok(false) => {}
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "preflight_visible_response_absorb_failed file={} error={}",
+                        file.display(),
+                        err.to_string().replace('\n', " ")
+                    ),
+                );
+            }
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

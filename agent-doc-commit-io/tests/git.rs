@@ -2472,6 +2472,59 @@ Duplicate replay should stay live.
         );
     }
 
+    /// `#preflightvisibleabsorb`: haiven-dev fpe.md 2026-09-29. A finalize stranded
+    /// behind a mid-turn install left its response in the snapshot and on disk but
+    /// not in HEAD, with no open cycle. Preflight and `agent-doc commit` now run this
+    /// absorb; it must land the response in HEAD, and must decline once the
+    /// operator has typed a newer exchange prompt.
+    #[test]
+    fn a_stranded_visible_response_is_absorbed_into_head_but_a_new_prompt_is_not() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        let doc = root.join("session.md");
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ parameterize a GPU instance\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        commit_file(root, "session.md", head, "add doc");
+        let answered = head.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: parameterize a GPU instance — gpt-5 · 2026-09-29T18:12-04:00\n\nTwo PRs.\n<!-- /agent:exchange -->",
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &answered,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let prompted = answered.replace(
+            "<!-- /agent:exchange -->",
+            "❯ a newer question\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &prompted).unwrap();
+        assert!(
+            !agent_doc_commit_io::commit_visible_uncommitted_response(&doc).unwrap(),
+            "a newer operator prompt must never be swallowed into the absorb commit"
+        );
+
+        fs::write(&doc, &answered).unwrap();
+        assert!(agent_doc_commit_io::commit_visible_uncommitted_response(&doc).unwrap());
+        let shown = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&shown.stdout).contains("Two PRs."),
+            "the stranded response must land in HEAD"
+        );
+    }
+
     /// Sets up the `#strandedremedydeadlock` shape: `snapshot == HEAD`, and the
     /// only difference is typed-component (queue/backlog) drift in the
     /// editor-authoritative document.

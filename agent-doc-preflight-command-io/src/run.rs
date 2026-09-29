@@ -2734,7 +2734,7 @@ mod tests {
         assert!(err.to_string().contains("requires SSH profile `missing`"));
     }
     #[test]
-    fn preflight_fails_closed_on_uncommitted_closeout_drift_even_without_diff() {
+    fn preflight_absorbs_a_stranded_visible_response_without_committing_side_effects() {
         let dir = setup_project();
         let root = dir.path();
         std::fs::create_dir_all(root.join("news/2026-05-01")).unwrap();
@@ -2779,14 +2779,33 @@ mod tests {
         std::fs::write(&news_index, "new news index\n").unwrap();
         std::fs::write(&news_day, "new news day\n").unwrap();
 
-        let err =
-            run(&doc).expect_err("preflight should fail before diffing hidden closeout drift");
-        let message = err.to_string();
-        assert!(message.contains("snapshot differs from HEAD"));
-        assert!(message.contains("tracked side-effect edits"));
-        assert!(message.contains("news/README.md"));
-        assert!(message.contains("news/2026-05-01/README.md"));
-        assert!(message.contains("agent-doc write --commit"));
+        // `#preflightvisibleabsorb`: preflight used to bail here naming `write
+        // --commit` (haiven-dev fpe.md 2026-09-29 22:53), so the re-dispatched turn
+        // never got a contract. It now commits the stranded response itself.
+        if let Err(err) = run(&doc) {
+            eprintln!("preflight after the absorb reported (not under test): {err:#}");
+        }
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&head.stdout).contains("### Re: create today's news"),
+            "preflight must absorb the stranded visible response into HEAD"
+        );
+        let status = Command::new("git")
+            .current_dir(root)
+            .args(["status", "--porcelain", "--", "news"])
+            .output()
+            .unwrap();
+        let status = String::from_utf8_lossy(&status.stdout);
+        assert!(
+            status.contains("news/README.md") && status.contains("news/2026-05-01/README.md"),
+            "the absorb commits only the session document, never other tracked edits: {status}"
+        );
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("preflight_visible_response_absorb_succeeded"), "{log}");
     }
     #[test]
     fn preflight_fails_closed_on_uncommitted_exchange_drift_without_response_heading() {

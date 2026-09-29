@@ -4683,7 +4683,10 @@ fn try_main() -> anyhow::Result<()> {
             }
         }
         Commands::Commit { file } => {
-            let did_commit = agent_doc_commit_io::commit_document_only_drift(&file)?;
+            // `#preflightvisibleabsorb`: the stranded-write remedy names this command,
+            // so it must absorb a visible response its closed cycle never committed.
+            let did_commit = agent_doc_commit_io::commit_visible_uncommitted_response(&file)?
+                || agent_doc_commit_io::commit_document_only_drift(&file)?;
             println!("{}", commit_outcome_message(did_commit, &file));
             Ok(())
         }

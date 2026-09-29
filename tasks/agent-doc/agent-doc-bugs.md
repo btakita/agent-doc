@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: b64ff560-4517-456f-862a-5f3d7f665251
+  claude: 868140d6-82c0-433f-a811-a949cf83e265
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -318,6 +318,29 @@ Fixed in agent-doc `7eaf68fdc` (`#reexecpurposelost`). It's pushed and installed
 - CI run `36535275954` is still in progress.
 
 **Not covered:** there is no end-to-end SimWorld test that runs a real execve across a reap.
+
+### Re: lazily crash closeout left its queue head live — opus-5-5 · 2026-09-29T03:23-04:00
+
+> **Queue prompt:** The lazily.md session crashed. Fix agent-doc causes.
+
+Closing out the fix above hit a second agent-doc defect, now fixed in agent-doc `24af12191` (`#repairftstrike`). It's pushed and installed, and the superproject pointer is bumped.
+
+**What happened:**
+- `respond` was deferred because no editor replica was registered with the relay, most likely because of the library reload from my own `make install`.
+- When delivery converged, `session-check` pointed to `write --commit`. That committed the response.
+- It left this queue head live anyway, even though the response quoted it word for word.
+
+**Why:** the `write --commit` repair runs with empty stdin. It found the response already in the document and returned `AlreadyApplied`, but the queue pass after it matches the `> **Queue prompt:**` quote only against the stdin response text. That text was empty, so the free-text head could never be struck on this path.
+
+**Fix:** the repair's `AlreadyApplied` branch already holds the retained response it just confirmed is in the document. It now uses that text to strike the free-text heads it quotes (`strike_answered_free_text_queue_heads`) before closing out. The strike re-checks that the response is present and that the head was already queued before this cycle. Force-disk repairs are excluded.
+
+**Verification:**
+- New regression test `repair_already_applied_strikes_the_free_text_head_its_response_quotes`. It checks that the quoted head is struck and that an unanswered `do [#id]` head stays live.
+- I disabled only the new strike to check the test: it fails.
+- Full `make check`: exit 0; nextest reported 10058 run, 10058 passed, 0 failed.
+- CI runs `36535275954` (`#reexecpurposelost`) and `36536276106` (this fix) are still in progress.
+
+**Not fixed:** a `make install` during a turn still unregisters the editor replica for a few seconds, which is what deferred this closeout. It recovered as designed, so I left it alone.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -328,7 +351,7 @@ Fixed in agent-doc `7eaf68fdc` (`#reexecpurposelost`). It's pushed and installed
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#retaineddeferwedge]~~
-- 🚧 The lazily.md session crashed. Fix agent-doc causes.
+- ~~The lazily.md session crashed. Fix agent-doc causes.~~
 - ⏭️ do [#focuscrossrootverify]
 <!-- /agent:queue -->
 

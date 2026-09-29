@@ -397,6 +397,26 @@ The cooldown is armed only after a reload is actually delivered, so a failed del
 - New stale supervisors no longer produce this loop.
 
 Exchange is 336+ lines; noting accretion only (queue active, no compaction).
+
+### Re: lazily.md "preflight admission failed … stranded" (3:09 AM) — opus-5 · 2026-09-29T11:48-04:00
+
+**Same root cause as #replicachurn12s, which is now fixed at the sender.** ops.log for lazily.md, 07:09Z (= 3:09 AM):
+
+- 07:09:39: the lazily replica deregistered in the churn.
+- 07:09:44: the reregister notify was refused mid-reload (`IPC receipt rejected`, `definitively_refused_by_all:1`).
+- Preflight saw `live_editors=0` and refused admission with "stranded, run `agent-doc commit`".
+
+At that moment the stale boost-client supervisor (pid 3913498) was sending ~14 `reload_library` requests a minute. That rate held from 06:0x through 07:5x, per the boost-client ops.log. Commit `203144577` stops a replaced-executable sender from reloading the editor, so this refusal shape shouldn't recur once that supervisor is gone.
+
+**The "stranded → run `agent-doc commit`" guidance was wrong in that case.** The binary's own `captured_finalize_resume` for `cycle-1790664582720` committed at 07:09:48 (`ContinuedWriteAppliedCapture`), one second before the codex stop hook preserved the refusal. So nothing was actually stranded, and nobody needed to run `agent-doc commit`.
+
+I couldn't pin the exact verdict path from the logs; the refusal text itself wasn't logged. So I filed it with the evidence as `#strandedwhileresuming`, appended behind the current head.
+
+**lazily.md right now**
+- A new cycle `cycle-1790696495188` is `preflight_started`, so its owning session is live on it. I left the document alone.
+- No manual `agent-doc commit` is needed for the 3:09 AM turn, because that capture already committed.
+
+**Still live:** stale supervisor 3913498 hasn't re-exec'd yet. Its continue-mode restart is accepted but waits on its open `monsterrodholders.md` codex cycle. Until then, its next notify can still churn the replicas once more.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -412,6 +432,7 @@ Exchange is 336+ lines; noting accretion only (queue active, no compaction).
 
 
 <!-- agent:backlog -->
+- [ ] [#retainedwriteverdict] [strandedwhileresuming] Retained-write verdict said STRANDED (codex told to run agent-doc commit from the owning pane) for tasks/software/lazily.md at 2026-09-29T07:09:44-49Z while captured_finalize_resume for cycle-1790664582720 was in flight and committed at 07:09:48 (captured_finalize_resume_committed repair_outcome=ContinuedWriteAppliedCapture). Transient missing_replica (disposition=transient_probe) during a replica gap must not produce stranded guidance while a capture resume holds the write; see agent_doc_turn::write_ownership. Evidence: .agent-doc/logs/ops.log.1.zst 07:09:33-07:09:50Z.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 <!-- /agent:backlog -->

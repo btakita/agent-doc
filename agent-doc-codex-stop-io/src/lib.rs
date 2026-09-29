@@ -77,6 +77,10 @@ struct ClaudeStopInput {
     cwd: String,
     #[serde(default)]
     stop_hook_active: bool,
+    /// Claude Code's session transcript (JSONL). `#stoploopalreadyarmed`: read
+    /// to tell whether this turn already scheduled the `/loop` re-entry.
+    #[serde(default)]
+    transcript_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -429,6 +433,23 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
         return Ok(None);
     }
 
+    // `#stoploopalreadyarmed`: the agent has already scheduled the exact
+    // `/loop agent-doc <FILE>` re-entry this block would ask for. Blocking again
+    // cannot change what happens next; it only surfaces a "Stop hook blocking
+    // error" on every drained item and re-asks for a wake-up that is pending.
+    if let Some(transcript) = input.transcript_path.as_deref()
+        && claude_transcript_arms_loop_reentry(Path::new(transcript), &file)
+    {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "claude_stop_queue_continuation_already_armed head_bytes={} source=transcript_schedule_wakeup action=allow_final_answer",
+                prompt.len(),
+            ),
+        );
+        return Ok(None);
+    }
+
     if input.stop_hook_active {
         // Claude explicitly requires Stop hooks to break their own recursion.
         // The route-owned supervisor and stall projection remain the bounded
@@ -493,6 +514,90 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
 /// sealed contract: schedule a wake-up that SUBMITS the trigger as a real
 /// prompt. Keep the no-op case and the fallback together -- naming the fallback
 /// without naming the symptom leaves the agent unable to tell that it needs one.
+/// Bytes of transcript tail inspected; one turn's records fit comfortably.
+const CLAUDE_TRANSCRIPT_TAIL_BYTES: u64 = 4 * 1024 * 1024;
+
+fn claude_transcript_arms_loop_reentry(transcript: &Path, file: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut handle) = std::fs::File::open(transcript) else {
+        return false;
+    };
+    let len = handle.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let start = len.saturating_sub(CLAUDE_TRANSCRIPT_TAIL_BYTES);
+    if let Err(err) = handle.seek(SeekFrom::Start(start)) {
+        eprintln!("[agent-doc] Claude Stop hook could not read the transcript tail: {err}");
+        return false;
+    }
+    let mut tail = Vec::new();
+    if let Err(err) = handle.read_to_end(&mut tail) {
+        eprintln!("[agent-doc] Claude Stop hook could not read the transcript tail: {err}");
+        return false;
+    }
+    transcript_tail_arms_loop_reentry(&String::from_utf8_lossy(&tail), file)
+}
+
+fn is_stop_hook_feedback(text: &str) -> bool {
+    text.trim_start().starts_with("Stop hook feedback:")
+}
+
+/// `#stoploopalreadyarmed`: true when, after the operator prompt that started
+/// the current turn, the assistant called `ScheduleWakeup` with a
+/// `/loop ... agent-doc <FILE>` prompt. Stop-hook feedback and tool results are
+/// harness records inside the turn, not a new operator prompt, so they do not
+/// end the search.
+pub fn transcript_tail_arms_loop_reentry(tail: &str, file: &Path) -> bool {
+    let file_display = file.display().to_string();
+    for line in tail.lines().rev() {
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let content = record.pointer("/message/content");
+        match record.get("type").and_then(serde_json::Value::as_str) {
+            Some("assistant") => {
+                let armed = content
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .any(|block| {
+                        block.get("type").and_then(serde_json::Value::as_str) == Some("tool_use")
+                            && block.get("name").and_then(serde_json::Value::as_str)
+                                == Some("ScheduleWakeup")
+                            && block
+                                .pointer("/input/prompt")
+                                .and_then(serde_json::Value::as_str)
+                                .is_some_and(|prompt| {
+                                    let prompt = prompt.trim();
+                                    prompt.starts_with("/loop")
+                                        && prompt.contains("agent-doc")
+                                        && prompt.contains(file_display.as_str())
+                                })
+                    });
+                if armed {
+                    return true;
+                }
+            }
+            Some("user") => {
+                let operator_prompt = match content {
+                    Some(serde_json::Value::String(text)) => !is_stop_hook_feedback(text),
+                    Some(serde_json::Value::Array(blocks)) => blocks.iter().any(|block| {
+                        block.get("type").and_then(serde_json::Value::as_str) == Some("text")
+                            && !block
+                                .get("text")
+                                .and_then(serde_json::Value::as_str)
+                                .is_some_and(is_stop_hook_feedback)
+                    }),
+                    _ => false,
+                };
+                if operator_prompt {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 pub fn claude_stop_continuation_reason(file_display: &str, prompt: &str) -> String {
     format!(
         "agent-doc Stop hook kept the active queue moving for {file_display}. The completed \
@@ -3936,6 +4041,7 @@ Reviewed the gated items.\n\
             session_id: "codex-session".to_string(),
             cwd: dir.path().display().to_string(),
             stop_hook_active: false,
+            transcript_path: None,
         })
         .unwrap()
         .expect("clean Claude closeout must keep draining");
@@ -3969,6 +4075,7 @@ Reviewed the gated items.\n\
                 session_id: "codex-session".to_string(),
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
+                transcript_path: None,
             })
             .unwrap()
             .is_some(),
@@ -3994,6 +4101,7 @@ Reviewed the gated items.\n\
                 session_id: "codex-session".to_string(),
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
+                transcript_path: None,
             })
             .unwrap()
             .is_none(),
@@ -4043,6 +4151,7 @@ Reviewed the gated items.\n\
                 session_id: "codex-session".to_string(),
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
+                transcript_path: None,
             })
             .unwrap()
         };
@@ -4159,6 +4268,7 @@ Reviewed the gated items.\n\
                 session_id: "codex-session".to_string(),
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
+                transcript_path: None,
             })
             .unwrap()
         };
@@ -4194,6 +4304,7 @@ Reviewed the gated items.\n\
                 session_id: "another-claude-session".to_string(),
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: false,
+                transcript_path: None,
             })
             .unwrap()
             .is_none(),
@@ -4204,6 +4315,7 @@ Reviewed the gated items.\n\
                 session_id: "codex-session".to_string(),
                 cwd: dir.path().display().to_string(),
                 stop_hook_active: true,
+                transcript_path: None,
             })
             .unwrap()
             .is_none(),
@@ -5432,6 +5544,54 @@ Reviewed the gated items.\n\
             !agent_doc_flow_io::closeout::replay_closeout_still_proven(&doc, &current).unwrap(),
             "a new cycle must supersede the old receipt even with unchanged content"
         );
+    }
+
+    fn transcript_record(kind: &str, content: serde_json::Value) -> String {
+        serde_json::json!({"type": kind, "message": {"role": kind, "content": content}}).to_string()
+    }
+
+    fn schedule_wakeup(prompt: &str) -> String {
+        transcript_record(
+            "assistant",
+            serde_json::json!([{"type": "tool_use", "name": "ScheduleWakeup",
+                "input": {"delaySeconds": 60, "prompt": prompt}}]),
+        )
+    }
+
+    /// `#stoploopalreadyarmed`: this session, 2026-09-29. Every drained item
+    /// ended with a "Stop hook blocking error" asking for a `/loop` re-entry
+    /// the turn had already scheduled with `ScheduleWakeup`.
+    #[test]
+    fn a_scheduled_loop_reentry_arms_the_continuation() {
+        let file = Path::new("/work/tasks/agent-doc/agent-doc-bugs.md");
+        let loop_prompt = "/loop agent-doc /work/tasks/agent-doc/agent-doc-bugs.md";
+        let turn_start = transcript_record("user", serde_json::json!("<command-name>/loop</command-name>"));
+        let feedback = transcript_record(
+            "user",
+            serde_json::json!("Stop hook feedback:\nagent-doc Stop hook kept the active queue moving"),
+        );
+        let tool_result = transcript_record(
+            "user",
+            serde_json::json!([{"type": "tool_result", "content": "Next wakeup scheduled"}]),
+        );
+
+        let armed = [turn_start.clone(), schedule_wakeup(loop_prompt), tool_result.clone(), feedback.clone()].join("\n");
+        assert!(transcript_tail_arms_loop_reentry(&armed, file));
+
+        // Stop-hook feedback before the wake-up is still inside the same turn.
+        let after_feedback = [turn_start.clone(), feedback, schedule_wakeup(loop_prompt), tool_result.clone()].join("\n");
+        assert!(transcript_tail_arms_loop_reentry(&after_feedback, file));
+
+        // A new operator prompt after the wake-up starts a new turn.
+        let operator = transcript_record("user", serde_json::json!("Also fix the Stop hook error in this session"));
+        let superseded = [schedule_wakeup(loop_prompt), tool_result.clone(), operator].join("\n");
+        assert!(!transcript_tail_arms_loop_reentry(&superseded, file));
+
+        // A wake-up for another document, or a non-loop prompt, arms nothing.
+        let other = [turn_start.clone(), schedule_wakeup("/loop agent-doc /work/tasks/other.md")].join("\n");
+        assert!(!transcript_tail_arms_loop_reentry(&other, file));
+        let not_loop = [turn_start, schedule_wakeup("check the deploy")].join("\n");
+        assert!(!transcript_tail_arms_loop_reentry(&not_loop, file));
     }
 
     /// `#queuetypingsteer`: src/haiven-dev/tasks/api.md, 2026-09-29. Operator

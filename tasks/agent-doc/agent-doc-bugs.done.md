@@ -227,3 +227,4 @@
   No cycle is currently open, so I stopped without making changes.
   11:54 AM
   ```
+- 2026-09-29 [#codexupdateblocker] `tasks/devops.md` pane `%40` is parked on Codex's "Update available 0.158.0 → 0.159.0 · enter continue · esc skip" dialog. The route reports it as `alive-busy` with `recognized_blocker=none`, so dispatch into that pane stalls silently. Recognize the Codex update dialog as a named operator blocker in live-pane classification (never auto-answer it), and surface it in `session status` and the route refusal.

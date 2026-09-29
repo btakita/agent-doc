@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 38eef18e-70b8-40f5-a773-3c6acd1f7ea5
+  claude: 50afa660-8de0-481e-abf5-b182db2d5506
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -500,6 +500,28 @@ Notes:
 - The backlog marker has no `queue` attribute, so `#retainedadvanceadmit` is in the backlog only, not in the queue. Queue it with `- do [#retainedadvanceadmit]` if you want this go-queue to drain it.
 - Preflight still warns `legacy_gated_in_backlog`: `#apimdrevert` is `[/]` inside `agent:backlog`. Running `agent-doc migrate` moves it into `agent:review`. I did not run it, because it writes to this live document outside the response boundary.
 - The queue is at 456 exchange lines, which is a size warning only. It is not a reason to stop draining.
+
+### Re: #codexupdateblocker — opus-5 · 2026-09-29T13:32-04:00
+
+> **Queue prompt:**
+>
+> do [#codexupdateblocker]
+
+
+Done in agent-doc **832bb5e22** (pushed, installed as 0.35.418).
+
+Codex's "Update available · 0.158.0 → 0.159.0 … enter continue · esc skip" dialog now has its own name, `codex update-available dialog`. Before, its `› 1. Update now` row looked like the idle composer, so the pane read as `alive-busy` / `recognized_blocker=none`.
+
+- **Classification** (`agent-doc-harness`). The dialog counts as a blocker when an "Update available" line is followed by the "enter continue · esc skip" footer. An idle composer printed after the footer overrides it, so a dismissed dialog in scrollback does not keep blocking. The dialog also counts as protected prompt input, which means routed input never answers it.
+- **Route** (`busy_pane.rs`). The busy-pane auto-fix fails closed with a named message. Its restart or `Escape` would otherwise discard or silently skip the operator's choice.
+- **Refusal hint** (`dispatch.rs`). A dispatch-only refusal tells the operator to choose Update now or Skip in the pane, then rerun.
+- **`session status`**. It prints a line like `live_pane_blocker: reason="codex update-available dialog" operator_action="choose Update now or Skip (esc) …"`. The `session clear` hint is suppressed for this blocker, because it would type `/clear` into the dialog.
+
+**Verification:** `make check` passed, 10073/10073. HEAD plus only this commit, tested in a scratch worktree, passed 2188/2188 across the harness, controller, route-io and root crates. The regression fixture is the live capture from pane `%40`.
+
+**Live check:** `%40` (`src/haiven-dev/tasks/devops.md`) has since been dismissed back to an idle composer, so there is no dialog left to classify. The next Codex update prompt will show the new status line.
+
+**Shared tree:** `agent-doc-harness/src/lib.rs` also holds uncommitted `#clearnewchattrailer` work: Codex post-`/clear` trailer handling plus its test. No tracked item owns it. I committed a hand-built blob without those hunks and left them in the working tree untouched. Its test passes in the full suite.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -510,14 +532,13 @@ Notes:
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#advance-review~~
-- do [#codexupdateblocker]
+- ~~do [#codexupdateblocker]~~
 - do [#focuscrossrootverify]
 - Fix https://github.com/btakita/agent-doc/issues/59. release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#codexupdateblocker] `tasks/devops.md` pane `%40` is parked on Codex's "Update available 0.158.0 → 0.159.0 · enter continue · esc skip" dialog. The route reports it as `alive-busy` with `recognized_blocker=none`, so dispatch into that pane stalls silently. Recognize the Codex update dialog as a named operator blocker in live-pane classification (never auto-answer it), and surface it in `session status` and the route refusal.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 - [ ] [#retainedadvanceadmit] [agent-doc] Advances #drivecapturedsplice. The captured-splice live run is refused at `agent-doc-write-runtime-io/src/lib.rs:3135` ("retained document-write delivery from a prior cycle remains unsettled") while the captured operator edit is still unsaved in the editor (`native_editor_save_request_deferred`; authority and disk diverge on `exchange`). Decide whether a separate canonical advance must be admitted while a captured operator edit is retained. The recipe exists to prove that admission. Fix whichever side is wrong: the admission guard, or the harness ordering. Add SimWorld coverage for "retained capture + independent advance". Then rerun the recipe from tasks/agent-doc/plan-captured-editor-splice-recovery.md with a CLI build that matches the IDE cdylib.

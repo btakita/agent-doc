@@ -1068,9 +1068,9 @@ pub fn commit_document_only_drift(file: &Path) -> Result<bool> {
 /// behind a missing editor replica left its response visible and uncommitted
 /// with the cycle `committed`). Commits only when no cycle is open, the closed
 /// cycle's snapshot already holds a response `HEAD` lacks, and the current
-/// authority still equals that snapshot. Anything the operator typed after the
-/// closeout makes current differ from the snapshot, so it is never swallowed into
-/// a commit that would hide it from the next turn's diff. Returns `false`
+/// exchange still equals the snapshot's. A prompt the operator typed after the
+/// closeout makes the exchange differ, so it is never swallowed into a commit
+/// that would hide it from the next turn's diff. Returns `false`
 /// without mutating otherwise.
 pub fn commit_visible_uncommitted_response(file: &Path) -> Result<bool> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
@@ -1095,23 +1095,49 @@ pub fn commit_visible_uncommitted_response(file: &Path) -> Result<bool> {
                 agent_doc_hash::content_hash(&current),
             ),
         );
-        let outcome = commit_with_outcome_scoped(file)?;
+        let outcome = commit_with_outcome_scoped(file);
         let post_head = agent_doc_git_io::revision::show_head(file)?.unwrap_or_default();
-        anyhow::ensure!(
-            agent_doc_turn::document_drift::detect_bypassed_response_write_between(
-                &post_head, &current
-            )
-            .is_none(),
-            "visible-response commit for {} did not land the response in HEAD; the commit is not terminal",
-            file.display()
-        );
-        Ok(outcome.did_commit)
+        let landed = agent_doc_turn::document_drift::detect_bypassed_response_write_between(
+            &post_head, &current,
+        )
+        .is_none();
+        match outcome {
+            Ok(outcome) => {
+                anyhow::ensure!(
+                    landed,
+                    "visible-response commit for {} did not land the response in HEAD; the commit is not terminal",
+                    file.display()
+                );
+                Ok(outcome.did_commit)
+            }
+            // The response reached HEAD; a later close refused only residual
+            // binary-owned drift (observed: the frontmatter session id advancing
+            // again during the commit). That drift belongs to the next commit, not to
+            // this recovery, so it must not report the landed response as a failure.
+            Err(error) if landed => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "visible_response_commit_landed_with_residual_refusal file={} error={} #visibleresponseabsorb",
+                        file.display(),
+                        format!("{error:#}").replace('\n', " "),
+                    ),
+                );
+                Ok(true)
+            }
+            Err(error) => Err(error),
+        }
     })
 }
 
 /// Pure decision for [`commit_visible_uncommitted_response`].
+///
+/// Only the exchange must still equal the snapshot: that is where an operator's
+/// next prompt lands. Binary-owned components may legitimately advance after the
+/// snapshot (the deferred queue strike and frontmatter session id did on
+/// agent-doc-bugs.md), and committing them records their current value.
 pub fn visible_uncommitted_response_is_absorbable(head: &str, snapshot: &str, current: &str) -> bool {
-    normalize_transient_agent_doc_markers(current) == normalize_transient_agent_doc_markers(snapshot)
+    document_only_exchange_is_unchanged(snapshot, current)
         && normalize_transient_agent_doc_markers(current) != normalize_transient_agent_doc_markers(head)
         && agent_doc_turn::document_drift::detect_bypassed_response_write_between(head, snapshot)
             .is_some()
@@ -3160,6 +3186,21 @@ mod visible_response_absorb_tests {
             "### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n\n❯ A new question?\n",
         );
         assert!(!visible_uncommitted_response_is_absorbable(HEAD, &snapshot, &current));
+    }
+
+    /// The observed shape: after the snapshot, the deferred queue consume struck the
+    /// answered head and the frontmatter session id advanced. Neither is operator
+    /// input, so they do not block the absorb.
+    #[test]
+    fn binary_owned_changes_after_the_snapshot_do_not_block_the_absorb() {
+        let snapshot = format!(
+            "{}\n<!-- agent:queue -->\n- 🚧 Fix it\n<!-- /agent:queue -->\n",
+            with_exchange("### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n")
+        );
+        let current = snapshot
+            .replace("- 🚧 Fix it", "- ~~Fix it~~")
+            .replace("agent_doc_session: t", "agent_doc_session: t2");
+        assert!(visible_uncommitted_response_is_absorbable(HEAD, &snapshot, &current));
     }
 
     #[test]

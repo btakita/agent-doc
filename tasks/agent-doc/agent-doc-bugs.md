@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 2412bbea-00ef-477f-b15c-289d803767b1
+  claude: 72fd5a16-900e-4b5d-883f-20e9b5eaf0bf
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -787,7 +787,8 @@ Next in the queue is your lazily.md "multiple `agent-doc: awaiting response`" it
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#editorauth2]: ensure plugin parity~~
 - ~~do [#editorauth3]~~
-- Fix multiple `agent-doc: awaiting response` prompts in lazily.md: ![img_2.png](img_2.png)
+- 🚧 Fix multiple `agent-doc: awaiting response` prompts in lazily.md: ![img_2.png](img_2.png)
+- do [#editorauth2]
 - 📌 do [#layoutobservehandoff]
 - 📌 do [#syntheticstrike]
 - 📌 do [#focuscrossrootverify]

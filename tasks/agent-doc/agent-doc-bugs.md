@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 53cfd339-a350-4cf5-b9c0-ef3ff6bcbe62
+  claude: 4e934bdb-28cd-475a-b74d-606b95cf8343
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -561,6 +561,24 @@ Fixed and installed.
   - `#layoutobservehandoff`: a layout observation during a controller handoff must wait for the new controller instead of being refused.
   - `#syntheticstrike`: the answered #59 queue line was never struck off.
 - **Not run:** a live repeat of the `fpe.md` sequence. The debris lines still in `fpe.md` (418–426) are yours to delete in the editor.
+
+### Re: #queuetypingsteer — opus-5 · 2026-09-29T15:24-04:00
+
+Fixed, installed and pushed as commit ba25d21d5.
+
+**What went wrong in `api.md`:** you typed into the queue while the turn was running. The response committed, and session-check then reported your typing as steering, labelled `content_edit: Even if formal logic code is not directly understandable…`. The Codex Stop hook only recognized steering labelled `prompt_target`, which means a new prompt. `content_edit` means typing inside an existing queue item or prompt, so the hook treated it as a normal open cycle, said "already continued once", and the agent stopped with your edit unanswered.
+
+**Changes:**
+- After a commit, `content_edit` now counts as steering exactly like `prompt_target`. That includes typing inside the queue item currently being worked. The Stop hook sends the agent back to answer it in the same turn, naming your actual edit text rather than some other prompt in the exchange.
+- The second refusal said "retained … from a prior cycle", but the pending write had been created inside the still-open cycle: it was this turn's own earlier attempt, refused by the relay after you typed. The message now says so. The response was not lost and commits once delivery converges, so it must not be resent, and if session-check then reports steering the agent continues and answers it.
+
+**Validation:**
+- **Formal:** `formal/tla/RealtimeSteeringStop.tla` proves steering that lands after a commit is always answered. The run that recognizes only `prompt_target` fails to answer your edit, exactly as `api.md` did. The reachability run shows a `content_edit` is actually handed back.
+- **Tests:** both new tests fail when `content_edit` is removed from the recognized labels. `make check` passed: exit 0, 10081 tests.
+
+**Still open:** when your typing changes the document mid-write, the first write attempt is still refused by the relay's hash check and `respond` exits 1. The pending write is kept, and the controller merges it onto your text and applies it, so the response does land. It isn't merged in the same call yet. The truthful refusal message above now guides the agent correctly while it waits.
+
+Queue: `#layoutobservehandoff` and `#syntheticstrike` are next. The exchange is at 535 lines, which is a size warning only.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -572,6 +590,9 @@ Fixed and installed.
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#advance-review~~
 - ~~do [#codexupdateblocker]~~
+- ~~do [#queuetypingsteer]~~
+- do [#layoutobservehandoff]
+- do [#syntheticstrike]
 - do [#focuscrossrootverify]
 - ~~do [#replayafterack]~~
 - do [#retainedadvanceadmit]
@@ -580,7 +601,6 @@ Fixed and installed.
 
 
 <!-- agent:backlog -->
-- [ ] [#queuetypingsteer] [agent-doc] Typing in `agent:queue` (or an exchange prompt) while a turn is running must be realtime steering, never a closeout wedge. That includes typing inside the queue item being worked on. src/haiven-dev/tasks/api.md 2026-09-29 ~14:40–14:55: (1) respond's write was refused, `crdt_cp_write … CP relay write refused` (stale expected hash after an operator queue edit following preflight, recovery=retry_crdt_merge). (2) The retry was refused with "retained document-write delivery from a prior cycle remains unsettled". (3) session-check reported authority/disk divergence with the response already in the editor buffer, and the agent stopped. Fix: the response write must merge over concurrent operator edits to other components (and to non-conflicting spans of the active queue item) through the CRDT instead of refusing on a whole-document expected hash. The operator edit must surface as `RealtimeSteering` for the active item. The retry of the SAME capture must not be refused as a "prior cycle" retained write. Validate with a TLA+ model (operator edit ∥ response write: no loss, no refusal wedge) plus SimWorld coverage.
 - [ ] [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
 - [ ] [#syntheticstrike] [agent-doc] An answered free-text queue head is never struck when its closeout commits as a synthetic cycle. agent-doc-bugs.md 2026-09-29 14:28: the capture belonged to cycle-1790704937323, but the commit landed as synthetic-1790706539439. `active_captured_response_for_queue_strike` requires `closeout.cycle_id == capture.cycle_id` and an open phase, so the controller's answered-free-text Computed never fired and "Fix …/issues/59" stayed live with a 🚧 marker. The pure projection strikes it correctly (probed with the real inputs and baseline). Fix the capture-to-synthetic-cycle ownership, or strike from the committing synthetic cycle when it committed that capture's response.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.

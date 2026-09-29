@@ -319,7 +319,6 @@ Release work remains intact:
 - Interop checks and merge network suite passed.
 
 One unrelated warning remains: the `mail` subrepo has pre-existing partially staged companion changes. I left them untouched.
-
 ### Re: consumer simulation testkit standardized across maintained bindings — GPT-5 · 2026-09-29T12:37:59-04:00
 > **Queue prompt:**
 >
@@ -356,7 +355,6 @@ The stranded `src/haiven-dev/tasks/infra.md` editor state is recovered. A direct
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 Ensure the lazily-go consumer simulation testkit is added to lazily-spec + lazily-conformance. Then implement in all the lazily implementations in subagents.
 - do [#lzhtmlbootstrap]
 - do [#lzgdasset]
 - do [#lzreleasepins]

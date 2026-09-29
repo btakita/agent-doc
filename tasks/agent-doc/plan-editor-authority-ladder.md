@@ -104,6 +104,24 @@ When the agent's incoming merge and the operator's live edit meet:
   presentation, and `conflict_render.rs` tests its round trip separately.
   `#editorauth4` must implement `merge` from the Lean model in `agent-doc-merge`.
 
+## `#editorauth4` (done 2026-09-29, agent-doc f62cbd933)
+
+- `agent-doc-merge/src/conflict_reconcile.rs`: `reconcile(base, yours, agent,
+  cursor)` diffs each side against the base into edits and applies the Lean
+  rules; overlapping edits group transitively into whole-line regions rendered
+  by `render_conflict`. Identical edits apply once (a replayed delivery); the
+  Lean `merge` and the TLA+ spec gained the same first case
+  (`identical_edits_apply_once`, `IdenticalAppliesOnce`).
+- FFI `agent_doc_reconcile_text` (JSON result, UTF-16 cursor), bound as
+  `reconcileText` in JetBrains `NativeLib.kt` and VS Code `native.ts`.
+- Conflict gates use `introduces_conflicts(merged, inputs)`: marks the merge
+  added, counted only when well formed. A bare `contains("<<<<<<<")` refused
+  every document that quotes the notation; the bare-token `has_conflicts`
+  would flag `i++}` or a Gemfile `~> 1.2`.
+- Not yet on a live path: the replica exchange is yrs. `#editorauth2`
+  (registration merges forward) and `#editorauth3` (no whole-text replacement
+  into a registered editor) are where `reconcileText` gets called.
+
 ## Phases
 
 1. `#editorauth1`: Lean + TLA model of the conflict-reconciliation rules above.

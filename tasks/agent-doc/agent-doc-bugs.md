@@ -684,7 +684,7 @@ Your three conflict rules are now formally modeled and proved (commit 6c651cf63)
 **`#editorauth2` ("ensure plugin parity"):** I rewrote the item to cover JetBrains and VS Code together. It now prefers the shared registration code in the FFI library, so both plugins get the same fix. Its regression replay of the api.md sequence must run against both plugins, plus an editor-parity check.
 
 Next in the queue is `#editorauth2`. The exchange is over 600 lines, which is a size warning only.
-<!-- agent:boundary:fe1c0161:agent-doc-bugs -->
+<!-- agent:boundary:331a7b2f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -694,7 +694,7 @@ Next in the queue is `#editorauth2`. The exchange is over 600 lines, which is a 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#editorauth1]~~
-- do [#editorauth2]: ensure plugin parity
+- ~~do [#editorauth2]: ensure plugin parity~~
 - do [#editorauth3]
 - do [#editorauth4]
 - 🚧 📌 do [#layoutobservehandoff]

@@ -2022,10 +2022,31 @@ fn retained_tracked_work_landed_awaiting_commit(file: &Path, force_disk: bool) -
         || !state.pending_added_ids.is_empty()
         || !state.requested_done_ids.is_empty()
         || !state.requested_added_ids.is_empty();
-    if !state.is_open() || !recorded_tracked_work {
+    // The deferral's failure releases the cycle owner, and `cancel_preflight`
+    // then abandons the cycle, usually before anyone can retry. An abandoned
+    // cycle still qualifies while its landed work is uncommitted.
+    let abandoned = state.phase == agent_doc_turn::CyclePhase::Abandoned;
+    if !(state.is_open() || abandoned) || !recorded_tracked_work {
         return false;
     }
-    recorded_tracked_work_unlanded_now(file, force_disk) == Some(false)
+    if recorded_tracked_work_unlanded_now(file, force_disk) != Some(false) {
+        return false;
+    }
+    if !abandoned {
+        return true;
+    }
+    let content = if force_disk {
+        resolve_force_disk_document(file, "retained_tracked_work_uncommitted")
+    } else {
+        resolve_current_document(file, "retained_tracked_work_uncommitted")
+    };
+    let Ok(content) = content.map(|current| current.into_content()) else {
+        return false;
+    };
+    agent_doc_git_io::revision::show_head(file)
+        .ok()
+        .flatten()
+        .is_some_and(|head| head != content)
 }
 
 fn write_outcome_retains_closeout_mutations(write_result: &Result<()>) -> bool {
@@ -3859,6 +3880,60 @@ mod tests {
         assert!(
             !retained_tracked_work_landed_awaiting_commit(&doc, true),
             "unlanded work is not ready to commit"
+        );
+    }
+
+    /// `#mutonlyretry`, observed: the failed deferral released the cycle owner
+    /// and `cancel_preflight` abandoned the cycle (proof=owner_released) before
+    /// the retry. The landed, uncommitted work is still the retry's to commit;
+    /// once HEAD holds it there is nothing left.
+    #[test]
+    fn an_abandoned_cycle_still_owes_its_landed_uncommitted_tracked_work() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let git = |args: &[&str]| {
+            assert!(
+                std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(root)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success(),
+                "git {args:?}"
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "t"]);
+        let doc = root.join("doc.md");
+        let before = "<!-- agent:backlog -->\n- [ ] [#b] open\n<!-- /agent:backlog -->\n";
+        fs::write(&doc, before).unwrap();
+        git(&["add", "doc.md"]);
+        git(&["commit", "-qm", "base"]);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(before), Some(before)).unwrap();
+        let a = vec!["a".to_string()];
+        agent_doc_cycle_state_io::record_requested_tracked_work(&doc, &a, &a).unwrap();
+        agent_doc_cycle_state_io::record_requested_tracked_work_mutations(&doc).unwrap();
+        agent_doc_cycle_state_io::mark_tracked_work_mutations_applied(&doc).unwrap();
+        let landed =
+            "<!-- agent:backlog -->\n- [ ] [#c] new\n- [ ] [#b] open\n<!-- /agent:backlog -->\n";
+        fs::write(&doc, landed).unwrap();
+        agent_doc_cycle_state_io::mark_abandoned(
+            &doc,
+            "cancel_preflight_cycle_abandoned",
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(retained_tracked_work_landed_awaiting_commit(&doc, true));
+
+        git(&["commit", "-qam", "landed"]);
+        assert!(
+            !retained_tracked_work_landed_awaiting_commit(&doc, true),
+            "HEAD already holds the work: an abandoned cycle owes nothing"
         );
     }
 

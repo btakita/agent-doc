@@ -154,6 +154,30 @@ pub fn topic_resolves_to_only_id_directives(topic: &str) -> Option<Vec<String>> 
     Some(ids)
 }
 
+/// `#annotateddirective`: the ids of an explicit `do` directive that carries an
+/// operator note after a colon, `do [#id]: note` / `do #a #b: note`.
+///
+/// The note amends the tracked work; it does not turn the line into free text.
+/// Classifying it as free text let the answered-free-text strike complete the
+/// head as soon as a response quoted the note, while the backlog item stayed
+/// open (agent-doc-bugs.md, 2026-09-29: `do [#editorauth2]: ensure plugin
+/// parity` was struck by the `#editorauth1` closeout). The explicit `do` verb is
+/// required: under the optional-`do` grammar a bare `[#id]: note` stays inert
+/// prose.
+pub fn explicit_do_directive_with_note_ids(topic: &str) -> Option<Vec<String>> {
+    let norm = topic.trim().trim_start_matches('❯').trim();
+    let rest = norm
+        .get(..3)
+        .filter(|verb| verb.eq_ignore_ascii_case("do "))
+        .map(|_| &norm[3..])?;
+    let (directives, note) = rest.split_once(':')?;
+    if note.trim().is_empty() || directives.ends_with(char::is_whitespace) {
+        return None;
+    }
+    let ids = topic_resolves_to_only_id_directives(directives)?;
+    (!ids.is_empty()).then_some(ids)
+}
+
 /// Narrow raw `do [#id]` directive target ids to those that must reach a
 /// `--done`/`--pending-gate` lifecycle outcome this cycle.
 ///
@@ -305,6 +329,30 @@ mod tests {
         assert!(!topic_resolves_to_exact_id("#foo halt", "foo"));
         assert!(!topic_resolves_to_exact_id("#foo deferred", "foo"));
         assert!(!topic_resolves_to_exact_id("#other", "foo"));
+    }
+
+    #[test]
+    fn explicit_do_directive_with_note_is_id_backed() {
+        assert_eq!(
+            explicit_do_directive_with_note_ids("do [#editorauth2]: ensure plugin parity"),
+            Some(vec!["editorauth2".to_string()])
+        );
+        assert_eq!(
+            explicit_do_directive_with_note_ids("Do #a [#b]: both, carefully"),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+        // A bare id token with a note stays inert prose (optional-`do` grammar).
+        assert_eq!(explicit_do_directive_with_note_ids("[#foo]: note"), None);
+        // Prose between the verb and the colon is free text, not a directive.
+        assert_eq!(
+            explicit_do_directive_with_note_ids("do #foo then ship it: now"),
+            None
+        );
+        // No note, a detached colon, or no colon at all is not this shape.
+        assert_eq!(explicit_do_directive_with_note_ids("do [#foo]:"), None);
+        assert_eq!(explicit_do_directive_with_note_ids("do [#foo] : note"), None);
+        assert_eq!(explicit_do_directive_with_note_ids("do [#foo]"), None);
+        assert_eq!(explicit_do_directive_with_note_ids("do: something"), None);
     }
 
     #[test]

@@ -2172,6 +2172,50 @@ mod core_tests {
         );
     }
     #[test]
+    fn replayed_closeout_never_consumes_an_annotated_do_directive() {
+        // `#annotateddirective` (agent-doc-bugs.md, 2026-09-29): the operator
+        // amended `do [#editorauth2]` with a note. The `#editorauth1` closeout
+        // replayed after its own head was already struck, asked for a free-text
+        // budget, and positional consumption struck `#editorauth2` because the
+        // note made it read as free text. Its backlog item stayed open.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- ~~do [#editorauth1]~~\n",
+            "- do [#editorauth2]: ensure plugin parity\n",
+            "- do [#editorauth3]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        for budget in [0, 1] {
+            assert!(
+                plan_queue_prompt_consumption_with_snapshot_and_count(
+                    &doc,
+                    content,
+                    None,
+                    &["editorauth1".to_string()],
+                    budget,
+                )
+                .unwrap()
+                .is_none(),
+                "budget {budget}: an annotated directive is consumed only by its own done id"
+            );
+        }
+        let planned = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            content,
+            None,
+            &["editorauth2".to_string()],
+            0,
+        )
+        .unwrap()
+        .expect("`--done editorauth2` consumes the annotated directive");
+        assert_eq!(planned.consumed_text, "do [#editorauth2]: ensure plugin parity");
+        assert!(planned.new_document.contains("- do [#editorauth3]\n"));
+    }
+
+    #[test]
     fn done_id_closeout_never_eats_an_unrelated_free_text_head() {
         // #qftnodoneeat: `--done <id>` proves nothing about a free-text head --
         // a free-text head carries no id, so it can never be the head that id

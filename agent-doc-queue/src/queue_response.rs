@@ -198,7 +198,9 @@ pub fn queue_prompt_text_is_queue_activation_trigger(text: &str) -> bool {
 /// NOT a queue activation trigger).
 pub fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
     let normalized = normalize_queue_prompt_text(text);
-    if let Some(ids) = crate::queue_directive::topic_resolves_to_only_id_directives(&normalized) {
+    if let Some(ids) = crate::queue_directive::topic_resolves_to_only_id_directives(&normalized)
+        .or_else(|| crate::queue_directive::explicit_do_directive_with_note_ids(&normalized))
+    {
         return ids
             .iter()
             .all(|id| head_id_is_registered_preset(content, id));
@@ -939,6 +941,13 @@ mod tests {
             content,
             "Approve [#shoptiers] then ship it"
         ));
+        // `#annotateddirective`: an operator note after the directive keeps it
+        // id-backed, so only `--done editorauth2` may complete it.
+        assert!(!queue_prompt_text_is_free_text(
+            content,
+            "do [#editorauth2]: ensure plugin parity"
+        ));
+        assert!(queue_prompt_text_is_free_text(content, "[#editorauth2]: a note"));
     }
 
     #[test]

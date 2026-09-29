@@ -492,10 +492,9 @@ The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ⏭️ #advance-review
-- ~~do [#runinfrawedged]~~
-- ~~do [#retainedwriteverdict]~~
 - 🚧 do [#codexupdateblocker]
 - do [#focuscrossrootverify]
+- Fix https://github.com/btakita/agent-doc/issues/59. release + publish
 <!-- /agent:queue -->
 
 

@@ -64,10 +64,30 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
     }
 
     private fun reportOpen(file: VirtualFile) {
+        reportOpenWithRetry(file.path, attempt = 0)
+    }
+
+    /**
+     * `#rundocdispatchrobust`: an open report that cannot reach the owning controller is
+     * retried, not dropped. After the 2026-09-29 18:12:38 dynamic reload the replacement
+     * generation's report for every src/haiven-dev document was lost (the native library
+     * was mid hot-reload), so that nested controller kept the retired generation as the
+     * live endpoint and refused every registration as `replica_register_stale_editor_endpoint`.
+     */
+    private fun reportOpenWithRetry(filePath: String, attempt: Int) {
         val fallbackRoot = project.basePath ?: return
         ApplicationManager.getApplication().executeOnPooledThread {
-            val lib = AgentDocLib.get() ?: return@executeOnPooledThread
-            reportOpenNow(lib, fallbackRoot, file, republish = false)
+            if (project.isDisposed || PluginGeneration.retired) return@executeOnPooledThread
+            val lib = AgentDocLib.get()
+            val outcome =
+                if (lib == null) LivenessReportOutcome.Retry
+                else reportOpenNow(lib, fallbackRoot, filePath, republish = attempt > 0)
+            val delayMs = livenessReportRetryDelayMsUtil(outcome, attempt) ?: return@executeOnPooledThread
+            com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService().schedule(
+                { reportOpenWithRetry(filePath, attempt + 1) },
+                delayMs,
+                java.util.concurrent.TimeUnit.MILLISECONDS,
+            )
         }
     }
 
@@ -76,14 +96,20 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
         fallbackRoot: String,
         file: VirtualFile,
         republish: Boolean,
-    ): Boolean {
-        val filePath = file.path
+    ): Boolean = reportOpenNow(lib, fallbackRoot, file.path, republish) == LivenessReportOutcome.Published
+
+    private fun reportOpenNow(
+        lib: AgentDocLib,
+        fallbackRoot: String,
+        filePath: String,
+        republish: Boolean,
+    ): LivenessReportOutcome {
         // Scope liveness to agent-doc session documents only: a plain source file
         // opened as a tab must not enter the plane (it would over-count the
         // session-document scope). This disk read is appropriate at open time —
         // it is the moment we decide whether to track a possibly-random `.md` tab.
-        if (lib.agent_doc_is_session_document(filePath) != 1) return false
-        val documentHash = resolveDocumentHash(lib, filePath) ?: return false
+        if (lib.agent_doc_is_session_document(filePath) != 1) return LivenessReportOutcome.NotSessionDocument
+        val documentHash = resolveDocumentHash(lib, filePath) ?: return LivenessReportOutcome.Retry
         // The owning controller is the nearest agent-doc root, not necessarily
         // the IntelliJ project base. A nested submodule has its own controller.
         val root = NativePatching.resolveProjectPath(filePath)?.first ?: fallbackRoot
@@ -106,9 +132,13 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
                     "jetbrains",
                     pluginVersion(),
                     EDITOR_CAPABILITIES,
-                ) ?: return true
+                ) ?: return LivenessReportOutcome.Published
             }
-        return push(lib, root, documentHash, opsJson)
+        return if (push(lib, root, documentHash, opsJson)) {
+            LivenessReportOutcome.Published
+        } else {
+            LivenessReportOutcome.Retry
+        }
     }
 
     private fun republishOpenDocumentsAfterNativeReload(): Int {
@@ -250,6 +280,15 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
         ): PathTransitionOutcome =
             instances[project]?.reportMoveNow(oldPath, newPath) ?: PathTransitionOutcome.Retry
 
+        /**
+         * `#rundocdispatchrobust`: republish this generation's liveness for one document. Called
+         * when a registration is refused as a stale editor endpoint, which means the owning
+         * controller never received this generation's open report.
+         */
+        fun republishDocument(project: Project, filePath: String) {
+            instances[project]?.reportOpenWithRetry(filePath, attempt = 1)
+        }
+
         fun republishOpenDocumentsAfterNativeReload(projects: Iterable<Project>): Int =
             projects.sumOf { project ->
                 instances[project]?.republishOpenDocumentsAfterNativeReload() ?: 0
@@ -265,3 +304,19 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
                 .joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 }
+
+internal enum class LivenessReportOutcome {
+    Published,
+    NotSessionDocument,
+    Retry,
+}
+
+internal const val LIVENESS_REPORT_MAX_ATTEMPTS = 8
+
+/** Backoff for a liveness report that could not reach its controller; null means stop. */
+internal fun livenessReportRetryDelayMsUtil(outcome: LivenessReportOutcome, attempt: Int): Long? =
+    when {
+        outcome != LivenessReportOutcome.Retry -> null
+        attempt + 1 >= LIVENESS_REPORT_MAX_ATTEMPTS -> null
+        else -> minOf(250L shl attempt.coerceAtMost(4), 4_000L)
+    }

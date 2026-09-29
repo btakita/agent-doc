@@ -172,6 +172,12 @@ internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !b
  */
 internal fun shouldUrgentDrainForRemoteEventUtil(@Suppress("UNUSED_PARAMETER") reasonToken: String?): Boolean = true
 
+/** A registration refused because the owning controller names another generation's endpoint. */
+internal fun registerFailureNeedsLivenessRepublishUtil(reason: String?): Boolean =
+    reason?.contains("replica_register_stale_editor_endpoint") == true
+
+internal const val STALE_ENDPOINT_REGISTER_RETRY_MS = 1_000L
+
 /** Only the controller's typed missing-membership recovery may republish editor state. */
 internal fun shouldReregisterForRemoteEventUtil(reasonToken: String?): Boolean =
     reasonToken == "editor_replica_reregister"
@@ -3262,6 +3268,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "reason=$reason failure_count=${projection.failureCount} " +
                 "retry_backoff_ms=${projection.backoffMs}",
         )
+        // `#rundocdispatchrobust`: a retired generation's retry loop re-registered
+        // src/haiven-dev documents every 30s under its retired identity after the
+        // 2026-09-29 18:12:38 reload. Only the live generation retries.
+        if (PluginGeneration.retired) return
+        if (registerFailureNeedsLivenessRepublishUtil(reason)) {
+            // The owning controller never received this generation's open report, so it
+            // still names another generation as the live endpoint. Republish, then retry
+            // promptly instead of waiting out a backoff that cannot change the answer.
+            ReliableSyncLivenessListener.republishDocument(project, filePath)
+            scheduleRegisterRetry(filePath, minOf(projection.backoffMs, STALE_ENDPOINT_REGISTER_RETRY_MS))
+            return
+        }
         scheduleRegisterRetry(filePath, projection.backoffMs)
     }
 
@@ -3280,7 +3298,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * convergence until the open document has an attached replica.
      */
     private fun scheduleRegisterRetry(filePath: String, delayMs: Long) {
-        if (disposed.get()) return
+        if (disposed.get() || PluginGeneration.retired) return
         registerRetryTasks.compute(filePath) { _, existing ->
             if (existing != null && !existing.isDone) {
                 existing
@@ -3289,6 +3307,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     {
                         registerRetryTasks.remove(filePath)
                         if (
+                            PluginGeneration.retired ||
                             disposed.get() ||
                             project.isDisposed ||
                         (forwarders[filePath]?.attached == true &&

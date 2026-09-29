@@ -113,6 +113,7 @@ where
     let mut last_progress = Instant::now();
     let mut last_observed: Option<String> = None;
     let mut last_urgent_drain: Option<Instant> = None;
+    let mut reregister_rounds = 0u32;
 
     loop {
         let observation = observe(file, "preflight_visible_mutation");
@@ -188,6 +189,38 @@ where
                     wait_one_settle_slice(file, boundary_observation.state, poll);
                     continue;
                 }
+                // `#rundocdispatchrobust`: a missing editor model is recoverable, not
+                // terminal. The editor is open (the relay routes it as attached) but its
+                // replica is not registered, e.g. a dynamic plugin reload lost the new
+                // generation's liveness report and the controller refused its
+                // registrations as a stale endpoint. Ask that editor to re-register and
+                // give it another no-progress window, a bounded number of times, instead
+                // of refusing the operator's Run Agent Doc on the first 3.7s window.
+                if reason == SettleDeferReason::NoProgress
+                    && editor_model_missing_state(boundary_observation.state)
+                    && reregister_rounds < PREFLIGHT_EDITOR_REREGISTER_ROUNDS
+                {
+                    reregister_rounds += 1;
+                    let status = match signal(file, CrdtReplicaEventReason::EditorReplicaReregister, 0)
+                    {
+                        Ok(()) => "requested".to_string(),
+                        Err(error) => format!("failed:{error:#}").replace('\n', " "),
+                    };
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "preflight_visible_mutation_editor_reregister_requested file={} state={} round={}/{} reregister={}",
+                            file.display(),
+                            boundary_observation.state,
+                            reregister_rounds,
+                            PREFLIGHT_EDITOR_REREGISTER_ROUNDS,
+                            status,
+                        ),
+                    );
+                    last_progress = Instant::now();
+                    wait_one_settle_slice(file, boundary_observation.state, poll);
+                    continue;
+                }
                 let waited = match reason {
                     SettleDeferReason::NoProgress => timers.stalled_for,
                     SettleDeferReason::ProgressCeiling => timers.total_elapsed,
@@ -217,6 +250,17 @@ where
         }
         wait_one_settle_slice(file, observation.state, poll);
     }
+}
+
+/// `#rundocdispatchrobust`: how many extra no-progress windows preflight grants an
+/// attached editor whose model is missing, each after asking it to re-register.
+const PREFLIGHT_EDITOR_REREGISTER_ROUNDS: u32 = 3;
+
+/// Whether `state` means an attached editor's replica is not registered, which an
+/// editor re-registration repairs. `authority_unavailable` covers the controller's
+/// bounded ensure giving up on `editor_attached_model_missing`.
+fn editor_model_missing_state(state: &str) -> bool {
+    matches!(state, "missing_replica" | "authority_unavailable")
 }
 
 /// Longest single park while delivery is settling.
@@ -456,6 +500,73 @@ mod tests {
             message.contains("delivery_pending") && message.contains("preflight deferred"),
             "a wedged transition must still fail closed with its reason: {message}"
         );
+    }
+
+    fn missing_replica() -> Observation {
+        Observation {
+            ready: false,
+            state: "missing_replica",
+            drain_targets: None,
+            text: None,
+            error: None,
+        }
+    }
+
+    /// `#rundocdispatchrobust`: devops.md 2026-09-29 18:14. A dynamic plugin reload
+    /// left the open editor's replica unregistered, and preflight refused Run Agent
+    /// Doc after one no-progress window. It now asks the editor to re-register and
+    /// admits once the replica is back.
+    #[test]
+    fn preflight_mutation_wait_reregisters_a_missing_editor_model_instead_of_refusing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let signals = RefCell::new(Vec::new());
+
+        let outcome = wait_for_lazily_current_before_mutation_with_effects(
+            &doc,
+            Duration::from_millis(50),
+            |_file, _source| {
+                if signals.borrow().is_empty() {
+                    missing_replica()
+                } else {
+                    converged()
+                }
+            },
+            |_file, reason, targets| {
+                signals.borrow_mut().push((reason, targets));
+                Ok(())
+            },
+        );
+
+        assert!(outcome.is_ok(), "a re-registered editor must be admitted: {outcome:?}");
+        assert_eq!(
+            signals.into_inner(),
+            vec![(CrdtReplicaEventReason::EditorReplicaReregister, 0)]
+        );
+    }
+
+    /// The re-register recovery is bounded: an editor that never comes back still
+    /// fails closed with the same reason, after a fixed number of requests.
+    #[test]
+    fn preflight_mutation_wait_bounds_editor_reregister_recovery() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let signals = Cell::new(0u32);
+
+        let outcome = wait_for_lazily_current_before_mutation_with_effects(
+            &doc,
+            Duration::from_millis(30),
+            |_file, _source| missing_replica(),
+            |_file, reason, _targets| {
+                assert_eq!(reason, CrdtReplicaEventReason::EditorReplicaReregister);
+                signals.set(signals.get() + 1);
+                Ok(())
+            },
+        );
+
+        let message = format!("{:#}", outcome.unwrap_err());
+        assert!(message.contains("missing_replica") && message.contains("preflight deferred"));
+        assert_eq!(signals.get(), PREFLIGHT_EDITOR_REREGISTER_ROUNDS);
     }
 
     /// A delivery ACK can land after the last ordinary observation but before

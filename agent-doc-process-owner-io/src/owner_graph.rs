@@ -42,7 +42,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agent_doc_controller::command_line::{
-    agent_doc_owner_document_from_cmdline, cmdline_owns_other_document,
+    agent_doc_cmdline_is_owner, agent_doc_owner_document_from_cmdline, cmdline_owns_other_document,
     cmdlines_are_unmanaged_harness_session, owner_document_from_cmdline,
 };
 use agent_doc_state_scope::LocalReadScope;
@@ -370,7 +370,19 @@ pub fn tree_runs_unmanaged_harness_session(root_pid: &str) -> bool {
 // Policy stays in `agent_doc_controller::command_line`; these are the total
 // functions that lift it from one command line to one observed tree.
 
+/// `#descendantownerforeign`: the pane's binding is its ROOT-FIRST owner. A pane
+/// whose `agent-doc start ... <claimed>` wrapper binds the claimed document owns
+/// it, whatever its descendants mention: the harness below it runs `make check`,
+/// whose test fixtures spawn `agent-doc start /tmp/.../doc.md`, and the agent
+/// itself runs `agent-doc session status <other>.md`. Scanning every descendant
+/// read those transient processes as "this pane now runs another document" and
+/// refused to route the pane's own document into it.
 fn classify_other_document(tree: &[TreeProcess], claimed: &str) -> Option<String> {
+    let binding = tree_cmdlines(tree)
+        .find(|cmdline| agent_doc_owner_document_from_cmdline(cmdline).is_some());
+    if binding.is_some_and(|cmdline| agent_doc_cmdline_is_owner(cmdline, claimed)) {
+        return None;
+    }
     tree_cmdlines(tree).find_map(|cmdline| {
         cmdline_owns_other_document(cmdline, claimed)
             .then(|| owner_document_from_cmdline(cmdline))?
@@ -410,6 +422,39 @@ mod tests {
             classify_other_document(&observed, "tasks/foreign.md"),
             None,
             "a pane that owns the claimed document owns no OTHER document"
+        );
+    }
+
+    #[test]
+    fn descendant_owner_of_another_document_does_not_override_the_root_binding() {
+        // `#descendantownerforeign`: the live shape that refused to route
+        // agent-doc-bugs.md into its own pane while `make check` ran below it.
+        let observed = tree(&[
+            ("10", "-zsh"),
+            (
+                "20",
+                "/home/brian/.cargo/bin/agent-doc start --route-owned \
+                 --route-owned-reap-policy keep-alive tasks/agent-doc/agent-doc-bugs.md",
+            ),
+            (
+                "30",
+                "/opt/claude-code/bin/claude --dangerously-skip-permissions --resume abc",
+            ),
+            (
+                "40",
+                "/repo/target/debug/agent-doc start --route-owned /tmp/.tmpX/tasks/fixture.md",
+            ),
+            ("50", ".bin/agent-doc route tasks/infra.md"),
+        ]);
+        assert_eq!(
+            classify_other_document(&observed, "tasks/agent-doc/agent-doc-bugs.md"),
+            None,
+            "the root-first wrapper binds the claimed document; descendants are transient"
+        );
+        assert_eq!(
+            classify_other_document(&observed, "tasks/infra.md"),
+            Some("tasks/agent-doc/agent-doc-bugs.md".to_string()),
+            "a pane bound to another document is still foreign to the claimed one"
         );
     }
 

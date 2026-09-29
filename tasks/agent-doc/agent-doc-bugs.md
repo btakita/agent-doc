@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 5eae4a88-ecc4-423b-9429-d3fc0bd0ccbb
+  claude: b64ff560-4517-456f-862a-5f3d7f665251
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -264,7 +264,7 @@ Fixed in agent-doc `c48ce15fc` (`#clearunrenderedlabel`). It's pushed and instal
 **What was wrong:**
 - Every codex Clear Session Context in haiven-dev since 04:55 failed this same way: frontend `%20`, infra `%27`, fpe `%31` and api `%19`.
 - None of those panes were blank. The captures were 723–3187 bytes, and `%19` shows a drawn, idle `› Ask Codex to do anything` prompt. It is still at **62% context**, so the clear never ran.
-- The code decided "not rendered" with the check `observation_budget == RENDER_TIMEOUT`, as a stand-in for "the last frame was blank".
+- The code decided "not rendered" with the check `aobservation_budget == RENDER_TIMEOUT`, as a stand-in for "the last frame was blank".
   - That only worked while the normal wait was shorter than the render wait.
   - An uncommitted change in `src/session_actor_cmd.rs` had set the supervisor wait to 10s, the same as the render wait. It was already in the installed binary. After that, every clear with no observed change got the "not rendered" label.
 - The wrong label also skipped the repair step. When the pane never changed after the `/clear` was sent, the code is supposed to send `/clear` again, but only for an "unobserved" result. So a dropped `/clear` was never retried.
@@ -288,6 +288,36 @@ Fixed in agent-doc `c48ce15fc` (`#clearunrenderedlabel`). It's pushed and instal
 - I saved a memory so this doesn't happen again.
 
 The queue has only one item left, `#focuscrossrootverify`. It needs you to check it in a live editor.
+
+### Re: lazily.md session crash — opus-5-5 · 2026-09-29T02:51-04:00
+
+> **Queue prompt:** The lazily.md session crashed. Fix agent-doc causes.
+
+Fixed in agent-doc `7eaf68fdc` (`#reexecpurposelost`). It's pushed and installed, and the superproject pointer is bumped.
+
+**What happened:** agent-doc killed the lazily Codex pane itself. At 05:52:08Z, right after the "cont." turn committed, the pane's supervisor logged `route_owned_reap_decision policy=keep_alive decision=reap reason=layout_provision_stashed_orphan` and stopped its own child. The pane stayed gone until you reopened the tab at 06:49 (`controller_focus_resumed_missing_actor`, new pane `%33`).
+
+**Why:**
+- The pane was started as `layout-provision`, meaning a placeholder that holds an editor column. At 05:23 it carried a real turn, so the completion thread promoted it to `dispatch`. A `dispatch` pane is never reaped as an orphan.
+- That promotion was stored only in the completion thread's memory.
+- At 05:48 the supervisor recycled itself onto the fresh binary (`supervisor_binary_stale_self_recycled via=execve_preserve_child`). The re-exec reuses the original command line, which still said `--route-owned-start-purpose layout-provision`. So the promotion was lost.
+- The interaction probe only fires when it happens to see Codex's busy indicator, and it didn't fire again before the next commit. At that commit the pane still counted as an unused placeholder sitting in the stash window, so it was reaped.
+- The earlier `finalize` exit 1 at 05:50 (retained delivery projection) was a separate problem, already fixed by `#retaineddeferwedge` (`8da5f5015`). That fix landed after this incident. The lazily response was committed anyway, at 01:51 local.
+
+**Fix:**
+- The completion thread now records the promotion on the supervisor's shared state (`record_start_purpose_promoted`).
+- The self-recycle passes it to the new image through `AGENT_DOC_REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED`.
+- On re-entry the supervisor runs as `dispatch` only if it adopted the same surviving child (`reentry_route_owned_start_purpose`), and logs `route_owned_start_purpose_inherited`. A fresh start, or one whose child died, keeps the declared purpose.
+
+**Verification:**
+- New tests:
+  - a unit test of the re-entry decision covering all five input shapes
+  - a completion-thread test asserting the promotion leaves the thread
+- I broke the fix on purpose to check the test: with the `record_start_purpose_promoted()` call removed, the completion-thread test fails.
+- Full `make check`: exit 0; nextest reported 10057 run, 10057 passed, 0 failed.
+- CI run `36535275954` is still in progress.
+
+**Not covered:** there is no end-to-end SimWorld test that runs a real execve across a reap.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -298,7 +328,8 @@ The queue has only one item left, `#focuscrossrootverify`. It needs you to check
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#retaineddeferwedge]~~
-- do [#focuscrossrootverify]
+- 🚧 The lazily.md session crashed. Fix agent-doc causes.
+- ⏭️ do [#focuscrossrootverify]
 <!-- /agent:queue -->
 
 

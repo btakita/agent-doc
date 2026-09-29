@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: d0449ffc-6382-4cf9-adac-b0f7ef62ea03
+  claude: 3b203fc2-9b49-45c7-b3a5-590ce6906e35
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -684,7 +684,29 @@ Your three conflict rules are now formally modeled and proved (commit 6c651cf63)
 **`#editorauth2` ("ensure plugin parity"):** I rewrote the item to cover JetBrains and VS Code together. It now prefers the shared registration code in the FFI library, so both plugins get the same fix. Its regression replay of the api.md sequence must run against both plugins, plus an editor-parity check.
 
 Next in the queue is `#editorauth2`. The exchange is over 600 lines, which is a size warning only.
-<!-- agent:boundary:331a7b2f -->
+
+### Re: the queue struck editorauth2 by mistake (fixed) — opus-5 · 2026-09-29T17:31-04:00
+
+My `#editorauth1` closeout also struck `do [#editorauth2]: ensure plugin parity` from the queue, but that item is still open in the backlog and hasn't been worked on. I found the cause and fixed it (commit 5e49dc6d4). The fix is installed.
+
+**What happened:**
+- Your note after the directive (`: ensure plugin parity`) made the queue treat the whole line as a free-text prompt instead of an `#editorauth2` work item.
+- The closeout ran a second time after `#editorauth1` was already struck. That second run was allowed to consume one free-text head, and it took the next line, which was yours.
+- The first run had correctly refused to do this (`queue_consume_refused_unproven_free_text_head`). The second run didn't, because it went through a path that is allowed to consume free text.
+
+**The fix:** a line that starts with `do`, followed by ids and then a colon and a note (`do [#id]: note`), now counts as that id's work item. Only closing that id (`--done editorauth2`) removes it. A bare `[#id]: note` without `do` stays plain text, as before.
+
+**Tests:**
+- A unit test covers the new directive shape.
+- A classifier test checks both shapes.
+- A planner test replays the incident: the queue has `#editorauth1` already struck, and a free-text budget of 0 and 1 both leave the annotated line alone. `--done editorauth2` still consumes it.
+- I removed the fix and confirmed the planner test fails without it.
+- An earlier strike-path test I wrote passed even without the fix, so it wasn't testing anything, and I deleted it.
+
+`make check` passed: exit 0, 10,098 tests.
+
+**Please un-strike `do [#editorauth2]: ensure plugin parity` in the queue.** The binary has no command that restores a struck line with an id (`queue sync` skips ids that are already present), and I won't hand-edit your live buffer. Until you do, the queue will run `#editorauth3` next. `#editorauth2` is next in your order and is still open in the backlog, already rewritten for JetBrains + VS Code parity.
+<!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--

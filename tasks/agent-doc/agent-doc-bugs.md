@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 868140d6-82c0-433f-a811-a949cf83e265
+  claude: 0632edb8-e0be-4ca4-8ae2-0c770866f1a2
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -341,6 +341,27 @@ Closing out the fix above hit a second agent-doc defect, now fixed in agent-doc 
 - CI runs `36535275954` (`#reexecpurposelost`) and `36536276106` (this fix) are still in progress.
 
 **Not fixed:** a `make install` during a turn still unregisters the editor replica for a few seconds, which is what deferred this closeout. It recovered as designed, so I left it alone.
+
+### Re: deferred tracked-work closeouts could never commit — opus-5-5 · 2026-09-29T03:58-04:00
+
+The earlier mutation-only closeout (it recorded the coined ids and added `#replicachurn12s`) deferred and then wedged. Chasing it turned up three more agent-doc defects. All three are fixed, tested, pushed and installed, and the superproject pointer is bumped.
+
+- **`#retainedapplywitness`** (`5043fd66b`) — the real reason the wait for a deferred closeout (added in `8da5f5015`) never succeeded.
+  - Every closeout that edits the backlog records that it asked for tracked-work changes (`requested_tracked_work_mutations`). But when the write is held back waiting for the editor, nothing ever marks those changes as applied (`tracked_work_mutations_applied`).
+  - So on a fully converged document the check still reported `unlanded=Some(true)`, and it could never report otherwise.
+  - Fix: the deferral now records that the changes are held (`tracked_work_mutations_retained`). They count as applied once the editor has been proven in sync.
+- **`#addreapwitness`** (`ce910f27d`) — an id added and marked done in the same closeout is moved straight to `agent-doc-bugs.done.md`, so it never appears in the document. The check that looks for a new id treated it as still missing forever. A completed id is now checked only by the done half (it must no longer be open).
+- **`#mutonlyretry`** (`ce910f27d`, `56224b34e`) — the timeout message's own remedy ("re-run `write --commit` without the tracked-work flags") has no response body when the closeout was backlog changes only, and it died with "empty response".
+  - An empty-body retry now commits the cycle's recorded changes once they are in the document.
+  - This also works after `cancel_preflight` has abandoned the cycle, which in practice happens within about 2 minutes of the failure, as long as HEAD doesn't already hold the changes.
+  - `retained_tracked_work_retry_probe` in ops.log records why a retry was declined.
+
+**Verification:**
+- Regression tests for each fix. For each one I broke the fix on purpose and the matching test failed.
+- Full `make check`, last run: exit 0; nextest reported 10062 run, 10062 passed, 0 failed.
+- CI: `36535275954` (`#reexecpurposelost`) passed. The runs for the later commits are still in progress.
+
+**Still open:** `#replicachurn12s`. The editor's link to agent-doc for a live document drops and reconnects every 8–12s (`crdt_replica_register` → `crdt_replica_deregister` in ops.log, on both agent-doc-bugs.md and lazily.md, since at least 06:41Z). That churn caused every deferral this turn. I added it to the backlog but haven't diagnosed it yet.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -357,6 +378,7 @@ Closing out the fix above hit a second agent-doc defect, now fixed in agent-doc 
 
 
 <!-- agent:backlog -->
+- [ ] [#replicachurn12s] JB editor replica for live session docs (agent-doc-bugs.md, lazily.md) cycles crdt_replica_register → crdt_replica_deregister every ~8-12s (ops.log 2026-09-29 06:41Z onward, before any install). Writes landing in the gap defer with editor_replica_reregister=definitively_refused_by_all:1 (two respond deferrals this turn). Find what deregisters a live replica and stop the churn.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 <!-- /agent:backlog -->

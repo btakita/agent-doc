@@ -685,6 +685,10 @@ impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionS
         route_owned_live_pane_interaction_observed(self, harness)
     }
 
+    fn record_start_purpose_promoted(&self) {
+        self.mark_route_owned_dispatch_promoted();
+    }
+
     fn owned_pane_label(&self) -> String {
         owned_pane_label(self).to_string()
     }
@@ -1665,6 +1669,14 @@ fn supervisor_perform_reexec(
         } else {
             cmd.env_remove(agent_doc_supervisor_process::REEXEC_CAPABILITY_PROOF_CONTRACT_ENV);
         }
+        if shared.route_owned_dispatch_promoted() {
+            cmd.env(
+                agent_doc_supervisor_process::REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV,
+                "1",
+            );
+        } else {
+            cmd.env_remove(agent_doc_supervisor_process::REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV);
+        }
         let err = cmd.exec();
         attempts.push(format!(
             "{note} path={} exists_before={exists_before} errno={:?} ({err})",
@@ -2116,6 +2128,11 @@ pub(crate) struct SupervisorShared {
     /// Exact successful proof contract eligible for a same-child hot-reexec
     /// handoff. Cleared whenever the gate is not `Proven`.
     capability_proof_contract: Mutex<Option<String>>,
+    /// `#reexecpurposelost`: the route-owned completion thread promoted this
+    /// supervisor's `layout-provision` start to `dispatch` because the child
+    /// carried a real turn. Handed across a same-child hot-reexec, whose argv still
+    /// declares the original purpose.
+    route_owned_dispatch_promoted: AtomicBool,
 }
 
 impl SupervisorShared {
@@ -2187,7 +2204,17 @@ impl SupervisorShared {
             capability_proof_epoch: AtomicU64::new(0),
             capability_proof_error: Mutex::new(None),
             capability_proof_contract: Mutex::new(None),
+            route_owned_dispatch_promoted: AtomicBool::new(false),
         }
+    }
+
+    fn mark_route_owned_dispatch_promoted(&self) {
+        self.route_owned_dispatch_promoted
+            .store(true, Ordering::Relaxed);
+    }
+
+    fn route_owned_dispatch_promoted(&self) -> bool {
+        self.route_owned_dispatch_promoted.load(Ordering::Relaxed)
     }
 
     /// Current harness identity (snapshot clone). Reflects the latest in-loop

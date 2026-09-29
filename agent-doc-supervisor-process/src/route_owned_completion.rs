@@ -98,6 +98,10 @@ pub trait RouteOwnedCompletionState: Send + Sync + 'static {
     fn live_pane_interaction_observed(&self, _harness: &HarnessConfig) -> bool {
         false
     }
+    /// Record the sticky layout-provision → dispatch promotion outside the
+    /// completion thread, so a same-child hot-reexec can hand it to the fresh
+    /// image (`#reexecpurposelost`).
+    fn record_start_purpose_promoted(&self) {}
     fn owned_pane_label(&self) -> String;
     /// Whether THIS supervisor's own pane currently sits in a `stash` window.
     ///
@@ -212,6 +216,7 @@ where
                     && state.live_pane_interaction_observed(&harness)
                 {
                     effective_start_purpose = RouteOwnedStartPurpose::Dispatch;
+                    state.record_start_purpose_promoted();
                     let event = format!(
                         "route_owned_start_purpose_promoted prior={} new={} reason=live_child_interaction pane={}",
                         start_purpose.as_str(),
@@ -439,6 +444,7 @@ mod tests {
         busy_probe_count: AtomicU64,
         interaction_observed: AtomicBool,
         interaction_probe_count: AtomicU64,
+        promotion_recorded: AtomicBool,
     }
 
     impl RouteOwnedCompletionState for StashedCompletionState {
@@ -464,6 +470,10 @@ mod tests {
         fn live_pane_interaction_observed(&self, _harness: &HarnessConfig) -> bool {
             self.interaction_probe_count.fetch_add(1, Ordering::Relaxed);
             self.interaction_observed.load(Ordering::Relaxed)
+        }
+
+        fn record_start_purpose_promoted(&self) {
+            self.promotion_recorded.store(true, Ordering::Relaxed);
         }
 
         fn owned_pane_label(&self) -> String {
@@ -567,6 +577,7 @@ mod tests {
             busy_probe_count: AtomicU64::new(0),
             interaction_observed: AtomicBool::new(false),
             interaction_probe_count: AtomicU64::new(0),
+            promotion_recorded: AtomicBool::new(false),
         });
         let completed = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -614,6 +625,7 @@ mod tests {
             busy_probe_count: AtomicU64::new(0),
             interaction_observed: AtomicBool::new(false),
             interaction_probe_count: AtomicU64::new(0),
+            promotion_recorded: AtomicBool::new(false),
         });
         let completed = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -668,6 +680,7 @@ mod tests {
             busy_probe_count: AtomicU64::new(0),
             interaction_observed: AtomicBool::new(true),
             interaction_probe_count: AtomicU64::new(0),
+            promotion_recorded: AtomicBool::new(false),
         });
         let completed = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -696,6 +709,16 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         assert!(state.interaction_probe_count.load(Ordering::Relaxed) > 0);
+        let record_deadline = Instant::now() + Duration::from_secs(1);
+        while !state.promotion_recorded.load(Ordering::Relaxed) && Instant::now() < record_deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            state.promotion_recorded.load(Ordering::Relaxed),
+            "`#reexecpurposelost`: the promotion must leave the completion thread so a \
+             same-child hot-reexec can hand it to the fresh image"
+        );
 
         state.busy.store(false, Ordering::Relaxed);
         state.interaction_observed.store(false, Ordering::Relaxed);

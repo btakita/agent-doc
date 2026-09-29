@@ -40,7 +40,33 @@ impl SupervisorProcessCommand {
 pub const REEXEC_CHILD_PID_ENV: &str = "AGENT_DOC_REEXEC_CHILD_PID";
 pub const REEXEC_MASTER_FD_ENV: &str = "AGENT_DOC_REEXEC_MASTER_FD";
 pub const REEXEC_CAPABILITY_PROOF_CONTRACT_ENV: &str = "AGENT_DOC_REEXEC_CAPABILITY_PROOF_CONTRACT";
+/// Set on a same-child hot-reexec when the outgoing supervisor had promoted its
+/// route-owned start purpose from `layout-provision` to `dispatch`.
+///
+/// `#reexecpurposelost`: the reexec replays the ORIGINAL argv, which still says
+/// `--route-owned-start-purpose layout-provision`. The promotion lived only in the
+/// completion thread's memory, so the fresh image treated a pane carrying a live
+/// conversation as an unused layout placeholder and reaped it at the next commit.
+pub const REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV: &str =
+    "AGENT_DOC_REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED";
 pub const ROUTE_BIN_ENV: &str = "AGENT_DOC_ROUTE_BIN";
+
+/// Start purpose the supervisor runs under after (re)entry.
+///
+/// Only an adopted, still-living child inherits the outgoing image's promotion —
+/// the promotion is a fact about THAT child (it carried a real turn). A fresh
+/// spawn, or an adopt whose child died, gets a new child and the declared purpose.
+pub fn reentry_route_owned_start_purpose(
+    declared: agent_doc_supervisor::route_owned::RouteOwnedStartPurpose,
+    adopted_child_survived: bool,
+    promoted_env: Option<&str>,
+) -> agent_doc_supervisor::route_owned::RouteOwnedStartPurpose {
+    if adopted_child_survived && promoted_env.is_some_and(|value| value.trim() == "1") {
+        agent_doc_supervisor::route_owned::RouteOwnedStartPurpose::Dispatch
+    } else {
+        declared
+    }
+}
 
 pub fn agent_doc_start_bin() -> String {
     resolve_agent_doc_start_bin(
@@ -121,6 +147,35 @@ impl ReexecState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reentry_keeps_a_promoted_dispatch_purpose_only_for_the_adopted_child() {
+        use agent_doc_supervisor::route_owned::RouteOwnedStartPurpose as P;
+        // `#reexecpurposelost`: the lazily pane was promoted, self-recycled, and
+        // came back as layout-provision — then reaped as a stashed orphan.
+        assert_eq!(
+            reentry_route_owned_start_purpose(P::LayoutProvision, true, Some("1")),
+            P::Dispatch
+        );
+        assert_eq!(
+            reentry_route_owned_start_purpose(P::LayoutProvision, true, None),
+            P::LayoutProvision,
+            "no promotion was handed over"
+        );
+        assert_eq!(
+            reentry_route_owned_start_purpose(P::LayoutProvision, false, Some("1")),
+            P::LayoutProvision,
+            "a new child never interacted; the promotion belonged to the dead one"
+        );
+        assert_eq!(
+            reentry_route_owned_start_purpose(P::LayoutProvision, true, Some("0")),
+            P::LayoutProvision
+        );
+        assert_eq!(
+            reentry_route_owned_start_purpose(P::Dispatch, false, None),
+            P::Dispatch
+        );
+    }
 
     #[test]
     fn restart_command_preserves_old_pane_identity() {

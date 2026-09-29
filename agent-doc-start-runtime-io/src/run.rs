@@ -12,9 +12,10 @@ use agent_doc_supervisor::{
     session_lineage::HarnessSessionLineage,
 };
 use agent_doc_supervisor_process::{
-    REEXEC_CAPABILITY_PROOF_CONTRACT_ENV, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState,
+    REEXEC_CAPABILITY_PROOF_CONTRACT_ENV, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV,
+    REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV, ReexecState,
     io_threads::{spawn_reader_thread, spawn_writer_thread},
-    resize,
+    reentry_route_owned_start_purpose, resize,
 };
 use agent_doc_supervisor_process_io::{
     HarnessLaunchSpec, SupervisorLaunchLog, build_harness_launch_spec,
@@ -795,6 +796,17 @@ pub fn run_with_reap_policy_resume_and_harness(
     // These supervisor-only transport values must never reach the harness child or
     // perturb the exact capability-proof contract.
     let preserved_proof_contract = std::env::var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV).ok();
+    // `#reexecpurposelost`: argv still declares the original start purpose; the
+    // outgoing image's sticky dispatch promotion arrives through the environment.
+    let declared_route_owned_start_purpose = route_owned_start_purpose;
+    let route_owned_start_purpose = reentry_route_owned_start_purpose(
+        declared_route_owned_start_purpose,
+        preserved_child_survived,
+        std::env::var(REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV)
+            .ok()
+            .as_deref(),
+    );
+    unsafe { std::env::remove_var(REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV) };
     if pending_adopt.is_some() {
         unsafe {
             std::env::remove_var(REEXEC_CHILD_PID_ENV);
@@ -940,6 +952,17 @@ pub fn run_with_reap_policy_resume_and_harness(
         Some(actor_record.state),
         Some(pane_id.clone()),
     ));
+    if route_owned_start_purpose != declared_route_owned_start_purpose {
+        shared.mark_route_owned_dispatch_promoted();
+        log_event(
+            &mut session_log,
+            &format!(
+                "route_owned_start_purpose_inherited declared={} effective={} reason=reexec_adopted_promoted_child (#reexecpurposelost)",
+                declared_route_owned_start_purpose.as_str(),
+                route_owned_start_purpose.as_str(),
+            ),
+        );
+    }
     let mut capability_proof_thread = configure_managed_capability_proof_for_spec(
         &shared,
         &initial_launch_spec,
@@ -2719,8 +2742,16 @@ mod tests {
             panic!("frontmatter seed should resolve");
         };
         assert!(!reentry_may_record_resume_id(true, None, &id));
-        assert!(!reentry_may_record_resume_id(true, Some("new-thread"), "pre-clear"));
-        assert!(reentry_may_record_resume_id(true, Some("new-thread"), "new-thread"));
+        assert!(!reentry_may_record_resume_id(
+            true,
+            Some("new-thread"),
+            "pre-clear"
+        ));
+        assert!(reentry_may_record_resume_id(
+            true,
+            Some("new-thread"),
+            "new-thread"
+        ));
         assert!(
             reentry_may_record_resume_id(false, None, &id),
             "a real launch still records its resolved id"

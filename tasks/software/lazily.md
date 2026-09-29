@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -435,16 +435,33 @@ The authoritative released commits are ready for the eventual scoped update:
 The unpublished Rust `0.59.0` and React `0.3.0` preparation commits must not be pinned; neither has a corresponding published release. Other repository `main` heads are also ahead for post-release consumer-simulation work, so the eventual update must use the exact SHAs above rather than current heads.
 
 Operator gate: resume `#lzreleasepins` once the other root agent-doc sessions stop changing the superproject. Then stage only the Lazily gitlinks (and separately adjudicate the HTML directory-to-gitlink conversion against the live `.gitmodules` edit), run the exact-revision interop gate in an isolated checkout, and commit/push only that scoped pin set.
+
+### Re: release and publication closeout — GPT-5 · 2026-09-29T14:06:13-04:00
+
+> **Queue prompt:**
+>
+> release + publish
+
+The release train is drained to its current authority boundaries.
+
+Completed and externally verified releases remain published for Spec, Formal, C++, Zig, Kotlin, Go, JavaScript, C#, Python, Dart, and Godot source `v0.2.0`. HTML is now fully added to that set: [`lazily-hub/lazily-html` v0.1.0](https://github.com/lazily-hub/lazily-html/releases/tag/v0.1.0) is public on GitHub and npm, with CI, repository hygiene, and npm trusted-publisher configuration in place.
+
+The Godot Asset Library package is also complete and green at `0be4094cea9bc7ef0792a35b7773a7be3c7ddfa9`; its exact archive and form metadata are recorded in the preceding `#lzgdasset` response. The browser is open at the authenticated submission page, and that review item can be resolved as soon as the operator confirms login and the prepared form is submitted.
+
+The remaining publication work is intentionally gated rather than silently skipped:
+
+- Rust `0.59.0`: prepared and verified, but no release tag until crates.io Trusted Publishing is configured for `lazily-hub/lazily-rs` / `release.yml`.
+- React `0.3.0`: prepared and verified, but no release tag/npm publication until first-package `@lazily-hub` npm authorization is established.
+- Godot Asset Library `0.2.0`: package ready; authenticated legacy Asset Library submission pending.
+- Superproject release pins: the exact immutable SHA map is ready, but multiple live agent-doc sessions are still changing the root branch and `.gitmodules`; pinning is held until that explicitly requested settled state exists.
+
+No unpublished preparation commit was represented as a release, and no dirty shared-worktree content was folded into a publication or pin commit.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzhtmlbootstrap]~~
-- ~~do [#lzgdasset]~~
-- ~~do [#lzreleasepins]~~
-- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

@@ -225,6 +225,29 @@ def self_test() -> int:
     finally:
         git = original_git
 
+    # `#installgenskew`: the binary embeds the JetBrains generation it expects
+    # (agent-doc-reliable-sync-io/build.rs), so both install recipes must run
+    # the generation bump BEFORE building it, and bump-plugin must record the
+    # source digest (a bare `sed` bump let the next install bump again after the
+    # binary built: plugin 0.2.443 live beside a binary expecting 0.2.442).
+    import os
+
+    makefile_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Makefile")
+    makefile = open(makefile_path, encoding="utf-8").read()
+
+    def recipe(name: str) -> str:
+        start = makefile.index(f"\n{name}:")
+        end = makefile.find("\n\n", start + 1)
+        return makefile[start:end]
+
+    for name in ("install", "install-full"):
+        header = recipe(name).splitlines()[1]
+        assert "editor-generation-bump" in header, f"{name} must depend on editor-generation-bump: {header!r}"
+    bump_plugin = recipe("bump-plugin")
+    assert "check_plugin_versions.py --bump JetBrains" in bump_plugin, bump_plugin
+    assert "sed -i" not in bump_plugin, "bump-plugin must not bump pluginVersion without recording its digest"
+    assert "--bump JetBrains" in recipe("editor-generation-bump")
+
     print("[self-test] check_plugin_versions: ok")
     return 0
 

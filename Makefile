@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -154,18 +154,26 @@ dev-harness-test: $(VSCODE_NODE_LOCK)
 editor-parity: dev-harness-test cross-editor-simworld
 	@python3 scripts/check_editor_parity.py
 
-# Bump JB plugin patch version and build both zips
+# Bump JB plugin patch version (when its sources changed) and build both zips.
+# `#installgenskew`: the bump goes through check_plugin_versions.py so it also
+# records `pluginSourceDigest`. A bare `sed` bump left the digest stale, and the
+# next install then bumped AGAIN after the binary had been built, shipping plugin
+# 0.2.443 beside a binary that expected 0.2.442 (plugin_generation_mismatch).
 bump-plugin:
+	@python3 scripts/check_plugin_versions.py --bump JetBrains
 	@cd editors/jetbrains && \
-	cur=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
-	maj=$$(echo "$$cur" | cut -d. -f1); \
-	min=$$(echo "$$cur" | cut -d. -f2); \
-	pat=$$(echo "$$cur" | cut -d. -f3); \
-	new="$$maj.$$min.$$((pat + 1))"; \
-	sed -i "s/^pluginVersion = .*/pluginVersion = $$new/" gradle.properties; \
-	echo "bumped pluginVersion: $$cur -> $$new"; \
+	new=$$(grep '^pluginVersion' gradle.properties | sed 's/.*= *//'); \
 	./gradlew buildPlugin signPlugin && \
 	ls -1 build/distributions/agent-doc-jetbrains-$$new*.zip
+
+# `#installgenskew`: the binary embeds the JetBrains generation it expects
+# (agent-doc-reliable-sync-io/build.rs reads gradle.properties), so any bump
+# must land BEFORE the binary builds. install-editor-plugins bumps again only if
+# sources changed in between, which this makes a no-op.
+editor-generation-bump:
+	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
+		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
+	fi
 
 # Check staged changes and committed history since each target's last package
 # generation. This catches a same-version plugin behavior commit even when the
@@ -248,7 +256,7 @@ timings:
 # executable. `cargo install --force` unlinks the old executable before persisting
 # the new one, creating a short ENOENT window that can strand controller/supervisor
 # execve handoffs.
-install:
+install: editor-generation-bump
 	$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --all
@@ -269,7 +277,7 @@ install:
 # incremental) and is the correct install for the edit -> install -> recycle
 # loop. Reserve `install-full` for verifying pre-release parity, which is what
 # the `release` target uses it for.
-install-full:
+install-full: editor-generation-bump
 	cargo build --release --bin agent-doc
 	@target/release/agent-doc binary-install --source target/release/agent-doc
 	@target/release/agent-doc skill install --all

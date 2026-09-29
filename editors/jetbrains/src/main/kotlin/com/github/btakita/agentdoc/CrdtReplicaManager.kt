@@ -3395,10 +3395,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             ConcurrentHashMap<String, ReplicaResumeState>()
         private val nativeReloadSettledShadows = ConcurrentHashMap<String, String>()
 
-        fun getInstance(project: Project): CrdtReplicaManager =
-            instances.getOrPut(project) {
+        fun getInstance(project: Project): CrdtReplicaManager {
+            // `#pluginunloadresurrect`: a retired classloader must not start a
+            // manager; it would register replicas under a retired identity.
+            check(!PluginGeneration.retired) {
+                "agent-doc plugin generation was unloaded; refusing to start a CRDT replica manager"
+            }
+            return instances.getOrPut(project) {
                 CrdtReplicaManager(project).also { it.start() }
             }
+        }
 
         fun disposeProject(project: Project) {
             instances.remove(project)?.dispose()

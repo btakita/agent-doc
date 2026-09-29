@@ -53,6 +53,11 @@ internal object NativeReloadCoordinator {
         reloadGate.awaitReady(timeoutMs)
 
     fun requestReload(libVersion: String? = null) {
+        if (PluginGeneration.retired) {
+            // `#pluginunloadresurrect`: the replacement generation owns reloads.
+            log.info("[native] reload ignored by an unloaded plugin generation")
+            return
+        }
         val handoff = reloadGate.begin() ?: return
         try {
             ApplicationManager.getApplication().executeOnPooledThread {

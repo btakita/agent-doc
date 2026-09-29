@@ -3000,10 +3000,13 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
-    /// Undo the last agent response (restore state before response capture)
+    /// Undo the last agent response, keeping every operator revision
     Undo {
         /// Path to the session document
         file: PathBuf,
+        /// Print the lines undo would remove without writing anything
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Extract the last exchange entry from source to target document
     Extract {
@@ -5379,7 +5382,7 @@ fn try_main() -> anyhow::Result<()> {
             force,
             history,
         } => annotate::run(&file, force, history),
-        Commands::Undo { file } => undo::run(&file),
+        Commands::Undo { file, dry_run } => undo::run(&file, dry_run),
         Commands::Extract {
             source,
             target,

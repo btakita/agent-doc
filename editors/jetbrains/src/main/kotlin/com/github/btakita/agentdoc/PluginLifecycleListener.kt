@@ -261,8 +261,38 @@ class ProjectPluginLifecycleService(
  */
 class PluginUnloadCleanupService : Disposable {
     override fun dispose() {
+        // Retire first: anything still queued in this classloader (a reload
+        // intent, an EDT runnable) must find the generation retired before the
+        // managers it would otherwise recreate are gone.
+        PluginGeneration.retire()
         ProjectManager.getInstance().openProjects.forEach { project ->
             PluginLifecycleListener.disposeProjectResources(project)
         }
+    }
+}
+
+/**
+ * `#pluginunloadresurrect`: whether this classloader's plugin generation has been
+ * unloaded. A dynamic upgrade disposes the old generation's managers, but a
+ * `reload_library` intent still reaching the old classloader ran its native-reload
+ * restart, which recreated a `CrdtReplicaManager` there. That resurrected
+ * generation kept attaching documents under the retired editor identity while
+ * the replacement had published liveness under its own, so the controller
+ * refused every registration as a stale endpoint and those documents stayed
+ * detached until an IDE restart. Once retired, a generation never builds
+ * replicas or reloads native code again.
+ */
+internal object PluginGeneration {
+    @Volatile
+    var retired: Boolean = false
+        private set
+
+    fun retire() {
+        retired = true
+    }
+
+    /** Tests share one classloader; production never un-retires a generation. */
+    internal fun resetForTest() {
+        retired = false
     }
 }

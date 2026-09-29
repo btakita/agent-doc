@@ -1602,11 +1602,17 @@ fn attempt_stop_closeout(
     let mut note = String::new();
     match payload {
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-            agent_doc_repair_io::pending::save_pending(file, response.as_ref())?;
-            agent_doc_ops_log_io::log_op(file, "codex_stop_capture_saved");
-            note.push_str(
-                " The latest assistant text was captured into the pending/capture ledger before auto-close.",
-            );
+            if let Some(capture_id) = materialized_cycle_capture_supersedes(file, response.as_ref())? {
+                note.push_str(&format!(
+                    " The cycle's captured response `{capture_id}` is already in the document, so the closing chat message was not recaptured over it."
+                ));
+            } else {
+                agent_doc_repair_io::pending::save_pending(file, response.as_ref())?;
+                agent_doc_ops_log_io::log_op(file, "codex_stop_capture_saved");
+                note.push_str(
+                    " The latest assistant text was captured into the pending/capture ledger before auto-close.",
+                );
+            }
         }
         agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
             note.push_str(&capture_blocked_stop_payload(
@@ -1756,6 +1762,50 @@ fn reopen_terminal_cycle_before_stop_capture(
     Ok(())
 }
 
+/// `#stoprecapturesupersede`: the open cycle already holds a live capture whose
+/// response is visible in the document, and the Stop hook's final chat message
+/// is not. Codex routinely ends a turn with a short chat restatement after its
+/// real `agent-doc respond`; recapturing that as the cycle's response superseded
+/// the real one, and its later replay (headed "recovered response") replaced the
+/// visible answer in `src/haiven-dev/tasks/api.md` on 2026-09-28, diverging the
+/// controller from the editor that still held the original. Returns the
+/// existing capture id when the recapture must be skipped.
+fn materialized_cycle_capture_supersedes(file: &Path, message: &str) -> Result<Option<String>> {
+    let Some(closeout) = agent_doc_cycle_state_io::load_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if closeout.captured_response_retired_reason.is_some() {
+        return Ok(None);
+    }
+    let Some(capture) = closeout
+        .captured_response
+        .filter(|capture| closeout.cycle_id.as_deref() == Some(capture.cycle_id.as_str()))
+        .filter(|capture| !capture.response_body.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    let current = current_document_content(file, "codex_stop_existing_capture_check")?;
+    let existing_visible = agent_doc_turn::response_replay::response_materialized_in_content(
+        &capture.response_body,
+        &current,
+    );
+    let message_visible =
+        agent_doc_turn::response_replay::response_materialized_in_content(message, &current);
+    if !existing_visible || message_visible {
+        return Ok(None);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "codex_stop_recapture_skipped file={} cycle_id={} capture_id={} reason=materialized_cycle_capture",
+            file.display(),
+            capture.cycle_id,
+            capture.capture_id,
+        ),
+    );
+    Ok(Some(capture.capture_id))
+}
+
 fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) -> String {
     // A capture writes the document; a later read in this same invocation must
     // re-materialize rather than serve the pre-write snapshot.
@@ -1765,6 +1815,19 @@ fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) 
             capture_missing_stop_response(file, Some(state.last_prompt.as_str()))
         }
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+            match materialized_cycle_capture_supersedes(file, response.as_ref()) {
+                Ok(Some(capture_id)) => {
+                    return format!(
+                        " The cycle's captured response `{capture_id}` is already in the document, so the closing chat message was not recaptured over it."
+                    );
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    return format!(
+                        " The hook could not check the cycle's existing capture, so it did not recapture the final assistant text: {err}."
+                    );
+                }
+            }
             match agent_doc_repair_io::pending::save_pending(file, response.as_ref()) {
                 Ok(()) => {
                     agent_doc_ops_log_io::log_op(file, "codex_stop_capture_saved");
@@ -2584,6 +2647,62 @@ Done.\n\
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert!(state.last_turn_id.is_empty());
         assert!(state.last_prompt.is_empty());
+    }
+
+    /// `#stoprecapturesupersede`: the 2026-09-28 `src/haiven-dev/tasks/api.md`
+    /// shape. The cycle's real response is captured and visible; Codex then
+    /// stops with a heading-less chat restatement. That restatement must not
+    /// become the cycle's capture, or its replay replaces the visible answer.
+    /// (Through `apply_stop` the captured-finalize resume normally closes the
+    /// cycle first; the recapture only ran when that resume was blocked by a
+    /// retained write, so the predicate is exercised directly.)
+    #[test]
+    fn a_visible_cycle_capture_blocks_recapturing_a_restatement() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        let real = "### Re: Hello — gpt-5\n\nThe real response, already written.\n";
+        let restatement = "Nothing else to do; the answer is above.";
+
+        // Nothing captured yet: recapture is allowed.
+        assert_eq!(materialized_cycle_capture_supersedes(&doc, restatement).unwrap(), None);
+
+        let capture = agent_doc_capture_io::capture_response(&doc, real).unwrap();
+        // Captured but not yet visible: the Stop hook may still capture.
+        assert_eq!(materialized_cycle_capture_supersedes(&doc, restatement).unwrap(), None);
+
+        fs::write(&doc, original.replace("❯ Hello\n", &format!("❯ Hello\n\n{real}"))).unwrap();
+        invalidate_stop_document_cache();
+        assert_eq!(
+            materialized_cycle_capture_supersedes(&doc, restatement).unwrap(),
+            Some(capture.capture_id.clone()),
+            "a visible cycle response must not be superseded by the closing chat message"
+        );
+        // The message IS the visible response: nothing to protect.
+        assert_eq!(materialized_cycle_capture_supersedes(&doc, real).unwrap(), None);
+
+        agent_doc_cycle_state_io::retire_projected_captured_response(
+            &doc,
+            &capture.cycle_id,
+            &capture.capture_id,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(materialized_cycle_capture_supersedes(&doc, restatement).unwrap(), None);
+    }
+
+    #[test]
+    fn both_stop_capture_sites_consult_the_existing_capture_first() {
+        let source = include_str!("lib.rs");
+        for anchor in ["fn attempt_stop_closeout(", "fn capture_assistant_text("] {
+            let body = source.split(anchor).nth(1).unwrap();
+            let body = &body[..body.find("\nfn ").unwrap()];
+            let guard = body.find("materialized_cycle_capture_supersedes(").unwrap_or(usize::MAX);
+            let save = body.find("pending::save_pending(").unwrap();
+            assert!(guard < save, "{anchor} must check the existing capture before save_pending");
+        }
     }
 
     #[test]

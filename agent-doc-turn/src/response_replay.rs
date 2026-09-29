@@ -1210,11 +1210,19 @@ fn block_has_prompt_prefixed_body(block_lines: &[&str]) -> bool {
 }
 
 fn normalized_response_lines(content: &str) -> Vec<String> {
+    indexed_normalized_response_lines(content)
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect()
+}
+
+/// [`normalized_response_lines`] with each kept line's index in `content.lines()`.
+fn indexed_normalized_response_lines(content: &str) -> Vec<(usize, String)> {
     let mut out = Vec::new();
-    let mut lines = content.lines().peekable();
-    while let Some(line) = lines.next() {
+    let mut lines = content.lines().enumerate().peekable();
+    while let Some((index, line)) = lines.next() {
         if line.trim() == "> **Queue prompt:**" {
-            while let Some(next) = lines.peek() {
+            while let Some((_, next)) = lines.peek() {
                 if next.trim_start().starts_with('>') {
                     lines.next();
                 } else {
@@ -1224,10 +1232,51 @@ fn normalized_response_lines(content: &str) -> Vec<String> {
             continue;
         }
         if let Some(normalized) = normalize_response_line(line) {
-            out.push(normalized);
+            out.push((index, normalized));
         }
     }
     out
+}
+
+/// `#undokeepsoperator`: remove exactly the materialized `response` from
+/// `content` and nothing else. The response is located by the same normalized
+/// line match that proves materialization; the last occurrence wins because undo
+/// targets the newest response. Every line outside that span is returned
+/// byte-for-byte, so operator text typed before or after the response (even in
+/// the same cycle) survives. `None` when the response is not present unchanged,
+/// which includes an operator edit inside it: undo then refuses instead of
+/// guessing which lines were the agent's.
+pub fn remove_materialized_response(content: &str, response: &str) -> Option<String> {
+    let probe =
+        agent_doc_template::response_materialization::response_materialization_probe_from_response(
+            response,
+        );
+    let wanted = normalized_response_lines(&probe);
+    if wanted.is_empty() {
+        return None;
+    }
+    let indexed = indexed_normalized_response_lines(content);
+    let start = indexed
+        .windows(wanted.len())
+        .rposition(|window| window.iter().map(|(_, line)| line).eq(wanted.iter()))?;
+    let first = indexed[start].0;
+    let last = indexed[start + wanted.len() - 1].0;
+
+    let lines: Vec<&str> = content.split_inclusive('\n').collect();
+    let is_blank = |index: usize| lines.get(index).is_some_and(|line| line.trim().is_empty());
+    let mut from = first;
+    let mut to = last + 1;
+    // Drop one separator so removal leaves the spacing the response found.
+    if from > 0 && is_blank(from - 1) && (is_blank(to) || to == lines.len()) {
+        to += usize::from(is_blank(to));
+    } else if from > 0 && is_blank(from - 1) {
+        from -= 1;
+    }
+    let mut out = String::with_capacity(content.len());
+    for line in lines[..from].iter().chain(lines[to..].iter()) {
+        out.push_str(line);
+    }
+    Some(out)
 }
 
 fn normalize_response_line(line: &str) -> Option<String> {
@@ -1293,6 +1342,70 @@ mod duplicate_heading_materialization {
         assert!(
             response_materialized_in_content(&second_response, &both),
             "a genuinely present duplicate-heading response must read as materialized"
+        );
+    }
+}
+
+#[cfg(test)]
+mod undo_keeps_operator_text {
+    use super::*;
+
+    const RESPONSE: &str = "<!-- patch:exchange -->\n### Re: infra.md owner — opus-5-5\n\nReplayed body.\n\n- detail\n<!-- /patch:exchange -->\n";
+
+    /// `#undokeepsoperator`: the 2026-09-28 wedge. The operator's prompt and a
+    /// paste typed while the (wrong) response was being written both survive;
+    /// only the response lines go.
+    #[test]
+    fn removes_only_the_response_and_keeps_operator_text_around_it() {
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "*Compacted.*\n\n",
+            "Fix api.md issue\n",
+            "```\n",
+            "pasted log\n",
+            "```\n",
+            "\n",
+            "### Re: infra.md owner — opus-5-5 (HEAD)\n",
+            "\n",
+            "Replayed body.\n",
+            "\n",
+            "- detail\n",
+            "<!-- agent:boundary:fe1c0161:doc -->\n",
+            "<!-- /agent:exchange -->\n",
+            "operator text after the exchange\n",
+        );
+        let undone = remove_materialized_response(current, RESPONSE).expect("response is present");
+        assert_eq!(
+            undone,
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "*Compacted.*\n\n",
+                "Fix api.md issue\n",
+                "```\n",
+                "pasted log\n",
+                "```\n",
+                "<!-- agent:boundary:fe1c0161:doc -->\n",
+                "<!-- /agent:exchange -->\n",
+                "operator text after the exchange\n",
+            )
+        );
+        assert!(!response_materialized_in_content(RESPONSE, &undone));
+    }
+
+    #[test]
+    fn an_operator_edit_inside_the_response_refuses_instead_of_guessing() {
+        let current = "<!-- agent:exchange -->\nprompt\n\n### Re: infra.md owner — opus-5-5\n\nReplayed body, which I annotated.\n\n- detail\n<!-- /agent:exchange -->\n";
+        assert_eq!(remove_materialized_response(current, RESPONSE), None);
+    }
+
+    #[test]
+    fn the_newest_of_two_identical_responses_is_the_one_removed() {
+        let block = "### Re: infra.md owner — opus-5-5\n\nReplayed body.\n\n- detail\n";
+        let current = format!("<!-- agent:exchange -->\nfirst prompt\n\n{block}\nsecond prompt\n\n{block}<!-- /agent:exchange -->\n");
+        let undone = remove_materialized_response(&current, RESPONSE).unwrap();
+        assert_eq!(
+            undone,
+            format!("<!-- agent:exchange -->\nfirst prompt\n\n{block}\nsecond prompt\n<!-- /agent:exchange -->\n")
         );
     }
 }

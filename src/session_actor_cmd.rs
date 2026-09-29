@@ -2542,8 +2542,33 @@ fn capture_context_clear_submit_content_hash(tmux: &Tmux, pane: &str) -> Option<
 }
 
 fn short_context_clear_submit_content_hash(content: &str) -> String {
-    let hash = agent_doc_hash::content_hash(content);
+    let hash = agent_doc_hash::content_hash(&without_volatile_harness_chrome(content));
     hash[..hash.len().min(12)].to_string()
+}
+
+/// `#clearchromechange`: the pane capture with the lines a harness redraws on
+/// its own removed: the busy spinner (`esc to interrupt`), rotating tips, the
+/// shortcut hint, and the context-usage footer. The clear verifier resends a
+/// lost `/clear` only when the capture did not change since delivery
+/// (`#cleardoublesend`); hashing the raw capture let this chrome count as
+/// change, so src/haiven-dev/tasks/api.md (2026-09-29, pane `%19`) proved the
+/// conversation retained and still reported "whether the clear ran is unknown"
+/// instead of repairing the lost delivery once.
+fn without_volatile_harness_chrome(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim_start_matches(|c: char| c.is_whitespace() || c == '└');
+            let trimmed = trimmed.trim_start();
+            !(trimmed.contains("esc to interrupt")
+                || trimmed.starts_with("Tip:")
+                || trimmed.starts_with("? for shortcuts")
+                || (trimmed.contains("Context ")
+                    && (trimmed.contains("% used") || trimmed.contains("% left"))))
+        })
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn send_operator_interrupt_sequence(
@@ -5595,6 +5620,23 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         );
 
         assert!(!document_dirty_after_committed_cycle(&doc).unwrap());
+    }
+
+    #[test]
+    fn clear_change_detection_ignores_harness_chrome_but_not_the_conversation() {
+        let before = "• Ran make check\n  └ ok\n\n• Working (4m 57s • esc to interrupt)\n  └ Tip: Use /statusline to configure which items appear in the status line.\n› Ask Codex to do anything\n  GPT-5.6-Sol high · ~/work · Context 34% used\n  ? for shortcuts        ⚠ 2 warnings · f2 to view\n";
+        let chrome_only = "• Ran make check\n  └ ok\n\n• Working (4m 58s • esc to interrupt)\n  └ Tip: Use /review to review your changes.\n› Ask Codex to do anything\n  GPT-5.6-Sol high · ~/work · Context 35% used\n  ? for shortcuts        ⚠ 2 warnings · f2 to view\n";
+        assert_eq!(
+            short_context_clear_submit_content_hash(before),
+            short_context_clear_submit_content_hash(chrome_only),
+            "spinner, tip and context-footer redraws are not a change"
+        );
+        let cleared = "› Ask Codex to do anything\n  GPT-5.6-Sol high · ~/work · Context 0% used\n";
+        assert_ne!(
+            short_context_clear_submit_content_hash(before),
+            short_context_clear_submit_content_hash(cleared),
+            "a clear that landed still changes the capture"
+        );
     }
 
     #[test]

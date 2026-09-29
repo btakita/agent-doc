@@ -2340,6 +2340,12 @@ pub fn dispatch_only_blocker_recovery_hint(
             facts.file_display
         );
     }
+    if facts.harness_binary == "codex" && facts.reason == "codex update-available dialog" {
+        return format!(
+            "Codex is asking whether to update — choose `Update now` or `Skip` (esc) in that pane yourself (agent-doc never answers it), wait for the idle composer, then rerun `agent-doc route --dispatch-only {}` or the editor Run Agent Doc action",
+            facts.file_display
+        );
+    }
 
     "restore an idle prompt and retry".to_string()
 }
@@ -5464,6 +5470,14 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             hint.contains("agent-doc route --dispatch-only tasks/agent-doc/agent-doc-bugs2.md"),
             "hook-review blockers should include a reroute recovery command: {hint}"
         );
+
+        let update = dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
+            harness_binary: "codex",
+            reason: "codex update-available dialog",
+            file_display: "tasks/devops.md",
+        });
+        assert!(update.contains("`Update now` or `Skip`"), "{update}");
+        assert!(update.contains("never answers it"), "{update}");
 
         let generic = dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
             harness_binary: "codex",

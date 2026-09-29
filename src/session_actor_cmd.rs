@@ -3937,6 +3937,10 @@ fn print_status_summary(ctx: &SessionContext) {
             .unwrap_or_else(|| "unknown".to_string()),
         evidence.tail.as_deref().unwrap_or("none")
     );
+    let pane_blocker = live_pane_recognized_blocker(ctx, &tmux, &evidence);
+    if let Some(reason) = pane_blocker.as_deref() {
+        println!("{}", live_pane_blocker_status_line(reason));
+    }
     println!(
         "supervisor: health={} state={} actor_state={} restart_count={} socket={}",
         ctx.supervisor_runtime.health.as_str(),
@@ -4078,7 +4082,11 @@ fn print_status_summary(ctx: &SessionContext) {
             );
         }
     }
-    if owned_pane_ready_busy_conflict(ctx, &evidence) {
+    if owned_pane_ready_busy_conflict(ctx, &evidence)
+        && !pane_blocker
+            .as_deref()
+            .is_some_and(blocker_supersedes_ready_busy_recovery_hint)
+    {
         println!(
             "status_warning: owned_pane_ready_busy_conflict actor=ready supervisor_actor=ready controller_lease=ready live_pane=alive-busy prompt_ready=false current_command={}",
             evidence.current_command.as_deref().unwrap_or("unknown")
@@ -4089,6 +4097,49 @@ fn print_status_summary(ctx: &SessionContext) {
             ctx.canonical_file.display()
         );
     }
+}
+
+/// `#codexupdateblocker`: name the modal/interactive state holding the live
+/// pane, so `alive-busy` is not the operator's only clue.
+fn live_pane_recognized_blocker(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    evidence: &LivePaneEvidence,
+) -> Option<String> {
+    if evidence.state != LivePaneState::AliveBusy {
+        return None;
+    }
+    let pane = evidence.pane_id.as_deref()?;
+    let captured = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
+        .ok()?;
+    let harness = harness_for_evidence(ctx, evidence);
+    agent_doc_harness::dispatch_only_blocker_reason(&harness, &captured)
+}
+
+/// Blockers only the operator may answer. Suggesting `session clear` for them
+/// would type `/clear` into the modal.
+fn blocker_supersedes_ready_busy_recovery_hint(reason: &str) -> bool {
+    matches!(
+        reason,
+        agent_doc_harness::CODEX_UPDATE_AVAILABLE_BLOCKER
+            | agent_doc_harness::CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER
+            | "active permission prompt"
+    )
+}
+
+fn live_pane_blocker_status_line(reason: &str) -> String {
+    let action = match reason {
+        agent_doc_harness::CODEX_UPDATE_AVAILABLE_BLOCKER => {
+            "operator_action=\"choose Update now or Skip (esc) in the pane; agent-doc never answers this dialog\""
+        }
+        agent_doc_harness::CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER => {
+            "operator_action=\"close the conversation in the other app, then press r in the pane\""
+        }
+        "active permission prompt" => "operator_action=\"answer the permission prompt in the pane\"",
+        _ => "operator_action=\"restore an idle prompt\"",
+    };
+    format!("live_pane_blocker: reason=\"{reason}\" {action}")
 }
 
 fn owned_pane_ready_busy_conflict(ctx: &SessionContext, evidence: &LivePaneEvidence) -> bool {
@@ -4830,6 +4881,20 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
             "\n",
             Some(1),
             false
+        ));
+    }
+
+    #[test]
+    fn live_pane_blocker_status_names_codex_update_dialog_without_clear_hint() {
+        let line = live_pane_blocker_status_line(agent_doc_harness::CODEX_UPDATE_AVAILABLE_BLOCKER);
+        assert!(line.contains("reason=\"codex update-available dialog\""), "{line}");
+        assert!(line.contains("Update now or Skip"), "{line}");
+        assert!(line.contains("never answers"), "{line}");
+        assert!(blocker_supersedes_ready_busy_recovery_hint(
+            agent_doc_harness::CODEX_UPDATE_AVAILABLE_BLOCKER
+        ));
+        assert!(!blocker_supersedes_ready_busy_recovery_hint(
+            "queued draft in composer"
         ));
     }
 

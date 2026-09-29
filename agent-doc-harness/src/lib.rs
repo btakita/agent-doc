@@ -35,6 +35,12 @@ use std::path::{Path, PathBuf};
 pub const CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER: &str =
     "codex conversation open in another app";
 
+/// Codex's startup "Update available · X → Y" dialog (`#codexupdateblocker`).
+/// It swallows routed input until the operator picks Update now or Skip.
+/// Route and supervisor never answer it: `enter` would run a global `npm
+/// install`, and the busy-pane interrupt's `Escape` would silently skip it.
+pub const CODEX_UPDATE_AVAILABLE_BLOCKER: &str = "codex update-available dialog";
+
 mod grok;
 pub mod managed_capability;
 pub mod prompt_source;
@@ -1061,6 +1067,10 @@ impl HarnessConfig {
             return Some(CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER.to_string());
         }
 
+        if self.codex_update_dialog_active(output) {
+            return Some(CODEX_UPDATE_AVAILABLE_BLOCKER.to_string());
+        }
+
         if agent_doc_turn_executor_tmux::prompt::parse_prompt(output).active {
             return Some("active permission prompt".to_string());
         }
@@ -1256,13 +1266,46 @@ impl HarnessConfig {
             })
     }
 
+    fn codex_update_dialog_active(&self, output: &str) -> bool {
+        if self.binary != "codex" {
+            return false;
+        }
+
+        let mut latest_update_marker = None;
+        let mut latest_dialog_action = None;
+        let mut latest_ready_prompt = None;
+        for (index, raw_line) in output.lines().enumerate() {
+            let line = agent_doc_turn_executor_tmux::prompt::strip_ansi(raw_line);
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.starts_with("update available") {
+                latest_update_marker = Some(index);
+            }
+            if lower.contains("enter continue") && lower.contains("esc skip") {
+                latest_dialog_action = Some(index);
+            }
+            if self.is_dispatch_ready_prompt_line(trimmed) {
+                latest_ready_prompt = Some(index);
+            }
+        }
+
+        latest_update_marker
+            .zip(latest_dialog_action)
+            .is_some_and(|(marker_index, action_index)| {
+                action_index >= marker_index
+                    && latest_ready_prompt.is_none_or(|prompt| prompt <= action_index)
+            })
+    }
+
     /// Return a reason when the latest pane output shows live user input or
     /// another interactive composer state that must block replacement.
     pub fn protected_prompt_input_reason(&self, output: &str) -> Option<String> {
         if let Some(reason) = self.dispatch_blocker_reason(output) {
             match reason.as_str() {
                 "active permission prompt" => return Some(reason),
-                CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER => return Some(reason),
+                CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER | CODEX_UPDATE_AVAILABLE_BLOCKER => {
+                    return Some(reason);
+                }
                 "queued draft in composer"
                 | "interactive shell reverse-i-search"
                 | "interactive shell history search" => return Some(reason),
@@ -4632,6 +4675,45 @@ i-search: bug accept · cancel
         assert_eq!(
             h.dispatch_blocker_reason(output).as_deref(),
             Some("interactive shell history search")
+        );
+    }
+
+    /// `#codexupdateblocker`: live capture of pane `%40`. The dialog's
+    /// `› 1. Update now` row uses the composer glyph, so without this the pane
+    /// read as `alive-busy` with `recognized_blocker=none`.
+    #[test]
+    fn dispatch_blocker_reason_detects_codex_update_available_dialog() {
+        let h = HarnessConfig::codex();
+        let dialog = "\
+  Update available · 0.158.0 → 0.159.0
+  Release notes: https://github.com/openai/codex/releases/latest
+
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+↓
+  enter continue · esc skip
+
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(dialog).as_deref(),
+            Some(CODEX_UPDATE_AVAILABLE_BLOCKER)
+        );
+        assert_eq!(
+            dispatch_only_blocker_reason(&h, dialog).as_deref(),
+            Some(CODEX_UPDATE_AVAILABLE_BLOCKER)
+        );
+        assert_eq!(
+            h.protected_prompt_input_reason(dialog).as_deref(),
+            Some(CODEX_UPDATE_AVAILABLE_BLOCKER),
+            "routed input must never answer the update dialog"
+        );
+        assert!(!pane_idle_dispatch_ready(dialog, &h));
+
+        let dismissed = format!("{dialog}\n› Ask Codex to do anything\n");
+        assert_eq!(
+            h.dispatch_blocker_reason(&dismissed),
+            None,
+            "a later idle composer supersedes the dismissed dialog in scrollback"
         );
     }
 

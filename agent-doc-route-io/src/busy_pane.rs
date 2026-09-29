@@ -8,8 +8,8 @@ use agent_doc_controller::dispatch::{
     BusyPaneAutoFixFacts, BusyPaneAutoFixOutcome, existing_pane_ready_timeout,
     fresh_route_admission_timeout, is_codex_shell_search_blocker,
 };
-use agent_doc_harness::CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER;
 use agent_doc_harness::HarnessConfig;
+use agent_doc_harness::{CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER, CODEX_UPDATE_AVAILABLE_BLOCKER};
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
 use agent_doc_supervisor::route_runtime::SupervisorHealth;
 #[cfg(test)]
@@ -40,7 +40,11 @@ pub enum BusyPaneInterruptRecoveryOutcome {
 fn existing_pane_blocker_requires_operator(blocker_reason: Option<&str>) -> bool {
     matches!(
         blocker_reason,
-        Some("active permission prompt" | CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER)
+        Some(
+            "active permission prompt"
+                | CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER
+                | CODEX_UPDATE_AVAILABLE_BLOCKER
+        )
     )
 }
 
@@ -156,6 +160,21 @@ pub fn attempt_busy_existing_pane_auto_fix(
         {
             eprintln!("[route] Codex conversation writer locks currently held: {described}");
         }
+        return Ok(BusyPaneAutoFixOutcome::FailClosed);
+    }
+    if blocker_reason == Some(CODEX_UPDATE_AVAILABLE_BLOCKER) {
+        // `#codexupdateblocker`: the auto-fix may restart the pane, which would
+        // discard the operator's pending update choice. Name it and fail closed.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_busy_existing_pane_auto_fix_skipped file={} pane={} reason={}",
+                file_path, pane, CODEX_UPDATE_AVAILABLE_BLOCKER,
+            ),
+        );
+        eprintln!(
+            "[route] pane {pane} for {file_path} is showing Codex's \"Update available\" dialog — choose Update now or Skip (esc) in that pane, then retry"
+        );
         return Ok(BusyPaneAutoFixOutcome::FailClosed);
     }
     eprintln!(
@@ -576,6 +595,9 @@ mod tests {
         )));
         assert!(existing_pane_blocker_requires_operator(Some(
             "active permission prompt",
+        )));
+        assert!(existing_pane_blocker_requires_operator(Some(
+            agent_doc_harness::CODEX_UPDATE_AVAILABLE_BLOCKER,
         )));
         assert!(!existing_pane_blocker_requires_operator(Some(
             "active codex turn",

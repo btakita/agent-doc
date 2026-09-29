@@ -457,9 +457,9 @@ The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#focuscrossrootverify]
+- 🚧 #advance-review
 - ~~do [#retainedwriteverdict]~~
-- #advance-review
+- do [#focuscrossrootverify]
 <!-- /agent:queue -->
 
 

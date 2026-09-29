@@ -268,6 +268,8 @@ class PluginUnloadCleanupService : Disposable {
         ProjectManager.getInstance().openProjects.forEach { project ->
             PluginLifecycleListener.disposeProjectResources(project)
         }
+        // `#staleturnbanner`: strips outlive their unregistered provider, so remove them here.
+        TurnStateBannerProvider.retireStrips()
     }
 }
 

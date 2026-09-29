@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -9,6 +10,8 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.Dimension
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.function.Function
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -32,6 +35,7 @@ class TurnStateBannerProvider : EditorNotificationProvider {
         file: VirtualFile,
     ): Function<in FileEditor, out JComponent?>? {
         if (!file.name.endsWith(".md")) return null
+        if (PluginGeneration.retired) return null
         val refresher = TurnStateBannerRefresher.getInstance(project)
         refresher.start()
         // Empty label == idle / not-an-agent-doc-turn → no banner.
@@ -57,14 +61,57 @@ class TurnStateBannerProvider : EditorNotificationProvider {
                 minimumSize = Dimension(0, h)
                 preferredSize = Dimension(0, h)
                 maximumSize = Dimension(Int.MAX_VALUE, h)
-            }
+            }.also(::trackStrip)
         }
     }
 
-    private companion object {
+    internal companion object {
         private const val STRIP_HEIGHT_DP = 18
         // Subtle info-tone strip that reads on both light and dark themes.
         private val STRIP_BG = JBColor(0xEAF1FB, 0x2A3A4A)
         private val STRIP_FG = JBColor(0x3B5273, 0xA9C7EA)
+
+        /**
+         * `#staleturnbanner`: every strip this classloader attached to an editor. A dynamic
+         * plugin upgrade unregisters this provider but leaves the strips it already added in
+         * place, and nothing refreshes them again: the old generation's refresher is disposed,
+         * and the platform only recomputes panels for providers that are still registered. A
+         * document that was mid-turn during the upgrade therefore kept a frozen
+         * "awaiting response" strip beside the replacement generation's live one: two stacked
+         * strips, then one permanent strip once the live one went idle. Weak keys, so a closed
+         * editor's strip is not retained here.
+         */
+        private val strips: MutableSet<JComponent> =
+            Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap()))
+
+        private fun trackStrip(strip: JComponent) {
+            strips.add(strip)
+        }
+
+        /**
+         * Detach every strip this generation attached. Runs at the plugin-unload boundary, so
+         * the replacement generation is the only one painting turn state. Returns the number
+         * of strips removed.
+         */
+        fun retireStrips(): Int {
+            val retired = synchronized(strips) { strips.toList().also { strips.clear() } }
+            val detach = {
+                retired.forEach { strip ->
+                    strip.isVisible = false
+                    strip.parent?.let { parent ->
+                        parent.remove(strip)
+                        parent.revalidate()
+                        parent.repaint()
+                    }
+                }
+            }
+            val application = ApplicationManager.getApplication()
+            if (application == null || application.isDispatchThread) detach() else application.invokeLater(detach)
+            return retired.size
+        }
+
+        internal fun trackedStripCountForTest(): Int = strips.size
+
+        internal fun trackStripForTest(strip: JComponent) = trackStrip(strip)
     }
 }

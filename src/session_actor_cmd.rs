@@ -17,21 +17,26 @@ use agent_doc_supervisor::startup_miss::{SessionLogStatus, StartupMiss, format_t
 use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
 use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn_executor_tmux::context_clear::{
-    CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES, ContextClearSubmitObservation,
-    ContextClearSubmitPollState, ContextClearSubmitRetryAction, ContextClearSubmitRetryFacts,
-    ContextClearSubmitRetryProofFacts, ContextClearSubmitStatus, InterruptClearTimeoutFacts,
-    busy_clear_already_deferred_message, busy_clear_deferred_message, busy_clear_refusal_message,
-    context_clear_capture_shows_queued_input, context_clear_command_visible_in_active_input,
-    context_clear_history_proves_cleared_state, context_clear_submit_blocked_line,
-    context_clear_submit_blocked_message, context_clear_submit_observation_line,
-    context_clear_submit_resubmit_proof_line, context_clear_submit_retry_action,
-    interrupt_clear_timeout_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
-    protected_clear_refusal_message, terminal_editor_command,
+    CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES, ContextClearLastFrame,
+    ContextClearSubmitObservation, ContextClearSubmitPollState, ContextClearSubmitRetryAction,
+    ContextClearSubmitRetryFacts, ContextClearSubmitRetryProofFacts, ContextClearSubmitStatus,
+    InterruptClearTimeoutFacts, busy_clear_already_deferred_message, busy_clear_deferred_message,
+    busy_clear_refusal_message, context_clear_capture_shows_queued_input,
+    context_clear_command_visible_in_active_input, context_clear_history_proves_cleared_state,
+    context_clear_submit_blocked_line, context_clear_submit_blocked_message,
+    context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
+    context_clear_submit_retry_action, interrupt_clear_timeout_message,
+    operator_interrupt_key_plan, operator_interrupt_step_delay, protected_clear_refusal_message,
+    terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_millis(900);
+// Supervisor IPC acceptance proves that the command reached the actor transport,
+// not that Codex has consumed it. A real `/clear` observed on 2026-09-29 took
+// roughly five seconds to replace the old conversation with a fresh prompt.
+const CLEAR_SUPERVISOR_ACCEPTED_SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 const CLEAR_DIRECT_SUBMIT_RENDER_TIMEOUT: Duration = Duration::from_secs(10);
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT: usize = 1;
@@ -1036,6 +1041,7 @@ fn verify_supervisor_clear_submit(
         harness: &ctx.harness,
         command: harness_clear_command(&ctx.harness),
         initial_phase: "supervisor_ipc_acceptance",
+        delivery_evidence: ContextClearDeliveryEvidence::SupervisorAccepted,
         resubmit_source: "session_clear.supervisor_ipc_resubmit",
         pre_delivery_capture_hash,
     })
@@ -2099,9 +2105,30 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &ProvenPane, file: &Path, harness: &str
         harness,
         command,
         initial_phase: "direct_pane_acceptance",
+        delivery_evidence: ContextClearDeliveryEvidence::DirectPane,
         resubmit_source: "session_clear.direct_pane_resubmit",
         pre_delivery_capture_hash: pre_delivery_capture_hash.as_deref(),
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContextClearDeliveryEvidence {
+    /// The supervisor accepted the command for delivery. This is transport
+    /// evidence only, so allow the harness enough time to consume `/clear` and
+    /// render its replacement prompt before declaring the submit unobserved.
+    SupervisorAccepted,
+    /// The command was submitted directly to the pane. Preserve the short
+    /// stuck-draft detection window used by the direct recovery path.
+    DirectPane,
+}
+
+impl ContextClearDeliveryEvidence {
+    const fn settle_timeout(self) -> Duration {
+        match self {
+            Self::SupervisorAccepted => CLEAR_SUPERVISOR_ACCEPTED_SETTLE_TIMEOUT,
+            Self::DirectPane => CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT,
+        }
+    }
 }
 
 struct ContextClearSubmitVerification<'a> {
@@ -2111,6 +2138,7 @@ struct ContextClearSubmitVerification<'a> {
     harness: &'a str,
     command: &'a str,
     initial_phase: &'a str,
+    delivery_evidence: ContextClearDeliveryEvidence,
     #[allow(dead_code)]
     resubmit_source: &'a str,
     pre_delivery_capture_hash: Option<&'a str>,
@@ -2120,13 +2148,10 @@ fn verify_context_clear_submit_after_delivery(
     ctx: ContextClearSubmitVerification<'_>,
 ) -> Result<()> {
     let first = poll_context_clear_submit_acceptance(
-        ctx.tmux,
-        ctx.pane,
-        ctx.file,
-        ctx.harness,
-        ctx.command,
+        &ctx,
         ctx.initial_phase,
         ctx.pre_delivery_capture_hash,
+        ctx.delivery_evidence.settle_timeout(),
     );
     let mut final_phase = ctx.initial_phase;
     let mut final_observation = first;
@@ -2193,13 +2218,10 @@ fn verify_context_clear_submit_after_delivery(
             );
         }
         let second = poll_context_clear_submit_acceptance(
-            ctx.tmux,
-            ctx.pane,
-            ctx.file,
-            ctx.harness,
-            ctx.command,
+            &ctx,
             resubmit_phase,
             pre_resubmit_capture_hash.as_deref(),
+            ContextClearDeliveryEvidence::DirectPane.settle_timeout(),
         );
         agent_doc_ops_log_io::log_op(
             ctx.file,
@@ -2335,17 +2357,17 @@ fn upgrade_unobserved_clear_from_pane_history(
 }
 
 fn poll_context_clear_submit_acceptance(
-    tmux: &Tmux,
-    pane: &str,
-    file: &Path,
-    harness: &str,
-    command: &str,
+    ctx: &ContextClearSubmitVerification<'_>,
     phase: &str,
     pre_delivery_capture_hash: Option<&str>,
+    acceptance_timeout: Duration,
 ) -> ContextClearSubmitObservation {
+    let (tmux, pane, file, harness, command) =
+        (ctx.tmux, ctx.pane, ctx.file, ctx.harness, ctx.command);
     let harness_config = agent_doc_harness::HarnessConfig::from_agent_name(harness);
     let start = Instant::now();
     let mut last_capture: Option<(bool, usize, String)> = None;
+    let mut last_frame: Option<ContextClearLastFrame> = None;
     let mut poll_state = ContextClearSubmitPollState::default();
     let mut capture_failed = false;
     // `#cleardoublesend`: the per-frame answer is already computed below to
@@ -2367,10 +2389,17 @@ fn poll_context_clear_submit_acceptance(
                     .unwrap_or(false);
                 content_ever_changed_since_delivery |= content_changed_since_delivery;
                 last_capture = Some((command_visible, capture_len, capture_hash));
+                last_frame = Some(ContextClearLastFrame {
+                    command_visible,
+                    blank:
+                        agent_doc_turn_executor_tmux::context_clear::context_clear_capture_is_blank(
+                            &content,
+                        ),
+                });
                 observation_budget =
                     agent_doc_turn_executor_tmux::context_clear::context_clear_observation_budget(
                         &content,
-                        CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT,
+                        acceptance_timeout,
                         CLEAR_DIRECT_SUBMIT_RENDER_TIMEOUT,
                     );
                 let prompt_ready =
@@ -2413,28 +2442,21 @@ fn poll_context_clear_submit_acceptance(
     // the command sat unconsumed in the composer; `Unobserved` means the window
     // closed with no evidence either way. Both stay non-`Accepted` — the
     // acceptance rule is unchanged, only the label stops lying.
-    let (status, command_visible) = if let Some((visible, _, _)) = last_capture.as_ref() {
-        if *visible {
-            (ContextClearSubmitStatus::StillVisible, true)
-        } else {
-            (ContextClearSubmitStatus::Unobserved, false)
-        }
-    } else if capture_failed {
-        (ContextClearSubmitStatus::CaptureFailed, false)
-    } else {
-        (ContextClearSubmitStatus::Unobserved, false)
-    };
+    let status = agent_doc_turn_executor_tmux::context_clear::context_clear_expired_window_status(
+        last_frame,
+        capture_failed,
+    );
+    let command_visible = status == ContextClearSubmitStatus::StillVisible;
     // `#clearsubmitunobserved`: the loop above can only observe a transition, and
     // a clear that succeeds on a pane with nothing to clear produces none — the
     // normal case right after a cold start, which is where this was reported.
     // Before reporting the unknown, ask the state question the operator would:
     // does the pane still hold a conversation? Retained scrollback keeps it
     // blocked; an empty pane means the desired end state holds either way.
-    let status = if status == ContextClearSubmitStatus::Unobserved
-        && observation_budget == CLEAR_DIRECT_SUBMIT_RENDER_TIMEOUT
-    {
-        ContextClearSubmitStatus::Unrendered
-    } else if status == ContextClearSubmitStatus::Unobserved {
+    // `#clearunrenderedlabel`: `Unrendered` now comes from the last frame
+    // itself being blank, not from `observation_budget` equalling the render
+    // window — the supervisor settle window has the same length.
+    let status = if status == ContextClearSubmitStatus::Unobserved {
         upgrade_unobserved_clear_from_pane_history(tmux, pane, file, harness, command, phase)
     } else {
         status
@@ -3994,13 +4016,14 @@ fn print_status_summary(ctx: &SessionContext) {
     // happened after transitioning from `agent: claude` to `agent: codex`".
     // The document keeps its `resume.claude` id across a harness switch; that
     // id is the conversation a Claude Code client refuses to reopen.
-    let claude_conversation = std::fs::read_to_string(&ctx.canonical_file)
-        .ok()
-        .and_then(|content| {
-            agent_doc_frontmatter::frontmatter::parse(&content)
-                .ok()
-                .and_then(|(fm, _)| fm.resume_for_harness("claude").map(str::to_string))
-        });
+    let claude_conversation =
+        std::fs::read_to_string(&ctx.canonical_file)
+            .ok()
+            .and_then(|content| {
+                agent_doc_frontmatter::frontmatter::parse(&content)
+                    .ok()
+                    .and_then(|(fm, _)| fm.resume_for_harness("claude").map(str::to_string))
+            });
     for line in crate::conversation_holders::observe_holders(
         &ctx.base_dir,
         None,
@@ -5404,7 +5427,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     }
 
     #[test]
-    fn session_clear_submit_retry_budget_is_fast_and_independent_from_dispatch() {
+    fn session_clear_submit_windows_follow_delivery_evidence() {
         assert_eq!(
             clear_direct_submit_max_enter_resubmits_from_env_value(None),
             CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT
@@ -5422,8 +5445,13 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT
         );
         assert!(
-            CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT <= Duration::from_secs(1),
-            "clear should fail fast instead of holding JB Run Agent Doc behind a long submit proof window"
+            ContextClearDeliveryEvidence::DirectPane.settle_timeout() <= Duration::from_secs(1),
+            "direct clear recovery should retain its short stuck-draft proof window"
+        );
+        assert!(
+            ContextClearDeliveryEvidence::SupervisorAccepted.settle_timeout()
+                >= Duration::from_secs(6),
+            "supervisor acceptance is transport-only evidence and must cover Codex's observed five-second clear transition"
         );
         assert_eq!(
             CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT

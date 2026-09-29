@@ -239,6 +239,14 @@ impl ContextClearSubmitPollState {
     }
 }
 
+/// Whether a pane capture holds no visible text at all — a terminal that has
+/// not repainted, as opposed to one that is drawn but idle.
+pub fn context_clear_capture_is_blank(content: &str) -> bool {
+    content
+        .lines()
+        .all(|line| crate::prompt::strip_ansi(line).trim().is_empty())
+}
+
 /// A blank repaint is absence of terminal evidence, never a submitted clear.
 /// Keep the ordinary stuck-draft budget short, but let an unrendered terminal
 /// finish drawing before deciding to resend a destructive control command.
@@ -247,13 +255,42 @@ pub fn context_clear_observation_budget(
     ordinary: Duration,
     rendering: Duration,
 ) -> Duration {
-    if content
-        .lines()
-        .all(|line| crate::prompt::strip_ansi(line).trim().is_empty())
-    {
+    if context_clear_capture_is_blank(content) {
         rendering
     } else {
         ordinary
+    }
+}
+
+/// What the last capture of an expired acceptance window showed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContextClearLastFrame {
+    pub command_visible: bool,
+    pub blank: bool,
+}
+
+/// Classify an acceptance window that expired without an accepted frame.
+///
+/// (`#clearunrenderedlabel`) `Unrendered` is a statement about the LAST
+/// CAPTURE: it was blank. It used to be inferred from `observation_budget ==
+/// CLEAR_DIRECT_SUBMIT_RENDER_TIMEOUT`, which only meant "blank" while the
+/// ordinary window was shorter than the render window. Once supervisor-IPC
+/// delivery got its own 10s settle window — the same length as the render
+/// window — every unobserved codex clear reported `pane_not_rendered`. Observed
+/// 2026-09-29 on four haiven-dev documents (`api.md` pane `%19`, capture 3187
+/// bytes, a drawn idle `› Ask Codex to do anything` prompt at 62% context):
+/// the clear never ran, and the false label also suppressed the lost-delivery
+/// resend, which only an `Unobserved` result earns.
+pub fn context_clear_expired_window_status(
+    last_frame: Option<ContextClearLastFrame>,
+    capture_failed: bool,
+) -> ContextClearSubmitStatus {
+    match last_frame {
+        Some(frame) if frame.command_visible => ContextClearSubmitStatus::StillVisible,
+        Some(frame) if frame.blank => ContextClearSubmitStatus::Unrendered,
+        Some(_) => ContextClearSubmitStatus::Unobserved,
+        None if capture_failed => ContextClearSubmitStatus::CaptureFailed,
+        None => ContextClearSubmitStatus::Unobserved,
     }
 }
 
@@ -775,6 +812,53 @@ mod tests {
         assert_eq!(
             context_clear_submit_retry_action(facts),
             Some(ContextClearSubmitRetryAction::SubmitKey)
+        );
+    }
+
+    #[test]
+    fn expired_window_calls_a_drawn_idle_pane_unobserved_not_unrendered() {
+        // `#clearunrenderedlabel`: the api.md `%19` shape — a rendered codex
+        // idle prompt, command not visible — must earn `Unobserved` (and with
+        // it the lost-delivery resend), never `pane_not_rendered`.
+        let drawn = "\u{203a} Ask Codex to do anything\n\n  gpt \u{b7} Context 62% used\n";
+        assert!(!context_clear_capture_is_blank(drawn));
+        assert_eq!(
+            context_clear_expired_window_status(
+                Some(ContextClearLastFrame {
+                    command_visible: false,
+                    blank: context_clear_capture_is_blank(drawn),
+                }),
+                false,
+            ),
+            ContextClearSubmitStatus::Unobserved
+        );
+        assert_eq!(
+            context_clear_expired_window_status(
+                Some(ContextClearLastFrame {
+                    command_visible: false,
+                    blank: context_clear_capture_is_blank("\n  \n"),
+                }),
+                false,
+            ),
+            ContextClearSubmitStatus::Unrendered
+        );
+        assert_eq!(
+            context_clear_expired_window_status(
+                Some(ContextClearLastFrame {
+                    command_visible: true,
+                    blank: false,
+                }),
+                false,
+            ),
+            ContextClearSubmitStatus::StillVisible
+        );
+        assert_eq!(
+            context_clear_expired_window_status(None, true),
+            ContextClearSubmitStatus::CaptureFailed
+        );
+        assert_eq!(
+            context_clear_expired_window_status(None, false),
+            ContextClearSubmitStatus::Unobserved
         );
     }
 

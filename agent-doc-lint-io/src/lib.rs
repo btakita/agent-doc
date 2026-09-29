@@ -461,6 +461,27 @@ mod tests {
         run(&file, None).expect("clean doc must pass lint gate");
     }
 
+    /// agent-doc-bugs.md 2026-09-29: a compacted summary quoting a stray ``` sat
+    /// above a pasted fenced block; tagpath <= 0.12.2 paired the stray run with
+    /// the fence opener, read the fence's closer as unclosed, and blocked every
+    /// closeout with a false `agent-doc/unclosed-component`.
+    #[test]
+    fn stray_inline_backtick_run_above_a_pasted_fence_passes() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            - Prior summary/context: Fix api.md issue ``` \u{2022} Failed (exit 1)\n\
+            Fix fpe.md issue\n\
+            ```\n\
+            \u{2022} pasted pane output\n\
+            ```\n\
+            \n\
+            Your paste arrived empty (a bare `` `````` `` fence).\n\
+            <!-- /agent:exchange -->\n";
+        let file = write_doc(&dir, "stray-fence.md", doc);
+        run(&file, None).expect("a mid-line backtick run must not unclose the exchange");
+    }
+
     #[test]
     fn notes_component_reconciles_against_agent_doc_registry() {
         let dir = TempDir::new().unwrap();

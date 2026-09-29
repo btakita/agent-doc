@@ -1,0 +1,9 @@
+name = "authorityLadder"
+defaultTargets = ["EditorAuthorityLadder"]
+
+# Self-contained and offline: proves the editor authority ladder never rolls an
+# open editor back, for any editors and any content (formal/tla checks bounded
+# instances of the same design, including convergence and non-vacuity).
+
+[[lean_lib]]
+name = "EditorAuthorityLadder"

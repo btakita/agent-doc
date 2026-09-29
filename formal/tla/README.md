@@ -158,6 +158,15 @@ prompt (`prompt_target`) or typing inside an existing queue item or prompt
 violate `SteeringEventuallyAnswered`, the 2026-09-29 `api.md` stop;
 `RealtimeSteeringStopReach.cfg` must show a content_edit is handed back.
 
+`EditorAuthorityLadder.tla` checks the canonical-state ladder (several editors
+open: their reconciliation; one editor: its buffer; none: disk) with the
+in-memory CRDT as a forward-only merge engine: no open editor ever loses text
+nobody deleted. `EditorAuthorityLadderWedge.cfg` (registration adopts the CRDT,
+handoff reseeds from disk) must violate `NoRollback`, the 2026-09-29 `api.md`
+rollback; `EditorAuthorityLadderReach.cfg` must show agent writes still reach
+editors. `formal/authority_ladder/EditorAuthorityLadder.lean` proves the same
+safety property for every instance, not only the bounded ones TLC explores.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

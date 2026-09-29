@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0e8bc-26bd-7993-a500-468e9bd767ab
+  codex: 01a0ebfe-eb3f-71f1-9bc5-0015867b7663
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -319,12 +319,48 @@ Release work remains intact:
 - Interop checks and merge network suite passed.
 
 One unrelated warning remains: the `mail` subrepo has pre-existing partially staged companion changes. I left them untouched.
+
+### Re: consumer simulation testkit standardized across maintained bindings — GPT-5 · 2026-09-29T12:37:59-04:00
+> **Queue prompt:**
+>
+> Ensure the lazily-go consumer simulation testkit is added to lazily-spec + lazily-conformance. Then implement in all the lazily implementations in subagents.
+
+Implemented and published the consumer simulation testkit as a canonical conformance capability.
+
+The specification now owns a generated `conformance/simulation/consumer_testkit.json` fixture with five scenarios: successful checkpoint replay through selected real adapters, independent reducer identity across an external-process boundary, first-step observation divergence, materialized-history prefix mismatch, and simulation-world bypass. The public contract exposes the smallest portable world-evidence surface needed by consumers: stable identity, step count, and immutable trace entries. Specification/docs/generator changes are in `lazily-spec@9d98625`; the 9-binding coverage declaration and generated matrix are in `lazily-spec@65de260`.
+
+Implemented the public testkit API, fixture replay, negative cases, and conformance accounting in every maintained binding that supports this capability:
+
+- Go `9d7b0aa`
+- Rust `3adab50`
+- Python `9b5bfcc`
+- JavaScript `050de08`
+- C# `c1e9035`
+- C++ `a5a2241`, hardened by `db3591e`
+- Kotlin `f79a8de`
+- Dart `7aae38b`
+- Zig `f579bf1`
+
+GDScript remains explicitly not applicable in the canonical coverage row; its generated matrix was still synchronized. Generated coverage README commits are Go `c53e77d`, Rust `262566f`, Python `0374c12`, JavaScript `2850a39`, C# `db88628`, C++ `3b0d9f5`, Kotlin `b1518d5`, Dart `5013318`, Zig `0f3ff5c`, GDScript `20488c8`, and Formal `b64467d`. Kotlin's exact scenario floor was advanced from 157 to 162.
+
+All repository-level full checks passed. The canonical suite passed 337 tests plus Lean, schema, provenance, discriminability, coverage, and exact corpus-floor guards; the final floor audit reports 162 fixtures, 164 scenario arrays, 836 assertion-block sites, and all 10 binding ledgers audited. Binding validation included Go 156/156 scenarios, Rust 177/177 scenarios and 824/824 assertion blocks, Python 1,163 tests, Zig's pinned release toolchains, C++ native and WASM gates, and all remaining language-specific full gates.
+
+The initially failing specification CI was rerun after the Kotlin floor landed and is green. JavaScript, C#, C++, Kotlin, Dart, Zig, and GDScript sync CI are green. Exact-SHA Go, Rust, and Python sync workflows were still in progress at closeout after their complete local gates passed; Formal has no GitHub Actions workflow. Existing user-modified and harness-owned files were preserved.
+
+#### infra.md recovery
+
+The stranded `src/haiven-dev/tasks/infra.md` editor state is recovered. A direct `agent-doc commit` correctly failed closed because the owned target delivery had not reached the exchange boundary; `agent-doc session-check` then repaired historical committed-capture drift and confirmed the cycle committed with `queue_continuation_required=false`, `ui_outcome=no_drainable_work`, and `next_action=no_agent_action`. The live editor projection was intentionally left untouched.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 Ensure the lazily-go consumer simulation testkit is added to lazily-spec + lazily-conformance. Then implement in all the lazily implementations in subagents.
+- do [#lzhtmlbootstrap]
+- do [#lzgdasset]
+- do [#lzreleasepins]
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog

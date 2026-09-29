@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 5f4a77bb-4ad8-4d62-b421-995991d43e82
+  claude: 38eef18e-70b8-40f5-a773-3c6acd1f7ea5
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -482,6 +482,24 @@ The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::
 **Why nothing re-ran it on its own:** the refused admission ended Codex's turn. Your new queue item ("Reframe the title + description of the PR.") hasn't been committed yet, so dispatch skips it (`route_dispatch_uncommitted_head … head_not_in_committed_snapshot`). One manual **Run** commits your edits and drains that `go` queue. I didn't trigger it for you, because that item would edit the PR on GitHub.
 
 **About "awaiting response":** the label is only derived. The plugin shows it while a document's actor is `Busy`/`Blocked` or its cycle is still open. For `infra.md` that was true during the 11:54–11:57 window. Now it is `ready` and `committed`, so the label should be gone. If it is still showing on `infra.md`, it's a stale plugin subscription: close and reopen that tab, no restart needed. Separately, **`devops.md` pane `%40` is stuck on Codex's "Update available 0.158.0 → 0.159.0" dialog** (`alive-busy`, `recognized_blocker=none`). Press **Esc** (or pick Skip) in that pane. I added `#codexupdateblocker` so the router names this dialog as a blocker instead of stalling silently.
+
+### Re: #advance-review — opus-5 · 2026-09-29T13:16-04:00
+
+> **Queue prompt:** #advance-review
+
+I read this as the `#advance-review` preset the other session documents define: "Go through the review items. Add actionable backlog items to complete or advance the review items." This document's `prompt_presets` does not define that token.
+
+| Review item | Blocker now | Action |
+|---|---|---|
+| `#drivecapturedsplice` | The canonical advance is refused while the captured operator edit stays unsaved in the editor. Fixing this is agent work, not operator work. | Added **`#retainedadvanceadmit`**: decide the admission rule at `agent-doc-write-runtime-io/src/lib.rs:3135`, fix the guard or the harness, add SimWorld coverage, then rerun the recipe. |
+| `#pypiquotarecheck` | I reran `make pypi-quota-check`: exit 0, 8.362/10.0 GiB used, ~49,662 releases of headroom. pypi/support#12214 is unchanged (open, bot comment only). | Updated the review text to 2026-09-29. There is nothing to delete and no follow-up to add. |
+| `#grokmcpverify` | Waits on the Grok usage quota renewing or a subscription. | No agent step until then. It stays gated. |
+| `#coder7` | Needs a reachable Coder workspace with authentication. | No agent step until then. It stays gated. |
+
+Notes:
+- The backlog marker has no `queue` attribute, so `#retainedadvanceadmit` is in the backlog only, not in the queue. Queue it with `- do [#retainedadvanceadmit]` if you want this go-queue to drain it.
+- Preflight still warns `legacy_gated_in_backlog`: `#apimdrevert` is `[/]` inside `agent:backlog`. Running `agent-doc migrate` moves it into `agent:review`. I did not run it, because it writes to this live document outside the response boundary.
+- The queue is at 456 exchange lines, which is a size warning only. It is not a reason to stop draining.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -491,24 +509,25 @@ The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ #advance-review
-- 🚧 do [#codexupdateblocker]
+- ~~#advance-review~~
+- do [#codexupdateblocker]
 - do [#focuscrossrootverify]
 - Fix https://github.com/btakita/agent-doc/issues/59. release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#codexupdateblocker] `tasks/devops.md` pane `%40` is parked on Codex's "Update available 0.158.0 → 0.159.0 · enter continue · esc skip" dialog. The route reports it as `alive-busy` with `recognized_blocker=none`, so dispatch into that pane stalls silently. Recognize the Codex update dialog as a named operator blocker in live-pane classification (never auto-answer it), and surface it in `session status` and the route refusal.
+- [ ] [#codexupdateblocker] `tasks/devops.md` pane `%40` is parked on Codex's "Update available 0.158.0 → 0.159.0 · enter continue · esc skip" dialog. The route reports it as `alive-busy` with `recognized_blocker=none`, so dispatch into that pane stalls silently. Recognize the Codex update dialog as a named operator blocker in live-pane classification (never auto-answer it), and surface it in `session status` and the route refusal.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
+- [ ] [#retainedadvanceadmit] [agent-doc] Advances #drivecapturedsplice. The captured-splice live run is refused at `agent-doc-write-runtime-io/src/lib.rs:3135` ("retained document-write delivery from a prior cycle remains unsettled") while the captured operator edit is still unsaved in the editor (`native_editor_save_request_deferred`; authority and disk diverge on `exchange`). Decide whether a separate canonical advance must be admitted while a captured operator edit is retained. The recipe exists to prove that admission. Fix whichever side is wrong: the admission guard, or the harness ordering. Add SimWorld coverage for "retained capture + independent advance". Then rerun the recipe from tasks/agent-doc/plan-captured-editor-splice-recovery.md with a CLI build that matches the IDE cdylib.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
 - [/] [#drivecapturedsplice] [agent-doc] Run the captured-splice live proof to completion (#activateinstalledjetbrai). HARNESS FIXED 2026-09-28 (095d2af54): the old 'xdotool keystrokes always arrived' premise was false — `type --window` goes through XSendEvent and JetBrains drops send_event=True keys, so nothing ever reached the editor. The harness now types via XTEST under an absolute-path focus guard, keeps scratch docs in tmp/live-repro/ (under .agent-doc/ they became a nested project with their own controller and log), waits only on fresh doc-scoped receipts, pipes a real response into the advance, runs it in the scratch doc's owner pane, and seeds a lint-valid boundary. A live run then produced the first fresh doc-scoped `editor_op_capture_proof operator_ops=N shadow_replay=agreed` any scratch doc has carried. REMAINING BLOCKER: the canonical advance is refused with 'retained document-write delivery from a prior cycle remains unsettled' while the captured edit is still unsaved in the editor (native_editor_save_request_deferred; authority/disk diverge on exchange). Decide whether an independent advance must be admitted while a captured operator edit is retained — that admission is what this recipe exists to prove — and fix whichever side is wrong. Re-run from a desktop with no stale-binary supervisors and a CLI build matching the IDE cdylib (the runs saw crdt_replica_build_mismatch_recovery_requested x4). Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
-- [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically now: a human reply on pypi/support#12214, or `make pypi-quota-check` exiting non-zero. As of 2026-09-27 that check exits 0 — 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 151 releases (0.35.113..0.35.417), room for ~49,662 further post-cutover releases — so there is nothing to act on and nothing to delete. pypi/support#12214 is still open with one comment (the acknowledgement bot) and untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check actually reports (next tranche would be 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
+- [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically now: a human reply on pypi/support#12214, or `make pypi-quota-check` exiting non-zero. Rechecked 2026-09-29: exit 0 — 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 151 releases (0.35.113..0.35.417), room for ~49,662 further post-cutover releases. Nothing to act on and nothing to delete. pypi/support#12214 is still open with one comment (the acknowledgement bot) and untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check actually reports (next tranche would be 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 <!-- /agent:review -->

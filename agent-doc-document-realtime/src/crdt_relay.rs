@@ -642,6 +642,16 @@ pub struct RelayHub {
     /// projection joined to the hub graph, not state inferred from RPC arrival
     /// order or recovered from an editor whole-buffer request.
     canonical_projection_required: ThreadSafeSourceMap<u64, bool>,
+    /// `#editorauth3`: members whose incremental updates stay quarantined until
+    /// the canonical projection is visibly received. A narrower fact than
+    /// [`Self::canonical_projection_required`]: a bootstrap *receipt* obligation
+    /// alone never quarantines, because a member that adopted this hub's
+    /// bootstrap edits inside this hub's lineage and its operator typing must
+    /// merge forward. Only an unproven lineage (a first-contact incremental
+    /// frame, a retained frontier against an unestablished relay) or an
+    /// explicit structural/graph rejection fences updates. Quarantining
+    /// in-lineage typing dropped ~468 acked characters on api.md 2026-09-29.
+    replica_updates_fenced: ThreadSafeSourceMap<u64, bool>,
     /// Optional live per-node document projection. It shares this hub's
     /// [`ThreadSafeContext`] and is updated at every canonical mutation boundary.
     /// Default-off; see [`CELL_DOC_TREE_CUTOVER_ENV`].
@@ -699,6 +709,7 @@ struct LivenessCore {
     ctx: ThreadSafeContext,
     liveness: ThreadSafeSourceMap<u64, bool>,
     canonical_projection_required: ThreadSafeSourceMap<u64, bool>,
+    replica_updates_fenced: ThreadSafeSourceMap<u64, bool>,
     controller_projection_established: Source<bool>,
     retained_replica_reseed_pending: Source<bool>,
     membership_epoch: Source<u64>,
@@ -1252,6 +1263,8 @@ impl RelayHub {
         let liveness: ThreadSafeSourceMap<u64, bool> = ThreadSafeSourceMap::new(&ctx);
         let canonical_projection_required: ThreadSafeSourceMap<u64, bool> =
             ThreadSafeSourceMap::new(&ctx);
+        let replica_updates_fenced: ThreadSafeSourceMap<u64, bool> =
+            ThreadSafeSourceMap::new(&ctx);
         let delivery_subscription = DeliveryConvergenceSubscription::new(&ctx);
         let live_editor_count = {
             let liveness = liveness.clone();
@@ -1270,6 +1283,7 @@ impl RelayHub {
             ctx,
             liveness,
             canonical_projection_required,
+            replica_updates_fenced,
             controller_projection_established,
             retained_replica_reseed_pending,
             membership_epoch,
@@ -1386,6 +1400,7 @@ impl RelayHub {
             ctx,
             liveness,
             canonical_projection_required,
+            replica_updates_fenced,
             controller_projection_established,
             retained_replica_reseed_pending,
             membership_epoch,
@@ -1407,6 +1422,7 @@ impl RelayHub {
             pending_rebootstrap: HashSet::new(),
             compact_epoch_requested: false,
             canonical_projection_required,
+            replica_updates_fenced,
             live_document_projection,
             ctx,
             controller_projection_established,
@@ -1640,10 +1656,26 @@ impl RelayHub {
     }
 
     /// Fence a member whose first contact with this hub was an incremental
-    /// update from a retained editor generation.
+    /// update from a retained editor generation: its updates stay quarantined
+    /// and it owes a canonical projection receipt.
     pub fn require_canonical_projection(&mut self, client_id: u64) {
         self.canonical_projection_required
             .set(&self.ctx, client_id, true);
+        self.replica_updates_fenced.set(&self.ctx, client_id, true);
+    }
+
+    /// Whether incremental updates from `client_id` are quarantined
+    /// (`#editorauth3`). See the `replica_updates_fenced` field.
+    pub fn replica_updates_fenced(&self, client_id: u64) -> bool {
+        self.replica_updates_fenced
+            .observe(&self.ctx, &client_id)
+            .unwrap_or(false)
+    }
+
+    fn clear_canonical_projection_obligation(&self, client_id: u64) {
+        self.canonical_projection_required
+            .set(&self.ctx, client_id, false);
+        self.replica_updates_fenced.set(&self.ctx, client_id, false);
     }
 
     /// Fence each registered author of a quarantined durable document-op frame
@@ -1662,6 +1694,7 @@ impl RelayHub {
                 continue;
             }
             result.registered_origins += 1;
+            self.require_canonical_projection(client_id);
             if self.ensure_canonical_projection_receipt(client_id)? {
                 result.projections_queued += 1;
             }
@@ -1715,8 +1748,7 @@ impl RelayHub {
         let removed = self.members.remove(&client_id).is_some();
         if removed {
             self.pending_rebootstrap.remove(&client_id);
-            self.canonical_projection_required
-                .set(&self.ctx, client_id, false);
+            self.clear_canonical_projection_obligation(client_id);
             // The cell stays present-but-false (deferral, not de-allocation) so it is
             // no longer counted; a later re-register flips the same cell back to true.
             self.set_live(client_id, false);
@@ -2295,7 +2327,11 @@ impl RelayHub {
         if !self.members.contains_key(&client_id) {
             return Err(anyhow!("replica {client_id} is not registered"));
         }
-        self.require_canonical_projection(client_id);
+        // `#editorauth3`: a receipt obligation, not an update fence. Callers
+        // that cannot prove the member's lineage fence explicitly through
+        // [`Self::require_canonical_projection`].
+        self.canonical_projection_required
+            .set(&self.ctx, client_id, true);
         let expected_content_hash = content_hash(&self.canonical.text());
         let canonical_state = self.canonical.encode_state();
         let canonical_id = self.canonical_id;
@@ -2568,8 +2604,7 @@ impl RelayHub {
             member.clear_nonconvergence_streaks();
             self.pending_rebootstrap.remove(&client_id);
             if acknowledged_projection {
-                self.canonical_projection_required
-                    .set(&self.ctx, client_id, false);
+                self.clear_canonical_projection_obligation(client_id);
             }
             // Draining an ACKed run can be the write that converges delivery.
             self.bump_delivery_epoch();
@@ -2582,8 +2617,7 @@ impl RelayHub {
         member.last_ack_generation = member.last_ack_generation.max(generation);
         member.clear_nonconvergence_streaks();
         if acknowledged_projection {
-            self.canonical_projection_required
-                .set(&self.ctx, client_id, false);
+            self.clear_canonical_projection_obligation(client_id);
         }
         self.bump_delivery_epoch();
         Ok(true)
@@ -2646,8 +2680,7 @@ impl RelayHub {
         member.clear_nonconvergence_streaks();
         self.pending_rebootstrap.remove(&client_id);
         if acknowledged_projection {
-            self.canonical_projection_required
-                .set(&self.ctx, client_id, false);
+            self.clear_canonical_projection_obligation(client_id);
         }
         self.bump_delivery_epoch();
         self.settle_requested_epoch_compaction()?;

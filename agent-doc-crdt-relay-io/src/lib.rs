@@ -92,6 +92,13 @@ pub enum CrdtReplicaEventReason {
 pub enum ColdStartReplicaUpdateDecision {
     Relay,
     ReprojectCanonical,
+    /// `#editorauth3`: the relay holds nothing above the disk rung (no
+    /// established controller projection, no live member, canonical equal to
+    /// disk), so the unregistered editor's buffer is the top of the authority
+    /// ladder. Never seed it from disk and project over it; ask it to
+    /// re-register with its retained frontier so registration reseeds the
+    /// relay from the editor.
+    RequestEditorReseed,
 }
 
 /// Observable result of fencing a stable Compact Exchange snapshot into a fresh
@@ -115,16 +122,42 @@ pub enum CompactEpochRequestOutcome {
     Retained { lineage: String, state_bytes: usize },
 }
 
+/// `updates_fenced` is the member's lineage fence, not its projection-receipt
+/// obligation: a registered member that adopted this relay's bootstrap edits in
+/// this lineage, and its typing relays even while its receipt is outstanding
+/// (`#editorauth3`). `editor_rung_reseedable` says the relay carries nothing
+/// above disk, so an unregistered editor outranks it.
 pub const fn decide_cold_start_replica_update(
     registered: bool,
     controller_projection_established: bool,
-    canonical_projection_pending: bool,
+    updates_fenced: bool,
+    editor_rung_reseedable: bool,
 ) -> ColdStartReplicaUpdateDecision {
-    if registered && controller_projection_established && !canonical_projection_pending {
+    if registered && controller_projection_established && !updates_fenced {
         ColdStartReplicaUpdateDecision::Relay
+    } else if !registered && editor_rung_reseedable {
+        ColdStartReplicaUpdateDecision::RequestEditorReseed
     } else {
         ColdStartReplicaUpdateDecision::ReprojectCanonical
     }
+}
+
+/// `#editorauth3`: whether `hub` holds nothing above the disk rung of the
+/// editor authority ladder, so a live editor's retained state outranks it.
+///
+/// A relay that already projected the controller canonical, or that has a live
+/// member, carries editor or agent state and keeps authority. An unestablished
+/// relay whose canonical differs from disk may carry an agent write that is not
+/// on disk yet, so it also keeps authority. A relay already awaiting a retained
+/// editor reseed is empty transport state and always yields.
+fn relay_holds_only_disk_rung(hub: &RelayHub, file: &Path) -> bool {
+    if hub.retained_replica_reseed_pending() {
+        return true;
+    }
+    if hub.controller_projection_established() || hub.live_count() > 0 {
+        return false;
+    }
+    std::fs::read_to_string(file).is_ok_and(|disk| disk == hub.canonical_text())
 }
 
 impl CrdtReplicaEventReason {
@@ -2115,6 +2148,36 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
             ),
         );
     }
+    // `#editorauth3`: the same authority transfer when a relay already exists
+    // but holds only the disk rung, e.g. a replacement controller seeded it from
+    // disk (or from a retained projection equal to disk) before this editor
+    // re-registered. An open editor outranks disk, so its retained state reseeds
+    // the relay instead of a full bootstrap that the editor would adopt over its
+    // own buffer. The reset happens under the hub lock, so a concurrent reader
+    // observes either the old cold relay or the empty reseed fence.
+    let reseed_cold_relay_from_retained_replica = !restore_fresh_controller_from_retained_replica
+        && retained_state_vector.is_some()
+        && expected_canonical_hash.is_none()
+        && with_hub_seeded_from_file(file, |hub| {
+            if !relay_holds_only_disk_rung(hub, file) {
+                return false;
+            }
+            *hub = RelayHub::new(CANONICAL_CLIENT_ID);
+            hub.begin_retained_replica_reseed();
+            true
+        })?;
+    if reseed_cold_relay_from_retained_replica {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_register_retained_reseed file={} client_id={} recovery=cold_relay_editor_authority_ladder",
+                file.display(),
+                client_id,
+            ),
+        );
+    }
+    let restore_fresh_controller_from_retained_replica =
+        restore_fresh_controller_from_retained_replica || reseed_cold_relay_from_retained_replica;
     let (
         bootstrap,
         canonical_state_vector,
@@ -2159,10 +2222,11 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
         // Preserve that unsettled visible-write obligation under the new
         // identity, and force a full canonical bootstrap so a stale retained
         // native frontier cannot union-merge over it.
+        let retained_lineage_unproven = !restore_fresh_controller_from_retained_replica
+            && !hub.controller_projection_established()
+            && retained_state_vector.is_some();
         let canonical_projection_retained = !restore_fresh_controller_from_retained_replica
-            && (force_full_bootstrap
-                || (!hub.controller_projection_established() && retained_state_vector.is_some())
-                || !hub.delivery_converged());
+            && (force_full_bootstrap || retained_lineage_unproven || !hub.delivery_converged());
         let effective_retained_state_vector = if canonical_projection_retained {
             None
         } else {
@@ -2233,7 +2297,15 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
         // editor baseline is a projection-consumer fault, never authority for a
         // whole-document adopt.
         hub.establish_controller_projection();
+        if retained_lineage_unproven {
+            // A retained frontier against a relay that never projected the
+            // controller canonical may belong to another lineage; an update
+            // racing this reply must not union-merge into it.
+            hub.require_canonical_projection(client_id);
+        }
         if canonical_projection_retained {
+            // Otherwise a receipt obligation only (`#editorauth3`): the editor
+            // adopts this bootstrap and its typing then relays forward.
             hub.ensure_canonical_projection_receipt(client_id)?;
         }
         let canonical_content_hash = agent_doc_hash::content_hash(&hub.canonical_text());
@@ -2680,6 +2752,7 @@ pub fn relay_replica_update_for_file(
         packet,
         reattached,
         canonical_projection_pending,
+        editor_reseed_requested,
         corruption_restored,
         isolation_refused_lossy,
         isolation_regions_restored,
@@ -2688,7 +2761,8 @@ pub fn relay_replica_update_for_file(
         let decision = decide_cold_start_replica_update(
             registered,
             hub.controller_projection_established(),
-            hub.awaits_canonical_projection(client_id),
+            hub.replica_updates_fenced(client_id),
+            !registered && relay_holds_only_disk_rung(hub, file),
         );
         // #replica-structure-guard: capture the clean pre-update canonical so a
         // connected editor pushing a stale/truncated buffer (one whose merged
@@ -2696,19 +2770,26 @@ pub fn relay_replica_update_for_file(
         // component close marker) can be rejected and the canonical restored
         // before the corruption ever becomes authoritative.
         let before_text = hub.canonical_text();
-        let (packet, reattached, canonical_projection_pending) = match decision {
-            ColdStartReplicaUpdateDecision::Relay => {
-                (Some(hub.relay_update(client_id, update)?), false, false)
-            }
-            ColdStartReplicaUpdateDecision::ReprojectCanonical => {
-                if !registered {
-                    hub.register(client_id)?;
+        let (packet, reattached, canonical_projection_pending, editor_reseed_requested) =
+            match decision {
+                ColdStartReplicaUpdateDecision::Relay => {
+                    (Some(hub.relay_update(client_id, update)?), false, false, false)
                 }
-                hub.establish_controller_projection();
-                hub.ensure_canonical_projection_receipt(client_id)?;
-                (None, !registered, true)
-            }
-        };
+                ColdStartReplicaUpdateDecision::ReprojectCanonical => {
+                    if !registered {
+                        hub.register(client_id)?;
+                    }
+                    hub.establish_controller_projection();
+                    // The member's lineage is unproven against this relay: fence
+                    // its updates until the canonical projection is received.
+                    hub.require_canonical_projection(client_id);
+                    hub.ensure_canonical_projection_receipt(client_id)?;
+                    (None, !registered, true, false)
+                }
+                // Leave the relay untouched: no membership, no established
+                // projection, nothing queued over the editor's buffer.
+                ColdStartReplicaUpdateDecision::RequestEditorReseed => (None, false, false, true),
+            };
         let mut corruption_restored = None;
         // `#reconcilesyntheticbase`: a region-scoped restore rides the normal
         // delta in `packet.update` and names `origin` among its targets, so the
@@ -2768,11 +2849,39 @@ pub fn relay_replica_update_for_file(
             packet,
             reattached,
             canonical_projection_pending,
+            editor_reseed_requested,
             corruption_restored,
             isolation_refused_lossy,
             isolation_regions_restored,
         ))
     })??;
+    if editor_reseed_requested {
+        // `#editorauth3`: the editor authority ladder. The relay holds only the
+        // disk rung, so the editor that sent this frame is the authority. Its
+        // re-registration with a retained frontier reseeds the relay from the
+        // editor (`crdt_replica_register_retained_reseed`); projecting disk over
+        // it is the api.md 2026-09-29 rollback.
+        let signal = signal_crdt_replica_event(file, CrdtReplicaEventReason::EditorReplicaReregister, 0)
+            .map_or_else(|err| format!("failed:{err}"), |()| "requested".to_string());
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_update_editor_reseed_requested file={} authority=multi_replica client_id={} update_bytes={} reregister={} recovery=editor_authority_ladder",
+                file.display(),
+                client_id,
+                update.len(),
+                signal,
+            ),
+        );
+        return Ok(Some(FanOut {
+            origin: client_id,
+            update: Vec::new(),
+            targets: Vec::new(),
+            canonical_len: with_hub_seeded_from_file(file, |hub| {
+                hub.canonical_text().chars().count()
+            })?,
+        }));
+    }
     if isolation_regions_restored {
         agent_doc_ops_log_io::log_op(
             file,
@@ -8147,8 +8256,23 @@ mod tests {
         assert!(ops_log.contains("crdt_replica_update_invalid_graph_rejected"));
     }
 
+    /// Simulate the execve handoff: the replacement controller process has no
+    /// relay and no retained projection for the document.
+    fn drop_controller_state_for_test(doc: &Path) {
+        let hash = agent_doc_fs::document_state_hash(doc).unwrap();
+        hub_registry().lock().remove(&hash);
+        let projections = retained_canonical_projections();
+        projections.values.remove(&projections.ctx, &hash);
+    }
+
+    /// `#editorauth3` regression: replay of src/haiven-dev/tasks/api.md
+    /// 2026-09-29 15:35. The operator typed; the update reached a replacement
+    /// controller before the editor re-registered; the controller seeded a
+    /// relay from disk, quarantined the typing, projected disk over the editor,
+    /// and the re-registration then adopted that stale canonical. The editor is
+    /// the top rung of the authority ladder, so its text must survive.
     #[test]
-    fn relay_update_after_recycle_waits_for_controller_projection_receipt() {
+    fn relay_update_after_handoff_reseeds_from_the_editor_not_disk() {
         let (_dir, doc) = temp_doc("relay-lazy-projection.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
@@ -8156,88 +8280,198 @@ mod tests {
         let (client_id, bootstrap) = register_replica_for_file(&doc, identity)
             .unwrap()
             .expect("editor replica should attach");
-
-        let stale_editor =
-            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
-        let stale_offset = stale_editor.text().chars().count() as u32;
-        stale_editor.apply_local_edit(stale_offset, 0, "\nSTALE WHOLE BUFFER\n");
-        let stale_update = stale_editor.encode_state();
-
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        assert!(hub_registry().lock().remove(&hash).is_some());
-
-        let quarantined = relay_replica_update_for_file(&doc, identity, &stale_update)
-            .unwrap()
-            .expect("a cold relay update should return a quarantined no-op");
-        assert!(quarantined.update.is_empty());
-        assert!(quarantined.targets.is_empty());
-
         let disk_text = std::fs::read_to_string(&doc).unwrap();
-        let pending = with_hub(&doc, |hub| {
-            assert!(hub.controller_projection_established());
-            assert!(hub.awaits_canonical_projection(client_id));
-            assert_eq!(hub.canonical_text(), disk_text);
-            hub.pending_updates(client_id).unwrap().pop().unwrap()
-        })
-        .unwrap();
 
-        let projected_editor =
-            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &pending.update)
-                .unwrap();
-        assert_eq!(projected_editor.text(), disk_text);
+        let editor =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let frontier = editor.state_vector();
+        let end = editor.text().chars().count() as u32;
+        editor.apply_local_edit(end, 0, "\nOPERATOR TYPING ACKED BEFORE HANDOFF\n");
+        let typed_delta = editor.diff(&frontier).unwrap();
+
+        drop_controller_state_for_test(&doc);
+        let outcome = relay_replica_update_for_file(&doc, identity, &typed_delta)
+            .unwrap()
+            .expect("a cold relay update is handled, not a transport error");
+        assert!(outcome.update.is_empty());
+        assert!(outcome.targets.is_empty());
         with_hub(&doc, |hub| {
             assert!(
-                hub.ack_delivery_with_content_hash(
-                    client_id,
-                    &pending.patch_id,
-                    pending.generation,
-                    Some(&pending.expected_content_hash),
-                )
-                .unwrap()
+                !hub.is_registered(client_id),
+                "the cold update must not attach the editor as a projection consumer"
             );
-            assert!(!hub.awaits_canonical_projection(client_id));
+            assert!(!hub.controller_projection_established());
+            assert_eq!(hub.canonical_text(), disk_text);
         })
         .unwrap();
+        let ops_log =
+            std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("crdt_replica_update_editor_reseed_requested"));
+        assert!(
+            !ops_log.contains("crdt_replica_update_quarantined"),
+            "operator typing must not be quarantined behind a disk projection:\n{ops_log}"
+        );
 
-        let projected_frontier = projected_editor.state_vector();
-        let queue_offset = projected_editor.text().chars().count() as u32;
-        projected_editor.apply_local_edit(queue_offset, 0, "\nNEW QUEUE ITEM\n");
-        let queue_delta = projected_editor.diff(&projected_frontier).unwrap();
-        let applied = relay_replica_update_for_file(&doc, identity, &queue_delta)
+        let registration =
+            register_replica_for_file_incremental(&doc, identity, Some(&editor.state_vector()))
+                .unwrap()
+                .expect("the editor re-registers with its retained frontier");
+        assert!(registration.retained_replica_reseed_pending);
+        assert!(!registration.canonical_projection_retained);
+        assert!(registration.incremental);
+        assert!(
+            registration.bootstrap.is_empty(),
+            "no canonical text may be handed to the editor to adopt over its buffer"
+        );
+
+        let reseed = editor.diff(&registration.canonical_state_vector).unwrap();
+        relay_replica_update_for_file(&doc, identity, &reseed)
             .unwrap()
-            .expect("a post-projection user delta should relay");
-        assert!(!applied.update.is_empty());
+            .expect("the editor's retained state reseeds the relay");
         with_hub(&doc, |hub| {
-            assert!(hub.canonical_text().contains("NEW QUEUE ITEM"));
-            assert!(!hub.canonical_text().contains("STALE WHOLE BUFFER"));
+            assert_eq!(hub.canonical_text(), editor.text());
+            assert!(!hub.retained_replica_reseed_pending());
+            assert!(hub.pending_updates(client_id).unwrap().is_empty());
         })
         .unwrap();
 
-        assert!(hub_registry().lock().remove(&hash).is_some());
+        // Typing continues to merge forward in the reseeded lineage.
+        let after_reseed = editor.state_vector();
+        let end = editor.text().chars().count() as u32;
+        editor.apply_local_edit(end, 0, "more typing\n");
+        let next = editor.diff(&after_reseed).unwrap();
+        let relayed = relay_replica_update_for_file(&doc, identity, &next)
+            .unwrap()
+            .expect("post-reseed typing relays");
+        assert!(relayed.canonical_len > 0);
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), editor.text())).unwrap();
+    }
+
+    /// `#editorauth3`: a bootstrap receipt is an obligation, not an update
+    /// fence. The editor adopted the full bootstrap, so its typing is in this
+    /// relay's lineage and merges forward before the receipt ACK arrives.
+    #[test]
+    fn typing_relays_while_a_bootstrap_receipt_is_outstanding() {
+        let (_dir, doc) = temp_doc("receipt-not-fence.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let original = std::fs::read_to_string(&doc).unwrap();
+        let (old_client_id, original_bootstrap) = register_replica_for_file(&doc, "intellij:rnf")
+            .unwrap()
+            .expect("initial editor attaches");
+        let original_replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            old_client_id,
+            &original_bootstrap,
+        )
+        .unwrap();
+        let updated = format!("{original}\ncontroller response awaiting visibility\n");
+        apply_cp_write_for_file(&doc, &original, &updated, "test_receipt_not_fence")
+            .unwrap()
+            .expect("canonical write uses the live relay");
+
+        let identity = "intellij:rnf:refresh-1";
         let registration = register_replica_for_file_incremental(
             &doc,
             identity,
-            Some(&stale_editor.state_vector()),
+            Some(&original_replica.state_vector()),
         )
         .unwrap()
-        .expect("registration-first recycle should return controller bootstrap");
+        .expect("replacement registers");
         assert!(registration.canonical_projection_retained);
-        assert!(!registration.incremental);
+        let replacement = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+            registration.client_id,
+            &registration.bootstrap,
+        )
+        .unwrap();
         with_hub(&doc, |hub| {
-            assert!(hub.controller_projection_established());
-            assert!(hub.awaits_canonical_projection(client_id));
+            assert!(hub.awaits_canonical_projection(registration.client_id));
+            assert!(!hub.replica_updates_fenced(registration.client_id));
         })
         .unwrap();
 
-        let registration_first_stale = relay_replica_update_for_file(&doc, identity, &stale_update)
+        let frontier = replacement.state_vector();
+        let end = replacement.text().chars().count() as u32;
+        replacement.apply_local_edit(end, 0, "typed before the receipt ACK\n");
+        let typed = replacement.diff(&frontier).unwrap();
+        relay_replica_update_for_file(&doc, identity, &typed)
             .unwrap()
-            .expect("registration-first stale update should remain quarantined");
-        assert!(registration_first_stale.update.is_empty());
+            .expect("typing relays");
         with_hub(&doc, |hub| {
-            assert!(hub.canonical_text().contains("NEW QUEUE ITEM"));
-            assert!(!hub.canonical_text().contains("STALE WHOLE BUFFER"));
+            assert!(
+                hub.canonical_text().contains("typed before the receipt ACK"),
+                "in-lineage operator typing must not be quarantined"
+            );
+            assert_eq!(hub.canonical_text(), replacement.text());
         })
         .unwrap();
+    }
+
+    /// `#editorauth3`: a relay whose canonical differs from disk may hold an
+    /// agent write that is not on disk yet, so it keeps authority. The editor
+    /// gets the full bootstrap and its racing updates stay fenced until the
+    /// projection is received.
+    #[test]
+    fn relay_ahead_of_disk_keeps_authority_over_a_retained_registration() {
+        let (_dir, doc) = temp_doc("relay-ahead-of-disk.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = "intellij:ahead-of-disk";
+        let (client_id, bootstrap) = register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let editor =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let frontier = editor.state_vector();
+        let end = editor.text().chars().count() as u32;
+        editor.apply_local_edit(end, 0, "\nEDITOR TEXT\n");
+        let editor_update = editor.encode_state();
+        relay_replica_update_for_file(&doc, identity, &editor.diff(&frontier).unwrap())
+            .unwrap()
+            .expect("typing relays");
+
+        // Evict the relay but keep its retained projection, which is ahead of disk.
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert!(hub_registry().lock().remove(&hash).is_some());
+        let registration =
+            register_replica_for_file_incremental(&doc, identity, Some(&editor.state_vector()))
+                .unwrap()
+                .expect("registration-first recycle returns the controller bootstrap");
+        assert!(registration.canonical_projection_retained);
+        assert!(!registration.retained_replica_reseed_pending);
+        with_hub(&doc, |hub| {
+            assert!(hub.controller_projection_established());
+            assert!(hub.replica_updates_fenced(client_id));
+            assert!(hub.canonical_text().contains("EDITOR TEXT"));
+        })
+        .unwrap();
+        let racing = relay_replica_update_for_file(&doc, identity, &editor_update)
+            .unwrap()
+            .expect("a racing update is handled");
+        assert!(racing.update.is_empty());
+    }
+
+    /// `#editorauth3`: an unregistered editor whose update reaches a relay that
+    /// already carries another live member does not outrank it; the existing
+    /// canonical projection path still applies.
+    #[test]
+    fn cold_start_decision_prefers_the_editor_only_over_the_disk_rung() {
+        use ColdStartReplicaUpdateDecision::*;
+        assert_eq!(decide_cold_start_replica_update(true, true, false, false), Relay);
+        assert_eq!(
+            decide_cold_start_replica_update(true, false, false, false),
+            ReprojectCanonical
+        );
+        assert_eq!(decide_cold_start_replica_update(true, true, true, false), ReprojectCanonical);
+        assert_eq!(
+            decide_cold_start_replica_update(false, false, false, true),
+            RequestEditorReseed
+        );
+        assert_eq!(
+            decide_cold_start_replica_update(false, true, false, false),
+            ReprojectCanonical
+        );
+        // Registered members never reseed: they already joined this lineage.
+        assert_eq!(decide_cold_start_replica_update(true, true, false, true), Relay);
     }
 
     #[test]

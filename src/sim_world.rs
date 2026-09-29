@@ -461,6 +461,9 @@ mod cold_start_crdt_authority_model {
                         self.registered,
                         self.authority == Projection::Target,
                         self.canonical_projection_pending,
+                        // The retained controller target outranks disk here, so
+                        // the editor-rung reseed never applies in this model.
+                        false,
                     ) {
                         ColdStartReplicaUpdateDecision::Relay => {
                             // Once full-state convergence established the shared
@@ -473,6 +476,9 @@ mod cold_start_crdt_authority_model {
                             self.authority = Projection::Target;
                             self.canonical_projection_pending = true;
                             self.stale_updates_quarantined += 1;
+                        }
+                        ColdStartReplicaUpdateDecision::RequestEditorReseed => {
+                            unreachable!("the retained target is never only the disk rung")
                         }
                     }
                 }

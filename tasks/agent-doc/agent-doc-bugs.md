@@ -29,11 +29,74 @@ queue: go
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260929-003942.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260929-004013.md`*
 
 Compacted content:
-- Archived 32 response topic(s): complete #confirmfixlive; do #opcapturedormant; monsterrodholders migrate nag; 29 more
-- Prior summary/context: prior compacted content: Archived 7 response topic(s): queue prompt on cargovodtrim; actionable review items into bac...
+- Prior summary/context: prior compacted content: Archived 32 response topic(s): complete #confirmfixlive; do #opcapturedormant; monsterrodhol...
+Fix api.md issue
+```
+• Failed (exit 1) agent-doc write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md
+  └ Error: [finalize] retained document-write delivery from a prior cycle remains unsettled for /home/brian/work/btaki…
+    + Show details
+
+• The response-aware path correctly refused to create a second response while the retained delivery is settling. I’m
+  waiting briefly for the scheduled reconciliation, then running only the required session check.
+
+• Failed (exit 1) agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md
+  └ [perf] session_check.operations file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md total_ms=2726…
+    Error: [session-check] INTERRUPTED: canonical editor authority and disk projection diverge for /home/brian/work/bt…
+    + Show details
+
+• The prescribed check still sees the authoritative editor buffer ahead of disk, so agent-doc forbids another check or
+  write. The controller owns recovery now; I’m leaving the retained response untouched and observing its state
+  transition instead of forcing a competing closeout.
+
+• Ran agent-doc session status /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md
+  └ controller_last_command: none
+    status_warning: owned_pane_ready_busy_conflict actor=ready supervisor_actor=ready controller_lease=ready live_pane…
+    recovery_hint: supervisor will treat a stable stale ready/busy probe as recoverable after a bounded re-probe; if t…
+    + Show details
+
+• Ran agent-doc reliable-sync-status
+  └   d9272bd99fc83eb3c4050a3a0b3c3e0d84d979354d03d0f157187d0fe82f9b50
+      f073f1718a7ebc9a902fb32f4f0c79fc7153e878b07d782a96693f1931a9b334
+      f3b3b8d2aeee52fd97a96dd820fcdb1d5da996d0005143787f9b540f857bc131
+    + Show details
+
+• No new queue work is available; the retained continuation response remains under automatic agent-doc controller
+  reconciliation.
+
+• Hook stopped
+  └ agent-doc Stop hook already continued once for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md, but
+the cycle is still open. [session-check] INTERRUPTED: binary-owned response delivery `1790641671607888913-1-
+40bd928acd47a1b05b99e31eac227d86b0035df5bb529a5a3b2dc933647e054d` is retained for `/home/brian/work/btakita/agent-loop/
+src/haiven-dev/tasks/api.md` (reason=editor_delivery_worker_stale, source=serialized_atomic_write,
+target_hash=40bd928acd47a1b05b99e31eac227d86b0035df5bb529a5a3b2dc933647e054d); the same capture will resume
+automatically after editor/controller delivery converges. NOTE: zero live editor replicas are registered for this
+document, so there is currently nothing for the delivery to converge WITH — it will stay retained rather than drain on
+its own. Reopen the document in the editor so its replica re-registers; the retained capture then drains automatically.
+The capture is durable in CRDT/Lazily state, so it is not at risk while you do that. Do not issue another closeout
+payload and do not force disk; retry only `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/
+tasks/api.md`.
+
+  Worked for 3m 55s · 8:31 PM
+```
+
+### Re: infra.md "owned by pane %12, invocation from pane %3" — and recovery from that state — opus-5-5 · 2026-09-28T20:00-04:00
+
+**Cause: Codex's shared app-server daemon.** The refusal was printed *in* pane `%12`, infra.md's own owner. Codex 0.158 attaches every TUI to one shared `codex app-server` daemon, and the daemon spawns hooks and tool commands, so they inherit its environment. That daemon (pid 171804) had been started by the Codex TUI in `%3`, so it carried `TMUX_PANE=%3`. The `%12` TUI was connected to it over `/tmp/codex-daemon-1000/…`. Pane execution authority proves the invoking pane from `TMUX_PANE`, so the real owner looked foreign. Walking the process tree can't recover the true pane: the daemon's ancestry leads back to `%3` as well. fpe.md only ever worked because it really does live in `%3`.
+
+**Fix 1 — new launches (`f12d13c1c`):** the supervisor adds `--no-daemon` to every Codex launch before `fresh_base_args` is taken, so fresh, exact-resume and restart launches all carry it. `codex resume` accepts the flag, and the resume translator passes it through. A test covers every launch shape, and a mutation check confirmed it fails with the call removed.
+
+**infra.md is fixed now.** I restarted its supervisor onto the fixed binary. That kept the old Codex child, so I then replaced the agent. `%12` now runs `codex resume 01a0e8b5-… -c sandbox_mode="danger-full-access" --no-daemon` with its hook as its own child, and `agent-doc tasks/infra.md` ran instead of being refused.
+
+**Fix 2 — recovering sessions already in this state (`cb783a93b`):** Codex TUIs launched earlier (`%3` and `%13` right now) are still on the daemon. On a live-owner mismatch, pane authority now checks two things before refusing:
+- the invoking process descends from a Codex app-server daemon
+- the owner pane runs a Codex TUI without `--no-daemon`
+
+When both hold, it requests the owner's `agent:continue` replacement and logs `pane_authority_shared_codex_daemon`. That is the Restart Agent intent: the live supervisor defers it to the turn boundary and completes it as an exact resume, so the conversation survives and the relaunch carries `--no-daemon`. The refusal then says the reported pane isn't evidence and to re-run the trigger once the pane is back at its prompt. If the request can't be made, it names `agent-doc session restart-agent <FILE>`. On the live desktop, detection flags `%3`'s TUI (pid 171289), not `%12`'s, and reports no daemon ancestry for a process outside it.
+
+**Verification:** `make check` → exit 0, nextest 10032 passed, 0 failed. Installed, and the release `.bin` was rebuilt. **Caveat:** the `src/agent-doc` tree still holds another session's uncommitted edits (33 files, including `src/main.rs` and `src/session_actor_cmd.rs`). Those builds include them; I committed none of their files.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

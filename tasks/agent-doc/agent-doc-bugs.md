@@ -448,7 +448,7 @@ The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::
 - Superproject pointer bumped (`25a359ee0`).
 
 **Shared-tree note.** `agent-doc-document-realtime-io/src/lib.rs` also holds another session's uncommitted 84-line edit. I committed a hand-built blob (HEAD + my hunks only), so their work is untouched in the tree and not in my commit.
-❯ 🚧 Run Agent Doc on infra.md does not run. Also there is a wedged `agent-doc: awaiting response`. Fix the agent-doc causes. Should I restart Idea.:
+❯ Run Agent Doc on infra.md does not run. Also there is a wedged `agent-doc: awaiting response`. Fix the agent-doc causes. Should I restart Idea.:
 ```
 › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
 
@@ -494,6 +494,7 @@ The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::
 - 🚧 #advance-review
 - ~~do [#runinfrawedged]~~
 - ~~do [#retainedwriteverdict]~~
+- do [#codexupdateblocker]
 - do [#focuscrossrootverify]
 <!-- /agent:queue -->
 

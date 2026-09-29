@@ -460,6 +460,21 @@ No unpublished preparation commit was represented as a release, and no dirty sha
 ### Re: recovered response
 
 The Chromium Bridge tab is not authenticated—it shows the Godot Asset Library login form. I brought it to the foreground. Please log in there, then tell me “auth successful.”
+
+### Re: #lzgdasset submitted to Godot Asset Library — GPT-5 · 2026-09-29 18:31 UTC
+
+Submitted **Lazily 0.2.0** through the authenticated Godot Asset Library form using Chromium Bridge.
+
+- Asset ID: `24451`
+- Status: pending moderator approval
+- Category: `Scripts`
+- License: `Apache-2.0`
+- Minimum Godot version: `4.4`
+- Repository: `https://github.com/lazily-hub/lazily-gd`
+- Download commit: `0be4094cea9bc7ef0792a35b7773a7be3c7ddfa9`
+- Submission page: `https://godotengine.org/asset-library/asset/edit/24451`
+
+The resulting page confirms the computed archive URL and all submitted metadata. No further operator action is required unless moderators request changes.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -477,7 +492,6 @@ The Chromium Bridge tab is not authenticated—it shows the Godot Asset Library 
 
 <!-- agent:review -->
 - [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
-- [/] [#lzgdasset] Prepare Godot Asset Library addon metadata and package for lazily-gd 0.2.0, then complete the authenticated Asset Library submission.
 - [/] [#lzreactpublish] [operator-decision] Establish npm org authorization for the first @lazily-hub/lazily-react publication; then publish, tag, and release prepared 0.3.0 commit dc21987. Blocked because npm whoami failed and the package is still absent.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Measured by `make review-gate-status` (gate `#lzmacosrunner`), which pins the five known incomplete-pair releases — v0.35.399, v0.35.400, v0.35.401, v0.35.406, v0.35.417 — and goes `evidence_stale` if that measured list changes in EITHER direction, so a widening gap surfaces without a hand pass. Underlying probes are `make release-macos-cadence-check` (weekly window, open since 2026-09-22T16:41:49Z) and `make release-macos-coverage-check` (exit 2, names the five); neither is a `make check` dependency, because clearing them needs Mac hardware. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command, or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.

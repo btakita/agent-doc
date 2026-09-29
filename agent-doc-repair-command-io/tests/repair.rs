@@ -1109,6 +1109,54 @@ mod tests {
         );
     }
 
+    /// `#repairftstrike`: a retained write deferred on an unregistered editor
+    /// replica, then converged. `write --commit` (empty stdin) found the response
+    /// already present and committed it, but kept the answered free-text queue
+    /// head: the queue pass only matches a `> **Queue prompt:**` echo against
+    /// the stdin body, and there was none.
+    #[test]
+    fn repair_already_applied_strikes_the_free_text_head_its_response_quotes() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let head = "The lazily.md session crashed. Fix agent-doc causes.";
+        let response = format!(
+            "### Re: lazily.md session crash — opus-5-5\n\n> **Queue prompt:** {head}\n\nFixed.\n"
+        );
+        let baseline = format!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: true\n---\n\n\
+             ## Exchange\n\n<!-- agent:exchange patch=append -->\n\
+             <!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue -->\n- {head}\n- do [#other]\n<!-- /agent:queue -->\n"
+        );
+        let current = format!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: true\n---\n\n\
+             ## Exchange\n\n<!-- agent:exchange patch=append -->\n\
+             {response}<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue -->\n- {head}\n- do [#other]\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, &response).unwrap();
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::AlreadyApplied);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            repaired.contains(&format!("~~{head}~~")),
+            "the answered free-text head must be struck by the repair:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("- do [#other]") && !repaired.contains("~~do [#other]~~"),
+            "an unanswered id-backed head must stay live:\n{repaired}"
+        );
+    }
+
     #[test]
     fn repair_reorders_response_before_prompt_tail_when_pending_response_is_visible() {
         let dir = setup_project();

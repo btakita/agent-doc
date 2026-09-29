@@ -885,6 +885,29 @@ pub fn run_with_queue_completion_ids_and_force_disk<
                 eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
             }
         }
+        // `#repairftstrike`: the retained response is the only copy of this
+        // cycle's body the closeout will ever see — `write --commit` reaches here
+        // with empty stdin, so the later queue pass has nothing to match a
+        // `> **Queue prompt:**` echo against and keeps an answered free-text head
+        // queued forever. Strike it here, from the same response we just proved is
+        // materialized. The strike re-proves materialization and the baseline gate
+        // itself, and skips heads already struck.
+        if force_disk_override != Some(true) {
+            match agent_doc_queue_io::queue_consume::strike_answered_free_text_queue_heads(
+                file,
+                &response,
+                false,
+                &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
+            ) {
+                Ok(0) => {}
+                Ok(struck) => eprintln!(
+                    "[repair] struck {struck} answered free-text queue head(s) from the already-present response"
+                ),
+                Err(err) => {
+                    eprintln!("[repair] answered free-text strike deferred: {err:#} (non-fatal)")
+                }
+            }
+        }
         pending::clear_pending(&canonical)?;
         return Ok(RepairOutcome::AlreadyApplied);
     }
@@ -3579,8 +3602,12 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, base, agent_doc_ops_log_io::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         git(dir.path(), &["init", "-q"]);
         git(dir.path(), &["config", "user.email", "test@example.com"]);
         git(dir.path(), &["config", "user.name", "Test User"]);

@@ -211,13 +211,62 @@ Review work is complete, but document closeout is not yet committed.
 - The scoped review and credential proofs passed; latest agent-doc CI is green.
 - Finalization failed closed because the live editor authority diverges from disk and the shell pane is not the registered owner.
 - A reopen is queued in owner pane `%188`; the controller owns recovery. No force-write or resubmission was attempted, and nothing was pushed.
-<!-- agent:boundary:ce9fbb66:lazily -->
+1. Prepare clean version-bump commits and run every repository's full `make check` (plus registry dry-runs where available).
+2. Release `lazily-spec v0.40.0` first.
+3. Release `lazily-formal`, then the independent core/bindings. Ensure `lazily-js` precedes `lazily-react`; do not tag Rust until crates.io Trusted Publishing is configured.
+4. Treat the source releases for Godot and the eventual Asset Library submission as separate deliverables. Keep HTML out of this train until its public-repository bootstrap is complete.
+5. Run `make -C src/lazily-interop check` and `make -C src/lazily-interop network-suite-merge` against the chosen release revisions.
+6. Verify each registry/artifact after publication: Maven, Go proxy, npm, both NuGet packages, PyPI's full wheel matrix, pub.dev, crates.io, and all GitHub releases. Only then update and push the superproject pins.
+> **Queue prompt:**
+>
+> What needs to be done to release + publish?
+
+### Re: Lazily release and publication readiness — GPT-5 · 2026-09-29T00:10-04:00
+
+A full Lazily release train is warranted: every standalone repository has commits beyond its latest remote release. No release action was taken in this audit—no files, tags, pushes, credentials, registry entries, or releases were changed.
+
+The immediate rule is: **do not release from the current checkouts**. They all contain user-owned instruction/agent state, and some local tag refs are stale. Prepare each release in a clean worktree or fresh clone, fetch tags, and stage only intentional version/release-note files.
+
+#### Proposed release scope
+
+| Project | Published baseline | Proposed release | Publication path / required work |
+|---|---:|---:|---|
+| `lazily-spec` | `v0.39.0` | `v0.40.0` | Run `make check`; tag and create a GitHub release. It is not a registry package. Release this first because binding CI consumes the published corpus. |
+| `lazily-formal` | `v0.38.1` | `v0.39.0` | Local `make check` is the only gate; there is no CI workflow. Create a source GitHub release. |
+| `lazily-rs` | `0.58.0` | `0.59.0` | Bump the root crate and generated/versioned references, then `make check`. **Blocked:** configure crates.io Trusted Publishing for `lazily-hub/lazily-rs` / `release.yml`; recent tag workflows fail closed because this publisher is absent. The separate `@lazily/signaling` package is unpublished and outside the Rust release workflow. |
+| `lazily-kt` | `0.42.0` | `0.43.0` | Bump Gradle version, interop-peer version, and README; tag-triggered workflow publishes Maven artifacts to GitHub Packages. |
+| `lazily-go` | `v0.27.0` | `v0.28.0` | Update the interop-peer version, check, tag, create GitHub release, then warm/verify the Go proxy. |
+| `lazily-js` | `0.33.0` | `0.34.0` | Bump package/lock, interop peer, and generated README; tag-triggered OIDC workflow publishes npm. Publish before React. |
+| `lazily-react` | tag `v0.2.0`; npm absent | `0.3.0` | Bump package/lock, check, and `npm pack --dry-run`. **Operator decision/blocker:** the package has never been published; confirm npm org permission/authentication and whether tagged `0.2.0` should be back-published before `0.3.0`. |
+| `lazily-cs` | NuGet `0.5.0` | `0.6.0` | Bump both package projects and interop peer; tag workflow publishes both NuGet packages. Separately create the missing GitHub Release object for the already-published/tagged `v0.5.0`. |
+| `lazily-py` | `0.41.1` | `0.42.0` | Bump `pyproject.toml`, `__init__.py`, and changelog; tag workflow publishes PyPI wheels. Preserve the hosted `macos-14` matrix and both x86_64/arm64 deliverables; the current release has all six expected Darwin wheels. |
+| `lazily-dart` | `0.31.0` | `0.32.0` | Bump pubspec/changelog and run `dart pub publish --dry-run`; publication is a manual authenticated `dart pub publish`. |
+| `lazily-cpp` | `v0.29.0` | `v0.30.0` | Bump CMake version, check, and create a source-only GitHub release. The documented durable-owner capability gap should remain explicit. |
+| `lazily-zig` | `v0.35.0` | `v0.36.0` | Bump `build.zig.zon`, check, and create a source-only GitHub release. |
+| `lazily-gd` | `v0.1.0` | `v0.2.0` | A source-only GitHub release is ready after checks. **Godot Asset Library publication is blocked** on addon metadata/package structure and an operator submission; no registry entry currently exists. |
+| `lazily-html` | none | initial `0.1.0` | **Not release-ready:** the declared public GitHub repository does not exist, npm returns 404, and the private superproject copy tracks `node_modules`. Extract/create the public repo, preserve history, remove tracked dependencies/add `.gitignore`, add CI and trusted npm publication, then run `npm ci`, tests, and `npm pack --dry-run`. |
+| `lazily-interop` | private `0.1.0` | no publication | This is an integration gate, not a package. Run it last against exact released revisions, then update only the intended superproject pins. |
+
+#### Recommended order
+
+1. Prepare clean version-bump commits and run every repository's full `make check` (plus registry dry-runs where available).
+2. Release `lazily-spec v0.40.0` first.
+3. Release `lazily-formal`, then the independent core/bindings. Ensure `lazily-js` precedes `lazily-react`; do not tag Rust until crates.io Trusted Publishing is configured.
+4. Treat the source releases for Godot and the eventual Asset Library submission as separate deliverables. Keep HTML out of this train until its public-repository bootstrap is complete.
+5. Run `make -C src/lazily-interop check` and `make -C src/lazily-interop network-suite-merge` against the chosen release revisions.
+6. Verify each registry/artifact after publication: Maven, Go proxy, npm, both NuGet packages, PyPI's full wheel matrix, pub.dev, crates.io, and all GitHub releases. Only then update and push the superproject pins.
+
+The currently published `main` heads and latest CI are green for all audited standalone repositories except `lazily-formal`, which has no hosted CI and relies on its local check. The root Lazily network workflow is intentionally manual/disabled, so its local interop result is required release evidence.
+
+This audit used the repository's `tsift` navigation workflow to bound source and release-workflow inspection. A separate advisory remains: the live JetBrains agent-doc plugin is newer than the binary-bundled plugin; it does not block this release audit and should not be reinstalled during this cycle.
+<!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ⏭️ #advance-review
+- 🚧 do [#needsreleasepublish]
 <!-- /agent:queue -->
 
 ## Backlog

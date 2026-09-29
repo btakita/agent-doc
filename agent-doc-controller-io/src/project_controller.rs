@@ -5478,6 +5478,30 @@ fn retained_transition_state(
         });
     }
 
+    // `#replayafterack`: the retained Base -> Target delta may already be in the
+    // editor's cut under different binary-owned marker placement (a response the
+    // editor applied before the controller model saw it). Rebasing it again
+    // re-inserts the response; the cut is the fixed point.
+    if agent_doc_merge::captured_splice::current_contains_delta(
+        base_content,
+        &intent.target_content,
+        delivery.content.as_ref(),
+    ) {
+        return RetainedTransitionState::TargetVisible {
+            intent_id: intent.intent_id.clone(),
+            target_hash: delivery.content_hash.clone(),
+            delivery_version: delivery.delivery_version,
+            controller_generation,
+            persistence: RetainedPersistenceProjection {
+                file: delivery.file.clone(),
+                content_hash: delivery.content_hash.clone(),
+                content_len: delivery.content.len(),
+                delivery_version: delivery.delivery_version,
+                controller_generation,
+            },
+        };
+    }
+
     let compact_exchange_continuation_matches = projection
         .document
         .pending_compact_projection
@@ -5525,7 +5549,13 @@ fn retained_transition_state(
         .ok()
         .flatten()
         .unwrap_or(rebased);
-    if agent_doc_element::element::structural_corruption_reason(&rebased).is_some() {
+    if agent_doc_element::element::structural_corruption_reason(&rebased).is_some()
+        || agent_doc_document_realtime::write_policy::rebase_introduces_unscoped_text(
+            &rebased,
+            delivery.content.as_ref(),
+            &intent.target_content,
+        )
+    {
         return RetainedTransitionState::Conflict {
             intent_id: intent.intent_id.clone(),
             target_hash: intent.target_hash.clone(),
@@ -16079,6 +16109,64 @@ agent:queue\n\
         assert_eq!(projection.content_len, visible.len());
         assert_eq!(projection.delivery_version, 12);
         assert_eq!(projection.controller_generation, 7);
+    }
+
+    /// `#replayafterack`: fpe.md 2026-09-29. The editor applied the response
+    /// before the controller model saw it, a disk projection then gave that cut
+    /// ` (HEAD)` and moved the boundary, and the operator added a queue line.
+    /// The retained Base -> Target delta is already in the cut, so the state is
+    /// its fixed point. Rebasing it again duplicated the response and left
+    /// residue after `<!-- /agent:done -->`.
+    fn fpe_retained_transition(cut: &str) -> RetainedTransitionState {
+        let mut projection = retained_resume_projection("fpe-replay-after-ack");
+        let base = "## Exchange\n<!-- agent:exchange -->\nThe performance seems slow.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n## Queue\n<!-- agent:queue -->\n- slow?\n<!-- /agent:queue -->\n<!-- agent:done -->\n<!-- /agent:done -->\n";
+        let target = "## Exchange\n<!-- agent:exchange -->\nThe performance seems slow.\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n\n1. Test 4 vCPU.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n## Queue\n<!-- agent:queue -->\n- slow?\n<!-- /agent:queue -->\n<!-- agent:done -->\n<!-- /agent:done -->\n";
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(base.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(base);
+        intent.target_content = target.to_string();
+        intent.target_hash = agent_doc_hash::content_hash(target);
+        intent.continuation = None;
+        projection.closeout.captured_response = None;
+        retained_transition_state(
+            Some(&projection),
+            Some(&RetainedDeliveryObservation {
+                file: PathBuf::from("/work/fpe.md"),
+                content: Arc::from(cut),
+                content_hash: agent_doc_hash::content_hash(cut),
+                live_editors: 1,
+                delivery_converged: true,
+                delivery_version: 18,
+            }),
+            3,
+        )
+    }
+
+    #[test]
+    fn a_retained_delta_already_in_the_editor_cut_is_its_fixed_point() {
+        let cut = "## Exchange\n<!-- agent:exchange -->\nThe performance seems slow.\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n\n1. Test 4 vCPU.\n<!-- /agent:exchange -->\n## Queue\n<!-- agent:queue -->\n- slow?\n- PR #194 is merged. Continue.\n<!-- /agent:queue -->\n<!-- agent:done -->\n<!-- /agent:done -->\n";
+        let state = fpe_retained_transition(cut);
+        assert_eq!(retained_transition_state_tag(&state), "target_visible");
+        let RetainedTransitionState::TargetVisible { target_hash, .. } = &state else {
+            unreachable!();
+        };
+        assert_eq!(target_hash, &agent_doc_hash::content_hash(cut));
+
+        // Control: without the response in the cut, the delta is still applied.
+        let without = cut.replace(
+            "### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n\n1. Test 4 vCPU.\n",
+            "",
+        );
+        let state = fpe_retained_transition(&without);
+        assert_eq!(retained_transition_state_tag(&state), "apply_target");
+        let RetainedTransitionState::ApplyTarget(transition) = &state else {
+            unreachable!();
+        };
+        assert_eq!(
+            transition.target_content.matches("### Re: FPE capacity recommendation").count(),
+            1,
+            "the applied target carries exactly one response"
+        );
     }
 
     #[test]

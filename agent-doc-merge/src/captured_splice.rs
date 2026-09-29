@@ -119,6 +119,70 @@ pub fn rebase(
 /// canonical change over the same base range whose inserted text begins or ends
 /// with the operator's inserted text. Registration-only: adopting canonical is
 /// then lossless, where the alternative was refusing the endpoint indefinitely.
+/// `#ambiguousholdforever2` / `#replayafterack`: [text] without the markers only
+/// agent-doc writes: boundary-marker lines and the transient ` (HEAD)` heading
+/// suffix. A controller disk projection and canonical place them differently
+/// without anyone typing, so a containment proof must not count them as edits.
+/// The JetBrains plugin's `withoutBinaryOwnedMarkersUtil` applies the same rule.
+pub fn without_binary_owned_markers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\n', '\r']);
+        let trimmed = body.trim();
+        if trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->") {
+            continue;
+        }
+        let ending = &line[body.len()..];
+        match body.strip_suffix(" (HEAD)") {
+            Some(heading) if heading.trim_start().starts_with('#') => {
+                out.push_str(heading);
+                out.push_str(ending);
+            }
+            _ => out.push_str(line),
+        }
+    }
+    out
+}
+
+/// True when `current` already carries every change `base -> target` makes,
+/// ignoring binary-owned markers. A retained write whose delta is already in
+/// the editor's cut is delivered; rebasing it again re-inserts the same text.
+pub fn current_contains_delta(base: &str, target: &str, current: &str) -> bool {
+    let (base, target, current) = (
+        without_binary_owned_markers(base),
+        without_binary_owned_markers(target),
+        without_binary_owned_markers(current),
+    );
+    if target == current {
+        return true;
+    }
+    if target == base {
+        return false;
+    }
+    let old: Vec<char> = base.chars().collect();
+    let new: Vec<char> = target.chars().collect();
+    let mut prefix = 0;
+    while prefix < old.len() && prefix < new.len() && old[prefix] == new[prefix] {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < old.len() - prefix
+        && suffix < new.len() - prefix
+        && old[old.len() - 1 - suffix] == new[new.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    let batch = CapturedSpliceBatch {
+        edits: vec![CapturedSplice {
+            offset_code_points: prefix,
+            delete_code_points: old.len() - prefix - suffix,
+            insert: new[prefix..new.len() - suffix].iter().collect(),
+        }],
+        resulting_text: target.clone(),
+    };
+    canonical_contains_captured(&base, &current, &batch).unwrap_or(false)
+}
+
 pub fn canonical_contains_captured(
     base: &str,
     canonical: &str,
@@ -322,24 +386,6 @@ mod tests {
         batch(base, vec![edit(prefix, old.len() - prefix - suffix, &insert)])
     }
 
-    /// Mirrors the plugin's `withoutBinaryOwnedMarkersUtil`.
-    fn without_binary_owned_markers(text: &str) -> String {
-        text.lines()
-            .filter(|line| {
-                let line = line.trim();
-                !(line.starts_with("<!-- agent:boundary:") && line.ends_with("-->"))
-            })
-            .map(|line| {
-                if line.starts_with('#') {
-                    line.strip_suffix(" (HEAD)").unwrap_or(line)
-                } else {
-                    line
-                }
-            })
-            .map(|line| format!("{line}\n"))
-            .collect()
-    }
-
     /// `#ambiguousholdforever2`: the fpe.md hold (2026-09-29). The buffer was
     /// reloaded from a controller disk projection that put ` (HEAD)` and the
     /// boundary at the response heading; canonical kept its boundary at the end
@@ -368,5 +414,32 @@ mod tests {
         // Control: normalization does not excuse an operator edit canonical lacks.
         let unseen = buffer.replace("- PR #194 is merged. Continue.\n", "- typed while detached\n");
         assert!(!canonical_contains_captured(&shadow, &canonical, &single_splice(&shadow, &unseen)).unwrap());
+    }
+
+    /// `#replayafterack`: fpe.md 2026-09-29. The retained write's delta (the
+    /// response, boundary at the end of the exchange) was already in the
+    /// editor's cut, which the disk projection had shaped with ` (HEAD)` and the
+    /// boundary above the heading, plus an operator queue line.
+    #[test]
+    fn a_delta_already_in_the_cut_under_different_markers_is_contained() {
+        let base = "<!-- agent:exchange -->\nprompt\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- slow?\n<!-- /agent:queue -->\n";
+        let target = "<!-- agent:exchange -->\nprompt\n### Re: FPE capacity recommendation\n\nIncrease CPU first.\n<!-- agent:boundary:60c81193 -->\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- slow?\n<!-- /agent:queue -->\n";
+        let cut = "<!-- agent:exchange -->\nprompt\n<!-- agent:boundary:60c81193 -->\n### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n<!-- /agent:exchange -->\n<!-- agent:queue -->\n- slow?\n- PR #194 is merged.\n<!-- /agent:queue -->\n";
+        assert!(current_contains_delta(base, target, cut));
+        // Control: a cut without the response does not contain the delta.
+        let without = cut.replace("### Re: FPE capacity recommendation (HEAD)\n\nIncrease CPU first.\n", "");
+        assert!(!current_contains_delta(base, target, &without));
+        // Control: a different response body under the same heading is not the delta.
+        let other = cut.replace("Increase CPU first.", "Buy GPUs.");
+        assert!(!current_contains_delta(base, target, &other));
+    }
+
+    #[test]
+    fn binary_owned_markers_are_normalized_but_operator_mentions_are_kept() {
+        assert_eq!(
+            without_binary_owned_markers("a\n  <!-- agent:boundary:ab12 -->\n### Re: x (HEAD)\nb (HEAD)\n"),
+            "a\n### Re: x\nb (HEAD)\n"
+        );
+        assert_eq!(without_binary_owned_markers("t\n<!-- agent:boundary:ab12 -->"), "t\n");
     }
 }

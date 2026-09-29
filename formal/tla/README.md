@@ -143,6 +143,14 @@ decision when the published shadow, the live buffer, and canonical all differ:
 and must violate `EventuallyRegistered` (the 2026-09-29 `fpe.md` hold);
 `RetainedProjectionHoldReach.cfg` must show the containment edge is taken.
 
+`RetainedTransitionFixedPoint.tla` checks that a retained write whose
+Base -> Target delta is already in the editor's cut settles as that fixed point
+instead of being rebased again: at most one copy of the response, and the
+write always settles. `RetainedTransitionFixedPointWedge.cfg` (whole-text
+comparison only) must violate `AtMostOneResponse`, the 2026-09-29 `fpe.md`
+duplicate; `RetainedTransitionFixedPointReach.cfg` must show the fixed-point
+edge is taken.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

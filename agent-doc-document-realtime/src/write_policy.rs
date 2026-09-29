@@ -170,6 +170,50 @@ pub fn rebase_retained_target_over_editor_cut(
     rebase_agent_candidate_over_editor_cut(merge_base, agent_target, editor_cut)
 }
 
+/// `#replayafterack`: lines of [content] that sit outside every component
+/// (frontmatter included), trimmed. Component bodies are the only place a
+/// document write may land; text outside them is headings and prose the
+/// operator owns.
+fn unscoped_lines(content: &str) -> Option<std::collections::HashSet<String>> {
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let mut covered = vec![false; content.len()];
+    for component in &components {
+        for flag in &mut covered[component.open_start..component.close_end.min(content.len())] {
+            *flag = true;
+        }
+    }
+    let mut lines = std::collections::HashSet::new();
+    let mut offset = 0;
+    for line in content.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+        if covered[start..offset].iter().all(|flag| !flag) {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                lines.insert(trimmed.to_string());
+            }
+        }
+    }
+    Some(lines)
+}
+
+/// `#replayafterack`: true when a retained rebase placed text outside every
+/// component that neither the editor cut nor the agent target has there. That
+/// is merge residue (fpe.md, 2026-09-29: response lines and a torn boundary
+/// marker after `<!-- /agent:done -->`), never a write the intent asked for.
+pub fn rebase_introduces_unscoped_text(rebased: &str, editor_cut: &str, agent_target: &str) -> bool {
+    let (Some(rebased), Some(cut), Some(target)) = (
+        unscoped_lines(rebased),
+        unscoped_lines(editor_cut),
+        unscoped_lines(agent_target),
+    ) else {
+        return true;
+    };
+    rebased
+        .iter()
+        .any(|line| !cut.contains(line) && !target.contains(line))
+}
+
 fn retained_rebase_anchor_line(line: &str) -> bool {
     if line.len() < 8 || line.starts_with("<!-- agent:") {
         return false;
@@ -4858,4 +4902,24 @@ fn editor_delivery_admission_fails_closed_on_incomplete_registration() {
         EditorDeliveryAdmission::RefuseIncompleteRegistration,
         "a registration without a reliable open-set fact must not receive recovery payloads",
     );
+}
+
+/// `#replayafterack`: fpe.md 2026-09-29 — the retained rebase left response
+/// lines and a torn boundary tail after `<!-- /agent:done -->`.
+#[test]
+fn rebase_residue_outside_every_component_is_detected() {
+    let cut = "## Queue\n<!-- agent:queue -->\n- slow?\n<!-- /agent:queue -->\n<!-- agent:done -->\n<!-- /agent:done -->\n";
+    let target = cut;
+    let rebased = format!("{cut}Recommend 4 vCPU / 8 GiB.\n60c81193 -->\n");
+    assert!(rebase_introduces_unscoped_text(&rebased, cut, target));
+
+    // Text the operator typed outside components is in the cut, so it is kept.
+    let operator = format!("{cut}## Notes typed by the operator\n");
+    assert!(!rebase_introduces_unscoped_text(&operator, &operator, target));
+    // Text the agent's own target adds outside components is intended.
+    let agent_heading = format!("## Status\n{cut}");
+    assert!(!rebase_introduces_unscoped_text(&agent_heading, cut, &agent_heading));
+    // Changes inside a component never count.
+    let inside = cut.replace("- slow?\n", "- slow?\n- new item\n");
+    assert!(!rebase_introduces_unscoped_text(&inside, cut, target));
 }

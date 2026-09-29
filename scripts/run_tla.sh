@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -117,6 +117,10 @@ must_violate=(
     # difference (fpe.md, 2026-09-29); the containment edge must stay reachable.
     RetainedProjectionHold:RetainedProjectionHoldWedge
     RetainedProjectionHold:RetainedProjectionHoldReach
+    # `#replayafterack`: a retained delta already in the editor cut is its fixed
+    # point; rebasing it again duplicated fpe.md's response (2026-09-29).
+    RetainedTransitionFixedPoint:RetainedTransitionFixedPointWedge
+    RetainedTransitionFixedPoint:RetainedTransitionFixedPointReach
     StopHookFailClosed:StopHookFailClosedWedge
     StopHookFailClosed:StopHookFailClosedReach
     # `#recyclesettlewaitshort` — the dispatch gate across an upgrade re-exec.

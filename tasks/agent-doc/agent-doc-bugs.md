@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: c637ccfc-22c9-461c-9835-fbde6d23536c
+  claude: d0449ffc-6382-4cf9-adac-b0f7ef62ea03
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -646,6 +646,44 @@ Yes. I built it and recorded it as your decision for rule 3. Commit b1d21582d ad
 **Not wired in yet:** the renderer is standalone until `#editorauth4` puts it in the live merge. That phase also has to switch every conflict check that looks only for `<<<<<<<` over to `has_conflicts`, including `write_policy.rs` and write-converge. Otherwise an inline mark could be committed as if it were resolved text. I've added this to `#editorauth4`, and `#editorauth1` now includes this conflict display in what it formalizes. The plan file records the decision.
 
 Next in the queue is `#layoutobservehandoff`. The exchange is at about 600 lines, which is a size warning only.
+
+### Re: #editorauth1, the conflict rules formalized — opus-5 · 2026-09-29T17:02-04:00
+
+> **Queue prompt:**
+>
+> do [#editorauth1]
+
+
+> **Queue:** `do [#editorauth1]`, then `#editorauth2` ("ensure plugin parity"), `#editorauth3`, `#editorauth4`
+
+Your three conflict rules are now formally modeled and proved (commit 6c651cf63). The Lean proof covers every document and every pair of edits. The TLA+ model checks bounded cases, including you continuing to type after the merge.
+
+**The model:** the document is a sequence, and you have a cursor. Both your edit and the agent's replace a span of the same base text, and an append is a span of length zero.
+
+**What `formal/authority_ladder/ConflictReconciliation.lean` proves (no `sorry`):**
+- **Rule 1** (`same_point_agent_first`): when you both append at the same point, the agent's text lands first, your append follows it, and your cursor ends up at the end of your append. So if you keep typing, you extend your own text.
+- **Rule 2** (`agent_before_applies_both`, `operator_before_applies_both`): when the edits touch separate regions, both apply. The cursor stays at the end of your edit, moved only by the change in length from any agent edit earlier in the document.
+- **Rule 3** (`conflict_is_surfaced`, `conflict_resolves_to_either_side`): when the edits overlap and disagree, the buffer always gets a conflict mark, so neither side is silently dropped. Resolving it to your side reproduces your edit exactly, and resolving it to the agent's side reproduces the agent's edit exactly.
+- **Compact display** (`resolve_render`, `render_compact`): text both sides share stays outside the conflict mark, and a conflict never has two empty sides. The proof treats a conflict as one abstract node, which `conflict_render.rs` writes either inline or as a block.
+- **Every case:**
+  - `operator_text_never_lost`: outside a conflict, your inserted text sits intact just before the cursor; inside a conflict, your side is your exact edit.
+  - `agent_insert_preserved`: the same guarantee for the agent's text.
+- **Checking the theorems can fail:** `operator_first_violates_rule_one` and `conflict_reachable` are concrete examples showing that putting your text first would break rule 1, and that conflicts actually occur.
+
+**What `formal/tla/ConflictReconciliation.tla` checks:** every pair of edits on a 3-token base, followed by you typing at the cursor (11,368 states, no errors). Three configs must fail, and they do:
+- Putting your append first breaks `SamePointAgentFirst`.
+- "Last writer wins" on an overlap breaks `AgentPreserved`.
+- The Reach config shows conflicts really are shown.
+
+**Checking the checks:** I broke the model on purpose in 7 ways:
+- 5 in TLA+: a wrong cursor, no shared-prefix trimming, no shared-suffix trimming, swapped conflict sides, and separate regions treated as a conflict. Each one failed the invariant it should.
+- 2 in Lean: your text placed first, and the agent's side dropped. Each one broke the proofs.
+
+**Verification:** `make check` passed with exit 0: 10,096 tests, plus the Lean build and every TLA+ check, including the 3 new configs that must fail. This is a formal-only change, so there was no binary to install. CI for 6c651cf63 was still running when I checked. The plan file lists the theorems. It also notes that the proof doesn't cover the choice between inline and block display, which the `conflict_render.rs` round-trip tests cover separately.
+
+**`#editorauth2` ("ensure plugin parity"):** I rewrote the item to cover JetBrains and VS Code together. It now prefers the shared registration code in the FFI library, so both plugins get the same fix. Its regression replay of the api.md sequence must run against both plugins, plus an editor-parity check.
+
+Next in the queue is `#editorauth2`. The exchange is over 600 lines, which is a size warning only.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -655,21 +693,22 @@ Next in the queue is `#layoutobservehandoff`. The exchange is at about 600 lines
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fixapiissue]~~
-- 🚧 re "My proposal is that your text stays in the buffer and the agent's version becomes a visible conflict for it to reconcile": can we have an inline conflict resolution text for this if the conflict is short? Multi-line conflicts are overly verbose...and long lines with a small conflict are difficult to reconcile.
-- do [#layoutobservehandoff]
-- do [#syntheticstrike]
-- do [#focuscrossrootverify]
-- do [#retainedadvanceadmit]
+- ~~do [#editorauth1]~~
+- do [#editorauth2]: ensure plugin parity
+- do [#editorauth3]
+- do [#editorauth4]
+- 🚧 📌 do [#layoutobservehandoff]
+- 📌 do [#syntheticstrike]
+- 📌 do [#focuscrossrootverify]
+- 📌 do [#retainedadvanceadmit]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#editorauth1] [agent-doc] Formalize the conflict-reconciliation rules for the editor authority ladder (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Model content as a sequence with the operator's cursor, in Lean and TLA+. Prove: operator text is never lost; agent inserts are preserved; when both append at the same point, the agent content goes before the operator's and the cursor stays at the end of the operator's edit; an agent append while the operator edits existing text applies independently; a same-span conflict is surfaced in the buffer, never dropped, using the compact rendering decided 2026-09-29 (inline CriticMarkup for short changes, minimal git-style blocks otherwise; agent-doc-merge/src/conflict_render.rs), and resolving either side reproduces it exactly.
-- [ ] [#editorauth2] [agent-doc][jetbrains] Plugin registration never adopts canonical over a buffer that differs (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome; registration publishes the editor state and then merges forward. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register).
+- [ ] [#editorauth2] [agent-doc][jetbrains][vscode] Plugin registration never adopts canonical over a buffer that differs, in BOTH editor plugins (operator: ensure plugin parity) (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome in JetBrains and VS Code, preferably in the shared FFI registration path so both plugins get one behaviour; registration publishes the editor state and then merges forward. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register) against both plugins, plus an editor-parity check.
 - [ ] [#editorauth3] [agent-doc] Controller: no whole-text canonical replacement into a registered editor. Fold quarantined editor updates (`crdt_replica_update_quarantined recovery=lazy_canonical_projection`) before any handoff or checkpoint, and reseed the in-memory CRDT from the ladder on handoff/restart: the open editors' states, else disk (plan: tasks/agent-doc/plan-editor-authority-ladder.md; proof: formal/authority_ladder/EditorAuthorityLadder.lean).
 - [ ] [#editorauth4] [agent-doc] Implement the editorauth1 conflict-reconciliation merge in the native merge (agent-doc-merge), shared by JetBrains and VS Code through FFI (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Render same-span conflicts through conflict_render::render_conflict, and switch every detector that checks only for <<<<<<< (write_policy.rs, agent-doc-write-converge-io, run_entry.rs, sim_world) to conflict_render::has_conflicts so inline markers are never committed as resolved text.
-- [ ] [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
+- [ ] 🚧 [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
 - [ ] [#syntheticstrike] [agent-doc] An answered free-text queue head is never struck when its closeout commits as a synthetic cycle. agent-doc-bugs.md 2026-09-29 14:28: the capture belonged to cycle-1790704937323, but the commit landed as synthetic-1790706539439. `active_captured_response_for_queue_strike` requires `closeout.cycle_id == capture.cycle_id` and an open phase, so the controller's answered-free-text Computed never fired and "Fix …/issues/59" stayed live with a 🚧 marker. The pure projection strikes it correctly (probed with the real inputs and baseline). Fix the capture-to-synthetic-cycle ownership, or strike from the committing synthetic cycle when it committed that capture's response.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2

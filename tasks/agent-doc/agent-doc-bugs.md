@@ -136,6 +136,24 @@ There were no actionable follow-up items.
 **Verification:** `make check` passed, 10126/10126 (exit 0). `make install` exit 0. Pushed.
 
 **Follow-up (`#synthcommitstrike`, appended to the backlog):** the answered head still stays visibly live until the next preflight strikes it. A preflight commit can also refuse it first as a "recurring" prompt. The fix is to strike in the commit path itself, which needs either the capture carried through the synthetic fold or the shared residue strike run at commit.
+
+### Re: do [#layoutobservehandoff] — opus-5 · 2026-09-29T19:50-04:00
+
+> **Queue prompt:** 📌 do [#layoutobservehandoff]
+
+This landed earlier this session as `c0864bca9`, with the CI compile fix in `d44acade0`; this cycle verifies and closes it.
+
+- **Cause:** during an install handoff, `editor_route`'s layout sync reached a controller that was still `Preparing`. The refusal came back as the command's terminal result (`exit_code=1`, "controller not authoritative"), not as a transport error, so the existing handoff retry never saw it and Run Agent Doc showed the raw refusal.
+- **Fix:** the whole command submit, including its terminal-result check, now runs under the bounded handoff retry, so each attempt reaches the promoted generation. Real failures are not retried.
+- **Evidence:**
+  - haiven-dev's ops.log has exactly two occurrences: 18:57Z (the original report) and 22:51Z. Both are before the fix was installed at 22:57Z, and none have appeared since.
+  - All 16 controller-io handoff tests pass, including:
+    - `a_terminal_command_plane_handoff_refusal_is_retried`
+    - `a_mid_handoff_refusal_is_retried_until_a_generation_answers`
+    - `a_failure_that_is_not_a_handoff_refusal_is_never_retried`
+  - The full `make check` for the fix passed and it is installed.
+
+The exchange is getting large (session accretion `warn`); I'm continuing the drain rather than compacting.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -145,7 +163,7 @@ There were no actionable follow-up items.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ 📌 do [#layoutobservehandoff]
+- ~~📌 do [#layoutobservehandoff]~~
 - ~~📌 do [#syntheticstrike]~~
 - 📌 do [#focuscrossrootverify]
 - 📌 do [#retainedadvanceadmit]
@@ -156,7 +174,6 @@ There were no actionable follow-up items.
 - [ ] [#synthcommitstrike] [agent-doc] Strike an answered free-text queue head AT the synthetic closeout, not only at the next preflight. After #syntheticstrike (13d1c6d78) the continuation no longer re-offers the answered head, but the head stays visibly live (with 🚧) until the next preflight_freetext_residue_strike, and a preflight commit can refuse it first as 'a later queue prompt recurs after committed response capture' (agent-doc-bugs.md 2026-09-29 18:34:11). Cause: decide_committed turns an Abandoned capture cycle into a fresh synthetic state, and the projection clears captured_response on any cycle-id change, so the capture-owned strike Computed can never fire. Fix direction: run the shared residue strike (free_text_queue_head_is_completed_residue) in the commit path, or carry the capture into the fold.
 - [ ] [#frontmattersessionflap] [agent-doc] agent-doc-bugs.md frontmatter `claude:` session id changed three times in ~30 minutes on 2026-09-29 (72fd5a16 -> 500fe7a4 -> edbb61e8) with no new Claude session; each rewrite is post-commit drift that makes a later close refuse (commit_document_via_controller_error 22:44:30Z) and start_session_id_record_failed appears around it. Find the writer (session-id capture on /loop re-entry or hook), make it write only on a real session change, and add regression coverage.
 - [ ] [#editorauth2] [agent-doc][jetbrains][vscode] Plugin registration never adopts canonical over a buffer that differs, in BOTH editor plugins (operator: ensure plugin parity) (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome in JetBrains and VS Code, preferably in the shared FFI registration path so both plugins get one behaviour; registration publishes the editor state and then merges forward. The controller side landed in #editorauth3 (4d9e78578): on editor_replica_reregister the plugin must re-register WITH its retained state vector (resumeState) so the controller's cold-relay reseed applies, and must never drop that state on forceRefresh/requireFreshRegistration. Also covers two or more editors: an unregistered editor joining a relay that already holds one still gets the fenced canonical projection; reconcile it through reconcileText instead of adopting. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register) against both plugins, plus an editor-parity check.
-- [ ] [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 - [ ] [#retainedadvanceadmit] [agent-doc] Advances #drivecapturedsplice. The captured-splice live run is refused at `agent-doc-write-runtime-io/src/lib.rs:3135` ("retained document-write delivery from a prior cycle remains unsettled") while the captured operator edit is still unsaved in the editor (`native_editor_save_request_deferred`; authority and disk diverge on `exchange`). Decide whether a separate canonical advance must be admitted while a captured operator edit is retained. The recipe exists to prove that admission. Fix whichever side is wrong: the admission guard, or the harness ordering. Add SimWorld coverage for "retained capture + independent advance". Then rerun the recipe from tasks/agent-doc/plan-captured-editor-splice-recovery.md with a CLI build that matches the IDE cdylib.

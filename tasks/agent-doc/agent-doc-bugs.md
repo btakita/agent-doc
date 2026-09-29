@@ -448,6 +448,40 @@ The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::
 - Superproject pointer bumped (`25a359ee0`).
 
 **Shared-tree note.** `agent-doc-document-realtime-io/src/lib.rs` also holds another session's uncommitted 84-line edit. I committed a hand-built blob (HEAD + my hunks only), so their work is untouched in the tree and not in my commit.
+❯ 🚧 Run Agent Doc on infra.md does not run. Also there is a wedged `agent-doc: awaiting response`. Fix the agent-doc causes. Should I restart Idea.:
+```
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
+
+
+• agent-doc could not open a new cycle because the editor acknowledged a newer canonical version of tasks/infra.md that
+  has not reached disk. The visible edits are stranded.
+
+  Run:
+
+  agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
+
+  No cycle is currently open, so I stopped without making changes.
+
+  11:54 AM
+```
+
+### Re: infra.md won't run + wedged "awaiting response" — opus-5.5 · 2026-09-29T12:41-04:00
+
+**No, don't restart IDEA.** `infra.md` recovered by itself at about 11:57 and is healthy now. Press **Run Agent Doc** on it once more.
+
+**What happened (all times local, 2026-09-29):**
+- **11:54:15–11:54:44:** my previous cycle's `make install` triggered an `auto_install_reexec` recycle while you were typing in `infra.md`. The JetBrains replica rejected the controller's IPC receipt and began re-registering. During that window the controller kept re-sending the same update to it (redeliveries 1→17).
+- **11:54:30:** **Run Agent Doc** dispatched into the Codex pane. During preflight, the step that normalizes your prompt text made its own write, target `bd3fd3d3…`. The editor was re-registering, so that write had not reached disk yet and was held for later delivery. The ops log says as much: `recovery=retained_async_editor_delivery operator_action=none driver=lazy_projection`.
+- **The bug:** the refusal classified that held write as unowned. It told Codex the edits were **"STRANDED, not deferred, and waiting will not commit them — run `agent-doc commit`"**. That was false. The same kind of write lands by itself once the editor re-registers.
+- **11:55:48:** the editor's save reached disk.
+- **11:57:08:** the supervisor recycled onto the fresh build and the replica re-registered cleanly.
+- **Now:** disk, the controller and the editor all agree on `9c877027…` with `delivery_converged=true`. `agent-doc session-check tasks/infra.md` → `ok` (exit 0). The actor is `ready`, pane `%27` is idle at the prompt, and the cycle is `committed`.
+
+**The fix was already in.** `dc67c0495` (`#retainedwriteverdict`, committed 11:56:42, installed 11:57:03) rewrote this exact refusal site. When the refusal has just recorded a held write, it now counts that as ownership, so the verdict is `Deferred` ("the same intent commits itself once delivery converges"), not `Stranded`. A structural test (`every_refusal_after_a_recorded_intent_carries_it`) now fails on any new refusal site that forgets this. Codex's attempt ran on the older build three minutes before the fix was installed. No new code change was needed this turn.
+
+**Why nothing re-ran it on its own:** the refused admission ended Codex's turn. Your new queue item ("Reframe the title + description of the PR.") hasn't been committed yet, so dispatch skips it (`route_dispatch_uncommitted_head … head_not_in_committed_snapshot`). One manual **Run** commits your edits and drains that `go` queue. I didn't trigger it for you, because that item would edit the PR on GitHub.
+
+**About "awaiting response":** the label is only derived. The plugin shows it while a document's actor is `Busy`/`Blocked` or its cycle is still open. For `infra.md` that was true during the 11:54–11:57 window. Now it is `ready` and `committed`, so the label should be gone. If it is still showing on `infra.md`, it's a stale plugin subscription: close and reopen that tab, no restart needed. Separately, **`devops.md` pane `%40` is stuck on Codex's "Update available 0.158.0 → 0.159.0" dialog** (`alive-busy`, `recognized_blocker=none`). Press **Esc** (or pick Skip) in that pane. I added `#codexupdateblocker` so the router names this dialog as a blocker instead of stalling silently.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -458,12 +492,14 @@ The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 #advance-review
+- ~~do [#runinfrawedged]~~
 - ~~do [#retainedwriteverdict]~~
 - do [#focuscrossrootverify]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#codexupdateblocker] `tasks/devops.md` pane `%40` is parked on Codex's "Update available 0.158.0 → 0.159.0 · enter continue · esc skip" dialog. The route reports it as `alive-busy` with `recognized_blocker=none`, so dispatch into that pane stalls silently. Recognize the Codex update dialog as a named operator blocker in live-pane classification (never auto-answer it), and surface it in `session status` and the route refusal.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 <!-- /agent:backlog -->

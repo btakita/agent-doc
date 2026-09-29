@@ -217,3 +217,13 @@
 - 2026-09-29 [#mutonlyretry] Empty-body write --commit commits a landed retained tracked-work closeout, incl. abandoned cycles (agent-doc ce910f27d, 56224b34e).
 - 2026-09-29 [#replicachurn12s] JB editor replica for live session docs (agent-doc-bugs.md, lazily.md) cycles crdt_replica_register → crdt_replica_deregister every ~8-12s (ops.log 2026-09-29 06:41Z onward, before any install). Writes landing in the gap defer with editor_replica_reregister=definitively_refused_by_all:1 (two respond deferrals this turn). Find what deregisters a live replica and stop the churn.
 - 2026-09-29 [#retainedwriteverdict] Retained-write verdict said STRANDED (codex told to run agent-doc commit from the owning pane) for tasks/software/lazily.md at 2026-09-29T07:09:44-49Z while captured_finalize_resume for cycle-1790664582720 was in flight and committed at 07:09:48 (captured_finalize_resume_committed repair_outcome=ContinuedWriteAppliedCapture). Transient missing_replica (disposition=transient_probe) during a replica gap must not produce stranded guidance while a capture resume holds the write; see agent_doc_turn::write_ownership. Evidence: .agent-doc/logs/ops.log.1.zst 07:09:33-07:09:50Z.
+- 2026-09-29 [#runinfrawedged] Run Agent Doc on infra.md does not run. Also there is a wedged `agent-doc: awaiting response`. Fix the agent-doc causes. Should I restart Idea.:
+  ```
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
+  • agent-doc could not open a new cycle because the editor acknowledged a newer canonical version of tasks/infra.md that
+  has not reached disk. The visible edits are stranded.
+  Run:
+  agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
+  No cycle is currently open, so I stopped without making changes.
+  11:54 AM
+  ```

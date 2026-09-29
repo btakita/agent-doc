@@ -45,10 +45,28 @@ When the agent's incoming merge and the operator's live edit meet:
 2. **Operator editing existing text while the agent appends:** apply the agent's
    append; the regions are independent.
 3. **Both editing the same existing text:** a true conflict. It must be resolved,
-   never silently dropped on either side. Proposal: the operator's text stays in
-   the buffer (editor truth), and the agent's version is surfaced as a visible
-   conflict record (the steering channel) for the agent to reconcile next.
-   Operator decision still needed.
+   never silently dropped on either side. The operator's text stays in the buffer
+   (editor truth), and the agent's version is surfaced **in the buffer** as a
+   compact conflict for the agent (or operator) to reconcile next.
+
+   **Conflict rendering (operator decision 2026-09-29):** "can we have an inline
+   conflict resolution text for this if the conflict is short? Multi-line
+   conflicts are overly verbose...and long lines with a small conflict are
+   difficult to reconcile." Implemented as a pure, lossless renderer in
+   `agent-doc-merge/src/conflict_render.rs`:
+
+   - **Inline** when the differing lines correspond one-to-one and each change is
+     short (≤ 80 chars per side, ≤ 4 changes per line). Only the differing words
+     are marked, in CriticMarkup, reading as the agent's proposed edit to your
+     text: `{~~yours~>agent~~}` substitutes, `{++agent++}` adds, `{--yours--}`
+     removes. Adjacent word changes separated only by whitespace merge into one
+     substitution. Example: `pending a {~~lazy~>canonical~~} projection`.
+   - **Block** otherwise, but only around the lines that differ, never the
+     unchanged lines around them: `<<<<<<< yours` / `=======` / `>>>>>>> agent`.
+     A side without a final newline carries `\ No newline at end of file`.
+   - `resolve_conflicts(text, Keep::Yours | Keep::Agent)` returns either side
+     byte-for-byte; `has_conflicts` detects both shapes. Rendering refuses input
+     that already contains marker syntax, since it could not round-trip.
 
 ## Formal artifacts
 
@@ -70,7 +88,8 @@ When the agent's incoming merge and the operator's live edit meet:
    Content becomes a sequence with the operator's cursor. Prove: operator text
    never lost; agent inserts preserved; same-point appends ordered
    agent-before-operator with the cursor at the operator's end;
-   same-span conflicts surfaced, not dropped.
+   same-span conflicts surfaced, not dropped, in the compact rendering above
+   (resolving either side reproduces it exactly).
 2. `#editorauth2`: plugin registration. Remove every adopt-canonical outcome
    (`ApplyCanonical` over a buffer that differs) and replace it with
    publish-editor-state then merge forward. Regression test: replay of the api.md
@@ -80,4 +99,8 @@ When the agent's incoming merge and the operator's live edit meet:
    Reseed from the ladder on handoff/restart.
 4. `#editorauth4`: implement the conflict-reconciliation merge from phase 1 in
    the native merge (`agent-doc-merge`), shared by JetBrains and VS Code through
-   FFI.
+   FFI. Same-span conflicts render through `conflict_render::render_conflict`,
+   and every conflict detector that today checks only `<<<<<<<` (for example
+   `agent-doc-document-realtime/src/write_policy.rs`,
+   `agent-doc-write-converge-io`) switches to `conflict_render::has_conflicts`
+   so inline markers are never committed as resolved text.

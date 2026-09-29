@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: d6ba6e38-8c46-43f9-a101-8d3286ad2ac0
+  claude: cff0928e-bf41-4405-9dfb-628a47729295
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -579,7 +579,7 @@ Fixed, installed and pushed as commit ba25d21d5.
 **Still open:** when your typing changes the document mid-write, the first write attempt is still refused by the relay's hash check and `respond` exits 1. The pending write is kept, and the controller merges it onto your text and applies it, so the response does land. It isn't merged in the same call yet. The truthful refusal message above now guides the agent correctly while it waits.
 
 Queue: `#layoutobservehandoff` and `#syntheticstrike` are next. The exchange is at 535 lines, which is a size warning only.
-❯ 🚧 Fix api.md issue: I typed in the following but agent-doc deleted it
+❯ Fix api.md issue: I typed in the following but agent-doc deleted it
 ```
 `- demonstrate a hand-written model change and counterexample investigation by an engineer who did not author the model, without requiring agent access;` is not necessary. I want to emphasize that hand-writing formal models is not a requirement. But understanding the formal models is a requirement. Also, please emphasize that the formal models help keep the agent activity within bounds & reduce hallucinations by defining in formal language with invariants + proofs.
 ```
@@ -630,15 +630,11 @@ You're right that agent-doc rolled back the editor, which should be the source o
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 do [#fixapiissue]
-- ~~#advance-review~~
-- ~~do [#codexupdateblocker]~~
-- ~~do [#queuetypingsteer]~~
+- re "My proposal is that your text stays in the buffer and the agent's version becomes a visible conflict for it to reconcile": can we have an inline conflict resolution text for this if the conflict is short? Multi-line conflicts are overly verbose...and long lines with a small conflict are difficult to reconcile.
 - do [#layoutobservehandoff]
 - do [#syntheticstrike]
 - do [#focuscrossrootverify]
-- ~~do [#replayafterack]~~
 - do [#retainedadvanceadmit]
-- ~~Fix https://github.com/btakita/agent-doc/issues/59. release + publish~~
 <!-- /agent:queue -->
 
 

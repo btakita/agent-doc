@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0ebfe-eb3f-71f1-9bc5-0015867b7663
+  codex: 01a0ee0a-c94f-7de2-800b-cbdbc94e8377
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -349,13 +349,33 @@ The initially failing specification CI was rerun after the Kotlin floor landed a
 #### infra.md recovery
 
 The stranded `src/haiven-dev/tasks/infra.md` editor state is recovered. A direct `agent-doc commit` correctly failed closed because the owned target delivery had not reached the exchange boundary; `agent-doc session-check` then repaired historical committed-capture drift and confirmed the cycle committed with `queue_continuation_required=false`, `ui_outcome=no_drainable_work`, and `next_action=no_agent_action`. The live editor projection was intentionally left untouched.
+
+### Re: #lzhtmlbootstrap public release — GPT-5 · 2026-09-29T13:32:53-04:00
+
+> **Queue prompt:**
+>
+> do [#lzhtmlbootstrap]
+
+
+Completed the public `lazily-hub/lazily-html` bootstrap and release.
+
+- Published the public repository at [lazily-hub/lazily-html](https://github.com/lazily-hub/lazily-html), with `main` as its default branch. The extracted history preserves the two pre-bootstrap package commits (`ca6b0f8`, `958ad70`) followed by the public bootstrap commits.
+- Removed 1,407 tracked `node_modules` paths and added repository/package hygiene guards, exact ignore rules, CI, release automation, changelog, badges, install guidance, and normalized npm/GitHub metadata.
+- Added a tag-driven trusted-publishing workflow bound on npm to `lazily-hub/lazily-html` / `release.yml`, with GitHub OIDC `id-token: write`, version/tag validation, full checks, idempotent publication, and GitHub release creation.
+- Released [v0.1.0](https://github.com/lazily-hub/lazily-html/releases/tag/v0.1.0) and published [`@lazily-hub/lazily-html@0.1.0`](https://www.npmjs.com/package/@lazily-hub/lazily-html). The public registry reports the expected version, tarball, integrity, and 25 packaged files.
+- Verification passed locally: `make check`, 34/34 tests, repository hygiene, package-content validation (25 files, 19 source files, 39.0 kB packed / 134.2 kB unpacked), and `npm audit` with 0 vulnerabilities.
+- GitHub verification passed: the [release run](https://github.com/lazily-hub/lazily-html/actions/runs/36603517463) completed successfully and created the release; the idempotent publish step correctly detected the already-live version. The subsequent [current-runtime CI run](https://github.com/lazily-hub/lazily-html/actions/runs/36604250699) also completed successfully after upgrading checkout/setup-node to v6 and removing an invalid setup-node input.
+- The temporary browser-login token was revoked with `npm logout`, and its temporary userconfig file was removed.
+- The private superproject was intentionally left untouched in the shared dirty worktree; the already-queued `#lzreleasepins` item owns pinning/converting package links after the public release set is complete. No additional follow-up item is needed from this work.
+
+The exchange remains large, but this queue item is fully closed and the active queue can continue.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzhtmlbootstrap]
+- ~~do [#lzhtmlbootstrap]~~
 - do [#lzgdasset]
 - do [#lzreleasepins]
 - release + publish
@@ -364,7 +384,6 @@ The stranded `src/haiven-dev/tasks/infra.md` editor state is recovered. A direct
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzhtmlbootstrap] Bootstrap the public lazily-hub/lazily-html repository with preserved history, dependency hygiene, CI, trusted npm publication, and release 0.1.0.
 - [ ] [#lzgdasset] Prepare Godot Asset Library addon metadata and package for lazily-gd 0.2.0, then complete the authenticated Asset Library submission.
 - [ ] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 <!-- /agent:backlog -->

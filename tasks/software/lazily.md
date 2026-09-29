@@ -217,7 +217,7 @@ Review work is complete, but document closeout is not yet committed.
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 #advance-review
+- ⏭️ #advance-review
 <!-- /agent:queue -->
 
 ## Backlog

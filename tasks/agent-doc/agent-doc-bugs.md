@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 81a5dc86-7660-4bd2-944c-5bf9e029e9c8
+  claude: 4a326d6d-35d4-40d1-a46d-4014d1c3996d
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -228,6 +228,34 @@ Closed with no code change. The unblock question is "does either IDE host actual
 So a `-signed` sibling has no consumer. Adding `signPlugin` to the release `plugins` job without the three secrets would only fail the release. The client half (7649ccafd, `find_asset` accepting `<prefix>*-signed.<ext>`) stays as harmless forward compatibility. Signing becomes a real requirement only if agent-doc is ever published to JetBrains Marketplace. That would be a new item with its own secrets, not this one.
 
 Queue state: only `#focuscrossrootverify` remains, and it is `[operator-verify]` (a live IDE tab switch into `src/haiven-dev/tasks/api.md`). The loop stops here.
+
+### Re: #retaineddeferwedge — opus-5-5 · 2026-09-29T02:32-04:00
+
+Fixed in agent-doc `8da5f5015` (pushed and installed).
+
+**What went wrong:**
+- **Why nothing committed.** When the tracked-work mutations were deferred on the retained delivery projection, the write command returned `Ok(())` right away (`agent-doc-write-runtime-io/src/lib.rs`). That skipped queue consumption and the commit.
+  - The message promised "the same intent commits itself once delivery converges". Nothing did that. The write command is the only thing that owns this commit.
+- **Why the three recovery verdicts disagreed.** The cycle had been abandoned by `cancel_preflight` at 05:17, and the recovery classifier treated an abandoned cycle as `Clean` without checking anything. So `repair` said clean. With no recovery command, the session-check hint fell back to "document-only drift, run `agent-doc commit`". Then `commit` refused, because it compares the current document to HEAD and found a response HEAD doesn't have.
+- **Which content the snapshot recorded.** The 22261-byte snapshot was saved when the response cell was written (`response_cell_projection_materialized` → `document_baseline_checkpoint`, 05:23:46). That was after the response was added but before the tracked-work mutations. The mutations (reaping done items) then shrank the document to 21647 bytes. Because the snapshot already contained the response, a check that compares the document against the snapshot could not see it either.
+
+**Fix:**
+- **Write path:** after a deferral, the command now waits up to 30s for delivery to converge. Once this cycle's recorded mutations show up in the document, it carries on through the normal steps (queue consumption, then commit). If the wait ends without that proof, the closeout fails instead of exiting 0 uncommitted, and the error names `write --commit` without the tracked-work flags. The decision logic is a pure function: `agent_doc_turn::write_ownership::resolve_deferred_tracked_work`.
+- **Classifier:** it now also checks whether the current document holds a response that HEAD doesn't. This is the same check `commit` refuses on, applied to both abandoned and committed cycles, so session-check, repair and commit all name `write --commit`.
+
+**Verification:**
+- New tests:
+  - unit tests for the deferral decision and the classifier
+  - a file-level regression test that reproduces the incident (abandoned cycle, response hidden from the snapshot)
+- I broke the fix on purpose to check the file-level test: with the new abandoned-cycle branch disabled, the test fails.
+- Full `make check`:
+  - It fails in the shared tree on clippy `too_many_arguments` in `src/session_actor_cmd.rs`. Another session is editing that file and hasn't committed it; I didn't touch it.
+  - So I ran it in a clean worktree at HEAD with only my 5 files applied: exit 0; nextest reported 10052 run, 10052 passed, 0 failed; clippy, sim, lean and tla all passed.
+- CI run for `8da5f5015` is still in progress.
+
+**Not covered:** the in-process wait itself (the RPC loop) has no SimWorld test; only its decision function is tested.
+
+Warning from preflight: 1 gated item is still in `agent:backlog` (`legacy_gated_in_backlog`). Running `agent-doc migrate` moves it to `agent:review`.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -237,17 +265,12 @@ Queue state: only `#focuscrossrootverify` remains, and it is `[operator-verify]`
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#drivecapturedsplice]~~
-- ~~do [#fpestopreplay]~~
-- ~~do [#pastetriggeradmit]~~
-- ~~do [#nameelseclaude]: This happened after transitioning from `agent: claude` to `agent: codex`~~
-- do [#focuscrossrootverify]
-- ~~do [#publishjetbrainssibling]~~
+- ~~do [#retaineddeferwedge]~~
+- ⏭️ do [#focuscrossrootverify]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#retaineddeferwedge] [agent-doc] A respond whose tracked-work mutations deferred on retained delivery projection (tracked_work_mutations_deferred_retained_delivery_projection, 2026-09-29T05:23:49Z, cycle-1790658555784) never committed after delivery converged (delivery_converged=true at 05:26, authority==disk 21647B) and nothing retried it. The three verdicts contradicted: session-check said snapshot!=HEAD run agent-doc commit; commit refused 'current authority contains an uncommitted response; use write --commit'; repair --apply-recovery said clean. Recovered by re-piping the identical body through write --commit (deduped: 'response cell already present'). Fix: the retained intent must commit itself on convergence, and session-check/commit/repair must agree on one remedy. Also snapshot_len=22261 differed from converged authority 21647 — find which target the snapshot recorded.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 <!-- /agent:backlog -->

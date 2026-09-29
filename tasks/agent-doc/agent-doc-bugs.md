@@ -706,6 +706,28 @@ My `#editorauth1` closeout also struck `do [#editorauth2]: ensure plugin parity`
 `make check` passed: exit 0, 10,098 tests.
 
 **Please un-strike `do [#editorauth2]: ensure plugin parity` in the queue.** The binary has no command that restores a struck line with an id (`queue sync` skips ids that are already present), and I won't hand-edit your live buffer. Until you do, the queue will run `#editorauth3` next. `#editorauth2` is next in your order and is still open in the backlog, already rewritten for JetBrains + VS Code parity.
+
+### Re: the queue struck editorauth2 by mistake (fixed) — opus-5 · 2026-09-29T17:16-04:00
+
+My `#editorauth1` closeout also struck `do [#editorauth2]: ensure plugin parity` from the queue, but that item is still open in the backlog and hasn't been worked on. I found the cause and fixed it (commit 5e49dc6d4). The fix is installed.
+
+**What happened:**
+- Your note after the directive (`: ensure plugin parity`) made the queue treat the whole line as a free-text prompt instead of an `#editorauth2` work item.
+- The closeout ran a second time after `#editorauth1` was already struck. That second run was allowed to consume one free-text head, and it took the next line, which was yours.
+- The first run had correctly refused to do this (`queue_consume_refused_unproven_free_text_head`). The second run didn't, because it went through a path that is allowed to consume free text.
+
+**The fix:** a line that starts with `do`, followed by ids and then a colon and a note (`do [#id]: note`), now counts as that id's work item. Only closing that id (`--done editorauth2`) removes it. A bare `[#id]: note` without `do` stays plain text, as before.
+
+**Tests:**
+- A unit test covers the new directive shape.
+- A classifier test checks both shapes.
+- A planner test replays the incident: the queue has `#editorauth1` already struck, and a free-text budget of 0 and 1 both leave the annotated line alone. `--done editorauth2` still consumes it.
+- I removed the fix and confirmed the planner test fails without it.
+- An earlier strike-path test I wrote passed even without the fix, so it wasn't testing anything, and I deleted it.
+
+`make check` passed: exit 0, 10,098 tests.
+
+**Please un-strike `do [#editorauth2]: ensure plugin parity` in the queue.** The binary has no command that restores a struck line with an id (`queue sync` skips ids that are already present), and I won't hand-edit your live buffer. Until you do, the queue will run `#editorauth3` next. `#editorauth2` is next in your order and is still open in the backlog, already rewritten for JetBrains + VS Code parity.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

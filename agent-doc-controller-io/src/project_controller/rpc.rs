@@ -3144,6 +3144,7 @@ where
 /// The command-plane response when its terminal result is success, or an error
 /// carrying the handler's output (which [`retry_controller_handoff_refusal`]
 /// inspects for a mid-handoff refusal).
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn command_submit_response_accepted(
     name: &str,
     response: serde_json::Value,

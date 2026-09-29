@@ -776,6 +776,25 @@ Next in the queue are `#layoutobservehandoff`, `#syntheticstrike`, `#focuscrossr
 **Still needed from the plugins (`#editorauth2`, updated):** when asked to re-register, the plugins must send their saved CRDT state and never discard it. Otherwise the controller has nothing to reseed from. A second editor joining a relay that already has one still gets the guarded canonical text, so `#editorauth2` also covers reconciling that case through `reconcileText`.
 
 Next in the queue is your lazily.md "multiple `agent-doc: awaiting response`" item. The exchange is over 700 lines, which is a size warning only.
+
+### Re: the two "awaiting response" strips in lazily.md, and Run Agent Doc refused on devops.md — opus-5 · 2026-09-29T18:29-04:00
+
+> **Queue prompt:** Fix multiple `agent-doc: awaiting response` prompts in lazily.md: ![img_2.png](img_2.png)
+
+**Both fixed, installed (plugin 0.2.446) and pushed.** `make check` passed (10,117 tests), and so did the full JetBrains suite.
+
+**The duplicate strip (`#duplicateturnbanner`, agent-doc `365cd8674`):** the second "awaiting response" strip came from the plugin generation that the 17:38 dynamic reload unloaded. The unload cleanup (`#staleturnbanner`) can miss a strip: the IDE can build the old generation's strip on the UI thread after that generation retired, and an older build may have no cleanup at all. The live generation now does the cleanup. Each strip carries a marker and, when it attaches, removes any other agent-doc turn strip beside it. A retired generation builds no strips. There are tests for a stale strip beside a live one, a stale strip inside a wrapper, and a retired generation. Re-breaking the sweep failed both sweep tests.
+
+**A log storm (`#reloadignorestorm`, same commit):** the retired generation asked for a native reload on every library call, about 400 log lines a second, so `idea.log` rotated every ~3 minutes and erased the history needed for this diagnosis. That generation now skips the check and logs once, with the caller's stack trace.
+
+**Run Agent Doc on devops.md (`#rundocdispatchrobust`, agent-doc `c8b75b429`):**
+- **Cause:** Analyze Project was not the cause. My 18:12:38 plugin install swapped generations. The new generation's liveness report (its "I have these documents open" message) never reached the nested haiven-dev controller: the native library was mid-reload, and a failed report was dropped with no retry. That controller kept treating the retired generation as the live editor and refused every registration from the new one as a stale endpoint. Meanwhile the retired generation kept re-registering under its old identity every 30 seconds. Preflight waited about 3.7 seconds and then refused your turn.
+- **Plugin fix:** a liveness report that can't be delivered is retried with backoff. A stale-endpoint refusal republishes that document's liveness and retries after 1 second. A retired generation never retries registration.
+- **Preflight fix:** when the editor's document model is missing, preflight asks the editor to re-register and waits another window, up to 3 times, before refusing. It no longer gives up after the first window.
+- **Seen live:** this install's reload at 18:28:43 hit the same fault. devops.md was refused once as a stale endpoint at 18:28:46 and then attached under the new generation at 18:29:00, on its own. Before the fix it never attached.
+- **Not changed, by design:** the "queued draft in composer" refusal on pane %40. Dispatch won't type over text sitting in Codex's input box, because that text may be yours. Clear or submit that draft and Run Agent Doc will go through.
+
+Next in the queue is `#layoutobservehandoff`. The exchange is 750 lines, which is a size warning only.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -788,7 +807,6 @@ Next in the queue is your lazily.md "multiple `agent-doc: awaiting response`" it
 - ~~do [#editorauth2]: ensure plugin parity~~
 - ~~do [#editorauth3]~~
 - 🚧 Fix multiple `agent-doc: awaiting response` prompts in lazily.md: ![img_2.png](img_2.png)
-- do [#editorauth2]
 - 📌 do [#layoutobservehandoff]
 - 📌 do [#syntheticstrike]
 - 📌 do [#focuscrossrootverify]

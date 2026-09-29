@@ -215,3 +215,4 @@
 - 2026-09-29 [#retainedapplywitness] Retained tracked-work envelope counts as applied once delivery converges (agent-doc 5043fd66b).
 - 2026-09-29 [#addreapwitness] Add+done in one closeout witnessed by the done half, not by row presence (agent-doc ce910f27d).
 - 2026-09-29 [#mutonlyretry] Empty-body write --commit commits a landed retained tracked-work closeout, incl. abandoned cycles (agent-doc ce910f27d, 56224b34e).
+- 2026-09-29 [#replicachurn12s] JB editor replica for live session docs (agent-doc-bugs.md, lazily.md) cycles crdt_replica_register → crdt_replica_deregister every ~8-12s (ops.log 2026-09-29 06:41Z onward, before any install). Writes landing in the gap defer with editor_replica_reregister=definitively_refused_by_all:1 (two respond deferrals this turn). Find what deregisters a live replica and stop the churn.

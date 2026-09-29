@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 0632edb8-e0be-4ca4-8ae2-0c770866f1a2
+  claude: 86748b32-6dfb-4df4-a108-fbd7a235fcad
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -362,6 +362,41 @@ The earlier mutation-only closeout (it recorded the coined ids and added `#repli
 - CI: `36535275954` (`#reexecpurposelost`) passed. The runs for the later commits are still in progress.
 
 **Still open:** `#replicachurn12s`. The editor's link to agent-doc for a live document drops and reconnects every 8–12s (`crdt_replica_register` → `crdt_replica_deregister` in ops.log, on both agent-doc-bugs.md and lazily.md, since at least 06:41Z). That churn caused every deferral this turn. I added it to the backlog but haven't diagnosed it yet.
+
+### Re: #replicachurn12s — stale supervisor reload loop — opus-5 · 2026-09-29T11:41-04:00
+
+**Root cause.** The churn didn't come from a replica lifecycle bug. It was a `reload_library` loop.
+
+- The supervisor for `src/boost-client` `monsterrodholders.md` (pid 3913498, `start --route-owned`, started 01:53) still runs a **replaced binary**: build `0.35.418+7f9e86f9`, exe `(deleted)`.
+- Everything else is on the installed build `+63f928ae`: the installed binary, the installed `.so`, the JB listener, and every controller.
+- Every replica notify from that supervisor hit `ipc_handshake_rejected reason=ipc_build_mismatch listener=+63f928ae client=+7f9e86f9`.
+- `send_message_to_pid_recovering_build_mismatch` then sent `reload_library` to the JB editor without checking which side was stale.
+- The editor reloaded the library it already ran. That restarted **every replica in the IDE, across all projects**, then "replica restart incomplete attached=20/27". The mismatch survived, so the loop repeated every ~5-12s.
+- Evidence: 26 `reload_library received` in idea.log within ~2 min; ops.log shows `replica_deregister source=jetbrains_plugin` for all 7 open docs at once.
+- The loop was also a **deadlock**: the stale supervisor defers its own recycle while its codex cycle is open (`supervisor_recycle_deferred_cycle_open stale=true`), and that cycle can't close because its writes land in the churn.
+
+**Fix** (`agent-doc-ipc-io`, commit `203144577`, pushed). The build-mismatch recovery now withholds the editor reload and returns the typed mismatch when the reload provably can't help:
+- the sender's `/proc/self/exe` is replaced (` (deleted)`), i.e. the stale side is the sender; or
+- a delivered reload for the same editor pid + listener build is still inside a cooldown (2× the 90s reload receipt budget). A working reload changes the listener build, so a repeat mismatch against the same build means the sender is the stale one.
+
+The cooldown is armed only after a reload is actually delivered, so a failed delivery still retries. The existing code comment already said "a stale project controller must recycle itself"; the recovery just never checked.
+
+**Verification**
+- New tests: decision table, cooldown scoping/expiry, replaced-exe detection, and listener-build extraction.
+- The existing end-to-end `build_skew_blocks_mutation_but_reload_compatibility_remains_available` now asserts that a second mismatch against the same listener build is withheld, with exactly 1 reload delivered.
+- Mutation probe: disabling the guard reddens that test.
+- `make check`: exit 0, 10066/10066 passed.
+- `make install`: ok. Its reload fan-out was deferred mid-cycle, which is expected.
+- Committed only my hunks; another session's rustfmt hunk in the same file is left unstaged.
+
+**Live residue**
+- The already-running stale supervisor still has the old code.
+- I requested `agent-doc session restart-supervisor src/boost-client/tasks/monsterrodholders.md` (continue mode, not forced). It was accepted, but the replacement is deferred on that open codex cycle.
+- Churn has been quiet since 15:39:50Z while that session is idle. It will come back on that supervisor's next notify until its cycle closes and it re-execs.
+- If it keeps recurring, the unblocker is finishing that codex turn or `restart-supervisor --force` on that document. That discards the busy-state guard for another session, so I didn't do it.
+- New stale supervisors no longer produce this loop.
+
+Exchange is 336+ lines; noting accretion only (queue active, no compaction).
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -371,14 +406,12 @@ The earlier mutation-only closeout (it recorded the coined ids and added `#repli
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#retaineddeferwedge]~~
-- ~~The lazily.md session crashed. Fix agent-doc causes.~~
-- ⏭️ do [#focuscrossrootverify]
+- do [#focuscrossrootverify]
+- ~~do [#replicachurn12s]~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#replicachurn12s] JB editor replica for live session docs (agent-doc-bugs.md, lazily.md) cycles crdt_replica_register → crdt_replica_deregister every ~8-12s (ops.log 2026-09-29 06:41Z onward, before any install). Writes landing in the gap defer with editor_replica_reregister=definitively_refused_by_all:1 (two respond deferrals this turn). Find what deregisters a live replica and stop the churn.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 <!-- /agent:backlog -->

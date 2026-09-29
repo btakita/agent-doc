@@ -151,6 +151,13 @@ comparison only) must violate `AtMostOneResponse`, the 2026-09-29 `fpe.md`
 duplicate; `RetainedTransitionFixedPointReach.cfg` must show the fixed-point
 edge is taken.
 
+`RealtimeSteeringStop.tla` checks that operator steering landing after a commit
+is always handed back to the agent in the current turn, whether it is a new
+prompt (`prompt_target`) or typing inside an existing queue item or prompt
+(`content_edit`). `RealtimeSteeringStopWedge.cfg` (prompt_target only) must
+violate `SteeringEventuallyAnswered`, the 2026-09-29 `api.md` stop;
+`RealtimeSteeringStopReach.cfg` must show a content_edit is handed back.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

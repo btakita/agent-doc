@@ -137,9 +137,22 @@ pub fn response_prompt_target_from_re_heading(response_body: &str) -> Option<Str
     None
 }
 
+/// `#queuetypingsteer`: the labels session-check puts before realtime operator
+/// steering (`prompt_bearing_route::prompt_bearing_route_context_from_change`).
+/// `content_edit` is the operator typing inside an existing queue item or
+/// exchange prompt, which is steering exactly as much as a new `prompt_target`.
+const STEERING_MARKERS: [&str; 2] = ["prompt_target:", "content_edit:"];
+
+fn first_steering_marker(reason: &str) -> Option<(usize, &'static str)> {
+    STEERING_MARKERS
+        .iter()
+        .filter_map(|marker| reason.find(marker).map(|at| (at, *marker)))
+        .min_by_key(|(at, _)| *at)
+}
+
 pub fn is_committed_prompt_diff_interruption(reason: &str) -> bool {
     reason.contains("is `committed`")
-        && reason.contains("prompt_target:")
+        && first_steering_marker(reason).is_some()
         && (reason.contains("unresolved prompt-bearing user changes")
             || reason.contains(
                 "active harness session changed this document after the last committed closeout",
@@ -149,8 +162,8 @@ pub fn is_committed_prompt_diff_interruption(reason: &str) -> bool {
 }
 
 pub fn prompt_target_from_interruption_reason(reason: &str) -> Option<String> {
-    let marker = "prompt_target:";
-    let tail = reason.split_once(marker)?.1.trim();
+    let (at, marker) = first_steering_marker(reason)?;
+    let tail = reason[at + marker.len()..].trim();
     (!tail.is_empty()).then(|| tail.to_string())
 }
 
@@ -575,6 +588,30 @@ mod tests {
         let reason = "session-check: cycle is `preflight_started`; unresolved prompt-bearing user changes found; no new agent-doc cycle started; prompt_target: do #deploy";
 
         assert!(!is_committed_prompt_diff_interruption(reason));
+    }
+
+    /// `#queuetypingsteer`: src/haiven-dev/tasks/api.md, 2026-09-29. The operator
+    /// typed into the queue while the turn ran; session-check labelled it
+    /// `content_edit`, the Stop hook did not treat it as steering, and the
+    /// agent stopped with "already continued once" instead of answering it.
+    #[test]
+    fn committed_content_edit_is_realtime_steering_too() {
+        let reason = "[session-check] INTERRUPTED: cycle `cycle-1790707653839` is `committed` (commit_success), repaired committed historical committed_capture snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: content_edit: Even if formal logic code is not directly understandable, agents should be able to construct human understandable representation of the invariants and proofs from the formal logic code.\nThis is realtime operator steering, not a failed closeout";
+
+        assert!(is_committed_prompt_diff_interruption(reason));
+        assert_eq!(
+            prompt_target_from_interruption_reason(reason)
+                .as_deref()
+                .map(first_nonempty_prompt_line)
+                .as_deref(),
+            Some(
+                "Even if formal logic code is not directly understandable, agents should be able to construct human understandable representation of the invariants and proofs from the formal logic code."
+            )
+        );
+        // An open cycle is not the committed-steering shape, whatever the label.
+        assert!(!is_committed_prompt_diff_interruption(
+            &reason.replace("is `committed`", "is `preflight_started`")
+        ));
     }
 
     #[test]

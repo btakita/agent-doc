@@ -958,9 +958,19 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
     if !is_committed_prompt_diff_interruption(reason) {
         return Ok(None);
     }
-    let prompt = agent_doc_session_check_io::unresolved_exchange_prompt(file)?
-        .or_else(|| prompt_target_from_interruption_reason(reason))
-        .unwrap_or_else(|| "the unresolved exchange prompt".to_string());
+    // `#queuetypingsteer`: a `content_edit` is the operator's own edit inside an
+    // existing queue item or prompt; name that edit, not some other prompt the
+    // exchange happens to hold.
+    let steering_is_content_edit = reason
+        .find("content_edit:")
+        .is_some_and(|at| reason.find("prompt_target:").is_none_or(|target| at < target));
+    let prompt = if steering_is_content_edit {
+        prompt_target_from_interruption_reason(reason)
+    } else {
+        agent_doc_session_check_io::unresolved_exchange_prompt(file)?
+            .or_else(|| prompt_target_from_interruption_reason(reason))
+    }
+    .unwrap_or_else(|| "the unresolved exchange prompt".to_string());
     Ok(Some(StopResponse::Block {
         decision: "block",
         reason: format!(
@@ -5421,6 +5431,27 @@ Reviewed the gated items.\n\
         assert!(
             !agent_doc_flow_io::closeout::replay_closeout_still_proven(&doc, &current).unwrap(),
             "a new cycle must supersede the old receipt even with unchanged content"
+        );
+    }
+
+    /// `#queuetypingsteer`: src/haiven-dev/tasks/api.md, 2026-09-29. Operator
+    /// typing inside an existing queue item is reported as `content_edit`. The
+    /// recursive Stop must hand it back as steering to answer in-pane, not stop
+    /// with "already continued once".
+    #[test]
+    fn a_committed_content_edit_is_handed_back_as_steering() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        let reason = "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), repaired committed historical committed_capture snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: content_edit: Even if formal logic code is not directly understandable, agents should explain the invariants.\nThis is realtime operator steering, not a failed closeout";
+
+        let response = committed_prompt_diff_stop_response(&doc, reason)
+            .unwrap()
+            .expect("content_edit steering after a commit must be handed back in-pane");
+        assert!(
+            matches!(&response, StopResponse::Block { reason, .. }
+                if reason.contains("fresh unresolved exchange work")
+                    && reason.contains("Even if formal logic code is not directly understandable")),
+            "{response:?}"
         );
     }
 

@@ -3131,6 +3131,25 @@ fn guard_historical_retained_write_before_new_capture(
     }
     if agent_doc_document_realtime_io::retained_write_blocks_new_cycle(file, boundary.gate_source())
     {
+        // `#queuetypingsteer`: when the unsettled write was created inside the
+        // cycle that is still open, it is THIS turn's own earlier attempt (for
+        // example a write the relay refused after the operator typed), not a
+        // prior cycle's. Saying "prior cycle" sent the agent looking for an
+        // older problem and it stopped; the truthful answer is that its
+        // response is already retained and commits once delivery converges.
+        let own_attempt = state.as_ref().is_some_and(|state| {
+            state.phase.is_open()
+                && agent_doc_document_realtime_io::pending_document_write(file).is_some_and(
+                    |pending| retained_intent_created_in_cycle(&pending.intent_id, state.started_at),
+                )
+        });
+        if own_attempt {
+            anyhow::bail!(
+                "[finalize] this cycle's earlier response write for {} is still converging through the editor/controller; it was not lost and commits once delivery converges. Do not resend the response. Run only `agent-doc session-check {}`; if it then reports realtime operator steering after the commit, continue THIS turn and answer that steering.",
+                file.display(),
+                file.display(),
+            );
+        }
         anyhow::bail!(
             "[finalize] retained document-write delivery from a prior cycle remains unsettled for {}; refusing the new response before capture/admission. Automatic controller reconciliation remains scheduled. Run only `agent-doc session-check {}` after it settles; do not resubmit finalize, force disk, or replace the queued edit.",
             file.display(),
@@ -3138,6 +3157,18 @@ fn guard_historical_retained_write_before_new_capture(
         );
     }
     Ok(())
+}
+
+/// `#queuetypingsteer`: a retained intent id starts with its creation time in
+/// nanoseconds (`<unix_nanos>-<ordinal>-<target_hash>`). True when that instant
+/// is at or after `cycle_started_at` (unix seconds), i.e. the intent belongs to
+/// the cycle that started then. An unparseable id is never claimed.
+fn retained_intent_created_in_cycle(intent_id: &str, cycle_started_at: u64) -> bool {
+    intent_id
+        .split('-')
+        .next()
+        .and_then(|nanos| nanos.parse::<u128>().ok())
+        .is_some_and(|nanos| nanos / 1_000_000_000 >= u128::from(cycle_started_at))
 }
 
 fn historical_retained_write_guard_may_bypass(
@@ -3716,6 +3747,17 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+
+    /// `#queuetypingsteer`: the api.md intent from 2026-09-29 was created at
+    /// 1790707734s, inside the open cycle, so it is the turn's own attempt.
+    #[test]
+    fn a_retained_intent_is_attributed_to_the_cycle_that_created_it() {
+        let intent = "1790707734286542712-1-f024b9768412fddc5d51b6d91ab6e4b4a0389fc6474a2db80a544c05875c05f1";
+        assert!(retained_intent_created_in_cycle(intent, 1_790_707_653));
+        assert!(retained_intent_created_in_cycle(intent, 1_790_707_734));
+        assert!(!retained_intent_created_in_cycle(intent, 1_790_707_735));
+        assert!(!retained_intent_created_in_cycle("not-a-timestamp", 0));
+    }
 
     #[test]
     fn every_write_mode_admits_pane_authority_before_capture_or_mutation() {

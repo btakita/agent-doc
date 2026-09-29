@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: cff0928e-bf41-4405-9dfb-628a47729295
+  claude: c637ccfc-22c9-461c-9835-fbde6d23536c
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -620,6 +620,32 @@ You're right that agent-doc rolled back the editor, which should be the source o
 - **The Stop hook error in this session** (commit e1af0c2ca): the hook no longer blocks when the turn already scheduled the `/loop` re-entry.
 
 `make check` passed: exit 0, 10,084 tests, with the Lean and TLA+ checks green. The fixes are installed. The exchange is at 557 lines, which is a size warning only.
+
+### Re: inline conflict text for short conflicts — opus-5 · 2026-09-29T16:26-04:00
+
+> **Queue prompt:** re "My proposal is that your text stays in the buffer and the agent's version becomes a visible conflict for it to reconcile": can we have an inline conflict resolution text for this if the conflict is short? Multi-line conflicts are overly verbose...and long lines with a small conflict are difficult to reconcile.
+
+Yes. I built it and recorded it as your decision for rule 3. Commit b1d21582d adds `agent-doc-merge/src/conflict_render.rs`.
+
+**How a conflict looks now:**
+- **Short changes are shown inline.** Only the words that differ get marked, using CriticMarkup notation. Each mark reads as the agent's proposed edit to your text:
+  - `{~~yours~>agent~~}` swaps your words for the agent's.
+  - `{++agent++}` adds the agent's words.
+  - `{--yours--}` removes your words.
+  - Example of a long line with a small conflict: `…quarantines the update pending a {~~lazy~>canonical~~} projection, then loses it.`
+  - Word changes separated only by spaces merge into one mark: `the {~~quick brown~>slow red~~} fox`.
+- **"Short" means** the changed lines pair up one-to-one, each change is 80 characters or fewer per side, and a line has at most 4 changes.
+- **Anything else becomes a block,** but only around the lines that actually differ, never the unchanged lines around them: `<<<<<<< yours` / `=======` / `>>>>>>> agent`.
+- **Resolving:** delete the side you don't want along with its marks. `resolve_conflicts(text, Keep::Yours | Keep::Agent)` does this mechanically and returns either side exactly as it was. `has_conflicts` detects both the inline and block forms. If either side already contains marker syntax, rendering refuses rather than produce text that can't be resolved back.
+
+**Validation:**
+- 10 new tests, including a generated test in which more than 1,000 random document pairs all resolve back exactly on both sides.
+- I broke four parts of the code on purpose (which side the resolver keeps, the word merging, the missing-final-newline marker, the line-ending check). The tests failed for each one.
+- `make check` passed: exit 0, 10,096 tests. Installed and pushed. The CI run for this commit was still in progress when I last checked.
+
+**Not wired in yet:** the renderer is standalone until `#editorauth4` puts it in the live merge. That phase also has to switch every conflict check that looks only for `<<<<<<<` over to `has_conflicts`, including `write_policy.rs` and write-converge. Otherwise an inline mark could be committed as if it were resolved text. I've added this to `#editorauth4`, and `#editorauth1` now includes this conflict display in what it formalizes. The plan file records the decision.
+
+Next in the queue is `#layoutobservehandoff`. The exchange is at about 600 lines, which is a size warning only.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -629,8 +655,8 @@ You're right that agent-doc rolled back the editor, which should be the source o
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixapiissue]
-- re "My proposal is that your text stays in the buffer and the agent's version becomes a visible conflict for it to reconcile": can we have an inline conflict resolution text for this if the conflict is short? Multi-line conflicts are overly verbose...and long lines with a small conflict are difficult to reconcile.
+- ~~do [#fixapiissue]~~
+- 🚧 re "My proposal is that your text stays in the buffer and the agent's version becomes a visible conflict for it to reconcile": can we have an inline conflict resolution text for this if the conflict is short? Multi-line conflicts are overly verbose...and long lines with a small conflict are difficult to reconcile.
 - do [#layoutobservehandoff]
 - do [#syntheticstrike]
 - do [#focuscrossrootverify]
@@ -639,10 +665,10 @@ You're right that agent-doc rolled back the editor, which should be the source o
 
 
 <!-- agent:backlog -->
-- [ ] [#editorauth1] [agent-doc] Formalize the conflict-reconciliation rules for the editor authority ladder (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Model content as a sequence with the operator's cursor, in Lean and TLA+. Prove: operator text is never lost; agent inserts are preserved; when both append at the same point, the agent content goes before the operator's and the cursor stays at the end of the operator's edit; an agent append while the operator edits existing text applies independently; a same-span conflict is surfaced, never dropped. The same-span resolution rule still needs the operator's decision.
+- [ ] [#editorauth1] [agent-doc] Formalize the conflict-reconciliation rules for the editor authority ladder (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Model content as a sequence with the operator's cursor, in Lean and TLA+. Prove: operator text is never lost; agent inserts are preserved; when both append at the same point, the agent content goes before the operator's and the cursor stays at the end of the operator's edit; an agent append while the operator edits existing text applies independently; a same-span conflict is surfaced in the buffer, never dropped, using the compact rendering decided 2026-09-29 (inline CriticMarkup for short changes, minimal git-style blocks otherwise; agent-doc-merge/src/conflict_render.rs), and resolving either side reproduces it exactly.
 - [ ] [#editorauth2] [agent-doc][jetbrains] Plugin registration never adopts canonical over a buffer that differs (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome; registration publishes the editor state and then merges forward. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register).
 - [ ] [#editorauth3] [agent-doc] Controller: no whole-text canonical replacement into a registered editor. Fold quarantined editor updates (`crdt_replica_update_quarantined recovery=lazy_canonical_projection`) before any handoff or checkpoint, and reseed the in-memory CRDT from the ladder on handoff/restart: the open editors' states, else disk (plan: tasks/agent-doc/plan-editor-authority-ladder.md; proof: formal/authority_ladder/EditorAuthorityLadder.lean).
-- [ ] [#editorauth4] [agent-doc] Implement the editorauth1 conflict-reconciliation merge in the native merge (agent-doc-merge), shared by JetBrains and VS Code through FFI (plan: tasks/agent-doc/plan-editor-authority-ladder.md).
+- [ ] [#editorauth4] [agent-doc] Implement the editorauth1 conflict-reconciliation merge in the native merge (agent-doc-merge), shared by JetBrains and VS Code through FFI (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Render same-span conflicts through conflict_render::render_conflict, and switch every detector that checks only for <<<<<<< (write_policy.rs, agent-doc-write-converge-io, run_entry.rs, sim_world) to conflict_render::has_conflicts so inline markers are never committed as resolved text.
 - [ ] [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
 - [ ] [#syntheticstrike] [agent-doc] An answered free-text queue head is never struck when its closeout commits as a synthetic cycle. agent-doc-bugs.md 2026-09-29 14:28: the capture belonged to cycle-1790704937323, but the commit landed as synthetic-1790706539439. `active_captured_response_for_queue_strike` requires `closeout.cycle_id == capture.cycle_id` and an open phase, so the controller's answered-free-text Computed never fired and "Fix …/issues/59" stayed live with a 🚧 marker. The pure projection strikes it correctly (probed with the real inputs and baseline). Fix the capture-to-synthetic-cycle ownership, or strike from the committing synthetic cycle when it committed that capture's response.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.

@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: e0d7af8d-d8cc-4727-885f-25e6e9f37b87
+  claude: 76cfeba3-5675-4186-95b9-e7a31e207ffa
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -97,6 +97,26 @@ tasks/api.md`.
 When both hold, it requests the owner's `agent:continue` replacement and logs `pane_authority_shared_codex_daemon`. That is the Restart Agent intent: the live supervisor defers it to the turn boundary and completes it as an exact resume, so the conversation survives and the relaunch carries `--no-daemon`. The refusal then says the reported pane isn't evidence and to re-run the trigger once the pane is back at its prompt. If the request can't be made, it names `agent-doc session restart-agent <FILE>`. On the live desktop, detection flags `%3`'s TUI (pid 171289), not `%12`'s, and reports no daemon ancestry for a process outside it.
 
 **Verification:** `make check` → exit 0, nextest 10032 passed, 0 failed. Installed, and the release `.bin` was rebuilt. **Caveat:** the `src/agent-doc` tree still holds another session's uncommitted edits (33 files, including `src/main.rs` and `src/session_actor_cmd.rs`). Those builds include them; I committed none of their files.
+
+### Re: api.md reverted by queue updates — opus-5.5 · 2026-09-29T01:06-04:00
+
+> **Queue prompt:** api.md reverted by queue updates. Looks like a previous revision rollback applied to the entire document. My changes should be preserved. Perhaps we need to do a roll-forward merge? Fix the current agent-doc state of api.md. It seems there are 2 sessions associated with api.md. Fix the runtime + agent-doc causes.
+
+I could not find any of your text that was lost, so I did not do a roll-forward merge. There was nothing to merge onto. I also have not fixed any runtime cause yet, because I have not been able to reproduce a lost edit. Here is what I checked.
+
+**Current state of `src/haiven-dev/tasks/api.md` (consistent, not wedged):** disk, the controller's CRDT text, and the JetBrains buffer all match: 34186 bytes, hash `c9273a0b…`, `delivery_converged=true`. That is HEAD `1b432940` (the ADR answer, 00:34) plus one uncommitted change from Codex's closeout at 00:49:49: `queue: go → stop`, and the answered ADR queue item is struck through. That change was applied as a CRDT delta (`update_bytes=2038`) against the text all three sides held at the time, so it did not overwrite anything that was only in the editor.
+
+**The only edit on the editor side since the last commit** is a pair of changes one second apart, both classified as local document changes (`local-splice-batch`) in `idea.1.log`:
+- 00:40:02: 3 splices, 34346 → 34137 chars (`bdba4d4e…`, roughly the queue-stop/strike shape).
+- 00:40:03: 3 splices, 34137 → 34346 chars, restoring the exact previous hash `25509a1e…`.
+
+Nothing else in `idea.1.log` was logged around it (no file reload, no agent-doc projection). An edit followed one second later by its exact inverse looks like undo/redo or a flip made inside the plugin, not a controller rollback. The 00:46 recycle re-registered the editor three times. The plugin logged "retained the exact published shadow … publishing the buffer", but the buffer hash was the shadow hash `25509a…`, so it held no unpublished text.
+
+**A false lead I ruled out:** controller `canonical_len` counts UTF-16 characters, while `crdt_current_text len` counts bytes. The 34346 vs 34398 "divergence" is the same text measured two ways.
+
+**"2 sessions":** the registry has one owner, pane `%19` (Codex). The frontmatter `resume:` block keeps both the `claude` and `codex` harness session ids from the claude → codex switch. Pane `%20` (the haiven-frontend Codex session) only logs `foreign_owned_sweep_skip` for api.md, meaning it sees another pane owns the file and does nothing. So there is no second writer.
+
+**What I need from you:** which text disappeared, and roughly when did you see it go? If it was typed in the editor, JetBrains Local History (right-click api.md → Local History → Show History) should still have it. With the lost text or a timestamp I can locate the path that dropped it. I filed that follow-up as `#apimdrevert`.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -106,22 +126,24 @@ When both hold, it requests the owner's `agent:continue` replacement and logs `p
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#drivecapturedsplice]
-- do [#publishjetbrainssibling]
+- ⏭️ do [#drivecapturedsplice]
+- ~~api.md reverted by queue updates. Looks like a previous revision rollback applied to the entire document. My changes should be preserved. Perhaps we need to do a roll-forward merge? Fix the current agent-doc state of api.md. It seems there are 2 sessions associated with api.md. Fix the runtime + agent-doc causes.~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#fpestopreplay]
 - do [#pastetriggeradmit]
 - do [#nameelseclaude]: This happened after transitioning from `agent: claude` to `agent: codex`
 - do [#focuscrossrootverify]
+- do [#publishjetbrainssibling]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#fpestopreplay] [agent-doc] Codex Stop hook replayed Codex's closing console status into a committed document as two ❯ operator prompts (src/haiven-dev/tasks/fpe.md, 2026-09-28; repaired by removing nodes p:48ccd96c2ccb/p:9c5170502608, commit 4a2c4b37). Sequence from ops.log: 23:01:23 codex_stop_post_commit_prompt_cycle_reopened source=replayable_stop_payload behind the already-committed #advance-review response → codex_stop_capture_saved (raw last_assistant_message, no heading) → the hook's own repair (which wraps bare prose as '### Re: recovered response') lost the closeout lease to captured_finalize_resume in controller pid 165487, flagged as a stale binary → that resume replayed the capture unwrapped → normalize_user_prompts applied=2 → Codex's agent-doc commit committed 43acc513 and session-check wedged on an unanswerable prompt tail. Two fixes were tried and reverted: gating post-commit replay on a ### Re: heading (plain prose is the normal Codex answer shape, pinned by tests), and wrapping at capture time (breaks ordinary_same_thread_followup_after_clean_closeout_auto_closes_fresh_cycle, because replayers attach a prompt-targeting heading themselves). Next: (1) reproduce against the CURRENT captured_finalize_resume to learn whether it lands a raw Stop capture without a heading, and fix it to wrap with the prompt-targeting heading if so; (2) decide whether a recurring queue head its committed predecessor already answered should ever reopen a cycle from a Stop payload.
 - [ ] [#pastetriggeradmit] [agent-doc] [recommended] The UserPromptSubmit hook treated a pasted transcript whose first line was `agent-doc tasks/fpe.md` as an agent-doc trigger, resolved the path against the session's own root (agent-loop) rather than the pasted doc's root (src/haiven-dev), and refused admission with 'failed to canonicalize .../agent-loop/tasks/fpe.md'. Harmless here only because the running cycle was already admitted. A trigger should be the whole prompt, or at minimum a first line followed by nothing but whitespace; a multi-line paste that merely begins with the command text is operator content to reason about, not an invocation.
 - [ ] [#nameelseclaude] [agent-doc] Name what else has a Claude Code conversation open instead of leaving the operator with a bare "This conversation is open in another app / press R to continue" lock. Operator-reported 2026-09-28 on src/haiven-dev/tasks/api.md. The information is already on disk and agent-doc can read it: `~/.claude/sessions/<pid>.json` carries `sessionId`, `pid`, `cwd`, `tmux` (session:window.pane), `entrypoint` (cli / sdk-ts), `kind`, `name`, and `status`, so a holder can be named exactly, and liveness proven with /proc/<pid>. Verified at the time of the report: the four live haiven-dev CLI records held four DISTINCT session ids, so agent-doc had not routed a second client onto the same conversation — the other holder was not a registry-visible CLI, leaving the Chrome native host (pid 281712) / desktop / web client as the remaining shape. Deliverable: surface live holders of a document's conversation (agent-doc session status and/or doctor), report stale records whose pid is dead, and say plainly when no second CLI holder exists so the operator knows to look outside the terminal.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 - [ ] [#publishjetbrainssibling] [agent-doc] Publish a `-signed` JetBrains sibling from the release `plugins` job. The client half shipped in 7649ccafd — `find_asset` now matches `<prefix>*-signed.<ext>` by shape, so a signed asset would be selected the moment one exists — but the job publishes only the unsigned zip. `signPlugin` in editors/jetbrains/build.gradle.kts reads CERTIFICATE_CHAIN / PRIVATE_KEY / PRIVATE_KEY_PASSWORD from the environment and none are available to that job, so wiring `signPlugin` in today would fail the release rather than produce a sibling. UNBLOCK: decide whether either IDE host actually requires a signed package, and if so add those three repo secrets; then add signPlugin + a second cp to the plugins job and extend the two-asset verify to four. [recommended]
-- [ ] 🚧 [#drivecapturedsplice] [agent-doc] Run the captured-splice live proof to completion (#activateinstalledjetbrai). HARNESS FIXED 2026-09-28 (095d2af54): the old 'xdotool keystrokes always arrived' premise was false — `type --window` goes through XSendEvent and JetBrains drops send_event=True keys, so nothing ever reached the editor. The harness now types via XTEST under an absolute-path focus guard, keeps scratch docs in tmp/live-repro/ (under .agent-doc/ they became a nested project with their own controller and log), waits only on fresh doc-scoped receipts, pipes a real response into the advance, runs it in the scratch doc's owner pane, and seeds a lint-valid boundary. A live run then produced the first fresh doc-scoped `editor_op_capture_proof operator_ops=N shadow_replay=agreed` any scratch doc has carried. REMAINING BLOCKER: the canonical advance is refused with 'retained document-write delivery from a prior cycle remains unsettled' while the captured edit is still unsaved in the editor (native_editor_save_request_deferred; authority/disk diverge on exchange). Decide whether an independent advance must be admitted while a captured operator edit is retained — that admission is what this recipe exists to prove — and fix whichever side is wrong. Re-run from a desktop with no stale-binary supervisors and a CLI build matching the IDE cdylib (the runs saw crdt_replica_build_mismatch_recovery_requested x4). Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
+- [ ] [#drivecapturedsplice] [agent-doc] Run the captured-splice live proof to completion (#activateinstalledjetbrai). HARNESS FIXED 2026-09-28 (095d2af54): the old 'xdotool keystrokes always arrived' premise was false — `type --window` goes through XSendEvent and JetBrains drops send_event=True keys, so nothing ever reached the editor. The harness now types via XTEST under an absolute-path focus guard, keeps scratch docs in tmp/live-repro/ (under .agent-doc/ they became a nested project with their own controller and log), waits only on fresh doc-scoped receipts, pipes a real response into the advance, runs it in the scratch doc's owner pane, and seeds a lint-valid boundary. A live run then produced the first fresh doc-scoped `editor_op_capture_proof operator_ops=N shadow_replay=agreed` any scratch doc has carried. REMAINING BLOCKER: the canonical advance is refused with 'retained document-write delivery from a prior cycle remains unsettled' while the captured edit is still unsaved in the editor (native_editor_save_request_deferred; authority/disk diverge on exchange). Decide whether an independent advance must be admitted while a captured operator edit is retained — that admission is what this recipe exists to prove — and fix whichever side is wrong. Re-run from a desktop with no stale-binary supervisors and a CLI build matching the IDE cdylib (the runs saw crdt_replica_build_mismatch_recovery_requested x4). Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 <!-- /agent:backlog -->
 
 ## Review

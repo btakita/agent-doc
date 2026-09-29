@@ -510,6 +510,79 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
     false
 }
 
+/// One `> **Queue prompt:**` / `> **Queue prompts:**` echo block in a response.
+struct QueuePromptEchoBlock {
+    plural: bool,
+    /// Normalized quoted entries (the prompt text, one per list item for plural).
+    entries: Vec<String>,
+    /// The block is followed directly by another echo block, or by nothing.
+    bare: bool,
+}
+
+fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
+    let lines: Vec<&str> = response_body.lines().collect();
+    let echo_start = |line: &str| -> Option<(bool, String)> {
+        let quoted = line.trim_start().strip_prefix('>')?.trim_start();
+        if let Some(rest) = quoted.strip_prefix("**Queue prompts:**") {
+            Some((true, rest.to_string()))
+        } else {
+            quoted
+                .strip_prefix("**Queue prompt:**")
+                .map(|rest| (false, rest.to_string()))
+        }
+    };
+    let mut blocks = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let Some((plural, first)) = echo_start(lines[i]) else {
+            i += 1;
+            continue;
+        };
+        let mut raw = vec![first];
+        i += 1;
+        while i < lines.len() && lines[i].trim_start().starts_with('>') {
+            if echo_start(lines[i]).is_some() {
+                break;
+            }
+            raw.push(lines[i].trim_start().trim_start_matches('>').trim_start().to_string());
+            i += 1;
+        }
+        let mut next = i;
+        while next < lines.len() && lines[next].trim().is_empty() {
+            next += 1;
+        }
+        let bare = next >= lines.len() || echo_start(lines[next]).is_some();
+        let entries = raw
+            .iter()
+            .map(|line| normalize_prompt_echo_presence_line(line))
+            .filter(|line| !line.is_empty())
+            .map(|line| normalize_for_answer_match(&line))
+            .collect();
+        blocks.push(QueuePromptEchoBlock { plural, entries, bare });
+    }
+    blocks
+}
+
+/// `#bareechodrop`: a head quoted in a singular `> **Queue prompt:**` block
+/// that is followed directly by another prompt's echo (or by nothing) was
+/// listed, not answered. Observed on a Codex document: the response echoed
+/// "Can we use https://fakecloud.dev/ to test our infrastructure locally?",
+/// then immediately echoed `do [#sbxdeeplevers]` and answered only that — and
+/// the bare echo alone struck the question from the queue, losing it. Grouping
+/// several heads under one answer uses the plural `> **Queue prompts:**` list,
+/// which this rule leaves alone.
+fn head_echoed_only_in_bare_singular_blocks(response_body: &str, head_clean: &str) -> bool {
+    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(head_clean));
+    if head_norm.is_empty() {
+        return false;
+    }
+    let matching: Vec<QueuePromptEchoBlock> = queue_prompt_echo_blocks(response_body)
+        .into_iter()
+        .filter(|block| block.entries.contains(&head_norm))
+        .collect();
+    !matching.is_empty() && matching.iter().all(|block| !block.plural && block.bare)
+}
+
 /// The prose prefix of a free-text queue head used for answer-matching: every
 /// line before the first fenced code block (` ``` ` or `~~~`). A head whose body
 /// is dominated by a pasted console/route log (the common shape of an operator
@@ -601,6 +674,9 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
     // Strip the leading operator/agent pin (`:pushpin:` ...) first -- its literal
     // shortcode word would otherwise survive normalization and break the match.
     let head_clean = strip_priority_markers(head_text);
+    if head_echoed_only_in_bare_singular_blocks(response_body, &head_clean) {
+        return false;
+    }
     if response_explicit_queue_prompt_echoes_head(response_body, &head_clean) {
         return true;
     }
@@ -732,6 +808,44 @@ mod tests {
             ),
             head
         )
+    }
+
+    #[test]
+    fn bare_singular_echo_followed_by_another_echo_is_not_an_answer() {
+        let head = "Can we use https://fakecloud.dev/ to test our infrastructure locally?";
+        let dropped = concat!(
+            "### Re: The deep sandbox levers are capability decisions — codex\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> Can we use https://fakecloud.dev/ to test our infrastructure locally?\n\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#sbxdeeplevers]\n\n",
+            "I do not recommend changing either lever without a product decision.\n",
+        );
+        assert!(!free_text_head_answered_by_response(dropped, head));
+
+        // The same echo followed by its own answer still counts.
+        let answered = concat!(
+            "### Re: fakecloud — codex\n\n",
+            "> **Queue prompt:** Can we use https://fakecloud.dev/ to test our infrastructure locally?\n\n",
+            "Partly: it emulates the AWS APIs we use but not ECS task networking.\n",
+        );
+        assert!(free_text_head_answered_by_response(answered, head));
+
+        // An echo as the very last thing in a response answered nothing.
+        let trailing = "### Re: x — codex\n\nDid other work.\n\n> **Queue prompt:** Can we use https://fakecloud.dev/ to test our infrastructure locally?\n";
+        assert!(!free_text_head_answered_by_response(trailing, head));
+
+        // Grouping uses the plural list form and is left alone.
+        let grouped = concat!(
+            "### Re: two — codex\n\n",
+            "> **Queue prompts:**\n",
+            "> - Can we use https://fakecloud.dev/ to test our infrastructure locally?\n",
+            "> - Should the sandbox keep Temporal running?\n\n",
+            "Both are capability decisions; answered together below.\n",
+        );
+        assert!(free_text_head_answered_by_response(grouped, head));
     }
 
     #[test]

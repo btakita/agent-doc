@@ -295,7 +295,8 @@ pub fn handle_claude_stop() -> Result<()> {
 ///
 /// Modelled in `formal/tla/StopHookContinuation.tla`.
 fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
-    let envelope = payload.and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok());
+    let envelope =
+        payload.and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok());
     let Some(envelope) = envelope else {
         eprintln!(
             "[agent-doc] Claude Stop hook received a payload that is not JSON; it names no \
@@ -714,6 +715,30 @@ fn apply_bound_stop(
             // the agent to run `finalize` is impossible because finalize must
             // reject that terminal predecessor. Reuse the same binary-owned
             // reopen/capture/closeout path as the first Stop invocation.
+            // `#fpestopreplay`: a committed cycle that already settled THIS turn's
+            // prompt owns the turn's answer. The unresolved prompt diff session-check
+            // reports is newer work (typically a recurring queue head the committed
+            // response already answered once), and Codex's closing chat message is a
+            // restatement of the committed answer, not an answer to that diff.
+            // Reopening a cycle to capture it replayed console status into the
+            // document as operator prompts (src/haiven-dev/tasks/fpe.md,
+            // 2026-09-28). Neither reopen nor capture; direct the agent to answer the
+            // fresh diff in-pane instead.
+            if is_committed_prompt_diff_interruption(&reason)
+                && agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
+                && committed_cycle_settled_prompt_debt(file, state)?
+                && let Some(response) = committed_prompt_diff_stop_response(file, &reason)?
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_post_commit_replay_skipped file={} reason=committed_cycle_settled_turn_prompt stop_hook_active={}",
+                        file.display(),
+                        input.stop_hook_active,
+                    ),
+                );
+                return Ok(response);
+            }
             let recursive_post_commit_prompt = input.stop_hook_active
                 && is_committed_prompt_diff_interruption(&reason)
                 && agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
@@ -4091,7 +4116,10 @@ Reviewed the gated items.\n\
             claude_stop_response(Some("not json")).unwrap(),
             serde_json::json!({})
         );
-        assert_eq!(claude_stop_response(Some("")).unwrap(), serde_json::json!({}));
+        assert_eq!(
+            claude_stop_response(Some("")).unwrap(),
+            serde_json::json!({})
+        );
         assert_eq!(claude_stop_response(None).unwrap(), serde_json::json!({}));
     }
 
@@ -5182,6 +5210,116 @@ Reviewed the gated items.\n\
             Some(agent_doc_hash::content_hash(&current).as_str())
         );
         assert_ne!(reopened.snapshot_hash, reopened.file_hash);
+    }
+
+    #[test]
+    fn stop_does_not_replay_a_restatement_over_the_turns_committed_cycle() {
+        // `#fpestopreplay`: the turn's own cycle committed its answer, then a
+        // fresh prompt diff appeared (a recurring queue head), so session-check
+        // is interrupted. Codex's closing chat message restates the committed
+        // answer; it must not reopen a cycle and land in the document.
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        let seeded = fs::read_to_string(&doc).unwrap().replace(
+            "❯ Hello\n<!-- /agent:exchange -->",
+            "❯ Hello\n\n### Re: Hello — gpt-5\n\nInitial response.\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, &seeded).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &seeded,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        let turn_cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original))
+                .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: "Answer the recurring review head.".to_string(),
+        })
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&original),
+            Some(&original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        let root = project_root_for(dir.path()).unwrap();
+        let tracked = load_state(&root, "codex-session").unwrap().unwrap();
+        assert!(
+            committed_cycle_settled_prompt_debt(&doc, &tracked).unwrap(),
+            "{tracked:?}"
+        );
+        fs::write(
+            &doc,
+            original.replace(
+                "<!-- /agent:exchange -->",
+                "\n❯ Review the recurring head again\n<!-- /agent:exchange -->",
+            ),
+        )
+        .unwrap();
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
+                assert!(is_committed_prompt_diff_interruption(&message), "{message}");
+            }
+            other => panic!("expected interrupted session-check status, got {other:?}"),
+        }
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Closing console status restating the committed answer."
+                .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert!(
+            matches!(&response, StopResponse::Block { reason, .. }
+                if reason.contains("fresh unresolved exchange work")),
+            "the fresh diff must be handed back in-pane: {response:?}"
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            !content.contains("Closing console status"),
+            "the restatement must not be written into the document:\n{content}"
+        );
+        let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(cycle.cycle_id, turn_cycle.cycle_id, "no cycle may be reopened");
+        assert_eq!(cycle.phase.as_str(), "committed");
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("codex_stop_post_commit_replay_skipped"), "{ops}");
+        assert!(!ops.contains("codex_stop_post_commit_prompt_cycle_reopened"), "{ops}");
     }
 
     #[test]

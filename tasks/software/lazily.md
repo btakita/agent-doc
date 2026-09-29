@@ -403,6 +403,38 @@ Prepared submission values:
 - Description: `Lazily is a pure-GDScript reactive kernel for Godot 4.4 and newer. It provides sources, computed values, scoped effects, batching, and transport-free latest-durable projection helpers without native binaries or platform-specific dependencies. It is a runtime script library, so there is no editor plugin to enable after installation.`
 
 Operator gate: authenticate in the opened [Godot Asset Library submission page](https://godotengine.org/asset-library/asset/submit), then resume this item so the prepared form can be submitted and the pending review entry verified.
+
+### Re: #lzreleasepins exact pins resolved; superproject still active — GPT-5 · 2026-09-29T14:04:13-04:00
+
+> **Queue prompt:**
+>
+> do [#lzreleasepins]
+
+
+The immutable release-pin map is resolved, but the superproject has not met this item's own “after the other sessions settle” precondition. No root files, gitlinks, index entries, commits, or remotes were changed.
+
+The root index is currently clean, but the working tree has 223 changed/untracked paths, including every existing Lazily submodule and an unrelated in-progress `.gitmodules` addition for `src/haiven-dev`. More importantly, active agent-doc sessions are still committing into the same root branch: `HEAD` moved from `827e1f6152` to `7f2bb2d1ae` during this audit alone. Creating the pin commit now would race those sessions and violate the requested settled-superproject boundary.
+
+The authoritative released commits are ready for the eventual scoped update:
+
+- spec `v0.40.0` → `38f867809f30528ec0a19f73f5e8b8b372965a57`
+- formal `v0.39.0` → `fdb37c735033a14870cc2fb072bb5f813230c946`
+- rs `v0.58.0` → `0c06ce86de3018172ca5267c9d86c639ef3e68d7`
+- kt `v0.43.0` → `0ecfdfe26114793278c644fcffdb5d6c04b894b1`
+- go `v0.28.0` → `af4d84586a15a7af126a38663b310027812bb6a2`
+- js `v0.34.0` → `d0131ea4b771562b62ccdcea2612dd70a47bc471`
+- react `v0.2.0` → `a2c5b33ff7142d90f5d504a71e98441c64b16b65`
+- cs `v0.6.0` → `3c2d03dfd5e3cbb5f93ea14cc29655d21ec75a31`
+- py `v0.42.0` → `94177acea1e97edaf343a39b0b8e3f9ebf7a2e88`
+- dart `v0.32.0` → `62e09108797f39f982df8a3b1b3ee5707bcedb50`
+- cpp `v0.30.0` → `39f14f49e2b6e2d7587256c6e08197092f213b08`
+- zig `v0.36.0` → `65cdc6278af1b1dc87e042dd9dd15fc299f093e7`
+- gd `v0.2.0` → `138bf2fa943ecf4fd2515b2c46c78e2e3b46997f`
+- html `v0.1.0` → `86b97bbbd584ba422ac9ea14021de7320f737e46` (not yet a superproject gitlink)
+
+The unpublished Rust `0.59.0` and React `0.3.0` preparation commits must not be pinned; neither has a corresponding published release. Other repository `main` heads are also ahead for post-release consumer-simulation work, so the eventual update must use the exact SHAs above rather than current heads.
+
+Operator gate: resume `#lzreleasepins` once the other root agent-doc sessions stop changing the superproject. Then stage only the Lazily gitlinks (and separately adjudicate the HTML directory-to-gitlink conversion against the live `.gitmodules` edit), run the exact-revision interop gate in an isolated checkout, and commit/push only that scoped pin set.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -411,19 +443,19 @@ Operator gate: authenticate in the opened [Godot Asset Library submission page](
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzhtmlbootstrap]~~
 - ~~do [#lzgdasset]~~
-- do [#lzreleasepins]
+- ~~do [#lzreleasepins]~~
 - release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 - [/] [#lzgdasset] Prepare Godot Asset Library addon metadata and package for lazily-gd 0.2.0, then complete the authenticated Asset Library submission.
 - [/] [#lzreactpublish] [operator-decision] Establish npm org authorization for the first @lazily-hub/lazily-react publication; then publish, tag, and release prepared 0.3.0 commit dc21987. Blocked because npm whoami failed and the package is still absent.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.

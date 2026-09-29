@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: ef89c6a5-2731-4ef1-b09c-8312e1a7c137
+  claude: 2412bbea-00ef-477f-b15c-289d803767b1
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -757,6 +757,25 @@ The conflict rules are now implemented in the shared native merge, both plugins 
 **Not connected to a live path yet:** live editing still syncs through the CRDT replicas. `#editorauth2` (registration merges forward) and `#editorauth3` (the controller never replaces a registered editor's whole text) are where `reconcileText` gets called. The plan file records this.
 
 Next in the queue are `#layoutobservehandoff`, `#syntheticstrike`, `#focuscrossrootverify` and `#retainedadvanceadmit`. `#editorauth3` is skipped (⏭️), and `#editorauth2` is still struck, though open in the backlog. The exchange is over 700 lines, which is a size warning only.
+
+### Re: #editorauth3, the controller never rolls an editor back — opus-5 · 2026-09-29T18:00-04:00
+
+> do [#editorauth3]
+
+**Done.** agent-doc `4d9e78578`, pushed and installed. `make check` passed: 10,115 tests with exit 0, and the TLA non-vacuity checks hold. CI for this commit was still running at closeout.
+
+**What lost the api.md text (the controller side):** when an editor registers, the controller sends it the current text and waits for a receipt. That wait set the same flag that quarantines the editor's updates. The editor had already taken that text, so your typing matched the controller's copy, but every keystroke was dropped (`crdt_replica_update_quarantined`) until the receipt came back. The install handoff came first, so the text was lost for good. The re-registration then took the stale copy.
+
+**Fixes (all in the controller):**
+- **Waiting for a receipt no longer blocks typing.** Updates are quarantined only when the controller can't prove the editor's CRDT history matches its own: a first contact that arrives as an update, a retained editor state against a relay that hasn't taken the controller's text yet, or a rejected corrupt update.
+- **The editor outranks disk after a handoff.** A new controller whose relay holds nothing but disk no longer projects disk over the editor. An update from an editor it hasn't registered yet asks that editor to re-register (`crdt_replica_update_editor_reseed_requested`). The re-registration, carrying the editor's saved CRDT state, then reseeds the relay from the editor (`recovery=cold_relay_editor_authority_ladder`). In the authority ladder, the one open editor beats disk.
+- **A relay that is ahead of disk keeps authority.** It may hold an agent write that isn't on disk yet, so the old guarded full-text path still applies there.
+
+**Tests:** a replay of the api.md sequence (acked typing, handoff, update, re-register) now ends with your text in the controller's copy. It replaces an old test that asserted the rollback. There are also tests for typing while a receipt is pending, for a relay ahead of disk, and for the decision table. I checked the tests by re-breaking each fix, and each time the matching test failed. The plan file records the details (`9d19d1d41`).
+
+**Still needed from the plugins (`#editorauth2`, updated):** when asked to re-register, the plugins must send their saved CRDT state and never discard it. Otherwise the controller has nothing to reseed from. A second editor joining a relay that already has one still gets the guarded canonical text, so `#editorauth2` also covers reconciling that case through `reconcileText`.
+
+Next in the queue is your lazily.md "multiple `agent-doc: awaiting response`" item. The exchange is over 700 lines, which is a size warning only.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -767,7 +786,7 @@ Next in the queue are `#layoutobservehandoff`, `#syntheticstrike`, `#focuscrossr
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#editorauth2]: ensure plugin parity~~
-- 🚧 do [#editorauth3]
+- ~~do [#editorauth3]~~
 - Fix multiple `agent-doc: awaiting response` prompts in lazily.md: ![img_2.png](img_2.png)
 - 📌 do [#layoutobservehandoff]
 - 📌 do [#syntheticstrike]
@@ -777,8 +796,7 @@ Next in the queue are `#layoutobservehandoff`, `#syntheticstrike`, `#focuscrossr
 
 
 <!-- agent:backlog -->
-- [ ] [#editorauth2] [agent-doc][jetbrains][vscode] Plugin registration never adopts canonical over a buffer that differs, in BOTH editor plugins (operator: ensure plugin parity) (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome in JetBrains and VS Code, preferably in the shared FFI registration path so both plugins get one behaviour; registration publishes the editor state and then merges forward. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register) against both plugins, plus an editor-parity check.
-- [ ] 🚧 [#editorauth3] [agent-doc] Controller: no whole-text canonical replacement into a registered editor. Fold quarantined editor updates (`crdt_replica_update_quarantined recovery=lazy_canonical_projection`) before any handoff or checkpoint, and reseed the in-memory CRDT from the ladder on handoff/restart: the open editors' states, else disk (plan: tasks/agent-doc/plan-editor-authority-ladder.md; proof: formal/authority_ladder/EditorAuthorityLadder.lean).
+- [ ] [#editorauth2] [agent-doc][jetbrains][vscode] Plugin registration never adopts canonical over a buffer that differs, in BOTH editor plugins (operator: ensure plugin parity) (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome in JetBrains and VS Code, preferably in the shared FFI registration path so both plugins get one behaviour; registration publishes the editor state and then merges forward. The controller side landed in #editorauth3 (4d9e78578): on editor_replica_reregister the plugin must re-register WITH its retained state vector (resumeState) so the controller's cold-relay reseed applies, and must never drop that state on forceRefresh/requireFreshRegistration. Also covers two or more editors: an unregistered editor joining a relay that already holds one still gets the fenced canonical projection; reconcile it through reconcileText instead of adopting. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register) against both plugins, plus an editor-parity check.
 - [ ] [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
 - [ ] [#syntheticstrike] [agent-doc] An answered free-text queue head is never struck when its closeout commits as a synthetic cycle. agent-doc-bugs.md 2026-09-29 14:28: the capture belonged to cycle-1790704937323, but the commit landed as synthetic-1790706539439. `active_captured_response_for_queue_strike` requires `closeout.cycle_id == capture.cycle_id` and an open phase, so the controller's answered-free-text Computed never fired and "Fix …/issues/59" stayed live with a 🚧 marker. The pure projection strikes it correctly (probed with the real inputs and baseline). Fix the capture-to-synthetic-cycle ownership, or strike from the committing synthetic cycle when it committed that capture's response.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.

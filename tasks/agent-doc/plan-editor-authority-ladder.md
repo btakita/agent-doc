@@ -81,6 +81,28 @@ When the agent's incoming merge and the operator's live edit meet:
     `canonical_is_disk_when_none_open`, `deleted_monotone`.
   - `adopt_can_roll_back`: non-vacuity counterexample for the shipped
     registration.
+- `formal/authority_ladder/ConflictReconciliation.lean` (`#editorauth1`, done
+  2026-09-29): content is a sequence, an edit replaces `[pos, pos+len)` of the
+  shared base, and the operator has a cursor. For every base and every pair of
+  edits:
+  - `same_point_agent_first`: rule 1, agent content before the operator's
+    append, cursor at the end of the operator's edit.
+  - `agent_before_applies_both`, `operator_before_applies_both`: rule 2.
+  - `conflict_resolves_to_either_side`, `conflict_is_surfaced`: rule 3, never
+    dropped, and resolving reproduces either edit exactly.
+  - `resolve_render`, `render_compact`: the rendering is lossless and keeps
+    shared text outside the marks (the Lean `Seg.conflict` is the node that
+    `conflict_render.rs` writes as inline CriticMarkup or a block).
+  - `operator_text_never_lost`, `agent_insert_preserved`: every case.
+  - Non-vacuity: `operator_first_violates_rule_one`, `conflict_reachable`.
+- `formal/tla/ConflictReconciliation.tla`: the same merge over every pair of
+  edits of a 3-atom base plus the operator typing on at the cursor (11,368
+  states). `OperatorFirstWedge` violates `SamePointAgentFirst`, `DropWedge`
+  (last writer wins) violates `AgentPreserved`, `Reach` shows conflicts are
+  surfaced.
+- The model does not choose between inline and block notation: that choice is
+  presentation, and `conflict_render.rs` tests its round trip separately.
+  `#editorauth4` must implement `merge` from the Lean model in `agent-doc-merge`.
 
 ## Phases
 

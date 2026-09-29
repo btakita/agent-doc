@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: ba96c08d-608e-4a54-bc3f-af53ad89bd4f
+  claude: 81a5dc86-7660-4bd2-944c-5bf9e029e9c8
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -195,6 +195,28 @@ It logs `codex_stop_post_commit_replay_skipped` and returns the existing "answer
 - My first isolated build put a 46 GB target dir on the `/tmp` tmpfs and filled it to 100% for a few minutes. It is deleted.
 - The second build left `tmp/fpewt-target` (46 GB, gitignored) that the safety hook would not let me `rm -rf`. Please delete it.
 - The exchange is getting long (8 cycles in 30 minutes). I'm not compacting it without an opt-in.
+
+### Re: #nameelseclaude — opus-5.5 · 2026-09-29T02:08-04:00
+
+> **Queue prompt:** do [#nameelseclaude]: This happened after transitioning from `agent: claude` to `agent: codex`
+
+Done in agent-doc `5799eb417` (pushed and installed). `agent-doc session status <FILE>` now names what holds the document's Claude Code conversation.
+
+**What it reports:**
+- **Live and stale holders:** every live Claude Code CLI record in the project, and every record whose pid is dead (marked `STALE(dead pid)`), from `~/.claude/sessions/<pid>.json`. Each line names the holder, pid, session id, entrypoint, kind, status and tmux pane.
+- **The document's own conversation (`resume.claude`):** after `agent: claude` → `agent: codex` the frontmatter keeps the old Claude id, and that id is what a Claude client refuses to reopen. A record holding exactly that id is reported even if its cwd is elsewhere, and is marked `holds_this_conversation`.
+- **A positive "not held" finding:** when no live CLI holds the conversation, the report says so, and says the holder is a desktop, web or browser native-host client outside the terminal.
+- **Not gated on the declared harness:** api.md is `agent: codex`, so any harness gate would hide this report.
+
+**Live, on `src/haiven-dev/tasks/api.md`:** `conversation_holders.this_conversation: claude=baaf5655-b09c-46eb-b83d-ed3a27e99499 is not held by any live Claude Code CLI session`. The "open in another app" lock you saw came from a client outside the terminal.
+
+**Origin:** I finished an abandoned uncommitted draft for this item: an untracked `src/conversation_holders.rs` plus a hook in `session status`. I added the per-conversation finding, the flag, and three tests (11 total). I also marked the now test-only `report_from_holders` as `#[cfg(test)]` for clippy.
+
+**Verification:**
+- **Full suite:** `make check` exited 0 with 10049 tests passed. I ran it on the exact commit tree in an isolated worktree.
+- **Commit:** I built it through a private index. `src/session_actor_cmd.rs` still holds another session's uncommitted `/clear` settle-timeout change. That change is what fails clippy in the shared tree (8 args on `poll_context_clear_submit_acceptance`), and I left it out and untouched.
+- **Install:** `make install` exited 0.
+- **CI:** the newest run, `36529492455`, has no result yet (status only showed a clock icon).
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -207,7 +229,7 @@ It logs `codex_stop_post_commit_replay_skipped` and returns the existing "answer
 - ~~do [#drivecapturedsplice]~~
 - ~~do [#fpestopreplay]~~
 - ~~do [#pastetriggeradmit]~~
-- 🚧 do [#nameelseclaude]: This happened after transitioning from `agent: claude` to `agent: codex`
+- ~~do [#nameelseclaude]: This happened after transitioning from `agent: claude` to `agent: codex`~~
 - do [#focuscrossrootverify]
 - do [#publishjetbrainssibling]
 <!-- /agent:queue -->
@@ -216,7 +238,6 @@ It logs `codex_stop_post_commit_replay_skipped` and returns the existing "answer
 <!-- agent:backlog -->
 - [ ] [#retaineddeferwedge] [agent-doc] A respond whose tracked-work mutations deferred on retained delivery projection (tracked_work_mutations_deferred_retained_delivery_projection, 2026-09-29T05:23:49Z, cycle-1790658555784) never committed after delivery converged (delivery_converged=true at 05:26, authority==disk 21647B) and nothing retried it. The three verdicts contradicted: session-check said snapshot!=HEAD run agent-doc commit; commit refused 'current authority contains an uncommitted response; use write --commit'; repair --apply-recovery said clean. Recovered by re-piping the identical body through write --commit (deduped: 'response cell already present'). Fix: the retained intent must commit itself on convergence, and session-check/commit/repair must agree on one remedy. Also snapshot_len=22261 differed from converged authority 21647 — find which target the snapshot recorded.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
-- [ ] 🚧 [#nameelseclaude] [agent-doc] Name what else has a Claude Code conversation open instead of leaving the operator with a bare "This conversation is open in another app / press R to continue" lock. Operator-reported 2026-09-28 on src/haiven-dev/tasks/api.md. The information is already on disk and agent-doc can read it: `~/.claude/sessions/<pid>.json` carries `sessionId`, `pid`, `cwd`, `tmux` (session:window.pane), `entrypoint` (cli / sdk-ts), `kind`, `name`, and `status`, so a holder can be named exactly, and liveness proven with /proc/<pid>. Verified at the time of the report: the four live haiven-dev CLI records held four DISTINCT session ids, so agent-doc had not routed a second client onto the same conversation — the other holder was not a registry-visible CLI, leaving the Chrome native host (pid 281712) / desktop / web client as the remaining shape. Deliverable: surface live holders of a document's conversation (agent-doc session status and/or doctor), report stale records whose pid is dead, and say plainly when no second CLI holder exists so the operator knows to look outside the terminal.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 - [ ] [#publishjetbrainssibling] [agent-doc] Publish a `-signed` JetBrains sibling from the release `plugins` job. The client half shipped in 7649ccafd — `find_asset` now matches `<prefix>*-signed.<ext>` by shape, so a signed asset would be selected the moment one exists — but the job publishes only the unsigned zip. `signPlugin` in editors/jetbrains/build.gradle.kts reads CERTIFICATE_CHAIN / PRIVATE_KEY / PRIVATE_KEY_PASSWORD from the environment and none are available to that job, so wiring `signPlugin` in today would fail the release rather than produce a sibling. UNBLOCK: decide whether either IDE host actually requires a signed package, and if so add those three repo secrets; then add signPlugin + a second cp to the plugins job and extend the two-asset verify to four. [recommended]
 <!-- /agent:backlog -->

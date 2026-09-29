@@ -491,16 +491,16 @@ The refusal then asked the capture-only ownership shell (`agent_doc_capture_io::
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #advance-review
+- ⏭️ #advance-review
 - ~~do [#runinfrawedged]~~
 - ~~do [#retainedwriteverdict]~~
-- do [#codexupdateblocker]
+- 🚧 do [#codexupdateblocker]
 - do [#focuscrossrootverify]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#codexupdateblocker] `tasks/devops.md` pane `%40` is parked on Codex's "Update available 0.158.0 → 0.159.0 · enter continue · esc skip" dialog. The route reports it as `alive-busy` with `recognized_blocker=none`, so dispatch into that pane stalls silently. Recognize the Codex update dialog as a named operator blocker in live-pane classification (never auto-answer it), and surface it in `session status` and the route refusal.
+- [ ] 🚧 [#codexupdateblocker] `tasks/devops.md` pane `%40` is parked on Codex's "Update available 0.158.0 → 0.159.0 · enter continue · esc skip" dialog. The route reports it as `alive-busy` with `recognized_blocker=none`, so dispatch into that pane stalls silently. Recognize the Codex update dialog as a named operator blocker in live-pane classification (never auto-answer it), and surface it in `session status` and the route refusal.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 <!-- /agent:backlog -->

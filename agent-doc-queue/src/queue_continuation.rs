@@ -233,7 +233,7 @@ pub fn required_continuation(
         }
     }
 
-    let Some(head) = drainable_head_prompt_for_scope(content, DrainScope::InSessionLoop) else {
+    let Some(head) = continuation_head_skipping_answered_residue(content) else {
         return Ok(None);
     };
     let head_prompt = head.text;
@@ -252,6 +252,47 @@ pub fn required_continuation(
         head_id,
         head_prompt,
     }))
+}
+
+/// `#syntheticstrike`: the drainable head for a post-closeout continuation,
+/// skipping free-text heads the committed exchange already answered.
+///
+/// A closeout that commits under a synthetic cycle (its capture's cycle was
+/// abandoned) cannot run the capture-owned answered-free-text strike, so the
+/// answered head stays live until the next preflight's residue strike. Offering
+/// it as the continuation head re-dispatched finished work (agent-doc-bugs.md
+/// 2026-09-29 14:28: "Fix …/issues/59" came back as the next head). This uses
+/// the same residue predicate as session-check and the preflight strike, so a
+/// recurring imperative head is never skipped.
+fn continuation_head_skipping_answered_residue(content: &str) -> Option<QueuePrompt> {
+    let (queue_facts, activation) = active_queue_for_supervisor_start(content, false)?;
+    let exchange_text = element::parse(content)
+        .ok()
+        .and_then(|components| {
+            components
+                .iter()
+                .find(|component| component.name == "exchange")
+                .map(|component| component.content(content).to_string())
+        })
+        .unwrap_or_default();
+    let entries: Vec<QueueEntry> = activation
+        .entries_after
+        .into_iter()
+        .filter(|entry| match entry {
+            QueueEntry::Prompt(prompt) => !crate::queue_heads::free_text_queue_head_is_completed_residue(
+                content,
+                &exchange_text,
+                prompt.text.trim(),
+            ),
+            _ => true,
+        })
+        .collect();
+    eligible_head_prompt_from_entries(
+        content,
+        &entries,
+        queue_facts.preset_supplies_directive,
+        DrainScope::InSessionLoop,
+    )
 }
 
 /// Drain scope for computing which backlog ids are deferred.
@@ -1561,6 +1602,45 @@ mod tests {
         let output = effective_continuation_output(false, false, None);
         assert!(!output.required);
         assert_eq!(output.guidance, None);
+    }
+
+    fn doc_with_answered_exchange(queue_prompts: &[&str], answered: &str) -> String {
+        doc_with_backlog(queue_prompts, &["- [ ] [#next] next"]).replace(
+            "## Backlog",
+            &format!(
+                "## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: issue -- opus\n\n> **Queue prompt:** {answered}\n\nFixed and released.\n<!-- /agent:exchange -->\n\n## Backlog"
+            ),
+        )
+    }
+
+    /// `#syntheticstrike`: agent-doc-bugs.md 2026-09-29 14:28. The closeout
+    /// committed under a synthetic cycle, so the answered free-text head was
+    /// never struck and came back as the continuation head.
+    #[test]
+    fn required_continuation_skips_a_free_text_head_the_exchange_already_answered() {
+        let answered = "Fix https://github.com/btakita/agent-doc/issues/59. release + publish";
+        let content = doc_with_answered_exchange(&[answered, "do [#next]"], answered);
+        let continuation = required_continuation(&content, Some(&content))
+            .unwrap()
+            .expect("the next real head still requires continuation");
+        assert_eq!(continuation.head_prompt, "do [#next]");
+
+        let only_answered = doc_with_answered_exchange(&[answered], answered);
+        assert!(
+            required_continuation(&only_answered, Some(&only_answered))
+                .unwrap()
+                .is_none(),
+            "an answered head alone must not re-dispatch finished work"
+        );
+    }
+
+    #[test]
+    fn required_continuation_keeps_a_recurring_imperative_head_even_when_echoed() {
+        let content = doc_with_answered_exchange(&["deploy to staging"], "deploy to staging");
+        let continuation = required_continuation(&content, Some(&content))
+            .unwrap()
+            .expect("a recurring imperative stays a standing directive");
+        assert_eq!(continuation.head_prompt, "deploy to staging");
     }
 
     #[test]

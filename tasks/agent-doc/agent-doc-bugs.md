@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: e6325f72-1329-4ebb-8513-6f76aba7334d
+  claude: a7be1d72-8fcc-43e5-992d-f13f752f0f36
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -98,6 +98,24 @@ Your paste arrived empty (a bare `` `````` `` fence), so I worked from the fpe.m
 **Verification:** `make check` passed, 10123/10123 (exit 0). `make install` exit 0. Both commits are pushed to agent-doc main.
 
 There were no actionable follow-up items; the fix is complete and nothing is left to capture.
+
+### Re: Fix fpe.md issue (paste landed; lint-gate fix) — opus-5 · 2026-09-29T19:45-04:00
+
+Your paste reached the document after the turn started. It shows exactly the sequence above: the Stop hook reported STRANDED, then the 18:58 re-route got "admission failed … Recovery requires `agent-doc write --commit`". `#preflightvisibleabsorb` removes that dead end. The closeout here was itself committed by the new absorb ("committed the visible uncommitted response").
+
+Closing this turn exposed a second defect, which I also fixed:
+
+- **What happened:** the lint gate blocked the closeout with a false `agent-doc/unclosed-component` on `agent:exchange`.
+- **Cause:** tagpath's inline-code-span matcher paired the stray ` ``` ` in the compacted summary line with the paste's opening fence. It accepted a closing run of any length and let spans cross line-start fences. The paste's closing fence then read as an unclosed opener and hid `&lt;!-- /agent:exchange --&gt;`. That would have blocked every later closeout of this document.
+- **tagpath 0.12.3:** inline spans now follow CommonMark: the closing run must be exactly as long as the opener, and a span never crosses a blank line or a line-start fence. Two new tests.
+  - I published it to crates.io from a clean tag worktree, not with `--allow-dirty`, because another session's uncommitted `AGENTS.md` and `.agents/` would have shipped in the package.
+- **agent-doc `5646cd361`:** bumps to tagpath 0.12.3. Adds a lint-io regression on the observed shape, which fails on 0.12.2 and passes on 0.12.3.
+
+**Verification:** `make check` passed, 10124/10124 (exit 0). `make install` exit 0. Pushed.
+
+One tagpath test was already failing before my change: `round_trip_real_session_doc_is_clean` flags `agent:notes` in the live `tasks/software/tsift.md`. It reads a file only this machine has, so CI skips it.
+
+There were no actionable follow-up items.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

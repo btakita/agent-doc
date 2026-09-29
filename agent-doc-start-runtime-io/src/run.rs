@@ -60,6 +60,24 @@ fn resolve_resume_claim_for_start(
     claim.effective_request(resume)
 }
 
+/// `#reexecresumeflap`: whether a start may write `resume.<harness>` for `id`.
+///
+/// A supervisor re-exec that adopts the still-running child is not a launch: the
+/// child keeps whatever thread it is on, including a new one it opened with
+/// `/clear`, while its argv still names the thread it was launched with. Only the
+/// hook ledger observes the live thread, so a re-exec may record an id only when
+/// the ledger proves it. Otherwise the fallback is frontmatter read from disk —
+/// which lags an unsaved editor — and each stale-binary re-exec rewrote the
+/// document back to the pre-`/clear` thread (tasks/api.md, 2026-09-28: 01a0e962
+/// and 01a0eaeb alternated across re-execs, each a whole-document write).
+fn reentry_may_record_resume_id(
+    preserved_child_survived: bool,
+    ledger_resume_id: Option<&str>,
+    id: &str,
+) -> bool {
+    !preserved_child_survived || ledger_resume_id.map(str::trim) == Some(id.trim())
+}
+
 fn resolve_resume_request_from_sources(
     requested: Option<&agent_doc_harness::ResumeRequest>,
     frontmatter_resume: Option<&str>,
@@ -835,11 +853,25 @@ pub fn run_with_reap_policy_resume_and_harness(
         base_args = initial_launch_args.clone();
         active_resume_id.get_or_insert(assigned);
     }
+    let ledger_resume_id = initial_codex_projection
+        .as_ref()
+        .map(|state| state.session_id.clone());
     let mut session_lineage = HarnessSessionLineage::new(
         active_resume_id,
         initial_codex_projection.map(|state| state.session_id),
     );
     if let Some(id) = session_lineage.active_id()
+        && !fm.has_harness_resume_entry(&harness.binary, id)
+        && !reentry_may_record_resume_id(preserved_child_survived, ledger_resume_id.as_deref(), id)
+    {
+        log_event(
+            &mut session_log,
+            &format!(
+                "start_resume_projection_skipped id={id} reason=reexec_unproven_by_hook_ledger ledger_id={}",
+                ledger_resume_id.as_deref().unwrap_or("none")
+            ),
+        );
+    } else if let Some(id) = session_lineage.active_id()
         && !fm.has_harness_resume_entry(&harness.binary, id)
     {
         match record_document_resume_id_for_harness(&canonical, &harness.binary, id) {
@@ -2673,6 +2705,25 @@ mod tests {
         assert_eq!(
             resolve_resume_request_from_sources(Some(&latest), Some("cold-seed"), None),
             Some(agent_doc_harness::ResumeRequest::Id("cold-seed".into()))
+        );
+    }
+
+    #[test]
+    fn reexec_records_only_a_hook_ledger_proven_thread() {
+        // tasks/api.md shape: the adopted child `/clear`ed onto new-thread, the
+        // ledger read came back empty, and frontmatter on disk still named the
+        // pre-clear thread. The re-exec must not write that back.
+        let latest = agent_doc_harness::ResumeRequest::Latest;
+        let resolved = resolve_resume_request_from_sources(Some(&latest), Some("pre-clear"), None);
+        let Some(agent_doc_harness::ResumeRequest::Id(id)) = resolved else {
+            panic!("frontmatter seed should resolve");
+        };
+        assert!(!reentry_may_record_resume_id(true, None, &id));
+        assert!(!reentry_may_record_resume_id(true, Some("new-thread"), "pre-clear"));
+        assert!(reentry_may_record_resume_id(true, Some("new-thread"), "new-thread"));
+        assert!(
+            reentry_may_record_resume_id(false, None, &id),
+            "a real launch still records its resolved id"
         );
     }
 

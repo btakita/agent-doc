@@ -1382,6 +1382,7 @@ fn run_pending_maintenance_with_options(
             .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
     });
     let already_done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
+    let done_item_texts = collect_agent_done_texts_with_root(&content, project_root.as_deref());
 
     for surface in &tracked_surfaces {
         let components = agent_doc_element::element::parse(&current_content)
@@ -1431,10 +1432,43 @@ fn run_pending_maintenance_with_options(
         }
 
         if should_reap_already_done_mirrors(surface) && !already_done_ids.is_empty() {
+            // `#donemirrorbytext`: an id match alone is not proof that an active
+            // item re-adds completed work. Reap only items whose text agrees with
+            // the archived entry; keep (and report) id collisions.
+            let (_, id_matches) = agent_doc_element_backlog::backlog::op_take_active_items_by_ids(
+                &current_body,
+                &already_done_ids,
+            );
+            let mirror_ids: std::collections::HashSet<String> = id_matches
+                .iter()
+                .filter(|item| {
+                    let mirrored = done_item_texts
+                        .get(&item.id.to_ascii_lowercase())
+                        .is_none_or(|done| {
+                            agent_doc_element_done::done_entry_matches_item(done, &item.text)
+                        });
+                    if !mirrored {
+                        eprintln!(
+                            "[preflight] {}: kept #{} although a done entry shares its id: the texts describe different work (id collision)",
+                            surface_label, item.id
+                        );
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "done_mirror_reap_skipped_id_collision file={} id={} texts_differ=true",
+                                file.display(),
+                                item.id
+                            ),
+                        );
+                    }
+                    mirrored
+                })
+                .map(|item| item.id.clone())
+                .collect();
             let (after_mirror_reap, mirror_items) =
                 agent_doc_element_backlog::backlog::op_take_active_items_by_ids(
                     &current_body,
-                    &already_done_ids,
+                    &mirror_ids,
                 );
             if !mirror_items.is_empty() {
                 let removed_ids: Vec<String> = mirror_items.iter().map(|i| i.id.clone()).collect();
@@ -1940,6 +1974,35 @@ fn collect_agent_done_ids_with_root(
         }
     }
     ids
+}
+
+/// `#donemirrorbytext`: done id -> recorded text, from the same sources as
+/// [`collect_agent_done_ids_with_root`].
+fn collect_agent_done_texts_with_root(
+    content: &str,
+    project_root: Option<&Path>,
+) -> std::collections::HashMap<String, String> {
+    let mut texts = std::collections::HashMap::new();
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return texts;
+    };
+    for comp in &components {
+        if !agent_doc_element::element::is_backlog_done_component(&comp.name) {
+            continue;
+        }
+        for (id, text) in agent_doc_element_done::collect_done_item_texts(comp.content(content)) {
+            texts.entry(id).or_insert(text);
+        }
+        if let Some(archive) = comp.attrs.get("archive")
+            && let Some(root) = project_root
+            && let Ok(archive_content) = std::fs::read_to_string(root.join(archive))
+        {
+            for (id, text) in agent_doc_element_done::collect_done_item_texts(&archive_content) {
+                texts.entry(id).or_insert(text);
+            }
+        }
+    }
+    texts
 }
 
 fn snapshot_proves_queue_was_active(file: &Path) -> bool {
@@ -11077,6 +11140,44 @@ mod tests {
         assert!(!backlog_after.contains("[#leadstatus]"));
     }
     #[test]
+    fn pending_maintenance_keeps_new_work_that_only_shares_a_done_id() {
+        // `#donemirrorbytext`: 2026-09-29, a new `#fixapiissue` was reaped as an
+        // "already-done mirror" of an unrelated 2026-09-23 entry with the same id.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#fixapiissue] Fix api.md issue: I typed in the following but agent-doc deleted it\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#fixapiissue] Fix agent-doc api.md issue: the retained write never settled\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        let components = agent_doc_element::element::parse(&file_after).unwrap();
+        let backlog = components.iter().find(|c| c.name == "backlog").unwrap();
+        assert!(
+            backlog
+                .content(&file_after)
+                .contains("I typed in the following but agent-doc deleted it"),
+            "new work sharing a done id must survive maintenance:\n{file_after}"
+        );
+    }
+
+    #[test]
     fn pending_maintenance_reaps_inline_done_backlog_and_review_mirrors() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
@@ -11084,12 +11185,12 @@ mod tests {
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "## Backlog\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] [#done1] stale backlog mirror\n",
+            "- [ ] [#done1] already archived backlog\n",
             "- [ ] [#keep1] keep backlog\n",
             "<!-- /agent:backlog -->\n\n",
             "## Review\n\n",
             "<!-- agent:review -->\n",
-            "- [/] [#done2] stale review mirror\n",
+            "- [/] [#done2] already archived review\n",
             "- [/] [#keep2] keep review\n",
             "<!-- /agent:review -->\n\n",
             "## Completed / Reaped\n\n",
@@ -11170,11 +11271,11 @@ mod tests {
         let content = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "<!-- agent:backlog -->\n",
-            "- [ ] [#extdone1] stale backlog mirror\n",
+            "- [ ] [#extdone1] externally archived backlog\n",
             "- [ ] [#fresh1] fresh backlog\n",
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:review -->\n",
-            "- [/] [#extdone2] stale review mirror\n",
+            "- [/] [#extdone2] externally archived review\n",
             "- [/] [#fresh2] fresh review\n",
             "<!-- /agent:review -->\n\n",
             "<!-- agent:done archive=session.done.md -->\n",

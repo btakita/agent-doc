@@ -210,6 +210,60 @@ pub fn collect_done_item_own_ids(text: &str) -> HashSet<String> {
     ids
 }
 
+/// `#donemirrorbytext`: each done item's own id mapped to the text after it.
+pub fn collect_done_item_texts(text: &str) -> std::collections::HashMap<String, String> {
+    let mut texts = std::collections::HashMap::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if !(trimmed.starts_with("- ") || trimmed.starts_with("* ")) {
+            continue;
+        }
+        if let Some(start) = trimmed.find("[#") {
+            let after = &trimmed[start + 2..];
+            if let Some(end) = after.find(']') {
+                let id = &after[..end];
+                if agent_doc_element_backlog::backlog::is_valid_pending_id(id) {
+                    texts
+                        .entry(id.to_ascii_lowercase())
+                        .or_insert_with(|| after[end + 1..].trim().to_string());
+                }
+            }
+        }
+    }
+    texts
+}
+
+fn normalized_work_text(text: &str) -> String {
+    let mut out = String::new();
+    for word in text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+    {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&word.to_lowercase());
+    }
+    out
+}
+
+/// `#donemirrorbytext`: true when an active item re-adds the SAME work a done
+/// entry records: their normalized leading text agrees. Sharing an id is not
+/// enough. On 2026-09-29 a new `#fixapiissue` ("Fix api.md issue: I typed in
+/// the following but agent-doc deleted it") was reaped because a 2026-09-23 done
+/// entry `#fixapiissue` ("Fix agent-doc api.md issue: ...") had the same id.
+pub fn done_entry_matches_item(done_text: &str, item_text: &str) -> bool {
+    const LEAD: usize = 60;
+    let done = normalized_work_text(done_text);
+    let item = normalized_work_text(item_text);
+    if done.is_empty() || item.is_empty() {
+        return false;
+    }
+    let lead = |text: &str| text.chars().take(LEAD).collect::<String>();
+    let (done_lead, item_lead) = (lead(&done), lead(&item));
+    done_lead.starts_with(&item_lead) || item_lead.starts_with(&done_lead)
+}
+
 /// Extract done-item ids from a parsed `agent:done` component.
 pub fn collect_done_component_own_ids(document: &str, component: &Component) -> HashSet<String> {
     if !DESCRIPTOR.matches_name(&component.name) {
@@ -233,6 +287,25 @@ pub fn collect_done_document_own_ids(document: &str) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#donemirrorbytext`: a new item that only shares an archived id is not a
+    /// mirror of that done work.
+    #[test]
+    fn a_shared_id_with_different_work_is_not_a_done_mirror() {
+        let archive = "- 2026-09-23 [#fixapiissue] Fix agent-doc api.md issue: the retained write never settled\n";
+        let texts = collect_done_item_texts(archive);
+        let done = texts.get("fixapiissue").expect("done text");
+        assert!(!done_entry_matches_item(
+            done,
+            "🚧 Fix api.md issue: I typed in the following but agent-doc deleted it"
+        ));
+        // A genuine re-add of the same work is a mirror (markers/case ignored).
+        assert!(done_entry_matches_item(
+            done,
+            "🚧 fix agent-doc API.md issue: the retained write never settled"
+        ));
+        assert!(!done_entry_matches_item(done, ""));
+    }
 
     #[test]
     fn insert_done_component_after_tracked_work_inserts_canonical_done_component() {

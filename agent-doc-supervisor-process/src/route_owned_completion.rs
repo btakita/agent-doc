@@ -13,10 +13,12 @@ use std::time::{Duration, Instant};
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 use agent_doc_supervisor::route_owned::{
-    RouteOwnedCycleFacts, RouteOwnedCyclePhase, RouteOwnedLivenessReason, RouteOwnedReapDecision,
-    RouteOwnedReapEffect, RouteOwnedReapEffects, RouteOwnedReapPolicy, RouteOwnedStartPurpose,
-    route_owned_cycle_committed_since_start, route_owned_liveness_reason_for_content,
-    route_owned_reap_decision_for_purpose,
+    ROUTE_OWNED_VISIBLE_COLUMN_KEEP_ALIVE, RouteOwnedCycleFacts, RouteOwnedCyclePhase,
+    RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapEffect,
+    RouteOwnedReapEffects, RouteOwnedReapPolicy, RouteOwnedStartPurpose,
+    route_owned_cycle_committed_since_start, route_owned_keep_visible_column,
+    route_owned_liveness_reason_for_content, route_owned_reap_decision_for_purpose,
+    route_owned_visible_column_stashed_orphan_decision,
 };
 
 pub const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -111,6 +113,13 @@ pub trait RouteOwnedCompletionState: Send + Sync + 'static {
     /// pane. Defaults to `false` so a state that cannot observe its pane keeps
     /// the pre-existing keep-alive behaviour.
     fn owned_pane_is_stashed(&self) -> bool {
+        false
+    }
+    /// Whether THIS supervisor's own pane is live outside a `stash` window,
+    /// i.e. filling a visible layout column (`#routeownedvisiblereap`).
+    /// Defaults to `false`, preserving the one-shot reap for states that
+    /// cannot observe their pane.
+    fn owned_pane_is_visible_in_layout(&self) -> bool {
         false
     }
     fn paused_queue_has_no_supervisor_drainable_head(&self, _file: &Path) -> bool {
@@ -211,6 +220,9 @@ where
             let mut ready_busy_ticks: u32 = 0;
             let mut ready_busy_key: Option<(String, String)> = None;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
+            // Set once an `auto` commit decision kept this pane only for its
+            // visible column; arms the stashed-orphan check below.
+            let mut visible_column_keep_alive = false;
             while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
                 if effective_start_purpose == RouteOwnedStartPurpose::LayoutProvision
                     && state.live_pane_interaction_observed(&harness)
@@ -237,7 +249,7 @@ where
                     // never changes, so `route_owned_cycle_committed_since_start`
                     // stays false and no decision is ever reached. The pane then
                     // lives as long as the tmux server.
-                    if layout_provision_owner
+                    if (layout_provision_owner || visible_column_keep_alive)
                         && !facts.phase.is_open()
                         && Instant::now() >= next_orphan_check
                     {
@@ -248,12 +260,18 @@ where
                         {
                             let liveness_reason =
                                 route_owned_liveness_reason_for_file(&file, &facts);
-                            let decision = route_owned_reap_decision_for_purpose(
-                                reap_policy,
-                                effective_start_purpose,
-                                liveness_reason,
-                                true,
-                            );
+                            let decision = if layout_provision_owner {
+                                route_owned_reap_decision_for_purpose(
+                                    reap_policy,
+                                    effective_start_purpose,
+                                    liveness_reason,
+                                    true,
+                                )
+                            } else {
+                                route_owned_visible_column_stashed_orphan_decision(
+                                    liveness_reason,
+                                )
+                            };
                             if decision.reap {
                                 let event = format!(
                                     "route_owned_reap_decision policy={} purpose={} decision=reap reason={} pane={} cycle={} event={}",
@@ -373,13 +391,20 @@ where
                             route_owned_liveness_reason_for_file(&file, &facts),
                             state.paused_queue_has_no_supervisor_drainable_head(&file),
                         );
-                        route_owned_reap_decision_for_purpose(
+                        route_owned_keep_visible_column(
                             reap_policy,
-                            effective_start_purpose,
-                            liveness_reason,
-                            layout_provision_owner && state.owned_pane_is_stashed(),
+                            route_owned_reap_decision_for_purpose(
+                                reap_policy,
+                                effective_start_purpose,
+                                liveness_reason,
+                                layout_provision_owner && state.owned_pane_is_stashed(),
+                            ),
+                            state.owned_pane_is_visible_in_layout(),
                         )
                     };
+                    if decision.reason == ROUTE_OWNED_VISIBLE_COLUMN_KEEP_ALIVE {
+                        visible_column_keep_alive = true;
+                    }
                     let busy_guard = decision.reason.starts_with("live_pane_busy_no_idle_prompt");
                     let effect = RouteOwnedReapEffect {
                         policy: reap_policy,

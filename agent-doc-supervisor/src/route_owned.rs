@@ -403,6 +403,53 @@ pub fn route_owned_reap_decision_for_purpose(
     route_owned_reap_decision(policy, liveness_reason)
 }
 
+/// Keep-alive reason for an `auto` route-owned pane that currently fills a
+/// visible editor column in the layout window.
+pub const ROUTE_OWNED_VISIBLE_COLUMN_KEEP_ALIVE: &str = "owned_pane_holds_visible_layout_column";
+
+/// `#routeownedvisiblereap`: an `auto` dispatch pane with no pending work used
+/// to be reaped right after its commit even while it held a visible editor
+/// column. Nothing re-provisioned the column, so the layout window collapsed
+/// (observed 2026-09-29: haiven `infra.md` pane `%27` reaped with
+/// `no_liveness_signals`, leaving `agent-doc` with one pane while `infra.md`
+/// stayed open in the editor). A visible pane is doing the job a layout pane
+/// exists for, so it stays alive. Once the layout stashes it, it becomes a
+/// stashed orphan and [`route_owned_visible_column_stashed_orphan_decision`]
+/// reaps it.
+pub fn route_owned_keep_visible_column(
+    policy: RouteOwnedReapPolicy,
+    decision: RouteOwnedReapDecision,
+    owned_pane_visible: bool,
+) -> RouteOwnedReapDecision {
+    if policy == RouteOwnedReapPolicy::Auto && decision.reap && owned_pane_visible {
+        return RouteOwnedReapDecision {
+            reap: false,
+            reason: ROUTE_OWNED_VISIBLE_COLUMN_KEEP_ALIVE.to_string(),
+        };
+    }
+    decision
+}
+
+/// Reap decision for a pane that was kept alive only because it held a visible
+/// column and has since been stashed. Uses the same pending-interaction rule as
+/// layout-provision orphans (a steady-state backlog is not liveness).
+pub fn route_owned_visible_column_stashed_orphan_decision(
+    liveness_reason: Option<RouteOwnedLivenessReason>,
+) -> RouteOwnedReapDecision {
+    match liveness_reason {
+        Some(reason) if route_owned_liveness_blocks_layout_provision_reap(Some(&reason)) => {
+            RouteOwnedReapDecision {
+                reap: false,
+                reason: reason.to_string(),
+            }
+        }
+        _ => RouteOwnedReapDecision {
+            reap: true,
+            reason: "visible_column_pane_stashed_orphan".to_string(),
+        },
+    }
+}
+
 pub fn route_owned_file_dirty_after_commit(
     content: &str,
     committed_file_hash: Option<&str>,
@@ -498,6 +545,42 @@ fn route_owned_line_is_response_heading(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_pane_holding_a_visible_column_survives_commit_then_reaps_once_stashed() {
+        let reap = route_owned_reap_decision(RouteOwnedReapPolicy::Auto, None);
+        assert!(reap.reap);
+
+        let kept = route_owned_keep_visible_column(RouteOwnedReapPolicy::Auto, reap.clone(), true);
+        assert!(!kept.reap);
+        assert_eq!(kept.reason, ROUTE_OWNED_VISIBLE_COLUMN_KEEP_ALIVE);
+
+        assert_eq!(
+            route_owned_keep_visible_column(RouteOwnedReapPolicy::Auto, reap.clone(), false),
+            reap,
+            "a stashed or vanished pane keeps the one-shot reap"
+        );
+        let explicit = route_owned_reap_decision(RouteOwnedReapPolicy::ReapAfterCommit, None);
+        assert_eq!(
+            route_owned_keep_visible_column(
+                RouteOwnedReapPolicy::ReapAfterCommit,
+                explicit.clone(),
+                true
+            ),
+            explicit,
+            "an explicit one-shot reap is never overridden"
+        );
+
+        let orphan = route_owned_visible_column_stashed_orphan_decision(Some(
+            RouteOwnedLivenessReason::BacklogNonEmpty,
+        ));
+        assert!(orphan.reap, "a steady-state backlog must not pin a stashed pane");
+        assert_eq!(orphan.reason, "visible_column_pane_stashed_orphan");
+        let pending = route_owned_visible_column_stashed_orphan_decision(Some(
+            RouteOwnedLivenessReason::QueueNonEmpty,
+        ));
+        assert!(!pending.reap);
+    }
 
     #[test]
     fn queue_control_blocks_dispatch_but_not_layout_provision_or_reentry() {

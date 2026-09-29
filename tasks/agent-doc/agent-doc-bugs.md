@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 3b203fc2-9b49-45c7-b3a5-590ce6906e35
+  claude: ef89c6a5-2731-4ef1-b09c-8312e1a7c137
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -728,6 +728,35 @@ My `#editorauth1` closeout also struck `do [#editorauth2]: ensure plugin parity`
 `make check` passed: exit 0, 10,098 tests.
 
 **Please un-strike `do [#editorauth2]: ensure plugin parity` in the queue.** The binary has no command that restores a struck line with an id (`queue sync` skips ids that are already present), and I won't hand-edit your live buffer. Until you do, the queue will run `#editorauth3` next. `#editorauth2` is next in your order and is still open in the backlog, already rewritten for JetBrains + VS Code parity.
+
+### Re: #editorauth4, the conflict rules in the native merge — opus-5 · 2026-09-29T17:39-04:00
+
+The conflict rules are now implemented in the shared native merge, both plugins can call them, and the conflict checks look only for conflicts the merge itself created (commit f62cbd933). It's installed: JetBrains 0.2.444 and VS Code 0.2.73.
+
+**The merge** (`agent-doc-merge/src/conflict_reconcile.rs`, `reconcile(base, yours, agent, cursor)`) compares your buffer and the agent's version against the text they both started from, then applies the three proved rules:
+- When you both append at the same point, the agent's text goes first and your cursor stays at the end of your text.
+- Edits to separate regions both apply.
+- Overlapping edits are grouped into whole lines and shown with the compact conflict display: inline for short changes, a small block otherwise. Resolving to either side gives that side back exactly. When your cursor is inside a conflict, the result reports no cursor position.
+- **One change to the rules:** if you and the agent make the exact same edit, it now applies once instead of twice. Otherwise an editor that already has the agent's text (a re-sent delivery) would get it a second time. I added the same case to the Lean proof and the TLA+ model, and both are still green.
+
+**Both plugins:** a new shared native function, `agent_doc_reconcile_text`, returns the result as JSON, with the cursor counted in UTF-16 units because that's what both editors use. JetBrains (`NativeLib.reconcileText`) and VS Code (`native.ts reconcileText`) both call it. If a conflict can't be shown without losing text, it returns an error, and your buffer stays as it is.
+
+**Conflict checks:** the two write paths that checked `contains("<<<<<<<")` (`write_policy.rs` and write-converge) now ask whether the merge **added** conflict marks its inputs didn't already have (`introduces_conflicts`). Only complete marks count.
+- The old check was wrong for this document: an earlier response here quotes `<<<<<<< yours`, so those fast paths always refused it.
+- The broader `has_conflicts` would have been worse: it matches plain text like `i++}` or a Gemfile `~> 1.2`.
+
+**Tests:**
+- An exhaustive comparison against a direct Rust copy of the Lean merge, covering every pair of small edits (more than 1,500 cases). It checks the same text, the same conflict decision, the same way each side resolves, and the same cursor.
+- 3,000 randomly generated documents with several edits each.
+- A native-function test with an emoji, to check UTF-16 cursor handling.
+- A write-policy test showing that a document which quotes the notation now merges, while a newly added conflict mark is still refused.
+- **Checking the checks:** I broke the code on purpose 4 ways, and the tests failed each time: your text placed first, the agent's side dropped from a conflict, duplicate edits no longer merged, and the old `<<<<<<<` check restored.
+
+`make check` passed: exit 0, 10,112 tests. CI for f62cbd933 was still running when I checked.
+
+**Not connected to a live path yet:** live editing still syncs through the CRDT replicas. `#editorauth2` (registration merges forward) and `#editorauth3` (the controller never replaces a registered editor's whole text) are where `reconcileText` gets called. The plan file records this.
+
+Next in the queue are `#layoutobservehandoff`, `#syntheticstrike`, `#focuscrossrootverify` and `#retainedadvanceadmit`. `#editorauth3` is skipped (⏭️), and `#editorauth2` is still struck, though open in the backlog. The exchange is over 700 lines, which is a size warning only.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -739,9 +768,9 @@ My `#editorauth1` closeout also struck `do [#editorauth2]: ensure plugin parity`
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#editorauth1]~~
 - ~~do [#editorauth2]: ensure plugin parity~~
-- do [#editorauth3]
-- do [#editorauth4]
-- 🚧 📌 do [#layoutobservehandoff]
+- ⏭️ do [#editorauth3]
+- ~~do [#editorauth4]~~
+- 📌 do [#layoutobservehandoff]
 - 📌 do [#syntheticstrike]
 - 📌 do [#focuscrossrootverify]
 - 📌 do [#retainedadvanceadmit]
@@ -751,8 +780,7 @@ My `#editorauth1` closeout also struck `do [#editorauth2]: ensure plugin parity`
 <!-- agent:backlog -->
 - [ ] [#editorauth2] [agent-doc][jetbrains][vscode] Plugin registration never adopts canonical over a buffer that differs, in BOTH editor plugins (operator: ensure plugin parity) (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome in JetBrains and VS Code, preferably in the shared FFI registration path so both plugins get one behaviour; registration publishes the editor state and then merges forward. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register) against both plugins, plus an editor-parity check.
 - [ ] [#editorauth3] [agent-doc] Controller: no whole-text canonical replacement into a registered editor. Fold quarantined editor updates (`crdt_replica_update_quarantined recovery=lazy_canonical_projection`) before any handoff or checkpoint, and reseed the in-memory CRDT from the ladder on handoff/restart: the open editors' states, else disk (plan: tasks/agent-doc/plan-editor-authority-ladder.md; proof: formal/authority_ladder/EditorAuthorityLadder.lean).
-- [ ] [#editorauth4] [agent-doc] Implement the editorauth1 conflict-reconciliation merge in the native merge (agent-doc-merge), shared by JetBrains and VS Code through FFI (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Render same-span conflicts through conflict_render::render_conflict, and switch every detector that checks only for <<<<<<< (write_policy.rs, agent-doc-write-converge-io, run_entry.rs, sim_world) to conflict_render::has_conflicts so inline markers are never committed as resolved text.
-- [ ] 🚧 [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
+- [ ] [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
 - [ ] [#syntheticstrike] [agent-doc] An answered free-text queue head is never struck when its closeout commits as a synthetic cycle. agent-doc-bugs.md 2026-09-29 14:28: the capture belonged to cycle-1790704937323, but the commit landed as synthetic-1790706539439. `active_captured_response_for_queue_strike` requires `closeout.cycle_id == capture.cycle_id` and an open phase, so the controller's answered-free-text Computed never fired and "Fix …/issues/59" stayed live with a 🚧 marker. The pure projection strikes it correctly (probed with the real inputs and baseline). Fix the capture-to-synthetic-cycle ownership, or strike from the committing synthetic cycle when it committed that capture's response.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2

@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 4e934bdb-28cd-475a-b74d-606b95cf8343
+  claude: d6ba6e38-8c46-43f9-a101-8d3286ad2ac0
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -579,6 +579,47 @@ Fixed, installed and pushed as commit ba25d21d5.
 **Still open:** when your typing changes the document mid-write, the first write attempt is still refused by the relay's hash check and `respond` exits 1. The pending write is kept, and the controller merges it onto your text and applies it, so the response does land. It isn't merged in the same call yet. The truthful refusal message above now guides the agent correctly while it waits.
 
 Queue: `#layoutobservehandoff` and `#syntheticstrike` are next. The exchange is at 535 lines, which is a size warning only.
+❯ 🚧 Fix api.md issue: I typed in the following but agent-doc deleted it
+```
+`- demonstrate a hand-written model change and counterexample investigation by an engineer who did not author the model, without requiring agent access;` is not necessary. I want to emphasize that hand-writing formal models is not a requirement. But understanding the formal models is a requirement. Also, please emphasize that the formal models help keep the agent activity within bounds & reduce hallucinations by defining in formal language with invariants + proofs.
+```
+
+### Re: api.md text deleted · editor as source of truth — opus-5 · 2026-09-29T15:58-04:00
+
+You're right that agent-doc rolled back the editor, which should be the source of truth.
+
+**What happened** (`src/haiven-dev/tasks/api.md`, 15:35):
+1. **15:35:31:** your typing (42,625 characters) was forwarded, and the controller acknowledged it (`projectState content_hash=90a06be…`).
+2. **Right after:** the controller quarantined the update to fold into canonical "later" (`crdt_replica_update_quarantined recovery=lazy_canonical_projection`). My `make install` then handed the controller off, and the quarantined update was lost.
+3. **15:35:42:** after the plugin reload, the editor re-registered and adopted the controller's stale copy (42,157 characters) over your buffer: "registration retained the controller canonical projection". About 468 characters were gone.
+
+**Your text isn't recoverable from agent-doc.** It isn't on disk, in git, or in the controller. The only copy is what you quoted in the prompt above, so please paste it back into `api.md`.
+
+**Why no adopt-canonical rule can be patched safely:** when the controller's copy is missing text the editor has, that looks the same whether the controller lost it or the agent deleted it (for example, a queue strike). So any registration outcome that replaces the editor with canonical can roll you back.
+
+**The design you specified:** canonical is the reconciliation of the open editors when two or more are open, else the single open editor's buffer, else disk. The in-memory CRDT is a copy and merge engine that only merges forward:
+- Registration publishes the editor's state and then merges forward.
+- A controller handoff reseeds the CRDT from that ladder, never from an older checkpoint.
+
+**Formal validation** (commits 0ee19954d and f154df8822):
+- **`formal/authority_ladder/EditorAuthorityLadder.lean`** proves, for any number of editors and any content, not just sampled cases:
+  - `no_rollback`: every step preserves an open editor's text that nobody deleted.
+  - `handoff_never_regresses`, `canonical_reconciles_all_open_editors`, `canonical_is_disk_when_none_open` and `deleted_monotone`.
+  - `adopt_can_roll_back` is a counterexample showing the shipped registration can lose text, so the theorem isn't vacuous. It contains no `sorry`.
+- **`formal/tla/EditorAuthorityLadder.tla`** model-checks bounded instances (37,054 states) with no rollback. Its Wedge config, which uses the shipped adopt-canonical-plus-reseed-from-disk behaviour, reproduces this rollback. Its Reach config shows agent writes still reach editors. Both are in `make check`.
+
+**Your conflict rules** are recorded in `tasks/agent-doc/plan-editor-authority-ladder.md` and are the next item to formalize (`#editorauth1`):
+- When you and the agent both append at the same point, the agent's content goes before yours and your cursor stays at the end of your edit.
+- When you're editing existing text while the agent appends, the append applies separately.
+- When you both edit the same existing text, it's a true conflict and must be resolved, not dropped. My proposal is that your text stays in the buffer and the agent's version becomes a visible conflict for it to reconcile. **That rule needs your decision.**
+
+**The fix itself is not implemented yet.** Phases `#editorauth2` (plugin registration merges forward) and `#editorauth3` (the controller folds quarantined updates and reseeds from the ladder) are queued before `#fixapiissue`, which stays open until they land. `#editorauth4` implements your conflict rules in the shared native merge.
+
+**Also fixed in this session:**
+- **Recurring "clear not proven submitted"** (commit 0f02484f2): as you said, the clear did run. The verifier only accepted proof when the pane's whole tmux scrollback was 200 lines or fewer, and tmux keeps the old chat (12,392 lines here). It now reads the visible frame: a Codex `Context 0% used` footer, or the new-chat banner next to the old chat's `codex resume` line, proves the clear ran. Your "Run Agent Doc, then clear" flow no longer shows this error. An earlier commit (329b4bcdc) also stopped treating Codex's spinner and footer redraws as screen changes, so a genuinely lost `/clear` gets one resend.
+- **The Stop hook error in this session** (commit e1af0c2ca): the hook no longer blocks when the turn already scheduled the `/loop` re-entry.
+
+`make check` passed: exit 0, 10,084 tests, with the Lean and TLA+ checks green. The fixes are installed. The exchange is at 557 lines, which is a size warning only.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -588,6 +629,7 @@ Queue: `#layoutobservehandoff` and `#syntheticstrike` are next. The exchange is 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#fixapiissue]
 - ~~#advance-review~~
 - ~~do [#codexupdateblocker]~~
 - ~~do [#queuetypingsteer]~~
@@ -601,6 +643,10 @@ Queue: `#layoutobservehandoff` and `#syntheticstrike` are next. The exchange is 
 
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#fixapiissue] Fix api.md issue: I typed in the following but agent-doc deleted it
+  ```
+  `- demonstrate a hand-written model change and counterexample investigation by an engineer who did not author the model, without requiring agent access;` is not necessary. I want to emphasize that hand-writing formal models is not a requirement. But understanding the formal models is a requirement. Also, please emphasize that the formal models help keep the agent activity within bounds & reduce hallucinations by defining in formal language with invariants + proofs.
+  ```
 - [ ] [#layoutobservehandoff] [agent-doc] `pane layout observation refused: controller not authoritative (handoff_state=Preparing)` was shown to the operator on src/haiven-dev/tasks/api.md during an install-driven controller handoff (2026-09-29 ~14:50). A layout observation that arrives during a handoff must be deferred to, and applied by, the successor controller, not refused to the editor. The controller was `stable` again once the handoff finished.
 - [ ] [#syntheticstrike] [agent-doc] An answered free-text queue head is never struck when its closeout commits as a synthetic cycle. agent-doc-bugs.md 2026-09-29 14:28: the capture belonged to cycle-1790704937323, but the commit landed as synthetic-1790706539439. `active_captured_response_for_queue_strike` requires `closeout.cycle_id == capture.cycle_id` and an open phase, so the controller's answered-free-text Computed never fired and "Fix …/issues/59" stayed live with a 🚧 marker. The pure projection strikes it correctly (probed with the real inputs and baseline). Fix the capture-to-synthetic-cycle ownership, or strike from the committing synthetic cycle when it committed that capture's response.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.

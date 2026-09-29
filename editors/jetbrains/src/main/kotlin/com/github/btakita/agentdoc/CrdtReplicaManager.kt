@@ -1352,6 +1352,42 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         return LocalEditorForwardResult.Applied
     }
 
+    /**
+     * `#ambiguousholdforever`: only consulted when shadow, buffer and canonical
+     * all differ. The native proof answers true exactly when every operator
+     * change from the shadow is already in canonical; anything else, including a
+     * missing native library, leaves the hold in place.
+     */
+    private fun canonicalContainsOperatorEditsAtRegistration(
+        filePath: String,
+        canonicalProjectionRetained: Boolean,
+        publishedShadow: String?,
+        bufferText: String?,
+        canonicalText: String?,
+    ): Boolean? {
+        if (!canonicalProjectionRetained || publishedShadow == null || bufferText == null || canonicalText == null) {
+            return null
+        }
+        if (bufferText == publishedShadow || canonicalText == bufferText || canonicalText == publishedShadow) {
+            return null
+        }
+        val contained =
+            NativePatching.capturedSplicesContained(
+                publishedShadow,
+                canonicalText,
+                singleSpliceBatchUtil(publishedShadow, bufferText),
+            ) ?: return false
+        if (contained) {
+            log.info(
+                "[crdt-replica] retained canonical already contains the operator buffer's edits for " +
+                    "${File(filePath).name}; adopting canonical is lossless. " +
+                    "shadow_hash=${contentHash(publishedShadow)} buffer_hash=${contentHash(bufferText)} " +
+                    "canonical_hash=${contentHash(canonicalText)}",
+            )
+        }
+        return contained
+    }
+
     private fun rebootstrapCanonicalAndForwardCapturedLocalEdit(
         filePath: String,
         capturedBaseText: String,
@@ -2844,6 +2880,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 publishedShadow = publishedShadowAtRegistration,
                 bufferText = bufferTextAtRegistration,
                 canonicalText = forwarder.replicaText(),
+                canonicalContainsOperatorEdits =
+                    canonicalContainsOperatorEditsAtRegistration(
+                        filePath = filePath,
+                        canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
+                        publishedShadow = publishedShadowAtRegistration,
+                        bufferText = bufferTextAtRegistration,
+                        canonicalText = forwarder.replicaText(),
+                    ),
             )
         if (forwarder.canonicalProjectionRetained || forwarder.retainedReplicaReseedPending) {
             // Controller state survives an IDEA/plugin restart; this local set
@@ -4132,6 +4176,7 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
     publishedShadow: String?,
     bufferText: String?,
     canonicalText: String?,
+    canonicalContainsOperatorEdits: Boolean? = null,
 ): RetainedRegistrationProjectionAction =
     if (deferCanonicalProjectionForPendingLocal) {
         RetainedRegistrationProjectionAction.DeferCanonicalProjection
@@ -4150,6 +4195,7 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
             publishedShadow = publishedShadow,
             bufferText = bufferText,
             canonicalText = canonicalText,
+            canonicalContainsOperatorEdits = canonicalContainsOperatorEdits,
         )
     } else {
         RetainedRegistrationProjectionAction.ApplyCanonical
@@ -4167,6 +4213,7 @@ internal fun retainedRegistrationProjectionActionUtil(
     publishedShadow: String?,
     bufferText: String?,
     canonicalText: String?,
+    canonicalContainsOperatorEdits: Boolean? = null,
 ): RetainedRegistrationProjectionAction =
     when {
         // Convergence is safe and must win before the three-generation test;
@@ -4182,8 +4229,38 @@ internal fun retainedRegistrationProjectionActionUtil(
         bufferText == publishedShadow && canonicalCoversRetainedFrontier == true ->
             RetainedRegistrationProjectionAction.ApplyCanonical
         canonicalText == publishedShadow -> RetainedRegistrationProjectionAction.PublishOperatorBuffer
+        // `#ambiguousholdforever`: the proven rebase. Every operator change from
+        // the shadow is already present in canonical (the controller ingested
+        // those deltas before the endpoint dropped), so adopting canonical keeps
+        // all operator text. Without this edge the hold had no exit: the cut
+        // never changes, and registration was refused every second for hours.
+        canonicalContainsOperatorEdits == true -> RetainedRegistrationProjectionAction.ApplyCanonical
         else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
     }
+
+/** One splice turning [before] into [after]: the common code-point prefix and suffix stay. */
+internal fun singleSpliceBatchUtil(before: String, after: String): PreparedLocalEditorBatch {
+    val old = before.codePoints().toArray()
+    val new = after.codePoints().toArray()
+    var prefix = 0
+    while (prefix < old.size && prefix < new.size && old[prefix] == new[prefix]) prefix++
+    var suffix = 0
+    while (
+        suffix < old.size - prefix &&
+        suffix < new.size - prefix &&
+        old[old.size - 1 - suffix] == new[new.size - 1 - suffix]
+    ) {
+        suffix++
+    }
+    val insert = String(new, prefix, new.size - prefix - suffix)
+    val edits =
+        if (old.size - prefix - suffix == 0 && insert.isEmpty()) {
+            emptyList()
+        } else {
+            listOf(PreparedLocalEditorEdit(prefix, old.size - prefix - suffix, insert))
+        }
+    return PreparedLocalEditorBatch(edits = edits, resultingText = after)
+}
 
 internal fun retainedCanonicalWouldClobberOperatorTextUtil(
     publishedShadow: String?,

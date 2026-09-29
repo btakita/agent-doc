@@ -338,6 +338,12 @@ interface AgentDocLib : Library {
         editsJson: String,
     ): FfiPatchResult.ByValue
 
+    fun agent_doc_captured_splices_contained(
+        base: String,
+        canonical: String,
+        editsJson: String,
+    ): FfiPatchResult.ByValue
+
     /**
      * Converge the `agent:queue` opening-tag `auto` attribute. `want_auto` is a C int (nonzero =
      * ensure `auto`, zero = strip `auto`); a content patch cannot change an opening-tag attribute,
@@ -2186,6 +2192,36 @@ object NativePatching {
             }
             val json = result.text?.getString(0) ?: return null
             return gson.fromJson(json, PreparedLocalEditorBatch::class.java)
+        } finally {
+            lib.agent_doc_free_string(result.error)
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /**
+     * `#ambiguousholdforever`: true when canonical already carries every change in
+     * [batch] from [base]; null when the proof is unavailable (older native
+     * library or a malformed batch), which callers treat as "not proven".
+     */
+    internal fun capturedSplicesContained(
+        base: String,
+        canonical: String,
+        batch: PreparedLocalEditorBatch,
+    ): Boolean? {
+        val lib = AgentDocLib.get() ?: return null
+        val gson = com.google.gson.Gson()
+        val result = try {
+            lib.agent_doc_captured_splices_contained(base, canonical, gson.toJson(batch))
+        } catch (error: UnsatisfiedLinkError) {
+            LOG.warn("[native] captured splice containment proof requires the updated native library", error)
+            return null
+        }
+        try {
+            if (result.error != null) {
+                LOG.warn("[native] captured splice containment proof unavailable: ${result.error!!.getString(0)}")
+                return null
+            }
+            return result.text?.getString(0)?.toBooleanStrictOrNull()
         } finally {
             lib.agent_doc_free_string(result.error)
             lib.agent_doc_free_string(result.text)

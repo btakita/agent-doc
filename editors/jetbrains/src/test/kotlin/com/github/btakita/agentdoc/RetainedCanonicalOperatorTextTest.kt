@@ -131,6 +131,45 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
+    fun `canonical proven to contain the operator edits ends the three-generation hold`() {
+        // `#ambiguousholdforever`: the controller ingested the operator's paste,
+        // then appended a response beside it. The hold had no exit and refused
+        // registration every second for hours; the proof is its exit.
+        val shadow = "# doc\n\nFix api.md issue\n"
+        val buffer = "$shadow```\npasted log\n```\n"
+        val canonical = "$buffer\n### Re: replayed\n"
+        for ((proof, expected) in listOf(
+            true to RetainedRegistrationProjectionAction.ApplyCanonical,
+            false to RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            null to RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+        )) {
+            assertEquals(
+                expected,
+                retainedRegistrationProjectionActionForAttachUtil(
+                    deferCanonicalProjectionForPendingLocal = false,
+                    canonicalProjectionRetained = true,
+                    publishedShadow = shadow,
+                    bufferText = buffer,
+                    canonicalText = canonical,
+                    canonicalContainsOperatorEdits = proof,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `single splice batch spans only the changed code points`() {
+        val batch = singleSpliceBatchUtil("a🌍 fix bug\n", "a🌍 fix the bug\n")
+        assertEquals(listOf(PreparedLocalEditorEdit(7, 0, "the ")), batch.edits)
+        assertEquals("a🌍 fix the bug\n", batch.resultingText)
+        assertEquals(emptyList<PreparedLocalEditorEdit>(), singleSpliceBatchUtil("same", "same").edits)
+        assertEquals(
+            listOf(PreparedLocalEditorEdit(1, 2, "")),
+            singleSpliceBatchUtil("abcd", "ad").edits,
+        )
+    }
+
+    @Test
     fun `a restarted IDE has no shadow, so adoption stays the recovery`() {
         // The shadow map is in-memory and does not survive a restart. Without it
         // the buffer is a stale reconstruction and canonical must win — the

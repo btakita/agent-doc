@@ -3046,8 +3046,20 @@ fn projected_committed_capture_response(file: &Path) -> Result<Option<Historical
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(None);
     };
-    let Some(projected) =
-        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+    let Some(closeout) = agent_doc_cycle_state_io::load_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    // `#compactreplaydup`: a retired capture (e.g. `compact` archived its
+    // response out of HEAD and preflight reconciled it) is settled. Its payload
+    // stays in the projection as evidence only; treating it as the current
+    // committed capture made an operator's next prompt look like its
+    // "unresolved prompt tail" and replayed the archived response under it.
+    if closeout.captured_response_retired_reason.is_some() {
+        return Ok(None);
+    }
+    let Some(projected) = closeout
+        .captured_response
+        .filter(|capture| capture.capture_id == capture_id)
     else {
         return Ok(None);
     };
@@ -3538,6 +3550,102 @@ mod tests {
             )
             .unwrap()
             .is_none()
+        );
+    }
+
+    #[test]
+    fn retired_compacted_capture_is_not_replayed_under_the_next_prompt() {
+        // `#compactreplaydup`: compact archived a committed response out of
+        // HEAD, preflight retired its capture, then the operator typed a new
+        // prompt. The new prompt is a new turn, not the archived capture's
+        // "unresolved prompt tail"; replaying it duplicated the old response.
+        fn git(root: &Path, args: &[&str]) {
+            let status = std::process::Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?} failed with {status}");
+        }
+        let base = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Please fix infra.md.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = "### Re: infra.md owner mismatch — gpt-5\n\nArchived response body.\n";
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, base, agent_doc_ops_log_io::log_op)
+            .unwrap();
+        git(dir.path(), &["init", "-q"]);
+        git(dir.path(), &["config", "user.email", "test@example.com"]);
+        git(dir.path(), &["config", "user.name", "Test User"]);
+        git(dir.path(), &["add", "doc.md"]);
+        git(dir.path(), &["commit", "-qm", "initial", "--no-verify"]);
+
+        let archive_dir = dir.path().join(".agent-doc/archives");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        let archive_path = archive_dir.join("doc-20260929-003942.md");
+        std::fs::write(
+            &archive_path,
+            format!(
+                "---\narchived_from: compact\ncomponent: exchange\ndocument: doc.md\n---\n\n{base}\n{response}"
+            ),
+        )
+        .unwrap();
+        let compacted = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n*Compacted. Content archived to `{}`*\n<!-- /agent:exchange -->\n",
+            archive_path.display()
+        );
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        std::fs::write(&doc, &compacted).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &compacted,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        git(dir.path(), &["add", "doc.md"]);
+        git(dir.path(), &["commit", "-qm", "compact", "--no-verify"]);
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&compacted),
+            Some(&compacted),
+        )
+        .unwrap();
+
+        let with_next_prompt = compacted.replace(
+            "*\n<!-- /agent:exchange -->",
+            "*\n\nFix api.md issue\n<!-- /agent:exchange -->",
+        );
+        assert!(
+            agent_doc_turn::exchange_tail::prompt_only_exchange_tail(&with_next_prompt).is_some(),
+            "fixture must present an operator prompt tail"
+        );
+        // Control: before reconciliation the projected committed capture is the
+        // exact shape the replay selector fired on.
+        assert!(
+            historical_committed_capture_replay(&doc, &with_next_prompt)
+                .unwrap()
+                .is_some(),
+            "control: an unreconciled projected capture should reach the selector"
+        );
+
+        assert!(
+            agent_doc_flow_io::closeout::reconcile_compacted_committed_capture(&doc).unwrap(),
+            "preflight reconciliation should retire the archived capture"
+        );
+        assert!(
+            historical_committed_capture_replay(&doc, &with_next_prompt)
+                .unwrap()
+                .is_none(),
+            "a retired archived capture must not be replayed under the operator's next prompt"
         );
     }
 

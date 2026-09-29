@@ -551,6 +551,40 @@ pub unsafe extern "C" fn agent_doc_rebase_captured_splices(
     )
 }
 
+/// `#ambiguousholdforever`: answer `"true"` when `canonical` already carries every
+/// captured editor change from `base` (see
+/// [`agent_doc_merge::captured_splice::canonical_contains_captured`]), `"false"`
+/// otherwise, or an explicit error. Registration-only proof; never a write.
+///
+/// # Safety
+/// All arguments must point to valid NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_captured_splices_contained(
+    base: *const c_char,
+    canonical: *const c_char,
+    edits_json: *const c_char,
+) -> FfiPatchResult {
+    if base.is_null() || canonical.is_null() || edits_json.is_null() {
+        return ffi_patch_err("null captured splice argument");
+    }
+    ffi_guard!(
+        ffi_patch_err("captured splice containment proof panicked"),
+        ffi_patch_from_result((|| {
+            let base = unsafe { CStr::from_ptr(base) }.to_str()?;
+            let canonical = unsafe { CStr::from_ptr(canonical) }.to_str()?;
+            let edits_json = unsafe { CStr::from_ptr(edits_json) }.to_str()?;
+            let batch: agent_doc_merge::captured_splice::CapturedSpliceBatch =
+                serde_json::from_str(edits_json)?;
+            Ok(
+                agent_doc_merge::captured_splice::canonical_contains_captured(
+                    base, canonical, &batch,
+                )?
+                .to_string(),
+            )
+        })())
+    )
+}
+
 /// Open (or reset) the cdylib-hosted CRDT replica `replica_id`, optionally
 /// bootstrapping it from a previously encoded state (`init_state` / `init_len`;
 /// pass null / 0 for a fresh empty replica). `replica_id` is also the yrs client

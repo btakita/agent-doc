@@ -111,6 +111,49 @@ pub fn rebase(
     })
 }
 
+/// `#ambiguousholdforever`: prove at editor registration that `canonical`
+/// already carries every change the captured batch made to `base`, including
+/// when the controller inserted its own text directly beside the operator's
+/// (Myers then reports one merged insertion, which [`rebase`] rightly refuses to
+/// treat as applied on the hot typing path). Each captured change must match a
+/// canonical change over the same base range whose inserted text begins or ends
+/// with the operator's inserted text. Registration-only: adopting canonical is
+/// then lossless, where the alternative was refusing the endpoint indefinitely.
+pub fn canonical_contains_captured(
+    base: &str,
+    canonical: &str,
+    batch: &CapturedSpliceBatch,
+) -> Result<bool> {
+    let mut captured: Vec<char> = base.chars().collect();
+    for edit in &batch.edits {
+        apply(&mut captured, edit)?;
+    }
+    ensure!(
+        captured.iter().collect::<String>() == batch.resulting_text,
+        "captured splice cut mismatch"
+    );
+    if batch.resulting_text == canonical {
+        return Ok(true);
+    }
+    let old: Vec<char> = base.chars().collect();
+    let current: Vec<char> = canonical.chars().collect();
+    let captured_changes = capture_diff_slices(Algorithm::Myers, &old, &captured);
+    let canonical_changes = capture_diff_slices(Algorithm::Myers, &old, &current);
+    Ok(captured_changes
+        .iter()
+        .filter(|op| op.tag() != DiffTag::Equal)
+        .all(|change| {
+            let inserted = &captured[change.new_range()];
+            canonical_changes.iter().any(|observed| {
+                let observed_inserted = &current[observed.new_range()];
+                observed.tag() != DiffTag::Equal
+                    && observed.old_range() == change.old_range()
+                    && (observed_inserted.starts_with(inserted)
+                        || observed_inserted.ends_with(inserted))
+            })
+        }))
+}
+
 fn apply(text: &mut Vec<char>, edit: &CapturedSplice) -> Result<()> {
     let end = edit
         .offset_code_points
@@ -145,6 +188,32 @@ mod tests {
             edits,
             resulting_text: text.iter().collect(),
         }
+    }
+
+    /// `#ambiguousholdforever`: the registration hold's proof. The operator
+    /// pasted after the shadow; the controller ingested that paste, then added
+    /// a response below it and rewrote the compaction header. Canonical already
+    /// holds every operator change, so the rebase must answer with no edits.
+    #[test]
+    fn operator_edits_already_in_advanced_canonical_are_contained() {
+        let shadow = "<!-- agent:exchange -->\n*Compacted 003942*\nFix api.md issue\n<!-- /agent:exchange -->\n";
+        let buffer = "<!-- agent:exchange -->\n*Compacted 003942*\nFix api.md issue\n```\n• Failed (exit 1) write --commit\n```\n<!-- /agent:exchange -->\n";
+        let canonical = "<!-- agent:exchange -->\n*Compacted 004013*\nFix api.md issue\n```\n• Failed (exit 1) write --commit\n```\n\n### Re: infra.md — opus\n\nReplayed.\n<!-- /agent:exchange -->\n";
+        let prefix = shadow.find("<!-- /agent:exchange").unwrap();
+        let pasted = &buffer[prefix..buffer.len() - (shadow.len() - prefix)];
+        let edits = batch(shadow, vec![edit(shadow[..prefix].chars().count(), 0, pasted)]);
+        assert_eq!(edits.resulting_text, buffer);
+        assert!(canonical_contains_captured(shadow, canonical, &edits).unwrap());
+
+        // Control: canonical WITHOUT the paste does not contain it.
+        let without_paste = canonical.replace("```\n• Failed (exit 1) write --commit\n```\n", "");
+        assert!(!canonical_contains_captured(shadow, &without_paste, &edits).unwrap());
+        // Control: a different operator edit at the same anchor is not contained.
+        let other = batch(shadow, vec![edit(shadow[..prefix].chars().count(), 0, "other text\n")]);
+        assert!(!canonical_contains_captured(shadow, canonical, &other).unwrap());
+        // Control: an edit elsewhere that canonical never saw is not contained.
+        let elsewhere = batch(shadow, vec![edit(0, 0, "operator header\n")]);
+        assert!(!canonical_contains_captured(shadow, canonical, &elsewhere).unwrap());
     }
 
     #[test]

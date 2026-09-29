@@ -2556,6 +2556,29 @@ fn editor_replica_memberships_for_pid(editor_pid: u32) -> Vec<(String, u64, Stri
     memberships
 }
 
+/// `#typingfencerevert`: whether merging an editor update lost a component
+/// marker line. Markers are counted by raw line text, deliberately blind to code
+/// fences: a fence the operator is still typing hides markers from the parser
+/// but deletes none of them, while a stale or truncated buffer tombstones one.
+fn update_removed_component_marker(before: &str, after: &str) -> bool {
+    fn marker_counts(doc: &str) -> std::collections::HashMap<&str, usize> {
+        let mut counts = std::collections::HashMap::new();
+        for line in doc.lines() {
+            let line = line.trim();
+            if (line.starts_with("<!-- agent:") || line.starts_with("<!-- /agent:"))
+                && line.ends_with("-->")
+            {
+                *counts.entry(line).or_insert(0) += 1;
+            }
+        }
+        counts
+    }
+    let after_counts = marker_counts(after);
+    marker_counts(before)
+        .into_iter()
+        .any(|(marker, count)| after_counts.get(marker).copied().unwrap_or(0) < count)
+}
+
 /// Relay a **raw encoded yrs update** from an editor replica through the
 /// document's per-document hub: integrate it into the canonical replica and fan
 /// the missing delta out to every OTHER live replica's hub-side mirror
@@ -2719,7 +2742,12 @@ pub fn relay_replica_update_for_file(
                 agent_doc_element::element::structural_corruption_reason(&after_text),
                 Some(reason) if reason.starts_with("parse_error:")
             )
-                && agent_doc_element::element::structural_corruption_reason(&before_text).is_none();
+                && agent_doc_element::element::structural_corruption_reason(&before_text).is_none()
+                // `#typingfencerevert`: only a lost marker proves a stale or
+                // truncated buffer. An update that kept every marker and still
+                // fails to parse inserted text, e.g. an operator mid-way
+                // through typing a code fence; restoring would erase it.
+                && update_removed_component_marker(&before_text, &after_text);
             if introduced_parse_failure
                 && let Some(reason) =
                     agent_doc_element::element::structural_corruption_reason(&after_text)
@@ -8015,6 +8043,71 @@ mod tests {
         assert!(
             ops_log.contains("crdt_replica_update_corruption_rejected"),
             "ops.log must audit the rejected corruption:\n{ops_log}"
+        );
+    }
+
+    /// `#typingfencerevert`: an operator typing an opening code fence inside
+    /// `exchange` leaves the document transiently unparseable (the fence
+    /// swallows `<!-- /agent:exchange -->`) without deleting any marker. That
+    /// is operator text, not a stale buffer: the guard must keep it rather than
+    /// restore the canonical and reproject over the operator's typing.
+    #[test]
+    fn relay_update_opening_code_fence_is_operator_text_not_corruption() {
+        let (_dir, doc) = temp_doc("replica-structure-guard-fence.md");
+        let body = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Fix api.md issue\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, body).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap().join(".agent-doc/logs")).unwrap();
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = "intellij:operator-typing-fence";
+        let (client_id, bootstrap) =
+            register_replica_for_file_with_liveness(&doc, identity, |_| true)
+                .unwrap()
+                .expect("editor replica should attach");
+
+        let editor =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let frontier = editor.state_vector();
+        let anchor = "Fix api.md issue\n";
+        let byte_off = editor.text().find(anchor).unwrap() + anchor.len();
+        let char_off = editor.text()[..byte_off].chars().count() as u32;
+        editor.apply_local_edit(char_off, 0, "```\n");
+        assert!(
+            agent_doc_element::element::structural_corruption_reason(&editor.text())
+                .is_some_and(|reason| reason.starts_with("parse_error:")),
+            "fixture: the half-typed fence must make the document unparseable"
+        );
+        let typing_delta = editor.diff(&frontier).unwrap();
+
+        relay_replica_update_for_file(&doc, identity, &typing_delta)
+            .unwrap()
+            .expect("operator typing is relayed, not a transport error");
+
+        with_hub(&doc, |hub| {
+            let canonical = hub.canonical_text();
+            assert!(
+                canonical.contains("Fix api.md issue\n```\n"),
+                "the operator's typed fence must survive:\n{canonical}"
+            );
+            assert!(
+                !hub.awaits_canonical_projection(client_id),
+                "the typing editor must not be forced to reproject over its buffer"
+            );
+        })
+        .unwrap();
+        let ops_log =
+            std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log"))
+                .unwrap_or_default();
+        assert!(
+            !ops_log.contains("crdt_replica_update_corruption_rejected"),
+            "operator typing must not be audited as corruption:\n{ops_log}"
         );
     }
 

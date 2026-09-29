@@ -48,6 +48,7 @@ mod captured_splice_verify;
 mod clean;
 mod cleanup_cmd;
 mod commands;
+mod conversation_holders;
 mod convert;
 mod crash_resilience;
 mod dashboard_cmd;

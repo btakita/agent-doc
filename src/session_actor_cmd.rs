@@ -3978,6 +3978,38 @@ fn print_status_summary(ctx: &SessionContext) {
             capability_proof_status(ctx)
         );
     }
+    // `#nameelseclaude`: Claude Code refuses a second attach with a bare "This
+    // conversation is open in another app", naming nothing. The holders are on
+    // disk in `~/.claude/sessions/<pid>.json`, so name them here — including the
+    // positive "no other live CLI holds it", which is what tells the operator to
+    // stop hunting panes and look outside the terminal.
+    // The lock is a property of the Claude Code CLI the operator is RUNNING, not
+    // of the harness this document declares, so this must not be gated on
+    // `ctx.harness`. It was, and that is precisely how the report went missing in
+    // the reported case: `src/haiven-dev/tasks/api.md` and `tasks/frontend.md`
+    // both carry `agent: codex`, so `ctx.harness == "codex"` and the whole report
+    // was skipped — while the operator, running Claude Code, sat in front of the
+    // bare "This conversation is open in another app" lock with nothing named.
+    // The operator had already written the cause onto the queue head: "This
+    // happened after transitioning from `agent: claude` to `agent: codex`".
+    // The document keeps its `resume.claude` id across a harness switch; that
+    // id is the conversation a Claude Code client refuses to reopen.
+    let claude_conversation = std::fs::read_to_string(&ctx.canonical_file)
+        .ok()
+        .and_then(|content| {
+            agent_doc_frontmatter::frontmatter::parse(&content)
+                .ok()
+                .and_then(|(fm, _)| fm.resume_for_harness("claude").map(str::to_string))
+        });
+    for line in crate::conversation_holders::observe_holders(
+        &ctx.base_dir,
+        None,
+        claude_conversation.as_deref(),
+    )
+    .status_lines()
+    {
+        println!("{line}");
+    }
     match &ctx.operator_status.supervisor_lease {
         Some(lease) => println!(
             "controller_lease: generation={} pid={} runtime_state={} heartbeat={} socket={}",

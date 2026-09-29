@@ -369,6 +369,40 @@ Completed the public `lazily-hub/lazily-html` bootstrap and release.
 - The private superproject was intentionally left untouched in the shared dirty worktree; the already-queued `#lzreleasepins` item owns pinning/converting package links after the public release set is complete. No additional follow-up item is needed from this work.
 
 The exchange remains large, but this queue item is fully closed and the active queue can continue.
+
+### Re: #lzgdasset package prepared; authentication required — GPT-5 · 2026-09-29T13:59:31-04:00
+
+> **Queue prompt:**
+>
+> do [#lzgdasset]
+
+
+The Godot Asset Library package is prepared, committed, pushed, and fully verified. The final authenticated submission is waiting only for the operator to finish logging into the browser tab opened at the legacy Asset Library submission page.
+
+- Public package commit: `0be4094cea9bc7ef0792a35b7773a7be3c7ddfa9` on [lazily-hub/lazily-gd](https://github.com/lazily-hub/lazily-gd).
+- Added archive export rules so GitHub's generated archive contains only `addons/lazily/`; the downloaded public archive was independently inspected and contains the expected addon surface.
+- Added addon-local README, complete Apache-2.0 LICENSE, NOTICE, `VERSION` (`0.2.0`), and a validated 256×256 PNG icon. Corrected stale/private workspace references in public documentation.
+- Deliberately did not add `plugin.cfg`: Lazily is a runtime Scripts addon, not an `EditorPlugin`, and the addon README now makes the no-enable installation behavior explicit.
+- Added `asset-package-check` to `make check` and pinned it in the CI reachability closure. It validates the exact archive boundary, required metadata, private-path hygiene, and icon dimensions.
+- Full verification passed under the declared Godot 4.4.1 floor: 38/38 tests, zero failures/errors/skips/orphans, load-graph, 23/162 conformance fixtures with explicit inventory, assertion ordering, CI activation/reachability, and the 29-file package check.
+- Both package commits are CI-green: [packaging run 36608657357](https://github.com/lazily-hub/lazily-gd/actions/runs/36608657357) and [final commit run 36608683537](https://github.com/lazily-hub/lazily-gd/actions/runs/36608683537).
+- The existing `v0.2.0` tag remains immutable. The Asset Library entry will use asset version `0.2.0` and the exact post-tag packaging commit above, as required by the current form.
+
+Prepared submission values:
+
+- Asset Name: `Lazily`
+- Category: `Scripts`
+- License: `Apache-2.0`
+- Repository host: `GitHub`
+- Repository URL: `https://github.com/lazily-hub/lazily-gd`
+- Issues URL: `https://github.com/lazily-hub/lazily-gd/issues`
+- Minimum Godot version: `4.4`
+- Asset Version: `0.2.0`
+- Download Commit: `0be4094cea9bc7ef0792a35b7773a7be3c7ddfa9`
+- Icon URL: `https://raw.githubusercontent.com/lazily-hub/lazily-gd/0be4094cea9bc7ef0792a35b7773a7be3c7ddfa9/addons/lazily/icon.png`
+- Description: `Lazily is a pure-GDScript reactive kernel for Godot 4.4 and newer. It provides sources, computed values, scoped effects, batching, and transport-free latest-durable projection helpers without native binaries or platform-specific dependencies. It is a runtime script library, so there is no editor plugin to enable after installation.`
+
+Operator gate: authenticate in the opened [Godot Asset Library submission page](https://godotengine.org/asset-library/asset/submit), then resume this item so the prepared form can be submitted and the pending review entry verified.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -376,7 +410,7 @@ The exchange remains large, but this queue item is fully closed and the active q
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzhtmlbootstrap]~~
-- do [#lzgdasset]
+- ~~do [#lzgdasset]~~
 - do [#lzreleasepins]
 - release + publish
 <!-- /agent:queue -->
@@ -384,13 +418,13 @@ The exchange remains large, but this queue item is fully closed and the active q
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgdasset] Prepare Godot Asset Library addon metadata and package for lazily-gd 0.2.0, then complete the authenticated Asset Library submission.
 - [ ] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzgdasset] Prepare Godot Asset Library addon metadata and package for lazily-gd 0.2.0, then complete the authenticated Asset Library submission.
 - [/] [#lzreactpublish] [operator-decision] Establish npm org authorization for the first @lazily-hub/lazily-react publication; then publish, tag, and release prepared 0.3.0 commit dc21987. Blocked because npm whoami failed and the package is still absent.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Measured by `make review-gate-status` (gate `#lzmacosrunner`), which pins the five known incomplete-pair releases — v0.35.399, v0.35.400, v0.35.401, v0.35.406, v0.35.417 — and goes `evidence_stale` if that measured list changes in EITHER direction, so a widening gap surfaces without a hand pass. Underlying probes are `make release-macos-cadence-check` (weekly window, open since 2026-09-22T16:41:49Z) and `make release-macos-coverage-check` (exit 2, names the five); neither is a `make check` dependency, because clearing them needs Mac hardware. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command, or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.

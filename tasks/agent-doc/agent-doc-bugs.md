@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 4a326d6d-35d4-40d1-a46d-4014d1c3996d
+  claude: 5eae4a88-ecc4-423b-9429-d3fc0bd0ccbb
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -256,6 +256,38 @@ Fixed in agent-doc `8da5f5015` (pushed and installed).
 **Not covered:** the in-process wait itself (the RPC loop) has no SimWorld test; only its decision function is tested.
 
 Warning from preflight: 1 gated item is still in `agent:backlog` (`legacy_gated_in_backlog`). Running `agent-doc migrate` moves it to `agent:review`.
+
+### Re: codex `/clear` blocked as `pane_not_rendered` — opus-5-5 · 2026-09-29T02:47-04:00
+
+Fixed in agent-doc `c48ce15fc` (`#clearunrenderedlabel`). It's pushed and installed, and the superproject pointer is bumped.
+
+**What was wrong:**
+- Every codex Clear Session Context in haiven-dev since 04:55 failed this same way: frontend `%20`, infra `%27`, fpe `%31` and api `%19`.
+- None of those panes were blank. The captures were 723–3187 bytes, and `%19` shows a drawn, idle `› Ask Codex to do anything` prompt. It is still at **62% context**, so the clear never ran.
+- The code decided "not rendered" with the check `observation_budget == RENDER_TIMEOUT`, as a stand-in for "the last frame was blank".
+  - That only worked while the normal wait was shorter than the render wait.
+  - An uncommitted change in `src/session_actor_cmd.rs` had set the supervisor wait to 10s, the same as the render wait. It was already in the installed binary. After that, every clear with no observed change got the "not rendered" label.
+- The wrong label also skipped the repair step. When the pane never changed after the `/clear` was sent, the code is supposed to send `/clear` again, but only for an "unobserved" result. So a dropped `/clear` was never retried.
+
+**Fix:**
+- The timeout result is now decided from the last frame alone: command still visible, blank, or neither. That logic is a pure function, `context_clear_expired_window_status`.
+- A drawn idle pane now reads as "unobserved". That triggers the scrollback check, and if the conversation is still there, the one-time resend of `/clear`.
+- I kept the uncommitted 10s supervisor wait, since codex takes about 5s to swap out its conversation, and committed it with this fix.
+- I also fixed its clippy error: the poll function now takes the verification context instead of 8 arguments.
+
+**Verification:**
+- New test: a drawn idle pane is classified as unobserved, not unrendered. The other outcomes (command still visible, blank pane, capture failure, no capture) are covered too.
+- Full `make check` in a clean worktree with only these 2 files: exit 0, nextest ran 10053 tests with 10053 passed and 0 failed, and clippy passed.
+- CI is still in progress for `8da5f5015` and `c48ce15fc`.
+
+**To do on your side:** codex pane `%19` still holds its conversation. Run Clear Session Context again on `api.md`; the new binary will retry the send if it gets dropped.
+
+**My mistake this turn:** I ran `cargo fmt -- <files>`, which reformats the whole workspace, not just the listed files.
+- In 44 files the only change was formatting (the working file matched rustfmt applied to HEAD), so I restored those to HEAD with nothing lost.
+- 8 files that other sessions are actively editing still have formatting changes mixed into their uncommitted edits: `project_controller.rs`, `crdt-relay-io`, `document-realtime-io`, `ipc-io`, `prompt-contract`, `document_queue.rs`, `repair-command-io` and `repair-io`. Nothing in them is semantically different; reverting would have destroyed their work, so I left them.
+- I saved a memory so this doesn't happen again.
+
+The queue has only one item left, `#focuscrossrootverify`. It needs you to check it in a live editor.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

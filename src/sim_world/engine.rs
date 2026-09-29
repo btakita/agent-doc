@@ -1917,7 +1917,10 @@ impl SimWorld {
                 agent_doc_merge_io::merge_contents(baseline, content_ours, snapshot_candidate)
                     .expect("disjoint forward-merge must succeed");
             assert!(
-                !union.contains("<<<<<<<"),
+                !agent_doc_merge::conflict_render::introduces_conflicts(
+                    &union,
+                    &[baseline, content_ours, snapshot_candidate],
+                ),
                 "a disjoint forward-merge must be conflict-free:\n{union}"
             );
             self.snapshot = union.clone();

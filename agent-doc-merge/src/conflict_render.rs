@@ -106,6 +106,65 @@ pub fn has_conflicts(text: &str) -> bool {
             .any(|line| line.starts_with("<<<<<<<") || line.starts_with(">>>>>>>"))
 }
 
+/// Number of well-formed conflict marks in `text`: complete inline marks
+/// (`{~~a~>b~~}`, `{++a++}`, `{--a--}` on one line) plus block openers
+/// (`<<<<<<<` at a line start). Unlike [`has_conflicts`], a lone token such as
+/// `i++}` or a Gemfile `~> 1.2` is not a mark.
+pub fn conflict_mark_count(text: &str) -> usize {
+    text.split_inclusive('\n')
+        .map(|line| {
+            if line.starts_with("<<<<<<<") {
+                return 1;
+            }
+            let mut count = 0;
+            let mut rest = line;
+            while let Some((open, close, mid)) = next_inline_open(rest) {
+                let after = &rest[open + 3..];
+                let closed = match mid {
+                    Some(mid) => after.find(mid).and_then(|m| {
+                        after[m + mid.len()..]
+                            .find(close)
+                            .map(|c| m + mid.len() + c)
+                    }),
+                    None => after.find(close),
+                };
+                match closed {
+                    Some(end) => {
+                        count += 1;
+                        rest = &after[end + close.len()..];
+                    }
+                    None => rest = after,
+                }
+            }
+            count
+        })
+        .sum()
+}
+
+fn next_inline_open(text: &str) -> Option<(usize, &'static str, Option<&'static str>)> {
+    [
+        (SUB_OPEN, SUB_CLOSE, Some(SUB_MID)),
+        (ADD_OPEN, ADD_CLOSE, None),
+        (DEL_OPEN, DEL_CLOSE, None),
+    ]
+    .into_iter()
+    .filter_map(|(open, close, mid)| text.find(open).map(|at| (at, close, mid)))
+    .min_by_key(|(at, _, _)| *at)
+}
+
+/// True when a merge produced conflict marks that none of its inputs already
+/// carried: the gate for committing merged text as resolved. Text that merely
+/// quotes the notation (this repository's own session documents do) is not a
+/// conflict unless the merge added one.
+pub fn introduces_conflicts(merged: &str, inputs: &[&str]) -> bool {
+    let carried = inputs
+        .iter()
+        .map(|t| conflict_mark_count(t))
+        .max()
+        .unwrap_or(0);
+    conflict_mark_count(merged) > carried
+}
+
 /// Resolve every conflict rendered by [`render_conflict`], keeping one side.
 pub fn resolve_conflicts(text: &str, keep: Keep) -> Result<String, ConflictResolveError> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
@@ -364,8 +423,14 @@ mod tests {
 
     #[test]
     fn additions_and_removals_use_their_own_markers() {
-        assert_eq!(roundtrip("keep this\n", "keep all of this\n"), "keep {++all of ++}this\n");
-        assert_eq!(roundtrip("keep all of this\n", "keep this\n"), "keep {--all of --}this\n");
+        assert_eq!(
+            roundtrip("keep this\n", "keep all of this\n"),
+            "keep {++all of ++}this\n"
+        );
+        assert_eq!(
+            roundtrip("keep all of this\n", "keep this\n"),
+            "keep {--all of --}this\n"
+        );
     }
 
     #[test]
@@ -416,6 +481,27 @@ mod tests {
     }
 
     #[test]
+    fn conflict_marks_are_counted_only_when_well_formed() {
+        assert_eq!(
+            conflict_mark_count("for (;;) { i++}\ngem 'x', '~> 1.2'\n"),
+            0
+        );
+        assert_eq!(conflict_mark_count("a {~~b~>c~~} d {++e++} {--f--}\n"), 3);
+        assert_eq!(
+            conflict_mark_count("x\n<<<<<<< yours\na\n=======\nb\n>>>>>>> agent\n"),
+            1
+        );
+        assert_eq!(conflict_mark_count("quoted `<<<<<<< yours` inline\n"), 0);
+        let rendered = render_conflict("one lazy two\n", "one eager two\n").unwrap();
+        assert!(introduces_conflicts(
+            &rendered,
+            &["one lazy two\n", "one eager two\n"]
+        ));
+        let quoted = "docs: `{~~yours~>agent~~}` substitutes\n";
+        assert!(!introduces_conflicts(quoted, &[quoted, "docs\n"]));
+    }
+
+    #[test]
     fn unterminated_markers_are_reported() {
         assert!(resolve_conflicts("a {~~b~>c\n", Keep::Yours).is_err());
         assert!(resolve_conflicts("<<<<<<< yours\na\n=======\n", Keep::Agent).is_err());
@@ -433,9 +519,11 @@ mod tests {
             state ^= state << 17;
             state
         };
-        let mut gen_doc = |next: &mut dyn FnMut() -> u64| {
+        let gen_doc = |next: &mut dyn FnMut() -> u64| {
             let len = (next() % 12) as usize;
-            (0..len).map(|_| words[(next() % words.len() as u64) as usize]).collect::<String>()
+            (0..len)
+                .map(|_| words[(next() % words.len() as u64) as usize])
+                .collect::<String>()
         };
         let mut rendered = 0;
         for _ in 0..4000 {
@@ -446,6 +534,9 @@ mod tests {
                 rendered += 1;
             }
         }
-        assert!(rendered > 1000, "only {rendered} generated pairs were renderable");
+        assert!(
+            rendered > 1000,
+            "only {rendered} generated pairs were renderable"
+        );
     }
 }

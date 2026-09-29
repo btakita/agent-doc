@@ -10071,7 +10071,7 @@ fn finalize_forward_merges_plain_concurrent_edit_outside_response() {
         world.snapshot
     );
     assert!(
-        !world.snapshot.contains("<<<<<<<"),
+        agent_doc_merge::conflict_render::conflict_mark_count(&world.snapshot) == 0,
         "the committed union must be conflict-free:\n{}",
         world.snapshot
     );

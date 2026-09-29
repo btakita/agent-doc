@@ -19,6 +19,9 @@
        implementation `agent-doc-merge/src/conflict_render.rs`, whose inline
        CriticMarkup and block markers are two notations for `Seg.conflict`).
 
+  The same edit on both sides applies once (`identical_edits_apply_once`): an
+  editor that already holds the agent's text must not receive it twice.
+
   An edit replaces the span `[pos, pos + len)` of the shared base with `ins`;
   an append is an edit with `len = 0`. Everything here holds for every base,
   every element type, and every pair of edits.
@@ -39,6 +42,7 @@ structure Edit (α : Type) where
   pos : Nat
   len : Nat
   ins : List α
+  deriving DecidableEq
 
 def Edit.stop (e : Edit α) : Nat := e.pos + e.len
 
@@ -89,7 +93,11 @@ def render (y g : List α) : List (Seg α) :=
 /-- The merge. The operator's edit is `o`, the agent's is `g`; both are
 relative to the same base. The cursor is `none` only for a conflict. -/
 def merge (b : List α) (o g : Edit α) : List (Seg α) × Option Nat :=
-  if o.len = 0 ∧ g.len = 0 ∧ o.pos = g.pos then
+  if o = g then
+    -- The same edit on both sides applies once: an editor that already holds
+    -- the agent's text (a replayed delivery) must not receive it twice.
+    (plains (apply b o), some (o.pos + o.ins.length))
+  else if o.len = 0 ∧ g.len = 0 ∧ o.pos = g.pos then
     -- Rule 1: agent content first, operator's append after it.
     (plains (b.take o.pos ++ g.ins ++ o.ins ++ b.drop o.pos),
      some (o.pos + g.ins.length + o.ins.length))
@@ -264,12 +272,27 @@ theorem drop_split (b : List α) {j k : Nat} (h : j ≤ k) :
   congr 1
   omega
 
+/-- Edits that are not a same-point pair but meet at a boundary differ. -/
+theorem ne_of_boundary (o g : Edit α)
+    (hsame : ¬ (o.len = 0 ∧ g.len = 0 ∧ o.pos = g.pos))
+    (hb : g.stop ≤ o.pos ∨ o.stop ≤ g.pos) : o ≠ g := by
+  intro h
+  subst h
+  unfold Edit.stop at hb
+  apply hsame
+  omega
+
+/-- Identical edits apply once, with the cursor at the end of the edit. -/
+theorem identical_edits_apply_once (b : List α) (e : Edit α) :
+    merge b e e = (plains (apply b e), some (e.pos + e.ins.length)) := by
+  simp [merge]
+
 /-! ### Rule 1: same-point appends -/
 
 /-- **Rule 1.** Both append at the same point: the agent's content lands first,
 the operator's append follows it, and the cursor sits at the end of the
 operator's append (so continued typing extends it). -/
-theorem same_point_agent_first (b : List α) (o g : Edit α)
+theorem same_point_agent_first (b : List α) (o g : Edit α) (hne : o ≠ g)
     (ho : o.len = 0) (hg : g.len = 0) (hp : o.pos = g.pos) (hvalid : o.pos ≤ b.length) :
     let m := merge b o g
     conflictFree m.1 ∧
@@ -277,7 +300,7 @@ theorem same_point_agent_first (b : List α) (o g : Edit α)
     m.2 = some (o.pos + g.ins.length + o.ins.length) ∧
     (resolve .yours m.1).take (o.pos + g.ins.length + o.ins.length) =
       b.take o.pos ++ g.ins ++ o.ins := by
-  simp only [merge, ho, hg, hp, and_self, if_true]
+  simp only [merge, hne, if_false, ho, hg, hp, and_self, if_true]
   refine ⟨conflictFree_plains _, resolve_plains _ _, ?_, ?_⟩
   · simp
   rw [resolve_plains, ← hp]
@@ -299,7 +322,7 @@ theorem agent_before_applies_both (b : List α) (o g : Edit α)
     ∃ mid, resolve .yours m.1 = b.take g.pos ++ g.ins ++ mid ++ o.ins ++ b.drop o.stop ∧
       apply b g = b.take g.pos ++ g.ins ++ mid ++ b.drop o.pos ∧
       m.2 = some ((b.take g.pos ++ g.ins ++ mid ++ o.ins).length) := by
-  simp only [merge, hsame, if_false, hbefore, if_true]
+  simp only [merge, ne_of_boundary o g hsame (Or.inl hbefore), hsame, if_false, hbefore, if_true]
   have hgp : g.pos ≤ b.length := by unfold Edit.stop at hbefore; omega
   refine ⟨conflictFree_plains _, (b.drop g.stop).take (o.pos - g.stop), resolve_plains _ _,
     ?_, ?_⟩
@@ -322,7 +345,8 @@ theorem operator_before_applies_both (b : List α) (o g : Edit α)
     ∃ mid, resolve .yours m.1 = b.take o.pos ++ o.ins ++ mid ++ g.ins ++ b.drop g.stop ∧
       apply b o = b.take o.pos ++ o.ins ++ mid ++ b.drop g.pos ∧
       m.2 = some ((b.take o.pos ++ o.ins).length) := by
-  simp only [merge, hsame, if_false, hnot, hbefore, if_true]
+  simp only [merge, ne_of_boundary o g hsame (Or.inr hbefore), hsame, if_false, hnot, hbefore,
+    if_true]
   refine ⟨conflictFree_plains _, (b.drop o.stop).take (g.pos - o.stop), resolve_plains _ _,
     ?_, ?_⟩
   · simp only [apply, List.append_assoc]
@@ -339,7 +363,10 @@ theorem conflict_resolves_to_either_side (b : List α) (o g : Edit α) (hov : ov
     resolve .yours (merge b o g).1 = apply b o ∧
     resolve .agent (merge b o g).1 = apply b g := by
   obtain ⟨hsame, hn1, hn2⟩ := hov
-  simp only [merge, hsame, hn1, hn2, if_false]
+  by_cases heq : o = g
+  · subst heq
+    simp [merge, resolve_plains]
+  simp only [merge, heq, hsame, hn1, hn2, if_false]
   unfold Edit.stop at hn1 hn2
   have side_ok : ∀ (e : Edit α), min o.pos g.pos ≤ e.pos → e.stop ≤ max o.stop g.stop →
       b.take (min o.pos g.pos) ++
@@ -391,9 +418,16 @@ theorem operator_text_never_lost (b : List α) (o g : Edit α)
         resolve .yours (merge b o g).1 = pre ++ o.ins ++ post ∧
         (pre ++ o.ins).length = c) ∨
       resolve .yours (merge b o g).1 = apply b o := by
+  by_cases heq : o = g
+  · subst heq
+    left
+    refine ⟨o.pos + o.ins.length, b.take o.pos, b.drop o.stop, ?_, ?_, ?_⟩
+    · simp [identical_edits_apply_once]
+    · simp [identical_edits_apply_once, apply, List.append_assoc]
+    · simp [List.length_take, Nat.min_eq_left hvalid]
   by_cases h1 : o.len = 0 ∧ g.len = 0 ∧ o.pos = g.pos
   · left
-    obtain ⟨cf, hr, hc, _⟩ := same_point_agent_first b o g h1.1 h1.2.1 h1.2.2 hvalid
+    obtain ⟨cf, hr, hc, _⟩ := same_point_agent_first b o g heq h1.1 h1.2.1 h1.2.2 hvalid
     refine ⟨_, b.take o.pos ++ g.ins, b.drop o.pos, hc, by simpa [List.append_assoc] using hr, ?_⟩
     simp [List.length_take, Nat.min_eq_left hvalid]; omega
   by_cases h2 : g.stop ≤ o.pos
@@ -414,22 +448,29 @@ resolves to exactly the agent's edit. -/
 theorem agent_insert_preserved (b : List α) (o g : Edit α) :
     (conflictFree (merge b o g).1 ∧ g.ins <:+: resolve .yours (merge b o g).1) ∨
       resolve .agent (merge b o g).1 = apply b g := by
+  by_cases heq : o = g
+  · subst heq
+    left
+    simp only [identical_edits_apply_once]
+    refine ⟨conflictFree_plains _, ?_⟩
+    rw [resolve_plains]
+    exact ⟨b.take o.pos, b.drop o.stop, by simp [apply]⟩
   by_cases h1 : o.len = 0 ∧ g.len = 0 ∧ o.pos = g.pos
   · left
-    simp only [merge, h1, and_self, if_true]
+    simp only [merge, heq, if_false, h1, and_self, if_true]
     refine ⟨conflictFree_plains _, ?_⟩
     rw [resolve_plains]
     exact ⟨b.take o.pos, o.ins ++ b.drop o.pos, by simp [List.append_assoc, h1.2.2]⟩
   by_cases h2 : g.stop ≤ o.pos
   · left
-    simp only [merge, h1, h2, if_false, if_true]
+    simp only [merge, heq, h1, h2, if_false, if_true]
     refine ⟨conflictFree_plains _, ?_⟩
     rw [resolve_plains]
     exact ⟨b.take g.pos, (b.drop g.stop).take (o.pos - g.stop) ++ o.ins ++ b.drop o.stop,
       by simp [List.append_assoc]⟩
   by_cases h3 : o.stop ≤ g.pos
   · left
-    simp only [merge, h1, h2, h3, if_false, if_true]
+    simp only [merge, heq, h1, h2, h3, if_false, if_true]
     refine ⟨conflictFree_plains _, ?_⟩
     rw [resolve_plains]
     exact ⟨b.take o.pos ++ o.ins ++ (b.drop o.stop).take (g.pos - o.stop), b.drop g.stop,

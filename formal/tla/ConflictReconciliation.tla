@@ -101,7 +101,9 @@ Overlaps(o, g) == ~SamePoint(o, g) /\ ~(Stop(g) <= o.pos) /\ ~(Stop(o) <= g.pos)
 
 \* The merge: buffer and cursor (-1 when a conflict is surfaced).
 Merge(b, o, g) ==
-    IF SamePoint(o, g) THEN
+    \* The same edit on both sides applies once (a replayed delivery).
+    IF o = g THEN [buf |-> Plains(Apply(b, o)), cursor |-> o.pos + Len(o.ins)]
+    ELSE IF SamePoint(o, g) THEN
         IF OperatorFirst
         THEN [buf |-> Plains(Take(b, o.pos) \o o.ins \o g.ins \o Drop(b, o.pos)),
               cursor |-> o.pos + Len(o.ins)]
@@ -174,7 +176,7 @@ AgentPreserved ==
 
 \* Rule 1: agent content first, operator's append (and typing) after it.
 SamePointAgentFirst ==
-    SamePoint(o, g) =>
+    (SamePoint(o, g) /\ o # g) =>
         Take(Text, cursor) = Take(Base, o.pos) \o g.ins \o OperatorText
 
 \* Rule 2: independent regions apply both edits and never conflict.
@@ -193,6 +195,10 @@ CompactConflict ==
             /\ ~(buf[i].y # <<>> /\ buf[i].g # <<>> /\ Head(buf[i].y) = Head(buf[i].g))
             /\ ~(buf[i].y # <<>> /\ buf[i].g # <<>>
                  /\ buf[i].y[Len(buf[i].y)] = buf[i].g[Len(buf[i].g)])
+
+\* Identical edits apply once.
+IdenticalAppliesOnce ==
+    (o = g) => Take(Text, cursor) = Take(Apply(Base, o), o.pos + Len(o.ins)) \o typed
 
 \* Reach: MUST be violated (ConflictReconciliationReach.cfg).
 NoConflictEver == ConflictFree(buf)

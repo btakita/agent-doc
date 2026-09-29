@@ -3679,7 +3679,7 @@ mod tests {
         assert!(merged.content.contains("### Re: recovery crdt - gpt-5"));
         assert!(merged.content.contains("while I was typing"));
         assert!(
-            !merged.content.contains("<<<<<<<") && !merged.content.contains(">>>>>>>"),
+            agent_doc_merge::conflict_render::conflict_mark_count(&merged.content) == 0,
             "document-model recovery merge must not emit diff3 markers:\n{}",
             merged.content,
         );

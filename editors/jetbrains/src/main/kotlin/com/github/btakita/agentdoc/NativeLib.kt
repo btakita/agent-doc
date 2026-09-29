@@ -641,6 +641,13 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_merge_crdt(base: String, ours: String, theirs: String): Pointer?
 
+    /**
+     * `#editorauth4`: reconcile the operator's buffer with the agent's version (agent-first
+     * same-point appends, independent edits both apply, overlaps surfaced as compact conflicts).
+     * `cursorUtf16` < 0 means no caret. Returns JSON; caller must free with [agent_doc_free_string].
+     */
+    fun agent_doc_reconcile_text(base: String, yours: String, agent: String, cursorUtf16: Long): Pointer?
+
     /** Get the library version (e.g. "0.26.1"). Caller must free result. */
     fun agent_doc_version(): Pointer?
 
@@ -2065,6 +2072,27 @@ object NativePatching {
     fun mergeCrdt(base: String, ours: String, theirs: String): String? {
         val lib = AgentDocLib.get() ?: return null
         val ptr = lib.agent_doc_merge_crdt(base, ours, theirs)
+        try {
+            return ptr?.getString(0)
+        } finally {
+            lib.agent_doc_free_string(ptr)
+        }
+    }
+
+    /**
+     * `#editorauth4`: reconcile [yours] (the operator's buffer, caret at [cursorUtf16], or -1) with
+     * [agent] (the agent's version), both derived from [base]. Returns the raw JSON result
+     * (`{"ok":true,"text",...,"cursor_utf16",...,"conflicts",...}` or `{"ok":false,"error",...}`),
+     * or null if FFI is unavailable. On `ok:false` the caller keeps the operator's buffer.
+     */
+    fun reconcileText(base: String, yours: String, agent: String, cursorUtf16: Int): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val ptr =
+            try {
+                lib.agent_doc_reconcile_text(base, yours, agent, cursorUtf16.toLong())
+            } catch (e: UnsatisfiedLinkError) {
+                return null
+            }
         try {
             return ptr?.getString(0)
         } finally {

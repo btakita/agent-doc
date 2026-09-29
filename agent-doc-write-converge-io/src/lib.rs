@@ -1077,7 +1077,12 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             .or_else(|| {
                 agent_doc_merge_io::merge_contents(base, &queue_reconciled_ours, &candidate)
                     .ok()
-                    .filter(|union| !union.contains("<<<<<<<"))
+                    .filter(|union| {
+                        !agent_doc_merge::conflict_render::introduces_conflicts(
+                            union,
+                            &[base, &queue_reconciled_ours, &candidate],
+                        )
+                    })
                     .filter(|union| {
                         dropped_queue_prompt_lines_after_content_ours(base, &candidate, union)
                             .is_empty()
@@ -1204,7 +1209,10 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
         )
         && let Ok(union) =
             agent_doc_merge_io::merge_contents(base, &queue_reconciled_ours, &candidate)
-        && !union.contains("<<<<<<<")
+        && !agent_doc_merge::conflict_render::introduces_conflicts(
+            &union,
+            &[base, &queue_reconciled_ours, &candidate],
+        )
     {
         let union_response_present = !response_headings.is_empty()
             && response_converged_in_visible_target(base, &queue_reconciled_ours, &union);

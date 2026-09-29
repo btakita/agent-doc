@@ -199,6 +199,7 @@ function resetBindings(): void {
     _version = null;
     _state_projection = null;
     _state_subscribe = null;
+    _reconcile_text = null;
     _record_state_event = null;
     _editor_content_applied_for_editor_v1 = null;
     _editor_patch_applied = null;
@@ -219,7 +220,7 @@ function resetBindings(): void {
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
 export const NATIVE_HOT_RELOAD_CAPABILITY = 'native_hot_reload_generation_v1';
-export const EDITOR_PLUGIN_VERSION = '0.2.72';
+export const EDITOR_PLUGIN_VERSION = '0.2.73';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 const BOUNDED_EDITOR_SPLICES_CAPABILITY = 'bounded_editor_splices_v1';
@@ -391,6 +392,7 @@ let _free_string: any = null;
 let _version: any = null;
 let _state_projection: any = null;
 let _state_subscribe: any = null;
+let _reconcile_text: any = null;
 let _record_state_event: any = null;
 let _editor_content_applied_for_editor_v1: any = null;
 let _editor_patch_applied: any = null;
@@ -650,6 +652,18 @@ function bindFunctions(): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] editor-surface event ABI unavailable: ${e.message}`);
         _record_editor_surface_event = null;
+    }
+    try {
+        // #editorauth4 conflict reconciliation (shared with JetBrains). Optional so
+        // an older cdylib without the symbol does not break the other bindings.
+        _reconcile_text = lib.func(
+            'agent_doc_reconcile_text',
+            OWNED_C_STRING_POINTER,
+            ['str', 'str', 'str', 'int64'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] reconcile ABI unavailable: ${e.message}`);
+        _reconcile_text = null;
     }
     try {
         // #r5at lazily-js reactive mirror: warm subscribe (snapshot/delta) over
@@ -1040,6 +1054,42 @@ export function stateProjectionForFile(filePath: string, projectRoot?: string): 
 // SHA-256); re-subscription lazily re-creates the view from a fresh cold snapshot, so
 // aggressive eviction is safe.
 const stateMirrors = new Map<string, GraphView>();
+
+/** Result of {@link reconcileText}. */
+export type ReconcileResult =
+    | { ok: true; text: string; cursor_utf16: number | null; conflicts: number }
+    | { ok: false; error: string };
+
+/**
+ * `#editorauth4`: reconcile `yours` (the operator's buffer, caret at
+ * `cursorUtf16`, or -1) with `agent` (the agent's version), both derived from
+ * `base`. Same-point appends put the agent's text first and keep the caret at
+ * the end of the operator's text; overlaps are surfaced as compact conflicts.
+ * Returns null when the FFI/symbol is unavailable. On `ok: false` the caller
+ * keeps the operator's buffer unchanged. Shared with JetBrains `reconcileText`.
+ */
+export function reconcileText(
+    base: string,
+    yours: string,
+    agent: string,
+    cursorUtf16: number,
+    projectRoot?: string,
+): ReconcileResult | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_reconcile_text) return null;
+    let ptr: any = null;
+    try {
+        ptr = _reconcile_text(base, yours, agent, cursorUtf16);
+        if (!ptr) return null;
+        return JSON.parse(koffi.decode(ptr, 'char', -1)) as ReconcileResult;
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] reconcile_text error: ${e.message}`);
+        return null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
 
 /**
  * Pull a raw `agent_doc_state_subscribe(documentHash, lastEpoch)` message

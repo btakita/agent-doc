@@ -935,6 +935,82 @@ pub unsafe extern "C" fn agent_doc_merge_crdt(
     CString::new(merged).unwrap_or_default().into_raw()
 }
 
+/// Reconcile the operator's live buffer with the agent's version of the same
+/// document (`#editorauth4`): the merge proved in
+/// `formal/authority_ladder/ConflictReconciliation.lean`, implemented in
+/// [`agent_doc_merge::conflict_reconcile::reconcile`].
+///
+/// Same-point appends put the agent's text first and keep the operator's
+/// cursor at the end of their own text; independent edits both apply; an
+/// overlapping edit is surfaced in the buffer as a compact conflict (inline
+/// CriticMarkup or a minimal block), never dropped.
+///
+/// `cursor_utf16` is the operator's caret in UTF-16 code units (the offset
+/// unit of both JetBrains and VS Code), or negative for none. Returns JSON:
+/// `{"ok":true,"text":…,"cursor_utf16":N|null,"conflicts":N}` or
+/// `{"ok":false,"error":"marker_syntax_in_input"|"cursor_out_of_bounds"|"invalid_utf8"}`.
+/// On `ok:false` the caller keeps the operator's buffer unchanged.
+///
+/// # Safety
+///
+/// `base`, `yours`, and `agent` must be valid, NUL-terminated strings. The
+/// caller must free the returned pointer with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reconcile_text(
+    base: *const c_char,
+    yours: *const c_char,
+    agent: *const c_char,
+    cursor_utf16: i64,
+) -> *mut c_char {
+    let json = (|| {
+        let read = |p: *const c_char| unsafe { CStr::from_ptr(p) }.to_str().ok();
+        let (Some(base), Some(yours), Some(agent)) = (read(base), read(yours), read(agent)) else {
+            return serde_json::json!({"ok": false, "error": "invalid_utf8"});
+        };
+        let cursor = if cursor_utf16 < 0 {
+            None
+        } else {
+            match utf16_to_byte_offset(yours, cursor_utf16 as usize) {
+                Some(byte) => Some(byte),
+                None => return serde_json::json!({"ok": false, "error": "cursor_out_of_bounds"}),
+            }
+        };
+        match agent_doc_merge::conflict_reconcile::reconcile(base, yours, agent, cursor) {
+            Ok(out) => serde_json::json!({
+                "ok": true,
+                "cursor_utf16": out.cursor.map(|c| out.text[..c].encode_utf16().count()),
+                "text": out.text,
+                "conflicts": out.conflicts,
+            }),
+            Err(agent_doc_merge::conflict_reconcile::ReconcileError::MarkerSyntaxInInput) => {
+                serde_json::json!({"ok": false, "error": "marker_syntax_in_input"})
+            }
+            Err(agent_doc_merge::conflict_reconcile::ReconcileError::CursorOutOfBounds) => {
+                serde_json::json!({"ok": false, "error": "cursor_out_of_bounds"})
+            }
+        }
+    })();
+    CString::new(json.to_string())
+        .unwrap_or_default()
+        .into_raw()
+}
+
+/// Byte offset of a UTF-16 offset into `text`; `None` past the end or inside a
+/// surrogate pair.
+fn utf16_to_byte_offset(text: &str, utf16: usize) -> Option<usize> {
+    let mut units = 0usize;
+    for (byte, ch) in text.char_indices() {
+        if units == utf16 {
+            return Some(byte);
+        }
+        units += ch.len_utf16();
+        if units > utf16 {
+            return None;
+        }
+    }
+    (units == utf16).then_some(text.len())
+}
+
 /// Reposition boundary marker to end of exchange component.
 ///
 /// Removes all existing boundary markers from the document, strips transient
@@ -1232,6 +1308,38 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
 mod tests {
     use super::*;
     use std::ffi::{CStr, CString};
+
+    fn reconcile_json(base: &str, yours: &str, agent: &str, cursor: i64) -> serde_json::Value {
+        let (b, y, a) = (
+            CString::new(base).unwrap(),
+            CString::new(yours).unwrap(),
+            CString::new(agent).unwrap(),
+        );
+        let ptr = unsafe { agent_doc_reconcile_text(b.as_ptr(), y.as_ptr(), a.as_ptr(), cursor) };
+        let json = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
+        unsafe { agent_doc_free_string(ptr) };
+        serde_json::from_str(&json).unwrap()
+    }
+
+    #[test]
+    fn reconcile_text_ffi_reports_utf16_cursor_and_conflicts() {
+        // "😀" is two UTF-16 units: the caret after "😀 note" is 7 units in.
+        let out = reconcile_json("😀\n", "😀 note\n", "😀\nreply\n", 7);
+        assert_eq!(out["ok"], true);
+        assert_eq!(out["text"], "😀 note\nreply\n");
+        assert_eq!(out["cursor_utf16"], 7);
+        assert_eq!(out["conflicts"], 0);
+
+        let out = reconcile_json("a lazy b\n", "a quick b\n", "a slow b\n", -1);
+        assert_eq!(out["text"], "a {~~quick~>slow~~} b\n");
+        assert_eq!(out["conflicts"], 1);
+        assert!(out["cursor_utf16"].is_null());
+
+        // Inside the surrogate pair: refused, never guessed.
+        let out = reconcile_json("😀\n", "😀\n", "😀\n", 1);
+        assert_eq!(out["ok"], false);
+        assert_eq!(out["error"], "cursor_out_of_bounds");
+    }
 
     #[test]
     fn apply_patch_append_preserves_leading_code_fence_after_prompt_fence() {

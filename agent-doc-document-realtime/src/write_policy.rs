@@ -1390,7 +1390,12 @@ pub fn response_target_disjoint_from_user_edit(
     let Some(merged) = merge_contents(baseline, content_ours, candidate) else {
         return false;
     };
-    if merged.contains("<<<<<<<") || merged.contains(">>>>>>>") {
+    // `#editorauth4`: only marks the merge ADDED are a conflict; the inputs may
+    // quote the notation (session documents about conflicts do).
+    if agent_doc_merge::conflict_render::introduces_conflicts(
+        &merged,
+        &[baseline, content_ours, candidate],
+    ) {
         return false;
     }
     let merged_lines: HashSet<&str> = merged
@@ -4713,6 +4718,40 @@ Working.
             &ours,
             &candidate,
             |_, _, candidate| Some(candidate.to_string())
+        ));
+    }
+
+    #[test]
+    fn response_target_disjoint_from_user_edit_accepts_quoted_conflict_notation() {
+        // `#editorauth4`: a session document that QUOTES conflict notation (as
+        // agent-doc-bugs.md does) is not a conflict; only marks the merge added are.
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Blocks read `<<<<<<< yours`; inline reads `{~~yours~>agent~~}`.\n",
+            "❯ do #fix\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\nold parked note body\n-->\n",
+        )
+        .to_string();
+        let ours = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: do #fix — opus-4-8\n\nImplemented and verified with a long-enough response body to matter.\n<!-- /agent:exchange -->",
+        );
+        let candidate = ours.replace("old parked note body", "edited parked note body");
+
+        assert!(response_target_disjoint_from_user_edit(
+            &baseline,
+            &ours,
+            &candidate,
+            |_, _, candidate| Some(candidate.to_string())
+        ));
+        let with_new_mark = candidate.replace("edited parked", "{~~edited~>agent~~} parked");
+        assert!(!response_target_disjoint_from_user_edit(
+            &baseline,
+            &ours,
+            &candidate,
+            move |_, _, _| Some(with_new_mark)
         ));
     }
 

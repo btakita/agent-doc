@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -154,9 +154,35 @@ Understood: the release now runs **after** the #62–#64 fixes (v0.35.420 shippe
 - **`--no-dynamic`** (alias `--restart-required`) on `plugin install|update` skips the hot-swap explicitly.
 - **Tests:** four new ones cover the IDE-first JVM order, the list of tried paths, the fallback, and `--no-dynamic` with and without a live IDE. The fallback test fails when the fallback is removed. The spec is updated (`specs/07-core-commands.md`).
 - **Not done (#jbunloadsig):** making the plugin's own `checkCanUnloadWithoutRestart` call work across IDE versions needs a plugin release with a version bump in `gradle.properties`, which another session has uncommitted edits in. With the fallback in place it no longer blocks updating.
+- `8b8547bc0` **#subsumedsplicereplay** (plugin 0.2.449): after re-registering, the editor sent the whole buffer and then replayed the same queued keystrokes, so typed text landed twice (infra.md). Sending the whole buffer now drops those older keystroke batches.
+- `0c3b48408` **#admissionmergedup**: a merge can no longer end up with more list items than the baseline plus each side's additions. This stops two edits of one queue item from becoming two items. Includes a new TLA model, `AdmissionSplitMerge`.
+- `09ae52d7f` **plugin/binary version mismatch now asks for operator action**: reloading the same binary and plugin can't clear it, so it is no longer treated as self-healing. The `RefusedSaveOperatorAction` TLA check is updated to match.
+- `165ab9638` **#owneddeliverydefer**: the closeout now waits a bounded time for the editor to receive the write instead of failing hard (fpe.md).
+- `b89f4d612` **#clearnewchattrailer**: Codex's composer is recognized again after `/clear`.
+- `bd6ba2102` **#qstruckbaredup**: when a queue line is struck, an identical plain-text copy of it is dropped instead of being served again.
+- `c4c3fd739` rustfmt-only reformatting in 6 files.
 
 **Verification:** `make check` exit 0, 10199/10199 passed. `make install` done. Superproject commits `9518013aa5` and `b555114b5a`. CI run 36675992323 was queued at last check.
-<!-- agent:boundary:05545729 -->
+> **Queue prompt:** commit the uncommitted files
+
+### Re: committed the pending agent-doc work — opus-5.5 · 2026-09-30T02:18-04:00
+
+The agent-doc submodule is now clean and pushed. Its uncommitted work was another session's, idle since 00:06. I committed it as seven commits, one per topic:
+
+- `8b8547bc0` **#subsumedsplicereplay** (plugin 0.2.449): after re-registering, the editor sent the whole buffer and then replayed the same queued keystrokes, so typed text landed twice (infra.md). Sending the whole buffer now drops those older keystroke batches.
+- `0c3b48408` **#admissionmergedup**: a merge can no longer end up with more list items than the baseline plus each side's additions. This stops two edits of one queue item from becoming two items. Includes a new TLA model, `AdmissionSplitMerge`.
+- `09ae52d7f` **plugin/binary version mismatch now asks for operator action**: reloading the same binary and plugin can't clear it, so it is no longer treated as self-healing. The `RefusedSaveOperatorAction` TLA check is updated to match.
+- `165ab9638` **#owneddeliverydefer**: the closeout now waits a bounded time for the editor to receive the write instead of failing hard (fpe.md).
+- `b89f4d612` **#clearnewchattrailer**: Codex's composer is recognized again after `/clear`.
+- `bd6ba2102` **#qstruckbaredup**: when a queue line is struck, an identical plain-text copy of it is dropped instead of being served again.
+- `c4c3fd739` rustfmt-only reformatting in 6 files.
+
+**Verification:** `make check` passed twice this session with all of this in the tree (10199/10199). The TLA suite passed, including the new model. The Kotlin `CrdtLocalEditorSpliceTest` passed 8/8 on a fresh run. `make install` had already built from this tree, so the installed binary and plugin 0.2.449 already contain these changes.
+
+**Superproject:** pointer `6ad04bd865`. I also committed agent-doc's installed skill/runbook files for v0.35.420 (`6d3a75d2fc`, 23 files). I left the other ~200 uncommitted superproject entries alone. They belong to other sessions and projects (memory notes, other submodules, `.gitmodules`, `.mise.toml`, other task documents, two deletions). Tell me if you want any of those committed too.
+
+**Note:** #qstruckbaredup and #admissionmergedup address the same duplication class as **#queuefreetextdup**. I'll re-check that item against them rather than start a new fix.
+<!-- agent:boundary:7f0514e2:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -167,7 +193,7 @@ Understood: the release now runs **after** the #62–#64 fixes (v0.35.420 shippe
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~fix https://github.com/btakita/agent-doc/issues/62~~
 - ~~fix https://github.com/btakita/agent-doc/issues/63~~
-- commit the uncommitted files
+- ~~commit the uncommitted files~~ — auto-struck: answered this cycle (#ftstrike)
 - fix https://github.com/btakita/agent-doc/issues/64
 - release + publish Issue 62-64
 <!-- /agent:queue -->

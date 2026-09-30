@@ -2,6 +2,39 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.420
+
+- **Code-quoted component markers stay readable (GH #61).** A `<!-- agent:NAME -->` marker quoted
+  inside an inline code span or a fenced/indented code block is no longer escaped to `&lt;!--`
+  when a response is written; renderers showed the entities literally. The component parser
+  already ignores code regions, so only bare-text markers are escaped.
+
+- **`reliable-sync-status` shows editor-surface auto-sync and pane placement (GH #62).** The
+  controller keeps each project's last editor-surface observation and last pane-layout outcome,
+  and the command prints them together with where every registered or visible document's tmux
+  pane lives (`agent-doc` / `stash` / none). A divergence verdict flags a visible document parked
+  in stash, a visible document with no pane, or a hidden document holding the agent-doc window.
+  `--json` adds `surface_sync`, `pane_placements`, and `surface_pane_findings`. Visible documents
+  under a nested project root are left to that project.
+
+- **A closeout that commits itself is not a failure.**
+  - `respond` / `finalize` / `write --commit` that fail after the response was captured now watch
+    that same cycle and succeed if the retained worker commits it within the settle window.
+    Before, a controller recycled mid-cycle (for example by `make install`) refused the closeout
+    CAS, `respond` exited nonzero, and the dogfood fix prompt fired for a turn that committed
+    about three seconds later (#respondsettle). Failures before capture still return at once.
+  - `session-check` re-samples a self-converging interruption (`write_applied`, retained
+    delivery, scheduled settlement) every 500ms for up to 15s (`AGENT_DOC_SESSION_CHECK_SETTLE_SECS`)
+    instead of reporting whatever it sampled at entry (GH #60).
+  - The Codex `Stop` hook accepts `"last_assistant_message": null` instead of failing closed on
+    `parse stop JSON`.
+
+- **Install cannot pair a binary with a different cdylib build.** `make install`,
+  `install-full`, and self-install build the binary and library in one cargo run, and
+  `lib-install` refuses a library whose build id differs from its binary. A concurrent edit
+  between two builds had installed mismatched halves, and every editor handshake was refused.
+  A compact of an exchange that holds only a rendered compact summary is now a no-op.
+
 ## 0.35.419
 
 - **Queues run by default; `pause`/`stop` hold them (#queuegodefault).** A queue with no control

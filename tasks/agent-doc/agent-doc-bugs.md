@@ -335,6 +335,23 @@ Continuing the queue: `#queuefreetextdup` is next. The exchange is large, but th
 **lazily.md "Stop hook failed closed" (11:20).** This is the same failure as fpe.md, already fixed by `a829b5ae5`, which was installed at 11:34, after this happened. The Stop hook reopened a cycle, saved the response, and its write was held; the error escaped as "failed closed". The held write settled 6 s later and committed as `53b068e086`. lazily.md passes session-check now, with only an operator-verify item waiting in its queue. Nothing more to do there.
 
 CI is still running on the 0.35.422 release commit. The exchange here is long, but the queue is active, so I'm continuing.
+
+### Re: #queuefreetextdup — opus-5-5 · 2026-09-30T12:36-04:00
+
+> **Queue prompt:**
+>
+> do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.
+
+**Fixed in `bc6cb52ef`: a repeated queue line now means "run it again"**, as you intended. Installed and pushed; `make check` passes (Rust 10218/0, JetBrains 599/0, VS Code 181/0).
+
+Two separate paths were erasing your second `release + publish`:
+
+1. **The strike hit every copy.** When a response answered a free-text queue line, every identical line in the queue was struck (`nodes=2` in the 01:47 cycle). Now one answer strikes only the first unstruck copy; later copies stay for their own cycle. With the old behaviour the new test fails.
+2. **Cleanup then deleted the repeat.** After the first copy's strike was saved, any live copy of a struck line was treated as a stale replay and removed. So even with the strike fixed, your repeat would have vanished on the next save. My first test of this failed exactly there. Now, if the saved document itself had a live copy next to the struck one, that copy is yours and stays. A replayed copy with no such saved repeat is still removed, and an old version that un-strikes the first copy is struck again; the test covers both.
+
+**`#qstruckbaredup` checked, no change needed.** It only removes a bare line with no leading `- ` that matches a struck item. An authored `- …` repeat is never affected, and the new test pins that down.
+
+Next in the queue: `#fpecapturedresponse`, the fpe.md duplicated response and lost queue items. CI is still running on `fd711bef4`. The exchange is long, but the queue is active, so I'm continuing.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -345,7 +362,7 @@ CI is still running on the 0.35.422 release commit. The exchange here is long, b
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~release + publish in a subagent so I can test it on my coder project~~
-- ⏭️ do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.
+- ~~do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.~~
 - ~~do [#semmergeargorder]~~
 - do [#fpecapturedresponse]
 - re [#apimdrevert]: I don't recall which text was lost. Can we practically debug log these events or will this cause excessive debug logging?
@@ -356,7 +373,6 @@ CI is still running on the 0.35.422 release commit. The exchange here is long, b
 
 <!-- agent:backlog -->
 - [ ] [#fpecapturedresponse] [fpereplaydup] [agent-doc] fpe.md 2026-09-30: a captured response retained behind editor_owner_without_registered_replica (intent 1790782003163310509, cycle-1790781814399) was written TWICE and the replay consumed two operator queue heads ("Configure the SBX + STG to have 16 vCPUs..." and "I can't login.") as Queue-prompt quotes over a byte-identical answer (haiven-dev commit 6735e15e). Evidence: ops.log 15:27-15:32Z shows ~9 captured_finalize_resume_tracked_work replays (recorded_tracked_work_is_unlanded kept returning true), capture_baseline_refreshed_for_benign_drift + repair_adopt_existing_response at 15:30:58-59, free_text_queue_strike at 15:30:59, then origin=repair_replay at 15:31:37. Find which step re-renders queue quotes against the CURRENT queue and make replay of an already-written capture idempotent; add a SimWorld regression. The live fpe.md still needs the two queue items restored and the duplicate (HEAD) response removed through the editor.
-- [ ] [#queuefreetextdup] [agent-doc] Operator 2026-09-30: the second 'release + publish' was INTENTIONAL, because the queue is a scheduling FIFO and a repeat means run it again. The real defect is strike scope: in the 01:47 cycle every answered_free_text_strike_applied reported nodes=2, so answering one copy struck both. #qstruckbaredup (bd6ba2102) also drops an identical plain copy of a struck line, which deletes an intentional repeat. Fix: a free-text answer strikes only the first unstruck occurrence and later repeats stay live. Re-check #qstruckbaredup against the authored-multiplicity rule (#qdedup-directive-twin) so it collapses only merge re-emits, never operator-authored repeats. Add regression tests for both.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

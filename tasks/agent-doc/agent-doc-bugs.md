@@ -17,7 +17,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -83,6 +83,33 @@ Side note: the scratch doc sits under gitignored `tmp/`. Every advance lands on 
 - stand up a local Coder server in Docker, install JetBrains Gateway and a Codium remote-SSH extension, and run the five-case matrix myself?
 
 I updated both review items with these results and the open decisions.
+
+### Re: release + publish — 0.35.426 tagged; #coder7 closed; monsterrodholders.md stall fixed — opus-5 · 2026-09-30T17:23-04:00
+
+> **Queue prompt:** release + publish
+
+**Released 0.35.426: tagged and pushed.**
+- **Checks:** full `make check` passed in a clean worktree (10248 tests; editor parity row added). Another session has an uncommitted edit in `agent-doc-document-realtime-io/src/lib.rs`, so I verified, built and installed from that clean worktree to keep the edit out of the release.
+- **Local install:** `make install-full` installed the binary, cdylib, skills and JetBrains plugin 0.2.453. Only its VS Code packaging step failed, because the fresh worktree had no compiled extension output. I packaged and installed VS Code 0.2.75 from the main checkout, whose editor sources are unchanged.
+- **Publishing:** `v0.35.426` and `main` are pushed (`97e90f684`), and the superproject pointer is at the new commit. The Release run (GitHub Release + PyPI) and CI were in progress when I checked, so neither is confirmed green yet.
+
+**`#coder7`: closed.** I recorded your validation (daily use in a Coder workspace) in `tasks/agent-doc/plan-coder-ide-hosted-tmux.md` and moved the item to done.
+
+**monsterrodholders.md stall: fixed, and the fix ships in this release.** The Codex transcript and ops.log showed two separate problems:
+
+1. **The wait after a deferred write never ran.**
+   - What happened: at 20:49:25 `respond` said the write was deferred and told the agent to run `session-check` once. At 20:49:32 that check printed `INTERRUPTED … still write_applied`, and the loop stopped. The cycle then committed on its own at 20:49:46.
+   - Why: session-check already had a wait loop for exactly this case (`#scsettlewindow`, GH #60). But the check exited the process from inside itself, so the loop never saw the result. It also only waited 15 seconds, and this commit arrived about 17 seconds after the check started.
+   - Fix: the check now hands the result back, only the command's entry point prints it and exits, and the wait is up to 45 seconds. A regression test runs the real result through the wait loop and pins that single exit. `#scsettleexit`, commit `8fb84e4e0`.
+2. **A mistyped queue id sat in the queue forever.**
+   - What happened: the queue held `do [#event-adapter-impl-tourne9yx]`, but the backlog item is `#event-adapter-impl-tourneyx`. The message told the agent to `--done event-adapter-impl-tourne9yx`, which matches nothing.
+   - Fix: when a queued id isn't a tracked item and exactly one tracked id is a near spelling, the message now names that id and says how to fix or strike the queue line. Your line is never rewritten. `#queueidtypo`, commit `c055826ae`.
+
+That document has since recovered on its own: its cycle is `committed`, and the next head is `#single-origin-dr-decision`. The typo line is still in its queue for you to correct to `#event-adapter-impl-tourneyx`.
+
+One earlier `make check` run failed `preflight_sweep_skips_foreign_owned_doc` while I was running other builds at the same time. It passed 3/3 alone and in the final full run, but it takes 17s even with nothing else running, so it is load-sensitive.
+
+**Cleanup for you:** my scratch cargo target dirs are about 62 GB: `~/.cache/agent-doc-relcheck-target` (57G) and `~/.cache/agent-doc-scfix-target` (5.1G), plus an empty `~/.cache/agent-doc-relinstall-target`. A hook blocked me from deleting them, so run `! rm -rf ~/.cache/agent-doc-{relcheck,scfix,relinstall}-target`.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -92,8 +119,6 @@ I updated both review items with these results and the open decisions.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#coder7 is validated. I'm using agent-doc on my work machine using coder.~~
-- 🚧 release + publish
 <!-- /agent:queue -->
 
 
@@ -107,7 +132,6 @@ I updated both review items with these results and the open decisions.
 - [/] [#drivecapturedsplice] [operator-verify] Captured-splice live proof (#activateinstalledjetbrai). LIVE RUN 2026-09-30 20:33Z (operator go-ahead): after harness fixes 01b1e30b7, the recipe drove IDEA end to end — edit one captured (editor_op_capture_proof operator_ops=37 shadow_replay=agreed, 20:33:01Z), canonical advanced independently via write --commit in owner pane %93 (20:33:02Z, editor acknowledged the target), edit two captured (operator_ops=36 agreed, 20:33:12Z); the final text holds every operator edit plus the advance. No text lost. The verifier still FAILS: its proving triple needs two source=captured-local-splice-recovery reads, and the plugin only takes that path (CrdtReplicaManager rebootstrapCanonicalAndForwardCapturedLocalEdit) when its replica is STALE against the canonical text. Healthy delivery reached the editor before edit two, so the recovery never had to run. DECISION NEEDED: (a) accept the healthy-path trail as the proof, extending verify-captured-splice-recovery with a capture/advance/capture triple, or (b) require the stale-replica race, making the recipe type edit two while the advance is still in flight. Aside: the scratch doc is under gitignored tmp/, so every advance ends commit_refused_ignored_path (write lands on disk, commit refused). Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or 'make pypi-quota-check' reporting a ceiling in reach. Rechecked 2026-09-30 16:25 EDT: 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 158 releases (0.35.113..0.35.424), post-cutover mean 34.7 KiB, ~49,485 further releases fit; VERDICT headroom fine. Nothing to act on or delete. pypi/support#12214 still open, 1 comment (github-actions bot), untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check reports (next tranche 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation. NEW BLOCKER 2026-09-30: grok 1.0.41 is now SIGNED OUT ('grok -p' -> 'Error: Not signed in'); operator runs 'grok login --device-code' (or sets XAI_API_KEY), and the free usage quota or the planned subscription must be active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed earlier; the last live MCP probe stopped at the usage limit before committed closeout. Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
-- [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix (JB Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, no-tmux image). Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Host check 2026-09-30: no coder CLI or ~/.config/coderv2, no JetBrains Toolbox/Gateway; codium and docker 29.8.1 are present. DECISION NEEDED: point at an existing Coder deployment (URL + auth), or approve standing up a local Coder server in docker plus installing JB Gateway and a Codium remote-SSH extension so the agent drives the matrix locally.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

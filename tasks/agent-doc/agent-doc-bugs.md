@@ -357,6 +357,34 @@ Late facts for the same cycle are still accepted. Repair legitimately captures a
 - New test `post_commit_capture_replays_do_not_reopen_committed_cycle` replays the live event order. When the guard is disabled, the test fails.
 - `make check` passes (exit 0, 10143/10143) and `make install` succeeded.
 - The CI run for the push is still queued (run 36657888896).
+
+### Re: queue go-by-default + pause/stop — opus-5.5 · 2026-09-29T22:37-04:00
+
+> **Queue prompt:** Make the queue in go mode by default. Add `pause`/`stop` attribute to pause/stop the queue.
+
+**Done:** `08e9de41b` (agent-doc, `#queuegodefault`), with the superproject pointer in `8230cfc336`.
+
+**What changed**
+- **`go` is now the default.** If the marker has no token and the frontmatter has no `queue:` field, the queue resolves to `go`.
+  - A half-typed `queue:` value still does nothing, so the drain can't start mid-keystroke.
+  - A document with only the old `queue_active:` flag still behaves as it did before (the new `frontmatter_queue_control` helper handles this).
+- **Activating a queue that had no control now writes `queue: go`.** It used to write `queue: start`, which would have quietly limited it to running only the first item.
+- **`pause` works on the marker** (`&lt;!-- agent:queue pause --&gt;`), just like `stop`. It moves into frontmatter as `queue: pause`, and only the operator can lift it. `queue: stop` / `queue: pause` in frontmatter keep working as before.
+- **Route's check for a queue item it could send** uses the same default.
+  - Free-text admission deliberately does not: a free-text item already sitting in a control-less queue is still turned into a tracked backlog item before the drain runs it. Switching admission over made existing free-text items stop being tracked, so I left it as it was.
+- **Spec** (`specs/07-orchestration-commands.md`): the table row for "no control" now says default `go`, and there is a new section explaining the rule.
+
+**Tests**
+- New unit tests cover: the default resolves to `go`; a half-typed value or the legacy flag does not; a `pause` marker holds the queue and moves into frontmatter; `merge_queue_state` writes `go`.
+- Some existing tests assumed a queue with no control is inactive:
+  - Two fixtures were really about other things (closeout drift, and `start`-only continuation). They now say `queue: stop` / `queue: start` explicitly.
+  - Three assertions no longer depend on the 🚧 in-progress marker that the now-active queue adds.
+- `make check` passes (exit 0, 10145/10145), and `make install` succeeded.
+- CI run 36660698670 is still pending. The previous run (36657888896) shows a `time` status, which I haven't investigated.
+
+**Behaviour change to be aware of:** any existing document with a bare `&lt;!-- agent:queue --&gt;` and no `queue:` field will now start draining its items. To keep one idle, set `queue: pause` or `queue: stop`.
+
+Exchange size: 331+ lines, but I left compaction alone because the queue is active.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -367,7 +395,7 @@ Late facts for the same cycle are still accepted. Repair legitimately captures a
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#closeoutcommitfactmissing]~~
-- Make the queue in go mode by default. Add `pause`/`stop` attribute to pause/stop the queue. 
+- 🚧 Make the queue in go mode by default. Add `pause`/`stop` attribute to pause/stop the queue.
 <!-- /agent:queue -->
 
 

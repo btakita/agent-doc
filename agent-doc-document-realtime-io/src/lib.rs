@@ -1381,6 +1381,32 @@ fn atomic_write_rebased_through_authority_body(
                             "serialized_atomic_write_editor_save_pending",
                             DocumentWriteDeferredReason::EditorProjectionPending,
                         )?;
+                        // `#rebasedsavefalsefail`: the exact-hash wait above aborts
+                        // the moment the editor advances past the target, and an
+                        // operator keystroke landing just after the projection
+                        // means that exact version is never saved. Its native
+                        // save then projects a successor that CONTAINS this write.
+                        // Observed 2026-09-30 on the xdotool captured-splice
+                        // recipe: one typed byte 0.1s after the projection, a
+                        // successor on disk 0.3s later, and this path still told
+                        // the operator the write had not reached disk. Ask the
+                        // shared settlement verdict — the same one that later
+                        // cleared the intent as `rebased_payload_materialized` —
+                        // instead of inventing a local exact-hash rule.
+                        if let Some(proof) = await_retained_write_settled(
+                            path,
+                            &intent_id,
+                            "serialized_atomic_write_rebased_settlement",
+                        ) {
+                            agent_doc_ops_log_io::log_op(
+                                path,
+                                &format!(
+                                    "write_authority action=materialized transport=crdt_editor_native_save_rebased intent_id={intent_id} target_hash={} proof={proof} disk_rewritten=false post_proof_rebases={post_proof_rebases}",
+                                    relay_write.content_hash,
+                                ),
+                            );
+                            return Ok(());
+                        }
                         return Err(retained_intent_refusal(
                             path,
                             &intent_id,
@@ -8688,6 +8714,47 @@ fn settle_actorless_document(
 /// Replaces `pending_document_write(file).is_some()` at the preflight gate: an
 /// intent that the converged document has already satisfied — and one whose
 /// planes could not be observed — are both *not* outstanding writes.
+/// Wait, bounded by the projection-observation deadline, for the shared
+/// settlement verdict to prove `intent_id` landed on disk — exactly or inside a
+/// successor cut. Returns the proof token, or `None` when the intent is still
+/// retained (the caller then reports the retained deferral unchanged).
+///
+/// Only a `Satisfied` verdict for this exact intent counts: an intent cleared
+/// by another reader, or replaced by a newer one, is not evidence that this
+/// write materialized, so those keep the conservative refusal.
+///
+/// Bounded polling is the documented `#reactive-boundary-ingress` exception:
+/// the editor's native filesystem save has no CRDT revision edge (the same gap
+/// `await_canonical_editor_projection_persisted` names), and this short-lived
+/// CLI caller has no subscription to the controller's settle `Effect`. The
+/// verdict itself stays the controller's shared `Computed`.
+fn await_retained_write_settled(file: &Path, intent_id: &str, source: &str) -> Option<String> {
+    let started = std::time::Instant::now();
+    let mut backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_INITIAL_MS;
+    loop {
+        match retained_write_settlement(file, source) {
+            agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied {
+                intent_id: settled,
+                proof,
+                ..
+            } if settled == intent_id => return Some(proof.token().to_string()),
+            agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied { .. }
+            | agent_doc_state_backbone::retained_write::SettlementVerdict::NoRetainedIntent => {
+                return None;
+            }
+            verdict if verdict.intent_id() != Some(intent_id) => return None,
+            _ => {}
+        }
+        if started.elapsed()
+            >= std::time::Duration::from_millis(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS)
+        {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+        backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY.next_ms(backoff_ms, false);
+    }
+}
+
 pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
     let verdict = retained_write_settlement(file, source);
     // A gate that refuses must say why. Without this the operator sees only
@@ -13158,6 +13225,62 @@ mod tests {
             "retained_compact_settled_regression_test",
             None,
         ));
+    }
+
+    /// `#rebasedsavefalsefail`: an operator keystroke landing right after the
+    /// write's projection means the exact target is never saved; the editor
+    /// saves a successor that contains it. That successor settles the write,
+    /// and a disk cut that lacks the write's lines does not.
+    #[test]
+    fn editor_save_pending_write_settles_when_a_successor_cut_carries_it() {
+        let base = "# Session\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        let target = "# Session\n\nCanonical response advanced.\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        let successor = "# Session\n\nCanonical response advanced.\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\noperator edit after the advance\n";
+        let without_write = "# Session\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\noperator edit after the advance\n";
+        let (_dir, file, _canonical) = temp_doc(base);
+        let identity = "test-editor-save-pending-successor-cut";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+
+        let intent_id = ensure_deferred_document_write_intent(
+            &file,
+            base,
+            target,
+            "serialized_atomic_write_editor_save_pending",
+            DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+
+        let publish = |text: &str| {
+            let current = replica.text();
+            replica.apply_local_edit(0, current.len() as u32, text);
+            agent_doc_crdt_relay_io::relay_replica_update_for_file(
+                &file,
+                identity,
+                &replica.encode_state(),
+            )
+            .unwrap()
+            .expect("editor should publish its cut");
+        };
+
+        publish(without_write);
+        std::fs::write(&file, without_write).unwrap();
+        assert_eq!(
+            await_retained_write_settled(&file, &intent_id, "successor_without_write_test"),
+            None,
+            "a saved cut that lacks the write's lines must keep the write retained",
+        );
+        assert!(pending_document_write(&file).is_some());
+
+        publish(successor);
+        std::fs::write(&file, successor).expect("simulate the editor's native save");
+        let proof = await_retained_write_settled(&file, &intent_id, "successor_with_write_test")
+            .expect("a saved successor carrying the write's lines settles it");
+        assert!(proof.ends_with("_materialized"), "unexpected proof {proof}");
     }
 
     #[test]

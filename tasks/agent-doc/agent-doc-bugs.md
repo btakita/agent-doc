@@ -159,6 +159,22 @@ Nothing left to do here. Issue #69 is already **CLOSED**, and its fix is already
 I made no code changes and did not reopen the issue. There are no actionable follow-up items from this head.
 
 Next in the queue is #70. That one is also already closed, fixed in `cb26320c1` / 0.35.424. After it comes `#release`.
+
+### Re: #gh-fix agent-doc#70 — opus-5.5 · 2026-09-30T18:42-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/70
+
+Nothing left to do here either. Issue #70 is already **CLOSED**, and its fix is released:
+
+- The fix is in `cb26320c1`, tagged `#tmuxnotinmode`. Git shows that commit is an ancestor of the agent-doc `HEAD` (`264ed7df7`).
+- It shipped in `v0.35.424`. The installed binary is `0.35.426`.
+- What changed: in the shared tmux runner (`agent-doc-tmux-io`), a command that exits 1 is now treated as success when every stderr line is `not in a mode`. Any other stderr line still fails the command. Regression tests cover the classification and the isolated-server reproduction from the issue.
+
+I made no code changes. There are no actionable follow-up items from this head.
+
+The closing comment on #70 already gives the next step if the problem comes back on ≥0.35.424. The fan-out probably comes from a tmux-side hook or binding, since agent-doc never builds a `send-keys -X` argument. The next thing to check is `tmux show-hooks -g` and the copy-mode bindings on the reporting host.
+
+Next in the queue: `#release`. The exchange is getting large (131 lines); I'm noting that and carrying on with the drain.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -169,8 +185,8 @@ Next in the queue is #70. That one is also already closed, fixed in `cb26320c1` 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/69~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/70
-- #release
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/70~~
+- ⏭️ #release
 <!-- /agent:queue -->
 
 

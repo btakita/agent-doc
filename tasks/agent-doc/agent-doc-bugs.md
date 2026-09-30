@@ -402,6 +402,21 @@ Both `[crdt-perf]` log helpers already logged at WARN only above a threshold, bu
 The install noted that 2 open haiven-dev documents hadn't re-registered with the new plugin yet; the plugin retries each one itself.
 
 Next: GH #66, then #67, then `release + publish`.
+
+### Re: GH #66 — `queue: go` flip suppressed its own drain — opus-5-5 · 2026-09-30T13:22-04:00
+
+> **Queue prompt:**
+>
+> fix https://github.com/btakita/agent-doc/issues/66
+
+**Fixed in `41773c0b6`. GH #66 is closed.** Installed and pushed; `make check` passes (Rust 10223/0, JetBrains 601/0, VS Code 181/0).
+
+- **The bug:** the filter that separates bookkeeping from real prompts only knew `queue_active:`. Your `queue: stop` → `queue: go` flip and the `prompt_presets:` map in the same edit counted as a fresh prompt, which stopped the drain that flip was meant to start.
+- **The fix:** instead of adding a fourth spelling to that list, any change that lies entirely inside the document's frontmatter no longer counts as a prompt. Frontmatter is settings and binary bookkeeping, never an instruction, so this covers `queue:`, `prompt_presets:` and any future key.
+- **The mislabel:** the diff summary also listed `exchange` as changed for any prompt-like edit, wherever it was, which is why the guidance called a frontmatter edit an "exchange prompt". Such an edit is now listed under `frontmatter`.
+- **Tests:** one replays the issue's exact edit and fails if the fix is removed; it also checks that a real exchange prompt in the same edit still counts. A second covers the component label.
+
+Next: GH #67, then `release + publish`.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -416,7 +431,7 @@ Next: GH #66, then #67, then `release + publish`.
 - ~~In the frontmatter, alias `presets` to `prompt_presets`.~~
 - ~~fix https://github.com/btakita/agent-doc/issues/62~~
 - ~~fix https://github.com/btakita/agent-doc/issues/65~~
-- fix https://github.com/btakita/agent-doc/issues/66
+- ~~fix https://github.com/btakita/agent-doc/issues/66~~
 - fix https://github.com/btakita/agent-doc/issues/67
 - release + publish
 <!-- /agent:queue -->

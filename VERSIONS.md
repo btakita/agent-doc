@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.424
+
+- **Sibling preset invocations stay queued (lost `#gh-fix` issues).** A bare `#word <text>` queue
+  line is a prompt-preset invocation, not a reference to tracked item `#word`. Three
+  `#gh-fix <issue url>` lines shared one identity, so once the first was struck, convergence
+  dropped the other two, and queue skip marked the survivors `⏭️` and jumped ahead to a later
+  item. Only a bare `#id`, `do #id …`, and `[#id]` are id-backed now, and a preset-only id never
+  enters the skip set.
+- **`plan` honours a turn preflight already sealed (GH #68).** It no longer reports a
+  `No changes` blocker once preflight has consumed the diff; it recovers the selected queue head
+  or returns `task_class: preflight_sealed`.
+- **Closeout receipts and warnings tell the truth (GH #68).** Success receipts print only after
+  the tracked-work transaction publishes; `--backlog-gate` collapses a backlog + review split onto
+  the review entry and the collision warning names that flag; the expected missing-snapshot skip
+  during queue consume no longer prints a warning.
+- **Script-facing CLI (GH #69).** Structured `prompt_presets` entries (`{prompt: ...}`) parse
+  instead of failing the whole document; invalid frontmatter errors name
+  `reset --from-current --preserve-session`, and reset says `--force-disk` when no editor is
+  attached; `backlog add` exits non-zero when its write is not visible to the next command;
+  new `--backlog-upsert key=text` / `backlog <FILE> upsert KEY TEXT`.
+- **tmux `not in a mode` no longer aborts a route (GH #70).** A tmux failure whose stderr is only
+  that benign line is success.
+
 ## 0.35.423
 
 - **A retained write is never re-sent (fpe.md duplicate + lost queue items).** A repair that ran

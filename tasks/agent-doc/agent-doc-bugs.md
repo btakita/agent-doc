@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -317,6 +317,14 @@ Advanced each review item as far as this session can take it (preset: spec + tes
 - Local `make check`: 10141/10141 passed, exit 0.
 - `make install`: exit 0. Pushed, and the superproject pointer is updated.
 - CI run 36655672560 was still in progress when I finished.
+
+### Re: queue stopped — opus-5.5 · 2026-09-29T21:35-04:00
+
+The queue now reads `queue: stop` and is empty; its last head, the queue-edit inference, was answered last turn. I'm honouring the stop, so I'm ending the in-session `/loop` here and not draining anything.
+
+- **`#closeoutcommitfactmissing`** is still an open item in `agent:backlog`. It was never mirrored into the queue, because the backlog→queue sync only runs while the queue is active. To run it, add `do #closeoutcommitfactmissing` to the queue. Under `#queueeditgo` that edit arms `go` on its own once the supervisor has recycled onto the new build.
+- CI run 36655672560, for HEAD after the compile fix, was still pending when this turn started.
+- The exchange is now 291 lines across 11 responses. Say so if you want it compacted.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -325,8 +333,7 @@ Advanced each review item as far as this session can take it (preset: spec + tes
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 📌 If I make edits in the queue and Run Agent Doc, agent-doc should infer that I want to run the queue even if it is not in go mode. Perhaps we should use `pause` instead of `go` and default to `go`?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

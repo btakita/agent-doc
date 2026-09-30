@@ -225,7 +225,27 @@ impl TmuxCommandRunner for tmux_router::IsolatedTmux {
     }
 }
 
+/// `#tmuxnotinmode` (GH #70): tmux prints `not in a mode` (exit 1) when a
+/// mode command (`send-keys -X ...`, typically from a user copy-mode binding or
+/// hook fanned out across panes) meets a pane that is not in a mode. The intent
+/// of such a command -- "make sure this pane is out of a mode" -- is already
+/// satisfied, so a failure whose stderr is ONLY those lines is success. Letting
+/// it through turned a no-op into `editor_route ... applied=false` and dropped
+/// the operator's route. Any other stderr line keeps the failure.
+fn stderr_is_only_not_in_a_mode(stderr: &str) -> bool {
+    let mut lines = stderr.lines().map(str::trim).filter(|line| !line.is_empty()).peekable();
+    lines.peek().is_some() && lines.all(|line| line == "not in a mode")
+}
+
 fn tmux_output_to_string(output: Output, binary: &str) -> Result<String, TmuxIoError> {
+    if !output.status.success()
+        && output.status.code() == Some(1)
+        && stderr_is_only_not_in_a_mode(&String::from_utf8_lossy(&output.stderr))
+    {
+        return String::from_utf8(output.stdout).map_err(|err| TmuxIoError::Utf8 {
+            message: err.to_string(),
+        });
+    }
     if !output.status.success() {
         return Err(TmuxIoError::Failed {
             binary: binary.to_string(),
@@ -715,6 +735,39 @@ pub fn project_root_for_pane_current_path(output: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    /// `#tmuxnotinmode` (GH #70): N copies of the benign `not in a mode` line
+    /// (one per pane a batched mode command did not need) are success; a real
+    /// error mixed in still fails.
+    #[test]
+    fn not_in_a_mode_only_stderr_is_success() {
+        use std::os::unix::process::ExitStatusExt;
+        let output = |stderr: &str| Output {
+            status: std::process::ExitStatus::from_raw(1 << 8),
+            stdout: b"ok".to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        assert_eq!(
+            tmux_output_to_string(output("not in a mode\nnot in a mode\nnot in a mode\n"), "tmux")
+                .unwrap(),
+            "ok"
+        );
+        assert!(tmux_output_to_string(output("not in a mode\ncan't find pane: %9\n"), "tmux").is_err());
+        assert!(tmux_output_to_string(output(""), "tmux").is_err());
+    }
+
+    /// `#tmuxnotinmode`: the exact reproduction from the issue, against a real
+    /// isolated tmux server.
+    #[test]
+    fn mode_exit_on_a_pane_not_in_a_mode_does_not_fail_the_command() {
+        let iso = tmux_router::IsolatedTmux::new("tmux-io-not-in-a-mode");
+        iso.cmd()
+            .args(["new-session", "-d", "-s", "t"])
+            .status()
+            .expect("start isolated tmux");
+        let command = TmuxCommand::new(["send-keys", "-t", "t", "-X", "cancel"]);
+        TmuxCommandRunner::run(&iso, &command).expect("not in a mode is benign");
+    }
+
     use super::*;
     use agent_doc_tmux_commands::capture_pane as capture_pane_command;
     use std::cell::RefCell;

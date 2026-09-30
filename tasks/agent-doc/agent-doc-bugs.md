@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -181,13 +181,34 @@ The agent-doc submodule is now clean and pushed. Its uncommitted work was anothe
 - `b89f4d612` **#clearnewchattrailer**: Codex's composer is recognized again after `/clear`.
 - `bd6ba2102` **#qstruckbaredup**: when a queue line is struck, an identical plain-text copy of it is dropped instead of being served again.
 - `c4c3fd739` rustfmt-only reformatting in 6 files.
+- **Cause:** on a fresh `init` project, the first `write --commit` wrote a full-UUID boundary (`agent:boundary:ebf9a71f-9986-…`). The bundled lint dialect rejects that as `malformed-boundary`, so the lint gate blocked the first closeout. Two writers built full UUIDs instead of calling the shared 8-hex id: the post-patch boundary re-insert and compaction's fallback. Both now use the short form.
+- **Second bug on the same path:** with a relative path (`scratch.md`), a git probe after the commit ran in an empty directory and failed with ENOENT. An empty directory now means the working directory.
+- **Test:** the issue asked for an end-to-end test of `init` → prompt → first `write --commit`. It asserts a commit lands with a short-hex boundary; restoring the UUID writer makes it fail with the issue's exact error.
 
 **Verification:** `make check` passed twice this session with all of this in the tree (10199/10199). The TLA suite passed, including the new model. The Kotlin `CrdtLocalEditorSpliceTest` passed 8/8 on a fresh run. `make install` had already built from this tree, so the installed binary and plugin 0.2.449 already contain these changes.
 
 **Superproject:** pointer `6ad04bd865`. I also committed agent-doc's installed skill/runbook files for v0.35.420 (`6d3a75d2fc`, 23 files). I left the other ~200 uncommitted superproject entries alone. They belong to other sessions and projects (memory notes, other submodules, `.gitmodules`, `.mise.toml`, other task documents, two deletions). Tell me if you want any of those committed too.
 
 **Note:** #qstruckbaredup and #admissionmergedup address the same duplication class as **#queuefreetextdup**. I'll re-check that item against them rather than start a new fix.
-<!-- agent:boundary:7f0514e2:agent-doc-bugs -->
+> **Queue prompt:** release + publish Issue 62-64
+
+### Re: release v0.35.421 (with GH #64 fixed first) — opus-5.5 · 2026-09-30T03:12-04:00
+
+Released **agent-doc v0.35.421**: tagged, pushed, and installed with `make install-full` (`agent-doc --version` = 0.35.421). Superproject `846c0d91f7`.
+
+**#64 first.** A closeout bug struck #64 in the queue without it being done (fixed as #qselectedheadonly), so I fixed it before releasing. `e5a21d01d`, `Fixes #64`, and the issue is closed.
+- **Cause:** on a fresh `init` project, the first `write --commit` wrote a full-UUID boundary (`agent:boundary:ebf9a71f-9986-…`). The bundled lint dialect rejects that as `malformed-boundary`, so the lint gate blocked the first closeout. Two writers built full UUIDs instead of calling the shared 8-hex id: the post-patch boundary re-insert and compaction's fallback. Both now use the short form.
+- **Second bug on the same path:** with a relative path (`scratch.md`), a git probe after the commit ran in an empty directory and failed with ENOENT. An empty directory now means the working directory.
+- **Test:** the issue asked for an end-to-end test of `init` → prompt → first `write --commit`. It asserts a commit lands with a short-hex boundary; restoring the UUID writer makes it fail with the issue's exact error.
+
+**What's in 0.35.421:** GH #63 (plugin update fallback), GH #64, the duplicated-response repair (tail and middle runs), the queue-quote cell fix that ended the resume spin, #qselectedheadonly, and the committed work from the other session. That work includes plugin 0.2.449 (`#subsumedsplicereplay`), `#admissionmergedup` with its TLA model, and `#owneddeliverydefer`. Also a `VERSIONS.md` entry and a `release-parity.tsv` row. `make check`: 10203/10203 passed.
+
+**#62 stays open.** Its diagnostics shipped in 0.35.420, but the root cause is still unverified. #63 was confounding it: the reporter's plugin was stuck at 0.2.392, and 0.35.421's update fallback can now move it forward. That makes the next measurement on the #62 thread possible.
+
+**Workflows at last check:** Release, PyPI and CI in progress; Book and Pages green.
+
+The exchange is past 160 lines; compacting it would be a good next step.
+<!-- agent:boundary:4dd420b8:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -195,12 +216,7 @@ The agent-doc submodule is now clean and pushed. Its uncommitted work was anothe
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~fix https://github.com/btakita/agent-doc/issues/62~~
-- ~~fix https://github.com/btakita/agent-doc/issues/63~~
-- ~~commit the uncommitted files~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~fix https://github.com/btakita/agent-doc/issues/64~~
-- release + publish Issue 62-64
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

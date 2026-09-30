@@ -790,7 +790,7 @@ mod visible_write_content_snapshot_tests {
         "<!-- /agent:backlog -->\n",
     );
 
-    // candidate (AGENT): head struck, a NEW exchange turn appended, and the
+    // content_ours (AGENT): head struck, a NEW exchange turn appended, and the
     // backlog item edited. All node-DISJOINT from the operator's edits below.
     const SM_AGENT: &str = concat!(
         "---\n",
@@ -809,7 +809,7 @@ mod visible_write_content_snapshot_tests {
         "<!-- /agent:backlog -->\n",
     );
 
-    // ours (OPERATOR): frontmatter flipped to queue:stop + an unrelated queue
+    // candidate (OPERATOR, the live editor buffer): frontmatter flipped to queue:stop + an unrelated queue
     // line added. Disjoint from the agent's exchange/strike/backlog edits.
     const SM_OPERATOR: &str = concat!(
         "---\n",
@@ -832,14 +832,14 @@ mod visible_write_content_snapshot_tests {
     fn smconv_disjoint_drift_merges_both_change_sets() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
-        let mut decision = IpcRepairDecision::file_read(SM_AGENT.to_string());
+        let mut decision = IpcRepairDecision::file_read(SM_OPERATOR.to_string());
 
         let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &file,
             "test",
             Some("smconv"),
             Some(SM_BASE),
-            Some(SM_OPERATOR),
+            Some(SM_AGENT),
             &mut decision,
         );
 
@@ -947,6 +947,74 @@ mod visible_write_content_snapshot_tests {
     }
 
     #[test]
+    fn smconv_operator_deletion_beats_the_agents_edit_of_the_same_line() {
+        // `#semmergeargorder`: the live editor text is the operator side. The agent strikes
+        // the queue line it answered while the operator deletes a different queue line and
+        // edits the frontmatter; the operator's deletion must not be resurrected and the
+        // agent's response must still land.
+        let base = concat!(
+            "---\nsession: test\nqueue: start\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #a\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
+        );
+        let agent = concat!(
+            "---\nsession: test\nqueue: start\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #a\n",
+            "### Re: do #a — opus-5-5\n\n",
+            "Did #a, verified end to end, and left #b queued for the next cycle so the\n",
+            "drain continues in order.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- ~~do [#a]~~\n- do [#b]\n<!-- /agent:queue -->\n",
+        );
+        let operator = concat!(
+            "---\nsession: test\nqueue: stop\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ do #a\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+        );
+        let merged = try_semantic_merge_convergence(base, operator, agent)
+            .expect("disjoint operator and agent edits converge");
+        let doc = &merged.merged_doc;
+        assert!(
+            !doc.contains("[#b]"),
+            "operator deletion was resurrected:\n{doc}"
+        );
+        assert!(
+            doc.contains("### Re: do #a — opus-5-5"),
+            "agent response lost:\n{doc}"
+        );
+        assert!(
+            doc.contains("queue: stop"),
+            "operator frontmatter lost:\n{doc}"
+        );
+
+        // Same-line conflict: the agent strikes `#a` while the operator deletes it. Which
+        // side is the operator decides the result, and the operator's deletion is
+        // authoritative (`#qdedup-directive-twin`).
+        let operator_deletes_a = operator.replace("- do [#a]\n", "- do [#b]\n");
+        let merged = try_semantic_merge_convergence(base, &operator_deletes_a, agent)
+            .expect("operator deletion and agent response converge");
+        let doc = &merged.merged_doc;
+        assert!(
+            !doc.contains("do [#a]"),
+            "the agent's strike resurrected the operator-deleted line:\n{doc}"
+        );
+        assert!(doc.contains("- do [#b]"), "untouched queue line lost:\n{doc}");
+        assert!(
+            doc.contains("### Re: do #a — opus-5-5"),
+            "agent response lost:\n{doc}"
+        );
+
+        // An agent that edits text outside components is refused rather than merged.
+        let agent_frontmatter = agent.replace("queue: start", "queue: go");
+        assert!(try_semantic_merge_convergence(base, operator, &agent_frontmatter).is_none());
+    }
+
+    #[test]
     fn smconv_merges_heading_prose_response_preserving_both_changesets() {
         // The real-session `### Re:` heading-prose exchange turn is now modeled by
         // document_cell_merge as an append-only node (#semmerge-owner heading-prose
@@ -980,7 +1048,7 @@ mod visible_write_content_snapshot_tests {
             "<!-- agent:queue -->\n- do [#cf-txn-email]\n- do [#op]\n<!-- /agent:queue -->\n",
         );
         // The merge now SUCCEEDS: the agent's heading-prose turn is appended.
-        let merged = try_semantic_merge_convergence(base, agent, operator)
+        let merged = try_semantic_merge_convergence(base, operator, agent)
             .expect("semantic merge must converge a heading-prose response turn now");
         let doc = &merged.merged_doc;
         assert!(
@@ -1005,13 +1073,13 @@ mod visible_write_content_snapshot_tests {
         // (snapshot installed from the merged doc) instead of dropping the turn.
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
-        let mut decision = IpcRepairDecision::file_read(agent.to_string());
+        let mut decision = IpcRepairDecision::file_read(operator.to_string());
         let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &file,
             "test",
             Some("smconv-heading"),
             Some(base),
-            Some(operator),
+            Some(agent),
             &mut decision,
         );
         assert!(adopted, "the guard resolves the drift");
@@ -1053,14 +1121,14 @@ mod visible_write_content_snapshot_tests {
         );
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
-        let mut decision = IpcRepairDecision::file_read(SM_AGENT.to_string());
+        let mut decision = IpcRepairDecision::file_read(operator_conflict.to_string());
 
         let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &file,
             "test",
             Some("smconv-conflict"),
             Some(SM_BASE),
-            Some(operator_conflict),
+            Some(SM_AGENT),
             &mut decision,
         );
 

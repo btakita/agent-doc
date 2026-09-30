@@ -174,6 +174,16 @@ pub fn checkpoint_ipc_baseline_nonfatal(
     true
 }
 
+/// Merge the live editor `candidate` (operator-owned) with the agent's `content_ours`
+/// against `base`.
+///
+/// `#semmergeargorder`: the roles are the ones every caller in this module means —
+/// `candidate` is the visible editor text and `content_ours` is the agent's response
+/// document. The body used to forward `candidate` into the merge's `ours_agent` slot,
+/// so operator text was merged as the agent's and a conflicting operator edit (for
+/// example deleting a queue line the agent struck) lost to the agent. The post-checks
+/// read the same roles: operator prompts come from `candidate`, new response headings
+/// from `content_ours`.
 pub fn try_semantic_merge_convergence(
     base: &str,
     candidate: &str,
@@ -190,8 +200,8 @@ pub fn try_semantic_merge_convergence(
         agent_doc_merge::document_cell_merge::ActiveNodes::new().active_component("exchange");
     let sm = agent_doc_merge::document_cell_merge::document_cell_merge_scoped(
         base,
-        candidate,
         content_ours,
+        candidate,
         &active,
     );
 
@@ -207,16 +217,35 @@ pub fn try_semantic_merge_convergence(
     if !dropped_queue_prompt_lines_after_content_ours(base, candidate, &sm.merged_doc).is_empty() {
         return None;
     }
-    if !preserves_visible_non_component_edits(base, candidate, &sm.merged_doc) {
+    if !merge_keeps_operator_non_component_text(base, candidate, content_ours, &sm.merged_doc) {
         return None;
     }
-    for heading in new_agent_response_headings(base, candidate) {
+    for heading in new_agent_response_headings(base, content_ours) {
         if !sm.merged_doc.contains(&heading) {
             return None;
         }
     }
 
     Some(sm)
+}
+
+/// Text outside components (frontmatter, headings, free prose) belongs to the operator:
+/// the agent may not change it, and the merge must carry the operator's version.
+fn merge_keeps_operator_non_component_text(
+    base: &str,
+    operator: &str,
+    agent: &str,
+    merged: &str,
+) -> bool {
+    let (Some(base_nc), Some(operator_nc), Some(agent_nc), Some(merged_nc)) = (
+        blank_components_except(base, &[]),
+        blank_components_except(operator, &[]),
+        blank_components_except(agent, &[]),
+        blank_components_except(merged, &[]),
+    ) else {
+        return false;
+    };
+    agent_nc == base_nc && merged_nc == operator_nc
 }
 
 fn preserves_visible_non_component_edits(base: &str, candidate: &str, _merged: &str) -> bool {

@@ -44,11 +44,109 @@ pub fn run_write_command_with_empty_response_recovery(
     options: agent_doc_write_command_io::CommandOptions,
     commit_mode: agent_doc_write_command_io::CommitMode,
 ) -> Result<()> {
-    agent_doc_write_runtime_io::run_command_with_empty_response_recovery(
+    let file = options.file.clone();
+    // `#respondsettle`: remember the cycle this command is closing BEFORE it
+    // runs, so a later settle can prove it was THIS cycle that committed.
+    let closing_cycle = if commit_mode == agent_doc_write_command_io::CommitMode::None {
+        None
+    } else {
+        agent_doc_cycle_state_io::load(&file)
+            .ok()
+            .flatten()
+            .filter(|cycle| cycle.is_open())
+    };
+    let outcome = agent_doc_write_runtime_io::run_command_with_empty_response_recovery(
         options,
         commit_mode,
         recover_empty_response_for_strict_closeout,
-    )
+    );
+    match (outcome, closing_cycle) {
+        (Err(error), Some(closing)) => settle_failed_strict_closeout(&file, &closing, error),
+        (outcome, _) => outcome,
+    }
+}
+
+/// `#respondsettle`: a strict closeout that fails AFTER its response was
+/// durably captured is often finished seconds later by the retained worker
+/// (a controller recycled mid-cycle by `make install` reseeds its relay model,
+/// so the closeout CAS sees a stale expected hash; GH #60 is the zero-replica
+/// variant). `respond` then exited nonzero and fired the dogfood "diagnose and
+/// fix" prompt for a turn that commits on its own. Watch THIS cycle's durable
+/// phase, bounded by the same settle window `session-check` uses, and report
+/// success only when it reaches `committed`. A failure before capture
+/// (pre-write gate, malformed patchback) leaves the phase at
+/// `preflight_started` and returns its error at once. This reads cycle state
+/// only: it performs no session-check repair and prints nothing to stdout.
+fn settle_failed_strict_closeout(
+    file: &Path,
+    closing: &agent_doc_cycle_state_io::CycleState,
+    error: anyhow::Error,
+) -> Result<()> {
+    let settled = poll_closing_cycle(
+        &closing.cycle_id,
+        agent_doc_session_check_io::session_check_settle_window(),
+        RESPOND_SETTLE_POLL,
+        || agent_doc_cycle_state_io::load(file).ok().flatten(),
+    );
+    if !failed_closeout_settled(closing, settled.as_ref()) {
+        return Err(error);
+    }
+    eprintln!(
+        "[respond] closeout error recovered: the retained closeout committed cycle `{}` on its own after: {error:#}",
+        closing.cycle_id
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "strict_closeout_error_settled_committed file={} cycle={} error={}",
+            file.display(),
+            closing.cycle_id,
+            format!("{error:#}").replace('\n', " ")
+        ),
+    );
+    Ok(())
+}
+
+const RESPOND_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Re-read the cycle while it is `cycle_id` with a captured response still in
+/// flight (`response_captured` / `write_applied`); return the last state seen.
+fn poll_closing_cycle(
+    cycle_id: &str,
+    window: std::time::Duration,
+    poll: std::time::Duration,
+    mut load: impl FnMut() -> Option<agent_doc_cycle_state_io::CycleState>,
+) -> Option<agent_doc_cycle_state_io::CycleState> {
+    let deadline = std::time::Instant::now() + window;
+    loop {
+        let state = load();
+        let in_flight = state.as_ref().is_some_and(|state| {
+            state.cycle_id == cycle_id
+                && matches!(
+                    state.phase,
+                    agent_doc_turn::CyclePhase::ResponseCaptured
+                        | agent_doc_turn::CyclePhase::WriteApplied
+                )
+        });
+        if !in_flight || std::time::Instant::now() + poll > deadline {
+            return state;
+        }
+        std::thread::sleep(poll);
+    }
+}
+
+/// The failed command's own cycle committed: same cycle id, and it was open
+/// before the command ran. A different (older or newer) committed cycle proves
+/// nothing about this command's response.
+fn failed_closeout_settled(
+    closing: &agent_doc_cycle_state_io::CycleState,
+    settled: Option<&agent_doc_cycle_state_io::CycleState>,
+) -> bool {
+    closing.is_open()
+        && settled.is_some_and(|settled| {
+            settled.cycle_id == closing.cycle_id
+                && settled.phase == agent_doc_turn::CyclePhase::Committed
+        })
 }
 
 pub fn recover_empty_response_for_strict_closeout(
@@ -858,5 +956,121 @@ mod captured_finalize_resume_tests {
                 response_sha256: "retained-response-sha".to_string(),
             }),
         );
+    }
+}
+
+#[cfg(test)]
+mod respond_settle_tests {
+    use super::*;
+
+    fn cycle(id: &str, phase: &str) -> agent_doc_cycle_state_io::CycleState {
+        serde_json::from_value(serde_json::json!({
+            "cycle_id": id,
+            "file": "/p/doc.md",
+            "phase": phase,
+            "last_event": "test",
+            "started_at": 1,
+            "updated_at": 1,
+        }))
+        .expect("minimal cycle state")
+    }
+
+    #[test]
+    fn the_same_open_cycle_reaching_committed_settles() {
+        assert!(failed_closeout_settled(
+            &cycle("c1", "write_applied"),
+            Some(&cycle("c1", "committed"))
+        ));
+    }
+
+    #[test]
+    fn a_different_committed_cycle_does_not_settle() {
+        assert!(!failed_closeout_settled(
+            &cycle("c1", "write_applied"),
+            Some(&cycle("c0", "committed"))
+        ));
+    }
+
+    #[test]
+    fn a_still_open_or_missing_cycle_does_not_settle() {
+        assert!(!failed_closeout_settled(
+            &cycle("c1", "preflight_started"),
+            Some(&cycle("c1", "write_applied"))
+        ));
+        assert!(!failed_closeout_settled(
+            &cycle("c1", "write_applied"),
+            None
+        ));
+    }
+
+    #[test]
+    fn polling_waits_for_an_in_flight_capture_to_commit() {
+        let calls = std::cell::Cell::new(0);
+        let settled = poll_closing_cycle(
+            "c1",
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(1),
+            || {
+                calls.set(calls.get() + 1);
+                Some(if calls.get() < 3 {
+                    cycle("c1", "write_applied")
+                } else {
+                    cycle("c1", "committed")
+                })
+            },
+        );
+        assert_eq!(calls.get(), 3);
+        assert!(failed_closeout_settled(
+            &cycle("c1", "write_applied"),
+            settled.as_ref()
+        ));
+    }
+
+    #[test]
+    fn polling_returns_at_once_before_capture() {
+        let calls = std::cell::Cell::new(0);
+        let settled = poll_closing_cycle(
+            "c1",
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_millis(1),
+            || {
+                calls.set(calls.get() + 1);
+                Some(cycle("c1", "preflight_started"))
+            },
+        );
+        assert_eq!(calls.get(), 1, "a pre-capture failure is not waited on");
+        assert!(!failed_closeout_settled(
+            &cycle("c1", "preflight_started"),
+            settled.as_ref()
+        ));
+    }
+
+    #[test]
+    fn polling_gives_up_when_the_window_closes() {
+        let calls = std::cell::Cell::new(0);
+        let settled = poll_closing_cycle(
+            "c1",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_millis(5),
+            || {
+                calls.set(calls.get() + 1);
+                Some(cycle("c1", "write_applied"))
+            },
+        );
+        assert!(calls.get() > 1);
+        assert!(!failed_closeout_settled(
+            &cycle("c1", "write_applied"),
+            settled.as_ref()
+        ));
+    }
+
+    #[test]
+    fn a_cycle_already_committed_before_the_command_does_not_settle() {
+        // A repair `write --commit` on an already-committed cycle that then
+        // fails must keep its error: nothing this command did committed.
+        assert!(!failed_closeout_settled(
+            &cycle("c1", "committed"),
+            Some(&cycle("c1", "committed"))
+        ));
     }
 }

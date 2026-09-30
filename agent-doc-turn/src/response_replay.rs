@@ -457,6 +457,9 @@ pub fn materialize_response_in_current_exchange(
     if let Some(repaired) = repair_response_heading_after_body(&exchange_body, &response) {
         return Some(exchange.replace_content(current, &repaired));
     }
+    if let Some(suffix) = orphan_response_suffix_range(&exchange_body, &response) {
+        exchange_body.replace_range(suffix, "");
+    }
     agent_doc_template::response_materialization::push_materialization_segment(
         &mut exchange_body,
         &response,
@@ -637,6 +640,52 @@ fn repair_response_heading_after_body(exchange: &str, response: &str) -> Option<
     repaired.push_str(&exchange[body_start..heading_start]);
     repaired.push_str(after_heading.strip_prefix('\n').unwrap_or(after_heading));
     Some(repaired)
+}
+
+/// Minimum normalized characters an orphaned response suffix must carry before
+/// it is treated as this response's own projection rather than a coincidental
+/// shared closing line.
+const ORPHAN_RESPONSE_SUFFIX_MIN_CHARS: usize = 120;
+
+/// Byte range of the exchange tail's orphaned copy of the response's trailing
+/// lines (`#respsuffixdup`); trailing transient markup stays outside it.
+///
+/// An editor visible write can project only a response's later segments (its
+/// bullets) with the queue-prompt quote, heading, and lead paragraph missing.
+/// Appending the full response after that fragment duplicated every bullet.
+/// Matches only when the exchange ends — modulo transient markup — with at
+/// least two of the response's final non-transient lines, strictly fewer than
+/// all of them, carrying enough text to rule out a coincidental closing line.
+fn orphan_response_suffix_range(
+    exchange: &str,
+    response: &str,
+) -> Option<std::ops::Range<usize>> {
+    let expected_lines = response_fragment_lines(response);
+    let actual_lines = response_fragment_lines(exchange);
+    let tail_end = actual_lines.last()?.end;
+    if !response_fragment_gap_is_transient(&exchange[tail_end..]) {
+        return None;
+    }
+    let max_len = expected_lines
+        .len()
+        .saturating_sub(1)
+        .min(actual_lines.len());
+    let len = (2..=max_len).rev().find(|&len| {
+        actual_lines[actual_lines.len() - len..]
+            .iter()
+            .zip(&expected_lines[expected_lines.len() - len..])
+            .all(|(actual, expected)| actual.normalized == expected.normalized)
+    })?;
+    let suffix = &actual_lines[actual_lines.len() - len..];
+    if suffix
+        .iter()
+        .map(|line| line.normalized.len())
+        .sum::<usize>()
+        < ORPHAN_RESPONSE_SUFFIX_MIN_CHARS
+    {
+        return None;
+    }
+    Some(suffix.first()?.start..tail_end)
 }
 
 #[derive(Debug)]
@@ -1574,6 +1623,57 @@ mod tests {
         assert!(repaired.contains("### Re: do #ship — gpt-5"));
         assert!(repaired.contains("Done."));
         assert!(response_materialized_in_content(response, &repaired));
+    }
+
+    #[test]
+    fn materialize_response_replaces_orphaned_response_suffix_instead_of_duplicating() {
+        // #respsuffixdup: the editor projected only the response's bullets
+        // (queue-prompt quote, heading, and lead paragraph missing); appending
+        // the full response after them duplicated every bullet.
+        let bullets = concat!(
+            "- **Contents:** GH #61 (code-quoted markers no longer escaped) and the install build-skew guard.\n",
+            "- **Release files:** version projection across 154 files and a `VERSIONS.md` entry.\n",
+            "- **Workflows at last check:** Release, PyPI, and CI in progress.\n",
+        );
+        let current = format!(
+            "<!-- agent:exchange -->\n### Re: earlier — opus-5\n\nEarlier body.\n{bullets}<!-- /agent:exchange -->\n"
+        );
+        let response = format!(
+            "<!-- patch:exchange -->\n> **Queue prompt:** release + publish\n\n### Re: release v0.35.420 — opus-5\n\nReleased v0.35.420.\n\n{bullets}<!-- /patch:exchange -->\n"
+        );
+
+        let repaired = materialize_response_in_current_exchange(&current, &response)
+            .expect("exchange should be repairable");
+
+        assert_eq!(repaired.matches("- **Contents:**").count(), 1, "{repaired}");
+        assert!(repaired.contains("Earlier body.\n> **Queue prompt:** release + publish"));
+        assert!(repaired.contains("### Re: release v0.35.420 — opus-5"));
+        assert!(response_materialized_in_content(&response, &repaired));
+    }
+
+    #[test]
+    fn materialize_response_keeps_short_coincidental_shared_closing_lines() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier — opus-5\n\n",
+            "- Tests pass.\n",
+            "- Installed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: later — opus-5\n\n",
+            "Did the next thing.\n\n",
+            "- Tests pass.\n",
+            "- Installed.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let repaired = materialize_response_in_current_exchange(current, response)
+            .expect("exchange should be repairable");
+
+        assert_eq!(repaired.matches("- Tests pass.").count(), 2, "{repaired}");
+        assert!(repaired.contains("### Re: earlier — opus-5\n\n- Tests pass.\n- Installed.\n"));
     }
 
     #[test]

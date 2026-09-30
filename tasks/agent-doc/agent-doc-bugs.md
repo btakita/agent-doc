@@ -298,6 +298,26 @@ Five fixes landed in two agent-doc commits (`d769cf5e3`, `a829b5ae5`): installed
 - **Your document:** fpe.md is live (editor open, owned by the Codex pane), so I did not edit it. It still needs the two queue items put back and the `(HEAD)` duplicate removed through the editor.
 
 The exchange here is long (warn level), but the queue is active, so I'm continuing rather than pausing to compact. CI for `a829b5ae5` is still running.
+
+### Re: release + publish 0.35.422 — opus-5-5 · 2026-09-30T12:08-04:00
+
+> **Queue prompt:**
+>
+> release + publish in a subagent so I can test it on my coder project
+
+A subagent released **agent-doc 0.35.422**: release commit `95bfe6ada` on main, with tag `v0.35.422` pushed to origin. The tag started the GitHub **Release** and **PyPI** workflows, both still running when I checked at 12:08. No macOS files were uploaded.
+
+It includes today's fixes: the JetBrains upgrade signature lookup (`#jbunloadsig`), the editor route focus retarget, the running-task indicator with its one-line task label, and the Stop hook no longer reporting "failed closed" when a write is only held.
+
+To test on your coder project once the PyPI job is green:
+
+```bash
+uv tool install agent-doc==0.35.422   # or: pip install agent-doc==0.35.422
+```
+
+PyPI now ships a small bootstrap wheel. On first run it downloads and checks the matching GitHub Release archive, so the Release job must finish too.
+
+Continuing the queue: `#queuefreetextdup` is next. The exchange is large, but the queue is active, so I'm not stopping to compact.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -307,10 +327,7 @@ The exchange here is long (warn level), but the queue is active, so I'm continui
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#jbunloadsig]~~
-- ~~fix https://github.com/btakita/agent-doc/issues/65~~
-- ~~fix https://github.com/btakita/agent-doc/issues/62~~
-- 🚧 release + publish in a subagent so I can test it on my coder project
+- ~~release + publish in a subagent so I can test it on my coder project~~
 - do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.
 - do [#semmergeargorder]
 - re [#apimdrevert]: I don't recall which text was lost. Can we practically debug log these events or will this cause excessive debug logging?

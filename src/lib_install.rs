@@ -240,13 +240,23 @@ pub fn install_binary_atomic(source: &Path, target_dir: &Path) -> Result<PathBuf
 pub fn run(source: Option<&str>, target_dir: Option<&str>, profile: &str) -> Result<()> {
     let source_path = source.map(PathBuf::from);
     let target_dir = target_dir.map(PathBuf::from);
-    run_paths(source_path.as_deref(), target_dir.as_deref(), profile)
+    run_paths(
+        source_path.as_deref(),
+        target_dir.as_deref(),
+        profile,
+        INSTALLER_BUILD_ID,
+    )
 }
 
+/// `expected_build_id` is the IPC build id of the binary this library will pair
+/// with: [`INSTALLER_BUILD_ID`] for `agent-doc lib-install`, or the id embedded
+/// in the freshly built binary for `self-install` (whose installer is the OLD
+/// binary). See [`validate_build_identity_matches_installer`].
 pub(crate) fn run_paths(
     source: Option<&Path>,
     target_dir: Option<&Path>,
     profile: &str,
+    expected_build_id: &str,
 ) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
     let ext = platform_lib_ext();
@@ -269,6 +279,7 @@ pub(crate) fn run_paths(
         );
     }
     validate_required_editor_abi_symbols(&source_path)?;
+    validate_build_identity_matches_installer(&source_path, expected_build_id)?;
 
     let target = match target_dir {
         Some(d) => d.to_path_buf(),
@@ -412,6 +423,75 @@ fn validate_required_editor_abi_symbols(source: &Path) -> Result<()> {
         source.display(),
         missing.join(", ")
     );
+}
+
+/// The IPC build identity this binary puts on the wire (`src/main.rs`,
+/// `src/ffi.rs`): `<version>+<workspace source digest>`.
+pub(crate) const INSTALLER_BUILD_ID: &str =
+    concat!(env!("CARGO_PKG_VERSION"), "+", env!("AGENT_DOC_BUILD_ID"));
+
+/// `#installbuildskew`: refuse a cdylib built from different sources than the
+/// binary installing it.
+///
+/// The IPC handshake rejects any peer whose build id differs, and the editor's
+/// `reload_library` recovery reloads the INSTALLED library — so a skewed pair
+/// can never converge: every editor intent (compact, response delivery, native
+/// save) is refused until the next install. The pair skewed on 2026-09-29 when
+/// `make install` built the binary and the cdylib in two cargo invocations
+/// while another session edited the shared tree between them.
+fn validate_build_identity_matches_installer(
+    source: &Path,
+    installer_build_id: &str,
+) -> Result<()> {
+    let bytes = std::fs::read(source)
+        .with_context(|| format!("read shared library {}", source.display()))?;
+    if contains_ascii_symbol(&bytes, installer_build_id.as_bytes()) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "[lib-install] source {} was not built from the same sources as this agent-doc binary \
+         (build {installer_build_id}); installing it would make every editor IPC handshake fail \
+         with `IPC build mismatch`. Build the binary and the library in ONE cargo invocation \
+         (`cargo build --bin agent-doc --lib`), install the binary, then run lib-install with it \
+         (`make install` does this).",
+        source.display(),
+    );
+}
+
+/// The IPC build ids (`<major>.<minor>.<patch>+<16 hex>`) embedded in a built
+/// artifact. A binary carries exactly one; used by `self-install`, which must
+/// pair the library with the binary it just built rather than with itself.
+pub(crate) fn embedded_build_ids(bytes: &[u8]) -> std::collections::BTreeSet<String> {
+    const HEX_LEN: usize = 16;
+    let mut ids = std::collections::BTreeSet::new();
+    for (plus, _) in bytes.iter().enumerate().filter(|(_, byte)| **byte == b'+') {
+        let Some(hex) = bytes.get(plus + 1..plus + 1 + HEX_LEN) else {
+            continue;
+        };
+        if !hex
+            .iter()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+        {
+            continue;
+        }
+        if bytes
+            .get(plus + 1 + HEX_LEN)
+            .is_some_and(|b| b.is_ascii_hexdigit())
+        {
+            continue;
+        }
+        let start = bytes[..plus]
+            .iter()
+            .rposition(|b| !(b.is_ascii_digit() || *b == b'.'))
+            .map_or(0, |index| index + 1);
+        let version = &bytes[start..plus];
+        let parts: Vec<&[u8]> = version.split(|b| *b == b'.').collect();
+        if parts.len() != 3 || parts.iter().any(|part| part.is_empty()) {
+            continue;
+        }
+        ids.insert(String::from_utf8_lossy(&bytes[start..plus + 1 + HEX_LEN]).into_owned());
+    }
+    ids
 }
 
 fn contains_ascii_symbol(haystack: &[u8], needle: &[u8]) -> bool {
@@ -707,6 +787,67 @@ mod tests {
         assert!(symlink.is_symlink());
         let target = fs::read_link(&symlink).unwrap();
         assert_eq!(target.to_str().unwrap(), versioned_lib_name("1.2.3"));
+    }
+
+    #[test]
+    fn lib_install_refuses_a_library_built_from_other_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("libagent_doc.so");
+        std::fs::write(&source, b"\x7fELF..0.35.419+c7a28f9544034eaf..").unwrap();
+
+        let error = validate_build_identity_matches_installer(&source, "0.35.419+3d7dff1545faf0b4")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not built from the same sources"), "{error}");
+        assert!(error.contains("0.35.419+3d7dff1545faf0b4"), "{error}");
+    }
+
+    #[test]
+    fn lib_install_accepts_a_library_from_the_installers_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("libagent_doc.so");
+        std::fs::write(&source, format!("\x7fELF..{INSTALLER_BUILD_ID}..")).unwrap();
+
+        validate_build_identity_matches_installer(&source, INSTALLER_BUILD_ID).unwrap();
+    }
+
+    #[test]
+    fn embedded_build_ids_finds_the_wire_identity_only() {
+        let ids = embedded_build_ids(
+            b"x\x000.35.419+3d7dff1545faf0b4\x00a+b 1.2+0123456789abcdef 1.2.3+0123456789abcdef0 9.9.9+0123456789ABCDEF",
+        );
+        assert_eq!(
+            ids.into_iter().collect::<Vec<_>>(),
+            vec!["0.35.419+3d7dff1545faf0b4".to_string()]
+        );
+    }
+
+    #[test]
+    fn make_install_builds_binary_and_library_in_one_cargo_invocation() {
+        let makefile = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Makefile"),
+        )
+        .unwrap();
+        for target in ["install:", "install-full:"] {
+            let body: Vec<&str> = makefile
+                .split(&format!("\n{target}"))
+                .nth(1)
+                .unwrap_or_else(|| panic!("Makefile has no {target} target"))
+                .lines()
+                .skip(1)
+                .take_while(|line| line.starts_with('\t'))
+                .collect();
+            let builds: Vec<&&str> = body
+                .iter()
+                .filter(|line| line.contains("cargo build"))
+                .collect();
+            assert_eq!(builds.len(), 1, "{target} must build once: {builds:?}");
+            assert!(
+                builds[0].contains("--bin agent-doc") && builds[0].contains("--lib"),
+                "{target} must build the binary and cdylib together: {}",
+                builds[0]
+            );
+        }
     }
 
     #[test]

@@ -21,23 +21,19 @@ pub fn run(
     let worktree = IsolatedWorktree::create(&repo_root, keep_worktree)?;
     eprintln!("[self-install] worktree: {}", worktree.path().display());
 
-    let install_label = format!("cargo build --profile {profile} --bin agent-doc");
+    // `#installbuildskew`: one cargo invocation, so the binary and the cdylib
+    // share one build-script run and therefore one IPC build id.
+    let install_label = format!("cargo build --profile {profile} --bin agent-doc --lib");
     run_command(
         worktree.path(),
         "cargo",
-        &["build", "--profile", profile, "--bin", "agent-doc"],
+        &["build", "--profile", profile, "--bin", "agent-doc", "--lib"],
         &install_label,
     )?;
     let binary_source = profile_binary_path(worktree.path(), profile);
+    let binary_build_id = single_embedded_build_id(&binary_source)?;
     let binary_target_dir = crate::lib_install::default_binary_target_dir()?;
     crate::lib_install::install_binary_atomic(&binary_source, &binary_target_dir)?;
-    let lib_build_label = format!("cargo build --profile {profile} --lib");
-    run_command(
-        worktree.path(),
-        "cargo",
-        &["build", "--profile", profile, "--lib"],
-        &lib_build_label,
-    )?;
 
     let lib_source = profile_lib_path(worktree.path(), profile);
     if !lib_source.exists() {
@@ -46,7 +42,7 @@ pub fn run(
             lib_source.display()
         );
     }
-    crate::lib_install::run_paths(Some(&lib_source), target_dir, profile)?;
+    crate::lib_install::run_paths(Some(&lib_source), target_dir, profile, &binary_build_id)?;
 
     if keep_worktree {
         eprintln!(
@@ -58,6 +54,20 @@ pub fn run(
     }
 
     Ok(())
+}
+
+/// The IPC build id the freshly built binary puts on the wire.
+fn single_embedded_build_id(binary: &Path) -> Result<String> {
+    let bytes =
+        std::fs::read(binary).with_context(|| format!("read built binary {}", binary.display()))?;
+    let ids = crate::lib_install::embedded_build_ids(&bytes);
+    match ids.len() {
+        1 => Ok(ids.into_iter().next().expect("one id")),
+        _ => bail!(
+            "[self-install] expected exactly one IPC build id in {}, found {ids:?}",
+            binary.display()
+        ),
+    }
 }
 
 struct IsolatedWorktree {

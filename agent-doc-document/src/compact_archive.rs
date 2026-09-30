@@ -80,6 +80,9 @@ pub fn build_inline_exchange_archive_content(
     archive
 }
 
+const COMPACTED_CONTENT_TITLE: &str = "Compacted content";
+const COMPACTED_CONTENT_TITLE_LINE: &str = "Compacted content:";
+
 /// Build the default visible summary for a full exchange compact.
 pub fn build_exchange_compact_summary(content: &str, archive_path: &str) -> String {
     let mut summary = String::from("### Session Summary\n\n");
@@ -94,10 +97,43 @@ pub fn build_exchange_compact_summary(content: &str, archive_path: &str) -> Stri
 
     if let Some(exchange) = components.iter().find(|c| c.name == "exchange") {
         let digest = summarize_compacted_exchange(exchange.content(content));
-        append_compact_summary_section(&mut summary, "Compacted content", &digest);
+        append_compact_summary_section(&mut summary, COMPACTED_CONTENT_TITLE, &digest);
     }
 
     summary
+}
+
+/// Whether an exchange body holds nothing but one visible compact summary
+/// (`#compactsummaryonly`).
+///
+/// Compacting such a body archives the summary into a new summary whose only
+/// digest line is "Prior summary/context: ..." — a pointer to a pointer, and a
+/// fresh archive file, for no reduction. That is what a repeated "Compact
+/// Exchange" produced on 2026-09-29 (a 663-byte archive 33s after the real
+/// one), when the first compact's editor delivery was slow to appear. Every
+/// non-blank line must be the summary's own shape: the heading, the
+/// `*Compacted. ...*` pointer, the `Compacted content:` header, or a `- ` digest
+/// bullet. Any other text (an operator note, a response heading) is real
+/// content and still compacts.
+pub fn is_compact_summary_only(content: &str) -> bool {
+    let mut lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    if lines.next() != Some("### Session Summary") {
+        return false;
+    }
+    let mut saw_pointer = false;
+    for line in lines {
+        if line.starts_with("*Compacted.") && line.ends_with('*') {
+            saw_pointer = true;
+        } else if line.starts_with("- ") || line == COMPACTED_CONTENT_TITLE_LINE {
+            continue;
+        } else {
+            return false;
+        }
+    }
+    saw_pointer
 }
 
 /// Extract compact archive pointers from visible compact summary text.
@@ -272,6 +308,35 @@ mod tests {
         assert!(summary.contains("*Compacted. Content archived to `.agent-doc/archives/a.md`*"));
         assert!(summary.contains("Compacted content:"));
         assert!(summary.contains("Archived 2 response topic(s): topic one; topic two"));
+    }
+
+    #[test]
+    fn compact_summary_only_matches_a_rendered_summary() {
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: topic one\n\nResponse one.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let summary = build_exchange_compact_summary(content, ".agent-doc/archives/a.md");
+        assert!(is_compact_summary_only(&summary), "{summary}");
+        assert!(is_compact_summary_only(&format!("\n{summary}\n\n")));
+    }
+
+    #[test]
+    fn compact_summary_only_rejects_real_content() {
+        let summary = "### Session Summary\n\n*Compacted. Content archived to `a.md`*\n\nCompacted content:\n- Archived 1 response topic(s): x\n";
+        assert!(!is_compact_summary_only(&format!(
+            "{summary}\n### Re: new topic\n\nBody.\n"
+        )));
+        assert!(!is_compact_summary_only(&format!(
+            "{summary}\nan operator note\n"
+        )));
+        assert!(!is_compact_summary_only("### Re: topic\n\nBody.\n"));
+        assert!(!is_compact_summary_only(
+            "### Session Summary\n\nhand-written recap\n"
+        ));
+        assert!(!is_compact_summary_only(""));
     }
 
     #[test]

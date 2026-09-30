@@ -256,12 +256,17 @@ timings:
 # executable. `cargo install --force` unlinks the old executable before persisting
 # the new one, creating a short ENOENT window that can strand controller/supervisor
 # execve handoffs.
+# `#installbuildskew`: the binary and the cdylib are built by ONE cargo
+# invocation, before either is installed. Two invocations each re-run build.rs,
+# whose IPC build id is a digest of the working tree; a concurrent session
+# editing the shared tree between them gave the binary 3d7dff.. and the cdylib
+# c7a28f.. under one version (2026-09-29), and every editor handshake was then
+# refused until the next install. `lib-install` also refuses that skew.
 install: editor-generation-bump
-	$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc
+	$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc --lib
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --all
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --root . --all
-	@$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --lib
 	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" agent-doc lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
 	@$(MAKE) install-editor-plugins
 
@@ -278,11 +283,10 @@ install: editor-generation-bump
 # loop. Reserve `install-full` for verifying pre-release parity, which is what
 # the `release` target uses it for.
 install-full: editor-generation-bump
-	cargo build --release --bin agent-doc
+	cargo build --release --bin agent-doc --lib
 	@target/release/agent-doc binary-install --source target/release/agent-doc
 	@target/release/agent-doc skill install --all
 	@target/release/agent-doc skill install --root . --all
-	@cargo build --release --lib
 	@agent-doc lib-install
 	@$(MAKE) install-editor-plugins
 	@$(MAKE) cleanup-build-artifacts

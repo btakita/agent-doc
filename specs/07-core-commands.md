@@ -63,6 +63,13 @@ commands do not wait for the recycle and never interrupt an active turn.
 - The retry guidance for that pre-write-only refusal names the compact mutation:
   retry the same compact after editor convergence. It must not fall through to
   generic response-cycle recovery guidance or suggest a forced disk write.
+- An exchange whose archiveable body is nothing but one rendered compact
+  summary (the `### Session Summary` heading, its `*Compacted. ...*` archive
+  pointer, the `Compacted content:` header and `- ` digest bullets) is already
+  compacted: compact is a no-op there, like an empty component, and writes no
+  archive (`#compactsummaryonly`). Re-compacting it would only archive the
+  summary into a summary whose digest is a pointer to a pointer. Any other text
+  before the boundary is real content and still compacts.
 
 ## init
 
@@ -267,6 +274,17 @@ file-based-IPC mode (GH #52). The missing-library remedy branches on how the
 binary was installed: a Cargo build tree is told to `cargo build --release`, and
 a package install is pointed at a release asset or `agent-doc lib-install
 --source <dir>` rather than at a toolchain it does not have.
+
+`lib-install` refuses a library whose embedded IPC build id
+(`<version>+<source digest>`) differs from the binary it pairs with — the
+installing binary itself, or for `self-install` the binary it just built
+(`#installbuildskew`). The handshake rejects every peer on a different build
+id, and the editor's `reload_library` recovery loads the installed library, so
+a skewed pair can never converge: every editor intent stays refused until the
+next install. Because the id is a digest of the working tree, `make install`,
+`make install-full` and `self-install` build the binary and the library in one
+cargo invocation (one build-script run) before installing either; two
+invocations let a concurrent edit of the shared tree land between them.
 
 Every `lib-install` writes a new `libagent_doc-<version>.so` beside the binary
 and swaps the unversioned symlink onto it, so the directory used to grow by one

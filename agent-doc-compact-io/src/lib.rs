@@ -2139,6 +2139,12 @@ fn run_component_compact_with_options(
         eprintln!("[compact] Component '{}' is already empty", target);
         return Ok(CompactDocumentTargets::same(content.to_string()));
     }
+    // `#compactsummaryonly`: re-compacting a bare summary only nests it.
+    if target == "exchange" && agent_doc_document::compact_archive::is_compact_summary_only(trimmed)
+    {
+        eprintln!("[compact] Component '{}' is already compacted", target);
+        return Ok(CompactDocumentTargets::same(content.to_string()));
+    }
 
     // Archive old content
     let archive_path = save_archive(
@@ -2987,6 +2993,42 @@ mod tests {
         let counts = agent_doc_element_backlog::backlog::tracked_component_item_counts(&result);
         assert_eq!(counts.get("backlog").copied(), Some(3));
         assert_eq!(counts.get("review").copied(), Some(1));
+    }
+
+    #[test]
+    fn run_component_compact_twice_does_not_nest_the_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("twice.md");
+        std::fs::write(&file, COMPACTDROPITEM_DOC).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            COMPACTDROPITEM_DOC,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let archives = || {
+            std::fs::read_dir(agent_doc_dir.join("archives"))
+                .unwrap()
+                .count()
+        };
+
+        run_component_compact_force_disk(&file, COMPACTDROPITEM_DOC, "exchange", None, false)
+            .unwrap();
+        let once = std::fs::read_to_string(&file).unwrap();
+        assert!(once.contains("### Session Summary"), "{once}");
+        assert_eq!(archives(), 1);
+
+        // `#compactsummaryonly`: a second "Compact Exchange" (the operator's
+        // retry when the first delivery was slow to appear) must not archive
+        // the summary into a summary of a summary.
+        let again =
+            run_component_compact_force_disk(&file, &once, "exchange", None, false).unwrap();
+        assert_eq!(again, once);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), once);
+        assert_eq!(archives(), 1, "a re-compact wrote another archive");
     }
 
     #[test]

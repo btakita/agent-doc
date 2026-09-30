@@ -56,6 +56,7 @@ MACOS_INCOMPLETE_PAIR_BASELINE: tuple[str, ...] = (
     "v0.35.401",
     "v0.35.406",
     "v0.35.417",
+    "v0.35.418",
 )
 
 DEFAULT_EXPIRY_WARN_HOURS = 24

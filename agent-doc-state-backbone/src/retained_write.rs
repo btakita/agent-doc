@@ -144,6 +144,13 @@ pub enum UnsettledCause {
     /// Planes agree, but the intent's payload is absent from that agreed
     /// content — the write genuinely has not landed.
     PayloadAbsentFromConvergedContent,
+    /// `#retainedadvanceadmit`: the authority already holds the intent's
+    /// content (exact target, response payload, or added delta); only the
+    /// editor's native save to disk is outstanding. Closeout must still wait for
+    /// disk, but a new cycle composes onto the authority, not disk, so it is not
+    /// refused. Refusing it abandoned haiven-dev fpe.md's captured-finalize
+    /// resume on 2026-09-29 and stranded the response.
+    DiskProjectionPending,
 }
 
 impl UnsettledCause {
@@ -151,6 +158,7 @@ impl UnsettledCause {
         match self {
             Self::AuthorityDiskDiverged => "authority_disk_diverged",
             Self::PayloadAbsentFromConvergedContent => "payload_absent_from_converged_content",
+            Self::DiskProjectionPending => "disk_projection_pending",
         }
     }
 }
@@ -278,7 +286,10 @@ impl SettlementVerdict {
     /// The single question `preflight` asks. `Unobserved` answers `false`
     /// deliberately: an unobservable plane is not proof of an outstanding write.
     pub fn blocks_new_cycle(&self) -> bool {
-        matches!(self, Self::Unsettled { .. })
+        matches!(
+            self,
+            Self::Unsettled { cause, .. } if *cause != UnsettledCause::DiskProjectionPending
+        )
     }
 
     /// The single question `session-check` asks before reporting a completed
@@ -311,7 +322,7 @@ impl SettlementVerdict {
             }
             Self::Unsettled {
                 intent_id,
-                cause: UnsettledCause::AuthorityDiskDiverged,
+                cause: UnsettledCause::AuthorityDiskDiverged | UnsettledCause::DiskProjectionPending,
             } => RecoveryAction::AwaitConvergence {
                 intent_id: intent_id.clone(),
             },
@@ -387,6 +398,7 @@ enum SettlementInput {
 enum ObservationState {
     Unobserved,
     AuthorityDiskDiverged,
+    AuthorityMaterializedDiskPending,
     CommittedStateOnlyAuthorityMaterialized,
     Converged(ConvergenceEvidence),
 }
@@ -422,6 +434,9 @@ impl StateTable for RetainedSettlementTable {
             }
             SettlementInput::Retained(ObservationState::AuthorityDiskDiverged) => {
                 SettlementDecision::Unsettled(UnsettledCause::AuthorityDiskDiverged)
+            }
+            SettlementInput::Retained(ObservationState::AuthorityMaterializedDiskPending) => {
+                SettlementDecision::Unsettled(UnsettledCause::DiskProjectionPending)
             }
             SettlementInput::Retained(
                 ObservationState::CommittedStateOnlyAuthorityMaterialized,
@@ -459,6 +474,7 @@ impl lazily::FiniteState for SettlementInput {
             Self::NoRetainedIntent,
             Self::Retained(ObservationState::Unobserved),
             Self::Retained(ObservationState::AuthorityDiskDiverged),
+            Self::Retained(ObservationState::AuthorityMaterializedDiskPending),
             Self::Retained(ObservationState::CommittedStateOnlyAuthorityMaterialized),
             Self::Retained(ObservationState::Converged(ExactTarget)),
             Self::Retained(ObservationState::Converged(RebasedPayloadMaterialized)),
@@ -490,6 +506,12 @@ fn settlement_input(
             return SettlementInput::Retained(
                 ObservationState::CommittedStateOnlyAuthorityMaterialized,
             );
+        }
+        if authority.content_hash == pending.target_hash
+            || (pending.carries_response_payload && authority.payload_materialized)
+            || (pending.carries_content_delta && authority.intent_delta_materialized)
+        {
+            return SettlementInput::Retained(ObservationState::AuthorityMaterializedDiskPending);
         }
         return SettlementInput::Retained(ObservationState::AuthorityDiskDiverged);
     }
@@ -808,13 +830,14 @@ mod tests {
         let coverage = lazily::table_coverage::<RetainedSettlementTable>();
         assert_eq!(
             coverage.len(),
-            9,
+            10,
             "the row set is the finite semantic sum, not a Cartesian product padded with impossible states",
         );
         coverage.assert_decisions_exactly(&[
             SettlementDecision::NoRetainedIntent,
             SettlementDecision::Unobserved,
             SettlementDecision::Unsettled(UnsettledCause::AuthorityDiskDiverged),
+            SettlementDecision::Unsettled(UnsettledCause::DiskProjectionPending),
             SettlementDecision::Satisfied(SatisfiedProof::CommittedStateOnlyAuthorityMaterialized),
             SettlementDecision::Satisfied(SatisfiedProof::ExactTarget),
             SettlementDecision::Satisfied(SatisfiedProof::RebasedPayloadMaterialized),
@@ -877,30 +900,32 @@ mod tests {
                 ..pending.clone()
             },
         ] {
-            assert!(matches!(
-                settlement_verdict(Some(&candidate), Some(&authority), Some(&disk)),
-                SettlementVerdict::Unsettled {
-                    cause: UnsettledCause::AuthorityDiskDiverged,
-                    ..
-                }
-            ));
+            // Without every strike proof the intent never settles from authority
+            // alone; when authority already holds its delta it is
+            // `DiskProjectionPending` (`#retainedadvanceadmit`), which still
+            // blocks closeout until disk catches up.
+            let verdict = settlement_verdict(Some(&candidate), Some(&authority), Some(&disk));
+            assert!(
+                matches!(verdict, SettlementVerdict::Unsettled { .. }),
+                "{verdict:?}"
+            );
+            assert!(verdict.blocks_session_closeout());
         }
 
         let authority_without_response = ContentObservation {
             payload_materialized: false,
             ..authority
         };
-        assert!(matches!(
-            settlement_verdict(
-                Some(&pending),
-                Some(&authority_without_response),
-                Some(&disk)
-            ),
-            SettlementVerdict::Unsettled {
-                cause: UnsettledCause::AuthorityDiskDiverged,
-                ..
-            }
-        ));
+        let verdict = settlement_verdict(
+            Some(&pending),
+            Some(&authority_without_response),
+            Some(&disk),
+        );
+        assert!(
+            matches!(verdict, SettlementVerdict::Unsettled { .. }),
+            "{verdict:?}"
+        );
+        assert!(verdict.blocks_session_closeout());
     }
 
     #[test]
@@ -1014,7 +1039,7 @@ mod tests {
     fn diverged_planes_are_unsettled_not_satisfied() {
         let verdict = settlement_verdict(
             Some(&intent("stamped", true)),
-            Some(&observed("authority", true)),
+            Some(&observed("authority", false)),
             Some(&observed("disk", true)),
         );
         assert!(verdict.blocks_new_cycle());
@@ -1023,6 +1048,54 @@ mod tests {
                 assert_eq!(cause, UnsettledCause::AuthorityDiskDiverged)
             }
             other => panic!("expected Unsettled, got {other:?}"),
+        }
+    }
+
+    /// `#retainedadvanceadmit`: the authority already holds the retained write
+    /// and only the editor's native save to disk is outstanding. A new cycle
+    /// composes onto the authority, so it is admitted; closeout still waits for
+    /// disk, and the intent is neither settled nor replayed early.
+    #[test]
+    fn materialized_authority_with_disk_pending_admits_a_new_cycle_but_not_closeout() {
+        let exact = settlement_verdict(
+            Some(&intent("stamped", false)),
+            Some(&observed("stamped", false)),
+            Some(&observed("disk", false)),
+        );
+        let payload = settlement_verdict(
+            Some(&intent("stamped", true)),
+            Some(&observed("operator-rebased", true)),
+            Some(&observed("disk", false)),
+        );
+        let mut delta_intent = intent("stamped", false);
+        delta_intent.carries_content_delta = true;
+        let delta = settlement_verdict(
+            Some(&delta_intent),
+            Some(&ContentObservation {
+                content_hash: "operator-rebased".to_string(),
+                payload_materialized: false,
+                intent_delta_materialized: true,
+            }),
+            Some(&observed("disk", false)),
+        );
+        for verdict in [exact, payload, delta] {
+            assert!(
+                matches!(
+                    verdict,
+                    SettlementVerdict::Unsettled {
+                        cause: UnsettledCause::DiskProjectionPending,
+                        ..
+                    }
+                ),
+                "{verdict:?}"
+            );
+            assert!(!verdict.blocks_new_cycle(), "{verdict:?}");
+            assert!(verdict.blocks_session_closeout(), "{verdict:?}");
+            assert!(!verdict.should_clear_intent(), "{verdict:?}");
+            assert!(matches!(
+                verdict.recovery_action(),
+                RecoveryAction::AwaitConvergence { .. }
+            ));
         }
     }
 
@@ -1323,6 +1396,37 @@ mod tests {
         assert!(session_check_view.should_clear_intent());
     }
 
+    /// `#retainedadvanceadmit` scenario: a captured operator edit is retained
+    /// (authority has it, the editor's native save has not reached disk), an
+    /// independent canonical advance is admitted and lands on the authority, and
+    /// the retained intent then settles once disk catches up, without replay.
+    #[test]
+    fn retained_capture_plus_independent_advance_settles_after_the_disk_projection() {
+        let settlement = RetainedWriteSettlement::new();
+        settlement.observe_pending(Some(intent("captured-target", true)));
+        settlement.observe_authority(Some(observed("captured-target", true)));
+        settlement.observe_disk(Some(observed("pre-capture-disk", false)));
+        let retained = settlement.verdict();
+        assert!(!retained.blocks_new_cycle(), "the advance must be admitted: {retained:?}");
+        assert!(retained.blocks_session_closeout());
+
+        // The admitted advance composes onto the authority; the captured edit
+        // stays materialized in the new cut.
+        settlement.observe_authority(Some(observed("captured-plus-advance", true)));
+        let advanced = settlement.verdict();
+        assert!(!advanced.blocks_new_cycle(), "{advanced:?}");
+        assert!(!advanced.should_clear_intent(), "disk still lags: {advanced:?}");
+
+        // The native save lands: the retained intent settles by payload.
+        settlement.observe_disk(Some(observed("captured-plus-advance", true)));
+        match settlement.verdict() {
+            SettlementVerdict::Satisfied { proof, .. } => {
+                assert_eq!(proof, SatisfiedProof::RebasedPayloadMaterialized)
+            }
+            other => panic!("expected the retained capture to settle, got {other:?}"),
+        }
+    }
+
     /// Invalidation must cross: a new observation changes the shared verdict
     /// without anyone re-deriving it by hand.
     #[test]
@@ -1331,7 +1435,8 @@ mod tests {
         settlement.observe_pending(Some(intent("stamped", true)));
         settlement.observe_authority(Some(observed("authority", true)));
         settlement.observe_disk(Some(observed("disk", true)));
-        assert!(settlement.verdict().blocks_new_cycle());
+        assert!(settlement.verdict().blocks_session_closeout());
+        assert!(!settlement.verdict().should_clear_intent());
 
         settlement.observe_disk(Some(observed("authority", true)));
         assert!(

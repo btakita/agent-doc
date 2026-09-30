@@ -91,7 +91,18 @@ After that, the editor and the controller refused every connection to each other
    - The fix treats `null` as empty for `last_assistant_message` and `stop_hook_active`, with tests. The same payload now returns `{"continue":true}` from the installed binary.
 
 **Verification:** `make check` exit 0, 10168 tests passed. Installed with the binary and editor library on one matching build (`0.35.419+305d8cd…` for both). Committed as agent-doc `91330f9f7` (pushed) and superproject `a25e9686cc`. After the install, one controller still reports the previous build; it recycles at the next idle boundary.
-<!-- agent:boundary:d3c2a789:agent-doc-bugs -->
+
+> **Queue prompt:** Fix https://github.com/btakita/agent-doc/issues/61
+
+### Re: GH #61 — component markers in code spans escaped — opus-5.5 · 2026-09-30T00:45-04:00
+
+Fixed in agent-doc `5611dc7bd` (pushed; `Fixes #61` closes the issue).
+
+- **Cause:** `sanitize_component_tags` (`agent-doc-template/src/sanitize.rs`) escaped every agent marker byte-wise with no code awareness.
+- **Fix:** it now computes `element::find_code_ranges` — the same pulldown-cmark helper the component parser uses to *ignore* code regions — and leaves markers inside inline code spans and fenced/indented blocks verbatim. Bare-text markers are still escaped, and an unmatched backtick (no span) still escapes. The materialization probe calls the same sanitizer, so writer/probe parity holds.
+- **Tests:** new coverage for inline span, backtick + tilde fences, bare-beside-span, unclosed backtick, and a round-trip proving a sanitized code quote parses as no extra component. Two tests that pinned the old escaped-in-code shape were updated. `make check`: 10173 passed, 0 failed. `make install` done; CI run 36670256201 in progress.
+- **Known edge:** a response captured by a pre-fix binary (written escaped) and replayed by the new binary would no longer match the materialization probe. That only affects an in-flight capture across the upgrade that quotes a marker in code; I did not add a legacy fallback across the six probe callers.
+<!-- agent:boundary:1cd2d88f:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -102,7 +113,7 @@ After that, the editor and the controller refused every connection to each other
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Compact Exchange did not work the first time I called it. It worked the second time though.~~
 - ~~Fix https://github.com/btakita/agent-doc/issues/60~~
-- Fix https://github.com/btakita/agent-doc/issues/61
+- ~~Fix https://github.com/btakita/agent-doc/issues/61~~
 - Fix https://github.com/btakita/agent-doc/issues/62
 - release + publish
 <!-- /agent:queue -->

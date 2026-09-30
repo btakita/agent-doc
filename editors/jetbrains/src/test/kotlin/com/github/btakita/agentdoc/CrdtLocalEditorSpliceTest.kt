@@ -104,4 +104,25 @@ class CrdtLocalEditorSpliceTest {
         assertEquals(before.substring(0, insertionOffset) + "?".repeat(3_000) + before.substring(insertionOffset), prepared.resultingText)
         assertEquals(insertionOffset + 2_999, prepared.edits.last().offsetCodePoints)
     }
+
+    @Test
+    fun `splices subsumed by a published buffer are not replayed`() {
+        // #subsumedsplicereplay live shape (infra.md): the 18 typed characters were
+        // published inside the whole buffer, and their queued splices replayed.
+        val shadow = "- Create a PR to fix the SBX + STG drift.\n"
+        val typed = " if there is drift"
+        val offset = shadow.indexOf(".\n")
+        val edits = typed.mapIndexed { index, ch -> CapturedLocalEditorEdit(offset + index, "", ch.toString(), 4) }
+        val published = prepareLocalEditorEditsUtil(shadow, edits)!!.resultingText
+
+        // The hazard: pure inserts validate against the published buffer too.
+        val replayed = prepareLocalEditorEditsUtil(published, edits)
+        assertEquals(2, replayed!!.resultingText.split(typed).size - 1)
+
+        // The fence: the publication advanced the epoch, so nothing is owed.
+        assertEquals(emptyList<CapturedLocalEditorEdit>(), currentEpochCapturedEditsUtil(edits, 5))
+        // Splices typed after the publication still forward.
+        val later = CapturedLocalEditorEdit(0, "", "x", 5)
+        assertEquals(listOf(later), currentEpochCapturedEditsUtil(edits + later, 5))
+    }
 }

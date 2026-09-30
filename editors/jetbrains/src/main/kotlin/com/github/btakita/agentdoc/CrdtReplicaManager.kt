@@ -491,6 +491,23 @@ internal fun prepareLocalEditorEditsUtil(
     return PreparedLocalEditorBatch(prepared, current.toString())
 }
 
+/**
+ * The captured splice batches still owed to the replica: only those taken in the
+ * current projection epoch. A whole-buffer publication (`PublishOperatorBuffer`,
+ * `MergeForward`) advances the epoch because the published buffer already
+ * contains every earlier splice (`#subsumedsplicereplay`).
+ *
+ * Live 2026-09-30 on infra.md: re-register published the whole buffer, typing
+ * included, from its settled shadow; the same 18 keystrokes were still queued as
+ * a splice batch and were forwarded again onto the re-registered replica. Pure
+ * inserts carry no range text to mismatch, so the replay passed validation and
+ * the operator's text landed twice.
+ */
+internal fun currentEpochCapturedEditsUtil(
+    edits: List<CapturedLocalEditorEdit>,
+    currentEpoch: Long,
+): List<CapturedLocalEditorEdit> = edits.filter { it.projectionEpoch == currentEpoch }
+
 internal fun pullDeliveryRequestsReplicaRefreshUtil(delivery: ReplicaPullDelivery): Boolean =
     delivery is ReplicaPullDelivery.Unavailable
 
@@ -1274,7 +1291,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val started = System.nanoTime()
         if (capturedEdits.isEmpty()) return LocalEditorForwardResult.Applied
         val currentEpoch = nonOperatorMutationEpoch(filePath)
-        val currentEdits = capturedEdits.filter { it.projectionEpoch == currentEpoch }
+        val currentEdits = currentEpochCapturedEditsUtil(capturedEdits, currentEpoch)
         if (currentEdits.isEmpty()) {
             log.debug(
                 "[crdt-replica] dropped stale operator splice batch for $filePath after a newer non-operator projection",
@@ -3165,6 +3182,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         false
                     } else {
                         shadows[filePath] = bufferText
+                        fenceCapturedEditsSubsumedByPublishedBuffer(filePath, "publish-operator-buffer")
                         retainedCanonicalProjectionPaths.remove(filePath)
                     if (!projectSettledVisibleState(filePath, forwarder, bufferText)) {
                         requestRemoteDrain(filePath, "registration-operator-buffer-projection-retry")
@@ -3206,6 +3224,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                     false
                 } else {
+                    fenceCapturedEditsSubsumedByPublishedBuffer(filePath, "registration-merge-forward")
                     retainedCanonicalProjectionPaths.remove(filePath)
                     // The replica now holds the merge and has published it; project
                     // it into the buffer through the generation-fenced apply, which
@@ -3413,6 +3432,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 )
             }
         }
+    }
+
+    /**
+     * A whole buffer was just published from the exact captured cut, so every
+     * splice captured before it is already in the replica. Advancing the
+     * projection epoch retires those batches instead of replaying them
+     * (`#subsumedsplicereplay`); a keystroke that raced the publication is
+     * recovered like any other fenced batch, by the next buffer-from-shadow
+     * registration.
+     */
+    private fun fenceCapturedEditsSubsumedByPublishedBuffer(filePath: String, reason: String) {
+        val epoch = advanceNonOperatorMutationEpoch(filePath)
+        log.info(
+            "[crdt-replica] fenced splices subsumed by the published buffer for ${File(filePath).name}; " +
+                "epoch=$epoch reason=$reason",
+        )
     }
 
     private fun markLocalPending(filePath: String) {

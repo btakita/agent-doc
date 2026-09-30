@@ -2022,6 +2022,13 @@ struct WriteArgs {
     /// The gate-set timestamp is stamped automatically.
     #[arg(long = "backlog-set-verify", alias = "pending-set-verify")]
     pending_set_verify: Vec<String>,
+    /// Add-or-update a backlog item keyed on a caller-supplied stable key
+    /// (`#backlogupsert`): `key=text` (repeatable). An open backlog item whose
+    /// text contains `key` is edited in place (its id is kept); otherwise a new
+    /// item is added. `text` is prefixed with `key` when it does not contain it,
+    /// so the next sync can find it again.
+    #[arg(long = "backlog-upsert")]
+    pending_upsert: Vec<String>,
     /// Add a new gated item directly to the review list (repeatable).
     #[arg(long = "review-add")]
     review_add: Vec<String>,
@@ -3786,6 +3793,15 @@ enum PendingAction {
         /// Leading `[#custom] ` is also accepted as compatibility input.
         item: String,
     },
+    /// Add-or-update the backlog item keyed on a stable caller-supplied key
+    /// (`#backlogupsert`): the open item whose text contains KEY is edited in
+    /// place (id kept); otherwise TEXT is added (prefixed with KEY when absent).
+    Upsert {
+        /// Stable key embedded in the item text (e.g. `[JIRA:ABC-1]`).
+        key: String,
+        /// The item description.
+        text: String,
+    },
     /// Remove an item from the selected tracked-work component
     Remove {
         /// Content to match
@@ -5021,6 +5037,7 @@ fn try_main() -> anyhow::Result<()> {
                     pending_resolve_gate: args.pending_resolve_gate,
                     pending_set_gate_type: args.pending_set_gate_type,
                     pending_set_verify: args.pending_set_verify,
+                    pending_upsert: args.pending_upsert,
                     review_add: args.review_add,
                     review_edit: args.review_edit,
                     review_remove: args.review_remove,
@@ -5080,6 +5097,7 @@ fn try_main() -> anyhow::Result<()> {
                     pending_resolve_gate: args.pending_resolve_gate,
                     pending_set_gate_type: args.pending_set_gate_type,
                     pending_set_verify: args.pending_set_verify,
+                    pending_upsert: args.pending_upsert,
                     review_add: args.review_add,
                     review_edit: args.review_edit,
                     review_remove: args.review_remove,
@@ -6187,10 +6205,18 @@ fn try_main() -> anyhow::Result<()> {
                     force_disk,
                     || match action {
                         PendingAction::Add { item } => {
-                            agent_doc_element_backlog_io::backlog_cmd::add(&file, &item, false)
+                            agent_doc_element_backlog_io::backlog_cmd::add_verified(
+                                &file, &item, false,
+                            )
                         }
                         PendingAction::AddGated { item } => {
-                            agent_doc_element_backlog_io::backlog_cmd::add(&file, &item, true)
+                            agent_doc_element_backlog_io::backlog_cmd::add_verified(
+                                &file, &item, true,
+                            )
+                        }
+                        PendingAction::Upsert { key, text } => {
+                            agent_doc_element_backlog_io::backlog_cmd::upsert(&file, &key, &text)
+                                .map(|_| ())
                         }
                         PendingAction::Remove { target, contains } => {
                             agent_doc_element_backlog_io::backlog_cmd::remove(
@@ -6276,6 +6302,11 @@ fn try_main() -> anyhow::Result<()> {
                         PendingAction::AddGated { item: _ } => {
                             anyhow::bail!(
                                 "agent-doc icebox add-gated is not supported; use `agent-doc review add` for gated review work"
+                            )
+                        }
+                        PendingAction::Upsert { .. } => {
+                            anyhow::bail!(
+                                "agent-doc icebox upsert is not supported; use `agent-doc backlog <FILE> upsert`"
                             )
                         }
                         PendingAction::Remove { target, contains } => {

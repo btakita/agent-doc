@@ -37,6 +37,19 @@ use std::path::Path;
 
 use agent_doc_frontmatter::frontmatter;
 
+/// `#resetclosedactor`: when no editor endpoint is attached, the retained
+/// authority can never converge on its own; `--force-disk` is the documented
+/// headless path. `None` while an editor is attached (keep waiting).
+fn closed_actor_reset_guidance(file: &Path, editor_attached: bool) -> Option<String> {
+    (!editor_attached).then(|| {
+        format!(
+            "reset --from-current --preserve-session: {} has retained editor authority that differs from disk, but NO live editor is attached, so no automatic convergence can arrive. The visible markdown on disk is what you want to rebuild from: rerun `agent-doc reset {} --from-current --preserve-session --force-disk` (or reopen the document in the editor first to let it converge).",
+            file.display(),
+            file.display()
+        )
+    })
+}
+
 pub fn run(
     file: &Path,
     from_current: bool,
@@ -96,6 +109,17 @@ pub fn run(
                     file,
                     "reset_preserve_session_editor_authority_convergence",
                 )? {
+                    // `#resetclosedactor` (GH #69 §2): with no editor attached
+                    // there is nothing for the promised convergence to come
+                    // from, so name the headless path instead of "do nothing".
+                    if let Some(guidance) = closed_actor_reset_guidance(
+                        file,
+                        agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(
+                            file,
+                        ),
+                    ) {
+                        anyhow::bail!("{guidance}");
+                    }
                     anyhow::bail!(
                         "reset --from-current --preserve-session is waiting for automatic editor-authority convergence for {} (authority_hash={}, disk_hash={}, component_divergence={}); the exact editor revision remains authoritative and retained, and no operator save, reload, or retry is required",
                         file.display(),
@@ -245,6 +269,17 @@ fn rebase_active_capture_after_preserve_session_reset(file: &Path, content: &str
 
 #[cfg(test)]
 mod tests {
+    /// `#resetclosedactor` (GH #69 §2): a closed actor gets the `--force-disk`
+    /// path, never a promise of convergence; an attached editor keeps waiting.
+    #[test]
+    fn closed_actor_reset_guidance_names_force_disk_only_without_an_editor() {
+        let file = Path::new("tasks/work/attention.ad.md");
+        let guidance = closed_actor_reset_guidance(file, false).expect("closed actor");
+        assert!(guidance.contains("--force-disk"), "{guidance}");
+        assert!(guidance.contains("NO live editor"), "{guidance}");
+        assert!(closed_actor_reset_guidance(file, true).is_none());
+    }
+
     use super::*;
     use tempfile::TempDir;
 

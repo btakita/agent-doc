@@ -894,10 +894,10 @@ pub struct Frontmatter {
 /// [`Deref`](std::ops::Deref)s to the map of presets that actually have a value, so
 /// every consumer keeps seeing exactly those — a key still being typed must never
 /// resolve as a preset with an empty body.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PromptPresets {
     /// Every declared key in document order; `None` is "declared, no value yet".
-    entries: indexmap::IndexMap<String, Option<String>>,
+    entries: indexmap::IndexMap<String, Option<PresetValue>>,
     /// The subset carrying a value — the [`Deref`](std::ops::Deref) target, kept in
     /// step with `entries` so consumers need no knowledge of this type.
     resolved: indexmap::IndexMap<String, String>,
@@ -923,8 +923,94 @@ impl PromptPresets {
         self.resolved = self
             .entries
             .iter()
-            .filter_map(|(key, value)| value.clone().map(|value| (key.clone(), value)))
+            .filter_map(|(key, value)| {
+                value
+                    .as_ref()
+                    .and_then(PresetValue::body)
+                    .map(|body| (key.clone(), body))
+            })
             .collect();
+    }
+
+    /// `#presetshape` (GH #69 §1): operator-readable problems with declared
+    /// presets. A structured entry is accepted when it carries a string
+    /// `prompt:` (the preset body); any other shape is preserved verbatim but
+    /// does not resolve. These are warnings, never parse errors -- one
+    /// malformed preset must not make `mode` / `session-check` unable to read
+    /// the whole document.
+    pub fn diagnostics(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (key, value) in &self.entries {
+            let Some(PresetValue::Structured(raw)) = value else {
+                continue;
+            };
+            let map = raw.as_mapping();
+            let has_prompt = map
+                .and_then(|m| m.get(serde_yaml::Value::from("prompt")))
+                .is_some_and(serde_yaml::Value::is_string);
+            if !has_prompt {
+                out.push(format!(
+                    "prompt_presets.{key}: unsupported shape; a preset is `<name>: <string>` or `<name>: {{prompt: <string>}}` -- this entry is kept as written but does not resolve"
+                ));
+                continue;
+            }
+            let ignored: Vec<String> = map
+                .into_iter()
+                .flat_map(|m| m.keys())
+                .filter_map(|k| k.as_str().map(str::to_string))
+                .filter(|k| k != "prompt")
+                .collect();
+            if !ignored.is_empty() {
+                out.push(format!(
+                    "prompt_presets.{key}: only `prompt` is used as the preset body; ignored field(s): {}",
+                    ignored.join(", ")
+                ));
+            }
+        }
+        out
+    }
+}
+
+/// One preset value: the plain string body, or a structured mapping kept
+/// verbatim for round-trip (`#presetshape`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PresetValue {
+    Text(String),
+    Structured(serde_yaml::Value),
+}
+
+impl PresetValue {
+    /// The body this preset expands to, if it has one.
+    pub fn body(&self) -> Option<String> {
+        match self {
+            PresetValue::Text(text) => Some(text.clone()),
+            PresetValue::Structured(raw) => raw
+                .as_mapping()
+                .and_then(|m| m.get(serde_yaml::Value::from("prompt")))
+                .and_then(serde_yaml::Value::as_str)
+                .map(str::to_string),
+        }
+    }
+}
+
+impl serde::Serialize for PresetValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            PresetValue::Text(text) => serializer.serialize_str(text),
+            PresetValue::Structured(raw) => raw.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PresetValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(match serde_yaml::Value::deserialize(deserializer)? {
+            serde_yaml::Value::String(text) => PresetValue::Text(text),
+            // Scalars keep the old string reading (`'#n': 42` was `"42"`).
+            serde_yaml::Value::Number(n) => PresetValue::Text(n.to_string()),
+            serde_yaml::Value::Bool(b) => PresetValue::Text(b.to_string()),
+            other => PresetValue::Structured(other),
+        })
     }
 }
 
@@ -932,7 +1018,7 @@ impl From<indexmap::IndexMap<String, String>> for PromptPresets {
     fn from(resolved: indexmap::IndexMap<String, String>) -> Self {
         let entries = resolved
             .iter()
-            .map(|(key, value)| (key.clone(), Some(value.clone())))
+            .map(|(key, value)| (key.clone(), Some(PresetValue::Text(value.clone()))))
             .collect();
         Self { entries, resolved }
     }
@@ -961,7 +1047,8 @@ impl serde::Serialize for PromptPresets {
 
 impl<'de> serde::Deserialize<'de> for PromptPresets {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let entries = indexmap::IndexMap::<String, Option<String>>::deserialize(deserializer)?;
+        let entries =
+            indexmap::IndexMap::<String, Option<PresetValue>>::deserialize(deserializer)?;
         let mut presets = Self {
             entries,
             resolved: indexmap::IndexMap::new(),
@@ -1379,9 +1466,10 @@ pub fn parse_for_startup(file_display: &str, content: &str) -> StartupFrontmatte
 /// and a repair hint.
 pub fn contextualize_parse_error(file_display: &str, err: anyhow::Error) -> anyhow::Error {
     anyhow::anyhow!(
-        "invalid YAML frontmatter in {}: {}\n\nFix the frontmatter between the opening and closing --- markers, then rerun the command.",
+        "invalid YAML frontmatter in {}: {}\n\nFix the frontmatter between the opening and closing --- markers, then rerun the command. For an `agent_doc_write: crdt` document, frontmatter is read from CRDT state, so after fixing the file run `agent-doc reset {} --from-current --preserve-session` to rebuild that state from the visible markdown (add `--force-disk` when no editor has the document open).",
         file_display,
-        err
+        err,
+        file_display
     )
 }
 
@@ -2402,14 +2490,27 @@ fn contextualize_yaml_parse_error(
     message.push_str(
         "\n\nFix the frontmatter between the opening and closing --- markers, then rerun the command.",
     );
+    // `#resetclosedactor` (GH #69 §2): a crdt-write document reads frontmatter
+    // from CRDT state, so a file edit alone is not enough -- name the rebuild.
+    message.push_str(&format!(
+        " For an `agent_doc_write: crdt` document, frontmatter is read from CRDT state, so after fixing the file run `agent-doc reset {file_display} --from-current --preserve-session` to rebuild that state from the visible markdown (add `--force-disk` when no editor has the document open)."
+    ));
     anyhow::anyhow!(message)
 }
 
 fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<String> {
     let lines: Vec<&str> = yaml.lines().collect();
-    if line == 0 || line > lines.len() {
+    if line == 0 || lines.is_empty() {
         return None;
     }
+    // An end-of-input syntax error (an unclosed `[`, `{`, or quote) is reported
+    // one line past the block; point at the last line, where the unclosed
+    // construct actually is, instead of dropping the excerpt.
+    let (line, column) = if line > lines.len() {
+        (lines.len(), lines[lines.len() - 1].len() + 1)
+    } else {
+        (line, column)
+    };
 
     let start = line.saturating_sub(1).max(1);
     let end = (line + 1).min(lines.len());
@@ -3586,6 +3687,50 @@ mod tests {
         let (parsed, body2) = parse(&written).unwrap();
         assert_eq!(body2, "Body\n");
         assert_eq!(parsed.prompt_presets, fm.prompt_presets);
+    }
+
+    /// `#resetclosedactor` (GH #69 §2): the invalid-frontmatter error names the
+    /// only command that can apply a fix to a crdt-write document.
+    #[test]
+    fn invalid_frontmatter_error_names_reset_from_current() {
+        let err = parse("---\nagent_doc_session: [unclosed\n---\nBody\n").unwrap_err();
+        let message = contextualize_parse_error("doc.md", err).to_string();
+        assert!(
+            message.contains("agent-doc reset doc.md --from-current --preserve-session"),
+            "{message}"
+        );
+    }
+
+    /// `#presetshape` (GH #69 §1): the reported structured preset used to be a
+    /// fatal `invalid type: map, expected a string` that made `mode` and
+    /// `session-check` unable to read the document. It now parses, resolves
+    /// its `prompt:` as the body, round-trips verbatim, and warns about the
+    /// fields it does not use.
+    #[test]
+    fn a_structured_prompt_preset_parses_and_round_trips() {
+        let content = "---\nagent_doc_session: s\nprompt_presets:\n  triage:\n    prompt: |\n      Triage {issue}.\n    response: |\n      {issue}\n  plain: do it\n  odd:\n    - a list\n---\nBody\n";
+        let (fm, body) = parse(content).expect("structured preset must not be fatal");
+        assert_eq!(
+            fm.prompt_presets.get("triage").map(String::as_str),
+            Some("Triage {issue}.\n")
+        );
+        assert_eq!(fm.prompt_presets.get("plain").map(String::as_str), Some("do it"));
+        assert!(fm.prompt_presets.get("odd").is_none(), "unsupported shape does not resolve");
+
+        let diagnostics = fm.prompt_presets.diagnostics();
+        assert!(
+            diagnostics.iter().any(|d| d.contains("triage") && d.contains("response")),
+            "{diagnostics:?}"
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.contains("odd") && d.contains("{prompt: <string>}")),
+            "{diagnostics:?}"
+        );
+
+        let written = write(&fm, body).unwrap();
+        let (reparsed, _) = parse(&written).unwrap();
+        assert_eq!(reparsed.prompt_presets, fm.prompt_presets, "{written}");
+        assert!(written.contains("response"), "structured form kept: {written}");
     }
 
     #[test]

@@ -596,6 +596,103 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     Ok(())
 }
 
+/// `#addreadback` (GH #69 §3): the standalone `agent-doc backlog <FILE> add`
+/// command. A write the editor path only *retained* returns Ok while the next
+/// command's read may not see it, so a script issuing adds back to back lost
+/// every item but one with exit 0 and no output. After the add, re-read through
+/// the SAME resolver the next command uses and fail loudly unless the new item
+/// -- and every item that was already there -- is visible. Exit non-zero is
+/// the caller's cue to retry or batch (`write --commit --backlog-add ... ×N`).
+pub fn add_verified(file: &Path, item: &str, gated: bool) -> Result<()> {
+    let before = read_command_document(file, "backlog_add_readback_before")?;
+    add(file, item, gated)?;
+    let after = read_command_document(file, "backlog_add_readback_after")?;
+    add_readback_verdict(file, &before, &after, item)
+}
+
+fn backlog_item_ids(content: &str) -> Result<Vec<String>> {
+    let comp = match backlog::find_tracked_work_component_in_content(
+        content,
+        backlog::TrackedWorkList::Backlog,
+    ) {
+        Ok(comp) => comp,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let (_, items, _) = backlog::parse_items(comp.content(content));
+    Ok(items.into_iter().map(|item| item.id).collect())
+}
+
+fn add_readback_verdict(file: &Path, before: &str, after: &str, item: &str) -> Result<()> {
+    let before_ids = backlog_item_ids(before)?;
+    let after_ids = backlog_item_ids(after)?;
+    let lost: Vec<&String> = before_ids.iter().filter(|id| !after_ids.contains(id)).collect();
+    let added = after_ids.iter().any(|id| !before_ids.contains(id));
+    // A dedupe (the item was already tracked) is a satisfied no-op.
+    let already_present = before == after && before.contains(item.trim());
+    if lost.is_empty() && (added || already_present) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "backlog add: the write for {} was accepted but is NOT visible to the next command yet \
+         (new item visible: {added}; previously visible items now missing: {}). Running more \
+         `backlog add` calls now would build on the stale document and silently lose items. \
+         Retry once the editor delivers, or add them in ONE write: `agent-doc write --commit {} \
+         --backlog-only --backlog-add \"...\" --backlog-add \"...\"` (#addreadback)",
+        file.display(),
+        if lost.is_empty() {
+            "none".to_string()
+        } else {
+            lost.iter().map(|id| format!("#{id}")).collect::<Vec<_>>().join(", ")
+        },
+        file.display()
+    )
+}
+
+/// `#backlogupsert` (GH #69 §4): add-or-update keyed on a caller-supplied
+/// stable key instead of the text hash. A collector syncing external state
+/// (`[GL:proj!12:review]`, `[JIRA:ABC-1]`) calls this every run: the open
+/// backlog item whose text contains `key` is edited in place (id kept) when its
+/// text changed, otherwise a new item is added. `text` gains a `key ` prefix
+/// when it does not already contain the key, so the next run matches it.
+/// Returns the id only when a new item was inserted. Errors when the key
+/// matches more than one open item -- that is ambiguous, not an upsert.
+pub fn upsert(file: &Path, key: &str, text: &str) -> Result<Option<String>> {
+    let key = key.trim();
+    anyhow::ensure!(!key.is_empty(), "--backlog-upsert: key must not be empty");
+    let text = if text.contains(key) {
+        text.trim().to_string()
+    } else {
+        format!("{key} {}", text.trim())
+    };
+    let (full_content, comp) = find_pending_component(file)?;
+    let (_, items, _) = backlog::parse_items(comp.content(&full_content));
+    let matches: Vec<_> = items
+        .iter()
+        .filter(|item| !item.is_done() && item.text.contains(key))
+        .collect();
+    match matches.as_slice() {
+        [] => {
+            let before: HashSet<String> = items.iter().map(|item| item.id.clone()).collect();
+            add(file, &text, false)?;
+            let after = read_command_document(file, "backlog_upsert_added")?;
+            Ok(backlog_item_ids(&after)?
+                .into_iter()
+                .find(|id| !before.contains(id)))
+        }
+        [existing] => {
+            if existing.text.trim() != text {
+                edit(file, &existing.id, &text)?;
+            }
+            Ok(None)
+        }
+        many => anyhow::bail!(
+            "--backlog-upsert: key `{key}` matches {} open backlog items ({}); make the key unique",
+            many.len(),
+            many.iter().map(|item| format!("#{}", item.id)).collect::<Vec<_>>().join(", ")
+        ),
+    }
+}
+
 /// Attribute edits this command accepts, per tracked-work component.
 ///
 /// `#bkqattrcli`: an unrestricted set-attr would let a typo land a permanently
@@ -2694,6 +2791,56 @@ mod tests {
         assert!(content.contains("<!-- agent:review -->"));
         assert!(content.contains("- [/release] [#a1b2] Release v1.0"));
         assert_eq!(content.matches("[#a1b2]").count(), 1);
+    }
+
+    /// `#addreadback` (GH #69 §3): a write that returns Ok without becoming
+    /// visible to the next read (the retained-delivery shape) must fail loudly
+    /// instead of exiting 0 while the item vanishes.
+    struct RetainingBacklogCommandEffects;
+    static RETAINING_EFFECTS: RetainingBacklogCommandEffects = RetainingBacklogCommandEffects;
+    impl crate::BacklogCommandEffects for RetainingBacklogCommandEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+        fn force_disk_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+        fn converge_or_disk_write(&self, _: &Path, _: &str, _: &str, _: &str) -> Result<()> {
+            Ok(()) // accepted, retained, never visible
+        }
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+    }
+
+    #[test]
+    fn add_verified_fails_when_the_write_is_not_visible_to_the_next_read() {
+        let (_tmp, doc) = doc_with_pending("- [ ] [#c3d4] Other");
+        let err = crate::with_backlog_command_effects(&RETAINING_EFFECTS, || {
+            add_verified(&doc, "new tracked item", false)
+        })
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("#addreadback"), "{err:#}");
+
+        with_test_effects(|| add_verified(&doc, "new tracked item", false)).unwrap();
+        with_test_effects(|| add_verified(&doc, "new tracked item", false))
+            .expect("re-adding a tracked item is a satisfied no-op");
+    }
+
+    /// `#backlogupsert` (GH #69 §4): a status change in a collector's text keeps
+    /// the SAME item instead of adding a duplicate for the same external key.
+    #[test]
+    fn upsert_edits_by_stable_key_and_adds_when_absent() {
+        let (_tmp, doc) = doc_with_pending("- [ ] [#c3d4] Other");
+        let first = force_pending(|| upsert(&doc, "[JIRA:ABC-1]", "needs review"))
+            .expect("absent key adds");
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("[JIRA:ABC-1] needs review"), "{content}");
+
+        let again = force_pending(|| upsert(&doc, "[JIRA:ABC-1]", "[JIRA:ABC-1] approved"));
+        assert!(again.is_none(), "existing key edits in place");
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(content.matches("[JIRA:ABC-1]").count(), 1, "{content}");
+        assert!(content.contains(&format!("[#{first}] [JIRA:ABC-1] approved")), "{content}");
+        assert!(content.contains("[#c3d4] Other"), "{content}");
     }
 
     /// `#txreceipt` (GH #68 §3): inside a tracked-work envelope a mutation's

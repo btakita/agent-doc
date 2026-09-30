@@ -51,6 +51,7 @@ pub struct FinalizeRerunCommand<'a> {
     pub pending_resolve_gate: &'a [String],
     pub pending_set_gate_type: &'a [String],
     pub pending_set_verify: &'a [String],
+    pub pending_upsert: &'a [String],
     pub review_add: &'a [String],
     pub review_edit: &'a [String],
     pub allow_replace_pending: bool,
@@ -381,6 +382,7 @@ pub fn finalize_rerun_command_base(command: FinalizeRerunCommand<'_>) -> Option<
     push_repeated_args(&mut args, "--icebox-add-back", command.icebox_add_back);
     push_repeated_args(&mut args, "--done", command.pending_done);
     push_repeated_args(&mut args, "--backlog-edit", command.pending_edit);
+    push_repeated_args(&mut args, "--backlog-upsert", command.pending_upsert);
     if command.pending_clear {
         args.push("--backlog-clear".to_string());
     }
@@ -1121,6 +1123,7 @@ mod tests {
             pending_resolve_gate: &empty,
             pending_set_gate_type: &empty,
             pending_set_verify: &empty,
+            pending_upsert: &empty,
             review_add: &empty,
             review_edit: &empty,
             allow_replace_pending: false,
@@ -1180,6 +1183,7 @@ mod tests {
             pending_resolve_gate: &pending_resolve_gate,
             pending_set_gate_type: &pending_set_gate_type,
             pending_set_verify: &pending_set_verify,
+            pending_upsert: &[],
             review_add: &review_add,
             review_edit: &review_edit,
             allow_replace_pending: true,

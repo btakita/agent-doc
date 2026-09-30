@@ -36,6 +36,8 @@ pub struct CapturedCloseoutMutationPlan {
     pub pending_resolve_gate: Vec<String>,
     pub pending_set_gate_type: Vec<String>,
     pub pending_set_verify: Vec<String>,
+    #[serde(default)]
+    pub pending_upsert: Vec<String>,
     pub review_add: Vec<String>,
     pub review_edit: Vec<String>,
     pub review_remove: Vec<String>,
@@ -93,6 +95,7 @@ pub struct CommandOptions {
     pub pending_resolve_gate: Vec<String>,
     pub pending_set_gate_type: Vec<String>,
     pub pending_set_verify: Vec<String>,
+    pub pending_upsert: Vec<String>,
     pub review_add: Vec<String>,
     pub review_edit: Vec<String>,
     /// `#reviewrm`: ids to delete from `agent:review` (clears stale/duplicate
@@ -146,6 +149,7 @@ impl CommandOptions {
             pending_resolve_gate: self.pending_resolve_gate.clone(),
             pending_set_gate_type: self.pending_set_gate_type.clone(),
             pending_set_verify: self.pending_set_verify.clone(),
+            pending_upsert: self.pending_upsert.clone(),
             review_add: self.review_add.clone(),
             review_edit: self.review_edit.clone(),
             review_remove: self.review_remove.clone(),
@@ -191,6 +195,7 @@ impl CommandOptions {
             pending_resolve_gate: plan.pending_resolve_gate,
             pending_set_gate_type: plan.pending_set_gate_type,
             pending_set_verify: plan.pending_set_verify,
+            pending_upsert: plan.pending_upsert,
             review_add: plan.review_add,
             review_edit: plan.review_edit,
             review_remove: plan.review_remove,
@@ -243,6 +248,7 @@ impl CommandOptions {
             pending_resolve_gate: Vec::new(),
             pending_set_gate_type: Vec::new(),
             pending_set_verify: Vec::new(),
+            pending_upsert: Vec::new(),
             review_add: Vec::new(),
             review_edit: Vec::new(),
             review_remove: Vec::new(),
@@ -280,6 +286,7 @@ impl CommandOptions {
             || !self.pending_resolve_gate.is_empty()
             || !self.pending_set_gate_type.is_empty()
             || !self.pending_set_verify.is_empty()
+            || !self.pending_upsert.is_empty()
             || !self.review_add.is_empty()
             || !self.review_edit.is_empty()
             || !self.review_remove.is_empty()
@@ -302,6 +309,7 @@ impl CommandOptions {
             || !self.icebox_edit.is_empty()
             || !self.review_edit.is_empty()
             || !self.pending_set_verify.is_empty()
+            || !self.pending_upsert.is_empty()
             || !self.pending_set_gate_type.is_empty()
     }
 }

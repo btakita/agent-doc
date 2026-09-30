@@ -91,6 +91,18 @@ pub fn content_and_staleness_warnings(
     {
         warnings.push(warning);
     }
+    // `#presetshape` (GH #69 §1): a structured or unsupported preset value is a
+    // warning with the supported shape named, never a fatal parse error.
+    if let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(content) {
+        warnings.extend(fm.prompt_presets.diagnostics().into_iter().map(|message| {
+            PreflightWarning {
+                code: "prompt_preset_shape".to_string(),
+                message: format!("{}: {message}", file.display()),
+                document_agent: None,
+                active_harness: None,
+            }
+        }));
+    }
     if let Ok((git_root, _)) = agent_doc_git_io::dirs::resolve_to_git_root(file)
         && let Some(warning) = stale_install_warning(&git_root)
     {

@@ -973,6 +973,7 @@ mod th {
                     pending_resolve_gate: Vec::new(),
                     pending_set_gate_type: Vec::new(),
                     pending_set_verify: Vec::new(),
+                    pending_upsert: Vec::new(),
                     review_add: Vec::new(),
                     review_edit: Vec::new(),
                     review_remove: Vec::new(),

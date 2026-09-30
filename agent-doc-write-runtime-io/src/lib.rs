@@ -1631,6 +1631,14 @@ fn apply_pending_and_status_mutations_with_mode(
                             })?;
                             backlog_cmd::set_gate_type(file, id, gt)?;
                         }
+                        for pair in &options.pending_upsert {
+                            let (key, text) = pair.split_once('=').with_context(|| {
+                                format!("--backlog-upsert expects 'key=text', got: {}", pair)
+                            })?;
+                            if let Some(id) = backlog_cmd::upsert(file, key, text)? {
+                                same_cycle_added_ids.push(id);
+                            }
+                        }
                         for pair in &options.pending_set_verify {
                             let (id, spec) = pair.split_once('=').with_context(|| {
                             format!(
@@ -2506,6 +2514,7 @@ fn run_command_inner_within_pass(
             pending_resolve_gate: &options.pending_resolve_gate,
             pending_set_gate_type: &options.pending_set_gate_type,
             pending_set_verify: &options.pending_set_verify,
+            pending_upsert: &options.pending_upsert,
             review_add: &options.review_add,
             review_edit: &options.review_edit,
             allow_replace_pending: options.allow_replace_pending,
@@ -2536,6 +2545,7 @@ fn run_command_inner_within_pass(
         || !options.pending_resolve_gate.is_empty()
         || !options.pending_set_gate_type.is_empty()
         || !options.pending_set_verify.is_empty()
+        || !options.pending_upsert.is_empty()
         || !options.review_add.is_empty()
         || !options.review_edit.is_empty()
         || options.status.is_some();

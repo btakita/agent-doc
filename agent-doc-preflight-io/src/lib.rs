@@ -857,11 +857,7 @@ fn prior_cycle_hosted_a_turn(prior: &agent_doc_cycle_state_io::CycleState) -> bo
 /// `#presetargdedup`: normalized `#id`s whose ONLY active meaning in the
 /// document is a prompt preset (no backlog/review/icebox item carries them).
 fn preset_only_identity_ids(content: &str) -> std::collections::HashSet<String> {
-    agent_doc_element_backlog::backlog::document_active_identities(content)
-        .into_iter()
-        .filter(|(_, sources)| sources.iter().all(|source| source == "prompt_presets"))
-        .map(|(id, _)| id)
-        .collect()
+    agent_doc_queue::queue_continuation::preset_only_identity_ids(content)
 }
 
 fn advance_skipped_queue_head_ids(

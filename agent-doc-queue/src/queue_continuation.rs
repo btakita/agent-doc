@@ -635,6 +635,7 @@ fn eligible_head_prompt_from_entries(
         open_backlog.as_ref(),
         &deferred_ids,
         &after_deps_from_content(content),
+        &preset_only_identity_ids(content),
         preset_supplies_directive,
         scope,
     )
@@ -645,7 +646,8 @@ fn eligible_head_prompt_from_entries(
 pub fn live_drainable_continuation_head(content: &str, scope: DrainScope) -> Option<String> {
     let head = drainable_head_prompt_for_scope(content, scope)?;
     let stripped = strip_in_progress_marker(&head.text);
-    Some(extract_head_id(&stripped).unwrap_or(stripped))
+    let preset_only = preset_only_identity_ids(content);
+    Some(tracked_head_id(&stripped, &preset_only).unwrap_or(stripped))
 }
 
 /// Live drainable active queue head **prompt text** for `scope` (`do [#id]`),
@@ -695,6 +697,7 @@ pub fn drainable_head_count(content: &str) -> usize {
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids_split(content, DrainScope::InSessionLoop);
     let after_deps = after_deps_from_content(content);
+    let preset_only = preset_only_identity_ids(content);
     document_queue::prompts(&activation.entries_after)
         .into_iter()
         .filter(|prompt| {
@@ -703,6 +706,7 @@ pub fn drainable_head_count(content: &str) -> usize {
                 open_backlog.as_ref(),
                 &deferred_ids,
                 &after_deps,
+                &preset_only,
                 queue_facts.preset_supplies_directive,
                 DrainScope::InSessionLoop,
             )
@@ -822,6 +826,7 @@ fn first_drainable_head<'a>(
     open_backlog_ids: Option<&HashSet<String>>,
     deferred_ids: &DeferredBacklogIds,
     after_deps: &HashMap<String, Vec<String>>,
+    preset_only_ids: &HashSet<String>,
     preset_supplies_directive: bool,
     scope: DrainScope,
 ) -> Option<&'a QueuePrompt> {
@@ -833,6 +838,7 @@ fn first_drainable_head<'a>(
                 open_backlog_ids,
                 deferred_ids,
                 after_deps,
+                preset_only_ids,
                 preset_supplies_directive,
                 scope,
             )
@@ -844,6 +850,7 @@ fn head_is_drainable(
     open_backlog_ids: Option<&HashSet<String>>,
     deferred_ids: &DeferredBacklogIds,
     after_deps: &HashMap<String, Vec<String>>,
+    preset_only_ids: &HashSet<String>,
     preset_supplies_directive: bool,
     scope: DrainScope,
 ) -> bool {
@@ -877,7 +884,7 @@ fn head_is_drainable(
     if inline_undrainable {
         return false;
     }
-    match extract_head_id(text) {
+    match tracked_head_id(text, preset_only_ids) {
         Some(id) => {
             let norm = id.to_ascii_lowercase();
             if deferred_ids.defers(&norm, operator_answered) {
@@ -918,6 +925,25 @@ fn head_is_drainable(
         }
         None => true,
     }
+}
+
+/// `#presetargdedup`: normalized `#id`s whose ONLY active meaning in the
+/// document is a prompt preset -- no backlog/review/icebox item carries them.
+pub fn preset_only_identity_ids(content: &str) -> HashSet<String> {
+    backlog::document_active_identities(content)
+        .into_iter()
+        .filter(|(_, sources)| sources.iter().all(|source| source == "prompt_presets"))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// `#presetargdedup`: the tracked-item id a head references, or `None` when
+/// its leading `#word` is a prompt-preset invocation (`#gh-fix <url>`). Such a
+/// head is free-text work the preset expands; judging it as a mirror of a
+/// missing backlog item made every sibling invocation non-drainable, so the
+/// loop reported `drainable_head_count: 0` over operator-queued work.
+fn tracked_head_id(text: &str, preset_only_ids: &HashSet<String>) -> Option<String> {
+    extract_head_id(text).filter(|id| !preset_only_ids.contains(&id.to_ascii_lowercase()))
 }
 
 /// `#dagdraingate`: declared `after=` edges, keyed by dependent id.
@@ -1833,6 +1859,40 @@ mod tests {
                     reason: "focused_cycle",
                 },
             ]
+        );
+    }
+
+    /// `#presetargdedup` (live, agent-doc-bugs.md 2026-09-30): `#gh-fix <url>`
+    /// heads are preset invocations, not mirrors of a missing backlog item
+    /// `#gh-fix`. Preflight reported `drainable_head_count: 0` and `no_changes`
+    /// over three operator-queued issues.
+    #[test]
+    fn preset_invocation_heads_are_drainable_free_text() {
+        let content = concat!(
+            "---\n",
+            "prompt_presets:\n",
+            "  '#gh-fix': fix then close\n",
+            "  '#spec': update spec\n",
+            "---\n\n",
+            "<!-- agent:queue preset=\"#spec\" priority go -->\n",
+            "- ~~#gh-fix https://x/issues/68~~\n",
+            "- #gh-fix https://x/issues/69\n",
+            "- #gh-fix https://x/issues/70\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#c3d4] Other\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(drainable_head_count(content), 2, "both sibling invocations drain");
+        assert_eq!(
+            live_drainable_continuation_head(content, DrainScope::InSessionLoop).as_deref(),
+            Some("#gh-fix https://x/issues/69"),
+            "the continuation head is the invocation text, never the preset name"
+        );
+        // A real tracked item with the same shape stays id-backed.
+        assert_eq!(
+            tracked_head_id("#c3d4 do it", &preset_only_identity_ids(content)).as_deref(),
+            Some("c3d4")
         );
     }
 

@@ -682,8 +682,36 @@ pub fn answered_free_text_head_node_keys(
     let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
         anyhow::anyhow!("free-text strike: failed to derive queue node keys: {err}")
     })?;
+    // `#ftstrikeonce` (live, agent-doc-bugs.md 2026-09-30): queue consume and
+    // this answered-head projection both act on the same answer. When consume
+    // had already struck the answered copy this cycle, the "first unstruck
+    // occurrence" here was the operator's NEXT repeat, so one answer struck two
+    // lines and silently dropped a queued rerun. A text with more struck copies
+    // now than in the baseline has already had its answer applied.
+    let struck_counts = |doc: &str| -> std::collections::HashMap<String, usize> {
+        let mut counts = std::collections::HashMap::new();
+        if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(doc, "queue") {
+            for node in nodes.into_iter().filter(|n| n.item.struck) {
+                *counts
+                    .entry(normalize_queue_prompt_text(node.item.text.trim()))
+                    .or_insert(0) += 1;
+            }
+        }
+        counts
+    };
+    let already_applied: HashSet<String> = match baseline {
+        Some(baseline) => {
+            let before = struck_counts(baseline);
+            struck_counts(content)
+                .into_iter()
+                .filter(|(text, now)| *now > before.get(text).copied().unwrap_or(0))
+                .map(|(text, _)| text)
+                .collect()
+        }
+        None => HashSet::new(),
+    };
     let mut keys = Vec::new();
-    let mut struck_texts = HashSet::new();
+    let mut struck_texts = already_applied;
     for node in nodes {
         if node.item.struck {
             continue;
@@ -2328,6 +2356,41 @@ Old.
             "the FIRST copy is the struck one:\n{target}"
         );
         assert!(target.contains("- do [#between]"));
+    }
+
+    /// `#ftstrikeonce` (live, agent-doc-bugs.md 2026-09-30): queue consume
+    /// already struck the answered copy this cycle; the answered-head
+    /// projection must not then strike the operator's NEXT repeat.
+    #[test]
+    fn answered_free_text_strike_does_not_reapply_an_answer_consume_already_struck() {
+        let head = concat!(
+            "---\n",
+            "agent_doc_session: queue-repeat\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+        );
+        let baseline = format!(
+            "{head}- release + publish\n- #gh-fix https://x/issues/71\n- release + publish\n<!-- /agent:queue -->\n"
+        );
+        let consumed = format!(
+            "{head}- ~~release + publish~~\n- #gh-fix https://x/issues/71\n- release + publish\n<!-- /agent:queue -->\n"
+        );
+        let response = concat!(
+            "### Re: release — gpt-5\n\n",
+            "> **Queue prompt:** release + publish\n\n",
+            "Released and published.\n",
+        );
+
+        let projected = project_answered_free_text_strike(&consumed, response, Some(&baseline))
+            .unwrap();
+        assert!(
+            projected.as_ref().is_none_or(|p| p.node_keys.is_empty()),
+            "consume already applied this answer: {:?}",
+            projected.map(|p| p.target_content)
+        );
     }
 
     #[test]

@@ -2,6 +2,39 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.422
+
+- **JetBrains dynamic upgrade finds `DynamicPlugins` on current IDEs (GH #63).** The upgrader now
+  resolves `checkCanUnloadWithoutRestart` / `unloadPlugin` by name at runtime: the direct overload
+  that accepts the live descriptor, else the Kotlin `$default` bridge with every optional parameter
+  defaulted. A miss names the platform build and every signature found. The compile-time call died
+  with `NoSuchMethodError` on IU-262.9437.185.
+
+- **An editor route retargets focus to the routed document.** Routing a document other than the
+  editor-selected one no longer refuses with "focused document does not match routed document";
+  the routed document is moved to where it is visible, or placed in the selected document's slot.
+
+- **The editor turn indicator stays busy for the whole turn.** An open durable cycle stays in
+  flight while the pane reads ready; only a closed pane retires it. The indicator used to show idle
+  for most of a running turn. The turn projection also carries the running task (first prompt
+  target, else turn id), shown as one line (60 chars, full text in the tooltip) in the JetBrains
+  banner and the VS Code status item. JetBrains plugin 0.2.451, VS Code extension 0.2.75.
+
+- **The Codex/Claude Stop hook no longer fails closed on a retained closeout.** A closeout repair
+  error (for example an editor-owned write retained under a deferred intent during a controller
+  handoff) is now a still-open cycle with a remedy derived from the retained write's ownership
+  (deferred vs stranded), so the hook blocks with guidance instead of stopping the turn.
+
+- **Responses arrive whole in JetBrains.** The IPC node-patch builder no longer node-patches the
+  exchange, or any component whose text outside its list items changed. The plugin used to apply
+  only the bullets (dropping quote, heading and paragraphs), and the materialize repair then
+  appended the full response, duplicating the bullets.
+
+- **Smaller fixes.** An editor closeout receipt now waits (bounded) for controller canonical to
+  catch up instead of refusing it right after `make install`; it still accepts only exact equality.
+  A stale supervisor generation whose captured-finalize resume latched `needs_operator` now
+  recycles across the open cycle (once per episode) instead of deadlocking on it.
+
 ## 0.35.421
 
 - **First `write --commit` after `init` commits (GH #64).** Two boundary writers minted a full

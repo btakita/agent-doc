@@ -2,6 +2,50 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.419
+
+- **Queues run by default; `pause`/`stop` hold them (#queuegodefault).** A queue with no control
+  on its marker and no `queue:` field now resolves to `go`, and activating one persists
+  `queue: go` rather than `start` (which drained only the first head). The marker takes `pause`
+  beside `stop`. A half-typed `queue:` value and a legacy `queue_active:` flag keep their old
+  inert resolution. An operator edit to a stopped queue's prompts also re-arms `go`
+  (#queueeditgo). Existing documents with a bare `<!-- agent:queue -->` will start draining; set
+  `queue: pause` or `queue: stop` to keep one idle.
+
+- **Closeout no longer strands a finished turn.**
+  - A queue write deferred behind editor delivery (`retained=delivery_projection_pending`) now
+    waits for convergence and proves the queue landed before finishing the snapshot, proof, and
+    commit. Before, finalize aborted and the orphaned queue edit was later refused as an
+    unanswered document edit (#qconsumedeferwedge).
+  - The stale-supervisor recycle no longer reclaims a preflight while the harness turn marker
+    says the agent is still working; it abandoned a live turn 21 minutes in (#reclaimliveturn).
+  - A stale response-capture replay can no longer reopen a committed cycle's projection, and
+    route gates pane input on the reconstructed cycle phase (#closeoutcommitfactmissing,
+    #fpenoop).
+  - `--done` of the id a free-text head leads with satisfies the pre-write evidence gate
+    (#doneleadingdirective); a `do [#id]: note` directive is id-backed.
+  - `write --commit`, preflight, and commit absorb a visible response whose cycle never
+    committed; an unstruck answered head without an owning capture is treated as residue; queue
+    continuation never re-offers a free-text head the exchange already answered.
+  - A retained write already in the editor cut settles instead of rebasing, and a new cycle is
+    admitted while only the disk projection is pending.
+
+- **Editor authority and merges.** The controller runs an editor authority ladder that never
+  rolls an open editor back (model-checked), operator-vs-agent conflicts reconcile natively with
+  compact inline/block conflict rendering, editor registration merges forward instead of
+  holding or re-registering cold, and the editor generation is bumped before the binary builds
+  it in.
+
+- **Sessions and routing.** Run Agent Doc survives a lost editor liveness report; a mid-handoff
+  refusal in a command-plane result is retried; a surviving-child re-exec mints no conversation
+  id; `session clear` treats harness chrome as no change and accepts a Codex fresh-chat frame as
+  proof; the Claude Stop hook does not re-block a loop re-entry; queue typing during a turn is
+  realtime steering after the commit; a done mirror is reaped only when it is the same work.
+
+- **JetBrains:** the live plugin generation removes stale turn strips and stops a retired
+  reload. **VS Code:** extension 0.2.74. **Lint:** tagpath 0.12.3 (stray inline backticks no
+  longer unclose the exchange).
+
 ## 0.35.418
 
 - **Hot-reload logs name the library version that actually loaded (#59).** Replacing

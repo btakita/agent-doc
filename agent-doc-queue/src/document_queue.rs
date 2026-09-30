@@ -1955,7 +1955,8 @@ pub fn has_auto_attr(attrs: &std::collections::HashMap<String, String>) -> bool 
 pub fn marker_control(
     attrs: &std::collections::HashMap<String, String>,
 ) -> Option<agent_doc_frontmatter::frontmatter::QueueControl> {
-    if attrs.contains_key("stop") {
+    // `pause` is the operator's hold; like `stop` it keeps the queue inactive.
+    if attrs.contains_key("stop") || attrs.contains_key("pause") {
         return Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop);
     }
     if attrs.contains_key("start") || attrs.contains_key("go") {
@@ -1967,7 +1968,9 @@ pub fn marker_control(
 /// Reconstruct an `<!-- agent:queue -->` opening tag without any marker-side
 /// control token (`start` / `go` / `stop`). Mirrors [`strip_auto_from_tag`].
 pub fn strip_control_from_tag(tag: &str) -> String {
-    rewrite_queue_tag_attrs(tag, |token| !matches!(token, "start" | "go" | "stop"))
+    rewrite_queue_tag_attrs(tag, |token| {
+        !matches!(token, "start" | "go" | "stop" | "pause")
+    })
 }
 
 /// Reconstruct an `<!-- agent:queue -->` opening tag with exactly one optional
@@ -2091,7 +2094,7 @@ fn queue_tag_token_key(token: &str) -> &str {
 }
 
 fn is_queue_boolean_attr(key: &str) -> bool {
-    matches!(key, "auto" | "priority" | "go" | "start" | "stop")
+    matches!(key, "auto" | "priority" | "go" | "start" | "stop" | "pause")
 }
 
 fn strip_malformed_true_suffix(value: &str) -> Option<&str> {

@@ -2043,8 +2043,19 @@ pub fn merge_queue_state(content: &str, active: bool) -> Result<String> {
         .queue
         .as_deref()
         .is_some_and(|queue| queue.trim().eq_ignore_ascii_case("pause"));
+    // `#queuegodefault`: activating a queue that carries no `queue:` control
+    // materializes its default `go`, never `start` — `start` would silently
+    // downgrade it to a first-head-only drain.
+    let default_go = fm.queue.is_none() && fm.queue_active.is_none();
     if !(paused && !active) {
-        fm.queue = Some(if active { "start" } else { "stop" }.to_string());
+        fm.queue = Some(
+            match (active, default_go) {
+                (true, true) => "go",
+                (true, false) => "start",
+                (false, _) => "stop",
+            }
+            .to_string(),
+        );
     }
     fm.queue_active = None;
     write_preserving(content, &fm, body)
@@ -2993,6 +3004,11 @@ mod tests {
 
         let stopped = merge_queue_state(legacy, false).unwrap();
         assert!(stopped.contains("queue: stop"), "{stopped}");
+
+        // `#queuegodefault`: no control at all activates to `go`, not `start`.
+        let bare = "---\nagent_doc_format: template\n---\n\nbody\n";
+        let armed = merge_queue_state(bare, true).unwrap();
+        assert!(armed.contains("queue: go"), "{armed}");
         assert!(!stopped.contains("queue_active:"), "{stopped}");
 
         // Round-trips back to the internal queue_active for readers.

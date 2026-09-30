@@ -67,6 +67,8 @@ impl QueueBindingMode {
     fn from_marker(attrs: &HashMap<String, String>) -> Option<Self> {
         if attrs.contains_key("stop") {
             Some(Self::Stop)
+        } else if attrs.contains_key("pause") {
+            Some(Self::Pause)
         } else if attrs.contains_key("go") {
             Some(Self::Go)
         } else if attrs.contains_key("start") {
@@ -104,8 +106,36 @@ fn resolved_queue_binding(
     // precedence, `<!-- agent:queue go -->` beside `queue: stop` is read as
     // stopped before convergence can observe and persist the marker edit,
     // producing the go-marker churn that #qactsync removes.
+    //
+    // `#queuegodefault`: a queue with no control on either surface is in `go`
+    // mode. Editing a queue is already consent to run it (`#queueeditgo`); an
+    // operator who wants it held writes `pause` or `stop` instead. A present
+    // but unrecognized `queue:` value (a half-typed edit) is not "no control"
+    // and stays inert rather than starting the drain mid-keystroke.
     QueueBindingMode::from_marker(attrs)
         .or_else(|| QueueBindingMode::from_frontmatter(frontmatter_queue))
+        .or_else(|| frontmatter_queue.is_none().then_some(QueueBindingMode::Go))
+}
+
+/// The frontmatter queue control as the binding predicates read it.
+///
+/// A legacy `queue_active:` flag with no `queue:` key is a present (deprecated)
+/// control, not "no control": it resolves inert exactly as it always did, and
+/// never picks up the `#queuegodefault` `go`. Convergence migrates it to an
+/// explicit `queue:` value.
+pub fn frontmatter_queue_control(fm: &frontmatter::Frontmatter) -> Option<&str> {
+    fm.queue
+        .as_deref()
+        .or_else(|| fm.queue_active.map(|_| "queue_active"))
+}
+
+/// `#queuegodefault`: the queue control is absent from both the marker and the
+/// frontmatter `queue:` field, so the queue runs in its default `go` mode.
+pub fn queue_control_defaults_to_go(
+    attrs: &HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> bool {
+    frontmatter_queue.is_none() && QueueBindingMode::from_marker(attrs).is_none()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -772,5 +802,45 @@ mod tests {
         let content = queue_doc(Some("stop"), "", &["x"]);
         let (_, changed) = infer_queue_go_from_prompt_edit(&content, None).unwrap();
         assert!(!changed);
+    }
+
+    #[test]
+    fn queue_without_any_control_defaults_to_go() {
+        // `#queuegodefault`: a bare marker and no `queue:` field is `go`.
+        let bare = HashMap::new();
+        assert!(explicit_queue_go_mode(&bare, None));
+        assert!(!explicit_queue_stop_mode(&bare, None));
+        assert!(queue_control_defaults_to_go(&bare, None));
+
+        // Any explicit control on either surface replaces the default, and a
+        // half-typed `queue:` value stays inert instead of starting the drain.
+        assert!(explicit_queue_stop_mode(&bare, Some("stop")));
+        assert!(explicit_queue_pause_mode(&bare, Some("pause")));
+        assert!(explicit_queue_start_mode(&bare, Some("start")));
+        assert!(!explicit_queue_go_mode(&bare, Some("sto")));
+        assert!(!queue_control_defaults_to_go(&bare, Some("stop")));
+    }
+
+    #[test]
+    fn pause_marker_token_holds_the_queue_and_converges_to_frontmatter() {
+        let mut attrs = HashMap::new();
+        attrs.insert("pause".to_string(), String::new());
+        assert!(explicit_queue_pause_mode(&attrs, None));
+        assert!(explicit_queue_stop_mode(&attrs, Some("go")));
+        assert!(!queue_control_defaults_to_go(&attrs, None));
+
+        let snapshot = queue_doc(None, "", &["held item"]);
+        let content = snapshot.replacen("<!-- agent:queue -->", "<!-- agent:queue pause -->", 1);
+        assert_ne!(content, snapshot, "fixture must carry a bare marker");
+        let (updated, changed) =
+            converge_queue_control_binding_content(&content, Some(&snapshot)).unwrap();
+        assert!(changed);
+        assert!(updated.contains("queue: pause\n"), "{updated}");
+        assert!(updated.contains("<!-- agent:queue -->"), "{updated}");
+        let (fm, _) = frontmatter::parse(&updated).unwrap();
+        assert!(explicit_queue_pause_mode(
+            &HashMap::new(),
+            fm.queue.as_deref()
+        ));
     }
 }

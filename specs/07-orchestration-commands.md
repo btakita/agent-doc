@@ -252,8 +252,20 @@ control. It subsumes the deprecated `queue_active:` boolean and the deprecated
 |----------------|---------|----------|
 | `start` (alias `go`) | activate — drive the queue | `queue_active: true` + marker `auto` |
 | `stop` | deactivate — halt (the binary writes this on drain) | `queue_active: false` |
-| `pause` | operator hold — inactive; never written by the binary | — |
-| (absent) | unmanaged / inactive | absence of both |
+| `pause` | operator hold — inactive; never written by the binary (marker spelling: `<!-- agent:queue pause -->`) | — |
+| (absent) | default `go` — a queue with no control on the marker or in `queue:` runs (`#queuegodefault`) | absence of both |
+
+**`go` is the default (`#queuegodefault`).** With no marker token and no
+`queue:` field, the queue resolves to `go` (`control_binding::resolved_queue_binding`;
+route's inactive-head probe shares the rule through `queue_control_defaults_to_go`,
+and an activation of a control-less queue persists `queue: go`, never `start`,
+via `merge_queue_state`). Free-text admission keeps its unmanaged-queue scope for
+a control-less queue, so a free-text head already present is still admitted as
+tracked work before the drain takes it. To hold a queue the operator writes `pause` or
+`stop` on either surface; a marker `pause`/`stop` converges into `queue:` like
+the other marker controls. A present but unrecognized `queue:` value (a
+half-typed edit) is not "absent" and stays inert, and a legacy
+`queue_active` flag still speaks for itself.
 
 **Queue edits imply `go` (`#queueeditgo`).** Editing the queue is consent to
 run it. When the pre-turn baseline and the current document differ by at least

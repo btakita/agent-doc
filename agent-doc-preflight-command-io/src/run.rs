@@ -2805,7 +2805,10 @@ mod tests {
             "the absorb commits only the session document, never other tracked edits: {status}"
         );
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("preflight_visible_response_absorb_succeeded"), "{log}");
+        assert!(
+            log.contains("preflight_visible_response_absorb_succeeded"),
+            "{log}"
+        );
     }
     #[test]
     fn preflight_fails_closed_on_uncommitted_exchange_drift_without_response_heading() {
@@ -4110,6 +4113,9 @@ mod tests {
             "---\n",
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
+            // Held queue: this test is about closeout drift, not about the
+            // default-`go` activation a bare queue now gets (`#queuegodefault`).
+            "queue: stop\n",
             "---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "❯ hello\n\n",

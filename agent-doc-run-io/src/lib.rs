@@ -1790,7 +1790,7 @@ pub fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> 
     };
     if !agent_doc_queue::control_binding::explicit_queue_go_mode(
         &queue_component.attrs,
-        fm.queue.as_deref(),
+        agent_doc_queue::control_binding::frontmatter_queue_control(&fm),
     ) {
         return Ok(ActiveQueuePromptState::Inactive);
     }

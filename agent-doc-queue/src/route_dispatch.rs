@@ -275,11 +275,17 @@ pub fn inactive_route_queue_head(
     ) {
         return Ok(RouteInactiveQueueHead::None);
     }
+    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(content).unwrap_or_default();
     let has_auto = has_auto_attr(&queue_component.attrs)
         || matches!(
             marker_control,
             Some(agent_doc_frontmatter::frontmatter::QueueControl::Start)
-        );
+        )
+        || (queue_active.is_none()
+            && crate::control_binding::queue_control_defaults_to_go(
+                &queue_component.attrs,
+                fm.queue.as_deref(),
+            ));
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries = parse(body)?;
     let activation = resolve_activation(&entries, has_auto, false, false);

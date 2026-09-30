@@ -23,8 +23,8 @@ use agent_doc_queue::{
     backlog_sync::AutoBacklogQueueSyncPolicy,
     control_binding::{
         converge_queue_control_binding_content, explicit_queue_go_mode, explicit_queue_pause_mode,
-        explicit_queue_start_mode, explicit_queue_stop_mode, infer_queue_go_from_prompt_edit,
-        strip_queue_activation_tokens_in_content,
+        explicit_queue_start_mode, explicit_queue_stop_mode, frontmatter_queue_control,
+        infer_queue_go_from_prompt_edit, strip_queue_activation_tokens_in_content,
     },
     free_text_admission::{
         FreeTextAdmissionExecution, FreeTextAdmissionScope, append_empty_agent_component,
@@ -2678,8 +2678,9 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         .unwrap_or(false);
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
-    let explicit_stop = explicit_queue_stop_mode(&comp.attrs, fm.queue.as_deref());
-    let persisted_activation = queue_control_activation(&comp.attrs, fm.queue.as_deref());
+    let explicit_stop = explicit_queue_stop_mode(&comp.attrs, frontmatter_queue_control(&fm));
+    let persisted_activation =
+        queue_control_activation(&comp.attrs, frontmatter_queue_control(&fm));
 
     let mut activation = agent_doc_queue::document_queue::resolve_activation(
         &entries,
@@ -3423,7 +3424,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         queue_currently_active_for_free_text_admission(&current_content, &comp.attrs);
     let queue_paused_by_operator = {
         let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
-        explicit_queue_pause_mode(&comp.attrs, fm.queue.as_deref())
+        explicit_queue_pause_mode(&comp.attrs, frontmatter_queue_control(&fm))
     };
     let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
@@ -3607,13 +3608,13 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             &comp.attrs,
             incoming_frontmatter
                 .as_ref()
-                .and_then(|fm| fm.queue.as_deref()),
+                .and_then(frontmatter_queue_control),
         );
         let queue_explicitly_stopped = explicit_queue_stop_mode(
             &comp.attrs,
             incoming_frontmatter
                 .as_ref()
-                .and_then(|fm| fm.queue.as_deref()),
+                .and_then(frontmatter_queue_control),
         );
         let sync_plan = agent_doc_queue::backlog_sync::plan_auto_backlog_queue_sync_ids(
             agent_doc_queue::backlog_sync::AutoBacklogQueueSyncInput {
@@ -3955,8 +3956,9 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         .unwrap_or(false);
     let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
-    let explicit_stop = explicit_queue_stop_mode(&comp.attrs, fm.queue.as_deref());
-    let persisted_activation = queue_control_activation(&comp.attrs, fm.queue.as_deref());
+    let explicit_stop = explicit_queue_stop_mode(&comp.attrs, frontmatter_queue_control(&fm));
+    let persisted_activation =
+        queue_control_activation(&comp.attrs, frontmatter_queue_control(&fm));
 
     let mut activation = agent_doc_queue::document_queue::resolve_activation(
         &entries,
@@ -5251,7 +5253,8 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     };
 
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
-    let queue_go_mode = explicit_queue_go_mode(&queue_component.attrs, fm.queue.as_deref());
+    let queue_go_mode =
+        explicit_queue_go_mode(&queue_component.attrs, frontmatter_queue_control(&fm));
     let queue_active = fm.queue_active.unwrap_or(false) || queue_go_mode;
     if !queue_active || !queue_go_mode {
         return Ok(Vec::new());
@@ -9359,7 +9362,7 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- do [#extdone]"),
+            updated.contains("do [#extdone]") && !updated.contains("~~do [#extdone]~~"),
             "open incarnation must override externally archived done history:\n{updated}"
         );
         assert!(
@@ -9405,7 +9408,7 @@ mod tests {
             "externally-archived live queue mirror must be struck:\n{updated}"
         );
         assert!(
-            updated.contains("- do [#fresh]"),
+            updated.contains("do [#fresh]") && !updated.contains("~~do [#fresh]~~"),
             "fresh live queue prompt must remain:\n{updated}"
         );
     }
@@ -9442,7 +9445,7 @@ mod tests {
             "idempotent sync should not report freshly-added ids"
         );
         assert_eq!(
-            updated.matches("- do [#alpha]").count(),
+            updated.matches("do [#alpha]").count(),
             1,
             "append must not duplicate an already-queued id:\n{updated}"
         );

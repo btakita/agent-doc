@@ -746,9 +746,11 @@ fn queue_section_of(content: &str) -> String {
 }
 
 fn active_persisted_queue_doc() -> String {
-    // Persisted-active queue: `queue_active: true` but the opening tag is plain
-    // `<!-- agent:queue -->` (no `go`). `#active-queue-persisted-no-continue`.
-    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
+    // Persisted-active queue: `queue_active: true` with an explicit `queue: start`
+    // and a plain `<!-- agent:queue -->` tag (no `go`). `start` is a start
+    // trigger only (`#active-queue-persisted-no-continue`); with no control at
+    // all the queue would default to `go` (`#queuegodefault`).
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\nqueue: start\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
 
 #[test]

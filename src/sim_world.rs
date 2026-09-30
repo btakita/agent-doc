@@ -1189,9 +1189,18 @@ mod queue_activation_binding_model {
             .find(|component| component.name == "queue")
             .unwrap();
         let controls = [
-            explicit_queue_start_mode(&queue.attrs, fm.queue.as_deref()),
-            explicit_queue_go_mode(&queue.attrs, fm.queue.as_deref()),
-            explicit_queue_stop_mode(&queue.attrs, fm.queue.as_deref()),
+            explicit_queue_start_mode(
+                &queue.attrs,
+                agent_doc_queue::control_binding::frontmatter_queue_control(&fm),
+            ),
+            explicit_queue_go_mode(
+                &queue.attrs,
+                agent_doc_queue::control_binding::frontmatter_queue_control(&fm),
+            ),
+            explicit_queue_stop_mode(
+                &queue.attrs,
+                agent_doc_queue::control_binding::frontmatter_queue_control(&fm),
+            ),
         ];
         assert_eq!(
             controls.into_iter().filter(|active| *active).count(),

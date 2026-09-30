@@ -23,7 +23,7 @@ struct StatusReport<'a> {
     surface_pane_findings: &'a [PlacementFinding],
 }
 
-pub fn run(project_root: &Path, json: bool) -> Result<()> {
+pub fn run(project_root: &Path, json: bool, check: bool) -> Result<()> {
     let status = agent_doc_controller_io::project_controller::reliable_sync_status(project_root)?;
     let registered: Vec<String> = status
         .registrations
@@ -51,12 +51,25 @@ pub fn run(project_root: &Path, json: bool) -> Result<()> {
                 surface_pane_findings: &findings,
             })?
         );
-        return Ok(());
+        return check_outcome(check, &findings);
     }
     print_plane(&status);
     print_surface_sync(&status, now_ms());
     print_pane_placement(&registered, &placements);
     print_findings(&status, &findings);
+    check_outcome(check, &findings)
+}
+
+/// GH #62: `--check` turns the divergence verdict into an exit status, so a doctor
+/// script or CI step can fail on "the document the editor shows has its pane parked
+/// in stash" instead of an operator reading three views by hand.
+fn check_outcome(check: bool, findings: &[PlacementFinding]) -> Result<()> {
+    if check && !findings.is_empty() {
+        anyhow::bail!(
+            "surface/pane divergence: {} finding(s); the tmux layout does not match the editor's visible documents",
+            findings.len()
+        );
+    }
     Ok(())
 }
 
@@ -288,6 +301,19 @@ fn format_age(now_ms: u64, then_ms: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn check_fails_only_on_a_divergence_and_only_when_asked() {
+        // GH #62
+        let finding = PlacementFinding::VisibleDocumentStashed {
+            document: "/p/tasks/agent-doc.md".to_string(),
+            pane_id: "%28".to_string(),
+        };
+        assert!(check_outcome(true, std::slice::from_ref(&finding)).is_err());
+        assert!(check_outcome(false, &[finding]).is_ok());
+        assert!(check_outcome(true, &[]).is_ok());
+    }
+
     use super::*;
 
     #[test]

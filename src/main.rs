@@ -3136,6 +3136,11 @@ enum Commands {
         /// Emit the raw JSON response instead of the human status table
         #[arg(long)]
         json: bool,
+        /// Exit non-zero when the tmux pane layout diverges from the editor's
+        /// visible documents (a visible document stashed or without a pane, or a
+        /// hidden document holding the agent-doc window)
+        #[arg(long)]
+        check: bool,
         /// Project root (default: discovered from the current directory)
         #[arg(long)]
         project_root: Option<PathBuf>,
@@ -5577,7 +5582,11 @@ fn try_main() -> anyhow::Result<()> {
             };
             lib_install::install_binary_atomic(&source, &target_dir).map(|_| ())
         }
-        Commands::ReliableSyncStatus { json, project_root } => {
+        Commands::ReliableSyncStatus {
+            json,
+            check,
+            project_root,
+        } => {
             let root = match project_root {
                 Some(root) => root,
                 None => {
@@ -5585,7 +5594,7 @@ fn try_main() -> anyhow::Result<()> {
                     agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd)
                 }
             };
-            reliable_sync_status_cmd::run(&root, json)
+            reliable_sync_status_cmd::run(&root, json, check)
         }
         Commands::SelfInstall {
             source_root,

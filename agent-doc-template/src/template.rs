@@ -1247,16 +1247,15 @@ pub fn apply_patches_with_overrides_pure(
             && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
             && find_boundary_in_component(&result, exchange).is_none()
         {
-            // Boundary was consumed — re-insert at end of exchange
-            let id = uuid::Uuid::new_v4().to_string();
-            let marker = format!("<!-- agent:boundary:{} -->", id);
+            // Boundary was consumed — re-insert at end of exchange. GH #64: the
+            // id must be the short `<hex>` form the bundled lint dialect accepts;
+            // a full UUID here blocked the first `write --commit` after `init`.
+            let id = new_boundary_id();
+            let marker = format_boundary_marker(&id);
             let content = exchange.content(&result);
             let new_content = format!("{}\n{}\n", content.trim_end(), marker);
             result = exchange.replace_content(&result, &new_content);
-            eprintln!(
-                "[template] re-inserted boundary {} at end of exchange",
-                &id[..id.len().min(8)]
-            );
+            eprintln!("[template] re-inserted boundary {id} at end of exchange");
         }
     }
 

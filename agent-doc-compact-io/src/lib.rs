@@ -2072,7 +2072,9 @@ fn append_boundary_marker(content: &str, target: &str, old_content: &str) -> Str
         return content.to_string();
     }
     let marker = agent_doc_document::compact_projection::boundary_marker_line(old_content)
-        .unwrap_or_else(|| format!("<!-- agent:boundary:{} -->", uuid::Uuid::new_v4()));
+        .unwrap_or_else(|| {
+            agent_doc_element::id::format_boundary_marker(&agent_doc_element::id::new_boundary_id())
+        });
     let mut out = content.to_string();
     if !out.ends_with('\n') {
         out.push('\n');

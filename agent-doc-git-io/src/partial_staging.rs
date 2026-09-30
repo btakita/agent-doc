@@ -245,6 +245,14 @@ fn git_name_lines(repo: &Path, args: &[&str]) -> Result<Vec<String>> {
 }
 
 fn git_stdout(repo: &Path, args: &[&str]) -> Result<Option<String>> {
+    // GH #64: `Path::new("doc.md").parent()` is `Some("")`, not `None`, so a
+    // relative document path reached here as an empty directory and
+    // `current_dir("")` failed with ENOENT after the first commit.
+    let repo = if repo.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        repo
+    };
     let output = Command::new("git")
         .current_dir(repo)
         .args(args)

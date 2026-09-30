@@ -4071,3 +4071,87 @@ fn finalize_valid_tracked_work_mutations_still_apply_exactly_once() {
         "the --done item must not remain open:\n{head_text}"
     );
 }
+
+/// GH #64: on a project scaffolded by `init`, the very first `write --commit`
+/// must reach a commit. It used to write a full-UUID boundary marker that the
+/// bundled default lint dialect rejects, so the lint gate interrupted closeout.
+#[test]
+fn init_then_first_write_commit_commits_with_a_lintable_boundary() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "test@example.com"],
+        vec!["config", "user.name", "Test User"],
+    ] {
+        assert!(
+            ProcessCommand::new("git")
+                .current_dir(root)
+                .args(&args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    agent_doc()
+        .current_dir(root)
+        .args(["init", "scratch.md"])
+        .assert()
+        .success();
+    let commit_all = |message: &str| {
+        assert!(
+            ProcessCommand::new("git")
+                .current_dir(root)
+                .args(["add", "-A"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            ProcessCommand::new("git")
+                .current_dir(root)
+                .args(["commit", "-qm", message, "--no-verify"])
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    commit_all("init");
+    let doc = root.join("scratch.md");
+    let mut content = fs::read_to_string(&doc).unwrap();
+    content.push_str("test prompt\n");
+    fs::write(&doc, content).unwrap();
+    commit_all("prompt");
+
+    agent_doc()
+        .current_dir(root)
+        .args(["write", "--commit", "scratch.md", "--origin", "skill"])
+        .write_stdin("<!-- patch:exchange -->\nPlain response.\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+
+    let written = fs::read_to_string(&doc).unwrap();
+    let boundary_ids: Vec<&str> = written
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("<!-- agent:boundary:"))
+        .filter_map(|rest| rest.strip_suffix(" -->"))
+        .collect();
+    assert!(!boundary_ids.is_empty(), "{written}");
+    for id in boundary_ids {
+        let hex = id.split(':').next().unwrap();
+        assert!(
+            hex.len() == 8 && hex.chars().all(|c| c.is_ascii_hexdigit()),
+            "boundary id must be the short <hex> form, got `{id}`:\n{written}"
+        );
+    }
+    let log = ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["log", "--oneline"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&log.stdout).lines().count(),
+        3,
+        "the first write --commit must add a closeout commit"
+    );
+}

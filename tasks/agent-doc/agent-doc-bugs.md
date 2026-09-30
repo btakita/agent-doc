@@ -278,6 +278,45 @@ Advanced each review item as far as this session can take it (preset: spec + tes
 - **Found while running the checks:** HEAD was failing `plugin-version-check`. My `#editorauth2` commit changed VS Code source without a package-generation bump; the version fence only examines committed changes, which is why my earlier `make check` runs missed it. VS Code is now bumped to 0.2.74 (`ac97eb9e6`).
 
 **Verification:** `make check` passed, 10130/10130 (exit 0). `make install` exit 0. Pushed.
+
+### Re: Queue edits imply `go`; fpe.md Run Agent Doc; CI — opus-5.5 · 2026-09-29T21:33-04:00
+
+> **Queue prompt:** If I make edits in the queue and Run Agent Doc, agent-doc should infer that I want to run the queue even if it is not in go mode. Perhaps we should use `pause` instead of `go` and default to `go`?
+
+**`#queueeditgo`: done (`e41da4123`).** An edit to the queue now counts as consent to run it.
+- **What triggers it:** the queue gains a prompt or preset that the pre-turn baseline didn't have (added or reworded). When that happens, preflight arms **`go`** on both the marker and `queue:`.
+  - It uses `go` rather than `start` because only `go` keeps draining past the first head.
+  - Removing an item, striking one, or re-marking one (🚧/📌) does not trigger it. That's why removing `#advance-review` just now didn't.
+- **It overrides `stop`.** The binary writes `stop` after every drain, which is what left post-drain edits inert.
+  - Free-text admission already had a weaker version of this inference: it armed `start`, which stops after one head.
+- **New `queue: pause`** is your standing hold.
+  - The binary never writes it.
+  - A drain or halt never lifts it.
+  - It blocks both this inference and free-text admission's queue start.
+- **I didn't remove or rename `go`**, so existing documents behave the same. With this inference, `go` effectively becomes the default whenever you touch the queue.
+  - If you'd rather rename `stop` or collapse `start` into `go`, say so. That's a naming change I'd want to agree with you first.
+- **Tests:** 8 new binding tests, a frontmatter test, and a preflight integration test covering both cases (`stop` becomes `go` and drains; `pause` holds). The spec in `specs/07-orchestration-commands.md` is updated.
+
+**fpe.md Run Agent Doc doing nothing: fixed (`a2bd7610c`).**
+- **What happened:** every press logged `route_dispatch_only_cycle_owns_input current_phase=write_applied outcome=no_pane_input`, so nothing was typed into the Codex pane %51, even though that pane was idle.
+- **Root cause:** cycle `synthetic-1790730269723` did commit at 01:04Z. Its turn-intent checkpoint says `committed` and its terminal proof says `did_commit=true`. But the raw closeout projection stayed at `write_applied`.
+  - `session-check` reads the reconstructed state, where the terminal checkpoint wins, so it reported "committed".
+  - The route guard read the raw projection phase, so it treated that finished cycle as open forever.
+- **Fix:** the route now uses the same reconstructed phase for that cycle. If reconstruction fails, it falls back to the raw projection and still refuses input.
+  - Regression test uses the live shape. I mutation-checked it: it fails without the fix.
+- **Still open:** why the `Committed` fact never reached the projection. Filed as `#closeoutcommitfactmissing`, appended to the queue.
+- **For you:** press Run Agent Doc on fpe.md again once the supervisor recycles onto the new build. Its pending "Create an ADR for processing videos…" edit should dispatch.
+
+**CI was red at HEAD, and not from these changes: fixed (`1472fb8b5`).**
+- Commit `cd484a1b0` (another session) referenced `EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN`, but its definition existed only in that session's uncommitted `realtime-io` edits.
+- I committed just that constant as a hand-built blob. The other session's remaining edits are untouched in its tree.
+- Checking a HEAD worktree also found a misplaced `#[test]` that had silently disabled `derive_representative_id_declines_when_text_has_no_keywords`. It's reattached and passes.
+- I verified HEAD plus these fixes in a clean worktree with CI's exact clippy command.
+
+**Verification:**
+- Local `make check`: 10141/10141 passed, exit 0.
+- `make install`: exit 0. Pushed, and the superproject pointer is updated.
+- CI run 36655672560 was still in progress when I finished.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -287,12 +326,12 @@ Advanced each review item as far as this session can take it (preset: spec + tes
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #advance-review
-- If I make edits in the queue and Run Agent Doc, agent-doc should infer that I want to run the queue even if it is not in go mode. Perhaps we should use `pause` instead of `go` and default to `go`?
+- 🚧 📌 If I make edits in the queue and Run Agent Doc, agent-doc should infer that I want to run the queue even if it is not in go mode. Perhaps we should use `pause` instead of `go` and default to `go`?
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#closeoutcommitfactmissing] [agent-doc] fpe.md synthetic-1790730269723 (2026-09-30T01:04Z): turn-intent checkpoint + terminal proof recorded commit_success, but the closeout projection never received the Committed typed fact and stayed at write_applied (session_check_passed=false, write_phase=intent_captured). #fpenoop (a2bd7610c) made the route read the reconstructed phase; find the closeout path that skips the Committed fact (look at retained_closeout / commit_blocked_unproved_head_current_component_drift at 01:04:41) and audit other raw closeout.phase readers.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -325,6 +325,38 @@ The queue now reads `queue: stop` and is empty; its last head, the queue-edit in
 - **`#closeoutcommitfactmissing`** is still an open item in `agent:backlog`. It was never mirrored into the queue, because the backlog→queue sync only runs while the queue is active. To run it, add `do #closeoutcommitfactmissing` to the queue. Under `#queueeditgo` that edit arms `go` on its own once the supervisor has recycled onto the new build.
 - CI run 36655672560, for HEAD after the compile fix, was still pending when this turn started.
 - The exchange is now 291 lines across 11 responses. Say so if you want it compacted.
+
+### Re: do #closeoutcommitfactmissing — opus-5.5 · 2026-09-29T22:02-04:00
+
+> **Queue prompt:**
+>
+> do [#closeoutcommitfactmissing]
+
+
+**Fixed:** `ec215b902` (agent-doc), with the superproject pointer in `f52ac81247`.
+
+**Root cause.** The Committed fact did arrive, but a later replay erased it. These are the fpe.md `state.db` events, in order:
+
+1. `511361 commit_observed` for synthetic-1790730269723. The projection is now committed.
+2. `511362 response_captured` for the older cycle-1790729925199. Its response is the same one (`d0837a91…`), and its `file_hash` is the exact committed content. A capture for a different cycle id resets the closeout projection, so the committed cycle was wiped.
+3. `511364`/`511365`: the synthetic cycle's own late capture and an unapplied response cell. Starting from the reset, these rebuilt the projection as `write_applied`, `intent_captured` and `session_check_passed=false`.
+
+That end state is exactly what the item reported. `#fpenoop` worked around it at the route. session-check reads the reconstructed state, so it already reported committed.
+
+**Fix (reducer, `agent-doc-state-backbone`).** While the projected cycle is `Committed`, the reducer now refuses a `ResponseCaptured`, `WriteApplied` or `ResponseCellAdded` fact when both of these hold:
+- the fact names a **different** cycle;
+- its content hash equals the committed content.
+
+Such a fact is a replay of work that's already committed, not a new cycle.
+
+Late facts for the same cycle are still accepted. Repair legitimately captures against a committed cycle whose snapshot lags HEAD, and my first, broader version broke two repair tests that cover this. The cycle machine already keeps a same-cycle fact from reopening a committed cycle.
+
+**Audit of raw `closeout.phase` readers.** I found 31 `load_closeout_projection` call sites. The fix is at the source, so none of them can see this regression any more. `closeout.write_phase` has no readers outside the reducer; its same-cycle reset is diagnostic only.
+
+**Verification.**
+- New test `post_commit_capture_replays_do_not_reopen_committed_cycle` replays the live event order. When the guard is disabled, the test fails.
+- `make check` passes (exit 0, 10143/10143) and `make install` succeeded.
+- The CI run for the push is still queued (run 36657888896).
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -333,12 +365,13 @@ The queue now reads `queue: stop` and is empty; its last head, the queue-edit in
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#closeoutcommitfactmissing]~~
+- Make the queue in go mode by default. Add `pause`/`stop` attribute to pause/stop the queue. 
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#closeoutcommitfactmissing] [agent-doc] fpe.md synthetic-1790730269723 (2026-09-30T01:04Z): turn-intent checkpoint + terminal proof recorded commit_success, but the closeout projection never received the Committed typed fact and stayed at write_applied (session_check_passed=false, write_phase=intent_captured). #fpenoop (a2bd7610c) made the route read the reconstructed phase; find the closeout path that skips the Committed fact (look at retained_closeout / commit_blocked_unproved_head_current_component_drift at 01:04:41) and audit other raw closeout.phase readers.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

@@ -4142,6 +4142,10 @@ enum PluginAction {
         /// Install into every JetBrains IDE that already has agent-doc installed
         #[arg(long, conflicts_with = "plugins_dir", requires = "local")]
         all_installed: bool,
+        /// JetBrains: skip the restart-free dynamic upgrade; replace the plugin
+        /// files and restart the IDE yourself to load them (GH #63)
+        #[arg(long, alias = "restart-required")]
+        no_dynamic: bool,
     },
     /// Update an installed plugin to the latest version
     Update {
@@ -4150,6 +4154,10 @@ enum PluginAction {
         /// Exact JetBrains plugins directory (required for ambiguous non-interactive discovery)
         #[arg(long, value_name = "PATH")]
         plugins_dir: Option<PathBuf>,
+        /// JetBrains: skip the restart-free dynamic upgrade; replace the plugin
+        /// files and restart the IDE yourself to load them (GH #63)
+        #[arg(long, alias = "restart-required")]
+        no_dynamic: bool,
     },
     /// List installed editor plugins
     List,
@@ -4923,7 +4931,9 @@ fn try_main() -> anyhow::Result<()> {
                 local,
                 plugins_dir,
                 all_installed,
+                no_dynamic,
             } => {
+                plugin::set_dynamic_upgrade_enabled(!no_dynamic);
                 if all_installed {
                     plugin::install_local_all_existing(&editor)
                 } else if local {
@@ -4941,7 +4951,9 @@ fn try_main() -> anyhow::Result<()> {
             PluginAction::Update {
                 editor,
                 plugins_dir,
+                no_dynamic,
             } => {
+                plugin::set_dynamic_upgrade_enabled(!no_dynamic);
                 if let Some(plugins_dir) = plugins_dir.as_deref() {
                     plugin::update_with_plugins_dir(&editor, Some(plugins_dir))
                 } else {

@@ -718,6 +718,12 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
             eprintln!("Plugin dynamically upgraded in {processes} live JetBrains process(es).");
             eprintln!("No JetBrains restart is required.");
         }
+        JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
+            eprintln!(
+                "WARNING: {}",
+                restart_required_message(&target_dir, &reason)
+            );
+        }
         JetbrainsLocalInstallOutcome::Unchanged => {
             eprintln!(
                 "Plugin already byte-identical at {}; kept the live generation in place",
@@ -764,6 +770,10 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
                     "Plugin dynamically upgraded in {processes} live JetBrains process(es) for {}",
                     target_dir.display()
                 );
+            }
+            JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
+                installed += 1;
+                eprintln!("WARNING: {}", restart_required_message(target_dir, &reason));
             }
             JetbrainsLocalInstallOutcome::Unchanged => {
                 unchanged += 1;
@@ -846,11 +856,37 @@ fn local_jetbrains_zip_version(zip_path: &Path) -> Result<String> {
         .context("Local JetBrains build has an unexpected filename")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum JetbrainsLocalInstallOutcome {
     Installed,
-    HotUpgraded { processes: usize },
+    HotUpgraded {
+        processes: usize,
+    },
+    /// GH #63: the files were replaced on disk while a live IDE still runs the
+    /// previous generation; `reason` says why no restart-free upgrade happened.
+    RestartRequired {
+        reason: String,
+    },
     Unchanged,
+}
+
+/// GH #63: `--no-dynamic` turns the restart-free upgrade off for this process.
+static DYNAMIC_UPGRADE_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_dynamic_upgrade_enabled(enabled: bool) {
+    DYNAMIC_UPGRADE_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn dynamic_upgrade_enabled() -> bool {
+    DYNAMIC_UPGRADE_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn restart_required_message(target_dir: &Path, reason: &str) -> String {
+    format!(
+        "Plugin files replaced in {} but the running IDE still has the previous generation loaded ({reason}). Restart the IDE to load the new plugin.",
+        target_dir.display()
+    )
 }
 
 fn print_jetbrains_activation_outcome(outcome: JetbrainsLocalInstallOutcome) {
@@ -861,6 +897,9 @@ fn print_jetbrains_activation_outcome(outcome: JetbrainsLocalInstallOutcome) {
         JetbrainsLocalInstallOutcome::HotUpgraded { processes } => {
             eprintln!("Plugin dynamically upgraded in {processes} live JetBrains process(es).");
             eprintln!("No JetBrains restart is required.");
+        }
+        JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
+            eprintln!("WARNING: restart the IDE to load the new plugin ({reason}).");
         }
         JetbrainsLocalInstallOutcome::Unchanged => {
             eprintln!("No JetBrains restart is required; no installed plugin bytes changed.");
@@ -955,13 +994,63 @@ fn jetbrains_upgrade_launcher_has_main_manifest(jar_path: &Path) -> Result<bool>
     }))
 }
 
+/// GH #63: JVM candidates for attaching to `pid`, most specific first.
+///
+/// The target IDE ships its own runtime, so the ambient environment is only a
+/// fallback: the process executable itself when it is a `java` launcher, then a
+/// `jbr/bin/java` beside any ancestor of that executable (the native `idea`
+/// launcher lives in `<dist>/bin/`), then `JAVA_HOME`, then each `PATH` entry.
+fn java_candidates_for_ide(
+    ide_exe: Option<&Path>,
+    java_home: Option<&Path>,
+    path_var: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
+    let java_name = if cfg!(windows) { "java.exe" } else { "java" };
+    let mut candidates = Vec::new();
+    if let Some(exe) = ide_exe {
+        if exe.file_name().and_then(|name| name.to_str()) == Some(java_name) {
+            candidates.push(exe.to_path_buf());
+        }
+        for ancestor in exe.ancestors().skip(1) {
+            candidates.push(ancestor.join("jbr").join("bin").join(java_name));
+        }
+    }
+    if let Some(home) = java_home {
+        candidates.push(home.join("bin").join(java_name));
+    }
+    if let Some(path_var) = path_var {
+        candidates.extend(std::env::split_paths(path_var).map(|dir| dir.join(java_name)));
+    }
+    let mut seen = BTreeSet::new();
+    candidates.retain(|candidate| seen.insert(candidate.clone()));
+    candidates
+}
+
+fn resolve_java_for_ide(pid: u32, candidates: &[PathBuf]) -> Result<PathBuf> {
+    if let Some(found) = candidates.iter().find(|candidate| candidate.is_file()) {
+        return Ok(found.clone());
+    }
+    bail!(
+        "no JVM found to run the JetBrains dynamic upgrader for pid {pid}; tried the IDE's bundled runtime, JAVA_HOME and PATH:\n{}",
+        candidates
+            .iter()
+            .map(|candidate| format!("  {}", candidate.display()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
+}
+
 #[cfg(not(test))]
-fn java_executable() -> PathBuf {
-    std::env::var_os("JAVA_HOME")
-        .map(PathBuf::from)
-        .map(|root| root.join("bin/java"))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from("java"))
+fn java_executable_for_ide(pid: u32) -> Result<PathBuf> {
+    let ide_exe = fs::read_link(format!("/proc/{pid}/exe")).ok();
+    let java_home = std::env::var_os("JAVA_HOME").map(PathBuf::from);
+    let path_var = std::env::var_os("PATH");
+    let candidates = java_candidates_for_ide(
+        ide_exe.as_deref(),
+        java_home.as_deref(),
+        path_var.as_deref(),
+    );
+    resolve_java_for_ide(pid, &candidates)
 }
 
 /// `#jbupgradereattach`: the dynamic upgrade verdict is the `ok:` status itself.
@@ -1024,7 +1113,8 @@ fn try_hot_upgrade_jetbrains(
     fs::copy(zip_path, archive.path()).context("Failed to stage JetBrains package")?;
     let mut upgraded = 0usize;
     for pid in pids {
-        let output = Command::new(java_executable())
+        let java = java_executable_for_ide(pid)?;
+        let output = Command::new(&java)
             .args(["--add-modules", "jdk.attach", "-jar"])
             .arg(launcher.path())
             .arg(pid.to_string())
@@ -1033,7 +1123,10 @@ fn try_hot_upgrade_jetbrains(
             .arg(expected_version)
             .output()
             .with_context(|| {
-                format!("Failed to launch JetBrains dynamic upgrader for pid {pid}")
+                format!(
+                    "Failed to launch JetBrains dynamic upgrader for pid {pid} with JVM {}",
+                    java.display()
+                )
             })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         if !output.status.success() {
@@ -1051,6 +1144,11 @@ fn try_hot_upgrade_jetbrains(
         }
     }
     Ok((upgraded > 0).then_some(upgraded))
+}
+
+#[cfg(test)]
+fn live_jetbrains_ide_pids() -> Result<Vec<u32>> {
+    Ok(Vec::new())
 }
 
 #[cfg(test)]
@@ -1119,14 +1217,13 @@ fn install_jetbrains_zip_into(
     if jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
         return Ok(JetbrainsLocalInstallOutcome::Unchanged);
     }
-    let outcome = if let Some(processes) =
-        try_hot_upgrade_jetbrains(zip_path, target_dir, expected_version)?
-    {
-        JetbrainsLocalInstallOutcome::HotUpgraded { processes }
-    } else {
-        replace_jetbrains_plugin_tree(zip_path, target_dir)?;
-        JetbrainsLocalInstallOutcome::Installed
-    };
+    let outcome = install_jetbrains_package_bytes(
+        zip_path,
+        target_dir,
+        dynamic_upgrade_enabled(),
+        || try_hot_upgrade_jetbrains(zip_path, target_dir, expected_version),
+        live_jetbrains_ide_pids,
+    )?;
     if !jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
         bail!(
             "JetBrains package verification failed in {}: installed bytes differ from the package",
@@ -1134,6 +1231,52 @@ fn install_jetbrains_zip_into(
         );
     }
     Ok(outcome)
+}
+
+/// GH #63: the restart-free dynamic upgrade is an optimization, never the
+/// update itself. When it cannot run (no JVM, attach refused, a platform
+/// signature the upgrader cannot call) or `--no-dynamic` skips it, the package
+/// is still replaced on disk -- the directory is removed and rewritten, so a
+/// live IDE keeps reading the old inodes -- and the caller is told to restart.
+fn install_jetbrains_package_bytes(
+    zip_path: &Path,
+    target_dir: &Path,
+    dynamic: bool,
+    hot_upgrade: impl FnOnce() -> Result<Option<usize>>,
+    live_pids: impl FnOnce() -> Result<Vec<u32>>,
+) -> Result<JetbrainsLocalInstallOutcome> {
+    let restart_reason = if dynamic {
+        match hot_upgrade() {
+            Ok(Some(processes)) => {
+                return Ok(JetbrainsLocalInstallOutcome::HotUpgraded { processes });
+            }
+            Ok(None) => None,
+            Err(error) => {
+                let reason = format!("dynamic upgrade unavailable: {error:#}");
+                eprintln!("WARNING: {reason}; falling back to a file replacement.");
+                Some(reason)
+            }
+        }
+    } else {
+        match live_pids() {
+            Ok(pids) if pids.is_empty() => None,
+            Ok(pids) => Some(format!(
+                "--no-dynamic skipped the restart-free upgrade for live JetBrains pid(s) {}",
+                pids.iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+            Err(error) => Some(format!(
+                "--no-dynamic; live JetBrains processes could not be enumerated: {error:#}"
+            )),
+        }
+    };
+    replace_jetbrains_plugin_tree(zip_path, target_dir)?;
+    Ok(match restart_reason {
+        Some(reason) => JetbrainsLocalInstallOutcome::RestartRequired { reason },
+        None => JetbrainsLocalInstallOutcome::Installed,
+    })
 }
 
 fn collect_installed_plugin_files(
@@ -1412,6 +1555,7 @@ mod tests {
         jetbrains_version_cmp, local_jetbrains_zip_in, local_jetbrains_zip_version,
         release_version, releases_page_url,
     };
+    use super::{install_jetbrains_package_bytes, java_candidates_for_ide, resolve_java_for_ide};
     use serde_json::json;
     use std::cmp::Ordering as CmpOrdering;
     use std::fs;
@@ -2185,6 +2329,115 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             b"new"
         );
         assert!(!lib.join("stale.jar").exists());
+    }
+
+    #[test]
+    fn java_is_resolved_from_the_target_ide_before_the_ambient_environment() {
+        // GH #63: remote-dev backend with JAVA_HOME unset and no java on PATH;
+        // the IDE's own `<dist>/jbr/bin/java` must be found.
+        let tmp = TempDir::new().unwrap();
+        let dist = tmp.path().join("RemoteDev/dist/IU-262.9437.185");
+        fs::create_dir_all(dist.join("bin")).unwrap();
+        fs::create_dir_all(dist.join("jbr/bin")).unwrap();
+        fs::write(dist.join("bin/idea"), b"").unwrap();
+        fs::write(dist.join("jbr/bin/java"), b"").unwrap();
+        let empty_path = tmp.path().join("empty-path");
+        fs::create_dir_all(&empty_path).unwrap();
+
+        let candidates = java_candidates_for_ide(
+            Some(&dist.join("bin/idea")),
+            None,
+            Some(empty_path.as_os_str()),
+        );
+        assert_eq!(candidates[0], dist.join("bin/jbr/bin/java"));
+        assert_eq!(
+            resolve_java_for_ide(1506046, &candidates).unwrap(),
+            dist.join("jbr/bin/java")
+        );
+
+        // A java-launched IDE uses its own executable first.
+        let java = dist.join("jbr/bin/java");
+        assert_eq!(java_candidates_for_ide(Some(&java), None, None)[0], java);
+    }
+
+    #[test]
+    fn missing_jvm_names_every_candidate_tried() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("no-jdk");
+        let candidates = java_candidates_for_ide(None, Some(&home), None);
+        let error = resolve_java_for_ide(7, &candidates)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no JVM found"), "{error}");
+        assert!(error.contains("pid 7"), "{error}");
+        assert!(
+            error.contains(&home.join("bin/java").display().to_string()),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn failed_dynamic_upgrade_falls_back_to_a_restart_required_file_replacement() {
+        // GH #63: a failed hot-swap must not mean a failed update.
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("agent-doc-jetbrains-0.2.392.jar"), b"old").unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.448.zip");
+        write_test_jetbrains_zip(&zip, "0.2.448", b"new");
+
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            true,
+            || anyhow::bail!("checkCanUnloadWithoutRestart signature mismatch"),
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+
+        match outcome {
+            JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
+                assert!(reason.contains("signature mismatch"), "{reason}");
+            }
+            other => panic!("expected RestartRequired, got {other:?}"),
+        }
+        assert_eq!(
+            fs::read(lib.join("agent-doc-jetbrains-0.2.448.jar")).unwrap(),
+            b"new"
+        );
+        assert!(jetbrains_local_zip_matches_installation(&zip, &target).unwrap());
+    }
+
+    #[test]
+    fn no_dynamic_replaces_files_and_requires_restart_only_under_a_live_ide() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.448.zip");
+        write_test_jetbrains_zip(&zip, "0.2.448", b"new");
+
+        let live = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            false,
+            || panic!("--no-dynamic must not attach"),
+            || Ok(vec![1506046]),
+        )
+        .unwrap();
+        assert!(
+            matches!(&live, JetbrainsLocalInstallOutcome::RestartRequired { reason } if reason.contains("1506046")),
+            "{live:?}"
+        );
+
+        let idle = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            false,
+            || panic!("--no-dynamic must not attach"),
+            || Ok(Vec::new()),
+        )
+        .unwrap();
+        assert_eq!(idle, JetbrainsLocalInstallOutcome::Installed);
     }
 }
 

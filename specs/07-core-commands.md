@@ -354,6 +354,16 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   install guidance (GH #57). Detection returning a candidate it has just proven
   absent is a defect: the resulting `No such file or directory` reads as if the
   vsix were missing.
+- JetBrains install/update treats the restart-free dynamic upgrade as an
+  optimization, never the update itself (GH #63). The upgrader's JVM resolves
+  from the target IDE first (the process executable when it is `java`, else a
+  `jbr/bin/java` beside an ancestor of it), then `JAVA_HOME`, then `PATH`; an
+  unresolved JVM names every candidate tried. When the dynamic upgrade fails
+  for any reason (no JVM, attach refused, a platform signature the upgrader
+  cannot call), or `--no-dynamic` (alias `--restart-required`) skips it under a
+  live IDE, the package is still replaced on disk (directory removed and
+  rewritten, so the live IDE keeps its old inodes) and the command succeeds
+  with a restart-the-IDE warning naming the reason.
 - JetBrains install/update success reports the installed plugin package version
   from the extracted plugin JAR, matching `plugin list`, rather than reporting the
   enclosing agent-doc release tag.

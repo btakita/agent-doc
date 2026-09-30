@@ -17,7 +17,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -141,6 +141,24 @@ One earlier `make check` run failed `preflight_sweep_skips_foreign_owned_doc` wh
 **Not tested live.** My local editor is publishing its surface right now, so the no-observation output was only checked by the unit tests. The stash-growth note in the issue comes from project config (`stash_session_ttl_prune_enabled = false`), and I left it unchanged.
 
 **Closeout note.** The first `respond` attempt failed before writing anything: `sync_pending recovery exhausted and disk read authority is refused`. That was the known strand from reloading the cdylib during `make install`. It cleared on its own at 22:14:47 (`crdt_relay_current diverged=false`), so this second attempt is the only write.
+
+### Re: #gh-fix agent-doc#69 — opus-5.5 · 2026-09-30T18:41-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/69
+
+Nothing left to do here. Issue #69 is already **CLOSED**, and its fix is already released:
+
+- The fix is in `20f622007`. Git shows that commit is an ancestor of the agent-doc `HEAD` (`264ed7df7`).
+- It first shipped in tag `v0.35.424`. The installed binary is `0.35.426`, so it's running.
+- The closing comment on #69 covers all four asks:
+  - `#presetshape`: structured `{prompt: …}` presets are now accepted.
+  - `#resetclosedactor`: the invalid-frontmatter error now points to `reset --from-current --preserve-session`, and `--force-disk` is named when no editor is live.
+  - `#addreadback`: `backlog add` now reads the document back after writing and exits non-zero when the item didn't persist.
+  - `#backlogupsert`: `--backlog-upsert` was added.
+
+I made no code changes and did not reopen the issue. There are no actionable follow-up items from this head.
+
+Next in the queue is #70. That one is also already closed, fixed in `cb26320c1` / 0.35.424. After it comes `#release`.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -149,12 +167,16 @@ One earlier `make check` run failed `preflight_sweep_skips_foreign_owned_doc` wh
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/69~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/70
+- #release
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
+- [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
+6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 
 ## Review

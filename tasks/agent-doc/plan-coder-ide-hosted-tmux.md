@@ -342,6 +342,10 @@ offline but the integration is not.
 
 Record outcomes in this file; only then close `#coder7`.
 
+**Outcome (2026-09-30):** the operator reported `#coder7` validated. They use agent-doc day to
+day on their work machine inside a Coder workspace. `#coder7` closed on that report; the
+per-case notes above were not recorded individually.
+
 ## Risks / open items
 
 - **Env-detection guesswork.** Coder's env var names, the JB remote-backend

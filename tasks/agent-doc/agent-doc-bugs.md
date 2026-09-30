@@ -384,6 +384,24 @@ Codex made only one `respond` call; the second copy came entirely from the binar
 - Remove the second `### Re: what a Haiven admin can do about AWS GPU access (HEAD)` section.
 
 Next in the queue: the `presets` → `prompt_presets` frontmatter alias, then `release + publish`. CI is still running on `bc6cb52ef`.
+
+### Re: GH #65 — `[crdt-perf]` at WARN — opus-5-5 · 2026-09-30T13:10-04:00
+
+> **Queue prompt:**
+>
+> fix https://github.com/btakita/agent-doc/issues/65
+
+**Fixed in `76a44fe34` (JetBrains plugin 0.2.452). GH #65 is closed.** Installed, hot-swapped into the running IDE, and pushed; `make check` passes (Rust 10221/0, JetBrains 601/0, VS Code 181/0).
+
+Both `[crdt-perf]` log helpers already logged at WARN only above a threshold, but the thresholds were 50 or 100 ms. Normal background CRDT work takes 118–395 ms in the issue's own numbers, so nearly every keystroke batch landed in `idea.log` at WARN.
+
+- **Background work now warns only at 1 s or more.** On the UI thread the existing tight thresholds (10–100 ms) still apply, since any stall there is visible to you. In the reporter's session this would have produced no warnings.
+- **The full per-delta timing is still there at DEBUG.** Turn it on with `Help > Diagnostic Tools > Debug Log Settings` → `#com.github.btakita.agentdoc`. That's the opt-in the issue asked for, with no new setting.
+- **A new test pins the rule:** the issue's measured latencies stay quiet off the UI thread, and a real stall still warns.
+
+The install noted that 2 open haiven-dev documents hadn't re-registered with the new plugin yet; the plugin retries each one itself.
+
+Next: GH #66, then #67, then `release + publish`.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -396,8 +414,8 @@ Next in the queue: the `presets` → `prompt_presets` frontmatter alias, then `r
 - ~~do [#fpecapturedresponse]~~
 - re [#apimdrevert]: I don't recall which text was lost. Can we practically debug log these events or will this cause excessive debug logging?
 - ~~In the frontmatter, alias `presets` to `prompt_presets`.~~
-- fix https://github.com/btakita/agent-doc/issues/62
-- fix https://github.com/btakita/agent-doc/issues/65
+- ~~fix https://github.com/btakita/agent-doc/issues/62~~
+- ~~fix https://github.com/btakita/agent-doc/issues/65~~
 - fix https://github.com/btakita/agent-doc/issues/66
 - fix https://github.com/btakita/agent-doc/issues/67
 - release + publish

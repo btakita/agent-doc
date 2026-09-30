@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -216,12 +216,16 @@ The exchange is past 160 lines; compacting it would be a good next step.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#editorlistonlyproj]
+- do [#stalesupresumedeadlock]
+- do [#jbunloadsig]
+- do [#queuefreetextdup]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#editorlistonlyproj] [agent-doc] Root cause behind #respsuffixdup: under live-prompt drift (operator editing during closeout) the editor's applied patch contains ONLY the response's markdown list block — quote, heading and paragraphs are dropped (2026-09-30 01:04, 01:47, 02:17 on agent-doc-bugs.md; e.g. patch 66381aae candidate_len=26256 vs content_ours_len=27474). The materialize repair now removes the orphan (d75c76157, da4908334), but the editor/CRDT merge that keeps list items and drops paragraphs is unfixed: trace the per-cell/list merge on the editor apply path and fix it with a regression test.
+- [ ] 🚧 [#editorlistonlyproj] [agent-doc] Root cause behind #respsuffixdup: under live-prompt drift (operator editing during closeout) the new response's LIST ITEMS land spliced directly after the previous response's last bullet, with its queue quote, heading and paragraphs dropped; materialization then appends the full response, so the bullets show twice. Seen 2026-09-30 01:04, 01:47, 02:17, 03:12 (last: patch e097816b; the 0.35.421 GH #64 bullets inserted after the #qstruckbaredup/rustfmt bullets of the prior response). That placement is exactly document_cell_merge's list-item fallback (agent-added items appended after the last existing item), which merge_exchange_inner uses only when neither side shows ### heading blocks. Next: capture the editor candidate for one such patch (the visible_write_lazily_event content), determine whether the plugin apply or try_semantic_merge_convergence (note its (base, candidate, content_ours) argument order vs document_cell_merge_scoped(base, ours_agent, theirs_operator)) produced it, fix, and add a regression test. The tail-only orphan cleanup cannot remove this mid-exchange copy.
 - [ ] [#stalesupresumedeadlock] [agent-doc] A stale route-owned supervisor (pid 19503, binary from 2026-09-28) ran captured_finalize resume every ~2s with old code that could not see its own materialized response (#queuequotecell), while its recycle stayed deferred with reason=agent_doc_cycle_open: the open cycle needed the new code, and the new code needed the recycle (2026-09-30 06:17-06:35; broken manually with an empty-stdin write --commit). A needs_operator retry loop on a stale binary should count as a recycle boundary, or the resume should run in the fresh controller.
 - [ ] [#jbunloadsig] [agent-doc][jetbrains] GH #63 layer 2: JetBrainsPluginUpgradeAction.java:68 calls DynamicPlugins.checkCanUnloadWithoutRestart(IdeaPluginDescriptorImpl) at compile time; on IU-262.9437.185 that signature does not resolve, so the dynamic upgrade aborts (the file-replacement fallback in 93039df74 now covers it). Look the method up reflectively by name, accept the signatures the supported platform range exposes, and report the build + signatures found on a miss. Needs a plugin version bump in editors/jetbrains/gradle.properties (another session had it dirty 2026-09-30).
 - [ ] [#queuefreetextdup] [agent-doc] 2026-09-30 01:47 cycle: 'release + publish' appeared TWICE in agent:queue before the #ftstrike ran (every answered_free_text_strike_applied reports nodes=2). The operator had rewritten the queue while the live-prompt-drift visible-write repair (ipc_socket_visible_write_drift_missing_response_materialized, patch bc498402) reconciled the editor candidate (18892B) against content_ours (19243B). Trace which merge re-emitted the old free-text line, then fix it with a regression test.

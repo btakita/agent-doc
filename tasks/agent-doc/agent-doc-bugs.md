@@ -440,6 +440,23 @@ Next: GH #67, then `release + publish`.
 Tests cover: the marker being written, not breaking the "already current" check, and being cleared; the warning choosing restart only when a refusal is recorded; and the upgrade step reading both answer shapes.
 
 Next and last in the queue: `release + publish`.
+
+### Re: GH #62 still open — opus-5-5 · 2026-09-30T13:47-04:00
+
+> **Queue prompt:**
+>
+> https://github.com/btakita/agent-doc/issues/62 is still open on github. Please close it if it is done. If it's not yet done, fix it then close the issue.
+
+**Mostly done already; I finished the remaining piece and closed GH #62.**
+
+What the issue asked for, and where it stands:
+- **See whether auto-sync is working without turning on debug logging.** Done in `9d84795d5`. `agent-doc reliable-sync-status` shows the editor's last reported layout and the last pane-layout attempt, and lists which tmux window holds each document's pane (agent-doc / stash / none).
+- **A check for the exact mismatch.** The same command already reported it (an open document's pane parked in stash or missing, or a hidden document in the agent-doc window), but only as printed text. The issue wanted a check that *fails*, so `e033224bc` adds `reliable-sync-status --check`, which exits non-zero on a mismatch, with or without `--json`.
+- **What triggered it:** the plugin was stuck at 0.2.392 because upgrades were failing (#63), which is fixed. On the live layout here, `--check` exits 0 and reports no mismatch.
+
+Installed and pushed; `make check` passes (Rust 10225/0, JetBrains 602/0, VS Code 181/0).
+
+Last in the queue: `release + publish`.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -456,7 +473,7 @@ Next and last in the queue: `release + publish`.
 - ~~fix https://github.com/btakita/agent-doc/issues/65~~
 - ~~fix https://github.com/btakita/agent-doc/issues/66~~
 - ~~fix https://github.com/btakita/agent-doc/issues/67~~
-- https://github.com/btakita/agent-doc/issues/62 is still open on github. Please close it if it is done. If it's not yet done, fix it then close the issue.
+- ~~https://github.com/btakita/agent-doc/issues/62 is still open on github. Please close it if it is done. If it's not yet done, fix it then close the issue.~~
 - release + publish
 <!-- /agent:queue -->
 

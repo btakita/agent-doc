@@ -17,7 +17,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -533,7 +533,27 @@ Since the lost lines were your queued order, I did #69 and #70 in this cycle, be
 `make check` passed on the final tree: all 10241 tests, plus audit-docs, editor-parity, lean and tla.
 
 Exchange is large (≈480 lines); this is the last queue item.
-<!-- agent:boundary:baee6279 -->
+
+### Re: #69, #70, #71 + release 0.35.425 — opus-5-5 · 2026-09-30T16:25-04:00
+
+> **Queue prompts:**
+> - #gh-fix https://github.com/btakita/agent-doc/issues/69
+> - #gh-fix https://github.com/btakita/agent-doc/issues/70
+> - #gh-fix https://github.com/btakita/agent-doc/issues/71
+
+**#69 and #70 were already fixed and closed in 0.35.424** (previous response). These two lines are your re-added copies, so this cycle just closes them out.
+
+**This cycle's preflight said `no_changes` with zero drainable heads, even with these three issues queued.** That was the same `#gh-fix` identity bug, a third time. The drainability check read each `#gh-fix <url>` line as a reference to a missing backlog item and discarded it, so the loop could never drain them on its own. Fixed in `1ecc52cfd`.
+
+**Your second `release + publish` was struck by a double-strike bug.** Queue consume struck the answered copy, then a second mechanism struck your next identical line for the same answer. An answer already applied this cycle is now not applied again (same commit). Both fixes have regression tests that fail when the fix is removed.
+
+- **[#71](https://github.com/btakita/agent-doc/issues/71)** (`7fc0d78b4`, closed): an admission refusal now carries a `pending:` line. It names `agent-doc session-check <FILE>` as the follow-up that lists any unanswered operator prompt. When the refusal is a queue/CRDT reconciliation, it also says to tell you your latest edit may not have been received yet. Writes still fail closed, and SKILL.md is updated to match.
+- **Released 0.35.425** (tag `v0.35.425` pushed, `make install` done: `agent-doc 0.35.425`). This covers the release your struck line asked for. 0.35.424 is on PyPI and its GitHub Release job passed.
+
+`make check` passed: all 10244 tests, plus audit-docs (after `make install`), editor-parity, lean and tla.
+
+Exchange is ≈530 lines; queue should now be empty.
+<!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -541,13 +561,7 @@ Exchange is large (≈480 lines); this is the last queue item.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/68~~
-- ~~release + publish~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/69
-- #gh-fix https://github.com/btakita/agent-doc/issues/70
-- #gh-fix https://github.com/btakita/agent-doc/issues/71
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

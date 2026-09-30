@@ -4,6 +4,11 @@
 //! remain display text when they are written through template patches. Escaping
 //! those comments before patch application prevents later component parses from
 //! treating examples as real document structure.
+//!
+//! Markers inside fenced code blocks and inline code spans are left verbatim
+//! (GH #61): the component parser already ignores code regions via
+//! `find_code_ranges`, so escaping there only corrupts the displayed quote
+//! (renderers show `&lt;!--` literally inside code).
 
 use crate::template::PatchBlock;
 
@@ -11,10 +16,14 @@ use crate::template::PatchBlock;
 ///
 /// Only `<!-- agent:NAME -->` and `<!-- /agent:NAME -->` patterns where `NAME`
 /// is a valid component name are escaped. Patch markers and other comments pass
-/// through unchanged.
+/// through unchanged, as do markers inside code spans and code blocks.
 pub fn sanitize_component_tags(content: &str) -> String {
+    if !content.contains("<!--") {
+        return content.to_string();
+    }
     let bytes = content.as_bytes();
     let len = bytes.len();
+    let code_ranges = agent_doc_element::element::find_code_ranges(content);
     let mut result = String::with_capacity(len);
     let mut pos = 0;
 
@@ -38,7 +47,10 @@ pub fn sanitize_component_tags(content: &str) -> String {
         let inner = &content[pos + 4..close - 3];
         let trimmed = inner.trim();
 
-        if agent_doc_element::element::is_agent_marker(trimmed) {
+        let in_code = code_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end);
+        if !in_code && agent_doc_element::element::is_agent_marker(trimmed) {
             let original = &content[pos..close];
             result.push_str(&original.replace('<', "&lt;").replace('>', "&gt;"));
         } else {
@@ -190,6 +202,52 @@ mod tests {
             unmatched.contains("&lt;!-- agent:exchange --&gt;"),
             "escaped markers expected, got: {unmatched}"
         );
+    }
+
+    #[test]
+    fn sanitize_leaves_markers_in_inline_code_span_verbatim() {
+        let input = "- queue activation (`<!-- agent:queue go -->`) → `queue_prompts: [...]`";
+        assert_eq!(sanitize_component_tags(input), input);
+    }
+
+    #[test]
+    fn sanitize_leaves_markers_in_fenced_block_verbatim() {
+        let input = "Example:\n\n```markdown\n<!-- agent:exchange -->\nbody\n<!-- /agent:exchange -->\n```\n";
+        assert_eq!(sanitize_component_tags(input), input);
+        let tilde = "~~~\n<!-- agent:backlog -->\n~~~\n";
+        assert_eq!(sanitize_component_tags(tilde), tilde);
+    }
+
+    #[test]
+    fn sanitize_escapes_bare_marker_beside_code_span() {
+        let input = "Quoted `<!-- agent:queue -->` vs bare <!-- agent:queue --> text.";
+        let result = sanitize_component_tags(input);
+        assert_eq!(
+            result,
+            "Quoted `<!-- agent:queue -->` vs bare &lt;!-- agent:queue --&gt; text."
+        );
+    }
+
+    #[test]
+    fn sanitize_escapes_marker_after_unclosed_backtick() {
+        // An unmatched backtick opens no code span, so the marker is bare text
+        // to the component parser and must still be escaped.
+        let input = "stray ` then <!-- agent:exchange --> marker";
+        let result = sanitize_component_tags(input);
+        assert!(result.contains("&lt;!-- agent:exchange --&gt;"), "{result}");
+    }
+
+    #[test]
+    fn sanitized_code_quote_does_not_parse_as_component() {
+        let doc = format!(
+            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            sanitize_component_tags(
+                "Use `<!-- agent:queue go -->` to start.\n\n```\n<!-- agent:backlog -->\n```"
+            )
+        );
+        let components = agent_doc_element::element::parse(&doc).expect("parse");
+        let names: Vec<_> = components.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["exchange"]);
     }
 
     #[test]

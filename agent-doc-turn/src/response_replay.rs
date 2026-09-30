@@ -1401,11 +1401,15 @@ mod undo_keeps_operator_text {
     #[test]
     fn the_newest_of_two_identical_responses_is_the_one_removed() {
         let block = "### Re: infra.md owner — opus-5-5\n\nReplayed body.\n\n- detail\n";
-        let current = format!("<!-- agent:exchange -->\nfirst prompt\n\n{block}\nsecond prompt\n\n{block}<!-- /agent:exchange -->\n");
+        let current = format!(
+            "<!-- agent:exchange -->\nfirst prompt\n\n{block}\nsecond prompt\n\n{block}<!-- /agent:exchange -->\n"
+        );
         let undone = remove_materialized_response(&current, RESPONSE).unwrap();
         assert_eq!(
             undone,
-            format!("<!-- agent:exchange -->\nfirst prompt\n\n{block}\nsecond prompt\n<!-- /agent:exchange -->\n")
+            format!(
+                "<!-- agent:exchange -->\nfirst prompt\n\n{block}\nsecond prompt\n<!-- /agent:exchange -->\n"
+            )
         );
     }
 }
@@ -1522,7 +1526,7 @@ mod tests {
         let content = concat!(
             "<!-- agent:exchange -->\n",
             "### Re: queue halted — gpt-5 (HEAD)\n\n",
-            "The frontmatter says `queue: start`, while `&lt;!-- agent:queue go --&gt;` is stale.\n",
+            "The frontmatter says `queue: start`, while `<!-- agent:queue go -->` is stale.\n",
             "<!-- agent:boundary:test -->\n",
             "<!-- /agent:exchange -->\n",
         );

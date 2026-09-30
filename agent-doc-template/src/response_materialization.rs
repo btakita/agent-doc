@@ -762,8 +762,10 @@ mod tests {
 
         let probe = response_materialization_probe_from_response(response);
 
-        assert!(probe.contains("&lt;!-- agent:queue go --&gt;"));
-        assert!(!probe.contains("`<!-- agent:queue go -->`"));
+        // GH #61: a marker quoted in a code span is not escaped by the writer,
+        // so the probe keeps it verbatim too.
+        assert!(probe.contains("`<!-- agent:queue go -->`"));
+        assert!(!probe.contains("&lt;!-- agent:queue go --&gt;"));
     }
 
     #[test]

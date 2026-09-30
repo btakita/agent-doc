@@ -479,6 +479,19 @@ What's in it (all fixed today):
 Install on another project once the PyPI job is green: `uv tool install agent-doc==0.35.423` (or `pip install agent-doc==0.35.423`).
 
 The queue is now empty.
+
+### Re: Did you publish the release? — opus-5-5 · 2026-09-30T14:32-04:00
+
+> **Queue prompt:**
+>
+> do [#publishrelease]
+
+**Yes, 0.35.423 is fully published.** When I wrote the last response the two publish jobs were still running; both have since finished successfully:
+
+- **GitHub Release** ([v0.35.423](https://github.com/btakita/agent-doc/releases/tag/v0.35.423)): Linux x86_64 (gnu and musl), Linux aarch64 and Windows archives, `SHA256SUMS`, the JetBrains plugin `agent-doc-jetbrains-0.2.453.zip`, the VS Code extension `agent-doc-0.2.75.vsix`, and `EDITOR-PACKAGES.sha256`. No macOS files, as usual for an on-demand release.
+- **PyPI:** the job passed, and the PyPI index now lists 0.35.423.
+
+On your coder project: `uv tool install agent-doc==0.35.423` (or `pip install agent-doc==0.35.423`). On first run it downloads the matching Linux or Windows archive from the Release above and checks it against `SHA256SUMS`.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -487,7 +500,7 @@ The queue is now empty.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

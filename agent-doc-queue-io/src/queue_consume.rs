@@ -1367,6 +1367,7 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     done_ids: &[String],
     requested_free_text_count: usize,
 ) -> Result<Option<QueueConsumptionPlan>> {
+    let caller_named_done_ids = !done_ids.is_empty();
     let eligible_done_ids =
         agent_doc_queue::queue_closeout_guard::done_ids_for_unchanged_queue_revisions(
             snapshot_content,
@@ -1626,10 +1627,10 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     // Preserve the fail-closed active-queue guard: an active component with no
     // prompt is malformed, while a first id-backed prompt is classified below
     // and left untouched without an explicit done/ack signal.
-    let consume_count = leading_done_consume_count
+    let mut consume_count = leading_done_consume_count
         .max(free_text_prefix_count)
         .max(1);
-    let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
+    let mut consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
     // `#queuedrainednoop`: distinguish a DRAINED queue from a malformed one.
     //
     // The fail-closed guard below is right for an active component that never had
@@ -1685,6 +1686,45 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
             ),
         );
         return Ok(None);
+    }
+    // `#fpecapturedresponse`: a caller that named done-ids none of which is a live
+    // head is replaying a closeout whose own heads were already struck. The count
+    // then lands on whatever operator heads are current NOW, which the captured
+    // response never answered (fpe.md 2026-09-30 consumed two later operator
+    // items). In that shape the consume must be proven by the cycle's own response,
+    // like the `#ftstrike` quote rule: consume only the answered prefix. An ordinary
+    // free-text closeout (no done-ids) keeps its existing semantics.
+    if caller_named_done_ids
+        && leading_done_consume_count == 0
+        && let Some(response_body) =
+            projected_capture_response_body(file).filter(|body| !body.trim().is_empty())
+    {
+        let proven = consumed_texts
+            .iter()
+            .take_while(|text| {
+                agent_doc_queue::queue_response::free_text_head_answered_by_response(
+                    &response_body,
+                    text,
+                )
+            })
+            .count();
+        if proven < consume_count {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_consume_refused_unanswered_free_text_head file={} requested={} proven={} head={:?} (#fpecapturedresponse)",
+                    file.display(),
+                    consume_count,
+                    proven,
+                    consumed_texts.get(proven).map(String::as_str).unwrap_or(""),
+                ),
+            );
+            if proven == 0 {
+                return Ok(None);
+            }
+            consume_count = proven;
+            consumed_texts.truncate(proven);
+        }
     }
     let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
     let completed_entries =
@@ -3502,6 +3542,102 @@ mod core_tests {
             ops_log.contains("snapshot_recovery_warning")
                 && ops_log.contains("snapshot head prompts"),
             "the snapshot rebase must be logged for forensics:\n{ops_log}"
+        );
+    }
+
+    /// `#fpecapturedresponse`: a replayed write whose done-id head is already
+    /// struck falls through to the count path. It may consume only the free-text
+    /// heads the cycle's captured response actually quotes, never the operator
+    /// items that became current after the turn.
+    #[test]
+    fn count_consume_requires_the_captured_response_to_answer_each_free_text_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("fpe.md");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: what an admin can do\n\nAnswer.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- ~~do [#awsapproval]~~\n",
+            "- Configure the SBX + STG to have 16 vCPUs.\n",
+            "- I can't login.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let record = |response: &str| {
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+            let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .unwrap();
+            let sha = agent_doc_hash::content_hash(response);
+            agent_doc_cycle_state_io::append_response_captured_body(
+                &doc,
+                agent_doc_cycle_state_io::CapturedResponseFactInput {
+                    cycle_id: &state.cycle_id,
+                    capture_id: &state.cycle_id,
+                    response_sha256: &sha,
+                    response_body: response,
+                    intent_body: None,
+                    mutation_plan_json: None,
+                    file_hash: None,
+                    snapshot_hash: None,
+                    baseline_content: None,
+                },
+            )
+            .unwrap();
+            agent_doc_cycle_state_io::mark_response_captured(
+                &doc,
+                "test_capture",
+                Some(content),
+                Some(content),
+                &sha,
+                Some(&state.cycle_id),
+            )
+            .unwrap();
+        };
+
+        // The replayed response answered a different, already-struck prompt.
+        record(concat!(
+            "### Re: what an admin can do\n\n",
+            "> **Queue prompt:**\n>\n> Is this something an admin can solve?\n\n",
+            "Answer.\n",
+        ));
+        let plan = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            content,
+            None,
+            &["awsapproval".to_string()],
+            2,
+        )
+        .unwrap();
+        assert!(
+            plan.is_none(),
+            "unanswered operator heads were consumed: {:?}",
+            plan.as_ref().map(|plan| &plan.consumed_texts)
+        );
+
+        // A response that quotes only the first head consumes only that head.
+        record(concat!(
+            "### Re: vCPUs\n\n",
+            "> **Queue prompt:**\n>\n> Configure the SBX + STG to have 16 vCPUs.\n\n",
+            "Configured.\n",
+        ));
+        let plan = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            content,
+            None,
+            &["awsapproval".to_string()],
+            2,
+        )
+        .unwrap()
+        .expect("the answered head is consumed");
+        assert_eq!(plan.consumed_texts.len(), 1, "{:?}", plan.consumed_texts);
+        assert!(
+            plan.new_document.contains("- I can't login.\n"),
+            "{}",
+            plan.new_document
         );
     }
 

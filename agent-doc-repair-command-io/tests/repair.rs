@@ -1490,6 +1490,62 @@ mod tests {
         );
     }
 
+    /// `#fpecapturedresponse`: a retained editor-owned write that already carries
+    /// the captured response owns its delivery. Repair must wait for it instead
+    /// of replaying a second copy whose fresh queue step would consume whatever
+    /// operator heads are current by then.
+    #[test]
+    fn repair_defers_to_a_retained_write_that_already_carries_the_response() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- improve the docs please\n",
+            "- a later operator item\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let response = "### Re: improve the docs — gpt-5\n\nDone.\n";
+        agent_doc_repair_io::pending::save_pending(
+            &doc,
+            &format!("<!-- patch:exchange -->\n{response}<!-- /patch:exchange -->\n"),
+        )
+        .unwrap();
+        let retained_target = content.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            &format!("{response}<!-- agent:boundary:abc123 -->\n"),
+        );
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &doc,
+            content,
+            &retained_target,
+            "test_retained_response",
+            agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+        )
+        .unwrap();
+
+        let err = run(&doc).expect_err("repair must wait for the retained write");
+        assert!(
+            format!("{err:#}").contains(
+                agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN
+            ),
+            "{err:#}"
+        );
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(after, content, "no second copy and no queue consumption");
+        assert!(after.contains("- a later operator item"));
+    }
+
     #[test]
     fn repair_strikes_consumed_free_text_queue_head() {
         // #repair-strike-consumed-head: a recovered free-text-head response must

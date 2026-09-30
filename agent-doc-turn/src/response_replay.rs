@@ -1483,6 +1483,37 @@ mod undo_keeps_operator_text {
 mod tests {
     use super::*;
 
+    /// `#fpecapturedresponse`: the done-id closeout embeds the consumed head's
+    /// echo between the heading and the response's own quote. The replay must still
+    /// see its response as materialized, or it writes a second copy.
+    #[test]
+    fn exchange_cell_materialization_tolerates_an_embedded_echo_before_the_responses_own_quote() {
+        let response = concat!(
+            "### Re: what a Haiven admin can do\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> Is this something a haiven admin can solve?\n\n",
+            "**A Haiven AWS admin can move the process forward.**\n\n",
+            "The practical options are listed below.\n",
+        );
+        let content = concat!(
+            "---\nagent_doc_session: s\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier\n\nEarlier answer.\n\n",
+            "### Re: what a Haiven admin can do\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#awsapproval]\n\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> Is this something a haiven admin can solve?\n\n",
+            "**A Haiven AWS admin can move the process forward.**\n\n",
+            "The practical options are listed below.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert!(response_materialized_in_exchange_response_cell(response, content));
+    }
+
     #[test]
     fn response_already_applied_tolerates_queue_prompt_echo_between_heading_and_body() {
         let captured_response = "### Re: do [#thing] — opus-4-8\n\nShipped the fix.\n";

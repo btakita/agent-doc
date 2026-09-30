@@ -950,6 +950,41 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         }
     }
 
+    // `#fpecapturedresponse`: a retained editor-owned write that already carries
+    // this response owns its delivery. The live document does not show it yet
+    // (the editor replica is missing or still converging), so the materialization
+    // check above reads "absent" — but replaying now writes a SECOND copy that
+    // lands beside the first once the retained write delivers, and the fresh
+    // write's queue step consumes whatever heads are current by then (fpe.md
+    // 2026-09-30: a duplicated answer that "answered" two later operator queue
+    // items). Wait for the retained intent's state edge instead of re-sending.
+    if force_disk_override != Some(true)
+        && let Some(retained) = agent_doc_document_realtime_io::pending_document_write(&canonical)
+        && response_replay::response_materialized_in_exchange_response_cell(
+            &response,
+            &retained.target_content,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "repair_replay_deferred_to_retained_write file={} intent_id={} target_hash={}",
+                canonical.display(),
+                retained.intent_id,
+                retained.target_hash,
+            ),
+        );
+        anyhow::bail!(
+            "{}: the captured response for {} is already carried by retained editor-owned write {} \
+             (target_hash={}); repair does not re-send it, the retained intent delivers it once \
+             the editor replica converges",
+            agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+            canonical.display(),
+            retained.intent_id,
+            retained.target_hash,
+        );
+    }
+
     replay_orphaned_response(
         effects.replay_write_effects,
         OrphanedResponseReplay {

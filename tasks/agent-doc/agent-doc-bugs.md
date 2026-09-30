@@ -17,7 +17,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -91,8 +91,9 @@ I updated both review items with these results and the open decisions.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- #coder7 is validated. I'm using agent-doc on my work machine using coder.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#coder7 is validated. I'm using agent-doc on my work machine using coder.~~
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 

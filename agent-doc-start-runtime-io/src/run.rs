@@ -79,6 +79,19 @@ fn reentry_may_record_resume_id(
     !preserved_child_survived || ledger_resume_id.map(str::trim) == Some(id.trim())
 }
 
+/// `#frontmattersessionflap`: whether this start launches a harness that needs a
+/// freshly minted conversation id.
+///
+/// A re-exec that adopts the surviving child launches nothing: the child keeps
+/// its own thread, so a minted id is never used by any process. Minting it
+/// anyway rewrote `resume.claude:` on every stale-binary re-exec
+/// (agent-doc-bugs.md 2026-09-29: 67619911 -> 6408b655 at 00:18:19, right after
+/// `supervisor_binary_stale_self_recycled via=execve_preserve_child`, with no
+/// transcript for either id), and each rewrite was post-commit drift.
+fn launch_mints_session_id(preserved_child_survived: bool) -> bool {
+    !preserved_child_survived
+}
+
 fn resolve_resume_request_from_sources(
     requested: Option<&agent_doc_harness::ResumeRequest>,
     frontmatter_resume: Option<&str>,
@@ -859,8 +872,9 @@ pub fn run_with_reap_policy_resume_and_harness(
     // `#resumecapture`: mint this launch's conversation id, hand it to the
     // harness, and record it on the document — so the NEXT restart can resume
     // precisely instead of starting fresh. No-op when already resuming.
-    if let Some(assigned) =
-        assign_and_record_session_id(&canonical, &harness, &mut initial_launch_args)
+    if launch_mints_session_id(preserved_child_survived)
+        && let Some(assigned) =
+            assign_and_record_session_id(&canonical, &harness, &mut initial_launch_args)
     {
         base_args = initial_launch_args.clone();
         active_resume_id.get_or_insert(assigned);
@@ -2742,6 +2756,18 @@ mod tests {
             panic!("frontmatter seed should resolve");
         };
         assert!(!reentry_may_record_resume_id(true, None, &id));
+        // `#frontmattersessionflap`: the adopted child launches nothing, so no id
+        // is minted (and none recorded) for it.
+        assert!(!launch_mints_session_id(true));
+        assert!(launch_mints_session_id(false));
+        let source = include_str!("run.rs");
+        let gate = source
+            .find(concat!("if launch_mints_session_id", "(preserved_child_survived)"))
+            .expect("the launch-args id mint must be gated on child survival");
+        let mint = source[gate..]
+            .find(concat!("assign_and_record_session_id", "(&canonical"))
+            .expect("the gated call must be the mint");
+        assert!(mint < 200, "the gate must guard the mint directly");
         assert!(!reentry_may_record_resume_id(
             true,
             Some("new-thread"),

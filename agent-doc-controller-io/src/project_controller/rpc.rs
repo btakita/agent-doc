@@ -9079,12 +9079,24 @@ fn handle_editor_route_rpc(
         ),
     );
 
-    let layout_invocation = editor_route_layout_invocation(&bootstrap.project_root, &layout_args)?;
+    let mut layout_invocation =
+        editor_route_layout_invocation(&bootstrap.project_root, &layout_args)?;
     let routed_document = canonical
         .canonicalize()
         .unwrap_or_else(|_| canonical.clone())
         .to_string_lossy()
         .to_string();
+    if let Some(retarget) = retarget_editor_route_focus(&mut layout_invocation, &routed_document) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_editor_route_focus_retargeted file={} editor_focus={} placement={}",
+                canonical.display(),
+                retarget.editor_focus.as_deref().unwrap_or("none"),
+                retarget.placement,
+            ),
+        );
+    }
     anyhow::ensure!(
         layout_invocation.focus.as_deref() == Some(routed_document.as_str()),
         "editor route refused before layout publication: focused document does not match routed document"
@@ -10004,6 +10016,80 @@ fn editor_route_layout_invocation(
         caller_kind: "editor_route".to_string(),
         actor_bindings: Vec::new(),
     })
+}
+
+/// How an editor route moved its layout focus onto the routed document.
+#[derive(Debug, PartialEq, Eq)]
+struct EditorRouteFocusRetarget {
+    editor_focus: Option<String>,
+    placement: &'static str,
+}
+
+/// Make the routed document the focus of an editor-route layout (`#routefocusretarget`).
+///
+/// The editor reports its *selected* editor as `--focus`, but Run Agent Doc can target a
+/// document that is not the selected one (a background tab, a split whose selection moved,
+/// a queued or re-run request). Measured 2026-09-30: routing `tasks/api.md` while `fpe.md`
+/// was selected refused with "focused document does not match routed document" and nothing
+/// ran. The route itself names the document the operator asked for, so it wins:
+/// - already focused: unchanged;
+/// - visible in some column: focus moves to it;
+/// - not visible: it takes the editor-focused document's slot, so the layout keeps its shape
+///   and the foreground pane is the routed one.
+///
+/// With neither a visible routed document nor a focused slot to take, nothing is changed
+/// and the caller's guard still refuses rather than guessing a column.
+fn retarget_editor_route_focus(
+    invocation: &mut ControllerTmuxLayoutSyncInvocation,
+    routed_document: &str,
+) -> Option<EditorRouteFocusRetarget> {
+    if invocation.focus.as_deref() == Some(routed_document) {
+        return None;
+    }
+    let editor_focus = invocation.focus.clone();
+    let column_documents = |column: &str| {
+        column
+            .split(',')
+            .map(str::trim)
+            .filter(|document| !document.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let routed_visible = invocation.columns.iter().any(|column| {
+        column_documents(column)
+            .iter()
+            .any(|document| document == routed_document)
+    });
+    if routed_visible {
+        invocation.focus = Some(routed_document.to_string());
+        return Some(EditorRouteFocusRetarget {
+            editor_focus,
+            placement: "visible",
+        });
+    }
+    let focused = editor_focus.as_deref()?;
+    for column in invocation.columns.iter_mut() {
+        let documents = column_documents(column);
+        if documents.iter().any(|document| document == focused) {
+            *column = documents
+                .into_iter()
+                .map(|document| {
+                    if document == focused {
+                        routed_document.to_string()
+                    } else {
+                        document
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            invocation.focus = Some(routed_document.to_string());
+            return Some(EditorRouteFocusRetarget {
+                editor_focus,
+                placement: "replaced_editor_focus",
+            });
+        }
+    }
+    None
 }
 
 fn controller_crdt_replica_data(
@@ -26772,6 +26858,57 @@ mod tests {
             "/repo/other.md".to_string(),
         ];
         assert!(editor_route_layout_invocation(Path::new("/"), &ambiguous_empty_slots).is_err());
+    }
+
+    #[test]
+    fn editor_route_retargets_focus_from_a_different_selected_document() {
+        // `#routefocusretarget`: the 2026-09-30 api.md refusal shape.
+        let args = vec![
+            "--col".to_string(),
+            "/repo/bugs.md".to_string(),
+            "--col".to_string(),
+            "/repo/fpe.md".to_string(),
+            "--focus".to_string(),
+            "/repo/fpe.md".to_string(),
+        ];
+        let mut invocation = editor_route_layout_invocation(Path::new("/"), &args).unwrap();
+        let retarget = retarget_editor_route_focus(&mut invocation, "/repo/api.md").unwrap();
+        assert_eq!(retarget.editor_focus.as_deref(), Some("/repo/fpe.md"));
+        assert_eq!(retarget.placement, "replaced_editor_focus");
+        assert_eq!(
+            invocation.columns,
+            vec!["/repo/bugs.md".to_string(), "/repo/api.md".to_string()]
+        );
+        assert_eq!(invocation.focus.as_deref(), Some("/repo/api.md"));
+
+        // A routed document that is already visible only moves the focus.
+        let mut visible = editor_route_layout_invocation(Path::new("/"), &args).unwrap();
+        let retarget = retarget_editor_route_focus(&mut visible, "/repo/bugs.md").unwrap();
+        assert_eq!(retarget.placement, "visible");
+        assert_eq!(
+            visible.columns,
+            vec!["/repo/bugs.md".to_string(), "/repo/fpe.md".to_string()]
+        );
+        assert_eq!(visible.focus.as_deref(), Some("/repo/bugs.md"));
+
+        // Already focused: untouched.
+        let mut focused = editor_route_layout_invocation(Path::new("/"), &args).unwrap();
+        assert_eq!(
+            retarget_editor_route_focus(&mut focused, "/repo/fpe.md"),
+            None
+        );
+    }
+
+    #[test]
+    fn editor_route_retarget_without_a_slot_leaves_the_guard_to_refuse() {
+        let args = vec!["--col".to_string(), "/repo/bugs.md".to_string()];
+        let mut invocation = editor_route_layout_invocation(Path::new("/"), &args).unwrap();
+        assert_eq!(
+            retarget_editor_route_focus(&mut invocation, "/repo/api.md"),
+            None
+        );
+        assert_eq!(invocation.focus, None);
+        assert_eq!(invocation.columns, vec!["/repo/bugs.md".to_string()]);
     }
 
     #[test]

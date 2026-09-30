@@ -133,10 +133,19 @@ object TurnStateBridge {
                     steering?.get("state")?.asString?.let(::steeringLabel)?.let { label ->
                         if (steeringCount > 1) "$label ($steeringCount edits)" else label
                     }
+                // `#turntasklabel`: which task is running, as one truncated line.
+                val task =
+                    root.get("task")
+                        ?.takeIf { it.isJsonPrimitive }
+                        ?.asString
+                        ?.let(::compactWhitespace)
+                        ?.takeIf(String::isNotEmpty)
                 val label =
-                    listOfNotNull(phaseLabel, steeringLabel, conflictLabel).joinToString(" · ")
+                    listOfNotNull(phaseLabel, task?.let(::truncateTaskLabel), steeringLabel, conflictLabel)
+                        .joinToString(" · ")
                 val tooltip =
                     listOfNotNull(
+                        task?.let { "Task: $it" },
                         steering?.get("verbatim")?.asString?.takeIf(String::isNotBlank),
                         conflictTooltip,
                     ).joinToString("\n\n").ifBlank { null }
@@ -229,6 +238,15 @@ object TurnStateBridge {
             .removePrefix("refusing ")
             .removePrefix("controller failed to ")
             .ifBlank { "unknown reason" }
+
+    internal const val TURN_TASK_LABEL_MAX_CHARS = 60
+
+    internal fun truncateTaskLabel(task: String, max: Int = TURN_TASK_LABEL_MAX_CHARS): String {
+        val codePoints = task.codePointCount(0, task.length)
+        if (codePoints <= max) return task
+        val end = task.offsetByCodePoints(0, max - 1)
+        return task.substring(0, end).trimEnd() + "…"
+    }
 
     private fun compactStatusText(text: String, maxLength: Int = 120): String {
         val compact = compactWhitespace(text)

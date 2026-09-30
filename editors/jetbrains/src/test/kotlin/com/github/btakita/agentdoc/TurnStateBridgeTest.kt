@@ -7,6 +7,34 @@ import org.junit.Test
 
 class TurnStateBridgeTest {
     @Test
+    fun `presentation shows the running task as one truncated line`() {
+        // `#turntasklabel`
+        val task = "do [#jbunloadsig]: " + "x".repeat(80)
+        val presentation = TurnStateBridge.presentation(
+            """{"state":"awaiting_response","turn_in_flight":true,""" +
+                """"transition_authority":"project_controller","task":"$task"}""",
+        )
+        val parts = presentation.label.split(" · ")
+        assertEquals("⟳ agent-doc: awaiting response", parts[0])
+        assertEquals(60, parts[1].codePointCount(0, parts[1].length))
+        assertTrue(parts[1].startsWith("do [#jbunloadsig]: x"))
+        assertTrue(parts[1].endsWith("…"))
+        assertEquals("Task: $task", presentation.tooltip)
+        assertTrue(presentation.showBanner)
+
+        val short = TurnStateBridge.presentation(
+            """{"state":"awaiting_response","turn_in_flight":true,""" +
+                """"transition_authority":"project_controller","task":"do [#a]"}""",
+        )
+        assertEquals("⟳ agent-doc: awaiting response · do [#a]", short.label)
+
+        val idle = TurnStateBridge.presentation(
+            """{"state":"idle","turn_in_flight":false,"transition_authority":"project_controller"}""",
+        )
+        assertEquals("", idle.label)
+    }
+
+    @Test
     fun `presentation projects realtime steering onto in-flight label`() {
         val presentation = TurnStateBridge.presentation(
             """

@@ -234,6 +234,31 @@ describe('sessionUi', () => {
 });
 
 describe('buildTurnStatePresentation (Project Controller turn-state coordination)', () => {
+    it('shows the running task as one truncated line with the full text in the tooltip', () => {
+        const task = 'do [#jbunloadsig]: ' + 'x'.repeat(80);
+        const presentation = buildTurnStatePresentation({
+            state: 'awaiting_response',
+            turn_in_flight: true,
+            transition_authority: 'project_controller',
+            task,
+        });
+        const shown = presentation.label.split(' · ')[1];
+        assert.strictEqual(presentation.label.split(' · ')[0], '⟳ agent-doc: awaiting response');
+        assert.strictEqual(Array.from(shown).length, 60);
+        assert.ok(shown.startsWith('do [#jbunloadsig]: x'));
+        assert.ok(shown.endsWith('…'));
+        assert.strictEqual(presentation.tooltip, `Task: ${task}`);
+        assert.strictEqual(
+            buildTurnStatePresentation({
+                state: 'awaiting_response',
+                turn_in_flight: true,
+                transition_authority: 'project_controller',
+                task: 'do [#a]',
+            }).label,
+            '⟳ agent-doc: awaiting response · do [#a]',
+        );
+    });
+
     it('is empty + ungated when idle or no projection', () => {
         assert.deepStrictEqual(buildTurnStatePresentation(null), {
             label: '',

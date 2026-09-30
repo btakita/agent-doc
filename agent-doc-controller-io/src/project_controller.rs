@@ -2934,17 +2934,20 @@ fn project_document_turn_authority(
         .phase
         .unwrap_or(agent_doc_turn::CyclePhase::Committed);
     let input_required = model_state == Some(ActorState::WaitingInput);
+    // `#turnindicatoridle`: the durable cycle phase is the authority for whether a turn
+    // is in flight. The pane actor's busy detection flaps while the agent works (long tool
+    // calls read as `ready`), and letting `ready` override an open phase showed an idle
+    // editor for the whole of a running turn (2026-09-30, agent-doc-bugs.md: one
+    // "awaiting response" frame, then idle for 20+ minutes with the cycle open). Only a
+    // closed pane retires an open phase; a busy pane with no open phase is a turn whose
+    // preflight has not landed yet.
     let phase = match model_state {
-        Some(ActorState::Busy | ActorState::Blocked | ActorState::WaitingInput)
-            if projected_phase.is_open() =>
-        {
-            projected_phase
-        }
+        Some(ActorState::Closed) => agent_doc_turn::CyclePhase::Committed,
+        _ if projected_phase.is_open() => projected_phase,
         Some(ActorState::Busy | ActorState::Blocked | ActorState::WaitingInput) => {
             agent_doc_turn::CyclePhase::PreflightStarted
         }
-        Some(_) => agent_doc_turn::CyclePhase::Committed,
-        None => projected_phase,
+        _ => projected_phase,
     };
     let conflicts = closeout
         .semantic_merge_conflict_advisories
@@ -2960,11 +2963,114 @@ fn project_document_turn_authority(
         .collect();
     let projection = agent_doc_turn::cp_projection::TurnProjection::from_phase(phase)
         .with_input_required(input_required)
-        .with_semantic_merge_conflicts(conflicts);
+        .with_semantic_merge_conflicts(conflicts)
+        .with_task(turn_task_from_checkpoint(closeout));
     if projection.turn_in_flight {
         projection.with_realtime_steering(closeout.realtime_steering.clone())
     } else {
         projection
+    }
+}
+
+/// The task the current cycle is working on (`#turntasklabel`): its first prompt target,
+/// else its turn/queue task id. Read from the cycle's own turn-intent checkpoint, so a
+/// checkpoint left by an older cycle never labels a newer one.
+fn turn_task_from_checkpoint(
+    closeout: &agent_doc_state_backbone::CloseoutProjection,
+) -> Option<String> {
+    let checkpoint = closeout.turn_intent_checkpoint.as_ref()?;
+    if closeout.cycle_id.as_deref() != Some(checkpoint.cycle_id.as_str()) {
+        return None;
+    }
+    let state: serde_json::Value = serde_json::from_str(&checkpoint.state_json).ok()?;
+    let non_empty = |value: &serde_json::Value| {
+        value
+            .as_str()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
+    state
+        .get("prompt_targets")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|targets| targets.iter().find_map(non_empty))
+        .or_else(|| state.get("turn_id").and_then(non_empty))
+        .or_else(|| state.get("queue_task_id").and_then(non_empty))
+}
+
+#[cfg(test)]
+mod turn_authority_tests {
+    use super::{project_document_turn_authority, turn_task_from_checkpoint};
+    use agent_doc_controller::actor::ActorState;
+    use agent_doc_state_backbone::{CloseoutProjection, TurnIntentCheckpointProjection};
+    use agent_doc_turn::CyclePhase;
+    use agent_doc_turn::cp_projection::TurnState;
+
+    fn open_cycle(state_json: &str) -> CloseoutProjection {
+        CloseoutProjection {
+            cycle_id: Some("cycle-1".into()),
+            phase: Some(CyclePhase::PreflightStarted),
+            turn_intent_checkpoint: Some(TurnIntentCheckpointProjection {
+                cycle_id: "cycle-1".into(),
+                checkpoint_sequence: 1,
+                state_sha256: String::new(),
+                state_json: state_json.into(),
+            }),
+            ..CloseoutProjection::default()
+        }
+    }
+
+    #[test]
+    fn an_open_cycle_stays_in_flight_while_the_pane_reads_ready() {
+        // `#turnindicatoridle`: the 2026-09-30 shape, an open cycle under a `ready` pane.
+        let closeout = open_cycle(r#"{"prompt_targets":["do [#jbunloadsig]"]}"#);
+        for state in [
+            None,
+            Some(ActorState::Ready),
+            Some(ActorState::Starting),
+            Some(ActorState::Busy),
+        ] {
+            let projection = project_document_turn_authority(state, &closeout);
+            assert!(
+                projection.turn_in_flight,
+                "{state:?} must not hide an open cycle"
+            );
+            assert_eq!(projection.state, TurnState::AwaitingResponse);
+            assert_eq!(projection.task.as_deref(), Some("do [#jbunloadsig]"));
+        }
+        let closed = project_document_turn_authority(Some(ActorState::Closed), &closeout);
+        assert!(
+            !closed.turn_in_flight,
+            "a closed pane retires the open phase"
+        );
+        assert_eq!(closed.task, None);
+    }
+
+    #[test]
+    fn a_busy_pane_before_preflight_is_in_flight_and_an_idle_one_is_not() {
+        let committed = CloseoutProjection {
+            phase: Some(CyclePhase::Committed),
+            ..CloseoutProjection::default()
+        };
+        assert!(project_document_turn_authority(Some(ActorState::Busy), &committed).turn_in_flight);
+        assert!(
+            !project_document_turn_authority(Some(ActorState::Ready), &committed).turn_in_flight
+        );
+        assert!(
+            !project_document_turn_authority(None, &CloseoutProjection::default()).turn_in_flight
+        );
+    }
+
+    #[test]
+    fn task_falls_back_to_the_turn_id_and_ignores_another_cycles_checkpoint() {
+        let by_id = open_cycle(r##"{"prompt_targets":["  "],"turn_id":"#abc"}"##);
+        assert_eq!(turn_task_from_checkpoint(&by_id).as_deref(), Some("#abc"));
+
+        let mut stale = open_cycle(r#"{"prompt_targets":["do [#old]"]}"#);
+        stale.cycle_id = Some("cycle-2".into());
+        assert_eq!(turn_task_from_checkpoint(&stale), None);
+
+        assert_eq!(turn_task_from_checkpoint(&open_cycle("not json")), None);
     }
 }
 
@@ -9298,6 +9404,36 @@ mod tests {
         assert_eq!(waiting.state, TurnState::Persisting);
         assert!(waiting.input_required);
 
+        actor_graph.set(BTreeMap::from([(
+            document_id.to_string(),
+            actor_record_for_test(
+                document_id,
+                "%42",
+                agent_doc_controller::actor::ActorState::Ready,
+            ),
+        )]));
+        // `#turnindicatoridle`: a `ready` pane does not retire the open durable phase.
+        assert_eq!(
+            authority_graph.projection(document_hash, document_id).state,
+            TurnState::Persisting
+        );
+
+        actor_graph.set(BTreeMap::from([(
+            document_id.to_string(),
+            actor_record_for_test(
+                document_id,
+                "%42",
+                agent_doc_controller::actor::ActorState::Closed,
+            ),
+        )]));
+        assert_eq!(
+            authority_graph.projection(document_hash, document_id).state,
+            TurnState::Idle
+        );
+
+        let mut committed = agent_doc_state_backbone::DocumentStateProjection::new(document_hash);
+        committed.closeout.phase = Some(agent_doc_turn::CyclePhase::Committed);
+        document_graphs.set_projection(document_hash, Some(committed));
         actor_graph.set(BTreeMap::from([(
             document_id.to_string(),
             actor_record_for_test(
@@ -16161,7 +16297,10 @@ agent:queue\n\
             unreachable!();
         };
         assert_eq!(
-            transition.target_content.matches("### Re: FPE capacity recommendation").count(),
+            transition
+                .target_content
+                .matches("### Re: FPE capacity recommendation")
+                .count(),
             1,
             "the applied target carries exactly one response"
         );

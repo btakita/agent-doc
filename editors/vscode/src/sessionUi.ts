@@ -52,6 +52,8 @@ export interface TurnProjection {
     state: 'idle' | 'awaiting_response' | 'persisting';
     turn_in_flight: boolean;
     transition_authority: string;
+    /** One-line label of the in-flight task (`#turntasklabel`). */
+    task?: string;
     semantic_merge_conflicts?: Array<{
         component: string;
         id: string;
@@ -122,12 +124,24 @@ export function buildTurnStatePresentation(
     const steering = steeringBase && steeringCount > 1
         ? `${steeringBase} (${steeringCount} edits)`
         : steeringBase;
-    const label = [phaseLabel, steering, conflictLabel].filter(Boolean).join(' · ');
+    // `#turntasklabel`: which task is running, as one truncated line; full text in the tooltip.
+    const task = projection.task?.replace(/\s+/g, ' ').trim() || null;
+    const label = [phaseLabel, task ? truncateTaskLabel(task) : null, steering, conflictLabel]
+        .filter(Boolean)
+        .join(' · ');
     const tooltip = [
+        task ? `Task: ${task}` : null,
         projection.realtime_steering?.verbatim?.trim(),
         conflictTooltip,
     ].filter(Boolean).join('\n\n') || undefined;
     return { label, guardPromptForwarding: true, ...(tooltip ? { tooltip } : {}) };
+}
+
+export const TURN_TASK_LABEL_MAX_CHARS = 60;
+
+export function truncateTaskLabel(task: string, max = TURN_TASK_LABEL_MAX_CHARS): string {
+    const chars = Array.from(task);
+    return chars.length <= max ? task : `${chars.slice(0, max - 1).join('').trimEnd()}…`;
 }
 
 function steeringLabel(state: TurnSteeringState | undefined): string | null {

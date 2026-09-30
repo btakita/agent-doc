@@ -118,8 +118,8 @@ class PluginLifecycleListenerTest {
         assertTrue(upgradeAction.contains("disposeProjectResources$"))
         assertTrue(
             "outgoing document listeners must stop before IntelliJ unloads their descriptor",
-            upgradeAction.indexOf("cleanupOutgoingGeneration(current)") <
-                upgradeAction.indexOf("unloadPlugin(current, updateOptions)"),
+            upgradeAction.indexOf("cleanupOutgoingGeneration(current)") in
+                0 until upgradeAction.indexOf("\"unloadPlugin\", current, updateOptions"),
         )
         assertTrue(upgradeAction.contains("documents="))
         assertTrue(upgradeAction.contains(".withDisable(false)"))

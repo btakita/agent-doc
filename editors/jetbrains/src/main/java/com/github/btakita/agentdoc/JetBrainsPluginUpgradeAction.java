@@ -5,6 +5,7 @@ import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.ide.plugins.IdeaPluginDescriptorImpl;
 import com.intellij.ide.plugins.PluginInstaller;
 import com.intellij.ide.plugins.PluginManagerCore;
+import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.extensions.PluginId;
@@ -14,7 +15,11 @@ import com.intellij.openapi.project.ProjectManager;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Freshly loaded implementation of one JetBrains plugin package replacement. */
@@ -65,7 +70,9 @@ public final class JetBrainsPluginUpgradeAction {
         }
 
         if (isLoaded(current)) {
-            String unloadBlocker = DynamicPlugins.INSTANCE.checkCanUnloadWithoutRestart(current);
+            Object unloadBlocker = invokeDescriptorMethod(
+                DynamicPlugins.class, DynamicPlugins.INSTANCE, "checkCanUnloadWithoutRestart", current
+            );
             if (unloadBlocker != null) {
                 throw new IllegalStateException("plugin cannot unload dynamically: " + unloadBlocker);
             }
@@ -74,7 +81,9 @@ public final class JetBrainsPluginUpgradeAction {
                 new DynamicPlugins.UnloadPluginOptions()
                     .withDisable(false)
                     .withUpdate(true);
-            if (!DynamicPlugins.INSTANCE.unloadPlugin(current, updateOptions)) {
+            if (!Boolean.TRUE.equals(invokeDescriptorMethod(
+                DynamicPlugins.class, DynamicPlugins.INSTANCE, "unloadPlugin", current, updateOptions
+            ))) {
                 throw new IllegalStateException(
                     "JetBrains refused to unload the current plugin generation after cleaning "
                         + cleanedProjects + " open project(s)"
@@ -198,6 +207,169 @@ public final class JetBrainsPluginUpgradeAction {
         String message = cause.getMessage();
         String text = message == null || message.isBlank() ? cause.getClass().getName() : message;
         return text.replace('\n', ' ').replace('\r', ' ').trim();
+    }
+
+    /**
+     * Call a {@code DynamicPlugins} method whose descriptor parameter type moves across platform
+     * builds (`#jbunloadsig`, GH #63 layer 2).
+     *
+     * A compile-time call binds the exact descriptor type of the build the plugin compiled
+     * against; IU-262.9437.185 no longer exposes {@code checkCanUnloadWithoutRestart
+     * (IdeaPluginDescriptorImpl)}, so the upgrade died with {@code NoSuchMethodError} before it
+     * unloaded anything. Resolve by name at runtime instead: a public instance overload whose
+     * first parameter accepts the live descriptor and whose remaining parameters accept
+     * {@code trailing}, else (with no trailing arguments) the Kotlin {@code name$default} bridge
+     * with every optional parameter defaulted. A miss names the build and every signature found,
+     * so the next platform move is diagnosable from the upgrade receipt alone.
+     */
+    static Object invokeDescriptorMethod(
+        Class<?> owner,
+        Object receiver,
+        String name,
+        Object descriptor,
+        Object... trailing
+    ) {
+        try {
+            Method direct = findDirectOverload(owner, name, descriptor, trailing);
+            if (direct != null) {
+                Object[] args = new Object[trailing.length + 1];
+                args[0] = descriptor;
+                System.arraycopy(trailing, 0, args, 1, trailing.length);
+                return direct.invoke(receiver, args);
+            }
+            Method bridge = trailing.length == 0 ? findDefaultBridge(owner, name, descriptor) : null;
+            if (bridge != null) {
+                return bridge.invoke(null, defaultBridgeArguments(bridge, receiver, descriptor));
+            }
+        } catch (IllegalAccessException failure) {
+            throw new IllegalStateException(
+                "DynamicPlugins." + name + " is not accessible: " + failure.getMessage(), failure
+            );
+        } catch (InvocationTargetException failure) {
+            Throwable cause = failure.getCause() == null ? failure : failure.getCause();
+            throw new IllegalStateException(
+                "DynamicPlugins." + name + " failed: " + singleLine(cause), cause
+            );
+        }
+        throw new IllegalStateException(
+            "DynamicPlugins." + name + " has no signature accepting "
+                + descriptor.getClass().getName() + " on build " + platformBuild()
+                + "; found: " + signaturesNamed(owner, name)
+        );
+    }
+
+    private static Method findDirectOverload(
+        Class<?> owner,
+        String name,
+        Object descriptor,
+        Object[] trailing
+    ) {
+        for (Method candidate : owner.getMethods()) {
+            Class<?>[] types = candidate.getParameterTypes();
+            if (!candidate.getName().equals(name)
+                || Modifier.isStatic(candidate.getModifiers())
+                || types.length != trailing.length + 1
+                || !types[0].isInstance(descriptor)) {
+                continue;
+            }
+            boolean accepts = true;
+            for (int index = 0; index < trailing.length; index++) {
+                if (trailing[index] != null && !types[index + 1].isInstance(trailing[index])) {
+                    accepts = false;
+                    break;
+                }
+            }
+            if (accepts) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /** Kotlin's bridge: {@code static name$default(Owner, P0, P1..Pn, int mask, Object)}. */
+    private static Method findDefaultBridge(Class<?> owner, String name, Object descriptor) {
+        for (Method candidate : owner.getDeclaredMethods()) {
+            Class<?>[] types = candidate.getParameterTypes();
+            if (candidate.getName().equals(name + "$default")
+                && Modifier.isStatic(candidate.getModifiers())
+                && types.length >= 4
+                && types[0] == owner
+                && types[1].isInstance(descriptor)
+                && types[types.length - 2] == int.class
+                && types[types.length - 1] == Object.class) {
+                candidate.setAccessible(true);
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static Object[] defaultBridgeArguments(Method bridge, Object receiver, Object descriptor) {
+        Class<?>[] types = bridge.getParameterTypes();
+        int declared = types.length - 3;
+        Object[] args = new Object[types.length];
+        args[0] = receiver;
+        args[1] = descriptor;
+        int mask = 0;
+        for (int index = 1; index < declared; index++) {
+            args[index + 1] = zeroValue(types[index + 1]);
+            mask |= 1 << index;
+        }
+        args[types.length - 2] = mask;
+        args[types.length - 1] = null;
+        return args;
+    }
+
+    private static Object zeroValue(Class<?> type) {
+        if (!type.isPrimitive()) {
+            return null;
+        }
+        if (type == boolean.class) {
+            return false;
+        }
+        if (type == char.class) {
+            return '\0';
+        }
+        if (type == long.class) {
+            return 0L;
+        }
+        if (type == float.class) {
+            return 0f;
+        }
+        if (type == double.class) {
+            return 0d;
+        }
+        if (type == byte.class) {
+            return (byte) 0;
+        }
+        if (type == short.class) {
+            return (short) 0;
+        }
+        return 0;
+    }
+
+    static String signaturesNamed(Class<?> owner, String name) {
+        List<String> found = new ArrayList<>();
+        for (Method candidate : owner.getDeclaredMethods()) {
+            if (candidate.getName().equals(name) || candidate.getName().equals(name + "$default")) {
+                StringBuilder signature = new StringBuilder(candidate.getName()).append('(');
+                Class<?>[] types = candidate.getParameterTypes();
+                for (int index = 0; index < types.length; index++) {
+                    signature.append(index == 0 ? "" : ",").append(types[index].getSimpleName());
+                }
+                found.add(signature.append(')').toString());
+            }
+        }
+        Collections.sort(found);
+        return found.isEmpty() ? "none" : String.join(" ", found);
+    }
+
+    private static String platformBuild() {
+        try {
+            return ApplicationInfo.getInstance().getBuild().asString();
+        } catch (Throwable unavailable) {
+            return "unknown";
+        }
     }
 
     static boolean sameInstallRoot(Path actual, Path expected) {

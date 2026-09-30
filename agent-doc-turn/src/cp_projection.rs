@@ -231,6 +231,32 @@ pub struct TurnProjection {
     /// editors observe it directly and never acknowledge it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub semantic_merge_conflicts: Vec<SemanticMergeConflictProjection>,
+    /// One-line label of the task this in-flight turn is working on
+    /// (`#turntasklabel`), e.g. `do [#jbunloadsig]`. Editors truncate it to fit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+}
+
+/// Longest task label the controller publishes; editors truncate further to fit.
+pub const TURN_TASK_LABEL_MAX_CHARS: usize = 200;
+
+/// Collapse a prompt into one bounded line for the turn indicator.
+pub fn turn_task_label(raw: &str) -> Option<String> {
+    let line = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    if line.chars().count() <= TURN_TASK_LABEL_MAX_CHARS {
+        return Some(line);
+    }
+    let mut truncated = line
+        .chars()
+        .take(TURN_TASK_LABEL_MAX_CHARS - 1)
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    truncated.push('…');
+    Some(truncated)
 }
 
 impl TurnProjection {
@@ -250,7 +276,18 @@ impl TurnProjection {
             transition_authority: TransitionAuthority::ProjectController,
             realtime_steering: TurnSteeringProjection::none(),
             semantic_merge_conflicts: Vec::new(),
+            task: None,
         }
+    }
+
+    /// Attach the in-flight task label; an idle projection never carries one.
+    pub fn with_task(mut self, task: Option<String>) -> Self {
+        self.task = if self.turn_in_flight {
+            task.as_deref().and_then(turn_task_label)
+        } else {
+            None
+        };
+        self
     }
 
     pub fn with_realtime_steering(mut self, steering: TurnSteeringProjection) -> Self {
@@ -324,6 +361,32 @@ mod tests {
                 "{phase:?} must guard against the double-append"
             );
         }
+    }
+
+    #[test]
+    fn task_label_is_one_bounded_line_and_only_in_flight() {
+        assert_eq!(
+            turn_task_label("  do [#a]:\n  fix   it  ").as_deref(),
+            Some("do [#a]: fix it")
+        );
+        assert_eq!(turn_task_label(" \n "), None);
+        let long = "x".repeat(TURN_TASK_LABEL_MAX_CHARS + 50);
+        let label = turn_task_label(&long).unwrap();
+        assert_eq!(label.chars().count(), TURN_TASK_LABEL_MAX_CHARS);
+        assert!(label.ends_with('…'));
+
+        let open = TurnProjection::from_phase(CyclePhase::PreflightStarted)
+            .with_task(Some("do [#a]".into()));
+        assert_eq!(open.task.as_deref(), Some("do [#a]"));
+        let idle =
+            TurnProjection::from_phase(CyclePhase::Committed).with_task(Some("do [#a]".into()));
+        assert_eq!(idle.task, None);
+        let json =
+            serde_json::to_string(&TurnProjection::from_phase(CyclePhase::Committed)).unwrap();
+        assert!(
+            !json.contains("\"task\""),
+            "absent task stays off the wire: {json}"
+        );
     }
 
     #[test]

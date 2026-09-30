@@ -11,6 +11,7 @@ publish = false
 name = "agent_doc_codex_stop_io"
 
 [dependencies]
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.421" }
 agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.421" }
 agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.35.421" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.421" }
@@ -41,7 +42,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
-agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.421" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.421" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.421" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.421" }

@@ -1673,6 +1673,23 @@ fn log_slow_stop_closeout_phase(file: &Path, phase: &str, started: &mut std::tim
     *started = std::time::Instant::now();
 }
 
+/// Explain a closeout whose repair could not finish, with the remedy derived from who
+/// (if anything) durably holds the write.
+fn closeout_repair_retained_note(
+    err: &anyhow::Error,
+    ownership: agent_doc_turn::write_ownership::RetainedWriteOwnership,
+    file: &Path,
+) -> String {
+    format!(
+        " The hook could not finish the required commit boundary: {}. {}.",
+        format!("{err:#}").replace('\n', " "),
+        agent_doc_turn::write_ownership::retained_write_remedy(
+            ownership,
+            &file.display().to_string()
+        ),
+    )
+}
+
 fn attempt_stop_closeout(
     file: &Path,
     state: &SessionState,
@@ -1785,13 +1802,32 @@ fn attempt_stop_closeout(
     }
     log_slow_stop_closeout_phase(file, "intent_capture", &mut phase_started);
 
-    let repair_outcome = agent_doc_repair_io::run_with_queue_completion_ids(
+    // `#stopretainedfailclosed`: a repair that cannot finish (typically an editor-owned
+    // write retained under a deferred intent while the controller hands off) is a still-open
+    // closeout whose owner the ownership predicate derives, not a hook failure. Propagating it here surfaced as "Stop hook failed closed" on fpe.md
+    // (2026-09-30) while the same intent settled and committed 29s later.
+    let repair_outcome = match agent_doc_repair_io::run_with_queue_completion_ids(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
         ),
         file,
         &queue_completion_ids,
-    )?;
+    ) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let ownership = agent_doc_capture_io::retained_write_ownership(file);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_stop_closeout_repair_retained verdict={:?} err={}",
+                    ownership.verdict(),
+                    format!("{err:#}").replace('\n', " "),
+                ),
+            );
+            note.push_str(&closeout_repair_retained_note(&err, ownership, file));
+            return Ok(StopCloseAttempt::StillOpen { note });
+        }
+    };
     log_slow_stop_closeout_phase(file, "intent_repair", &mut phase_started);
     if repair_outcome.replayed_response() {
         note.push_str(" The hook replayed the response through the normal write path.");
@@ -2871,6 +2907,21 @@ Done.\n\
     #[test]
     fn both_stop_capture_sites_consult_the_existing_capture_first() {
         let source = include_str!("lib.rs");
+        // `#stopretainedfailclosed`: a repair error after capture must become a still-open
+        // closeout, never a `?` that reaches the "failed closed" catch-all.
+        let closeout = source.split("fn attempt_stop_closeout(").nth(1).unwrap();
+        let closeout = &closeout[..closeout.find("\nfn ").unwrap()];
+        let repair = closeout
+            .split("run_with_queue_completion_ids(")
+            .nth(1)
+            .expect("closeout runs repair");
+        let call_end = repair.find("\n    )").expect("repair call closes");
+        assert!(
+            !repair[call_end..].starts_with("\n    )?"),
+            "attempt_stop_closeout must not propagate a repair error with `?`"
+        );
+        assert!(closeout.contains("closeout_repair_retained_note(&err, ownership, file)"));
+
         for anchor in ["fn attempt_stop_closeout(", "fn capture_assistant_text("] {
             let body = source.split(anchor).nth(1).unwrap();
             let body = &body[..body.find("\nfn ").unwrap()];
@@ -2883,6 +2934,37 @@ Done.\n\
                 "{anchor} must check the existing capture before save_pending"
             );
         }
+    }
+
+    #[test]
+    fn closeout_repair_failure_note_carries_error_and_derived_remedy() {
+        // `#stopretainedfailclosed`
+        let err = anyhow::anyhow!("editor projection pending").context(
+            "serialized_atomic_write: retained editor-owned write for /p/fpe.md before retrying \
+             live model reconciliation (intent_id=abc)",
+        );
+        let owned = agent_doc_turn::write_ownership::RetainedWriteOwnership {
+            cycle_open: true,
+            retained_capture: true,
+            write_applied: false,
+            retained_projection: true,
+            unanswered_edit: false,
+            capture_resume_unowned: false,
+        };
+        let note = closeout_repair_retained_note(&err, owned, Path::new("/p/fpe.md"));
+        assert!(note.contains("intent_id=abc"), "{note}");
+        assert!(
+            note.contains("editor projection pending"),
+            "full chain kept: {note}"
+        );
+        assert!(
+            note.contains(&agent_doc_turn::write_ownership::retained_write_remedy(
+                owned,
+                "/p/fpe.md"
+            )),
+            "{note}"
+        );
+        assert!(!note.contains('\n'), "one line: {note}");
     }
 
     #[test]

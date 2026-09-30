@@ -16,7 +16,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -457,6 +457,28 @@ What the issue asked for, and where it stands:
 Installed and pushed; `make check` passes (Rust 10225/0, JetBrains 602/0, VS Code 181/0).
 
 Last in the queue: `release + publish`.
+
+### Re: release + publish 0.35.423 — opus-5-5 · 2026-09-30T14:10-04:00
+
+> **Queue prompt:**
+>
+> release + publish
+
+**agent-doc 0.35.423 is released.** Release commit `e1c4bd611` is on main, and tag `v0.35.423` is pushed. `make check` passed (Rust 10225/0, and the editor-parity check accepts 0.35.423). `make release` exited 0, and `agent-doc --version` now reports 0.35.423 locally. The tag started the GitHub **Release** and **PyPI** workflows; both were still running at 14:10. No macOS files were uploaded.
+
+What's in it (all fixed today):
+- **fpe.md duplicate and lost queue items:** repair no longer writes a response again while an earlier write of it is still waiting for the editor. A replayed write can't mark newer queue items answered.
+- **Repeated queue lines:** an identical line queued twice runs twice.
+- **Merge sides:** the semantic merge had operator and agent swapped.
+- **Frontmatter edits aren't prompts (GH #66):** flipping `queue: stop` → `queue: go` no longer stops the drain it starts.
+- **Quieter logs (GH #65):** routine background CRDT timing logs at DEBUG instead of WARN.
+- **Restart advice (GH #67):** when the IDE refuses the no-restart upgrade, preflight now says to restart instead of reinstalling every cycle.
+- **`reliable-sync-status --check` (GH #62):** exits non-zero when tmux panes don't match the editor.
+- JetBrains plugin 0.2.453.
+
+Install on another project once the PyPI job is green: `uv tool install agent-doc==0.35.423` (or `pip install agent-doc==0.35.423`).
+
+The queue is now empty.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -466,15 +488,6 @@ Last in the queue: `release + publish`.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fpecapturedresponse]~~
-- re [#apimdrevert]: I don't recall which text was lost. Can we practically debug log these events or will this cause excessive debug logging?
-- ~~In the frontmatter, alias `presets` to `prompt_presets`.~~
-- ~~fix https://github.com/btakita/agent-doc/issues/62~~
-- ~~fix https://github.com/btakita/agent-doc/issues/65~~
-- ~~fix https://github.com/btakita/agent-doc/issues/66~~
-- ~~fix https://github.com/btakita/agent-doc/issues/67~~
-- ~~https://github.com/btakita/agent-doc/issues/62 is still open on github. Please close it if it is done. If it's not yet done, fix it then close the issue.~~
-- 🚧 release + publish
 <!-- /agent:queue -->
 
 

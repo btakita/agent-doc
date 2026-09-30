@@ -38,6 +38,23 @@ import javax.swing.SwingUtilities
 
 private const val CRDT_LISTENER_WARN_MS = 10L
 private const val CRDT_WORKER_WARN_MS = 100L
+
+/**
+ * GH #65: off-EDT CRDT work (replica workers, native calls, socket transport) routinely
+ * takes 100-400 ms and blocks nothing the user sees. Warning at the per-call 50/100 ms
+ * thresholds put every keystroke batch into `idea.log` at WARN (13% of the log, forcing
+ * rotation). Off the EDT only a genuine stall warns; the full per-delta timing stays at
+ * DEBUG (`Help > Diagnostic Tools > Debug Log Settings` → `#com.github.btakita.agentdoc`).
+ */
+internal const val CRDT_OFF_EDT_WARN_FLOOR_MS = 1_000L
+
+/**
+ * Whether a `[crdt-perf]` timing line is a warning. On the EDT the caller's threshold
+ * stands, because any UI-thread stall is user-visible; off the EDT it is raised to
+ * [CRDT_OFF_EDT_WARN_FLOOR_MS].
+ */
+internal fun crdtPerfWarns(elapsedMs: Long, warnMs: Long, onEdt: Boolean): Boolean =
+    elapsedMs >= if (onEdt) warnMs else maxOf(warnMs, CRDT_OFF_EDT_WARN_FLOOR_MS)
 private const val NATIVE_RELOAD_WORKER_TIMEOUT_MS = 5_000L
 
 internal fun nativeReloadRemainingWaitMillis(deadlineNanos: Long, nowNanos: Long): Long? {
@@ -3484,7 +3501,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val suffix = if (details.isBlank()) "" else " $details"
         val name = if (filePath == "(none)") filePath else File(filePath).name
         val message = "[crdt-perf] $operation file=$name elapsed_ms=$elapsedMs thread=${Thread.currentThread().name}$suffix"
-        if (elapsedMs >= warnMs) {
+        if (crdtPerfWarns(elapsedMs, warnMs, SwingUtilities.isEventDispatchThread())) {
             log.warn(message)
         } else {
             log.debug(message)

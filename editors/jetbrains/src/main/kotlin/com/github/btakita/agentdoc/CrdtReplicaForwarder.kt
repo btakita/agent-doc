@@ -515,7 +515,7 @@ class CrdtReplicaForwarder(
         val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos)
         val suffix = if (details.isBlank()) "" else " $details"
         val message = "[crdt-perf] $operation file=${File(filePath).name} elapsed_ms=$elapsedMs thread=${Thread.currentThread().name}$suffix"
-        if (elapsedMs >= warnMs) {
+        if (crdtPerfWarns(elapsedMs, warnMs, javax.swing.SwingUtilities.isEventDispatchThread())) {
             log.warn(message)
         } else {
             log.debug(message)

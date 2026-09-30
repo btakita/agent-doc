@@ -110,6 +110,37 @@ That document has since recovered on its own: its cycle is `committed`, and the 
 One earlier `make check` run failed `preflight_sweep_skips_foreign_owned_doc` while I was running other builds at the same time. It passed 3/3 alone and in the final full run, but it takes 17s even with nothing else running, so it is load-sensitive.
 
 **Cleanup for you:** my scratch cargo target dirs are about 62 GB: `~/.cache/agent-doc-relcheck-target` (57G) and `~/.cache/agent-doc-scfix-target` (5.1G), plus an empty `~/.cache/agent-doc-relinstall-target`. A hook blocked me from deleting them, so run `! rm -rf ~/.cache/agent-doc-{relcheck,scfix,relinstall}-target`.
+
+### Re: #gh-fix agent-doc#72 — reliable-sync-status reports placement without a surface observation — opus-5.5 · 2026-09-30T18:14-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/72
+
+**Fixed and closed.** The fix is btakita/agent-doc@264ed7df7, and I posted a summary on the issue.
+
+**What was wrong.** When the controller had no accepted editor-surface observation, `reliable-sync-status` reported the layout as fine even though it had nothing to check it against:
+- The layout effect builds its expectation from focus alone. So `converged_focus_only` looked like a success.
+- The divergence check printed a bare `not evaluated`, even though 6 of the 7 registered docs were parked in stash.
+
+**What changed (`src/reliable_sync_status_cmd.rs`).** It now builds a pure `UnobservedSurfaceGap` report whenever there is no accepted observation:
+1. The layout outcome gets the label `expectation synthesised from focus — …; N registered document(s) not in expectation`.
+2. The divergence section lists where each registered doc's pane actually is (agent-doc / stash / elsewhere / no pane), which can be read without the editor. It adds an `UNVERIFIED: N … parked in stash` line when any are stashed.
+3. For each live JetBrains plugin, it says whether that build includes the surface publisher. The publisher first shipped in **0.2.334** (8ecb433e3). The reporter's live `0.2.392` **includes it**, so the old plugin probably isn't the cause. The editor→controller path (their Windows client / Linux backend remote-dev setup) is the likelier suspect, and I said so on the issue.
+4. `--json` exposes the same data as `unobserved_surface_gap`.
+5. The report is advisory only: `--check` still fails only on findings measured against an accepted observation. Without one, there's no way to tell whether a stashed doc should be visible.
+
+**Spec.** Added a new `## reliable-sync-status` section to `specs/07-session-tmux-commands.md`.
+
+**Verification.**
+- 5 new regression tests in the module, including the issue's exact shape: 7 registered, 1 in agent-doc, 6 in stash, no observation, plugin 0.2.392.
+- `make check` passed (exit 0; 10254/10254 tests, plus TLA non-vacuity checks).
+- `make install` passed.
+- Committed only my 2 files. `agent-doc-document-realtime-io/src/lib.rs` has uncommitted changes from another session; I left it alone.
+- Pushed. CI was still running when I checked.
+- Superproject pointer committed as c9823013bd.
+
+**Not tested live.** My local editor is publishing its surface right now, so the no-observation output was only checked by the unit tests. The stash-growth note in the issue comes from project config (`stash_session_ttl_prune_enabled = false`), and I left it unchanged.
+
+**Closeout note.** The first `respond` attempt failed before writing anything: `sync_pending recovery exhausted and disk read authority is refused`. That was the known strand from reloading the cdylib during `make install`. It cleared on its own at 22:14:47 (`crdt_relay_current diverged=false`), so this second attempt is the only write.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

@@ -117,10 +117,20 @@ pub fn semantic_diff_summary(
             }
         })
         .collect::<Vec<_>>();
+    // GH #66: credit a prompt-bearing change to the component it actually lives
+    // in. A frontmatter-only edit used to add `exchange` with no matching
+    // component change, and the suppression guidance then called it an exchange
+    // prompt.
+    let frontmatter = crate::frontmatter_line_set(current);
     let prompt_changes = prompt_bearing_changes
         .iter()
         .filter_map(|change| {
-            changed_components.insert("exchange".to_string());
+            let component = if crate::change_is_frontmatter_only(&change.text, &frontmatter) {
+                "frontmatter"
+            } else {
+                "exchange"
+            };
+            changed_components.insert(component.to_string());
             semantic_preview(&change.text).map(|text_preview| SemanticPromptChange {
                 kind: change.kind.clone(),
                 text_preview,
@@ -357,6 +367,28 @@ pub fn semantic_preview(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frontmatter_only_prompt_change_is_credited_to_frontmatter_not_exchange() {
+        // GH #66
+        let before = "---\nqueue: stop\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let current = "---\nqueue: go\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let changes = vec![PromptBearingChange {
+            kind: crate::PromptBearingChangeKind::ContentEdit,
+            text: "queue: go".to_string(),
+        }];
+        let summary = semantic_diff_summary(before, current, &changes).unwrap();
+        assert!(
+            !summary.changed_components.contains(&"exchange".to_string()),
+            "{:?}",
+            summary.changed_components
+        );
+        assert!(
+            summary
+                .changed_components
+                .contains(&"frontmatter".to_string())
+        );
+    }
 
     #[test]
     fn semantic_diff_summary_reports_components_nodes_and_prompt_previews() {

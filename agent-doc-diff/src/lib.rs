@@ -1212,7 +1212,56 @@ fn contextual_prompt_bearing_changes_from_diff(
             }
         }
     }
+    // GH #66: frontmatter is configuration and binary bookkeeping, never steering.
+    // A hand-listed key filter (`queue_active:`, `resume:`, ...) kept missing
+    // spellings: the operator's `queue: stop` -> `queue: go` flip that STARTS a
+    // drain, plus a `prompt_presets:` map in the same edit, read as a fresh prompt
+    // and suppressed that very drain. Drop any change that lives entirely inside
+    // the current document's frontmatter block, whatever its keys.
+    let frontmatter = frontmatter_line_set(current_doc);
+    if !frontmatter.is_empty() {
+        unstarted.retain(|change| !change_is_frontmatter_only(&change.text, &frontmatter));
+    }
     unstarted
+}
+
+/// Trimmed, non-empty lines of `doc`'s leading `---` frontmatter block (fences
+/// excluded); empty when the document has no frontmatter.
+pub(crate) fn frontmatter_line_set(doc: &str) -> std::collections::HashSet<String> {
+    let mut lines = doc.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return std::collections::HashSet::new();
+    }
+    let mut block = std::collections::HashSet::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            return block;
+        }
+        if !trimmed.is_empty() {
+            block.insert(trimmed.to_string());
+        }
+    }
+    // An unterminated block is not frontmatter.
+    std::collections::HashSet::new()
+}
+
+pub(crate) fn change_is_frontmatter_only(
+    text: &str,
+    frontmatter: &std::collections::HashSet<String>,
+) -> bool {
+    let mut saw_line = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed == "---" {
+            continue;
+        }
+        saw_line = true;
+        if !frontmatter.contains(trimmed) {
+            return false;
+        }
+    }
+    saw_line
 }
 
 fn suppress_answered_prompt_runs(changes: Vec<PromptBearingChange>) -> Vec<PromptBearingChange> {
@@ -6114,6 +6163,52 @@ Done.\n\
             PromptBearingChangeKind::ContentEdit,
             "<!-- agent:queue -->"
         )));
+    }
+
+    #[test]
+    fn frontmatter_queue_go_flip_and_config_keys_are_never_user_intent() {
+        // GH #66: the `queue: stop` -> `queue: go` flip that starts a drain, plus an
+        // operator `prompt_presets:` map in the same edit, must not preempt that drain.
+        let before = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\nqueue: stop\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let after = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n",
+            "prompt_presets:\n  '#gh-issue': 'File a gh issue to github.com/btakita/agent-doc'\n",
+            "queue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = unified_diff_from_contents(before, after).expect("frontmatter changed");
+        let changes = classify_contextual_prompt_bearing_changes(&diff, after);
+        assert!(
+            changes.is_empty(),
+            "frontmatter edit read as user intent: {changes:?}"
+        );
+
+        // A real exchange prompt in the same edit still counts.
+        let with_prompt = after.replace(
+            "Done.\n<!-- /agent:exchange -->",
+            "Done.\n\nPlease also fix the login page.\n<!-- /agent:exchange -->",
+        );
+        let diff = unified_diff_from_contents(before, &with_prompt).expect("changed");
+        let changes = classify_contextual_prompt_bearing_changes(&diff, &with_prompt);
+        assert!(
+            changes
+                .iter()
+                .any(|change| change.text.contains("fix the login page")),
+            "{changes:?}"
+        );
+        assert!(
+            changes
+                .iter()
+                .all(|change| !change.text.contains("queue: go")),
+            "{changes:?}"
+        );
     }
 
     #[test]

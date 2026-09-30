@@ -457,8 +457,14 @@ case_captured_splice() {
   # Time on THIS document's capture receipt, not a sleep and not any historical
   # line: no fresh receipt means the reporter chain never ran and the rest of the
   # recipe would prove nothing.
-  wait_for_marker "editor_op_capture_proof" "${base%.md}" \
+  # --dry-run types nothing, so a fresh receipt can never arrive: name the wait
+  # instead of dying on it, so the dry run prints the whole recipe offline.
+  if [[ "$DRY_RUN" == 1 ]]; then
+    log "[dry-run] would wait for a fresh editor_op_capture_proof for ${base%.md}"
+  else
+    wait_for_marker "editor_op_capture_proof" "${base%.md}" \
     || die "no fresh editor_op_capture_proof for ${base%.md} within ${TIMEOUT}s — the keystrokes did not reach the editor, or the epoch was refused (agent-doc verify-op-capture $rel names which)"
+  fi
 
   if [[ "$DRY_RUN" == 1 ]]; then
     log "[dry-run] would advance the canonical response via: agent-doc write --commit $rel (in pane ${SCRATCH_OWNER_PANE:-self})"

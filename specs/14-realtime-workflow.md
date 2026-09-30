@@ -991,6 +991,8 @@ violated and each of which silently produced a recipe that could not pass:
   canonical advance carries a real response patch (empty stdin is refused) and
   runs in the scratch document's owning pane when another idle shell pane owns
   it; the harness refuses before typing when the owner is not an idle shell.
+  `--dry-run` types nothing, so no fresh receipt can arrive: it names each wait
+  instead of performing it and prints the whole recipe offline.
 
 Document-scoped editor actions must not create cross-document authority edges.
 In particular, JetBrains Compact Exchange saves only its selected document

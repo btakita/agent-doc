@@ -3718,6 +3718,48 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
     ))
 }
 
+/// `#supdrainlive` (GH #73) — IO wrapper: can the document's supervisor receive a
+/// `[focused-cycle]` drain hand-off right now?
+///
+/// Unlike the read-only stale warnings above this is deliberately FAIL-CLOSED: it
+/// gates a hand-off that tells the agent to end its turn, so a missing project root,
+/// binding, lease, pid, or unreadable binary identity reads as "no live supervisor",
+/// never as readiness.
+pub fn supervisor_drain_readiness_for_doc(file: &Path) -> status::SupervisorDrainReadiness {
+    let lease = agent_doc_project_root_io::project_root_containing(file).and_then(|root| {
+        let record = durable_actor_binding(&root, file).ok().flatten()?;
+        let conn = open_state_db(&root).ok()?;
+        load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)
+            .ok()
+            .flatten()
+    });
+    let Some(lease) = lease else {
+        return status::SupervisorDrainReadiness::NoLiveSupervisor;
+    };
+    let alive = lease.supervisor_pid.is_some_and(process_is_alive);
+    let binary_stale = lease.supervisor_pid.filter(|_| alive).is_some_and(|pid| {
+        match current_binary_identity()
+            .ok()
+            .and_then(|current| agent_doc_fs::inode_of_path(&current.path))
+        {
+            Some(installed_inode) => agent_doc_supervisor::config::host_supervisor_is_stale(
+                agent_doc_fs::running_exe_inode_for_pid(pid),
+                installed_inode,
+            ),
+            // No installed identity to compare against: cannot vouch for it.
+            None => true,
+        }
+    });
+    status::classify_supervisor_drain_readiness(
+        lease.supervisor_pid,
+        alive,
+        lease.last_heartbeat,
+        timestamp_secs(),
+        crate::project_controller::SUPERVISOR_LEASE_GUARD_STALE_AFTER,
+        binary_stale,
+    )
+}
+
 /// `#fccsupwarn`/`#fccsupwarn2` — IO wrapper: resolve the live processes hosting `file`
 /// and return a stale-binary warning if EITHER the lazy controller OR the route-owned
 /// host supervisor is serving a stale build. The controller check (`#fccsupwarn`) covers

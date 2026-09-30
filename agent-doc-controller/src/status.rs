@@ -757,6 +757,73 @@ pub fn supervisor_lease_is_fresh_and_alive(
     fresh_heartbeat && supervisor_process_alive
 }
 
+/// `#supdrainlive` (GH #73) — whether the document's supervisor can actually
+/// receive a `deferred_for_supervisor_drain` hand-off.
+///
+/// A hand-off is only valid if the receiver can receive. The `[focused-cycle]`
+/// yield used to be emitted from a property of the QUEUE alone, so an agent was
+/// told "NOT an operator stall" while the supervisor meant to drain it was dead,
+/// silent, or mapping a stale binary whose recycle had been refused — and the
+/// queue sat until a human re-triggered it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorDrainReadiness {
+    /// A live supervisor with a fresh heartbeat on the installed binary.
+    Ready { supervisor_pid: u32 },
+    /// No lease row, no recorded pid, or the recorded pid is dead.
+    NoLiveSupervisor,
+    /// The supervisor process is alive but its lease heartbeat is stale.
+    HeartbeatStale { supervisor_pid: u32 },
+    /// The supervisor maps a stale agent-doc binary; it must recycle before it
+    /// can be trusted to drain, and that recycle is not guaranteed to happen.
+    StaleBinary { supervisor_pid: u32 },
+}
+
+impl SupervisorDrainReadiness {
+    pub const fn is_ready(self) -> bool {
+        matches!(self, Self::Ready { .. })
+    }
+
+    pub const fn reason(self) -> &'static str {
+        match self {
+            Self::Ready { .. } => "ready",
+            Self::NoLiveSupervisor => "no_live_supervisor",
+            Self::HeartbeatStale { .. } => "supervisor_heartbeat_stale",
+            Self::StaleBinary { .. } => "supervisor_binary_stale",
+        }
+    }
+
+    pub const fn supervisor_pid(self) -> Option<u32> {
+        match self {
+            Self::Ready { supervisor_pid }
+            | Self::HeartbeatStale { supervisor_pid }
+            | Self::StaleBinary { supervisor_pid } => Some(supervisor_pid),
+            Self::NoLiveSupervisor => None,
+        }
+    }
+}
+
+/// Classify supervisor drain readiness from already-observed facts. Fail-closed:
+/// missing evidence is never read as readiness.
+pub fn classify_supervisor_drain_readiness(
+    supervisor_pid: Option<u32>,
+    supervisor_process_alive: bool,
+    last_heartbeat: Option<u64>,
+    now: u64,
+    stale_after: Duration,
+    binary_stale: bool,
+) -> SupervisorDrainReadiness {
+    let Some(supervisor_pid) = supervisor_pid.filter(|_| supervisor_process_alive) else {
+        return SupervisorDrainReadiness::NoLiveSupervisor;
+    };
+    if binary_stale {
+        return SupervisorDrainReadiness::StaleBinary { supervisor_pid };
+    }
+    if !supervisor_lease_is_fresh_and_alive(last_heartbeat, true, now, stale_after) {
+        return SupervisorDrainReadiness::HeartbeatStale { supervisor_pid };
+    }
+    SupervisorDrainReadiness::Ready { supervisor_pid }
+}
+
 pub const fn supervisor_lease_pid_is_foreign(supervisor_pid: Option<u32>, self_pid: u32) -> bool {
     match supervisor_pid {
         Some(pid) => pid != self_pid,
@@ -1049,6 +1116,50 @@ impl Error for ParseControllerHandoffStateError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supervisor_drain_readiness_fails_closed_on_every_missing_fact() {
+        let stale_after = Duration::from_secs(60);
+        let classify = |pid, alive, heartbeat, binary_stale| {
+            classify_supervisor_drain_readiness(
+                pid,
+                alive,
+                heartbeat,
+                1_000,
+                stale_after,
+                binary_stale,
+            )
+        };
+        assert_eq!(
+            classify(Some(7), true, Some(990), false),
+            SupervisorDrainReadiness::Ready { supervisor_pid: 7 }
+        );
+        assert_eq!(
+            classify(None, true, Some(990), false),
+            SupervisorDrainReadiness::NoLiveSupervisor
+        );
+        assert_eq!(
+            classify(Some(7), false, Some(990), false),
+            SupervisorDrainReadiness::NoLiveSupervisor
+        );
+        assert_eq!(
+            classify(Some(7), true, None, false),
+            SupervisorDrainReadiness::HeartbeatStale { supervisor_pid: 7 }
+        );
+        assert_eq!(
+            classify(Some(7), true, Some(100), false),
+            SupervisorDrainReadiness::HeartbeatStale { supervisor_pid: 7 }
+        );
+        // GH #73: an 18h-old supervisor mapping a stale binary is never a receiver,
+        // even with a fresh heartbeat.
+        let stale = classify(Some(7), true, Some(990), true);
+        assert_eq!(
+            stale,
+            SupervisorDrainReadiness::StaleBinary { supervisor_pid: 7 }
+        );
+        assert!(!stale.is_ready());
+        assert_eq!(stale.reason(), "supervisor_binary_stale");
+    }
 
     fn identity(version: &str, len: u64) -> ControllerBinaryIdentity {
         ControllerBinaryIdentity {

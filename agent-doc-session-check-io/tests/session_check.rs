@@ -35,18 +35,10 @@ fn continuation_guidance_for(file: &Path) -> String {
 }
 
 #[cfg(test)]
-fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "session_check_supervisor_drain_handoff file={} head_bytes={} head_sha256={} {}",
-            file.display(),
-            head.len(),
-            agent_doc_hash::content_hash(head),
-            outcome_fields
-        ),
-    );
-}
+use agent_doc_session_check_io::{
+    log_supervisor_drain_handoff, supervisor_drain_outcome_kind,
+    supervisor_drain_unavailable_message,
+};
 
 #[cfg(test)]
 mod tests {
@@ -7583,14 +7575,66 @@ Body\n\
         .unwrap()
         .log_fields();
         let head = "do [#focus]";
-        log_supervisor_drain_handoff(&doc, head, &outcome_fields);
+        log_supervisor_drain_handoff(
+            &doc,
+            head,
+            agent_doc_controller::status::SupervisorDrainReadiness::Ready { supervisor_pid: 42 },
+            &outcome_fields,
+        );
 
         let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("session_check_supervisor_drain_handoff"));
         assert!(ops_log.contains("ui_outcome=deferred_for_supervisor_drain"));
         assert!(ops_log.contains("next_action=yield_to_supervisor_clear_and_continue"));
+        assert!(ops_log.contains("supervisor_drain_readiness=ready supervisor_pid=42"));
         assert!(ops_log.contains(&format!("head_bytes={}", head.len())));
         assert!(ops_log.contains("head_sha256="));
+    }
+
+    /// `#supdrainlive` (GH #73): a hand-off is only valid if the receiver can
+    /// receive. Every non-ready supervisor must turn the yield into an
+    /// operator-class outcome that says STALLED — never the "NOT an operator
+    /// stall" yield that stranded the queue behind an 18h-stale supervisor.
+    #[test]
+    fn supervisor_drain_handoff_refuses_yield_when_supervisor_cannot_drain() {
+        use agent_doc_controller::status::SupervisorDrainReadiness as R;
+        use agent_doc_flow::outcome::{BinaryOutcomeClass, UserFacingOutcome, UserFacingOutcomeKind};
+
+        assert_eq!(
+            supervisor_drain_outcome_kind(R::Ready { supervisor_pid: 1 }),
+            UserFacingOutcomeKind::DeferredForSupervisorDrain
+        );
+        let doc = Path::new("tasks/doc.md");
+        for readiness in [
+            R::NoLiveSupervisor,
+            R::HeartbeatStale { supervisor_pid: 1872747 },
+            R::StaleBinary { supervisor_pid: 1872747 },
+        ] {
+            let kind = supervisor_drain_outcome_kind(readiness);
+            assert_eq!(kind, UserFacingOutcomeKind::SupervisorDrainUnavailable);
+            let outcome = UserFacingOutcome::new(kind).unwrap();
+            assert_eq!(outcome.class, BinaryOutcomeClass::Operator);
+            let fields = outcome.log_fields();
+            assert!(fields.contains("ui_outcome=supervisor_drain_unavailable"), "{fields}");
+            assert!(!fields.contains("yield_to_supervisor"), "{fields}");
+            let message = supervisor_drain_unavailable_message(doc, readiness);
+            assert!(message.contains("STALLED"), "{message}");
+            assert!(!message.contains("NOT an operator stall"), "{message}");
+            assert!(message.contains(readiness.reason()), "{message}");
+        }
+    }
+
+    /// `#supdrainlive`: with no controller state at all the readiness probe must
+    /// fail CLOSED — absent evidence is never read as a live receiver.
+    #[test]
+    fn supervisor_drain_readiness_fails_closed_without_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = tmp.path().join("doc.md");
+        fs::write(&doc, "doc\n").unwrap();
+        assert_eq!(
+            agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc(&doc),
+            agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor
+        );
     }
 
     #[test]

@@ -541,14 +541,50 @@ fn log_three_way_merge_steering_observation(file: &Path) {
     );
 }
 
-fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
+pub fn supervisor_drain_outcome_kind(
+    readiness: agent_doc_controller::status::SupervisorDrainReadiness,
+) -> agent_doc_flow::outcome::UserFacingOutcomeKind {
+    if readiness.is_ready() {
+        agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain
+    } else {
+        agent_doc_flow::outcome::UserFacingOutcomeKind::SupervisorDrainUnavailable
+    }
+}
+
+pub fn supervisor_drain_unavailable_message(
+    file: &Path,
+    readiness: agent_doc_controller::status::SupervisorDrainReadiness,
+) -> String {
+    let who = match readiness.supervisor_pid() {
+        Some(pid) => format!("the supervisor (pid {pid})"),
+        None => "no live supervisor".to_string(),
+    };
+    format!(
+        "[session-check] queue STALLED — needs the operator: a [focused-cycle] head remains for the supervisor clear-and-continue path, but {who} cannot drain it (supervisor_drain_readiness={}). Yielding would leave it undrained. Refresh the supervisor (`agent-doc admin recycle`, or `agent-doc session restart-supervisor {}`) or re-trigger `agent-doc {}` in a fresh session ({}; #supdrainlive).",
+        readiness.reason(),
+        file.display(),
+        file.display(),
+        file.display(),
+    )
+}
+
+pub fn log_supervisor_drain_handoff(
+    file: &Path,
+    head: &str,
+    readiness: agent_doc_controller::status::SupervisorDrainReadiness,
+    outcome_fields: &str,
+) {
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "session_check_supervisor_drain_handoff file={} head_bytes={} head_sha256={} {}",
+            "session_check_supervisor_drain_handoff file={} head_bytes={} head_sha256={} supervisor_drain_readiness={} supervisor_pid={} {}",
             file.display(),
             head.len(),
             agent_doc_hash::content_hash(head),
+            readiness.reason(),
+            readiness
+                .supervisor_pid()
+                .map_or_else(|| "none".to_string(), |pid| pid.to_string()),
             outcome_fields
         ),
     );
@@ -1590,22 +1626,42 @@ fn run_with_options_inner(
                         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
                     )
                 });
-                if let Some(supervisor_head) = supervisor_head {
-                    let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
-                        agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForSupervisorDrain,
-                    )
-                    .expect("static deferred supervisor-drain outcome is valid")
-                    .log_fields();
-                    log_supervisor_drain_handoff(file, &supervisor_head, &outcome_fields);
+                // #supdrainlive (GH #73): a hand-off is only valid if the receiver
+                // can receive. Gate the yield on supervisor liveness; when it cannot
+                // drain, admit a human is needed instead of asserting "NOT a stall".
+                let supervisor_drain = supervisor_head.map(|head| {
+                    let readiness =
+                        agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc(
+                            file,
+                        );
+                    (head, readiness)
+                });
+                if let Some((supervisor_head, readiness)) = supervisor_drain {
+                    let kind = supervisor_drain_outcome_kind(readiness);
+                    let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(kind)
+                        .expect("static supervisor-drain outcome is valid")
+                        .log_fields();
+                    log_supervisor_drain_handoff(file, &supervisor_head, readiness, &outcome_fields);
                     println!(
-                        "queue_continuation_required=false queue_deferred_heads={} queue_stale_noise_lines={} {}",
-                        deferred, noise, outcome_fields
-                    );
-                    eprintln!(
-                        "[session-check] queue continues via supervisor: a [focused-cycle] head remains that the CP/supervisor clear-and-continue path drains (force /clear + re-dispatch to a fresh session). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
-                        file.display(),
+                        "queue_continuation_required=false queue_deferred_heads={} queue_stale_noise_lines={} supervisor_drain_readiness={} {}",
+                        deferred,
+                        noise,
+                        readiness.reason(),
                         outcome_fields
                     );
+                    if readiness.is_ready() {
+                        eprintln!(
+                            "[session-check] queue continues via supervisor: a [focused-cycle] head remains that the CP/supervisor clear-and-continue path drains (force /clear + re-dispatch to a fresh session). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
+                            file.display(),
+                            outcome_fields
+                        );
+                    } else {
+                        eprintln!(
+                            "{} {}",
+                            supervisor_drain_unavailable_message(file, readiness),
+                            outcome_fields
+                        );
+                    }
                 } else if deferred > 0 || noise > 0 {
                     let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(
                         agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,

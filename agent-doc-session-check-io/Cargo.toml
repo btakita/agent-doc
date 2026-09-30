@@ -18,6 +18,7 @@ test-support = ["agent-doc-document-realtime-io/test-support"]
 agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.35.426" }
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.426" }
 agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.35.426" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.426" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.426" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.426" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.426" }

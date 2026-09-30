@@ -63,6 +63,120 @@ pub trait QueueConsumeWriteEffects {
             agent_doc_queue::queue_consume::apply_structural_ops_to_content(source_content, ops)?;
         self.converge_document_or_disk(file, &target_content, source_content, reason)
     }
+
+    /// `#qconsumedeferwedge`: after a write reported a retained delivery
+    /// deferral, wait (bounded) for editor delivery to converge and for the
+    /// authority to carry `target_content`'s queue. `Ok(true)` only on that
+    /// observed proof; anything unproven is `Ok(false)` and the caller keeps
+    /// the original error.
+    fn await_retained_queue_write_landed(&self, file: &Path, target_content: &str) -> Result<bool> {
+        let started = std::time::Instant::now();
+        let deadline = started + RETAINED_QUEUE_WRITE_CONVERGENCE_WAIT;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            // `Ok(None)`: no relay hub hosts the document, so no delivery is
+            // left to await and the landing check is the whole proof.
+            let converged =
+                match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                    file,
+                    remaining.min(RETAINED_QUEUE_WRITE_CONVERGENCE_SLICE),
+                ) {
+                    Ok(Some(status)) => status.converged,
+                    Ok(None) => true,
+                    Err(_) => false,
+                };
+            if converged {
+                match self.current_document_content(file, "queue_write_deferral_landing") {
+                    Ok(current) if queue_write_landed(target_content, &current) => {
+                        return Ok(true);
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        eprintln!(
+                            "[queue] warning: could not read the authority while awaiting a \
+                             retained queue write for {}: {err:#}",
+                            file.display()
+                        );
+                    }
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(false);
+            }
+            if converged {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+const RETAINED_QUEUE_WRITE_CONVERGENCE_WAIT: std::time::Duration =
+    std::time::Duration::from_secs(30);
+const RETAINED_QUEUE_WRITE_CONVERGENCE_SLICE: std::time::Duration =
+    std::time::Duration::from_secs(2);
+
+/// The queue this write produced is what the authority now holds. Compares the
+/// `agent:queue` body and the frontmatter queue control, so a concurrent
+/// operator edit elsewhere in the document does not void the proof.
+fn queue_write_landed(target_content: &str, current: &str) -> bool {
+    if target_content == current {
+        return true;
+    }
+    let queue_body = |content: &str| -> Option<String> {
+        let components = agent_doc_element::element::parse(content).ok()?;
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")?;
+        Some(queue.content(content).to_string())
+    };
+    let queue_control = |content: &str| {
+        frontmatter::parse(content)
+            .ok()
+            .map(|(fm, _)| (fm.queue, fm.queue_active))
+    };
+    matches!((queue_body(target_content), queue_body(current)), (Some(a), Some(b)) if a == b)
+        && queue_control(target_content) == queue_control(current)
+}
+
+/// Run a queue write; a retained delivery deferral is not a failure when the
+/// write provably lands (`#qconsumedeferwedge`).
+///
+/// Live 2026-09-30 on agent-doc-bugs.md `cycle-1790733856564`: the closeout's
+/// free-text head consume was deferred (`delivery_converged=false`), the error
+/// aborted finalize before the snapshot sync and the `AfterMutation` proof, and
+/// delivery converged one second later. Nothing owned the commit, and the
+/// orphaned queue edit (struck heads + drained control) was then refused as an
+/// unanswered document edit. The closeout is the only owner of this write, so
+/// it waits for the landing like the tracked-work closeout does
+/// (`#retaineddeferwedge`).
+fn converge_awaiting_retained_delivery(
+    effects: &dyn QueueConsumeWriteEffects,
+    file: &Path,
+    target_content: &str,
+    reason: &str,
+    write: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let Err(err) = write() else {
+        return Ok(());
+    };
+    if !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&format!(
+        "{err:#}"
+    )) {
+        return Err(err);
+    }
+    let started = std::time::Instant::now();
+    let landed = effects.await_retained_queue_write_landed(file, target_content)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_write_retained_delivery_awaited file={} reason={} landed={} waited_ms={}",
+            file.display(),
+            reason,
+            landed,
+            started.elapsed().as_millis()
+        ),
+    );
+    if landed { Ok(()) } else { Err(err) }
 }
 
 fn log_snapshot_recovery_warning(file: &Path, context: &str, detail: impl Display) {
@@ -412,9 +526,21 @@ fn consume_queue_prompts_with_options(
             .atomic_write(file, &plan.new_document)
             .context("queue consume: failed to write document")?;
     } else {
-        effects
-            .converge_document_or_disk(file, &plan.new_document, &content, "queue_consume")
-            .context("queue consume: failed to write document")?;
+        converge_awaiting_retained_delivery(
+            effects,
+            file,
+            &plan.new_document,
+            "queue_consume",
+            || {
+                effects.converge_document_or_disk(
+                    file,
+                    &plan.new_document,
+                    &content,
+                    "queue_consume",
+                )
+            },
+        )
+        .context("queue consume: failed to write document")?;
     }
     if plan.save_snapshot {
         save_snapshot_recovery_only(file, &plan.new_snapshot, "queue consume writeback");
@@ -645,13 +771,23 @@ pub fn strike_answered_free_text_queue_heads(
             .atomic_write(file, &new_document)
             .context("free-text strike: failed to write document")?;
     } else if !activation_changed && !replace_ops.is_empty() {
-        effects
-            .converge_structural_ops(file, &replace_ops, &content, "free_text_strike")
-            .context("free-text strike: failed to write document")?;
+        converge_awaiting_retained_delivery(
+            effects,
+            file,
+            &new_document,
+            "free_text_strike",
+            || effects.converge_structural_ops(file, &replace_ops, &content, "free_text_strike"),
+        )
+        .context("free-text strike: failed to write document")?;
     } else {
-        effects
-            .converge_document_or_disk(file, &new_document, &content, "free_text_strike")
-            .context("free-text strike: failed to write document")?;
+        converge_awaiting_retained_delivery(
+            effects,
+            file,
+            &new_document,
+            "free_text_strike",
+            || effects.converge_document_or_disk(file, &new_document, &content, "free_text_strike"),
+        )
+        .context("free-text strike: failed to write document")?;
     }
     if let Some(snap) = new_snapshot {
         save_snapshot_recovery_only(file, &snap, "free-text strike snapshot sync");
@@ -1092,13 +1228,30 @@ pub fn mark_completed_queue_prompts_for_done_ids(
             .context("queue done-id mark: failed to write document")?;
     } else if done_node_keys.ast_backed {
         let ops = queue_mark_done_node_ops(&done_node_keys.keys);
-        effects
-            .converge_structural_ops(file, &ops, &content, "queue_done_id_mark")
-            .context("queue done-id mark: failed to write document")?;
+        converge_awaiting_retained_delivery(
+            effects,
+            file,
+            &new_document,
+            "queue_done_id_mark",
+            || effects.converge_structural_ops(file, &ops, &content, "queue_done_id_mark"),
+        )
+        .context("queue done-id mark: failed to write document")?;
     } else {
-        effects
-            .converge_document_or_disk(file, &new_document, &content, "queue_done_id_mark")
-            .context("queue done-id mark: failed to write document")?;
+        converge_awaiting_retained_delivery(
+            effects,
+            file,
+            &new_document,
+            "queue_done_id_mark",
+            || {
+                effects.converge_document_or_disk(
+                    file,
+                    &new_document,
+                    &content,
+                    "queue_done_id_mark",
+                )
+            },
+        )
+        .context("queue done-id mark: failed to write document")?;
     }
     if let Some(new_snapshot) = new_snapshot {
         save_snapshot_recovery_only(file, &new_snapshot, "queue done-id mark");
@@ -2082,6 +2235,129 @@ mod core_tests {
         );
         assert_eq!(updated.matches("> **Queue prompt:**").count(), 1);
     }
+    /// Editor-attached effects that reproduce the live deferral: the write is
+    /// accepted into the authority (or not, when `lands` is false) but the
+    /// call reports `[retained=delivery_projection_pending]`.
+    struct RetainedDeliveryEffects {
+        lands: bool,
+        awaited: AtomicUsize,
+    }
+
+    impl QueueConsumeWriteEffects for RetainedDeliveryEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            agent_doc_fs::write_atomic(file, content.as_bytes())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            if self.lands {
+                agent_doc_fs::write_atomic(file, target_content.as_bytes())?;
+            }
+            anyhow::bail!(
+                "visible document write retained [{}] [recovery={}]",
+                agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+                "await_editor_replica_no_disk_write"
+            )
+        }
+
+        fn await_retained_queue_write_landed(
+            &self,
+            file: &Path,
+            target_content: &str,
+        ) -> Result<bool> {
+            self.awaited.fetch_add(1, Ordering::SeqCst);
+            Ok(queue_write_landed(
+                target_content,
+                &fs::read_to_string(file)?,
+            ))
+        }
+    }
+
+    fn retained_consume_fixture() -> (TempDir, std::path::PathBuf, String) {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let content = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: answered\n\n",
+            "> **Queue prompt:** Make the queue go by default.\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- Make the queue go by default.\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string();
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        (dir, doc, content)
+    }
+
+    #[test]
+    fn retained_delivery_deferral_that_lands_completes_the_consume() {
+        // #qconsumedeferwedge: the deferral used to abort the closeout before the
+        // snapshot sync and AfterMutation proof, although the write had landed.
+        let (_dir, doc, content) = retained_consume_fixture();
+        let effects = RetainedDeliveryEffects {
+            lands: true,
+            awaited: AtomicUsize::new(0),
+        };
+
+        let outcome = consume_queue_prompts_with_outcome(&doc, &[], false, &effects)
+            .expect("a landed retained write is not a closeout failure")
+            .expect("the answered free-text head is consumed");
+
+        assert_eq!(outcome.consumed_text, "Make the queue go by default.");
+        assert_eq!(effects.awaited.load(Ordering::SeqCst), 1);
+        assert_ne!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn retained_delivery_deferral_that_never_lands_still_fails() {
+        let (_dir, doc, content) = retained_consume_fixture();
+        let effects = RetainedDeliveryEffects {
+            lands: false,
+            awaited: AtomicUsize::new(0),
+        };
+
+        let err = consume_queue_prompts_with_outcome(&doc, &[], false, &effects)
+            .expect_err("an unproven landing must keep the closeout failing");
+
+        assert!(
+            agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&format!(
+                "{err:#}"
+            )),
+            "the original deferral stays visible: {err:#}"
+        );
+        assert_eq!(effects.awaited.load(Ordering::SeqCst), 1);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn queue_write_landing_ignores_concurrent_edits_outside_the_queue() {
+        let target =
+            "---\nqueue: stop\n---\n\n<!-- agent:queue -->\n- ~~a~~\n<!-- /agent:queue -->\n";
+        let with_edit = target.replace("---\n\n", "---\n\nOperator note.\n\n");
+        assert!(queue_write_landed(target, target));
+        assert!(queue_write_landed(target, &with_edit));
+        assert!(!queue_write_landed(target, &target.replace("~~a~~", "a")));
+        assert!(!queue_write_landed(target, &target.replace("stop", "go")));
+    }
+
     #[test]
     fn free_text_consume_preserves_following_id_backed_head() {
         let dir = TempDir::new().unwrap();
@@ -2211,7 +2487,10 @@ mod core_tests {
         )
         .unwrap()
         .expect("`--done editorauth2` consumes the annotated directive");
-        assert_eq!(planned.consumed_text, "do [#editorauth2]: ensure plugin parity");
+        assert_eq!(
+            planned.consumed_text,
+            "do [#editorauth2]: ensure plugin parity"
+        );
         assert!(planned.new_document.contains("- do [#editorauth3]\n"));
     }
 

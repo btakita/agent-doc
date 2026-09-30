@@ -63,6 +63,14 @@ fn enforce_selected_queue_response_contract(
         missing.sort();
         missing.dedup();
     }
+    // `#doneleadingdirective`: this closeout's `--done` of the id a head leads
+    // with completes that head; the queue removal guard already accepts it.
+    missing.retain(|head| {
+        !agent_doc_queue::queue_closeout_guard::head_leads_with_completed_directive(
+            head,
+            &flags.pending_done_ids,
+        )
+    });
     if !missing.is_empty() {
         anyhow::bail!(
             "[finalize] pre-write gate: selected free-text queue prompt lacks response evidence: {}. Include its exact `> **Queue prompt:**` quote and the completed result or concrete deferral before retrying. No response has been captured.",
@@ -3170,6 +3178,52 @@ mod tests {
         };
         enforce_selected_queue_response_contract(None, Some(current), current, response, &id_flags)
             .unwrap();
+    }
+
+    #[test]
+    fn done_of_the_leading_directive_id_satisfies_the_free_text_gate() {
+        // #doneleadingdirective live shape (fpe.md, 2026-09-30).
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("fpe.md");
+        let head = "do [#fperuntranscription]FPE run the transcription with Harmblock?";
+        let current = format!(
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n- \u{1f6a7} {head}\n<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &current).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(&doc, &[head.to_string()])
+            .unwrap();
+        let response = "### Re: FPE lanes\n\nProfiled the CPU and GPU lanes.";
+        let without_done = WriteFlags {
+            strict_closeout: true,
+            commit_requested: true,
+            ..Default::default()
+        };
+        assert!(
+            enforce_selected_queue_response_contract(
+                Some(&doc),
+                Some(&current),
+                &current,
+                response,
+                &without_done,
+            )
+            .is_err(),
+            "without --done the prose head still needs its quote"
+        );
+
+        let with_done = WriteFlags {
+            pending_done_ids: vec!["fperuntranscription".to_string()],
+            ..without_done
+        };
+        enforce_selected_queue_response_contract(
+            Some(&doc),
+            Some(&current),
+            &current,
+            response,
+            &with_done,
+        )
+        .expect("--done of the head's leading directive id is its completion evidence");
     }
 
     #[test]

@@ -153,6 +153,43 @@ pub fn selected_free_text_prompts_missing_response_evidence_for_closeout(
     Ok(missing)
 }
 
+/// True when a selected free-text head LEADS with a directive for an id this
+/// closeout completes (`--done`), so that completion is its evidence.
+///
+/// `#doneleadingdirective` (fpe.md, 2026-09-30): the head
+/// `do [#fperuntranscription]FPE run the transcription …` is free text — a
+/// directive plus prose — yet the closeout that ran `--done fperuntranscription`
+/// was refused for lacking a `> **Queue prompt:**` quote, while the queue
+/// removal guard accepted the same `--done` as the head's completion
+/// (`proof_source=backlog_resolved_or_removed`). Only a LEADING directive
+/// counts: an id merely mentioned later in the prose (`Approve [#x]. What
+/// next?`) does not make its `--done` an answer to the rest of the head.
+pub fn head_leads_with_completed_directive(head: &str, completed_ids: &[String]) -> bool {
+    if completed_ids.is_empty() {
+        return false;
+    }
+    let text = agent_doc_document::queue_projection::strip_in_progress_marker(
+        &strip_priority_markers(head),
+    );
+    let text = text.trim().trim_start_matches('❯').trim();
+    let lower = text.to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("do ")
+        .map(str::trim_start)
+        .unwrap_or(&lower);
+    let Some(rest) = rest.strip_prefix("[#").or_else(|| rest.strip_prefix('#')) else {
+        return false;
+    };
+    let id = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect::<String>();
+    !id.is_empty()
+        && completed_ids
+            .iter()
+            .any(|done| queue_response::normalize_done_id(done) == id)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueHeadRemovalProofSource {
     BacklogResolvedOrRemoved,
@@ -927,6 +964,28 @@ mod tests {
         assert!(!response_head_plausibly_answers(
             "Done.",
             "how does this work"
+        ));
+    }
+
+    #[test]
+    fn done_id_of_a_leading_directive_is_evidence_for_its_free_text_head() {
+        // #doneleadingdirective live head (fpe.md).
+        let head = "\u{1f6a7} do [#fperuntranscription]FPE run the transcription with Harmblock?";
+        let done = vec!["fperuntranscription".to_string()];
+        assert!(head_leads_with_completed_directive(head, &done));
+        assert!(head_leads_with_completed_directive(
+            "[#fperuntranscription] profile it",
+            &["#FPERUNTRANSCRIPTION".to_string()]
+        ));
+        // A different id, no done ids, or an id only mentioned later stays gated.
+        assert!(!head_leads_with_completed_directive(
+            head,
+            &["other".to_string()]
+        ));
+        assert!(!head_leads_with_completed_directive(head, &[]));
+        assert!(!head_leads_with_completed_directive(
+            "Approve [#fperuntranscription]. What are the next steps?",
+            &done
         ));
     }
 }

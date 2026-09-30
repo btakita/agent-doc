@@ -54,6 +54,24 @@ const ZERO_REPLICA_IDLE_WATCH_BACKOFF: std::time::Duration = std::time::Duration
 /// Throttling keeps that quiet while still reclaiming an orphan well inside a
 /// minute of it becoming eligible.
 const RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL: u32 = 30;
+
+/// `#reclaimliveturn`: may the open-cycle recycle deferral try to reclaim the
+/// empty preflight on this tick?
+///
+/// The reclaim's `OwnerReleased` authority is vacuous in this path — no closeout
+/// owner exists until finalize claims one — so its only remaining proof was the
+/// 120s pre-capture stall, i.e. elapsed time. An agent turn doing repo work goes
+/// far longer than that before its first capture. Live 2026-09-30 on
+/// agent-doc-bugs.md: `cycle-1790733856564` (preflight 02:04:16) was abandoned
+/// at 02:25:20 while the agent was mid-turn; finalize then found the cycle
+/// `CycleSuperseded`, and its deferred queue write had no owner to resume it.
+/// The harness turn-active marker (set by `UserPromptSubmit`, cleared by
+/// `Stop`) is the durable proof that a run is still generating into the cycle,
+/// so a live marker vetoes the reclaim; only an idle harness can have orphaned
+/// the preflight.
+fn supervisor_may_reclaim_empty_preflight(attempt_tick: bool, harness_turn_live: bool) -> bool {
+    attempt_tick && !harness_turn_live
+}
 static ZERO_REPLICA_IDLE_WATCH_LAST_PROBE: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
@@ -3447,8 +3465,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             .is_multiple_of(RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL);
                         recycle_cycle_open_deferrals =
                             recycle_cycle_open_deferrals.saturating_add(1);
-                        let reclaimed = attempt_reclaim
-                            && matches!(
+                        // Read the marker fresh: the loop's `turn_active` is only
+                        // assigned inside the drain, which may have exited early.
+                        let harness_turn_live = attempt_reclaim
+                            && turn_active_for_owned_pane_with_idle_evidence(
+                                &path,
+                                &shared,
+                                false,
+                                &mut session_log,
+                            );
+                        let reclaimed = supervisor_may_reclaim_empty_preflight(
+                            attempt_reclaim,
+                            harness_turn_live,
+                        ) && matches!(
                                 agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(
                                     &path,
                                 ),
@@ -3457,12 +3486,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_ops_log_io::log_op(
                             &path,
                             &format!(
-                                "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open reclaimed_empty_preflight={} (#midturn-recycle-resume) (#suprecyclespin-staleopencycle)",
+                                "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open reclaimed_empty_preflight={} harness_turn_live={} (#midturn-recycle-resume) (#suprecyclespin-staleopencycle) (#reclaimliveturn)",
                                 path.display(),
                                 shared.inject_pane.as_deref().unwrap_or("<pty>"),
                                 supervisor_stale,
                                 inflight_handlers,
                                 reclaimed,
+                                harness_turn_live,
                             ),
                         );
                     }
@@ -5463,6 +5493,32 @@ mod tests {
         assert!(
             source.contains("reclaimed_empty_preflight={}"),
             "the open-cycle deferral receipt must report the reclaim outcome"
+        );
+    }
+
+    #[test]
+    fn empty_preflight_reclaim_is_vetoed_by_a_live_harness_turn() {
+        // #reclaimliveturn: a live turn marker protects the cycle however long
+        // the agent has been working; only an idle harness may be reclaimed.
+        assert!(!supervisor_may_reclaim_empty_preflight(true, true));
+        assert!(supervisor_may_reclaim_empty_preflight(true, false));
+        assert!(!supervisor_may_reclaim_empty_preflight(false, false));
+
+        let source = include_str!("idle_watch.rs");
+        // Built from fragments so this guard never matches its own source text.
+        let gate = [
+            "let reclaimed = ",
+            "supervisor_may_reclaim",
+            "_empty_preflight(",
+        ]
+        .concat();
+        assert!(
+            source.contains(&gate),
+            "the open-cycle reclaim must go through the live-turn veto"
+        );
+        assert!(
+            source.contains("harness_turn_live={}"),
+            "the deferral receipt must report whether a live turn vetoed the reclaim"
         );
     }
 

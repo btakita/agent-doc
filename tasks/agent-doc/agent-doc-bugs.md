@@ -166,7 +166,7 @@ Understood: the release now runs **after** the #62–#64 fixes (v0.35.420 shippe
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~fix https://github.com/btakita/agent-doc/issues/62~~
-- 🚧 fix https://github.com/btakita/agent-doc/issues/63
+- ~~fix https://github.com/btakita/agent-doc/issues/63~~
 - commit the uncommitted files
 - fix https://github.com/btakita/agent-doc/issues/64
 - release + publish Issue 62-64

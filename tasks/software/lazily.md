@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0f029-8f29-7543-bbe2-a9f6ccd49e4c
+  codex: 01a0f04c-ff90-7bd2-a1b6-9a7b08508b85
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -553,20 +553,46 @@ The exchange remains above the accretion warning threshold; the queue is now dra
 
 Audited all seven gated review items against live state. No gate has cleared, no recorded evidence has rotted, and this pass found no agent-executable slice to add to backlog or queue.
 
-- `#lzreleasepins` remains blocked on its stated settled-superproject boundary. There are nine live `agent-doc start` sessions including this one, the root has 224 changed/untracked paths, and `.gitmodules` is still modified. The root HEAD stayed at `914160acd2b8ba4212b4631aa763c68980bc612f` across this short audit, but the concurrent-session and shared-worktree conditions are not settled.
-- `#lzreactpublish` remains operator-blocked: `npm whoami` returns `E401 Unauthorized`, `npm view @lazily-hub/lazily-react version` returns `E404`, and GitHub has no `v0.3.0` release.
+- `#lzreleasepins` remains blocked on its stated settled-superproject boundary. There are nine live `agent-doc start` sessions including this one, the root has 224 changed/untracked paths, and `.gitmodules` is still modified. The root HEAD stayed at `914160acd2b8ba4212b4631aa763c68980bc612f` across this short audit, but the concurrent-session and shared-worktree conditions are not settled.- `#lzreactpublish` remains operator-blocked: `npm whoami` returns `E401 Unauthorized`, `npm view @lazily-hub/lazily-react version` returns `E404`, and GitHub has no `v0.3.0` release.
 - `#lzrustpublish` remains operator-blocked: crates.io search still reports `lazily = "0.58.0"`, GitHub has no `v0.59.0` release, and the latest release-workflow run remains failed. The prepared `0.59.0` state has not become a publication.
 - `make review-gate-status` passed its self-test and live audit with `stale_count: 0`: `#lzambienttokenresolve`, `#lzagentdocartifactpurge`, and `#lzmacosrunner` are `blocked_fresh`; `#lzgithubbudget20` remains `unprobeable`. The artifact-purge handoff still records no deletion and has about 98.7 hours before its hard expiry.
 
 Accordingly, all seven review items stay unchanged. Adding backlog work here would duplicate existing operator gates or misrepresent blocked work as actionable. No credentials were resolved, no publication was attempted, no gitlinks or budgets were changed, and no artifacts were deleted.
 
 The repository has no workflow named `CI`, so the requested latest-CI probe is unavailable. The exchange remains above the accretion warning threshold; because this queue item was active, I did not pause the drain for compaction.
+
+### Re: #lzreactpublish narrowed to live npm approval — GPT-5 · 2026-09-30T11:05:58-04:00
+
+> **Queue prompt:**
+>
+> I'm logged into npm. Continue with #lsreactpublish
+
+Treated `#lsreactpublish` as the evident typo for the gated `#lzreactpublish` item and resumed the prepared React `0.3.0` release.
+
+The prepared commit is intact at remote `main`: `dc2198713cdce925bccb5651ae6229ed27cf5347` (`chore: prepare v0.3.0`). I fetched it and verified it from an isolated detached worktree so the shared checkout's unrelated `AGENTS.md` / tsift instruction edits remained untouched.
+
+Release proof is green:
+
+- npm identity now resolves as `btakita`.
+- GitHub CI run `36525936551` for exact commit `dc21987` completed successfully.
+- Full `make check` passed after supplying the two sibling checkouts required by the repository contract.
+- Node's native test report is 22 tests, 22 passed, 0 failed, 0 skipped.
+- `npm pack --dry-run --json` produced the expected public `@lazily-hub/lazily-react@0.3.0` package: 14 files, 12,963 bytes packed, SHA-1 `85fb0b2bb5d4496daa47c5a321bc0128fc498e13`.
+
+The remaining gate is narrower than login but still operator-only: `npm publish --access public` requires a fresh one-time browser authorization. I opened two npm authorization pages while the CLI waited; both challenges expired before npm received approval, and each callback ended with `E404`. Registry verification confirms `@lazily-hub/lazily-react@0.3.0` is still absent.
+
+I deliberately created no `v0.3.0` tag and no GitHub release, so repository metadata does not claim a publication that did not happen. The review item now records the exact unblocker: resume while at the browser, approve the fresh npm challenge promptly (or supply a current OTP), then verify the registry before tagging exact commit `dc21987` and creating the GitHub release.
+
+The temporary release worktree and sibling symlinks were removed. No shared-checkout files were changed. The exchange remains above the accretion warning threshold; because another queue item remains, I did not pause the queue to request compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+- I'm logged into npm. Continue with #lsreactpublish
+- Resolve #lzrustpublish
+- re #lzreleasepins: commit + push uncommitted changes
 <!-- /agent:queue -->
 
 ## Backlog
@@ -578,7 +604,7 @@ The repository has no workflow named `CI`, so the requested latest-CI probe is u
 
 <!-- agent:review -->
 - [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
-- [/] [#lzreactpublish] [operator-decision] Establish npm org authorization for the first @lazily-hub/lazily-react publication; then publish, tag, and release prepared 0.3.0 commit dc21987. Blocked because npm whoami failed and the package is still absent.
+- [/] [#lzreactpublish] [operator-decision] npm identity is authenticated as btakita and prepared commit dc2198713cdce925bccb5651ae6229ed27cf5347 is green, but publication still requires a live one-time npm browser approval (or OTP). Two publish challenges expired with E404 before approval reached the CLI; @lazily-hub/lazily-react@0.3.0 remains absent. Resume while at the browser, approve the fresh challenge promptly, then verify npm, create/push tag v0.3.0 at dc21987, and create the GitHub release.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Measured by `make review-gate-status` (gate `#lzmacosrunner`), which pins the six known incomplete-pair releases — v0.35.399, v0.35.400, v0.35.401, v0.35.406, v0.35.417, v0.35.418 — and goes `evidence_stale` if that measured list changes in EITHER direction, so a widening gap surfaces without a hand pass. Underlying probes are `make release-macos-cadence-check` (weekly window, open since 2026-09-22T16:41:49Z) and `make release-macos-coverage-check` (exit 2, names the six); neither is a `make check` dependency, because clearing them needs Mac hardware. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command, or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.

@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -102,7 +102,25 @@ Fixed in agent-doc `5611dc7bd` (pushed; `Fixes #61` closes the issue).
 - **Fix:** it now computes `element::find_code_ranges` — the same pulldown-cmark helper the component parser uses to *ignore* code regions — and leaves markers inside inline code spans and fenced/indented blocks verbatim. Bare-text markers are still escaped, and an unmatched backtick (no span) still escapes. The materialization probe calls the same sanitizer, so writer/probe parity holds.
 - **Tests:** new coverage for inline span, backtick + tilde fences, bare-beside-span, unclosed backtick, and a round-trip proving a sanitized code quote parses as no extra component. Two tests that pinned the old escaped-in-code shape were updated. `make check`: 10173 passed, 0 failed. `make install` done; CI run 36670256201 in progress.
 - **Known edge:** a response captured by a pre-fix binary (written escaped) and replayed by the new binary would no longer match the materialization probe. That only affects an in-flight capture across the upgrade that quotes a marker in code; I did not add a legacy fallback across the six probe callers.
-<!-- agent:boundary:1cd2d88f:agent-doc-bugs -->
+- **Controller:** it now records, per project, the last editor-surface observation (client, gen/seq, accepted, intent, focused, visible, running count) and the last pane-layout outcome (phase, expected vs actual). It returns them as `surface_sync` on `reliable_sync_status`. `None` means the controller predates this change; it never means "nothing observed".
+- **`agent-doc reliable-sync-status`:** prints both records, where each registered/visible document's tmux pane lives (agent-doc / stash / none), and a divergence verdict. The verdict comes from a pure `pane_placement::surface_pane_divergence` fold that flags a visible document parked in stash, a visible document with no pane, or a hidden document holding the agent-doc window. `--json` also gains `pane_placements` and `surface_pane_findings`.
+- **Live dogfood caught a false positive**, now fixed: the editor surface spans all projects, so `src/haiven-dev/tasks/fpe.md` was flagged as "no pane" from the agent-loop root. Visible documents under a nested project root are now excluded, with a regression test.
+- **Verification:** 16 new tests. `make check` passed: 10186 tests, 0 failed. CI runs 36670256201 (#61) and 36671583167 (#62) were still in progress when I checked.
+- **Not done:** promoting the plugin's `observe: published` log from `LOG.debug` to info. Another session has uncommitted JetBrains plugin edits (`CrdtReplicaManager.kt`, `gradle.properties`), and a plugin edit needs a version bump in that shared file. The controller-side receipt now answers the same question without that change.
+- Note: `rustfmt src/main.rs` followed the `mod` declarations and reformatted 10 unrelated `src/` files. I reverted them (formatting-only) before committing.
+> **Queue prompt:** Fix https://github.com/btakita/agent-doc/issues/62
+
+### Re: GH #62 — visible pane stuck in stash, auto-sync unobservable — opus-5.5 · 2026-09-30T01:03-04:00
+
+Landed agent-doc `9d84795d5` (pushed, `make install` done). This adds the issue's own ask: making auto-sync observable, plus the divergence check. The pane-placement **cause** is still unverified, and the reporter's plugin 0.2.392 skew (#63) confounds it. So #62 stays open; I commented there with the next measurement to take.
+
+- **Controller:** it now records, per project, the last editor-surface observation (client, gen/seq, accepted, intent, focused, visible, running count) and the last pane-layout outcome (phase, expected vs actual). It returns them as `surface_sync` on `reliable_sync_status`. `None` means the controller predates this change; it never means "nothing observed".
+- **`agent-doc reliable-sync-status`:** prints both records, where each registered/visible document's tmux pane lives (agent-doc / stash / none), and a divergence verdict. The verdict comes from a pure `pane_placement::surface_pane_divergence` fold that flags a visible document parked in stash, a visible document with no pane, or a hidden document holding the agent-doc window. `--json` also gains `pane_placements` and `surface_pane_findings`.
+- **Live dogfood caught a false positive**, now fixed: the editor surface spans all projects, so `src/haiven-dev/tasks/fpe.md` was flagged as "no pane" from the agent-loop root. Visible documents under a nested project root are now excluded, with a regression test.
+- **Verification:** 16 new tests. `make check` passed: 10186 tests, 0 failed. CI runs 36670256201 (#61) and 36671583167 (#62) were still in progress when I checked.
+- **Not done:** promoting the plugin's `observe: published` log from `LOG.debug` to info. Another session has uncommitted JetBrains plugin edits (`CrdtReplicaManager.kt`, `gradle.properties`), and a plugin edit needs a version bump in that shared file. The controller-side receipt now answers the same question without that change.
+- Note: `rustfmt src/main.rs` followed the `mod` declarations and reformatted 10 unrelated `src/` files. I reverted them (formatting-only) before committing.
+<!-- agent:boundary:6afcbb79 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -114,7 +132,7 @@ Fixed in agent-doc `5611dc7bd` (pushed; `Fixes #61` closes the issue).
 - ~~Compact Exchange did not work the first time I called it. It worked the second time though.~~
 - ~~Fix https://github.com/btakita/agent-doc/issues/60~~
 - ~~Fix https://github.com/btakita/agent-doc/issues/61~~
-- Fix https://github.com/btakita/agent-doc/issues/62
+- ~~Fix https://github.com/btakita/agent-doc/issues/62~~ — auto-struck: answered this cycle (#ftstrike)
 - release + publish
 <!-- /agent:queue -->
 

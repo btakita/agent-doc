@@ -1189,20 +1189,18 @@ fn consume_queue_prompts_for_done_ids_closeout(
     done_ids: &[String],
     force_disk: bool,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    let result = if force_disk {
-        queue_consume::consume_queue_prompts_with_outcome(
-            file,
-            done_ids,
-            true,
-            queue_consume_writeback_effects(true),
-        )
-    } else {
-        queue_consume::consume_queue_prompts_for_done_ids_with_outcome(
-            file,
-            done_ids,
-            queue_consume_writeback_effects(false),
-        )
-    };
+    // `#qselectedheadonly`: fence a free-text consume to this cycle's
+    // preflight-selected heads so it never takes the next, unanswered prompt.
+    let selected_heads = agent_doc_cycle_state_io::load(file)?
+        .map(|state| state.selected_free_text_queue_heads)
+        .unwrap_or_default();
+    let result = queue_consume::consume_queue_prompts_for_done_ids_selected_with_outcome(
+        file,
+        done_ids,
+        &selected_heads,
+        force_disk,
+        queue_consume_writeback_effects(force_disk),
+    );
     match result {
         Err(err) if !force_disk && error_requests_retry_without_disk(&err) => {
             Err(err.context(format!(
@@ -3145,7 +3143,9 @@ fn guard_historical_retained_write_before_new_capture(
         let own_attempt = state.as_ref().is_some_and(|state| {
             state.phase.is_open()
                 && agent_doc_document_realtime_io::pending_document_write(file).is_some_and(
-                    |pending| retained_intent_created_in_cycle(&pending.intent_id, state.started_at),
+                    |pending| {
+                        retained_intent_created_in_cycle(&pending.intent_id, state.started_at)
+                    },
                 )
         });
         if own_attempt {
@@ -4408,6 +4408,56 @@ mod tests {
         let loaded = fs::read_to_string(&snap_abs).unwrap();
         assert_eq!(loaded, content);
     }
+    #[test]
+    fn closeout_consume_never_takes_an_unselected_next_head() {
+        // #qselectedheadonly (agent-doc-bugs.md 2026-09-30): the answered-strike
+        // had already struck the selected head, so the leading head was the next,
+        // unanswered prompt; the closeout consumed it anyway.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let source = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "> **Queue prompt:** commit the uncommitted files\n\n",
+            "### Re: committed — opus-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- ~~commit the uncommitted files~~ — auto-struck: answered this cycle (#ftstrike)\n",
+            "- fix https://github.com/btakita/agent-doc/issues/64\n",
+            "- release + publish\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string();
+        fs::write(&doc, &source).unwrap();
+
+        let selected = vec!["commit the uncommitted files".to_string()];
+        let outcome = queue_consume::consume_queue_prompts_for_done_ids_selected_with_outcome(
+            &doc,
+            &[],
+            &selected,
+            true,
+            queue_consume_writeback_effects(true),
+        )
+        .unwrap();
+        assert!(outcome.is_none(), "{outcome:?}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), source);
+
+        // The selected head itself is still consumable.
+        let selected = vec!["🚧 fix https://github.com/btakita/agent-doc/issues/64".to_string()];
+        let outcome = queue_consume::consume_queue_prompts_for_done_ids_selected_with_outcome(
+            &doc,
+            &[],
+            &selected,
+            true,
+            queue_consume_writeback_effects(true),
+        )
+        .unwrap()
+        .expect("the selected head is consumed");
+        assert!(outcome.consumed_text.contains("issues/64"), "{outcome:?}");
+    }
+
     #[test]
     fn force_disk_closeout_queue_consume_bypasses_active_listener() {
         let dir = TempDir::new().unwrap();

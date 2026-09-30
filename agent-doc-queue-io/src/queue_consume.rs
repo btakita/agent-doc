@@ -240,7 +240,7 @@ pub fn consume_queue_prompt_with_outcome(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, &[], 1, false, None, effects)
+    consume_queue_prompts_with_options(file, &[], 1, false, None, &[], effects)
 }
 
 /// Consume up to `count` leading free-text prompts in one revision-pinned
@@ -254,7 +254,15 @@ pub fn consume_free_text_queue_prompts_with_outcome(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, &[], count.max(1), skip_visible_guard, None, effects)
+    consume_queue_prompts_with_options(
+        file,
+        &[],
+        count.max(1),
+        skip_visible_guard,
+        None,
+        &[],
+        effects,
+    )
 }
 
 /// Free-text budget for a closeout consume driven by `done_ids`.
@@ -283,7 +291,7 @@ pub fn consume_queue_prompts_for_done_ids_with_outcome(
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     let budget = done_ids_free_text_budget(done_ids);
-    consume_queue_prompts_with_options(file, done_ids, budget, false, None, effects)
+    consume_queue_prompts_with_options(file, done_ids, budget, false, None, &[], effects)
 }
 
 pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
@@ -292,7 +300,42 @@ pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     let budget = done_ids_free_text_budget(done_ids);
-    consume_queue_prompts_with_options(file, done_ids, budget, true, None, effects)
+    consume_queue_prompts_with_options(file, done_ids, budget, true, None, &[], effects)
+}
+
+/// A response closeout's consume, fenced to the heads preflight selected for
+/// the cycle (`#qselectedheadonly`). An id-naming closeout keeps the id match;
+/// an empty `selected_heads` keeps the unfenced behaviour.
+pub fn consume_queue_prompts_for_done_ids_selected_with_outcome(
+    file: &Path,
+    done_ids: &[String],
+    selected_heads: &[String],
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    let budget = if skip_visible_guard {
+        1
+    } else {
+        done_ids_free_text_budget(done_ids)
+    };
+    let selected: &[String] = if done_ids.is_empty() {
+        selected_heads
+    } else {
+        &[]
+    };
+    consume_queue_prompts_with_options(
+        file,
+        done_ids,
+        budget,
+        skip_visible_guard,
+        None,
+        selected,
+        effects,
+    )
+}
+
+fn same_queue_head_text(left: &str, right: &str) -> bool {
+    strip_priority_markers(left).trim() == strip_priority_markers(right).trim()
 }
 
 /// Strike the active queue head, **skipping the visible-write idle guard**, for
@@ -306,7 +349,7 @@ pub fn consume_queue_prompt_force_disk(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, &[], 1, true, None, effects)
+    consume_queue_prompts_with_options(file, &[], 1, true, None, &[], effects)
 }
 
 pub fn consume_queue_prompts_with_outcome(
@@ -315,7 +358,7 @@ pub fn consume_queue_prompts_with_outcome(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, done_ids, 1, skip_visible_guard, None, effects)
+    consume_queue_prompts_with_options(file, done_ids, 1, skip_visible_guard, None, &[], effects)
 }
 
 /// Consume exactly the head observed by the caller. If another write already
@@ -334,6 +377,7 @@ pub fn consume_queue_prompt_if_head_matches_with_outcome(
         1,
         skip_visible_guard,
         Some(expected_head),
+        &[],
         effects,
     )
 }
@@ -479,6 +523,7 @@ fn consume_queue_prompts_with_options(
     free_text_count: usize,
     skip_visible_guard: bool,
     expected_head: Option<&str>,
+    selected_heads: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     // `#crdtstructops` Phase D follow-on: no file-TOCTOU flock across the
@@ -510,6 +555,27 @@ fn consume_queue_prompts_with_options(
                 "queue_consume_stale_head_noop expected_hash={} observed_hash={} recovery=monotonic_noop",
                 agent_doc_hash::content_hash(expected_head.unwrap_or_default().trim()),
                 agent_doc_hash::content_hash(plan.consumed_text.trim())
+            ),
+        );
+        return Ok(None);
+    }
+    // `#qselectedheadonly`: a free-text closeout may consume only a head
+    // preflight selected for this cycle. When the answered-strike already struck
+    // the selected head, the leading head is the NEXT operator prompt, which no
+    // response has answered (agent-doc-bugs.md 2026-09-30: an empty-stdin
+    // `write --commit` repair struck `commit the uncommitted files` and then
+    // consumed `fix .../issues/64`).
+    if !selected_heads.is_empty()
+        && !selected_heads
+            .iter()
+            .any(|selected| same_queue_head_text(selected, &plan.consumed_text))
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_consume_unselected_head_noop observed_hash={} selected={} recovery=monotonic_noop #qselectedheadonly",
+                agent_doc_hash::content_hash(plan.consumed_text.trim()),
+                selected_heads.len()
             ),
         );
         return Ok(None);

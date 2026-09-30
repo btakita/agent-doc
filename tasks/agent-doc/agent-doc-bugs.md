@@ -240,7 +240,33 @@ I've rewritten the item to cover both. The fix will strike only the first unstru
 **Filed at the end of the queue:** `#semmergeargorder`. `try_semantic_merge_convergence` gets its merge roles in the opposite order in production from its own test. It did not cause this incident, but it would put operator text in the agent's slot.
 
 The exchange is past 180 lines. Compaction is left for an explicit opt-in while the queue is draining.
-<!-- agent:boundary:c0e00e2e -->
+> **Queue prompt:** do [#stalesupresumedeadlock]
+
+### Re: #stalesupresumedeadlock — a stale supervisor waiting on itself — opus-5.5 · 2026-09-30T10:42-04:00
+
+**Fixed.** agent-doc `d08e3e7fd`, superproject `26780458b1`, installed with `make install`.
+
+**Why it deadlocked.** The retry that finishes a captured response runs inside the supervisor process. An old supervisor therefore judges the retry with old code. Between 06:17 and 06:35 UTC the retry stopped with `needs_operator` roughly every 6s. The reason was a "heading already committed" check that the current build handles. Meanwhile the recycle was deferred with `reason=agent_doc_cycle_open`. An open cycle may only be crossed when something proves the response is safely captured. The recycle policy (`supervisor_recycle_action`) had exactly two such proofs: a proven editor write wedge and a stale-editor-delivery request. A captured response whose retry is stuck was neither. The same supervisor (pid 19503) also produced the 2-byte editor/controller mismatch at the start of the last closeout.
+
+**Fix.**
+- A new pure helper, `stale_generation_capture_resume_needs_recycle`, is true when a recycle is already due (old binary or a pending recycle request) and the in-process retry has stopped at `needs_operator`.
+- The idle watch passes it into the policy's captured-response slot, renamed from `editor_delivery_stale` to `capture_backed_refresh`. That slot already lets a write wedge cross an open cycle.
+- The recycle still waits until no supervisor request is in flight, and the response stays durably captured throughout.
+- The new process starts without the `needs_operator` stop and without the recycle request, so this fires at most once per episode.
+- If the fresh build also stops at `needs_operator`, it stays the operator's call.
+- The idle watch now logs `supervisor_stale_capture_resume_recycle`. `specs/supervisor.md` now lists the three cases that may cross an open cycle.
+
+**Tests.**
+- The incident shape now recycles immediately. Without the fix the same inputs defer on the open cycle. A request still in flight still defers.
+- The helper is true only when both facts hold. Making it always return false fails the test.
+- A source guard in `idle_watch.rs` keeps the wiring from being edited away.
+
+`make check` passed 10207/10207. CI run 36731096456 was in progress at last check; run 36728882098 for the previous fix was still in progress too.
+
+**Note:** this install triggers a recycle request, so pid 19503 should pick up the new build at its next safe checkpoint. That is also the first real test of this fix.
+
+The exchange is past 210 lines. Compaction is left for an explicit opt-in while the queue drains.
+<!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -250,7 +276,7 @@ The exchange is past 180 lines. Compaction is left for an explicit opt-in while 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#editorlistonlyproj]~~
-- do [#stalesupresumedeadlock]
+- ~~do [#stalesupresumedeadlock]~~
 - do [#jbunloadsig]
 - do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.
 - release + publish
@@ -258,7 +284,6 @@ The exchange is past 180 lines. Compaction is left for an explicit opt-in while 
 
 
 <!-- agent:backlog -->
-- [ ] [#stalesupresumedeadlock] [agent-doc] A stale route-owned supervisor (pid 19503, binary from 2026-09-28) ran captured_finalize resume every ~2s with old code that could not see its own materialized response (#queuequotecell), while its recycle stayed deferred with reason=agent_doc_cycle_open: the open cycle needed the new code, and the new code needed the recycle (2026-09-30 06:17-06:35; broken manually with an empty-stdin write --commit). A needs_operator retry loop on a stale binary should count as a recycle boundary, or the resume should run in the fresh controller.
 - [ ] [#jbunloadsig] [agent-doc][jetbrains] GH #63 layer 2: JetBrainsPluginUpgradeAction.java:68 calls DynamicPlugins.checkCanUnloadWithoutRestart(IdeaPluginDescriptorImpl) at compile time; on IU-262.9437.185 that signature does not resolve, so the dynamic upgrade aborts (the file-replacement fallback in 93039df74 now covers it). Look the method up reflectively by name, accept the signatures the supported platform range exposes, and report the build + signatures found on a miss. Needs a plugin version bump in editors/jetbrains/gradle.properties (another session had it dirty 2026-09-30).
 - [ ] [#queuefreetextdup] [agent-doc] Operator 2026-09-30: the second 'release + publish' was INTENTIONAL, because the queue is a scheduling FIFO and a repeat means run it again. The real defect is strike scope: in the 01:47 cycle every answered_free_text_strike_applied reported nodes=2, so answering one copy struck both. #qstruckbaredup (bd6ba2102) also drops an identical plain copy of a struck line, which deletes an intentional repeat. Fix: a free-text answer strikes only the first unstruck occurrence and later repeats stay live. Re-check #qstruckbaredup against the authored-multiplicity rule (#qdedup-directive-twin) so it collapses only merge re-emits, never operator-authored repeats. Add regression tests for both.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.

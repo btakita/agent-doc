@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -125,6 +125,13 @@ must_violate=(
     # prompt_target-only Stop hook left api.md's queue typing unanswered.
     RealtimeSteeringStop:RealtimeSteeringStopWedge
     RealtimeSteeringStop:RealtimeSteeringStopReach
+    # `#admissionmergedup`: a line-based merge rung kept both of two edits of one
+    # queue item (infra.md, 2026-09-30). One wedge for the pre-fix ladder, one
+    # proving stop-on-equals is no substitute (the count guard carries the
+    # invariant); reach proves disk-only work still lands.
+    AdmissionSplitMerge:AdmissionSplitMergeWedge
+    AdmissionSplitMerge:AdmissionSplitMergeGuardOffWedge
+    AdmissionSplitMerge:AdmissionSplitMergeReach
     # `#editorauthority`: adopting the CRDT over an open editor rolls it back
     # (api.md, 2026-09-29); forward merging still delivers agent work.
     EditorAuthorityLadder:EditorAuthorityLadderWedge

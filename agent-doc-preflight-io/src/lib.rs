@@ -2899,6 +2899,42 @@ fn disk_edit_newer_than_registered_authority(
     }
 }
 
+/// `#admissionmergedup`: the list-item count-conservation guard every admission
+/// merge rung must clear. For each identity-bearing list component, the merged
+/// revision may hold at most `baseline + additions(authority) + additions(disk)`
+/// items, where an addition is growth over the baseline. An edit is not an
+/// addition, so two sides editing one item must still yield one item.
+///
+/// Live 2026-09-30 on infra.md: the line-based `Semantic` rung kept both of two
+/// different edits of one queue item, adopting it twice; the authority
+/// subsumption check cannot see an addition. `formal/tla/AdmissionSplitMerge.tla`
+/// proves this guard alone restores `NoDuplicateItem` (its GuardOffWedge config
+/// shows stopping on `equals_authority` is not sufficient).
+fn merge_invents_list_items(
+    baseline: &str,
+    authority: &str,
+    disk: &str,
+    merged: &str,
+) -> Option<String> {
+    let count = |content: &str, component: &str| -> Option<usize> {
+        agent_doc_markdown_ast::mutations::item_nodes(content, component)
+            .ok()
+            .map(|nodes| nodes.len())
+    };
+    ["queue", "backlog"].into_iter().find_map(|component| {
+        let (Some(base), Some(ours), Some(theirs), Some(out)) = (
+            count(baseline, component),
+            count(authority, component),
+            count(disk, component),
+            count(merged, component),
+        ) else {
+            return None;
+        };
+        let bound = base + ours.saturating_sub(base) + theirs.saturating_sub(base);
+        (out > bound).then(|| format!("{component}:{out}>{bound}"))
+    })
+}
+
 /// Reconcile a genuine two-writer split into one revision (`#admissionsplitmerge`).
 ///
 /// This replaces a refusal. Both branches durably advanced and the live authority
@@ -2963,6 +2999,17 @@ fn merge_admission_three_way_split(
         } else if durable_merged == durable_authority {
             // Nothing from disk survived: the compare-and-swap write is a no-op.
             "equals_authority"
+        } else if let Some(invented) =
+            merge_invents_list_items(baseline, authority, disk, &plan.merged_doc)
+        {
+            // `#admissionmergedup`: count conservation. A merge may not hold more
+            // items than baseline + each side's additions; formal model
+            // `formal/tla/AdmissionSplitMerge.tla`.
+            rungs.push(format!(
+                "{:?}=would_duplicate_items({invented})",
+                plan.engine
+            ));
+            continue;
         } else {
             // Coarse diagnostic only: strict line subsumption, so an *edited* disk
             // line legitimately reads `false` (the operator's newer version of that
@@ -7428,6 +7475,56 @@ mod tests {
             std::fs::read_to_string(&doc).unwrap(),
             saved,
             "the newer native-save queue item must remain byte-identical"
+        );
+    }
+
+    /// `#admissionmergedup` (infra.md, 2026-09-30), reconstructed byte-exact from
+    /// the logged lengths: baseline 38985 (= commit 5e6da24c), disk +18 carries
+    /// the operator's reword ` if there is drift`, the authority +36 carries it
+    /// twice (a controller recycle re-applied the editor's typing), and the
+    /// adopted Semantic merge was authority +60 — disk's version of the line as a
+    /// second item. Replayed on the real triple it is 39081 bytes exactly.
+    fn admission_both_edited_docs() -> (String, String, String) {
+        let doc = |head: &str, _exchange: &str| {
+            format!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue: stop\n---\n\n\
+                 ## Status\n\n<!-- agent:status patch=replace -->\nThe infra review is merged.\n<!-- /agent:status -->\n\n\
+                 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior\n\nPrior answer.\n\
+                 <!-- agent:boundary:bdb190e6 -->\n<!-- /agent:exchange -->\n\n\
+                 ## Queue\n\n<!-- agent:queue priority -->\n- {head}\n<!-- /agent:queue -->\n\n\
+                 ## Backlog\n\n<!-- agent:backlog priority -->\n<!-- /agent:backlog -->\n\n\
+                 ## Review\n\n<!-- agent:review -->\n- [/] [#r1] item\n<!-- /agent:review -->\n\n\
+                 ## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n\
+                 ## Completed / Reaped\n\n<!-- agent:done archive=\"tasks/infra.done.md\"-->\n- [x] [#d1] done\n<!-- /agent:done -->\n"
+            )
+        };
+        let old = "Create a PR to fix the SBX + STG drift.";
+        let new = "Create a PR to fix the SBX + STG drift if there is drift.";
+        let baseline = doc(old, "Prior answer.\n");
+        let doubled = "Create a PR to fix the SBX + STG drift if there is drift if there is drift.";
+        let disk = doc(new, "Prior answer.\n");
+        let authority = doc(doubled, "Prior answer.\n");
+        (baseline, authority, disk)
+    }
+
+    #[test]
+    fn admission_split_merge_keeps_an_item_both_sides_edited_once() {
+        let dir = setup_project();
+        let doc = dir.path().join("infra.md");
+        let (baseline, authority, disk) = admission_both_edited_docs();
+        let merged = merge_admission_three_way_split(&doc, &baseline, &authority, &disk)
+            .unwrap()
+            .unwrap_or_else(|| authority.clone());
+        let body = component_body(&merged, "queue");
+        assert_eq!(
+            body.matches("Create a PR to fix the SBX + STG drift")
+                .count(),
+            1,
+            "the item both sides edited must stay one item:\n{merged}"
+        );
+        assert!(
+            body.contains("drift if there is drift if there is drift."),
+            "{merged}"
         );
     }
 

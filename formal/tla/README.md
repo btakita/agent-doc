@@ -180,6 +180,18 @@ writer wins on an overlap) must violate `AgentPreserved`, and
 `formal/authority_ladder/ConflictReconciliation.lean` proves the same merge for
 every base and every pair of edits.
 
+`AdmissionSplitMerge.tla` checks preflight's admission three-way merge ladder
+(`#admissionmergedup`): when the editor authority and disk both advanced past
+the baseline, the adopted revision never holds a list item more times than an
+identity merge would. The runtime guard every rung must clear is count
+conservation (at most baseline + each side's additions), because the
+line-based `Semantic` rung keeps both of two different edits of one item.
+`AdmissionSplitMergeWedge.cfg` (the pre-fix ladder) must violate
+`NoDuplicateItem`, the 2026-09-30 `infra.md` duplicate;
+`AdmissionSplitMergeGuardOffWedge.cfg` shows ending the ladder on
+`equals_authority` is no substitute for the guard; `AdmissionSplitMergeReach.cfg`
+must show disk-only additions still land.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

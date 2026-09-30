@@ -6482,6 +6482,33 @@ mod tests {
             .unwrap_or_else(|| entries.to_vec())
     }
 
+    /// `#presetargdedup` (live loss, agent-doc-bugs.md 2026-09-30): three
+    /// `#gh-fix <url>` preset invocations shared the identity `gh-fix`, so once
+    /// the first was struck the two live siblings were dropped as stale
+    /// re-emits of a finished item. Sibling invocations are distinct items.
+    #[test]
+    fn converge_keeps_sibling_preset_invocations_after_the_first_is_struck() {
+        let snapshot = vec![
+            p("#gh-fix https://x/issues/68"),
+            p("#gh-fix https://x/issues/69"),
+            p("#gh-fix https://x/issues/70"),
+            p("release + publish"),
+        ];
+        let entries = vec![
+            c("#gh-fix https://x/issues/68"),
+            p("#gh-fix https://x/issues/69"),
+            p("#gh-fix https://x/issues/70"),
+            p("release + publish"),
+        ];
+        assert_eq!(converge(&entries, &snapshot), entries);
+        let fresh = vec![
+            p("#gh-fix https://x/issues/68"),
+            p("#gh-fix https://x/issues/69"),
+            p("#gh-fix https://x/issues/70"),
+        ];
+        assert_eq!(converge(&fresh, &[]), fresh, "unstruck siblings survive too");
+    }
+
     /// `#qdedupsync` / `#pushpinaccum`: a pinned `do [#id]` accumulated alongside
     /// its bare twin collapses to one strongest-pin survivor at the earliest slot.
     #[test]

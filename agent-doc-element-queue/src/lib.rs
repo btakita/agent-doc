@@ -251,7 +251,22 @@ fn extract_head_id(prompt: &str) -> Option<String> {
     let raw = topic
         .strip_prefix("[#")
         .and_then(|rest| rest.split_once(']').map(|(id, _)| id))
-        .or_else(|| topic.strip_prefix('#').map(id_prefix))?;
+        .or_else(|| {
+            let rest = topic.strip_prefix('#')?;
+            let id = id_prefix(rest);
+            // `#presetargdedup`: a bare, un-`do`'d `#word <more text>` line is a
+            // prompt-preset invocation with arguments (`#gh-fix <issue url>`),
+            // not a reference to tracked item `#word`. Keying it by `word`
+            // gave every line sharing the preset ONE identity, so convergence
+            // collapsed the siblings -- and once the first was struck, dropped
+            // the rest as stale re-emits of a finished item. Only a bare `#id`
+            // (or `do #id ...` / `[#id]`) is id-backed; the rest keys as text.
+            if lower.starts_with("do ") || rest[id.len()..].trim().is_empty() {
+                Some(id)
+            } else {
+                None
+            }
+        })?;
     if raw.is_empty()
         || !raw
             .chars()
@@ -307,6 +322,28 @@ pub fn strip_priority_markers(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// `#presetargdedup`: sibling preset invocations that differ only in their
+    /// argument are distinct queue items; a bare `#id` stays id-backed.
+    #[test]
+    fn preset_invocations_with_arguments_key_by_full_text() {
+        let a = QueueItemIdentity::from_prompt("#gh-fix https://x/issues/69");
+        let b = QueueItemIdentity::from_prompt("#gh-fix https://x/issues/70");
+        assert!(!a.is_id_backed(), "{a:?}");
+        assert_ne!(a, b);
+        assert_eq!(
+            QueueItemIdentity::from_prompt("#abc123"),
+            QueueItemIdentity::Id("abc123".to_string())
+        );
+        assert_eq!(
+            QueueItemIdentity::from_prompt("do #abc123 then more"),
+            QueueItemIdentity::Id("abc123".to_string())
+        );
+        assert_eq!(
+            QueueItemIdentity::from_prompt("[#abc123] described"),
+            QueueItemIdentity::Id("abc123".to_string())
+        );
+    }
+
     use super::*;
 
     const ALL_STATES: [QueueItemState; 6] = [

@@ -243,6 +243,19 @@ Next queue head: #release.
 **Verification:** `make check` passed (exit 0; nextest 10262/10262 passed, 259 skipped). `make install` and `cargo build --release` succeeded. CI for #74/#75: see console.
 
 Exchange is at about 190 lines with 8 sections (accretion warn); I'm continuing the drain per the active-queue rule. Next queue head: #release.
+
+### Re: Doing the "things you need from me" — opus-5.5 · 2026-09-30T19:46-04:00
+
+> **Queue prompt:** Do the "things you need from me"
+
+Going through the list:
+
+- **`mail` uncommitted changes (done).** These turned out to be a normal corky archive sync left uncommitted since Sep 23–25. It added a new `haiven` account block to `.corky.toml` (provider/user/labels/sync_days, no credentials), a 100k-line `manifest.toml` delta, new conversations, and `.tsift/` in `.gitignore`. No corky process was running. I committed it inside-out as `chore: sync mail archive`, matching the earlier syncs: `mailboxes/lucas` `7452e07`, then `mail` `1555f23`. Both are pushed to their own `origin/main` and in sync. I recorded the superproject pointer (`8b5c726721`) with `commit --only`. The partial-staging warning should be gone.
+- **`src/agent-doc` pointer (done).** The superproject now points at the #73/#74/#75 fixes (`1978a50c01`).
+- **Other session's `lib.rs` work (handed to its owner).** The uncommitted `#rebasedsavefalsefail` edit in `agent-doc-document-realtime-io/src/lib.rs` is complete and includes its own test, and it passed all three full suites. It most likely belongs to the idle peer session `agent-loop-57` (started 3h ago; the edit is from 18:10). Landing a live session's work could collide with it, so I messaged that session to commit or discard it. I did not touch the file. `#refusalsteeringverbatim` stays blocked on it.
+- **Supervisor restart (after closeout).** `agent-doc admin recycle` runs right after this response commits. Recycling explicitly before closeout is forbidden by `#closeout-before-explicit-recycle`.
+- **Compaction (after closeout).** `agent-doc compact --commit` runs right after this closeout, before `#release`. The exchange is at 215 lines with 9 sections.
+- **`#release`.** Its skip marker is gone and it's the next queue head, so the loop takes it next.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -255,6 +268,7 @@ Exchange is at about 190 lines with 8 sections (accretion warn); I'm continuing 
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/73~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/74~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/75~~
+- ~~Do the "things you need from me"~~
 - ⏭️ #release
 <!-- /agent:queue -->
 

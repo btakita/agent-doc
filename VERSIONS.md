@@ -2,6 +2,33 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.423
+
+- **A retained write is never re-sent (fpe.md duplicate + lost queue items).** A repair that ran
+  while the first closeout write was still held for a missing editor replica called the response
+  absent and replayed it; the replay's queue step then consumed two newer operator items as
+  answered. Repair now defers to a pending document write that already carries the response, and a
+  replay whose own done-ids were already struck consumes only the free-text heads its captured
+  response quotes.
+- **Queue repeats are scheduled reruns.** An identical free-text line queued twice is an
+  intentional FIFO repeat: answering it strikes only the first copy, and convergence keeps an
+  authored live repeat below its struck first copy.
+- **Semantic merge uses the right roles.** `try_semantic_merge_convergence` merged the live editor
+  text as the agent's and the agent's document as the operator's, so a same-line conflict went to
+  the agent (an agent strike resurrected an operator-deleted queue line).
+- **A frontmatter-only change is never user intent (GH #66).** The `queue: stop` → `queue: go` flip
+  (and a `prompt_presets:` map) no longer suppresses the drain it starts, and the semantic diff
+  credits such a change to `frontmatter` instead of a phantom `exchange` change.
+- **`[crdt-perf]` timing logs at DEBUG off the EDT (GH #65).** Background CRDT work only warns at
+  1 s or more; UI-thread thresholds are unchanged. Full per-delta timing stays available through
+  the IDE's Debug Log Settings.
+- **A refused dynamic unload is recorded and preflight advises restart (GH #67).**
+  `plugin_bytes_superseded` no longer prescribes an install that can never converge; the fallback
+  prints its reason once; the upgrader reads both the String and Boolean shapes of
+  `checkCanUnloadWithoutRestart` (the `: false` message was a regression in 0.35.422).
+- **`agent-doc reliable-sync-status --check`** exits non-zero on a surface/pane divergence (GH #62).
+- JetBrains plugin 0.2.453.
+
 ## 0.35.422
 
 - **JetBrains dynamic upgrade finds `DynamicPlugins` on current IDEs (GH #63).** The upgrader now

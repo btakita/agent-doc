@@ -854,6 +854,16 @@ fn prior_cycle_hosted_a_turn(prior: &agent_doc_cycle_state_io::CycleState) -> bo
 /// stale, so re-offer the skipped heads. By the asymmetry above that costs at
 /// most one re-dispatch each, and a head that really is still stalled is skipped
 /// again by the very next completed cycle.
+/// `#presetargdedup`: normalized `#id`s whose ONLY active meaning in the
+/// document is a prompt preset (no backlog/review/icebox item carries them).
+fn preset_only_identity_ids(content: &str) -> std::collections::HashSet<String> {
+    agent_doc_element_backlog::backlog::document_active_identities(content)
+        .into_iter()
+        .filter(|(_, sources)| sources.iter().all(|source| source == "prompt_presets"))
+        .map(|(id, _)| id)
+        .collect()
+}
+
 fn advance_skipped_queue_head_ids(
     carried: std::collections::HashSet<String>,
     prior_dispatched: Option<&str>,
@@ -4840,11 +4850,18 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // is consumed or no longer a live head. Computed from the prior cycle's
     // state-ledger projection before `start_preflight` advances this run.
     let skipped_queue_head_ids: std::collections::HashSet<String> = if activation.active {
+        // `#presetargdedup`: a `#gh-fix <url>` head names a prompt PRESET, not a
+        // tracked item. Treating `gh-fix` as a dispatched-but-unresolved item id
+        // skipped every sibling invocation after the first (`⏭️`), so the drain
+        // jumped past operator-queued work. Only ids that are not preset-only
+        // take part in the skip set.
+        let preset_only = preset_only_identity_ids(&current_content);
         let current_live_ids: std::collections::HashSet<String> = activation
             .entries_after
             .iter()
             .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
             .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+            .filter(|id| !preset_only.contains(id))
             .collect();
         let prior = agent_doc_cycle_state_io::load(file).ok().flatten();
         let carried: std::collections::HashSet<String> = prior
@@ -4871,7 +4888,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                 s.active_queue_heads
                     .iter()
                     .filter_map(|h| agent_doc_queue::queue_response::queue_prompt_done_id(h))
-                    .find(|id| !carried.contains(id))
+                    .find(|id| !carried.contains(id) && !preset_only.contains(id))
             });
         advance_skipped_queue_head_ids(
             carried,
@@ -6566,6 +6583,70 @@ mod tests {
             agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
             snapshot_before
         );
+    }
+
+    /// `#presetargdedup` (live, agent-doc-bugs.md 2026-09-30): after the first
+    /// `#gh-fix <url>` head was answered, its siblings were marked `⏭️` as if
+    /// `gh-fix` were a dispatched-but-unresolved tracked item, and the drain
+    /// jumped to `release + publish`. A preset-only id never joins the skip set.
+    #[test]
+    fn run_queue_maintenance_never_skips_sibling_preset_invocations() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "prompt_presets:\n",
+            "  '#gh-fix': fix then close\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- ~~#gh-fix https://x/issues/68~~\n",
+            "- #gh-fix https://x/issues/69\n",
+            "- #gh-fix https://x/issues/70\n",
+            "- release + publish\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_active_queue_heads(
+            &doc,
+            &["#gh-fix https://x/issues/68".to_string()],
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(content),
+            Some(content),
+            &agent_doc_hash::content_hash("### Re: 68\n\nfixed\n"),
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "committed", Some(content), Some(content))
+            .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            state.selected_queue_prompts,
+            vec!["#gh-fix https://x/issues/69".to_string()],
+            "the next sibling invocation must be selected:\n{updated}"
+        );
+        assert!(!updated.contains("⏭️"), "no sibling may be skipped:\n{updated}");
+        let persisted = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(persisted.skipped_queue_head_ids.is_empty(), "{:?}", persisted.skipped_queue_head_ids);
     }
 
     #[test]

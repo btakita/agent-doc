@@ -201,6 +201,7 @@ fn late_answered_free_text_strike_capture(
     else {
         return Ok(None);
     };
+    let capture_owned = captured.is_some();
     let capture_id = if let Some((capture_id, captured_body)) = captured {
         // A strict-template capture retains its `patch:exchange` envelope while
         // committed HEAD contains only the visible response cell. Prove that
@@ -257,14 +258,39 @@ fn late_answered_free_text_strike_capture(
     if exact_struck_target || exact_reaped_target {
         return Ok(Some(LateAnsweredFreeTextStrike::Exact(capture_id)));
     }
-    let recurring = current_content != committed_content
-        && !agent_doc_queue::queue_consume::answered_free_text_head_node_keys(
-            current_content,
-            &response_body,
-            Some(committed_content),
-        )?
-        .is_empty();
+    let recurring = answered_free_text_head_recurs(
+        committed_content,
+        current_content,
+        &response_body,
+        capture_owned,
+    )?;
     Ok(recurring.then_some(LateAnsweredFreeTextStrike::Recurring(capture_id)))
+}
+
+/// `#synthcommitstrike`: whether the current document carries an answered
+/// free-text head as a prompt typed again, rather than as unstruck residue.
+///
+/// Recurrence is only provable when a capture owned by the committed cycle
+/// proves its strike was projected (`capture_owned`). A closeout that committed
+/// under a synthetic cycle has no owning capture (the `committed-head:` id), so
+/// HEAD never received the strike and a live answered head is residue. Refusing
+/// it as "recurring" (agent-doc-bugs.md 2026-09-29 18:34:11) blocked the commit
+/// before preflight's residue strike could clear it.
+fn answered_free_text_head_recurs(
+    committed_content: &str,
+    current_content: &str,
+    response_body: &str,
+    capture_owned: bool,
+) -> Result<bool> {
+    if !capture_owned || current_content == committed_content {
+        return Ok(false);
+    }
+    Ok(!agent_doc_queue::queue_consume::answered_free_text_head_node_keys(
+        current_content,
+        response_body,
+        Some(committed_content),
+    )?
+    .is_empty())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -3155,7 +3181,7 @@ mod controller_commit_scope_tests {
 
 #[cfg(test)]
 mod visible_response_absorb_tests {
-    use super::visible_uncommitted_response_is_absorbable;
+    use super::{answered_free_text_head_recurs, visible_uncommitted_response_is_absorbable};
 
     const HEAD: &str = concat!(
         "---\nagent_doc_session: t\nagent_doc_format: template\n---\n\n",
@@ -3168,6 +3194,33 @@ mod visible_response_absorb_tests {
         format!(
             "---\nagent_doc_session: t\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n❯ Prior question?\n{body}<!-- /agent:exchange -->\n"
         )
+    }
+
+    fn with_queue(exchange_body: &str, queue: &str) -> String {
+        format!("{}\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n", with_exchange(exchange_body))
+    }
+
+    const ANSWER: &str = "### Re: issue -- opus\n\n> **Queue prompt:** Fix https://github.com/btakita/agent-doc/issues/59. release + publish\n\nReleased.\n";
+
+    /// `#synthcommitstrike`: agent-doc-bugs.md 2026-09-29 18:34:11. HEAD kept the
+    /// answered head unstruck; an unrelated operator edit must not turn that
+    /// residue into a "recurring prompt" refusal.
+    #[test]
+    fn unstruck_residue_with_an_unrelated_edit_is_not_a_recurring_prompt() {
+        let head = "- Fix https://github.com/btakita/agent-doc/issues/59. release + publish\n";
+        let committed = with_queue(ANSWER, head);
+        let current = with_queue(ANSWER, &format!("{head}- do [#other]\n"));
+        assert!(!answered_free_text_head_recurs(&committed, &current, ANSWER, false).unwrap());
+    }
+
+    /// With a capture owned by the committed cycle, the strike was projected, so
+    /// a live answered head in a changed document is a prompt typed again.
+    #[test]
+    fn a_live_answered_head_recurs_only_under_an_owning_capture() {
+        let head = "- Fix https://github.com/btakita/agent-doc/issues/59. release + publish\n";
+        let committed = with_queue(ANSWER, head);
+        let current = with_queue(ANSWER, &format!("{head}- do [#other]\n"));
+        assert!(answered_free_text_head_recurs(&committed, &current, ANSWER, true).unwrap());
     }
 
     /// `#visibleresponseabsorb`: agent-doc-bugs.md 2026-09-29 18:29. The response was

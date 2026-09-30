@@ -1180,7 +1180,18 @@ fn compose_occurrence(
             }
             // Present only in theirs: symmetric.
             (None, Some(t)) => {
-                if ours_removed.contains(id) && !theirs_updated.contains(id) && !is_exchange {
+                // GH #74: a decoration-only theirs update (marker / strike, same
+                // instruction text) carries no operator content and cannot veto
+                // ours' delete — mirrors `crdt::reconcile_component_body`.
+                let theirs_update_is_decoration_only = lifecycle_governed
+                    && base_map.get(id).is_some_and(|base| {
+                        crate::crdt::queue_instruction_text(t)
+                            == crate::crdt::queue_instruction_text(base)
+                    });
+                if ours_removed.contains(id)
+                    && (!theirs_updated.contains(id) || theirs_update_is_decoration_only)
+                    && !is_exchange
+                {
                     None
                 } else {
                     Some(t.clone())

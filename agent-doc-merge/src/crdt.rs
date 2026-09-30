@@ -1566,6 +1566,19 @@ fn reconcile_component_body(
             // Present only in theirs: insert by theirs, or delete by ours.
             (None, Some(t)) => match in_b {
                 None => Some(t.text.clone()),
+                // GH #74: a list child whose theirs-side change is decoration
+                // only (a priority/pin marker or strike, same instruction text)
+                // carries no operator content, so it cannot veto ours' delete.
+                // An operator edit of an agent-annotated free-text item re-keys
+                // it (delete-old + insert-new on the side carrying the edit);
+                // resurrecting the decorated old child forked the item into two
+                // divergent copies.
+                Some(b)
+                    if lifecycle_governed
+                        && queue_instruction_text(&t.text) == queue_instruction_text(&b.text) =>
+                {
+                    None
+                }
                 Some(b) if protect_deletes || t.text != b.text => Some(t.text.clone()),
                 Some(_) => None,
             },
@@ -4731,6 +4744,68 @@ Second answer line three.
         assert_eq!(
             live_occurrences, 0,
             "stale CRDT resurrected the struck head as a live queue line:\n{queue_body}"
+        );
+    }
+
+    /// GH #74: an operator edit of an agent-annotated free-text queue item must
+    /// not fork it into two divergent copies. The item's text is its key, so the
+    /// edit reads as delete-old + insert-new on the side carrying it (`ours`). The
+    /// other side (`theirs`) changed only the item's decoration (the agent `🚧`
+    /// marker dropped). A decoration-only change must never resurrect the child
+    /// the edit replaced — that produced the captured `🚧 X + extra` / `X` pair.
+    #[test]
+    fn merge_by_component_edited_marked_free_text_item_not_forked_by_decoration_change() {
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue priority -->\n- 🚧 The review seems very long. If you need to verify something, please verify it.\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue priority -->\n- 🚧 The review seems very long. If you need to verify something, please verify it. Make edits to the review, not another retraction comment.\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue priority -->\n- The review seems very long. If you need to verify something, please verify it.\n<!-- /agent:queue -->\n";
+
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let merged = merge_by_component(Some(&base_state), ours, theirs).unwrap();
+        let queue_body = merged
+            .split("<!-- agent:queue priority -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:queue -->").next())
+            .unwrap();
+        let items: Vec<&str> = queue_body.lines().filter(|l| l.starts_with("- ")).collect();
+        assert_eq!(
+            items,
+            vec![
+                "- 🚧 The review seems very long. If you need to verify something, please verify it. Make edits to the review, not another retraction comment."
+            ],
+            "edited item was forked into divergent copies:\n{queue_body}"
+        );
+    }
+
+    /// GH #74, fallback keyed path (`reconcile_component_body`, used when the
+    /// per-cell merge falls back): same decoration-only-vs-delete rule.
+    #[test]
+    fn reconcile_component_body_decoration_only_change_does_not_veto_delete() {
+        let base = "- 🚧 review it. verify it.\n";
+        let ours = "- 🚧 review it. verify it. Edit the review.\n";
+        let theirs = "- review it. verify it.\n";
+        let merged = reconcile_component_body("queue", Some(base), ours, theirs).unwrap();
+        assert_eq!(merged, "- 🚧 review it. verify it. Edit the review.\n");
+    }
+
+    /// GH #74 boundary: a REAL content edit on `theirs` of a child `ours` deleted
+    /// is an operator correction and must still survive.
+    #[test]
+    fn merge_by_component_theirs_content_edit_survives_ours_delete() {
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- fix the parser\n  details line\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+<!-- agent:queue -->\n- fix the parser\n  details line, and the lexer too\n<!-- /agent:queue -->\n";
+
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let merged = merge_by_component(Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            merged.contains("and the lexer too"),
+            "operator content correction was dropped:\n{merged}"
         );
     }
 

@@ -417,6 +417,29 @@ Next: GH #66, then #67, then `release + publish`.
 - **Tests:** one replays the issue's exact edit and fails if the fix is removed; it also checks that a real exchange prompt in the same edit still counts. A second covers the component label.
 
 Next: GH #67, then `release + publish`.
+
+### Re: GH #67 — `plugin_bytes_superseded` advice that can never converge — opus-5-5 · 2026-09-30T13:36-04:00
+
+> **Queue prompt:**
+>
+> fix https://github.com/btakita/agent-doc/issues/67
+
+**Fixed in `3ee81039b` (JetBrains plugin 0.2.453). GH #67 is closed.** Installed (hot-swapped into the running IDE here) and pushed; `make check` passes (Rust 10224/0, JetBrains 602/0, VS Code 181/0).
+
+1. **The advice now remembers a refusal.**
+   - When an install has to fall back to replacing files because the running IDE refused the no-restart upgrade, it writes the reason to `.agent-doc-jetbrains-restart-required` in the plugins directory.
+   - The file sits next to the plugin folder, not inside it. Inside, the "already current" check would count it as a changed file and every install would look new.
+   - Any later install that succeeds without a restart deletes it.
+   - If that record is newer than the running IDE process, the `plugin_bytes_superseded` warning now says the files are current and to **restart the IDE**, instead of telling you to install again.
+2. **The reason prints once.** The fallback line no longer repeats the error; the final restart message carries it.
+3. **`plugin cannot unload dynamically: false` was my regression from `#jbunloadsig` this morning.**
+   - Newer IDE builds report whether the plugin *can* unload as `true`/`false`; older builds return a text reason or nothing. My lookup treated any non-empty answer as a refusal and printed the raw `false`.
+   - It now accepts both shapes. `false` becomes a proper sentence, and a `true` (can unload) is no longer refused.
+   - I couldn't check which way the reporter's build (IU-263) means its answer, since only 252/261 builds are installed here. It reported `false`, so on that IDE a restart is genuinely required, and now it will be told so.
+
+Tests cover: the marker being written, not breaking the "already current" check, and being cleared; the warning choosing restart only when a refusal is recorded; and the upgrade step reading both answer shapes.
+
+Next and last in the queue: `release + publish`.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -432,7 +455,8 @@ Next: GH #67, then `release + publish`.
 - ~~fix https://github.com/btakita/agent-doc/issues/62~~
 - ~~fix https://github.com/btakita/agent-doc/issues/65~~
 - ~~fix https://github.com/btakita/agent-doc/issues/66~~
-- fix https://github.com/btakita/agent-doc/issues/67
+- ~~fix https://github.com/btakita/agent-doc/issues/67~~
+- https://github.com/btakita/agent-doc/issues/62 is still open on github. Please close it if it is done. If it's not yet done, fix it then close the issue.
 - release + publish
 <!-- /agent:queue -->
 

@@ -3396,8 +3396,36 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     at_safe_checkpoint,
                 );
                 let write_wedged = wedge_needs_recycle && at_safe_checkpoint;
-                let editor_delivery_stale =
-                    stale_editor_replica_requested && at_safe_checkpoint;
+                // `#stalesupresumedeadlock`: this generation's own captured
+                // resume latched `needs_operator` while a recycle is already
+                // due. Hand the retained capture to the replacement instead of
+                // deferring on the open cycle that only the replacement can close.
+                let stale_capture_resume_latched =
+                    agent_doc_supervisor::lifecycle::stale_generation_capture_resume_needs_recycle(
+                        supervisor_stale || recycle_requested,
+                        resume_retry.as_ref().is_some_and(|retry| retry.needs_operator),
+                    );
+                let editor_delivery_stale = (stale_editor_replica_requested
+                    || stale_capture_resume_latched)
+                    && at_safe_checkpoint;
+                if stale_capture_resume_latched {
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "supervisor_stale_capture_resume_recycle file={} pane={} stale={} recycle_requested={} inflight={} action={} reason=latched_resume_in_replaceable_generation (#stalesupresumedeadlock)",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            supervisor_stale,
+                            recycle_requested,
+                            inflight_handlers,
+                            if at_safe_checkpoint {
+                                "recycle_at_safe_checkpoint"
+                            } else {
+                                "defer_until_safe_checkpoint"
+                            },
+                        ),
+                    );
+                }
                 if wedge_needs_recycle && !at_safe_checkpoint {
                     agent_doc_ops_log_io::log_op(
                         &path,
@@ -5489,6 +5517,26 @@ mod tests {
             source.contains("reclaimed_empty_preflight={}"),
             "the open-cycle deferral receipt must report the reclaim outcome"
         );
+    }
+
+    /// `#stalesupresumedeadlock`: a latched captured-resume verdict in a
+    /// generation that is already due for replacement must feed the
+    /// capture-backed recycle slot, or the open cycle holds the recycle that
+    /// alone could close it (2026-09-30 06:17-06:35 UTC, agent-doc-bugs.md).
+    #[test]
+    fn latched_capture_resume_feeds_the_capture_backed_recycle() {
+        let source = include_str!("idle_watch.rs");
+        // Built from fragments so this guard never matches its own source text.
+        let join = ["stale_generation_capture_resume", "_needs_recycle("].concat();
+        let recycle_wanted = ["supervisor_stale || ", "recycle_requested,"].concat();
+        let latch = ["retry.", "needs_operator)"].concat();
+        let slot = ["|| stale_capture_resume", "_latched)"].concat();
+        for needle in [&join, &recycle_wanted, &latch, &slot] {
+            assert!(
+                source.contains(needle.as_str()),
+                "idle watch lost the stale capture-resume recycle wiring: missing `{needle}`"
+            );
+        }
     }
 
     #[test]

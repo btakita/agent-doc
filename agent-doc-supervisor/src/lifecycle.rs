@@ -217,7 +217,7 @@ mod restart_admission_tests {
             false, // head_pending
             true,  // explicit_admin
             false, // write_wedged
-            false, // editor_delivery_stale
+            false, // capture_backed_refresh
             false, // reexec_failed
             true,  // cycle_open
         );
@@ -309,7 +309,7 @@ mod native_reload_admission_tests {
             false, // head_pending
             true,  // explicit_admin
             false, // write_wedged
-            false, // editor_delivery_stale
+            false, // capture_backed_refresh
             false, // reexec_failed
             true,  // cycle_open
         );
@@ -349,6 +349,32 @@ pub fn recycle_interrupted_resubmit_should_wait(
     trigger_already_injected && recycle_pending
 }
 
+/// Whether a supervisor that wants to recycle must do so now because its own
+/// captured-response resume is stuck (`#stalesupresumedeadlock`).
+///
+/// The captured-finalize resume runs inside the supervisor process, so a stale
+/// generation judges the retained response with stale code. On 2026-09-30
+/// (06:17-06:35 UTC, `tasks/agent-doc/agent-doc-bugs.md`) a route-owned
+/// supervisor built on 2026-09-28 latched `captured_finalize_resume_needs_operator`
+/// every ~6s ("heading already committed", which the installed build handles)
+/// while `supervisor_recycle_deferred_cycle_open` held its recycle: the open
+/// cycle needed the new code, and the new code needed the recycle. It was
+/// broken by hand with an empty-stdin `write --commit`.
+///
+/// A latched verdict from a generation that is already due for replacement is
+/// not an operator problem yet — the replacement has not looked. The response is
+/// durably captured (that is what the resume is replaying), so the recycle is
+/// capture-backed and crosses the open cycle like a write wedge. The fresh
+/// generation starts without the latch and without the recycle request (the
+/// marker is cleared before `execve`), so this fires at most once per episode;
+/// a verdict the fresh build also latches stays with the operator.
+pub fn stale_generation_capture_resume_needs_recycle(
+    recycle_wanted: bool,
+    capture_resume_latched_needs_operator: bool,
+) -> bool {
+    recycle_wanted && capture_resume_latched_needs_operator
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn supervisor_recycle_action(
     stale: bool,
@@ -357,11 +383,11 @@ pub fn supervisor_recycle_action(
     head_pending: bool,
     explicit_admin: bool,
     write_wedged: bool,
-    editor_delivery_stale: bool,
+    capture_backed_refresh: bool,
     reexec_failed: bool,
     cycle_open: bool,
 ) -> SupervisorRecycleAction {
-    let replay_checkpoint = if write_wedged || editor_delivery_stale {
+    let replay_checkpoint = if write_wedged || capture_backed_refresh {
         DurableReplayCheckpoint::CapturedResponse
     } else {
         DurableReplayCheckpoint::Absent
@@ -371,7 +397,7 @@ pub fn supervisor_recycle_action(
             return SupervisorRecycleAction::DeferCycleOpen;
         }
         GenerationTransitionAdmission::DeferUnsafeCheckpoint => {
-            return if explicit_admin || write_wedged || editor_delivery_stale {
+            return if explicit_admin || write_wedged || capture_backed_refresh {
                 SupervisorRecycleAction::DeferUnsafeCheckpoint
             } else {
                 SupervisorRecycleAction::None
@@ -395,12 +421,17 @@ pub fn supervisor_recycle_action(
     // flag on the dewedge marker before the execve so this is once-per-episode and
     // cannot recycle-loop. The in-flight response is capture-backed and is recovered
     // via redispatch/replay on the fresh supervisor.
-    // A typed stale editor-delivery request has the same liveness shape as a
-    // proven write wedge: the open closeout cycle cannot reach its boundary
-    // until the replica worker is refreshed. The caller only raises this at a
-    // capture-backed safe checkpoint, so deferring on `cycle_open` would be a
-    // circular wait while an immediate in-place recycle preserves the response.
-    if write_wedged || editor_delivery_stale {
+    // `capture_backed_refresh` has the same liveness shape as a proven write
+    // wedge: the open closeout cycle cannot reach its boundary until this
+    // generation is replaced. It is raised for a typed stale editor-delivery
+    // request (the replica worker must be refreshed) and for a stale
+    // generation whose own captured-response resume latched `needs_operator`
+    // (`#stalesupresumedeadlock`, see
+    // [`stale_generation_capture_resume_needs_recycle`]). The caller only raises
+    // it at a capture-backed safe checkpoint, so deferring on `cycle_open` would
+    // be a circular wait while an immediate in-place recycle preserves the
+    // response.
+    if write_wedged || capture_backed_refresh {
         return if reexec_failed {
             SupervisorRecycleAction::EscalateKillRelaunch
         } else {
@@ -784,13 +815,70 @@ mod tests {
         );
     }
 
+    /// `#stalesupresumedeadlock`: the 2026-09-30 06:17-06:35 shape. A recycle
+    /// was due, the cycle was open with a durable capture, and the resume in the
+    /// stale generation latched `needs_operator` again and again.
+    #[test]
+    fn stale_generation_latched_capture_resume_recycles_across_the_open_cycle() {
+        use SupervisorRecycleAction::*;
+        use SupervisorRecycleCheckpoint::*;
+
+        assert!(stale_generation_capture_resume_needs_recycle(true, true));
+        // Without the latch the resume is still making its own progress, and
+        // without a due recycle there is no newer generation to hand it to.
+        assert!(!stale_generation_capture_resume_needs_recycle(true, false));
+        assert!(!stale_generation_capture_resume_needs_recycle(false, true));
+
+        // Args: (stale, auto, checkpoint, head_pending, admin, write_wedged,
+        // capture_backed_refresh, reexec_failed, cycle_open)
+        let deadlocked = supervisor_recycle_action(
+            true,
+            true,
+            SafeIntraTurn,
+            false,
+            true,
+            false,
+            false,
+            false,
+            true,
+        );
+        assert_eq!(deadlocked, DeferCycleOpen, "the pre-fix circular wait");
+
+        let refreshed = supervisor_recycle_action(
+            true,
+            true,
+            SafeIntraTurn,
+            false,
+            true,
+            false,
+            stale_generation_capture_resume_needs_recycle(true, true),
+            false,
+            true,
+        );
+        assert_eq!(refreshed, RecycleImmediate);
+
+        // Still never severs in-flight supervisor IPC.
+        let inflight = supervisor_recycle_action(
+            true,
+            true,
+            Unsafe,
+            false,
+            true,
+            false,
+            stale_generation_capture_resume_needs_recycle(true, true),
+            false,
+            true,
+        );
+        assert_eq!(inflight, DeferUnsafeCheckpoint);
+    }
+
     #[test]
     fn wedge_recycles_immediately_mid_turn() {
         use SupervisorRecycleAction::*;
         use SupervisorRecycleCheckpoint::*;
 
         // Args: (stale, auto, checkpoint, head_pending, admin, write_wedged,
-        // editor_delivery_stale, reexec_failed, cycle_open)
+        // capture_backed_refresh, reexec_failed, cycle_open)
         // The whole point of `#midturn-wedge-recycle`: a proven wedge recycles even
         // when NOT at a turn boundary — the wedged turn can never reach one.
         assert_eq!(

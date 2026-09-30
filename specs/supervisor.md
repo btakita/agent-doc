@@ -689,6 +689,18 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   `idle_queue_drain_decision`) the live idle-queue watch uses rather than
   reimplementing the policy, so the recycle + clear pipeline is simulated offline
   across its interoperating systems.
+- `#stalesupresumedeadlock`: an open cycle defers a recycle only while the cycle
+  has no durable replay checkpoint. Three capture-backed facts cross it at a
+  supervisor-safe checkpoint (IPC drained): a proven editor-IPC write wedge, a
+  typed stale editor-delivery request, and a generation already due for
+  replacement (stale binary or pending recycle request) whose own
+  captured-finalize resume has latched `needs_operator`. The resume runs inside
+  the supervisor, so a stale generation judges the retained response with stale
+  code; deferring on the cycle it cannot close is a circular wait (2026-09-30,
+  06:17-06:35 UTC). The idle watch logs `supervisor_stale_capture_resume_recycle`,
+  and the replacement starts without the latch or the request marker, so the
+  escape fires at most once per episode. A verdict the fresh build also latches
+  stays with the operator.
 - `#wd40` / `#supboundarylivelock` state-flush: an explicit `admin recycle`
   recycles at the first supervisor-safe checkpoint even when the installed binary
   already matches the running supervisor (`supervisor:fresh`). A checkpoint is

@@ -4,6 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.426
 
+- **`session-check` waits out a converging `write_applied` again.** The settle window
+  (`#scsettlewindow`, GH #60) never ran: the INTERRUPTED branch printed and exited the process from
+  inside the check, so the settle loop never saw an error to classify. On 2026-09-30 a Codex loop on
+  `monsterrodholders.md` stopped on `INTERRUPTED … still write_applied` 2.7s after a deferred
+  `respond`, and the retained intent committed on its own 14s later. The check now returns a typed
+  `SessionCheckInterrupted`, and only the CLI entry prints it and exits `1`, after settling. The
+  window is also 45s instead of 15s, since that commit landed about 17s after the check began
+  (`#scsettleexit`).
 - **The captured-splice live recipe reaches its advance step.** The first operator-approved run of
   `scripts/xdotool-live-verify.sh captured-splice` stopped before the canonical advance. The
   repo-wide pane guard refused whenever any other document had a live session, a reaped owner pane

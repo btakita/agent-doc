@@ -770,6 +770,53 @@ pub fn run_with_options(
     codex_final_gate: bool,
     effects: &impl SessionCheckEffects,
 ) -> Result<()> {
+    exit_on_interrupted(file, try_run_with_options(file, codex_final_gate, effects))
+}
+
+/// A `session-check` INTERRUPTED outcome, carried as an error so a caller can
+/// inspect it before the process exits (`#scsettleexit`).
+///
+/// The Interrupted branch used to `println!` and exited the process from
+/// inside the check, so `run_read_only_settling` never received an `Err` to
+/// classify: the `#scsettlewindow` (GH #60) re-sample was dead code on exactly
+/// the `write_applied` deferral it was written for. Observed 2026-09-30 on
+/// `monsterrodholders.md`: `respond` deferred, the one permitted `session-check`
+/// reported INTERRUPTED after 2.7s, the Codex loop stopped, and the retained
+/// intent committed 14s later.
+#[derive(Debug)]
+pub struct SessionCheckInterrupted(pub String);
+
+impl std::fmt::Display for SessionCheckInterrupted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for SessionCheckInterrupted {}
+
+/// Print an INTERRUPTED outcome to stdout and exit `1`, as the CLI always has;
+/// pass every other result through.
+fn exit_on_interrupted(file: &Path, outcome: Result<()>) -> Result<()> {
+    match outcome {
+        Err(error) => match error.downcast::<SessionCheckInterrupted>() {
+            Ok(SessionCheckInterrupted(message)) => {
+                println!("{}", message);
+                crate::profile::report_now(file);
+                std::process::exit(1);
+            }
+            Err(other) => Err(other),
+        },
+        ok => ok,
+    }
+}
+
+/// [`run_with_options`] that returns an INTERRUPTED outcome as a
+/// [`SessionCheckInterrupted`] error instead of exiting.
+pub fn try_run_with_options(
+    file: &Path,
+    codex_final_gate: bool,
+    effects: &impl SessionCheckEffects,
+) -> Result<()> {
     // `#sccurrentpass`: one document version per sweep. See
     // `with_current_document_pass`.
     // Reset and report at the OUTERMOST boundary. Doing it around `inspect_core`
@@ -786,7 +833,9 @@ pub fn run_with_options(
 }
 
 /// Default bound for [`run_read_only_settling`] (`#scsettlewindow`, GH #60).
-pub const SESSION_CHECK_SETTLE_WINDOW_SECS: u64 = 15;
+/// 45s, not 15s (`#scsettleexit`): the 2026-09-30 `monsterrodholders.md`
+/// deferral committed ~17s after its single `session-check` began.
+pub const SESSION_CHECK_SETTLE_WINDOW_SECS: u64 = 45;
 /// Override for the settle window, in seconds; `0` samples once.
 pub const SESSION_CHECK_SETTLE_WINDOW_ENV: &str = "AGENT_DOC_SESSION_CHECK_SETTLE_SECS";
 const SESSION_CHECK_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(500);
@@ -836,9 +885,11 @@ pub fn run_read_only_settling(
     effects: &impl SessionCheckEffects,
     window: std::time::Duration,
 ) -> Result<()> {
-    settle_until_converged(window, SESSION_CHECK_SETTLE_POLL, || {
-        run_read_only_with_options(file, codex_final_gate, effects)
-    })
+    let outcome = settle_until_converged(window, SESSION_CHECK_SETTLE_POLL, || {
+        let read_only = ReadOnlySessionCheckEffects { inner: effects };
+        try_run_with_options(file, codex_final_gate, &read_only)
+    });
+    exit_on_interrupted(file, outcome)
 }
 
 fn settle_until_converged(
@@ -1631,11 +1682,7 @@ fn run_with_options_inner(
             }
             Ok(())
         }
-        SessionCheckStatus::Interrupted(message) => {
-            println!("{}", message);
-            crate::profile::report_now(file);
-            std::process::exit(1);
-        }
+        SessionCheckStatus::Interrupted(message) => Err(SessionCheckInterrupted(message).into()),
     }
 }
 
@@ -4101,6 +4148,47 @@ mod settle_window_tests {
             anyhow::bail!(WRITE_APPLIED)
         });
         assert_eq!(once.get(), 1, "a zero window samples exactly once");
+    }
+
+    /// `#scsettleexit`: the real check returns its INTERRUPTED outcome as a
+    /// typed error, and the settle loop must classify that error — not only a
+    /// hand-built `bail!` string — or the window is dead code again.
+    #[test]
+    fn the_typed_interrupted_outcome_is_resampled_until_it_commits() {
+        let calls = Cell::new(0);
+        let out = settle_until_converged(Duration::from_secs(5), Duration::from_millis(1), || {
+            calls.set(calls.get() + 1);
+            if calls.get() < 3 {
+                return Err(SessionCheckInterrupted(WRITE_APPLIED.to_string()).into());
+            }
+            Ok(())
+        });
+        assert!(out.is_ok());
+        assert_eq!(calls.get(), 3);
+    }
+
+    /// `#scsettleexit`: an INTERRUPTED outcome must never exit the process from
+    /// inside the check. The only `process::exit(1)` allowed in production code
+    /// is the entry-point one in `exit_on_interrupted`, which runs after any
+    /// settling. The window must also cover the observed 17s deferral.
+    #[test]
+    fn interrupted_exits_only_at_the_entry_point() {
+        let source = include_str!("command.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("test modules")];
+        let exits: Vec<usize> = production
+            .match_indices("std::process::exit(1)")
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(exits.len(), 1, "exactly one exit(1): {exits:?}");
+        let entry = production
+            .find("fn exit_on_interrupted(")
+            .expect("exit_on_interrupted");
+        let entry_end = entry + production[entry..].find("\n}\n").expect("fn end");
+        assert!(
+            (entry..entry_end).contains(&exits[0]),
+            "the exit(1) must live in exit_on_interrupted"
+        );
+        assert!(SESSION_CHECK_SETTLE_WINDOW_SECS >= 20);
     }
 
     #[test]

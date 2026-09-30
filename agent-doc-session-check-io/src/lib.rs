@@ -198,7 +198,7 @@ mod closeout_pass_guard {
             .map(|(before, _)| before)
             .unwrap_or(command);
         for entry in [
-            "pub fn run_with_options(",
+            "pub fn try_run_with_options(",
             "pub fn enforce_clean_closeout_with_force_disk(",
         ] {
             let start = body

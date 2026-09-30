@@ -1245,16 +1245,21 @@ fn install_jetbrains_package_bytes(
     hot_upgrade: impl FnOnce() -> Result<Option<usize>>,
     live_pids: impl FnOnce() -> Result<Vec<u32>>,
 ) -> Result<JetbrainsLocalInstallOutcome> {
+    let restart_marker =
+        target_dir.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
     let restart_reason = if dynamic {
         match hot_upgrade() {
             Ok(Some(processes)) => {
+                clear_restart_required_marker(&restart_marker);
                 return Ok(JetbrainsLocalInstallOutcome::HotUpgraded { processes });
             }
             Ok(None) => None,
             Err(error) => {
-                let reason = format!("dynamic upgrade unavailable: {error:#}");
-                eprintln!("WARNING: {reason}; falling back to a file replacement.");
-                Some(reason)
+                // GH #67: the reason is printed once, in the final restart message.
+                eprintln!(
+                    "WARNING: the restart-free upgrade was refused; replacing the plugin files instead."
+                );
+                Some(format!("dynamic upgrade unavailable: {error:#}"))
             }
         }
     } else {
@@ -1273,10 +1278,36 @@ fn install_jetbrains_package_bytes(
         }
     };
     replace_jetbrains_plugin_tree(zip_path, target_dir)?;
+    match &restart_reason {
+        // GH #67: record the refusal so preflight's `plugin_bytes_superseded` advises
+        // a restart instead of prescribing another install that re-learns the same
+        // refusal every cycle. It sits beside the plugin tree, never inside it.
+        Some(reason) => {
+            if let Err(err) = fs::write(&restart_marker, format!("{}\n", reason.replace('\n', " ")))
+            {
+                eprintln!(
+                    "[plugin] could not record the restart-required verdict at {}: {err}",
+                    restart_marker.display()
+                );
+            }
+        }
+        None => clear_restart_required_marker(&restart_marker),
+    }
     Ok(match restart_reason {
         Some(reason) => JetbrainsLocalInstallOutcome::RestartRequired { reason },
         None => JetbrainsLocalInstallOutcome::Installed,
     })
+}
+
+fn clear_restart_required_marker(marker: &Path) {
+    if let Err(err) = fs::remove_file(marker)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!(
+            "[plugin] could not clear the restart-required verdict at {}: {err}",
+            marker.display()
+        );
+    }
 }
 
 fn collect_installed_plugin_files(
@@ -2407,6 +2438,24 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             b"new"
         );
         assert!(jetbrains_local_zip_matches_installation(&zip, &target).unwrap());
+
+        // GH #67: the refusal is recorded beside (not inside) the plugin tree, so the
+        // byte-identity check above still passes and preflight can advise a restart.
+        let marker = target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
+        let recorded = fs::read_to_string(&marker).unwrap();
+        assert!(recorded.contains("signature mismatch"), "{recorded}");
+        assert_eq!(recorded.lines().count(), 1, "{recorded}");
+
+        // A later install that converges without a restart clears it.
+        install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            true,
+            || Ok(Some(1)),
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+        assert!(!marker.exists());
     }
 
     #[test]

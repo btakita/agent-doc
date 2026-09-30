@@ -576,6 +576,24 @@ fn prefer_mapped_plugin_jar(best: MappedPluginJar, candidate: MappedPluginJar) -
 pub fn plugin_byte_identity_warnings_from(
     probes: &[(String, u32, MappedPluginJar)],
 ) -> Vec<PreflightWarning> {
+    plugin_byte_identity_warnings_with_restart_verdicts(probes, &HashMap::new())
+}
+
+/// GH #67: file written into the IDE's plugins directory, beside (never inside) the
+/// `agent-doc-jetbrains` tree, when an install had to fall back to a file replacement
+/// because the live IDE refused the restart-free upgrade. Its body is the refusal
+/// reason. It lives outside the plugin tree so the install's byte-identity check
+/// never counts it as package content.
+pub const PLUGIN_RESTART_REQUIRED_MARKER: &str = ".agent-doc-jetbrains-restart-required";
+
+/// Like [`plugin_byte_identity_warnings_from`], but a process whose last install
+/// already recorded a refused restart-free upgrade (`restart_verdicts[pid]`) is told
+/// to restart. Re-running the install there can never converge: it downloads,
+/// replaces another live jar, and re-learns the same refusal every cycle.
+pub fn plugin_byte_identity_warnings_with_restart_verdicts(
+    probes: &[(String, u32, MappedPluginJar)],
+    restart_verdicts: &HashMap<u32, String>,
+) -> Vec<PreflightWarning> {
     let mut seen: HashSet<(String, u32)> = HashSet::new();
     let mut warnings = Vec::new();
     for (kind, pid, mapped) in probes {
@@ -595,16 +613,26 @@ pub fn plugin_byte_identity_warnings_from(
             ),
             _ => continue,
         };
+        let remedy = match restart_verdicts.get(pid) {
+            Some(reason) => format!(
+                "The last install already recorded that this process refused the restart-free \
+                 upgrade ({}), so another install cannot converge: the plugin files on disk are \
+                 current. Restart the editor to load them.",
+                reason.trim()
+            ),
+            None => "Re-run the plugin installation once so its dynamic update transaction \
+                     can converge. Restart the editor only if that install explicitly reports \
+                     a dynamic-unload failure."
+                .to_string(),
+        };
         warnings.push(PreflightWarning {
             code: "plugin_bytes_superseded".to_string(),
             message: format!(
                 "live {kind} editor pid {pid} is running superseded plugin bytes: {detail}. \
                  The version string cannot show this — an install rewrites the jar under the \
                  same version, so a version check reports the plugin as current while the \
-                 process keeps executing the replaced build. Re-run the plugin installation \
-                 once so its dynamic update transaction can converge. Do not repeat status \
-                 checks or reopen document tabs; neither changes the loaded bytes. Restart the \
-                 editor only if that install explicitly reports a dynamic-unload failure."
+                 process keeps executing the replaced build. {remedy} Do not repeat status \
+                 checks or reopen document tabs; neither changes the loaded bytes."
             ),
             document_agent: None,
             active_harness: None,
@@ -682,7 +710,38 @@ pub fn plugin_byte_identity_warnings(file: &Path) -> Vec<PreflightWarning> {
             probe_mapped_plugin_jar(pid, jar_stem),
         ));
     }
-    plugin_byte_identity_warnings_from(&probes)
+    let restart_verdicts = probes
+        .iter()
+        .filter_map(|(_, pid, mapped)| {
+            recorded_restart_verdict(*pid, mapped).map(|reason| (*pid, reason))
+        })
+        .collect::<HashMap<_, _>>();
+    plugin_byte_identity_warnings_with_restart_verdicts(&probes, &restart_verdicts)
+}
+
+/// The refusal an install recorded next to the jar this process maps, when that
+/// record is newer than the process (so it was this process that refused).
+fn recorded_restart_verdict(pid: u32, mapped: &MappedPluginJar) -> Option<String> {
+    let path = match mapped {
+        MappedPluginJar::Deleted { path } | MappedPluginJar::Superseded { path, .. } => path,
+        _ => return None,
+    };
+    // <plugins>/agent-doc-jetbrains/lib/<jar>
+    let plugins_dir = std::path::Path::new(path.trim_end_matches(" (deleted)"))
+        .parent()?
+        .parent()?
+        .parent()?;
+    let marker = plugins_dir.join(PLUGIN_RESTART_REQUIRED_MARKER);
+    let recorded_at = std::fs::metadata(&marker).ok()?.modified().ok()?;
+    let started_at = std::fs::metadata(format!("/proc/{pid}"))
+        .ok()?
+        .modified()
+        .ok()?;
+    if recorded_at < started_at {
+        return None;
+    }
+    let reason = std::fs::read_to_string(&marker).ok()?;
+    Some(reason.lines().next().unwrap_or("").to_string()).filter(|r| !r.trim().is_empty())
 }
 
 /// Jar filename prefix for an editor kind. Only editors that load agent-doc as a
@@ -839,6 +898,45 @@ mod tests {
                 "live_first={live_first}: a healthy IDE must not be told to reinstall"
             );
         }
+    }
+
+    /// GH #67: once an install recorded that this process refused the restart-free
+    /// upgrade, prescribing another install can never converge; the advice is restart.
+    #[test]
+    fn a_recorded_restart_verdict_turns_the_remedy_into_restart() {
+        let probes = vec![(
+            "jetbrains".to_string(),
+            1_506_046_u32,
+            MappedPluginJar::Deleted {
+                path: "/p/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.392.jar".to_string(),
+            },
+        )];
+        let verdicts = std::collections::HashMap::from([(
+            1_506_046_u32,
+            "dynamic upgrade unavailable: plugin cannot unload dynamically".to_string(),
+        )]);
+        let warnings =
+            super::plugin_byte_identity_warnings_with_restart_verdicts(&probes, &verdicts);
+        let message = &warnings[0].message;
+        assert!(
+            message.contains("Restart the editor to load them"),
+            "{message}"
+        );
+        assert!(
+            message.contains("plugin cannot unload dynamically"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("Re-run the plugin installation"),
+            "{message}"
+        );
+
+        let without = plugin_byte_identity_warnings_from(&probes);
+        assert!(
+            without[0]
+                .message
+                .contains("Re-run the plugin installation once")
+        );
     }
 
     /// The warning has to say why the version string lied, or the operator reads

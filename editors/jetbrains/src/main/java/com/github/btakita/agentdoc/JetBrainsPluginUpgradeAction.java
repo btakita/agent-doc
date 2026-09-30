@@ -70,11 +70,11 @@ public final class JetBrainsPluginUpgradeAction {
         }
 
         if (isLoaded(current)) {
-            Object unloadBlocker = invokeDescriptorMethod(
+            String unloadBlocker = unloadBlockerReason(invokeDescriptorMethod(
                 DynamicPlugins.class, DynamicPlugins.INSTANCE, "checkCanUnloadWithoutRestart", current
-            );
+            ));
             if (unloadBlocker != null) {
-                throw new IllegalStateException("plugin cannot unload dynamically: " + unloadBlocker);
+                throw new IllegalStateException(unloadBlocker);
             }
             int cleanedProjects = cleanupOutgoingGeneration(current);
             DynamicPlugins.UnloadPluginOptions updateOptions =
@@ -371,6 +371,29 @@ public final class JetBrainsPluginUpgradeAction {
             return "unknown";
         }
     }
+
+    /**
+     * Normalize {@code checkCanUnloadWithoutRestart}'s verdict across platform builds (GH #67).
+     * Older builds return a nullable blocker reason; newer ones return whether the plugin CAN
+     * unload. Treating any non-null result as a blocker printed "plugin cannot unload
+     * dynamically: false", and would have refused a {@code true} verdict outright.
+     */
+    static String unloadBlockerReason(Object verdict) {
+        if (verdict == null || Boolean.TRUE.equals(verdict)) {
+            return null;
+        }
+        if (Boolean.FALSE.equals(verdict)) {
+            return DYNAMIC_UNLOAD_REFUSED
+                + " (the platform reported the plugin cannot unload without a restart)";
+        }
+        String reason = verdict.toString().trim();
+        return reason.isEmpty()
+            ? DYNAMIC_UNLOAD_REFUSED
+            : DYNAMIC_UNLOAD_REFUSED + ": " + reason;
+    }
+
+    /** Stable prefix the launcher and preflight key on to record a refused dynamic unload. */
+    static final String DYNAMIC_UNLOAD_REFUSED = "plugin cannot unload dynamically";
 
     static boolean sameInstallRoot(Path actual, Path expected) {
         return actual.toAbsolutePath().normalize().equals(expected.toAbsolutePath().normalize());

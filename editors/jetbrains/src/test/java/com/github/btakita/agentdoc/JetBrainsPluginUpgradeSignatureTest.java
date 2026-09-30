@@ -111,6 +111,20 @@ public class JetBrainsPluginUpgradeSignatureTest {
     }
 
     @Test
+    public void unloadVerdictIsReadForBothReturnShapes() {
+        // GH #67: newer platforms return a Boolean "can unload"; older ones a blocker reason.
+        assertEquals(null, JetBrainsPluginUpgradeAction.unloadBlockerReason(null));
+        assertEquals(null, JetBrainsPluginUpgradeAction.unloadBlockerReason(Boolean.TRUE));
+        String refused = JetBrainsPluginUpgradeAction.unloadBlockerReason(Boolean.FALSE);
+        assertTrue(refused, refused.startsWith("plugin cannot unload dynamically ("));
+        assertTrue(refused, !refused.contains(": false"));
+        assertEquals(
+            "plugin cannot unload dynamically: extension point is not dynamic",
+            JetBrainsPluginUpgradeAction.unloadBlockerReason("extension point is not dynamic")
+        );
+    }
+
+    @Test
     public void missNamesTheDescriptorAndEverySignatureFound() {
         try {
             JetBrainsPluginUpgradeAction.invokeDescriptorMethod(

@@ -3934,21 +3934,46 @@ pub fn schedule_stale_editor_replica_cp_recycle(file: &Path, source: &str) -> St
             // was still in flight, so `src/haiven-dev/tasks/sdk.md` re-requested
             // a refused re-registration every ~90s with no terminal state.
             let status = if outcome.found == 0 {
+                clear_editor_reregister_wait(file);
                 "request_skipped reason=no_live_editor editor_replica_reregister=no_live_registration"
                     .to_string()
             } else if matches!(
                 outcome.classify(),
                 agent_doc_crdt_relay_io::ReplicaSignalClass::DefinitivelyRefusedByAll(_)
             ) {
+                clear_editor_reregister_wait(file);
                 format!(
                     "request_skipped reason=editor_endpoint_refused editor_replica_reregister={}",
                     outcome.diagnosis()
                 )
             } else {
-                format!(
-                    "request_skipped reason=editor_reregister_primary editor_replica_reregister={}",
-                    outcome.diagnosis()
-                )
+                // `#reregisterbound` (GH #75): a re-register that reached a live
+                // endpoint is the primary repair only for a bounded window. Past
+                // it, the same condition still holding proves re-registering has
+                // not worked, and "waiting" deadlocked preflight admission for
+                // minutes with every escape hatch closed. Escalate once to the
+                // supervisor-recycle fallback, then restart the window.
+                match observe_editor_reregister_wait(file) {
+                    status::EditorReregisterWait::Unanswered { age_secs } => {
+                        clear_editor_reregister_wait(file);
+                        let fallback = schedule_supervisor_cp_recycle(
+                            file,
+                            source,
+                            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+                            "stale_editor_replica_cp_recycle_requested",
+                            "editor_reregister_unanswered",
+                        );
+                        format!(
+                            "escalated reason=editor_reregister_unanswered unanswered_secs={age_secs} editor_replica_reregister={} fallback={fallback}",
+                            outcome.diagnosis()
+                        )
+                    }
+                    status::EditorReregisterWait::StartWindow
+                    | status::EditorReregisterWait::Pending { .. } => format!(
+                        "request_skipped reason=editor_reregister_primary editor_replica_reregister={}",
+                        outcome.diagnosis()
+                    ),
+                }
             };
             agent_doc_ops_log_io::log_op(
                 file,
@@ -3974,6 +3999,85 @@ pub fn schedule_stale_editor_replica_cp_recycle(file: &Path, source: &str) -> St
                 format!("{err:#}").replace('\n', "\\n")
             )
         }
+    }
+}
+
+const EDITOR_REREGISTER_WAIT_STATE_KIND: &str = "editor_reregister_wait";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct EditorReregisterWaitRecord {
+    first_requested_secs: u64,
+}
+
+/// `#reregisterbound`: read the episode start for `file`'s unanswered
+/// re-register, recording `now` when no live episode exists. Fail-open to
+/// `StartWindow` (keep today's behavior) on any storage error, logged.
+fn observe_editor_reregister_wait(file: &Path) -> status::EditorReregisterWait {
+    let now = timestamp_secs();
+    let observed = (|| -> Result<status::EditorReregisterWait> {
+        let project_root = agent_doc_project_root_io::project_root_containing(file)
+            .context("no project root")?;
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let conn = open_state_db(&project_root)?;
+        let first = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
+            &conn,
+            &document_hash,
+            EDITOR_REREGISTER_WAIT_STATE_KIND,
+        )?
+        .and_then(|state| {
+            serde_json::from_str::<EditorReregisterWaitRecord>(&state.payload_json).ok()
+        })
+        .map(|record| record.first_requested_secs);
+        let wait = status::classify_editor_reregister_wait(
+            first,
+            now,
+            status::EDITOR_REREGISTER_UNANSWERED_AFTER,
+            status::EDITOR_REREGISTER_EPISODE_TTL,
+        );
+        if wait == status::EditorReregisterWait::StartWindow {
+            agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
+                &conn,
+                &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+                    document_hash,
+                    state_kind: EDITOR_REREGISTER_WAIT_STATE_KIND.to_string(),
+                    canonical_path: canonical.to_string_lossy().into_owned(),
+                    payload_json: serde_json::to_string(&EditorReregisterWaitRecord {
+                        first_requested_secs: now,
+                    })?,
+                    updated_at_ms: now.saturating_mul(1_000),
+                },
+            )?;
+        }
+        Ok(wait)
+    })();
+    observed.unwrap_or_else(|err| {
+        eprintln!(
+            "[agent-doc] warning: editor re-register wait unavailable for {}: {err:#}",
+            file.display()
+        );
+        status::EditorReregisterWait::StartWindow
+    })
+}
+
+fn clear_editor_reregister_wait(file: &Path) {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return;
+    };
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let cleared = open_state_db(&project_root).and_then(|conn| {
+        agent_doc_sqlite::state_store::clear_document_runtime_state_in_db(
+            &conn,
+            &document_hash,
+            EDITOR_REREGISTER_WAIT_STATE_KIND,
+        )
+    });
+    if let Err(err) = cleared {
+        eprintln!(
+            "[agent-doc] warning: failed to clear editor re-register wait for {}: {err:#}",
+            file.display()
+        );
     }
 }
 
@@ -32835,6 +32939,56 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn editor_reregister_wait_records_episode_escalates_and_clears() {
+        // `#reregisterbound` (GH #75): the unanswered-re-register window must be
+        // durable across short-lived preflight invocations, reach `Unanswered`
+        // once the bound elapses, and restart after escalation clears it.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body\n").unwrap();
+
+        assert_eq!(
+            observe_editor_reregister_wait(&file),
+            status::EditorReregisterWait::StartWindow
+        );
+        assert!(matches!(
+            observe_editor_reregister_wait(&file),
+            status::EditorReregisterWait::Pending { .. }
+        ));
+
+        // Backdate the recorded episode past the bound.
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let conn = open_state_db(dir.path()).unwrap();
+        let backdated = timestamp_secs()
+            - status::EDITOR_REREGISTER_UNANSWERED_AFTER.as_secs()
+            - 5;
+        agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+                document_hash,
+                state_kind: EDITOR_REREGISTER_WAIT_STATE_KIND.to_string(),
+                canonical_path: canonical.to_string_lossy().into_owned(),
+                payload_json: format!("{{\"first_requested_secs\":{backdated}}}"),
+                updated_at_ms: backdated * 1_000,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            observe_editor_reregister_wait(&file),
+            status::EditorReregisterWait::Unanswered { age_secs } if age_secs >= 45
+        ));
+
+        clear_editor_reregister_wait(&file);
+        assert_eq!(
+            observe_editor_reregister_wait(&file),
+            status::EditorReregisterWait::StartWindow,
+            "escalation must restart the window, not re-escalate every call"
+        );
+    }
+
     #[test]
     fn schedule_stale_supervisor_cp_recycle_marks_doc_for_idle_recycle() {
         // `#fccsupwarn4`: a preflight-proven stale route-owned supervisor should

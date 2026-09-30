@@ -824,6 +824,50 @@ pub fn classify_supervisor_drain_readiness(
     SupervisorDrainReadiness::Ready { supervisor_pid }
 }
 
+/// `#reregisterbound` (GH #75) — how long an editor-replica re-register request
+/// may go unanswered before waiting stops counting as recovery.
+pub const EDITOR_REREGISTER_UNANSWERED_AFTER: Duration = Duration::from_secs(45);
+
+/// A pending-since record older than this belongs to an earlier episode and
+/// restarts the window instead of escalating immediately.
+pub const EDITOR_REREGISTER_EPISODE_TTL: Duration = Duration::from_secs(900);
+
+/// What to do with a re-register request that reached a live endpoint but has
+/// not (yet) produced a relay replica.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorReregisterWait {
+    /// First request of an episode: record `now` as the start of the window.
+    StartWindow,
+    /// Still inside the window: keep treating re-register as the primary repair.
+    Pending { age_secs: u64 },
+    /// The window elapsed with the same condition still present: re-registering
+    /// has not worked, so escalate instead of deferring forever.
+    Unanswered { age_secs: u64 },
+}
+
+/// Classify a re-register wait from the recorded episode start. Pure: the
+/// caller supplies `now`, so the bound is a function of observations, not a
+/// timer.
+pub fn classify_editor_reregister_wait(
+    first_requested_secs: Option<u64>,
+    now: u64,
+    unanswered_after: Duration,
+    episode_ttl: Duration,
+) -> EditorReregisterWait {
+    let Some(first) = first_requested_secs else {
+        return EditorReregisterWait::StartWindow;
+    };
+    let age_secs = now.saturating_sub(first);
+    if first > now || age_secs > episode_ttl.as_secs() {
+        return EditorReregisterWait::StartWindow;
+    }
+    if age_secs >= unanswered_after.as_secs() {
+        EditorReregisterWait::Unanswered { age_secs }
+    } else {
+        EditorReregisterWait::Pending { age_secs }
+    }
+}
+
 pub const fn supervisor_lease_pid_is_foreign(supervisor_pid: Option<u32>, self_pid: u32) -> bool {
     match supervisor_pid {
         Some(pid) => pid != self_pid,
@@ -1116,6 +1160,32 @@ impl Error for ParseControllerHandoffStateError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_reregister_wait_is_bounded() {
+        let after = Duration::from_secs(45);
+        let ttl = Duration::from_secs(900);
+        let classify = |first| classify_editor_reregister_wait(first, 10_000, after, ttl);
+        assert_eq!(classify(None), EditorReregisterWait::StartWindow);
+        assert_eq!(
+            classify(Some(9_990)),
+            EditorReregisterWait::Pending { age_secs: 10 }
+        );
+        // GH #75: three refusals minutes apart on the same condition must stop
+        // deferring to a re-register that never answers.
+        assert_eq!(
+            classify(Some(9_955)),
+            EditorReregisterWait::Unanswered { age_secs: 45 }
+        );
+        assert_eq!(
+            classify(Some(9_200)),
+            EditorReregisterWait::Unanswered { age_secs: 800 }
+        );
+        // An old episode's record restarts the window rather than escalating.
+        assert_eq!(classify(Some(5_000)), EditorReregisterWait::StartWindow);
+        // A future-stamped record (clock skew) is not evidence of waiting.
+        assert_eq!(classify(Some(20_000)), EditorReregisterWait::StartWindow);
+    }
 
     #[test]
     fn supervisor_drain_readiness_fails_closed_on_every_missing_fact() {

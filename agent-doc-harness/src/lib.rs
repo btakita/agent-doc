@@ -1369,6 +1369,12 @@ impl HarnessConfig {
                 PaneComposerProjection::Busy | PaneComposerProjection::Absent => None,
             };
         }
+        let output = if self.binary == "codex" {
+            codex_without_new_chat_trailer(output)
+        } else {
+            std::borrow::Cow::Borrowed(output)
+        };
+        let output = output.as_ref();
         if self.binary == "codex"
             && let Some(placeholder) = codex_idle_placeholder_candidate(output)
         {
@@ -1476,7 +1482,86 @@ pub enum PaneComposerProjection {
 }
 
 /// Project the current ANSI pane snapshot into its composer state.
+/// `#clearnewchattrailer`: after `/clear` ("clear the terminal and start a new
+/// chat"), Codex 0.158 paints its composer at the top of the viewport and the
+/// new-chat banner plus the previous chat's exit summary BELOW it:
+///
+/// ```text
+/// › Ask Codex to do anything
+///   GPT-5.6-Sol high · ~/work/btakita/agent-loop · Context 0% used
+///   >_ OpenAI Codex (v0.158.0)
+///      ~/work/btakita/agent-loop
+///   Welcome back. Familiar territory or a fresh adventure?
+/// Token usage: total=308,270 input=266,138 (+ 28,432,000 cached) output=42,132
+/// To continue this session, run codex resume, then select Review lazily task (01a0…)
+/// ```
+///
+/// The bottom-up prompt scan then resolved to the `codex resume` line, so the
+/// idle cleared pane read as not dispatch-ready and the clear verifier reported
+/// `submission_unobserved` for a clear that had run (observed 2026-09-29,
+/// `tasks/software/lazily.md` pane `%33`). Drop that trailer — only when it
+/// starts at the banner, holds nothing but banner/summary rows, and sits under
+/// a composer line — so the composer above it is what readiness sees.
+fn codex_without_new_chat_trailer(content: &str) -> std::borrow::Cow<'_, str> {
+    let lines: Vec<&str> = content.lines().collect();
+    let normalized: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            agent_doc_turn_executor_tmux::prompt::strip_ansi(line)
+                .trim()
+                .to_string()
+        })
+        .collect();
+    let Some(banner) = normalized
+        .iter()
+        .rposition(|line| line.starts_with(">_ OpenAI Codex"))
+    else {
+        return std::borrow::Cow::Borrowed(content);
+    };
+    let is_footer = |line: &str| {
+        line.is_empty()
+            || (line.contains('·') && line.contains("Context "))
+            || line.starts_with("? for shortcuts")
+    };
+    let mut in_exit_summary = false;
+    for (offset, line) in normalized[banner + 1..].iter().enumerate() {
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with("Token usage:") {
+            in_exit_summary = true;
+            continue;
+        }
+        if in_exit_summary {
+            // Wrapped `Token usage` / `codex resume` continuation rows.
+            continue;
+        }
+        let banner_path = offset <= 1 && (line.starts_with("~/") || line.starts_with('/'));
+        if banner_path || line.starts_with("Welcome back") || line.starts_with("Welcome to Codex")
+        {
+            continue;
+        }
+        return std::borrow::Cow::Borrowed(content);
+    }
+    // Everything between the composer and the banner is footer chrome; cut the
+    // frame right after the composer so the footer cannot pose as a candidate.
+    let Some(composer) = normalized[..banner]
+        .iter()
+        .rposition(|line| !is_footer(line))
+        .filter(|&index| normalized[index].starts_with('›'))
+    else {
+        return std::borrow::Cow::Borrowed(content);
+    };
+    std::borrow::Cow::Owned(lines[..=composer].join("\n"))
+}
+
 pub fn project_pane_composer(content: &str, harness: &HarnessConfig) -> PaneComposerProjection {
+    let content = if harness.binary == "codex" {
+        codex_without_new_chat_trailer(content)
+    } else {
+        std::borrow::Cow::Borrowed(content)
+    };
+    let content = content.as_ref();
     if harness.binary == "grok" {
         return if harness.has_busy_cue(content) {
             PaneComposerProjection::Busy
@@ -4715,6 +4800,50 @@ i-search: bug accept · cancel
             None,
             "a later idle composer supersedes the dismissed dialog in scrollback"
         );
+    }
+
+    /// `#clearnewchattrailer`: exact post-`/clear` frame from pane `%33`.
+    #[test]
+    fn codex_post_clear_new_chat_trailer_reads_as_idle_composer() {
+        let h = HarnessConfig::codex();
+        let mut frame = String::from(
+            "\u{1b}[1m›\u{1b}[0m \u{1b}[2mAsk Codex to do anything\u{1b}[0m\n\
+\n\
+  GPT-5.6-Sol high · ~/work/btakita/agent-loop · Context 0% used\n\
+  \u{1b}[1m?\u{1b}[0m for shortcuts                         ⚠ 3 warnings · f2 to view\n\
+\n\
+  >_ OpenAI Codex (v0.158.0)\n\
+     ~/work/btakita/agent-loop\n\
+\n\
+  Welcome back. Familiar territory or a fresh adventure?\n\
+\n\
+Token usage: total=308,270 input=266,138 (+ 28,432,000 cached) output=42,132\n\
+(reasoning 14,324)\n\
+To continue this session, run codex resume, then select Review lazily task\n\
+(01a0ebfe-eb3f-71f1-9bc5-0015867b7663)\n",
+        );
+        frame.push_str(&"\n".repeat(40));
+
+        assert!(
+            ready_prompt_candidate(&frame, &h).is_some(),
+            "a cleared idle Codex pane must read as dispatch-ready"
+        );
+        assert!(matches!(
+            project_pane_composer_at_cursor(&frame, &h, None),
+            PaneComposerProjection::ReadyEmpty { .. }
+        ));
+
+        // Real output after the banner is not a trailer: stay fail-closed.
+        let not_trailer = frame.replacen("Token usage:", "• Ran cargo test\nTokens:", 1);
+        assert!(ready_prompt_candidate(&not_trailer, &h).is_none());
+
+        // No composer above the banner (cold start still loading): not ready.
+        let no_composer = frame.replacen("Ask Codex to do anything", "loading", 1).replacen(
+            "\u{1b}[1m›\u{1b}[0m",
+            "",
+            1,
+        );
+        assert!(ready_prompt_candidate(&no_composer, &h).is_none());
     }
 
     #[test]

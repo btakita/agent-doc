@@ -5010,16 +5010,16 @@ impl ReplicaSignalClass {
     /// Deriving it from the class by exhaustive match is the point: a new class
     /// cannot default into "nothing to do" by being absent from a token list.
     ///
-    /// A generation mismatch stays automatic — a library reload clears it, which
-    /// is why [`NonconvergingReplicaDisposition`] also treats it as retryable.
+    /// A generation mismatch remains retryable, but it also needs operator
+    /// inspection: the exact-version fence is doing its job, and retrying the
+    /// same binary/plugin pair cannot change either reported generation.
     pub const fn needs_operator_inspection(self) -> bool {
         match self {
             Self::NoLiveRegistration
+            | Self::PluginGenerationMismatch(_)
             | Self::DeliveryFailedToAll(_)
             | Self::DefinitivelyRefusedByAll(_) => true,
-            Self::PluginGenerationMismatch(_)
-            | Self::PartiallyRequested { .. }
-            | Self::Requested(_) => false,
+            Self::PartiallyRequested { .. } | Self::Requested(_) => false,
         }
     }
 
@@ -5315,7 +5315,7 @@ mod tests {
         assert!(ReplicaSignalClass::NoLiveRegistration.needs_operator_inspection());
         assert!(ReplicaSignalClass::DeliveryFailedToAll(2).needs_operator_inspection());
 
-        // And the outcomes that genuinely do resolve themselves stay quiet, or
+        // And ordinary delivered outcomes stay quiet, or
         // the signal carries no information when it matters: an operator told to
         // inspect the endpoint on every ordinary retry learns nothing from being
         // told it during a real refusal.
@@ -5328,8 +5328,8 @@ mod tests {
             .needs_operator_inspection()
         );
         assert!(
-            !ReplicaSignalClass::PluginGenerationMismatch(1).needs_operator_inspection(),
-            "a library reload clears a generation fence, so it is not an operator's problem"
+            ReplicaSignalClass::PluginGenerationMismatch(1).needs_operator_inspection(),
+            "an exact plugin/binary generation fence cannot clear while both installed generations stay unchanged"
         );
     }
 
@@ -5349,6 +5349,7 @@ mod tests {
             ),
             (1, 0, 1, 0, ReplicaSignalClass::DefinitivelyRefusedByAll(1)),
             (2, 0, 0, 0, ReplicaSignalClass::DeliveryFailedToAll(2)),
+            (1, 0, 0, 1, ReplicaSignalClass::PluginGenerationMismatch(1)),
             (
                 2,
                 1,

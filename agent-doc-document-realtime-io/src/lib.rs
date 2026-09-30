@@ -170,9 +170,30 @@ impl std::fmt::Display for AwaitEditorReplicaNoDiskWrite {
 
 impl std::error::Error for AwaitEditorReplicaNoDiskWrite {}
 
+#[derive(Debug)]
+pub struct EditorNativeSaveNeedsOperator(String);
+
+impl std::fmt::Display for EditorNativeSaveNeedsOperator {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for EditorNativeSaveNeedsOperator {}
+
 /// Stable cross-process token for a native-save outcome that retrying the
 /// current editor/CLI pair cannot change.
 pub const EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN: &str = "editor_native_save_needs_operator";
+
+fn editor_native_save_needs_operator(path: &Path, diagnosis: &str) -> anyhow::Error {
+    EditorNativeSaveNeedsOperator(format!(
+        "native editor save for {} requires operator inspection: diagnosis={diagnosis} \
+         [{EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN}]. Keep editor authority; align the installed \
+         editor plugin and agent-doc binary generations, then retry without `--force-disk`",
+        path.display(),
+    ))
+    .into()
+}
 
 /// The stable machine-readable recovery token every retained-write refusal
 /// carries.
@@ -1521,8 +1542,10 @@ fn canonical_editor_projection_is_persisted(
     // `#savegateopaque`: observe the gate's authority input ONCE and keep it, so
     // the closed-gate diagnosis can name which conjunct is shut. Re-observing to
     // classify would race the very state being reported.
-    let gate_authority =
-        observe_live_editor_authority_after_model_ensure(path, "editor_projection_native_save_gate")?;
+    let gate_authority = observe_live_editor_authority_after_model_ensure(
+        path,
+        "editor_projection_native_save_gate",
+    )?;
     let gate_observation = match gate_authority {
         agent_doc_crdt_relay_io::CurrentText::Current {
             ref text,
@@ -1550,18 +1573,21 @@ fn canonical_editor_projection_is_persisted(
         });
     // Only meaningful while the gate is shut; the request path below overwrites
     // both the diagnosis and the action from the save outcome.
-    let gate_blocker = agent_doc_document_realtime::native_save_gate::NativeSaveGateBlocker::classify(
-        visible_editor_receipt,
-        editor_endpoint_definitively_refused(path),
-        gate_observation,
-    );
+    let gate_blocker =
+        agent_doc_document_realtime::native_save_gate::NativeSaveGateBlocker::classify(
+            visible_editor_receipt,
+            editor_endpoint_definitively_refused(path),
+            gate_observation,
+        );
     let mut save_diagnosis = gate_blocker.diagnosis_token().to_string();
+    let mut save_class = None;
     if ready_for_native_save {
         let outcome = agent_doc_crdt_relay_io::request_native_save_for_current_projection(
             path,
             &agent_doc_hash::content_hash(canonical),
             canonical.len(),
         )?;
+        save_class = Some(outcome.classify());
         save_diagnosis = outcome.diagnosis();
         agent_doc_ops_log_io::log_op(
             path,
@@ -1625,15 +1651,13 @@ fn canonical_editor_projection_is_persisted(
     // lookup returned `None`, and every closed-gate shape alike reported
     // `operator_action=none` — including the ones only a human can clear. Ask the
     // gate's own classification when the gate is what is shut.
-    let operator_action = if ready_for_native_save {
-        if agent_doc_crdt_relay_io::ReplicaSignalClass::from_diagnosis_token(&save_diagnosis)
+    let needs_operator = if ready_for_native_save {
+        agent_doc_crdt_relay_io::ReplicaSignalClass::from_diagnosis_token(&save_diagnosis)
             .is_some_and(agent_doc_crdt_relay_io::ReplicaSignalClass::needs_operator_inspection)
-        {
-            "inspect_editor_endpoint"
-        } else {
-            "none"
-        }
-    } else if gate_blocker.needs_operator_inspection() {
+    } else {
+        gate_blocker.needs_operator_inspection()
+    };
+    let operator_action = if needs_operator {
         "inspect_editor_endpoint"
     } else {
         "none"
@@ -1647,6 +1671,15 @@ fn canonical_editor_projection_is_persisted(
             agent_doc_hash::content_hash(canonical),
         ),
     );
+    // Missing or temporarily unreachable registrations still use document
+    // state edges for recovery. An exact generation mismatch is different:
+    // neither endpoint version can change until an operator updates one side.
+    if matches!(
+        save_class,
+        Some(agent_doc_crdt_relay_io::ReplicaSignalClass::PluginGenerationMismatch(_))
+    ) {
+        return Err(editor_native_save_needs_operator(path, &save_diagnosis));
+    }
     Ok(false)
 }
 
@@ -6136,6 +6169,23 @@ fn defer_visible_delivery_projection_with_ownership(
 #[cfg(test)]
 mod retained_refusal_token_tests {
     use super::*;
+
+    #[test]
+    fn native_save_operator_error_carries_structural_token_and_remedy() {
+        let err = editor_native_save_needs_operator(
+            Path::new("/tmp/plan.md"),
+            "plugin_generation_mismatch:1",
+        );
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains(EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN));
+        assert!(rendered.contains("plugin_generation_mismatch:1"));
+        assert!(rendered.contains("align the installed editor plugin and agent-doc binary"));
+        assert!(rendered.contains("without `--force-disk`"));
+        assert!(
+            err.downcast_ref::<EditorNativeSaveNeedsOperator>()
+                .is_some()
+        );
+    }
 
     /// `#retainconv`: the supervisor's captured-finalize classifier reads this
     /// failure as a *string* — through the ops-log `reason_head`, the retained

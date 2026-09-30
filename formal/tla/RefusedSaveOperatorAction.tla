@@ -77,9 +77,11 @@ and the fix does not need them: naming the failure changes only what the
 operator is told, never who owns the text. A model that could reach disk would
 be proving a different, unsafe design.
 
-A generation mismatch is modelled as automatic on purpose. A library reload
-clears it, so it is the one not-yet-served outcome that genuinely does resolve
-itself, and folding it in with the refusals would over-report.
+A generation mismatch keeps the retained write retryable, but it is not
+self-clearing: the editor reports one installed generation and the running
+binary expects another. Reloading the same pair preserves the mismatch. The
+operator action therefore names the exact-version fence without changing it or
+granting disk authority.
 ***************************************************************************)
 
 CONSTANTS
@@ -98,8 +100,8 @@ Outcomes == {"no_live_registration",
    here only when the fix is enabled -- that is the whole experiment. *)
 Terminal ==
     IF ClassifyRefusalAsTerminal
-    THEN {"no_live_registration", "delivery_failed_to_all", "definitively_refused_by_all"}
-    ELSE {"no_live_registration", "delivery_failed_to_all"}
+    THEN {"no_live_registration", "delivery_failed_to_all", "definitively_refused_by_all", "plugin_generation_mismatch"}
+    ELSE {"no_live_registration", "delivery_failed_to_all", "plugin_generation_mismatch"}
 
 VARIABLES
     outcome,          (* what the last signal answered *)
@@ -166,10 +168,11 @@ RefusalIsNotWeakerThanUnreachable ==
 InFlightSaveStaysQuiet ==
     (outcome = "requested") => operatorAction = "none"
 
-(* A generation mismatch resolves itself through a library reload, so it is not
-   an operator's problem either. *)
-GenerationMismatchStaysAutomatic ==
-    (outcome = "plugin_generation_mismatch") => operatorAction = "none"
+(* Retrying the same exact-version mismatch cannot alter either installed
+   generation, so the retained write must not claim automatic convergence. *)
+GenerationMismatchSurfacesOperatorAction ==
+    (retained /\ outcome = "plugin_generation_mismatch")
+        => operatorAction = "inspect_editor_endpoint"
 
 (* Negation used by RefusedSaveOperatorActionReach.cfg: a genuine in-flight save
    must be REACHABLE, so this must be violated. Without it the model could

@@ -149,7 +149,7 @@ One earlier `make check` run failed `preflight_sweep_skips_foreign_owned_doc` wh
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

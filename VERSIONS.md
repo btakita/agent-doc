@@ -12,6 +12,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   `SessionCheckInterrupted`, and only the CLI entry prints it and exits `1`, after settling. The
   window is also 45s instead of 15s, since that commit landed about 17s after the check began
   (`#scsettleexit`).
+- **A typo'd queue-head id names the item it meant.** `do [#event-adapter-impl-tourne9yx]` sat
+  undrained because the kept-head diagnostic said to `--done event-adapter-impl-tourne9yx`, an id
+  that exists nowhere. When a head's id is not a tracked item and exactly one active id is within
+  edit distance 2, the diagnostic now names it (`#event-adapter-impl-tourneyx`) and says how to
+  correct or strike the head. The operator's line is never rewritten (`#queueidtypo`).
 - **The captured-splice live recipe reaches its advance step.** The first operator-approved run of
   `scripts/xdotool-live-verify.sh captured-splice` stopped before the canonical advance. The
   repo-wide pane guard refused whenever any other document had a live session, a reaped owner pane

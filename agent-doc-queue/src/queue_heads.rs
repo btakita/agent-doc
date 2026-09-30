@@ -184,11 +184,57 @@ pub fn queue_skip_diagnostic_for_content(content: &str) -> Result<String> {
         ));
     }
     if let Some(id) = queue_prompt_done_id(&queue_head) {
+        if let Some(suggestion) = untracked_head_id_suggestion(content, &id) {
+            return Ok(format!(
+                "[queue] kept head `{queue_head_display}`: #{id} is not a tracked item in this document, so no `--done {id}` can ever match it. The closest tracked id is #{suggestion} — the queue line is likely a typo for it. Work #{suggestion} and close it with `--done {suggestion}`, then correct the queue line to `#{suggestion}` or strike the typo head with `agent-doc queue consume <FILE> --id {id}`. (#queueidtypo)"
+            ));
+        }
         return Ok(format!(
             "[queue] kept head `{queue_head_display}` because the response did not record a completion outcome for #{id}. Reap it with `--done {id}`, gate it with `--pending-gate {id}`, resolve review with `--review-resolve {id}`, or keep/narrow it with `--pending-edit \"{id}=...\"`. (missing proof: no done/gate/review-resolve/reap recorded for #{id} this cycle)"
         ));
     }
     Ok(GENERIC.to_string())
+}
+
+/// `#queueidtypo`: an id-backed head whose id is not an active tracked item,
+/// where exactly one active tracked id is a near spelling of it.
+///
+/// Observed 2026-09-30 on `monsterrodholders.md`: the operator queued
+/// `do [#event-adapter-impl-tourne9yx]` for backlog item
+/// `#event-adapter-impl-tourneyx`. The kept-head diagnostic told the agent to
+/// `--done event-adapter-impl-tourne9yx`, which names nothing, so the head sat
+/// undrained while the loop skipped past it. Suggest only; never rewrite the
+/// operator's line (`#qauthorder`). A unique match within edit distance 2, on
+/// ids long enough that two edits are a typo rather than a different word.
+pub fn untracked_head_id_suggestion(content: &str, id: &str) -> Option<String> {
+    let id = id.trim().to_ascii_lowercase();
+    if id.chars().count() < 6 {
+        return None;
+    }
+    let tracked = crate::queue_continuation::active_tracked_ids(content);
+    if tracked.contains(&id) {
+        return None;
+    }
+    let mut near = tracked
+        .into_iter()
+        .filter(|candidate| edit_distance(&id, candidate) <= 2);
+    let first = near.next()?;
+    near.next().is_none().then_some(first)
+}
+
+/// Levenshtein distance over chars.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut current = vec![i + 1; b.len() + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let substitution = previous[j] + usize::from(ca != *cb);
+            current[j + 1] = substitution.min(previous[j + 1] + 1).min(current[j] + 1);
+        }
+        previous = current;
+    }
+    previous[b.len()]
 }
 
 /// True when a closeout flag in this cycle explicitly names the active
@@ -380,6 +426,31 @@ fn leads_with_bare_id_directive(lower: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_typoed_head_id_names_the_tracked_item_it_meant() {
+        let content = "---\nqueue_active: true\n---\n\n<!-- agent:queue -->\n- do [#event-adapter-impl-tourne9yx]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#event-adapter-impl-tourneyx] Implement the TourneyX adapter.\n- [ ] [#event-adapter-impl-wa-wdfw] Implement the WDFW adapter.\n<!-- /agent:backlog -->\n";
+        assert_eq!(
+            super::untracked_head_id_suggestion(content, "event-adapter-impl-tourne9yx").as_deref(),
+            Some("event-adapter-impl-tourneyx")
+        );
+        let message = super::queue_skip_diagnostic_for_content(content).unwrap();
+        assert!(message.contains("#event-adapter-impl-tourne9yx is not a tracked item"), "{message}");
+        assert!(message.contains("`--done event-adapter-impl-tourneyx`"), "{message}");
+        assert!(!message.contains("Reap it with `--done event-adapter-impl-tourne9yx`"), "{message}");
+    }
+
+    #[test]
+    fn a_tracked_or_ambiguous_head_id_gets_no_suggestion() {
+        let content = "<!-- agent:backlog -->\n- [ ] [#adapter-one] A.\n- [ ] [#adapter-two] B.\n<!-- /agent:backlog -->\n";
+        assert_eq!(super::untracked_head_id_suggestion(content, "adapter-one"), None);
+        assert_eq!(super::untracked_head_id_suggestion(content, "adapter-onx"), Some("adapter-one".to_string()));
+        assert_eq!(super::untracked_head_id_suggestion(content, "adapter-tw"), Some("adapter-two".to_string()));
+        assert_eq!(super::untracked_head_id_suggestion(content, "adapter-xxx"), None, "two candidates at distance <= 3 but none <= 2 is no match");
+        let both = "<!-- agent:backlog -->\n- [ ] [#adapter-ab] A.\n- [ ] [#adapter-ac] B.\n<!-- /agent:backlog -->\n";
+        assert_eq!(super::untracked_head_id_suggestion(both, "adapter-ad"), None, "ambiguous");
+        assert_eq!(super::untracked_head_id_suggestion(content, "ab"), None, "too short");
+    }
+
     use super::*;
 
     const HALT_QUEUE_DOC: &str = concat!(

@@ -357,6 +357,11 @@ Next in the queue: `#fpecapturedresponse`, the fpe.md duplicated response and lo
 
 > **Queue prompt:**
 >
+> In the frontmatter, alias `presets` to `prompt_presets`.
+
+
+> **Queue prompt:**
+>
 > do [#fpecapturedresponse]
 
 **Root cause found and fixed in `eb3d09af1`.** Installed and pushed; `make check` passes (Rust 10221/0, JetBrains 599/0, VS Code 181/0).
@@ -390,7 +395,7 @@ Next in the queue: the `presets` → `prompt_presets` frontmatter alias, then `r
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#fpecapturedresponse]~~
 - re [#apimdrevert]: I don't recall which text was lost. Can we practically debug log these events or will this cause excessive debug logging?
-- In the frontmatter, alias `presets` to `prompt_presets`.
+- ~~In the frontmatter, alias `presets` to `prompt_presets`.~~
 - fix https://github.com/btakita/agent-doc/issues/62
 - fix https://github.com/btakita/agent-doc/issues/65
 - fix https://github.com/btakita/agent-doc/issues/66

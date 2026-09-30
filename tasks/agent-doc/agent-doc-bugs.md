@@ -167,6 +167,11 @@ Understood: the release now runs **after** the #62–#64 fixes (v0.35.420 shippe
 
 ### Re: committed the pending agent-doc work — opus-5.5 · 2026-09-30T02:18-04:00
 
+> **Queue prompt:**
+>
+> fix https://github.com/btakita/agent-doc/issues/64
+
+
 The agent-doc submodule is now clean and pushed. Its uncommitted work was another session's, idle since 00:06. I committed it as seven commits, one per topic:
 
 - `8b8547bc0` **#subsumedsplicereplay** (plugin 0.2.449): after re-registering, the editor sent the whole buffer and then replayed the same queued keystrokes, so typed text landed twice (infra.md). Sending the whole buffer now drops those older keystroke batches.
@@ -194,7 +199,7 @@ The agent-doc submodule is now clean and pushed. Its uncommitted work was anothe
 - ~~fix https://github.com/btakita/agent-doc/issues/62~~
 - ~~fix https://github.com/btakita/agent-doc/issues/63~~
 - ~~commit the uncommitted files~~ — auto-struck: answered this cycle (#ftstrike)
-- fix https://github.com/btakita/agent-doc/issues/64
+- ~~fix https://github.com/btakita/agent-doc/issues/64~~
 - release + publish Issue 62-64
 <!-- /agent:queue -->
 

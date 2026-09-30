@@ -347,7 +347,22 @@ pub fn response_materialized_in_exchange_response_cell(response: &str, content: 
                 break;
             }
         }
-        let cell = lines[index..cell_end].join("\n");
+        // `#queuequotecell`: a queue-drain response opens with its
+        // `> **Queue prompt:**` quote ABOVE the heading, so the cell must reach
+        // back over the blockquote (and blank) lines directly above it. Without
+        // that, no cell ever held the whole response once a boundary followed it,
+        // and captured-finalize resume declined its own materialized response as
+        // a replay, forever (agent-doc-bugs.md, 2026-09-30 06:17).
+        let mut cell_start = index;
+        while cell_start > 0 {
+            let above = lines[cell_start - 1].trim();
+            if above.is_empty() || above.starts_with('>') {
+                cell_start -= 1;
+            } else {
+                break;
+            }
+        }
+        let cell = lines[cell_start..cell_end].join("\n");
         if response_materialized_in_content(response, &cell) {
             return true;
         }
@@ -1678,6 +1693,35 @@ mod tests {
         );
         assert!(repaired.contains("**Verification:** make check passed."));
         assert!(response_materialized_in_content(&response, &repaired));
+    }
+
+    #[test]
+    fn queue_quote_above_heading_counts_as_materialized_response_cell() {
+        // #queuequotecell: the quote sits above the heading and a boundary
+        // follows the response.
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "> **Queue prompt:** commit the uncommitted files\n\n",
+            "### Re: committed — opus-5\n\n",
+            "Seven commits.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier — opus-5\n\n",
+            "Earlier body.\n\n",
+            "> **Queue prompt:** commit the uncommitted files\n\n",
+            "### Re: committed — opus-5 (HEAD)\n\n",
+            "Seven commits.\n",
+            "<!-- agent:boundary:8fc0d444 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_exchange_response_cell(response, content));
+        assert_eq!(
+            materialize_response_in_current_exchange(content, response).as_deref(),
+            Some(content)
+        );
     }
 
     #[test]

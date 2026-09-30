@@ -16,7 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -590,7 +590,7 @@ The temporary release worktree and sibling symlinks were removed. No shared-chec
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
-- I'm logged into npm. Continue with #lsreactpublish
+- ~~I'm logged into npm. Continue with #lsreactpublish~~ — auto-struck: answered this cycle (#ftstrike)
 - Resolve #lzrustpublish
 - re #lzreleasepins: commit + push uncommitted changes
 <!-- /agent:queue -->

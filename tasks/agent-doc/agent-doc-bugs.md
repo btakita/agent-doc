@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -134,6 +134,28 @@ Released **agent-doc v0.35.420**: tagged and pushed, with `make install-full` ru
 - **#respondsettle:** `respond` failed twice this session. Each time I had just run `make install`, which restarted the controller while the response was being saved. The save was refused, and `respond` exited nonzero and fired the dogfood fix prompt, although the retained worker committed the same cycle about 3s later. Now `respond`/`finalize`/`write --commit` watch that same cycle's phase after a failure that happens past capture, and succeed only if it reaches `committed`. A failure before capture still errors at once. 7 unit tests. The first version ran a full session-check and broke `finalize_prewrite_guard_failure_leaves_cycle_open_for_retry`, so it now reads cycle state only.
 - **Release files:** version projection across 154 files (verified version-only), a `VERSIONS.md` entry, and the required `editors/release-parity.tsv` row (no plugin behavior change). `make check` (inside `make release`): 10193 passed, 0 failed.
 - **Workflows at last check:** Release, PyPI, and CI in progress; Book and Pages green. Another session's uncommitted JetBrains edits are not part of this release.
+
+### Re: release re-queued; duplicated responses fixed — opus-5.5 · 2026-09-30T02:05-04:00
+
+Understood: the release now runs **after** the #62–#64 fixes (v0.35.420 shipped before any of them). I see your later queue edits too: #62 struck, "commit the uncommitted files" added, and the tail renamed to "release + publish Issue 62-64". Those run next, in your order.
+
+**Why your exchange has duplicated bullets.** The last two responses (#62 at 01:04 and release at 01:47) each landed with their bullet list **twice**: an orphan copy just before `> **Queue prompt:**`, then the full section.
+- You were editing while each response was written, so the editor applied only the bullets (1423 of 1666 bytes). The queue-prompt quote, heading and intro were missing.
+- The drift-repair path found no heading, concluded the response was missing, and appended the whole response after the fragment.
+- **Fix (`#respsuffixdup`, agent-doc `d75c76157`):** before appending, materialization now checks whether the exchange already ends with a trailing run of the response's own lines. The run must be at least 2 lines and 120+ characters, and shorter than the whole response. If so, it replaces that run instead of adding a second copy. Short shared closing lines like `- Tests pass.` are left alone. Two tests; disabling the fix makes the regression test fail.
+- **Your text is untouched:** the orphan bullets from those two earlier responses are still in your document. Delete them if you like; they sit directly above each `> **Queue prompt:**` line.
+- **The doubled `release + publish` line** was not caused by the auto-strike: every strike logged `nodes=2`, so both copies already existed. It's filed as **#queuefreetextdup** with the evidence.
+
+> **Queue prompt:** fix https://github.com/btakita/agent-doc/issues/63
+
+**GH #63 — `plugin update jetbrains` failed on a remote-dev backend.** Fixed in agent-doc `93039df74` (`Fixes #63`, with a comment on the issue).
+- **JVM:** the upgrader's JVM now comes from the target IDE first: the process executable if it is `java`, else `<ancestor>/jbr/bin/java`, which is the reporter's `<dist>/jbr/bin/java`. Then `JAVA_HOME`, then `PATH`. If none is found, the error lists every path it tried instead of a bare `No such file or directory`.
+- **Fallback:** a failed dynamic upgrade (no JVM, attach refused, the `checkCanUnloadWithoutRestart` signature mismatch) no longer fails the update. The plugin files are still replaced, and the command succeeds with a restart-the-IDE warning that gives the reason.
+- **`--no-dynamic`** (alias `--restart-required`) on `plugin install|update` skips the hot-swap explicitly.
+- **Tests:** four new ones cover the IDE-first JVM order, the list of tried paths, the fallback, and `--no-dynamic` with and without a live IDE. The fallback test fails when the fallback is removed. The spec is updated (`specs/07-core-commands.md`).
+- **Not done (#jbunloadsig):** making the plugin's own `checkCanUnloadWithoutRestart` call work across IDE versions needs a plugin release with a version bump in `gradle.properties`, which another session has uncommitted edits in. With the fallback in place it no longer blocks updating.
+
+**Verification:** `make check` exit 0, 10199/10199 passed. `make install` done. Superproject commits `9518013aa5` and `b555114b5a`. CI run 36675992323 was queued at last check.
 <!-- agent:boundary:05545729 -->
 <!-- /agent:exchange -->
 
@@ -143,15 +165,17 @@ Released **agent-doc v0.35.420**: tagged and pushed, with `make install-full` ru
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- fix https://github.com/btakita/agent-doc/issues/62
-- fix https://github.com/btakita/agent-doc/issues/63
+- ~~fix https://github.com/btakita/agent-doc/issues/62~~
+- 🚧 fix https://github.com/btakita/agent-doc/issues/63
+- commit the uncommitted files
 - fix https://github.com/btakita/agent-doc/issues/64
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- release + publish Issue 62-64
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#jbunloadsig] [agent-doc][jetbrains] GH #63 layer 2: JetBrainsPluginUpgradeAction.java:68 calls DynamicPlugins.checkCanUnloadWithoutRestart(IdeaPluginDescriptorImpl) at compile time; on IU-262.9437.185 that signature does not resolve, so the dynamic upgrade aborts (the file-replacement fallback in 93039df74 now covers it). Look the method up reflectively by name, accept the signatures the supported platform range exposes, and report the build + signatures found on a miss. Needs a plugin version bump in editors/jetbrains/gradle.properties (another session had it dirty 2026-09-30).
+- [ ] [#queuefreetextdup] [agent-doc] 2026-09-30 01:47 cycle: 'release + publish' appeared TWICE in agent:queue before the #ftstrike ran (every answered_free_text_strike_applied reports nodes=2). The operator had rewritten the queue while the live-prompt-drift visible-write repair (ipc_socket_visible_write_drift_missing_response_materialized, patch bc498402) reconciled the editor candidate (18892B) against content_ours (19243B). Trace which merge re-emitted the old free-text line, then fix it with a regression test.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

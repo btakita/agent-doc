@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 67619911-d533-4305-8300-e7f73c1754b7
+  claude: 6408b655-ba14-42e3-9568-0a42335c369b
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -180,6 +180,24 @@ It also caused real harm today. On haiven-dev fpe.md at 22:12:37Z it refused the
 **Verification:** `make check` passed, 10128/10128 (exit 0). `make install` exit 0. Pushed.
 
 **Still gated:** `#drivecapturedsplice` (review) no longer has this guard as its blocker. Its live rerun (`scripts/xdotool-live-verify.sh captured-splice`) injects real keystrokes into your desktop, so the plan requires your OK first. Say "run the captured-splice live proof" and I'll drive it.
+
+### Re: do [#synthcommitstrike] — opus-5 · 2026-09-29T20:40-04:00
+
+> **Queue prompt:** do [#synthcommitstrike]
+
+**Harm this closes:** a synthetic-cycle closeout left the answered head unstruck in HEAD. At the next preflight, an unrelated operator edit plus that live head made the commit refuse with "a later queue prompt recurs after committed response capture" (agent-doc-bugs.md 18:34:11). That refusal fired *before* the preflight residue strike that would have cleared it.
+
+**Fix (`fb18c0477`):** recurrence is only provable when a capture owned by the committed cycle shows its strike was projected. A synthetic fold has no owning capture (the `committed-head:` fallback id), so the live head there is residue. The commit now proceeds, and the same preflight's `preflight_freetext_residue_strike` strikes it. Genuine recurrence under an owning capture still refuses; the existing integration test `commit_recovers_exact_late_free_text_strike_or_its_reaped_target` covers that.
+
+**Approach I dropped:** counting occurrences. The strike can *reap* the row, so "reaped then re-added" is textually identical to leftover residue. The integration test caught that, and capture provenance is the real distinguisher.
+
+**Combined with `#syntheticstrike` (`13d1c6d78`):** the continuation no longer re-offers the answered head, and the next preflight now strikes it cleanly. In a `/loop` drain that is the very next admission.
+- **Remaining gap:** if the queue has no other head, nothing triggers a preflight, so the row stays live until the next manual invocation. It's cosmetic only: nothing dispatches it, and no commit refuses it.
+
+**Verification:**
+- Two unit tests: residue is not recurrence; an owning capture does recur.
+- A mutation check confirmed the residue test fails without the ownership gate.
+- `make check` passed, 10130/10130 (exit 0). `make install` exit 0. Pushed.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -193,14 +211,13 @@ It also caused real harm today. On haiven-dev fpe.md at 22:12:37Z it refused the
 - ~~📌 do [#syntheticstrike]~~
 - 📌 do [#focuscrossrootverify]
 - ~~📌 do [#retainedadvanceadmit]~~
-- do [#synthcommitstrike]
+- ~~do [#synthcommitstrike]~~
 - do [#frontmattersessionflap]
 - do [#editorauth2]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#synthcommitstrike] [agent-doc] Strike an answered free-text queue head AT the synthetic closeout, not only at the next preflight. After #syntheticstrike (13d1c6d78) the continuation no longer re-offers the answered head, but the head stays visibly live (with 🚧) until the next preflight_freetext_residue_strike, and a preflight commit can refuse it first as 'a later queue prompt recurs after committed response capture' (agent-doc-bugs.md 2026-09-29 18:34:11). Cause: decide_committed turns an Abandoned capture cycle into a fresh synthetic state, and the projection clears captured_response on any cycle-id change, so the capture-owned strike Computed can never fire. Fix direction: run the shared residue strike (free_text_queue_head_is_completed_residue) in the commit path, or carry the capture into the fold.
 - [ ] [#frontmattersessionflap] [agent-doc] agent-doc-bugs.md frontmatter `claude:` session id changed three times in ~30 minutes on 2026-09-29 (72fd5a16 -> 500fe7a4 -> edbb61e8) with no new Claude session; each rewrite is post-commit drift that makes a later close refuse (commit_document_via_controller_error 22:44:30Z) and start_session_id_record_failed appears around it. Find the writer (session-id capture on /loop re-entry or hook), make it write only on a real session change, and add regression coverage.
 - [ ] [#editorauth2] [agent-doc][jetbrains][vscode] Plugin registration never adopts canonical over a buffer that differs, in BOTH editor plugins (operator: ensure plugin parity) (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome in JetBrains and VS Code, preferably in the shared FFI registration path so both plugins get one behaviour; registration publishes the editor state and then merges forward. The controller side landed in #editorauth3 (4d9e78578): on editor_replica_reregister the plugin must re-register WITH its retained state vector (resumeState) so the controller's cold-relay reseed applies, and must never drop that state on forceRefresh/requireFreshRegistration. Also covers two or more editors: an unregistered editor joining a relay that already holds one still gets the fenced canonical projection; reconcile it through reconcileText instead of adopting. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register) against both plugins, plus an editor-parity check.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.

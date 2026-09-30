@@ -2,6 +2,37 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.421
+
+- **First `write --commit` after `init` commits (GH #64).** Two boundary writers minted a full
+  UUID (`agent:boundary:ebf9a71f-9986-…`) that the bundled lint dialect rejects as
+  `agent-doc/malformed-boundary`, so the lint gate interrupted the very first closeout on a fresh
+  project. They now use the short `<hex>` form. A relative document path (`scratch.md`) also
+  failed the partial-staging git probe after the commit (`current_dir("")`); it now resolves to
+  the working directory. An end-to-end test covers `init` → prompt → first `write --commit`.
+
+- **`plugin update jetbrains` survives a failed dynamic upgrade (GH #63).** The upgrader's JVM
+  resolves from the target IDE first (its `jbr/bin/java`), then `JAVA_HOME`, then `PATH`, and an
+  unresolved JVM lists every candidate tried. When the restart-free upgrade fails for any reason,
+  the plugin files are still replaced and the command succeeds with a restart-the-IDE warning.
+  `--no-dynamic` (alias `--restart-required`) skips the hot-swap.
+
+- **Responses are no longer duplicated when you edit during closeout.** When the editor projected
+  only a response's bullet list, the repair appended the whole response after the fragment; it now
+  replaces the orphaned run (tail or middle). A response that opens with its
+  `> **Queue prompt:**` quote above the heading now counts as present, so captured-finalize resume
+  no longer declines its own materialized response forever. Editor re-registration no longer
+  replays keystrokes a whole-buffer publish already carried (JetBrains plugin 0.2.449), and
+  admission merges conserve list-item counts (`AdmissionSplitMerge` TLA model).
+
+- **Queue closeout never consumes an unanswered head.** A free-text closeout may consume only the
+  head preflight selected for the cycle; an already-struck answered head no longer lets the
+  closeout take the next prompt. A struck free-text item also subsumes its exact bare twin.
+
+- **Smaller fixes.** A closeout waits (bounded) for owned-component delivery instead of failing
+  hard; a plugin/binary generation mismatch now asks for operator action instead of claiming to
+  self-heal; Codex's composer is recognised after `/clear`.
+
 ## 0.35.420
 
 - **Code-quoted component markers stay readable (GH #61).** A `<!-- agent:NAME -->` marker quoted

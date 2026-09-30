@@ -2063,6 +2063,31 @@ impl DocumentStateProjection {
             }
             StateFact::ResponseCaptured {
                 cycle_id,
+                file_hash,
+                ..
+            }
+            | StateFact::WriteApplied {
+                cycle_id,
+                file_hash,
+                ..
+            } if self
+                .closeout
+                .is_post_commit_replay(cycle_id, file_hash.as_deref()) =>
+            {
+                self.reject_stale(StateDomain::Closeout, StateOwner::DocumentWriter);
+            }
+            StateFact::ResponseCellAdded {
+                cycle_id,
+                content_hash,
+                ..
+            } if self
+                .closeout
+                .is_post_commit_replay(cycle_id, Some(content_hash.as_str())) =>
+            {
+                self.reject_stale(StateDomain::Closeout, StateOwner::DocumentWriter);
+            }
+            StateFact::ResponseCaptured {
+                cycle_id,
                 capture_id,
                 response_sha256,
                 response_body,
@@ -4001,6 +4026,32 @@ impl CloseoutProjection {
         self.owner
             .as_ref()
             .is_some_and(|owner| owner.cycle_id == cycle_id && owner.owner_id == owner_id)
+    }
+
+    /// A pre-commit lifecycle fact (`ResponseCaptured`, `WriteApplied`,
+    /// `ResponseCellAdded`) for ANOTHER cycle that names the exact content the
+    /// projected cycle already committed is a replay of already-committed work,
+    /// never a new cycle. Same-cycle facts stay admitted (repair legitimately
+    /// captures against a committed cycle whose snapshot lags HEAD) and cannot
+    /// regress the phase: the cycle machine refuses `Committed` → open.
+    ///
+    /// `#closeoutcommitfactmissing` (fpe.md, 2026-09-30): `CommitObserved` for
+    /// synthetic-1790730269723 landed, then the retained closeout appended the
+    /// older cycle's capture (same response, file hash = the committed content)
+    /// and the synthetic capture + an unapplied response cell. Each reset or
+    /// re-opened the projection, which ended at `write_applied` /
+    /// `intent_captured` / `session_check_passed=false` while the turn-intent
+    /// checkpoint and terminal proof said committed, and the route treated the
+    /// finished cycle as open (`#fpenoop`).
+    fn is_post_commit_replay(&self, cycle_id: &str, content_hash: Option<&str>) -> bool {
+        if self.phase != Some(CyclePhase::Committed) || self.cycle_id.as_deref() == Some(cycle_id) {
+            return false;
+        }
+        let committed_hash = self
+            .commit
+            .as_deref()
+            .and_then(|commit| commit.strip_prefix("content:"));
+        content_hash.is_some_and(|hash| committed_hash == Some(hash))
     }
 
     fn refresh_capture_content_hashes(
@@ -6554,6 +6605,78 @@ mod tests {
             content_hash: "hash-stale".into(),
         });
         assert!(!projection.closeout.realtime_steering.is_present());
+    }
+
+    #[test]
+    fn post_commit_capture_replays_do_not_reopen_committed_cycle() {
+        // #closeoutcommitfactmissing live order (fpe.md state.db 511361..511365).
+        let doc = "doc-fpe";
+        let committed = "524cf7";
+        let mut projection = DocumentStateProjection::new(doc);
+        projection.apply(&StateFact::CommitObserved {
+            document_hash: doc.into(),
+            cycle_id: "synthetic-1".into(),
+            commit: format!("content:{committed}"),
+            file_hash: Some(committed.into()),
+            snapshot_hash: Some(committed.into()),
+        });
+        assert_eq!(projection.closeout.phase, Some(CyclePhase::Committed));
+        let capture = |cycle: &str| StateFact::ResponseCaptured {
+            document_hash: doc.into(),
+            cycle_id: cycle.into(),
+            capture_id: cycle.into(),
+            response_sha256: "d0837a".into(),
+            response_body: Some("### Re: x".into()),
+            intent_body: None,
+            mutation_plan_json: None,
+            file_hash: Some(committed.into()),
+            snapshot_hash: None,
+            baseline_content: None,
+        };
+        projection.apply(&capture("cycle-older"));
+        projection.apply(&capture("synthetic-1"));
+        projection.apply(&StateFact::ResponseCellAdded {
+            document_hash: doc.into(),
+            cycle_id: "synthetic-1".into(),
+            operation_id: "response-cell:synthetic-1:d0837a".into(),
+            cell_id: "r:1".into(),
+            response_sha256: "d0837a".into(),
+            content_hash: committed.into(),
+            applied: false,
+        });
+        projection.apply(&StateFact::WriteApplied {
+            document_hash: doc.into(),
+            cycle_id: "synthetic-1".into(),
+            patch_id: None,
+            file_hash: Some(committed.into()),
+            snapshot_hash: None,
+        });
+
+        assert_eq!(projection.closeout.cycle_id.as_deref(), Some("synthetic-1"));
+        assert_eq!(projection.closeout.phase, Some(CyclePhase::Committed));
+        // Only the older cycle's replay is refused; the committed cycle's own
+        // late facts are admitted and the cycle machine keeps it committed.
+        assert_eq!(projection.rejected_stale_events.len(), 1);
+
+        // A different cycle carrying NEW content is real progress, and a new
+        // preflight still opens the next cycle.
+        projection.apply(&StateFact::ResponseCaptured {
+            document_hash: doc.into(),
+            cycle_id: "cycle-next".into(),
+            capture_id: "cycle-next".into(),
+            response_sha256: "fresh".into(),
+            response_body: Some("### Re: y".into()),
+            intent_body: None,
+            mutation_plan_json: None,
+            file_hash: Some("new-content".into()),
+            snapshot_hash: None,
+            baseline_content: None,
+        });
+        assert_eq!(projection.closeout.cycle_id.as_deref(), Some("cycle-next"));
+        assert_eq!(
+            projection.closeout.phase,
+            Some(CyclePhase::ResponseCaptured)
+        );
     }
 
     #[test]

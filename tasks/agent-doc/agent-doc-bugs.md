@@ -63,6 +63,34 @@ After that, the editor and the controller refused every connection to each other
 **Verification:** `make check` exit 0, 10161 tests passed. `make install` gave a matching pair (`0.35.419+ecd0acc…` for both). No build-mismatch rejections since 04:07:22. **fpe.md recovered on its own:** its held response committed at 04:08:41 and `session-check` is OK. The editor library reload was deferred to the next idle boundary because a document was mid-cycle. CI for `1fbb2e710` is still running.
 
 **Leftover in this document:** the second compact's summary-of-a-summary is in your editor, and the disk still has the first compact's summary. I left it alone because your editor text is authoritative. It's harmless: the full archive `…-20260930-035337.md` is one link away.
+
+### Re: Fix https://github.com/btakita/agent-doc/issues/60 (+ fpe.md Stop hook) — opus-5.5 · 2026-09-30T00:37-04:00
+
+> **Queue prompt:** Fix https://github.com/btakita/agent-doc/issues/60
+
+**#60 — after a zero-replica deferral, `session-check` reported a false INTERRUPTED.** `respond` exits nonzero when the editor has no registered replica, but the retained write still commits a few seconds later. The harness is allowed exactly one `session-check`, and that check sampled the state once at entry. So the answer depended on how quickly the harness typed: about 1s after `respond` it said `write_applied`, about 4s after it said `committed`, for the same cycle.
+
+- **Fix (`#scsettlewindow`):** the `session-check` CLI now re-checks every 500ms, for up to 15s, whenever the interruption is one the binary clears on its own:
+  - the cycle is still `write_applied`,
+  - a retained delivery says it "will resume automatically",
+  - a retained write delivery is still unsettled,
+  - replica/projection settlement is already scheduled,
+  - a captured closeout is still pending.
+
+  It then reports the last state it saw. The window is configurable with `AGENT_DOC_SESSION_CHECK_SETTLE_SECS` (`0` = check once).
+  - A real stall is still reported, just after the window.
+  - Interruptions that need the agent to act (finalize, `write --commit`, answer a prompt) are reported immediately.
+  - The Stop hooks keep their own time budget.
+- **Tests:** re-check until committed, report immediately when action is needed, report a stall when the window closes, and a zero window checks once. A pin test ties each trigger phrase to the real message that emits it, so rewording a message fails the build instead of silently disabling the wait. I checked the pin test by breaking a phrase; it failed as expected.
+- `respond` still exits nonzero for the deferral, and `session-check` gives the final answer. I commented on #60 (auto-closed by the commit).
+
+**fpe.md (your second paste):** two separate things.
+1. **The held closeout** (`editor_projection_pending` at about 04:07) was the tail of the build mismatch from the previous turn. It **committed at 00:08:40** once the matching binary and editor library were installed, and `session-check` is OK.
+2. **`Stop hook failed closed: parse stop JSON`** was a real bug (`#stopnullmessage`). Your Codex turn ended on `sleep 60` with no final message, so Codex sent `"last_assistant_message": null`. The hook tolerated a *missing* field but not an explicit `null`, so the whole payload failed to parse. That also meant the hook's existing path for tool-only stops could never run.
+   - I reproduced it against the installed binary (`parse stop JSON`).
+   - The fix treats `null` as empty for `last_assistant_message` and `stop_hook_active`, with tests. The same payload now returns `{"continue":true}` from the installed binary.
+
+**Verification:** `make check` exit 0, 10168 tests passed. Installed with the binary and editor library on one matching build (`0.35.419+305d8cd…` for both). Committed as agent-doc `91330f9f7` (pushed) and superproject `a25e9686cc`. After the install, one controller still reports the previous build; it recycles at the next idle boundary.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -73,7 +101,7 @@ After that, the editor and the controller refused every connection to each other
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Compact Exchange did not work the first time I called it. It worked the second time though.~~
-- Fix https://github.com/btakita/agent-doc/issues/60
+- ~~Fix https://github.com/btakita/agent-doc/issues/60~~
 - Fix https://github.com/btakita/agent-doc/issues/61
 - Fix https://github.com/btakita/agent-doc/issues/62
 - release + publish

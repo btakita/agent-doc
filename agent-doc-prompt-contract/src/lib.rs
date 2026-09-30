@@ -779,10 +779,8 @@ mod tests {
     fn requested_prompt_presets_keeps_nested_list_directive_form() {
         // Unhashed name on purpose: the hashtag detector cannot see it, so this
         // pins the `preset <name>` directive path alone.
-        let presets = IndexMap::from([(
-            "release-check".to_string(),
-            "Prepare release.".to_string(),
-        )]);
+        let presets =
+            IndexMap::from([("release-check".to_string(), "Prepare release.".to_string())]);
         let text = ["- fix the crash", "  - preset release-check"].join("\n");
 
         assert_eq!(

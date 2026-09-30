@@ -5,13 +5,13 @@ use std::time::Duration;
 use agent_doc_controller::dispatch::{
     DispatchOnlyProofOutcomeFacts, DispatchOnlyRecycleInflightMessageFacts,
     DispatchOnlyReopenDelivery, DispatchStartProofDecision, DispatchStartProofFacts,
-    RecycleInflightUnsettledVerdict, RoutedDispatchStartProof, RoutedReopenGuardReason,
-    accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
+    RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES, RecycleInflightUnsettledVerdict, RoutedDispatchStartProof,
+    RoutedReopenGuardReason, accepted_only_dispatch_start_log_message,
+    accepted_only_dispatch_start_refusal_message,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_recycle_inflight_message, dispatch_only_sent_console_message,
     dispatch_only_sent_log_message, dispatch_proof_failed_event,
-    RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES, recycle_inflight_unsettled_verdict,
-    routed_dispatch_start_timeout_for_binary,
+    recycle_inflight_unsettled_verdict, routed_dispatch_start_timeout_for_binary,
 };
 use agent_doc_harness::HarnessConfig;
 

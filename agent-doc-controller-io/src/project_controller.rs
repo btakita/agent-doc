@@ -3653,8 +3653,7 @@ impl RetainedWriteSettleSink {
                 )
             }
         };
-        if let Err(error) =
-            runtime.append_apply_state_event_serialized(&self.project_root, &event)
+        if let Err(error) = runtime.append_apply_state_event_serialized(&self.project_root, &event)
         {
             eprintln!(
                 "[controller] compact projection receipt ingress failed for {document_hash}: {error:#}"
@@ -10281,9 +10280,8 @@ mod tests {
             dependency.project_change();
             let _ = notified_tx.send(());
         });
-        let notification_was_responsive = notified_rx
-            .recv_timeout(Duration::from_millis(250))
-            .is_ok();
+        let notification_was_responsive =
+            notified_rx.recv_timeout(Duration::from_millis(250)).is_ok();
 
         release.wait();
         blocker_thread.join().unwrap();

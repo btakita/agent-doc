@@ -1781,15 +1781,21 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let second_root = root.clone();
         thread::spawn(move || {
-            let _ = tx.send(start_listener(&second_root, |_| None).err().map(|e| format!("{e:#}")));
+            let _ = tx.send(
+                start_listener(&second_root, |_| None)
+                    .err()
+                    .map(|e| format!("{e:#}")),
+            );
         });
-        let outcome = rx.recv_timeout(Duration::from_secs(10)).unwrap_or_else(|_| {
-            panic!(
-                "the second generation neither refused nor returned: it bound {} \
+        let outcome = rx
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the second generation neither refused nor returned: it bound {} \
                  out from under the live listener",
-                sock_path.display()
-            )
-        });
+                    sock_path.display()
+                )
+            });
         let message =
             outcome.expect("a second generation must refuse to evict a live listener, not bind it");
         assert!(message.contains("refusing to evict"), "{message}");

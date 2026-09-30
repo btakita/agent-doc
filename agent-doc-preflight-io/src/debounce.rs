@@ -201,11 +201,11 @@ where
                     && reregister_rounds < PREFLIGHT_EDITOR_REREGISTER_ROUNDS
                 {
                     reregister_rounds += 1;
-                    let status = match signal(file, CrdtReplicaEventReason::EditorReplicaReregister, 0)
-                    {
-                        Ok(()) => "requested".to_string(),
-                        Err(error) => format!("failed:{error:#}").replace('\n', " "),
-                    };
+                    let status =
+                        match signal(file, CrdtReplicaEventReason::EditorReplicaReregister, 0) {
+                            Ok(()) => "requested".to_string(),
+                            Err(error) => format!("failed:{error:#}").replace('\n', " "),
+                        };
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
@@ -538,7 +538,10 @@ mod tests {
             },
         );
 
-        assert!(outcome.is_ok(), "a re-registered editor must be admitted: {outcome:?}");
+        assert!(
+            outcome.is_ok(),
+            "a re-registered editor must be admitted: {outcome:?}"
+        );
         assert_eq!(
             signals.into_inner(),
             vec![(CrdtReplicaEventReason::EditorReplicaReregister, 0)]

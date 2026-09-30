@@ -5468,12 +5468,7 @@ mod tests {
     fn recycle_cycle_open_deferral_reclaims_an_orphaned_empty_preflight() {
         let source = include_str!("idle_watch.rs");
         // Built from fragments so this guard never matches its own source text.
-        let reclaim = [
-            "cancel_preflight_cycle",
-            "_after_owner",
-            "_release(",
-        ]
-        .concat();
+        let reclaim = ["cancel_preflight_cycle", "_after_owner", "_release("].concat();
         assert!(
             source.contains(&reclaim),
             "the open-cycle recycle deferral must attempt the owner-released \

@@ -1006,6 +1006,9 @@ pub fn build_ipc_node_patches_json(
 
     let mut node_patches = Vec::new();
     for component in component_names {
+        if !item_nodes_express_component_change(before, after, &component) {
+            continue;
+        }
         let before_nodes =
             agent_doc_markdown_ast::mutations::item_nodes(before, &component).unwrap_or_default();
         let after_nodes =
@@ -1125,6 +1128,52 @@ pub fn build_ipc_node_patches_json(
     }
 
     node_patches
+}
+
+/// Whether item-node patches alone can carry `component`'s change from `before`
+/// to `after` (`#editorlistonlyproj`).
+///
+/// The editor skips a component's legacy patch once it carries node patches, so
+/// a node-patched component must lose nothing that lives outside its list items.
+/// `exchange` never qualifies: a response is headings and prose appended at the
+/// boundary, and a node insert would only carry its bullets, anchored after the
+/// previous response's last bullet. Any other component qualifies only when its
+/// text outside the item nodes is unchanged; the component markers themselves are
+/// excluded so an opening-tag attribute flip (queue `go`) stays node-patchable.
+fn item_nodes_express_component_change(before: &str, after: &str, component: &str) -> bool {
+    if component == "exchange" {
+        return false;
+    }
+    match (
+        component_non_item_text(before, component),
+        component_non_item_text(after, component),
+    ) {
+        (Some(before_rest), Some(after_rest)) => before_rest == after_rest,
+        _ => false,
+    }
+}
+
+/// The inner text of the first `component` occurrence with its item nodes cut out.
+fn component_non_item_text(source: &str, component: &str) -> Option<String> {
+    let comp = agent_doc_markdown_ast::overlay::components(source)
+        .into_iter()
+        .find(|comp| comp.name == component)?;
+    let inner_start = source
+        .get(comp.start_byte..comp.end_byte)?
+        .find('\n')
+        .map(|newline| comp.start_byte + newline + 1)
+        .unwrap_or(comp.end_byte);
+    let mut rest = String::new();
+    let mut cursor = inner_start;
+    for item in &comp.items {
+        if item.start_byte < cursor || item.end_byte > comp.end_byte {
+            return None;
+        }
+        rest.push_str(source.get(cursor..item.start_byte)?);
+        cursor = item.end_byte;
+    }
+    rest.push_str(source.get(cursor..comp.end_byte)?);
+    Some(rest)
 }
 
 fn ipc_node_source(
@@ -1406,6 +1455,94 @@ mod tests {
     }
 
     #[test]
+    fn build_ipc_node_patches_json_never_node_patches_an_exchange_response() {
+        // #editorlistonlyproj: a response with a quote, heading, prose and bullets,
+        // plus a concurrent queue strike. The exchange must travel only as its
+        // component patch; node-patching it made the editor skip that patch and
+        // land just the bullets after the previous response's last bullet.
+        let before = "\
+<!-- agent:exchange -->
+### Re: prior — m · t
+
+- prior bullet one
+- prior bullet two
+<!-- agent:boundary:7f0514e2:doc -->
+<!-- /agent:exchange -->
+
+<!-- agent:queue priority go -->
+- release + publish
+<!-- /agent:queue -->
+";
+        let after = "\
+<!-- agent:exchange -->
+### Re: prior — m · t
+
+- prior bullet one
+- prior bullet two
+> **Queue prompt:** release + publish
+
+### Re: release — m · t
+
+Released the thing.
+- **Cause:** new bullet one
+- **Test:** new bullet two
+
+More prose after the list.
+<!-- agent:boundary:4dd420b8:doc -->
+<!-- /agent:exchange -->
+
+<!-- agent:queue priority -->
+- ~~release + publish~~
+<!-- /agent:queue -->
+";
+
+        let patches = build_ipc_node_patches_json(Some(before), Some(after));
+
+        assert!(
+            patches.iter().all(|patch| patch["component"] != "exchange"),
+            "exchange must not be node-patched: {patches:?}"
+        );
+        assert!(
+            patches
+                .iter()
+                .any(|patch| patch["component"] == "queue" && patch["op"] == "strike"),
+            "the queue strike (with an opening-tag attribute flip) stays node-patched: {patches:?}"
+        );
+    }
+
+    #[test]
+    fn build_ipc_node_patches_json_skips_a_component_whose_prose_changed() {
+        let before = "\
+<!-- agent:status -->
+Summary line.
+
+- [#alpha] one
+<!-- /agent:status -->
+";
+        let after = "\
+<!-- agent:status -->
+Summary line, rewritten.
+
+- [#alpha] one
+- [#beta] two
+<!-- /agent:status -->
+";
+        assert!(
+            build_ipc_node_patches_json(Some(before), Some(after)).is_empty(),
+            "a node insert would drop the rewritten summary line"
+        );
+
+        let items_only = after.replace("Summary line, rewritten.", "Summary line.");
+        let patches = build_ipc_node_patches_json(Some(before), Some(&items_only));
+        assert!(
+            patches
+                .iter()
+                .any(|patch| patch["component"] == "status" && patch["op"] == "insert"),
+            "an items-only change is still node-patched: {patches:?}"
+        );
+    }
+
+    #[test]
     fn build_ipc_node_patches_json_emits_stale_guarded_item_ops() {
         let before = "\
 <!-- agent:queue -->
@@ -1457,13 +1594,13 @@ mod tests {
     #[test]
     fn build_ipc_node_patches_json_preserves_consecutive_insert_order() {
         let before = "\
-<!-- agent:exchange -->
+<!-- agent:backlog -->
 - anchor response
 - following response
-<!-- /agent:exchange -->
+<!-- /agent:backlog -->
 ";
         let after = "\
-<!-- agent:exchange -->
+<!-- agent:backlog -->
 - anchor response
 - Shape chosen
 - All nine findings
@@ -1474,7 +1611,7 @@ mod tests {
 1. pending review
 2. Sanat
 - following response
-<!-- /agent:exchange -->
+<!-- /agent:backlog -->
 ";
 
         let payload = serde_json::json!({

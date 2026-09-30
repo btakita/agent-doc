@@ -12,6 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#agent-doc-causes': Fix agent-doc causes
+  '#do-backlog': '/goal do backlog items'
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
@@ -266,6 +267,37 @@ The exchange is past 180 lines. Compaction is left for an explicit opt-in while 
 **Note:** this install triggers a recycle request, so pid 19503 should pick up the new build at its next safe checkpoint. That is also the first real test of this fix.
 
 The exchange is past 210 lines. Compaction is left for an explicit opt-in while the queue drains.
+
+### Re: #jbunloadsig + route focus, running-task indicator, Stop-hook fail-closed — opus-5-5 · 2026-09-30T11:36-04:00
+
+> **Queue prompt:**
+>
+> fix https://github.com/btakita/agent-doc/issues/65
+
+
+> **Queue prompt:**
+>
+> do [#jbunloadsig]
+
+Five fixes landed in two agent-doc commits (`d769cf5e3`, `a829b5ae5`): installed, pushed, and `make check` green (Rust 10215/0, JetBrains 599/0, VS Code 181/0). One more bug you reported is not fixed; it is now `#fpereplaydup`, top of the backlog.
+
+**#jbunloadsig — JetBrains dynamic upgrade across IDE versions.** The upgrade now looks up `checkCanUnloadWithoutRestart` and `unloadPlugin` by name when it runs, instead of binding them at compile time. It uses whichever version of each method accepts the live plugin descriptor; failing that, it calls Kotlin's `$default` helper with every optional parameter defaulted. If nothing matches, the error names the IDE build and every signature it found. The plugin was bumped to 0.2.451. The install hot-swapped the running IDE without a restart, using the new lookup.
+
+**Editor route refused: "focused document does not match routed document" (api.md).** The editor sent the selected tab (`fpe.md`) as the focus while you ran `tasks/api.md`, and api.md wasn't in either visible column. Now the controller makes the routed document the focus: it moves focus to it if it is visible, or puts it in the selected document's slot if not. The refusal remains only when there's no slot to use.
+
+**Running indicator not visible.** The controller showed an open cycle as idle whenever the tmux pane read `ready` rather than `busy`. That pane status flips back and forth while the agent works, so this document showed "awaiting response" for one frame and then idle for the rest of the turn. Now the cycle's own state decides; only a closed pane ends a turn.
+
+**One-line view of the running task.** The turn state now carries the task (the first prompt target, else the turn id). The JetBrains banner and the VS Code status bar show `⟳ agent-doc: awaiting response · do [#jbunloadsig]`, truncated to 60 characters, with the full text in the tooltip. VS Code extension is now 0.2.75.
+
+**Stop hook "failed closed" on fpe.md.** When the hook's repair step failed, the error went straight to the hook's "failed closed" handler. Here the response write was only being held for the editor, and it committed 29 s later. The hook now treats this as a cycle still in progress: it blocks with instructions based on whether anything is still holding the write, and "failed closed" is kept for real hook failures.
+
+**Not fixed: fpe.md duplicate response and two lost queue items (`#fpereplaydup`).**
+- **What happened:** the editor briefly had no registered copy of the document, so the response write was held. The recovery path then wrote the same response a second time (haiven-dev commit `6735e15e`).
+- **The damage:** the second copy lists your two newer queue items ("Configure the SBX + STG to have 16 vCPUs…" and "I can't login.") as the prompts it answers, and both are gone from the queue. Neither was actually answered.
+- **Why it's still open:** the logs show about 9 repeated recovery writes, a baseline refresh, and then a full rewrite of the response, but I haven't pinned which step re-read the current queue.
+- **Your document:** fpe.md is live (editor open, owned by the Codex pane), so I did not edit it. It still needs the two queue items put back and the `(HEAD)` duplicate removed through the editor.
+
+The exchange here is long (warn level), but the queue is active, so I'm continuing rather than pausing to compact. CI for `a829b5ae5` is still running.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -275,16 +307,20 @@ The exchange is past 210 lines. Compaction is left for an explicit opt-in while 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#editorlistonlyproj]~~
-- ~~do [#stalesupresumedeadlock]~~
-- do [#jbunloadsig]
+- ~~do [#jbunloadsig]~~
+- ~~fix https://github.com/btakita/agent-doc/issues/65~~
+- fix https://github.com/btakita/agent-doc/issues/62
+- release + publish in a subagent so I can test it on my coder project
 - do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.
+- do [#semmergeargorder]
+- re [#apimdrevert]: I don't recall which text was lost. Can we practically debug log these events or will this cause excessive debug logging?
+- In the frontmatter, alias `presets` to `prompt_presets`.
 - release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#jbunloadsig] [agent-doc][jetbrains] GH #63 layer 2: JetBrainsPluginUpgradeAction.java:68 calls DynamicPlugins.checkCanUnloadWithoutRestart(IdeaPluginDescriptorImpl) at compile time; on IU-262.9437.185 that signature does not resolve, so the dynamic upgrade aborts (the file-replacement fallback in 93039df74 now covers it). Look the method up reflectively by name, accept the signatures the supported platform range exposes, and report the build + signatures found on a miss. Needs a plugin version bump in editors/jetbrains/gradle.properties (another session had it dirty 2026-09-30).
+- [ ] [#fpecapturedresponse] [fpereplaydup] [agent-doc] fpe.md 2026-09-30: a captured response retained behind editor_owner_without_registered_replica (intent 1790782003163310509, cycle-1790781814399) was written TWICE and the replay consumed two operator queue heads ("Configure the SBX + STG to have 16 vCPUs..." and "I can't login.") as Queue-prompt quotes over a byte-identical answer (haiven-dev commit 6735e15e). Evidence: ops.log 15:27-15:32Z shows ~9 captured_finalize_resume_tracked_work replays (recorded_tracked_work_is_unlanded kept returning true), capture_baseline_refreshed_for_benign_drift + repair_adopt_existing_response at 15:30:58-59, free_text_queue_strike at 15:30:59, then origin=repair_replay at 15:31:37. Find which step re-renders queue quotes against the CURRENT queue and make replay of an already-written capture idempotent; add a SimWorld regression. The live fpe.md still needs the two queue items restored and the duplicate (HEAD) response removed through the editor.
 - [ ] [#queuefreetextdup] [agent-doc] Operator 2026-09-30: the second 'release + publish' was INTENTIONAL, because the queue is a scheduling FIFO and a repeat means run it again. The real defect is strike scope: in the 01:47 cycle every answered_free_text_strike_applied reported nodes=2, so answering one copy struck both. #qstruckbaredup (bd6ba2102) also drops an identical plain copy of a struck line, which deletes an intentional repeat. Fix: a free-text answer strikes only the first unstruck occurrence and later repeats stay live. Re-check #qstruckbaredup against the authored-multiplicity rule (#qdedup-directive-twin) so it collapses only merge re-emits, never operator-authored repeats. Add regression tests for both.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#semmergeargorder] [agent-doc] try_semantic_merge_convergence(base, candidate, content_ours) forwards to document_cell_merge_scoped(base, ours_agent, theirs_operator). Its production caller (agent-doc-write-converge-io lib.rs ~1133) passes the EDITOR text as candidate, which lands in the agent slot. Its own test (agent-doc-write-runtime-io ipc.rs ~983) passes the AGENT text there, so the two callers disagree. The operator text then becomes 'ours' and the agent response becomes the skeleton. The path is gated on !is_visible_write_proven() and did not run in the #editorlistonlyproj incident. Decide the intended order, fix the caller or the body (the post-checks also mix the roles), and add a regression test with a concurrent operator deletion.

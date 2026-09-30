@@ -318,6 +318,23 @@ uv tool install agent-doc==0.35.422   # or: pip install agent-doc==0.35.422
 PyPI now ships a small bootstrap wheel. On first run it downloads and checks the matching GitHub Release archive, so the Release job must finish too.
 
 Continuing the queue: `#queuefreetextdup` is next. The exchange is large, but the queue is active, so I'm not stopping to compact.
+
+### Re: #semmergeargorder + lazily.md Stop hook — opus-5-5 · 2026-09-30T12:24-04:00
+
+> **Queue prompt:**
+>
+> do [#semmergeargorder]
+
+**Fixed in `fd711bef4`: the semantic merge had the operator and the agent swapped.** Installed and pushed; `make check` passes (Rust 10216/0, JetBrains 599/0, VS Code 181/0).
+
+- **The bug:** `try_semantic_merge_convergence(base, candidate, content_ours)` sent the live editor text into the merge's agent slot and the agent's document into the operator slot. The only production caller passes the editor buffer as `candidate`, so every same-line conflict went to the agent.
+- **The fix:** the merge now gets (base, agent, operator). New response headings are read from the agent's document. The check on text outside components now requires the agent to leave it alone and requires the merge to keep the operator's version. Before, it refused any operator frontmatter edit.
+- **Tests:** three existing guard tests were written to match the bug: they passed the operator text as `content_ours`. They now use the roles production uses.
+- **Regression:** the agent strikes a queue line while the operator deletes it, and the deletion must win. I checked the test catches the bug: with the old argument order, the agent's strike puts the deleted line back and the test fails. My first version of the test missed this, because edits to different lines merge the same way whichever side is which.
+
+**lazily.md "Stop hook failed closed" (11:20).** This is the same failure as fpe.md, already fixed by `a829b5ae5`, which was installed at 11:34, after this happened. The Stop hook reopened a cycle, saved the response, and its write was held; the error escaped as "failed closed". The held write settled 6 s later and committed as `53b068e086`. lazily.md passes session-check now, with only an operator-verify item waiting in its queue. Nothing more to do there.
+
+CI is still running on the 0.35.422 release commit. The exchange here is long, but the queue is active, so I'm continuing.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -328,8 +345,9 @@ Continuing the queue: `#queuefreetextdup` is next. The exchange is large, but th
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~release + publish in a subagent so I can test it on my coder project~~
-- do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.
-- do [#semmergeargorder]
+- ⏭️ do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.
+- ~~do [#semmergeargorder]~~
+- do [#fpecapturedresponse]
 - re [#apimdrevert]: I don't recall which text was lost. Can we practically debug log these events or will this cause excessive debug logging?
 - In the frontmatter, alias `presets` to `prompt_presets`.
 - release + publish
@@ -340,7 +358,6 @@ Continuing the queue: `#queuefreetextdup` is next. The exchange is large, but th
 - [ ] [#fpecapturedresponse] [fpereplaydup] [agent-doc] fpe.md 2026-09-30: a captured response retained behind editor_owner_without_registered_replica (intent 1790782003163310509, cycle-1790781814399) was written TWICE and the replay consumed two operator queue heads ("Configure the SBX + STG to have 16 vCPUs..." and "I can't login.") as Queue-prompt quotes over a byte-identical answer (haiven-dev commit 6735e15e). Evidence: ops.log 15:27-15:32Z shows ~9 captured_finalize_resume_tracked_work replays (recorded_tracked_work_is_unlanded kept returning true), capture_baseline_refreshed_for_benign_drift + repair_adopt_existing_response at 15:30:58-59, free_text_queue_strike at 15:30:59, then origin=repair_replay at 15:31:37. Find which step re-renders queue quotes against the CURRENT queue and make replay of an already-written capture idempotent; add a SimWorld regression. The live fpe.md still needs the two queue items restored and the duplicate (HEAD) response removed through the editor.
 - [ ] [#queuefreetextdup] [agent-doc] Operator 2026-09-30: the second 'release + publish' was INTENTIONAL, because the queue is a scheduling FIFO and a repeat means run it again. The real defect is strike scope: in the 01:47 cycle every answered_free_text_strike_applied reported nodes=2, so answering one copy struck both. #qstruckbaredup (bd6ba2102) also drops an identical plain copy of a struck line, which deletes an intentional repeat. Fix: a free-text answer strikes only the first unstruck occurrence and later repeats stay live. Re-check #qstruckbaredup against the authored-multiplicity rule (#qdedup-directive-twin) so it collapses only merge re-emits, never operator-authored repeats. Add regression tests for both.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
-- [ ] [#semmergeargorder] [agent-doc] try_semantic_merge_convergence(base, candidate, content_ours) forwards to document_cell_merge_scoped(base, ours_agent, theirs_operator). Its production caller (agent-doc-write-converge-io lib.rs ~1133) passes the EDITOR text as candidate, which lands in the agent slot. Its own test (agent-doc-write-runtime-io ipc.rs ~983) passes the AGENT text there, so the two callers disagree. The operator text then becomes 'ours' and the agent response becomes the skeleton. The path is gated on !is_visible_write_proven() and did not run in the #editorlistonlyproj incident. Decide the intended order, fix the caller or the body (the post-checks also mix the roles), and add a regression test with a concurrent operator deletion.
 <!-- /agent:backlog -->
 
 ## Review

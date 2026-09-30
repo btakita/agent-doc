@@ -2670,7 +2670,10 @@ pub fn collapse_progressive_free_text_heads(
     snapshot_entries: &[QueueEntry],
 ) -> Option<Vec<QueueEntry>> {
     let mut snapshot_counts = std::collections::HashMap::<String, usize>::new();
-    for key in snapshot_entries.iter().filter_map(progressive_free_text_key) {
+    for key in snapshot_entries
+        .iter()
+        .filter_map(progressive_free_text_key)
+    {
         *snapshot_counts.entry(key).or_insert(0) += 1;
     }
     let mut collapsed = Vec::with_capacity(entries.len());
@@ -3005,6 +3008,25 @@ pub fn converge_queue_via_lifecycle(
     let mut lifecycle_changed = false;
     let mut entries_for_convergence = Vec::with_capacity(entries.len());
     for entry in entries {
+        // `#qstruckbaredup`: a concurrent editor/closeout merge can preserve the
+        // operator's just-typed bare queue line as tolerant `Freeform` while the
+        // queue projection inserts and later strikes the actionable `- ...`
+        // form. `Freeform` is deliberately outside the lifecycle machine, so
+        // without this bridge the same answered prose survives immediately
+        // below its `#ftstrike` tombstone and is served again. A current struck
+        // free-text identity is terminal evidence; discard only an exact
+        // normalized bare duplicate. Unrelated contamination remains verbatim.
+        if let QueueEntry::Freeform(line) = entry {
+            let identity = agent_doc_element_queue::QueueItemIdentity::from_prompt(line);
+            if matches!(
+                identity,
+                agent_doc_element_queue::QueueItemIdentity::FreeText(_)
+            ) && current_struck.contains(&identity)
+            {
+                lifecycle_changed = true;
+                continue;
+            }
+        }
         if let QueueEntry::Prompt(_) = entry
             && let Some(identity) = queue_item_identity(entry)
             && let Some(struck_entry) = snapshot_struck.get(&identity)
@@ -4509,7 +4531,10 @@ mod tests {
         .unwrap();
         let collapsed = collapse_progressive_free_text_heads(&entries, &[])
             .expect("the final synthesis should supersede both raced drafts");
-        assert_eq!(render(&collapsed), "- Prepare sample and refresh fixture 42\n");
+        assert_eq!(
+            render(&collapsed),
+            "- Prepare sample and refresh fixture 42\n"
+        );
     }
 
     #[test]
@@ -6595,6 +6620,24 @@ mod tests {
         assert!(
             converge_queue_via_lifecycle(&entries, &[], &Default::default()).is_none(),
             "a live + struck pair of the same text is not a duplicate"
+        );
+    }
+
+    /// `#qstruckbaredup`: the tolerant parser preserves a bare line as
+    /// `Freeform`. When a concurrent projection also creates and strikes the
+    /// actionable list form, the terminal item must subsume that bare twin or
+    /// the answered question is immediately queued again.
+    #[test]
+    fn converge_struck_free_text_subsumes_matching_bare_freeform_twin() {
+        let line = "Should we add an ADR for deterministic simulation testing?";
+        let entries = vec![c(line), QueueEntry::Freeform(line.to_string())];
+
+        let out = converge(&entries, &entries);
+
+        assert_eq!(out, vec![c(line)], "{out:?}");
+        assert!(
+            converge_queue_via_lifecycle(&out, &entries, &Default::default()).is_none(),
+            "the repaired queue must be a fixpoint"
         );
     }
 

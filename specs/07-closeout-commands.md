@@ -74,6 +74,15 @@ retain the complete response capture for automatic binary retry, but it must
 not leave a response fragment for operator repair or substitute an unproven
 full response in the document, snapshot, or commit.
 
+An editor receipt that is ahead of the controller canonical is not yet a
+divergence (`#receiptcanonicalcatchup`). A programmatic editor apply reaches
+canonical through the replica's next delta, and a replica generation handoff
+(for example the library reload after `make install`) can land that delta a few
+seconds after the receipt. The receipt check therefore parks on the canonical
+delivery-revision edge, never a timer poll, and re-reads canonical after each
+revision. It accepts only exact equality, and it refuses when the
+projection-observation ceiling passes or the revision stops moving.
+
 When retained closeout recovery observes that live editor authority and disk
 diverge, it retains an exact continuation keyed by the authority revision.
 Editor-visible and disk projections are ordinary Sources; their equality and

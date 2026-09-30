@@ -2947,6 +2947,20 @@ pub fn apply_cp_write_through_relay_authority(
     )
 }
 
+/// How long an editor receipt may wait for the controller canonical to catch up
+/// to it before the receipt is refused (`#receiptcanonicalcatchup`).
+///
+/// A programmatic editor apply reaches canonical through the editor replica's
+/// next delta, not synchronously with the receipt. On 2026-09-30 (14:27 and
+/// 14:42 UTC, `tasks/agent-doc/agent-doc-bugs.md`) the receipt arrived while a
+/// post-install replica generation was re-registering; canonical matched the
+/// receipt byte-for-byte about one second later at 14:42
+/// (`crdt_document_op_delta_ingested`) and about four seconds later, through one
+/// intermediate revision, at 14:27, but the one-instant comparison had already
+/// failed both closeouts. The budget is the same ceiling every other projection
+/// observation uses.
+pub const EDITOR_RECEIPT_CANONICAL_CATCHUP_MS: u64 = CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS;
+
 /// Verify that an editor receipt observes the controller-owned canonical text.
 ///
 /// Editor visibility is downstream evidence only. It must never replace
@@ -2956,15 +2970,116 @@ pub fn adopt_verified_editor_text_through_relay_authority(
     text: &str,
     source: &str,
 ) -> Result<Option<bool>> {
-    let canonical = try_resolve_current_document_content(file, source)?;
-    anyhow::ensure!(
-        canonical == text,
-        "{source}: refusing editor receipt that diverges from controller canonical for {} (canonical_hash={}, editor_hash={}); retained canonical projection remains authoritative",
-        file.display(),
-        agent_doc_hash::content_hash(&canonical),
-        agent_doc_hash::content_hash(text),
+    adopt_verified_editor_text_through_relay_authority_within(
+        file,
+        text,
+        source,
+        std::time::Duration::from_millis(EDITOR_RECEIPT_CANONICAL_CATCHUP_MS),
+    )
+}
+
+/// [`adopt_verified_editor_text_through_relay_authority`] with an explicit
+/// catch-up budget.
+///
+/// The invariant is unchanged: the receipt is accepted only when canonical
+/// equals it exactly. What changed is *when* that is judged. A mismatch parks on
+/// the delivery-revision subscription (woken by the replica delta, not a timer
+/// poll) and re-reads canonical after each revision, so a receipt that is merely
+/// ahead of canonical is accepted once canonical arrives, while a genuinely
+/// divergent one is still refused when the budget runs out or the revision stops
+/// moving.
+pub fn adopt_verified_editor_text_through_relay_authority_within(
+    file: &Path,
+    text: &str,
+    source: &str,
+    wait: std::time::Duration,
+) -> Result<Option<bool>> {
+    let started = std::time::Instant::now();
+    let deadline = started.checked_add(wait);
+    let mut controller_cursor = None;
+    let mut revisions_observed = 0usize;
+    loop {
+        // Take the revision cursor from an observation made BEFORE the
+        // authority read, so an edge landing between the two wakes the park
+        // below instead of being missed.
+        let cursor = match observe_live_editor_authority_after_model_ensure(file, source) {
+            Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                delivery_version, ..
+            }) => Some(delivery_version),
+            _ => None,
+        };
+        let canonical = try_resolve_current_document_content(file, source)?;
+        if canonical == text {
+            if revisions_observed > 0 {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "editor_receipt_canonical_caught_up file={} source={} revisions={} waited_ms={} content_hash={} (#receiptcanonicalcatchup)",
+                        file.display(),
+                        source,
+                        revisions_observed,
+                        started.elapsed().as_millis(),
+                        agent_doc_hash::content_hash(text),
+                    ),
+                );
+            }
+            return Ok(Some(false));
+        }
+        let remaining = deadline
+            .map(|deadline| deadline.saturating_duration_since(std::time::Instant::now()))
+            .unwrap_or_default();
+        let advanced = match cursor {
+            Some(_) if remaining.is_zero() => false,
+            None => false,
+            Some(version) => {
+                await_canonical_revision_edge(file, version, &mut controller_cursor, remaining)
+                    .unwrap_or_else(|err| {
+                        eprintln!(
+                            "[agent-doc] {source}: delivery-revision wait failed for {} while awaiting canonical catch-up: {err:#}",
+                            file.display()
+                        );
+                        false
+                    })
+            }
+        };
+        if !advanced {
+            anyhow::bail!(
+                "{source}: refusing editor receipt that diverges from controller canonical for {} (canonical_hash={}, editor_hash={}, waited_ms={}, revisions={}); retained canonical projection remains authoritative",
+                file.display(),
+                agent_doc_hash::content_hash(&canonical),
+                agent_doc_hash::content_hash(text),
+                started.elapsed().as_millis(),
+                revisions_observed,
+            );
+        }
+        revisions_observed += 1;
+    }
+}
+
+/// Park until the canonical delivery revision moves past `version`, returning
+/// whether it did. Follows the hub subscription when the relay is embedded and
+/// the controller's document delivery-wake subscription otherwise, the same two
+/// edges [`await_visible_editor_projection_receipt`] follows.
+fn await_canonical_revision_edge(
+    file: &Path,
+    version: u64,
+    controller_cursor: &mut Option<agent_doc_controller_io::project_controller::ControllerStatePlaneCursor>,
+    remaining: std::time::Duration,
+) -> Result<bool> {
+    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+        let observed =
+            agent_doc_crdt_relay_io::await_delivery_revision_change_for_file(file, version, remaining)?;
+        return Ok(observed.is_some_and(|observed| observed.version != version));
+    }
+    let subscription = agent_doc_controller_io::project_controller::
+        subscribe_document_delivery_wakes_for_file(file, *controller_cursor, remaining)?;
+    *controller_cursor = Some(
+        agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+            controller_generation: subscription.controller_generation,
+            plane_version: subscription.latest_version,
+        },
     );
-    Ok(Some(false))
+    Ok(!(subscription.timed_out && !subscription.changed))
 }
 
 fn retained_prewrite_base_can_be_superseded(
@@ -13430,6 +13545,66 @@ mod tests {
         assert_eq!(pending_document_write_journal(&file).len(), 1);
     }
 
+    /// `#receiptcanonicalcatchup`: the 2026-09-30 14:42 UTC shape. The editor
+    /// receipt already holds the response while canonical is one replica delta
+    /// behind; the delta lands shortly after. The receipt must be accepted once
+    /// canonical equals it, not refused at the first comparison.
+    #[test]
+    fn editor_receipt_waits_for_canonical_to_catch_up() {
+        let baseline = "# Session\n\n<!-- agent:exchange -->\nprompt\n<!-- /agent:exchange -->\n";
+        let receipt =
+            "# Session\n\n<!-- agent:exchange -->\nprompt\n### Re: answer\n\nbody\n<!-- /agent:exchange -->\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-editor-receipt-canonical-catchup";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        assert_eq!(
+            try_resolve_current_document_content(&file, "catchup_before").unwrap(),
+            baseline
+        );
+
+        let writer_file = file.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            apply_cp_write_through_relay_authority(
+                &writer_file,
+                baseline,
+                receipt,
+                "catchup_replica_delta",
+            )
+            .expect("the late replica delta should apply")
+        });
+        let adopted = adopt_verified_editor_text_through_relay_authority_within(
+            &file,
+            receipt,
+            "catchup_receipt",
+            std::time::Duration::from_secs(5),
+        );
+        writer.join().unwrap();
+        assert_eq!(
+            adopted.expect("a receipt that is only ahead of canonical must be accepted"),
+            Some(false)
+        );
+
+        // A receipt canonical never reaches is still refused, and promptly.
+        let started = std::time::Instant::now();
+        let err = adopt_verified_editor_text_through_relay_authority_within(
+            &file,
+            "# Session\n\nsomething else\n",
+            "catchup_divergent_receipt",
+            std::time::Duration::from_millis(200),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("refusing editor receipt that diverges from controller canonical"),
+            "{err:#}"
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
+
     #[test]
     fn live_editor_projection_refuses_historical_divergence_without_retained_intent() {
         let baseline = "# Session\n\n<!-- agent:queue -->\nold\n<!-- /agent:queue -->\n";
@@ -13471,10 +13646,11 @@ mod tests {
         .unwrap();
         assert!(pending_document_write(&file).is_none());
 
-        let err = adopt_verified_editor_text_through_relay_authority(
+        let err = adopt_verified_editor_text_through_relay_authority_within(
             &file,
             &replayed,
             "live_editor_projection_historical_ack_post_register",
+            std::time::Duration::from_millis(200),
         )
         .unwrap_err();
         assert!(

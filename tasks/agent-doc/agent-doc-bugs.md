@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 402996cd-0f89-4735-ba09-0ed10533ac8a
+  claude: 67619911-d533-4305-8300-e7f73c1754b7
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
 agent: claude
 claude_model: opus
@@ -154,6 +154,32 @@ This landed earlier this session as `c0864bca9`, with the CI compile fix in `d44
   - The full `make check` for the fix passed and it is installed.
 
 The exchange is getting large (session accretion `warn`); I'm continuing the drain rather than compacting.
+
+### Re: do [#retainedadvanceadmit] — opus-5 · 2026-09-29T20:12-04:00
+
+> **Queue prompt:** 📌 do [#retainedadvanceadmit]
+
+**Decision: admit the advance. The guard was the wrong side, not the harness ordering.**
+
+A retained write whose content the Lazily authority already holds, but whose editor native save hasn't reached disk, was `Unsettled(AuthorityDiskDiverged)`. That refused every new cycle with "retained document-write delivery from a prior cycle remains unsettled". A new cycle composes onto the authority, not disk. The retained intent still settles by payload once disk catches up, so the refusal protected nothing.
+
+It also caused real harm today. On haiven-dev fpe.md at 22:12:37Z it refused the captured-finalize resume (`retained_write_blocks_new_cycle cause=authority_disk_diverged`, reason `editor_native_save_pending`). That cycle was later abandoned and the response stranded, which is the "Fix fpe.md issue" from earlier.
+
+**Fix (`54452093d`):** the settlement table gains `DiskProjectionPending`. It applies when the authority already holds the intent: the exact target, the response payload, or the added delta.
+- It does **not** block a new cycle or the queue boundary.
+- It **still blocks session closeout**, so the commit waits for disk.
+- It is never settled or replayed early. Recovery awaits convergence and requests the editor's native save.
+- Authority that lacks the intent stays `AuthorityDiskDiverged` and still blocks.
+
+**Coverage:**
+- The table-coverage test now has 10 rows.
+- Admission for each of the exact, payload, and delta cases.
+- A "retained capture + independent advance" sequence on the shared reactive verdict: admitted while disk lags, still admitted after the advance lands, and settled by `RebasedPayloadMaterialized` once disk catches up. It fails with the rule disabled.
+- Four older assertions that encoded "refuse while disk lags" now assert unsettled plus closeout-blocked, which preserves their fail-closed intent.
+
+**Verification:** `make check` passed, 10128/10128 (exit 0). `make install` exit 0. Pushed.
+
+**Still gated:** `#drivecapturedsplice` (review) no longer has this guard as its blocker. Its live rerun (`scripts/xdotool-live-verify.sh captured-splice`) injects real keystrokes into your desktop, so the plan requires your OK first. Say "run the captured-splice live proof" and I'll drive it.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -166,7 +192,10 @@ The exchange is getting large (session accretion `warn`); I'm continuing the dra
 - ~~📌 do [#layoutobservehandoff]~~
 - ~~📌 do [#syntheticstrike]~~
 - 📌 do [#focuscrossrootverify]
-- 📌 do [#retainedadvanceadmit]
+- ~~📌 do [#retainedadvanceadmit]~~
+- do [#synthcommitstrike]
+- do [#frontmattersessionflap]
+- do [#editorauth2]
 <!-- /agent:queue -->
 
 
@@ -176,7 +205,6 @@ The exchange is getting large (session accretion `warn`); I'm continuing the dra
 - [ ] [#editorauth2] [agent-doc][jetbrains][vscode] Plugin registration never adopts canonical over a buffer that differs, in BOTH editor plugins (operator: ensure plugin parity) (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome in JetBrains and VS Code, preferably in the shared FFI registration path so both plugins get one behaviour; registration publishes the editor state and then merges forward. The controller side landed in #editorauth3 (4d9e78578): on editor_replica_reregister the plugin must re-register WITH its retained state vector (resumeState) so the controller's cold-relay reseed applies, and must never drop that state on forceRefresh/requireFreshRegistration. Also covers two or more editors: an unregistered editor joining a relay that already holds one still gets the fenced canonical projection; reconcile it through reconcileText instead of adopting. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register) against both plugins, plus an editor-parity check.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
-- [ ] [#retainedadvanceadmit] [agent-doc] Advances #drivecapturedsplice. The captured-splice live run is refused at `agent-doc-write-runtime-io/src/lib.rs:3135` ("retained document-write delivery from a prior cycle remains unsettled") while the captured operator edit is still unsaved in the editor (`native_editor_save_request_deferred`; authority and disk diverge on `exchange`). Decide whether a separate canonical advance must be admitted while a captured operator edit is retained. The recipe exists to prove that admission. Fix whichever side is wrong: the admission guard, or the harness ordering. Add SimWorld coverage for "retained capture + independent advance". Then rerun the recipe from tasks/agent-doc/plan-captured-editor-splice-recovery.md with a CLI build that matches the IDE cdylib.
 <!-- /agent:backlog -->
 
 ## Review

@@ -220,6 +220,38 @@ Each rewrite was post-commit drift (the 22:44:30Z `commit_document_via_controlle
 **Coverage:** the pure gate, plus a source contract pinning it directly on the mint call. The contract fails with the gate removed; its needles are split with `concat!` so the test can't match its own text.
 
 **Verification:** `make check` passed, 10130/10130 (exit 0). `make install` exit 0. Pushed. This install's own idle-boundary re-exec is the live check: it should log no `start_session_id_assigned`.
+
+### Re: do [#editorauth2] — opus-5 · 2026-09-29T21:30-04:00
+
+> **Queue prompt:** do [#editorauth2]
+
+Landed as `c9b731ea1` (plugin 0.2.447) plus the install bump `674c775ec` (0.2.448).
+
+**JetBrains — the hold gets a non-destructive exit.**
+- Previously, a registration where settled shadow, live buffer, and canonical all differ, with canonical not provably containing the operator's edits, was `HoldOperatorBuffer`, refused on every retry (#ambiguousholdforever).
+- New `MergeForward`: when `reconcileText(base = shadow, yours = buffer, agent = canonical)` is clean, the replica publishes the merged text as a local delta. The generation-fenced remote apply then projects it into the buffer, and refuses if you typed since.
+- Conflicting or unavailable merges still hold, and a proven rebase still adopts canonical first.
+- This is the first live caller of the #editorauth4 FFI.
+
+**VS Code — re-registration keeps the retained frontier.**
+- `attachDocument(forceRefresh)` used to deregister and register **cold**, so the controller bootstrapped the editor from canonical (disk, on a fresh relay) instead of running #editorauth3's reseed-from-editor.
+- It now swaps through `replaceForwarder`, which carries `captureResumeState()` and fences the swap; a race keeps the old membership. This matches JetBrains `forwarderFor`, which already carried `resumeState`.
+
+**Deliberately unchanged, both with reasons:**
+- **Adopt with no settled shadow** (a restarted IDE): its buffer is a reconstruction with no base to merge from.
+- **VS Code's stale-cache reprojection:** its existing test shows the divergence is non-operator, because every operator edit passes through the change listener first.
+  - I first tried merge-forward there too. It broke that designed recovery and would hold forever without a reconciler, so I reverted it.
+
+**Verification:**
+- **Kotlin:** a decision-table test covering clean, conflicting, and unavailable merges, with and without a retained projection. It also checks that a proven rebase still adopts canonical.
+- **VS Code:** a forced re-register carries the state vector (`[7,7]`); the test fails with the fix reverted.
+- **Suites:**
+  - `make check` 10130/10130, including the editor-parity audit;
+  - gradle 593/593;
+  - npm 180/180;
+  - `make install` exit 0.
+
+**Operator note:** the running IDE still has 0.2.446 loaded. The new registration behavior needs an IDE restart (or plugin reload) to take effect.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -235,12 +267,11 @@ Each rewrite was post-commit drift (the 22:44:30Z `commit_document_via_controlle
 - ~~📌 do [#retainedadvanceadmit]~~
 - ~~do [#synthcommitstrike]~~
 - ~~do [#frontmattersessionflap]~~
-- do [#editorauth2]
+- ~~do [#editorauth2]~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#editorauth2] [agent-doc][jetbrains][vscode] Plugin registration never adopts canonical over a buffer that differs, in BOTH editor plugins (operator: ensure plugin parity) (plan: tasks/agent-doc/plan-editor-authority-ladder.md). Remove every ApplyCanonical-over-differing-buffer outcome in JetBrains and VS Code, preferably in the shared FFI registration path so both plugins get one behaviour; registration publishes the editor state and then merges forward. The controller side landed in #editorauth3 (4d9e78578): on editor_replica_reregister the plugin must re-register WITH its retained state vector (resumeState) so the controller's cold-relay reseed applies, and must never drop that state on forceRefresh/requireFreshRegistration. Also covers two or more editors: an unregistered editor joining a relay that already holds one still gets the fenced canonical projection; reconcile it through reconcileText instead of adopting. Regression test: replay of the api.md 2026-09-29 15:35 sequence (acked typing, then quarantine, then handoff, then re-register) against both plugins, plus an editor-parity check.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 - [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 <!-- /agent:backlog -->

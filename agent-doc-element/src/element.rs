@@ -3370,7 +3370,6 @@ Fix applied to skip non-agent <!-- sequences.
         assert!(is_backlog_component(&comps[0].name));
     }
 
-    #[test]
     /// `#bkqattrcli`: the attribute the whole item is about.
     #[test]
     fn set_open_marker_attr_adds_a_bare_queue_flag() {

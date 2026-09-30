@@ -170,6 +170,10 @@ impl std::fmt::Display for AwaitEditorReplicaNoDiskWrite {
 
 impl std::error::Error for AwaitEditorReplicaNoDiskWrite {}
 
+/// Stable cross-process token for a native-save outcome that retrying the
+/// current editor/CLI pair cannot change.
+pub const EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN: &str = "editor_native_save_needs_operator";
+
 /// The stable machine-readable recovery token every retained-write refusal
 /// carries.
 ///

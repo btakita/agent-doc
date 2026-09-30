@@ -6497,8 +6497,6 @@ mod tests {
         );
     }
 
-    /// No distinctive keywords means a surrogate hash is the honest answer.
-    #[test]
     /// `#operatorverifyliveid`: the SKILL tells agents to tag operator-gated
     /// follow-ups `[operator-verify]`. That tag used to push an explicit `#id`
     /// out of leading position, so the id was discarded and a slug was minted
@@ -6714,6 +6712,8 @@ mod tests {
         assert_eq!(outcome.id, "livepaneproof");
     }
 
+    /// No distinctive keywords means a surrogate hash is the honest answer.
+    #[test]
     fn derive_representative_id_declines_when_text_has_no_keywords() {
         assert_eq!(derive_representative_id(""), None);
         assert_eq!(derive_representative_id("the and but for not"), None);

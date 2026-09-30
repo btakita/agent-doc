@@ -470,7 +470,7 @@ case_captured_splice() {
     log "[dry-run] would advance the canonical response via: agent-doc write --commit $rel (in pane ${SCRATCH_OWNER_PANE:-self})"
   else
     log "advancing the canonical response independently of the editor"
-    advance_in_owner_pane "$rel" \
+    await_scratch_owner_ready "$rel" && advance_in_owner_pane "$rel" \
       || warn "response advance did not complete; the verifier will report an unadvanced canonical text"
   fi
 
@@ -516,11 +516,16 @@ case_lvbatch_markers() {
 # it, pane layout bound it to its own pane, and `write --commit` is refused from
 # every other pane. Ownership is per DOCUMENT, so read the scratch doc's actor.
 SCRATCH_OWNER_PANE=""
+# A closed actor, or one whose pane no longer exists, owns nothing: the binary's
+# authority check sees no live owner there, so neither may this guard (a reaped
+# scratch pane otherwise blocked every later run).
 scratch_owner_pane() {
-  local rel="$1"
-  (cd "$REPO" && agent-doc session status "$rel" 2>/dev/null) \
-    | awk '/^actor:/ { for (i=1;i<=NF;i++) if ($i ~ /^pane=%/) { sub("pane=","",$i); print $i; exit } }' \
-    || true  # a doc with no agent_doc_session has no owner; never abort the caller
+  local rel="$1" pane
+  pane="$( (cd "$REPO" && agent-doc session status "$rel" 2>/dev/null) \
+    | awk '/^actor:/ { if ($0 ~ / state=closed/) exit; for (i=1;i<=NF;i++) if ($i ~ /^pane=%/) { sub("pane=","",$i); print $i; exit } }' \
+    || true)"  # a doc with no agent_doc_session has no owner; never abort the caller
+  [[ -n "$pane" ]] && tmux display-message -p -t "$pane" '#{pane_id}' >/dev/null 2>&1 && printf '%s' "$pane"
+  return 0
 }
 
 # An owner pane can host the advance only when it is an idle shell: typing a
@@ -531,17 +536,59 @@ owner_pane_is_idle_shell() {
   [[ "$cmd" =~ ^(zsh|bash|sh|fish)$ ]]
 }
 
-assert_scratch_authority() {
+# An idle Claude Code agent pane can host the advance too: its `!` bash mode runs
+# the command in the pane's own process tree (TMUX_PANE is the owner pane, so the
+# write passes pane execution authority). Claude Code may then take a model turn
+# commenting on the command's output — harmless for a scratch doc, but it is an
+# agent turn, so this runs only against the scratch owner, never a real session. The
+# supervisor that owns a scratch doc spawns exactly this shape, so without it the
+# recipe could never reach its advance step. Idleness is the binary's own
+# conversation-holder report, never a screen scrape.
+SCRATCH_OWNER_BANG=0
+owner_pane_is_idle_claude() {
+  local rel="$1" pane="$2"
+  (cd "$REPO" && agent-doc session status "$rel" 2>/dev/null) \
+    | grep -Eq "^conversation_holders\.live: .* status=idle tmux=[^ ]*\.${pane} live"
+}
+
+# Resolve the scratch doc's owner and whether the advance can run there.
+# 0 = usable (no foreign owner, self, an idle shell, or an idle Claude Code agent);
+# 1 = a live owner that cannot host the advance right now.
+resolve_scratch_owner() {
   local rel="$1" self="${TMUX_PANE:-}"
-  command -v tmux >/dev/null 2>&1 || return 0
+  SCRATCH_OWNER_BANG=0
+  command -v tmux >/dev/null 2>&1 || { SCRATCH_OWNER_PANE=""; return 0; }
   SCRATCH_OWNER_PANE="$(scratch_owner_pane "$rel")"
   [[ -z "$SCRATCH_OWNER_PANE" || "$SCRATCH_OWNER_PANE" == "$self" ]] && { SCRATCH_OWNER_PANE=""; return 0; }
-  if owner_pane_is_idle_shell "$SCRATCH_OWNER_PANE"; then
-    log "scratch doc is owned by idle shell pane $SCRATCH_OWNER_PANE; the canonical advance will run there"
-    return 0
-  fi
-  [[ "$DRY_RUN" == 1 ]] && { warn "[dry-run] scratch owner $SCRATCH_OWNER_PANE is not an idle shell"; return 0; }
-  die "scratch doc is owned by pane $SCRATCH_OWNER_PANE, which is not an idle shell — refusing to inject keystrokes for a recipe whose advance cannot run"
+  owner_pane_is_idle_shell "$SCRATCH_OWNER_PANE" && return 0
+  owner_pane_is_idle_claude "$rel" "$SCRATCH_OWNER_PANE" && { SCRATCH_OWNER_BANG=1; return 0; }
+  return 1
+}
+
+describe_scratch_owner() {
+  if [[ -z "$SCRATCH_OWNER_PANE" ]]; then log "scratch doc has no foreign owner pane; the canonical advance runs here"
+  elif [[ "$SCRATCH_OWNER_BANG" == 1 ]]; then log "scratch doc is owned by idle Claude Code pane $SCRATCH_OWNER_PANE; the canonical advance will run there in ! bash mode"
+  else log "scratch doc is owned by idle shell pane $SCRATCH_OWNER_PANE; the canonical advance will run there"; fi
+}
+
+assert_scratch_authority() {
+  local rel="$1"
+  if resolve_scratch_owner "$rel"; then describe_scratch_owner; return 0; fi
+  [[ "$DRY_RUN" == 1 ]] && { warn "[dry-run] scratch owner $SCRATCH_OWNER_PANE is neither an idle shell nor an idle Claude Code agent"; return 0; }
+  die "scratch doc is owned by pane $SCRATCH_OWNER_PANE, which is neither an idle shell nor an idle Claude Code agent — refusing to inject keystrokes for a recipe whose advance cannot run"
+}
+
+# Opening the doc in the IDE can provision its owner pane asynchronously — the
+# pane may appear only after typing began, still starting its agent. Re-resolve
+# right before the advance and wait (bounded) for that owner to go idle, instead
+# of writing from a pane the binary will refuse.
+await_scratch_owner_ready() {
+  local rel="$1" deadline=$(( $(date +%s) + TIMEOUT * 2 ))
+  until resolve_scratch_owner "$rel"; do
+    (( $(date +%s) >= deadline )) && { warn "scratch owner $SCRATCH_OWNER_PANE never became an idle shell or idle Claude Code agent"; return 1; }
+    sleep 1
+  done
+  describe_scratch_owner
 }
 
 # Run the advance in the owning pane and wait for its exit status via a sentinel.
@@ -558,6 +605,11 @@ advance_in_owner_pane() {
     rc=$?; rm -f "$body"; return $rc
   fi
   sentinel="$(mktemp -u "${TMPDIR:-/tmp}/xdotool-advance.XXXXXX")"
+  if [[ "$SCRATCH_OWNER_BANG" == 1 ]]; then
+    # `!` alone switches the composer into bash mode; the command text follows.
+    tmux send-keys -t "$SCRATCH_OWNER_PANE" -l -- '!'
+    sleep 0.5
+  fi
   tmux send-keys -t "$SCRATCH_OWNER_PANE" -l -- \
     "cd $(printf '%q' "$REPO") && agent-doc write --commit $(printf '%q' "$rel") < $(printf '%q' "$body"); echo \$? > $(printf '%q' "$sentinel")"
   tmux send-keys -t "$SCRATCH_OWNER_PANE" Enter
@@ -590,7 +642,10 @@ assert_pane_authority() {
 run_case() {
   check_env
   assert_fresh_session
-  assert_pane_authority
+  # captured-splice resolves authority per DOCUMENT (assert_scratch_authority):
+  # every agent-doc session pane in the repo matches this repo-wide heuristic,
+  # so it refused the recipe whenever any other document had a live session.
+  [[ "$CASE" == captured-splice ]] || assert_pane_authority
   case "$CASE" in
     exch-intermix)        case_exch_intermix ;;
     postcommit-worktree)  case_postcommit_worktree ;;

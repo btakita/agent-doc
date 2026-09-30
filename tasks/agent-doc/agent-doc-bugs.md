@@ -207,7 +207,7 @@ Next queue head: #gh-fix #74.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/73~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/74
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/74
 - ⏭️ #release
 <!-- /agent:queue -->
 

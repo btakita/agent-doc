@@ -177,14 +177,45 @@ fn tracking_recognized_trigger(prompt: &str) -> bool {
 /// own stderr diagnostic for the operator's hook log, because the stderr copy is
 /// wanted even for prompts that never reach this function.
 fn emit_admission_failure(target: &str, err: &anyhow::Error) {
-    emit_user_prompt_submit_context(&format!(
+    emit_user_prompt_submit_context(&admission_failure_payload(target, &format!("{err:#}")));
+}
+
+/// `#refusalsteering` (GH #71): the refusal payload. A refused turn is the one
+/// path where preflight consults no steering surface, so an operator prompt
+/// already typed into `exchange` sat unanswered until the operator asked. The
+/// refusal still fails closed on writes, but it now says steering may be
+/// pending, names `session-check` as the permitted follow-up that lists it, and
+/// -- when the reason is a queue/CRDT reconciliation -- tells the agent to warn
+/// the operator that their latest edit may not have been received yet.
+fn admission_failure_payload(target: &str, reason: &str) -> String {
+    let reconciling = [
+        "reconciliation is pending",
+        "retry_crdt_merge",
+        "queue authority is unavailable",
+        "retained",
+    ]
+    .iter()
+    .any(|needle| reason.contains(needle));
+    let edit_note = if reconciling {
+        " The reason is an unsettled queue/CRDT reconciliation, so the operator's most recent \
+         edit may be inside the save that could not be merged: tell them it may not have been \
+         received yet and to re-trigger once it settles."
+    } else {
+        ""
+    };
+    format!(
         "{ADMISSION_FAILURE_MARKER}\n\
          document: {target}\n\
-         reason: {err:#}\n\
+         reason: {reason}\n\
+         pending: operator steering may be waiting unanswered -- this refused turn read no \
+         document changes. `agent-doc session-check {target}` is a permitted follow-up: it lists \
+         any unreconciled operator prompt verbatim without starting a response.{edit_note}\n\
          remedy: preflight refused to admit this turn, so no cycle contract exists. \
-         Do NOT shell `agent-doc preflight` to recreate admission. Report this failure \
-         and its reason to the operator, and stop."
-    ));
+         Do NOT shell `agent-doc preflight` to recreate admission, and do not start a response \
+         or write the document. Report this failure and its reason to the operator, run \
+         `agent-doc session-check {target}` and relay any pending operator prompt it lists, \
+         then stop."
+    )
 }
 
 /// Outcome of a hook admission attempt.
@@ -976,6 +1007,22 @@ mod tests {
     /// The failure marker must stay distinguishable from the success seal: the
     /// skill greps for the seal, so an overrun that embedded it would read as an
     /// admitted cycle.
+    #[test]
+    fn admission_failure_payload_points_at_pending_steering() {
+        let reason = "preflight refused admission: retained queue reconciliation is pending; \
+                      recovery=retry_crdt_merge";
+        let payload = admission_failure_payload("tasks/doc.md", reason);
+        assert!(payload.starts_with(ADMISSION_FAILURE_MARKER), "{payload}");
+        assert!(payload.contains("pending: operator steering may be waiting"), "{payload}");
+        assert!(payload.contains("agent-doc session-check tasks/doc.md"), "{payload}");
+        assert!(payload.contains("may not have been received yet"), "{payload}");
+        assert!(payload.contains("Do NOT shell `agent-doc preflight`"), "{payload}");
+
+        let other = admission_failure_payload("tasks/doc.md", "no project root found");
+        assert!(other.contains("agent-doc session-check tasks/doc.md"), "{other}");
+        assert!(!other.contains("may not have been received yet"), "{other}");
+    }
+
     #[test]
     fn admission_failure_marker_is_not_the_contract_marker() {
         assert_ne!(ADMISSION_FAILURE_MARKER, CONTRACT_MARKER);

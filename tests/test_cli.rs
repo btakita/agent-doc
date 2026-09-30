@@ -3627,8 +3627,9 @@ fn test_preflight_hook_never_emits_silence_on_admission_failure() {
         "\"hookEventName\": \"UserPromptSubmit\"",
         "\"additionalContext\": context",
         "fn emit_admission_failure(",
-        "emit_user_prompt_submit_context(&format!(",
-        "reason: {err:#}",
+        "emit_user_prompt_submit_context(&admission_failure_payload(",
+        "reason: {reason}",
+        "pending: operator steering may be waiting",
         "emit_admission_failure(&file.display().to_string(), &err)",
     ] {
         assert!(

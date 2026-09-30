@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -252,6 +252,14 @@ Landed as `c9b731ea1` (plugin 0.2.447) plus the install bump `674c775ec` (0.2.44
   - `make install` exit 0.
 
 **Operator note:** the running IDE still has 0.2.446 loaded. The new registration behavior needs an IDE restart (or plugin reload) to take effect.
+
+### Re: [#focuscrossrootverify] confirmed working — opus-5 · 2026-09-29T21:42-04:00
+
+> **Queue prompt:** [#focuscrossrootverify]: confirmed working
+
+Thanks. Closing `#focuscrossrootverify`: your live confirmation was the only remaining step, since the agent-side work (`#focuscrossroot`, 730d74600) was already complete and verified.
+
+The agent-doc-bugs queue has no other live heads. When convenient, restart the IDE so plugin 0.2.448 (`#editorauth2` merge-forward registration) loads.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -260,20 +268,12 @@ Landed as `c9b731ea1` (plugin 0.2.447) plus the install bump `674c775ec` (0.2.44
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~📌 do [#layoutobservehandoff]~~
-- ~~📌 do [#syntheticstrike]~~
-- 📌 do [#focuscrossrootverify]
-- ~~📌 do [#retainedadvanceadmit]~~
-- ~~do [#synthcommitstrike]~~
-- ~~do [#frontmattersessionflap]~~
-- ~~do [#editorauth2]~~
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
-- [ ] [#focuscrossrootverify] [operator-verify] [agent-doc] Confirm the cross-root editor focus delegation live (`#focuscrossroot`, 730d74600). Agent-side is complete and verified: 6 tests, make check green, installed and pushed. The remaining step needs a human at a real IDE because only the editor surface reproduces it — the CLI `agent-doc focus` already resolves the document's own project root and never took the broken path. UNBLOCK: after the controllers pick up 730d74600 at their next idle boundary, switch an IDE tab (rooted at the agent-loop superproject) to a submodule document such as src/haiven-dev/tasks/api.md and expect its pane to take focus, with `controller_focus_delegated document=... owner_root=.../src/haiven-dev focused=true` in agent-loop's .agent-doc/logs/ops.log and no further `reason=missing_actor_record` for that document.2
 <!-- /agent:backlog -->
 
 ## Review

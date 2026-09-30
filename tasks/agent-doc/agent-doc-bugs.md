@@ -17,7 +17,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -510,6 +510,29 @@ Each fix has a regression test. `make check` passes: all 10231 tests, audit-docs
 Not fixed here: #67 was already handled in 0.35.423 (`3ee81039b`). The #60 recurrences cannot be diagnosed until the IDE process is restarted, because its loaded plugin is older than the installed one.
 
 Exchange is large (465 lines); continuing the drain.
+
+### Re: #69, #70, release + publish 0.35.424 — opus-5-5 · 2026-09-30T15:52-04:00
+
+> **Queue prompt:** release + publish
+
+**Your #69 and #70 queue lines were deleted by agent-doc.** They were gone before the last cycle's commit, which is why preflight offered `release + publish` next. The cause was a real bug, now fixed: a bare `#gh-fix <url>` line was read as a reference to tracked item `#gh-fix`, so all three lines shared one identity.
+- Once #68 was struck, convergence dropped the other two as stale copies of a finished item.
+- After fixing that, a second defect showed up: queue skip marked the surviving siblings `⏭️` and jumped straight to `release + publish`.
+- Both are fixed (`076a646ac`, and the skip fix in `3b3bcda8b`'s parent). Each has a regression test that fails when the fix is removed, and I confirmed the fix against the installed binary in a scratch repo.
+
+Since the lost lines were your queued order, I did #69 and #70 in this cycle, before releasing:
+
+- **[#69](https://github.com/btakita/agent-doc/issues/69)** (`20f622007`, closed):
+  - A structured `prompt_presets` entry (`{prompt: …}`) now parses, and `prompt` is used as the body. Other shapes are kept as written and reported as warnings instead of failing the whole document.
+  - The invalid-frontmatter error names `reset --from-current --preserve-session`. `reset` says `--force-disk` when no editor is attached.
+  - `backlog add` reads the document back after writing and exits non-zero if its item isn't visible to the next command.
+  - New `--backlog-upsert key=text` and `backlog <FILE> upsert KEY TEXT`.
+- **[#70](https://github.com/btakita/agent-doc/issues/70)** (`cb26320c1`, closed): a tmux failure whose stderr is only `not in a mode` now counts as success, so it no longer aborts the route. Nothing in agent-doc sends `send-keys -X`, so the repeated lines very likely come from a tmux binding or hook on the reporting host. The issue comment says where to look if it still happens.
+- **Released 0.35.424** (`3b3bcda8b`, tag `v0.35.424` pushed): VERSIONS.md and release-parity are updated, and `make install` is done (`agent-doc 0.35.424`). The Release and PyPI workflows were still running at closeout. The #68 CI run passed.
+
+`make check` passed on the final tree: all 10241 tests, plus audit-docs, editor-parity, lean and tla.
+
+Exchange is large (≈480 lines); this is the last queue item.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -520,7 +543,11 @@ Exchange is large (465 lines); continuing the drain.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/68~~
-- release + publish
+- ~~release + publish~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/69
+- #gh-fix https://github.com/btakita/agent-doc/issues/70
+- #gh-fix https://github.com/btakita/agent-doc/issues/71
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

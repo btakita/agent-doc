@@ -584,6 +584,18 @@ The remaining gate is narrower than login but still operator-only: `npm publish 
 I deliberately created no `v0.3.0` tag and no GitHub release, so repository metadata does not claim a publication that did not happen. The review item now records the exact unblocker: resume while at the browser, approve the fresh npm challenge promptly (or supply a current OTP), then verify the registry before tagging exact commit `dc21987` and creating the GitHub release.
 
 The temporary release worktree and sibling symlinks were removed. No shared-checkout files were changed. The exchange remains above the accretion warning threshold; because another queue item remains, I did not pause the queue to request compaction.
+
+### Re: recovered response
+
+Published successfully.
+
+- npm: [`@lazily-hub/lazily-react@0.3.0`](https://www.npmjs.com/package/@lazily-hub/lazily-react/v/0.3.0)
+- npm access: public
+- npm `latest` tag: `0.3.0`
+- Git tag `v0.3.0` points exactly to `dc2198713cdce925bccb5651ae6229ed27cf5347`
+- [GitHub release v0.3.0](https://github.com/lazily-hub/lazily-react/releases/tag/v0.3.0)
+
+The general npm metadata endpoint is still briefly returning 404 during propagation, but npm’s access and dist-tag APIs confirm the publication.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  

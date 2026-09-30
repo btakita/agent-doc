@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.425
+
+- **Preset-invocation heads drain.** `#gh-fix <url>` queue heads were judged mirrors of a missing
+  backlog item `#gh-fix`, so preflight reported zero drainable heads and `no_changes` over
+  operator-queued issues. A preset-only id is not a tracked-item reference; these heads drain as
+  free text.
+- **One answer strikes one queue line.** Queue consume and the answered-free-text projection both
+  acted on the same answer, so consume struck the answered `release + publish` and the projection
+  then struck the operator's next identical copy. An answer already applied this cycle is no
+  longer applied twice.
+- **Admission refusals point at pending steering (GH #71).** The refusal payload now names
+  `agent-doc session-check <FILE>` as the follow-up that lists unanswered operator prompts, and
+  warns that the latest edit may not have been received when the refusal is a queue/CRDT
+  reconciliation.
+
 ## 0.35.424
 
 - **Sibling preset invocations stay queued (lost `#gh-fix` issues).** A bare `#word <text>` queue

@@ -647,19 +647,18 @@ fn repair_response_heading_after_body(exchange: &str, response: &str) -> Option<
 /// shared closing line.
 const ORPHAN_RESPONSE_SUFFIX_MIN_CHARS: usize = 120;
 
-/// Byte range of the exchange tail's orphaned copy of the response's trailing
-/// lines (`#respsuffixdup`); trailing transient markup stays outside it.
+/// Byte range of the exchange tail's orphaned copy of a contiguous run of the
+/// response's lines (`#respsuffixdup`); trailing transient markup stays outside it.
 ///
-/// An editor visible write can project only a response's later segments (its
-/// bullets) with the queue-prompt quote, heading, and lead paragraph missing.
-/// Appending the full response after that fragment duplicated every bullet.
-/// Matches only when the exchange ends — modulo transient markup — with at
-/// least two of the response's final non-transient lines, strictly fewer than
-/// all of them, carrying enough text to rule out a coincidental closing line.
-fn orphan_response_suffix_range(
-    exchange: &str,
-    response: &str,
-) -> Option<std::ops::Range<usize>> {
+/// An editor visible write can project only a response's list block (its
+/// bullets) with the queue-prompt quote, heading, and surrounding paragraphs
+/// missing. Appending the full response after that fragment duplicated every
+/// bullet — the list was the response's tail on 2026-09-30 01:47 and its middle
+/// at 02:17. Matches only when the exchange ends — modulo transient markup —
+/// with a contiguous run of at least two of the response's non-transient lines,
+/// strictly fewer than all of them, carrying enough text to rule out a
+/// coincidental shared line.
+fn orphan_response_suffix_range(exchange: &str, response: &str) -> Option<std::ops::Range<usize>> {
     let expected_lines = response_fragment_lines(response);
     let actual_lines = response_fragment_lines(exchange);
     let tail_end = actual_lines.last()?.end;
@@ -671,10 +670,12 @@ fn orphan_response_suffix_range(
         .saturating_sub(1)
         .min(actual_lines.len());
     let len = (2..=max_len).rev().find(|&len| {
-        actual_lines[actual_lines.len() - len..]
-            .iter()
-            .zip(&expected_lines[expected_lines.len() - len..])
-            .all(|(actual, expected)| actual.normalized == expected.normalized)
+        let tail = &actual_lines[actual_lines.len() - len..];
+        expected_lines.windows(len).any(|window| {
+            tail.iter()
+                .zip(window)
+                .all(|(actual, expected)| actual.normalized == expected.normalized)
+        })
     })?;
     let suffix = &actual_lines[actual_lines.len() - len..];
     if suffix
@@ -1648,6 +1649,34 @@ mod tests {
         assert_eq!(repaired.matches("- **Contents:**").count(), 1, "{repaired}");
         assert!(repaired.contains("Earlier body.\n> **Queue prompt:** release + publish"));
         assert!(repaired.contains("### Re: release v0.35.420 — opus-5"));
+        assert!(response_materialized_in_content(&response, &repaired));
+    }
+
+    #[test]
+    fn materialize_response_replaces_orphaned_middle_list_block_instead_of_duplicating() {
+        // #respsuffixdup, 2026-09-30 02:17: the editor projected only the
+        // response's middle bullet list; the paragraphs after it were missing.
+        let bullets = concat!(
+            "- `8b8547bc0` **#subsumedsplicereplay**: a whole-buffer publish retires earlier splice batches.\n",
+            "- `0c3b48408` **#admissionmergedup**: merges conserve list-item counts across rungs.\n",
+            "- `c4c3fd739` rustfmt-only reformatting in 6 files.\n",
+        );
+        let current = format!(
+            "<!-- agent:exchange -->\n### Re: earlier — opus-5\n\n- Earlier bullet.\n{bullets}<!-- /agent:exchange -->\n"
+        );
+        let response = format!(
+            "<!-- patch:exchange -->\n> **Queue prompt:** commit the uncommitted files\n\n### Re: committed — opus-5\n\nSeven commits:\n\n{bullets}\n**Verification:** make check passed.\n<!-- /patch:exchange -->\n"
+        );
+
+        let repaired = materialize_response_in_current_exchange(&current, &response)
+            .expect("exchange should be repairable");
+
+        assert_eq!(repaired.matches("`8b8547bc0`").count(), 1, "{repaired}");
+        assert!(
+            repaired
+                .contains("- Earlier bullet.\n> **Queue prompt:** commit the uncommitted files")
+        );
+        assert!(repaired.contains("**Verification:** make check passed."));
         assert!(response_materialized_in_content(&response, &repaired));
     }
 

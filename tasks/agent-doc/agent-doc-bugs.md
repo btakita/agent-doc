@@ -120,7 +120,21 @@ Landed agent-doc `9d84795d5` (pushed, `make install` done). This adds the issue'
 - **Verification:** 16 new tests. `make check` passed: 10186 tests, 0 failed. CI runs 36670256201 (#61) and 36671583167 (#62) were still in progress when I checked.
 - **Not done:** promoting the plugin's `observe: published` log from `LOG.debug` to info. Another session has uncommitted JetBrains plugin edits (`CrdtReplicaManager.kt`, `gradle.properties`), and a plugin edit needs a version bump in that shared file. The controller-side receipt now answers the same question without that change.
 - Note: `rustfmt src/main.rs` followed the `mod` declarations and reformatted 10 unrelated `src/` files. I reverted them (formatting-only) before committing.
-<!-- agent:boundary:6afcbb79 -->
+- **Contents:** GH #61 (code-quoted markers no longer escaped), GH #62 diagnostics (`reliable-sync-status` shows surface auto-sync, pane placement, and a divergence verdict), GH #60 session-check settle window, the Codex Stop `null` message fix, the install build-skew guard, and **#respondsettle** (`52b067500`, below).
+- **#respondsettle:** `respond` failed twice this session. Each time I had just run `make install`, which restarted the controller while the response was being saved. The save was refused, and `respond` exited nonzero and fired the dogfood fix prompt, although the retained worker committed the same cycle about 3s later. Now `respond`/`finalize`/`write --commit` watch that same cycle's phase after a failure that happens past capture, and succeed only if it reaches `committed`. A failure before capture still errors at once. 7 unit tests. The first version ran a full session-check and broke `finalize_prewrite_guard_failure_leaves_cycle_open_for_retry`, so it now reads cycle state only.
+- **Release files:** version projection across 154 files (verified version-only), a `VERSIONS.md` entry, and the required `editors/release-parity.tsv` row (no plugin behavior change). `make check` (inside `make release`): 10193 passed, 0 failed.
+- **Workflows at last check:** Release, PyPI, and CI in progress; Book and Pages green. Another session's uncommitted JetBrains edits are not part of this release.
+> **Queue prompt:** release + publish
+
+### Re: release v0.35.420 — opus-5.5 · 2026-09-30T01:47-04:00
+
+Released **agent-doc v0.35.420**: tagged and pushed, with `make install-full` run once and installed (`agent-doc --version` = 0.35.420).
+
+- **Contents:** GH #61 (code-quoted markers no longer escaped), GH #62 diagnostics (`reliable-sync-status` shows surface auto-sync, pane placement, and a divergence verdict), GH #60 session-check settle window, the Codex Stop `null` message fix, the install build-skew guard, and **#respondsettle** (`52b067500`, below).
+- **#respondsettle:** `respond` failed twice this session. Each time I had just run `make install`, which restarted the controller while the response was being saved. The save was refused, and `respond` exited nonzero and fired the dogfood fix prompt, although the retained worker committed the same cycle about 3s later. Now `respond`/`finalize`/`write --commit` watch that same cycle's phase after a failure that happens past capture, and succeed only if it reaches `committed`. A failure before capture still errors at once. 7 unit tests. The first version ran a full session-check and broke `finalize_prewrite_guard_failure_leaves_cycle_open_for_retry`, so it now reads cycle state only.
+- **Release files:** version projection across 154 files (verified version-only), a `VERSIONS.md` entry, and the required `editors/release-parity.tsv` row (no plugin behavior change). `make check` (inside `make release`): 10193 passed, 0 failed.
+- **Workflows at last check:** Release, PyPI, and CI in progress; Book and Pages green. Another session's uncommitted JetBrains edits are not part of this release.
+<!-- agent:boundary:05545729 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -129,11 +143,11 @@ Landed agent-doc `9d84795d5` (pushed, `make install` done). This adds the issue'
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Compact Exchange did not work the first time I called it. It worked the second time though.~~
-- ~~Fix https://github.com/btakita/agent-doc/issues/60~~
-- ~~Fix https://github.com/btakita/agent-doc/issues/61~~
-- ~~Fix https://github.com/btakita/agent-doc/issues/62~~ — auto-struck: answered this cycle (#ftstrike)
-- release + publish
+- fix https://github.com/btakita/agent-doc/issues/62
+- fix https://github.com/btakita/agent-doc/issues/63
+- fix https://github.com/btakita/agent-doc/issues/64
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

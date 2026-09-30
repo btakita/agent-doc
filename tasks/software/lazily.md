@@ -16,7 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -523,20 +523,38 @@ Committed the one-line plan update as `046656c2f823` (`docs: refresh agent-doc p
 The parent `#lzambienttokenresolve` review gate remains correctly blocked only on the operator quiet window, credential rotation, and the plan's real interactive-shell step. No additional backlog follow-up is needed because the next evidence repair, `#lzmacosbaselinerefresh`, is already queued.
 
 The exchange remains above the accretion warning threshold; because the queue is active, I did not pause it for compaction.
+
+### Re: #lzmacosbaselinerefresh completed — GPT-5 · 2026-09-29T22:58:12-04:00
+
+> **Queue prompt:**
+>
+> do [#lzmacosbaselinerefresh]
+
+
+Added `v0.35.418` to `MACOS_INCOMPLETE_PAIR_BASELINE` in `scripts/review-gate-status.py` and refreshed the existing `#lzmacosrunner` review text from five to six measured incomplete Darwin-pair releases, including the coverage-probe wording.
+
+Verification:
+
+- `python3 scripts/review-gate-status.py --self-test` passed.
+- `make review-gate-status` passed with exit 0 and `stale_count: 0`; `#lzmacosrunner` is now `blocked_fresh`, with the measured baseline and incomplete-pair list both exactly `v0.35.399`, `v0.35.400`, `v0.35.401`, `v0.35.406`, `v0.35.417`, and `v0.35.418`.
+- Full root `make check` passed with exit 0 and zero failure groups. The repository still has no workflow named `CI`, so that specific Actions status probe is unavailable.
+
+Committed the one-line script update as `6262f4021061` (`chore: refresh macOS release gap baseline`). No Darwin assets were built or uploaded, the weekly policy was unchanged, and lazily-py hosted wheels were untouched.
+
+The parent `#lzmacosrunner` item remains correctly review-gated on operator Mac access; no additional agent-executable follow-up is needed because the evidence is fresh and the only remaining unblocker is the existing Mac-only release/build-host decision.
+
+The exchange remains above the accretion warning threshold; the queue is now drained, so a later explicit compaction cycle would be appropriate.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzambientpreimagerefresh]~~
-- do [#lzmacosbaselinerefresh]
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzmacosbaselinerefresh] [agent-doc/lazily-py] Refresh stale macOS-gap evidence only: add v0.35.418 to MACOS_INCOMPLETE_PAIR_BASELINE in scripts/review-gate-status.py, update #lzmacosrunner review text from five to six incomplete-pair releases and its coverage-probe wording, and run python3 scripts/review-gate-status.py --self-test plus make review-gate-status. Keep the parent review gate blocked on operator Mac access; do not build or upload Darwin assets, change the weekly policy, or alter lazily-py hosted wheels.
 <!-- /agent:backlog -->
 
 ## Review
@@ -545,7 +563,7 @@ The exchange remains above the accretion warning threshold; because the queue is
 - [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 - [/] [#lzreactpublish] [operator-decision] Establish npm org authorization for the first @lazily-hub/lazily-react publication; then publish, tag, and release prepared 0.3.0 commit dc21987. Blocked because npm whoami failed and the package is still absent.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
-- [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Measured by `make review-gate-status` (gate `#lzmacosrunner`), which pins the five known incomplete-pair releases — v0.35.399, v0.35.400, v0.35.401, v0.35.406, v0.35.417 — and goes `evidence_stale` if that measured list changes in EITHER direction, so a widening gap surfaces without a hand pass. Underlying probes are `make release-macos-cadence-check` (weekly window, open since 2026-09-22T16:41:49Z) and `make release-macos-coverage-check` (exit 2, names the five); neither is a `make check` dependency, because clearing them needs Mac hardware. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command, or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
+- [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Current agent-doc policy intentionally keeps macOS out of GitHub Actions and uses operator-built Darwin assets via `make release-macos-assets TAG=<chosen-current-release>` no more frequently than weekly. Measured by `make review-gate-status` (gate `#lzmacosrunner`), which pins the six known incomplete-pair releases — v0.35.399, v0.35.400, v0.35.401, v0.35.406, v0.35.417, v0.35.418 — and goes `evidence_stale` if that measured list changes in EITHER direction, so a widening gap surfaces without a hand pass. Underlying probes are `make release-macos-cadence-check` (weekly window, open since 2026-09-22T16:41:49Z) and `make release-macos-coverage-check` (exit 2, names the six); neither is a `make check` dependency, because clearing them needs Mac hardware. Keep lazily-py hosted macOS wheels unchanged and never drop either deliverable. Blocked until the operator runs the Mac-only release command, or supplies the Mac SSH endpoint, username, architecture, and dedicated build-account confirmation for agent automation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Read-only audit with counterpart durability classification (commits 667eb4766, 434b32548) lives at src/agent-doc/tasks/agent-doc/artifact-purge-audit-2026-09-27/ and is confirmed the ONLY handoff on disk, so only one basis can be authorized. Run the plan from src/agent-doc with `python3 scripts/purge-actions-artifacts.py`; the destructive run is `--execute --authorize-deletion btakita/agent-doc --max-deletions 3000` and the 250 default cap otherwise aborts. TWO authorizable options, both re-proved by live dry run: (a) full plan — 2,666 artifacts (43.83 GB), 0 refused, 0 skipped; (b) `--durability durable` — 2,136 artifacts (34.83 GB), refusing exactly the 530 rows whose only counterpart is a PyPI file. Prefer (b): the prune floor is 0.35.113 and v0.35.119, the oldest PyPI-only-backed version, is only the THIRD live release above it, so option (a) additionally accepts that 9.01 GB rests on a thinner margin than version numbering suggests. 2,136 rows rest on GitHub release assets, which have not decayed. 571 artifacts are withheld at audit time and are never deletable. Hard deadline: the 7-day `--max-handoff-age-days` guard aborts the whole run after 2026-10-04T05:56:08Z unless the audit is regenerated or `--allow-stale-handoff` is passed; `make review-gate-status` imports that guard from the purge script and flips this gate to `evidence_stale` 24h BEFORE it expires rather than after. Blocked solely on explicit destructive authorization; no artifact has been deleted.
 - [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] The ready-to-apply point-of-use credential plan is complete at tasks/software/plan-ambient-publish-token-point-of-use.md, and its agent-executable prerequisite [#lzfakepublisherproof] is DONE: `make publish-credential-proof` statically verifies all eight preimages plus `git apply --check`, then exercises all eight production call sites in success, failure, and empty modes against fake passage/cargo/maturin/bun/twine recorders, resolving no credential and invoking no publisher. `make review-gate-status` now runs it as a gate probe and asserts from its JSON report, NOT its exit status, so a red exit over a clean report — or the reverse — reads `evidence_stale` instead of green. The preimage pin has now gone red FIVE times, most recently on 5cb4ee173a, the commit that added the gate target and therefore edited the root Makefile. Since [#lzpatchcontextpin] made the patches context-bearing (7fab345f18) only the recorded hash needs the hand refresh and the hunks relocate themselves — first live confirmation of that half. Expect the hash red on any edit to a patched file and refresh it by hand; do not add an auto-refresh mode. Remaining blockers are operator-only: a quiet window for application, rotation of the Cargo, npm, and PyPI credentials, and rerunning the plan step-5 name loop in a real INTERACTIVE shell after application, because a non-interactive shell does not fire mise activation and forcing it would resolve real credentials. Do not resolve or print credential values during preparation.

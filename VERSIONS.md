@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.426
+
+- **The captured-splice live recipe reaches its advance step.** The first operator-approved run of
+  `scripts/xdotool-live-verify.sh captured-splice` stopped before the canonical advance. The
+  repo-wide pane guard refused whenever any other document had a live session, a reaped owner pane
+  kept blocking later runs, and the owner pane that opening the doc provisions appeared only after
+  the pre-typing check. The owner is a Claude Code agent, never an idle shell. The recipe now checks
+  authority per document, ignores closed owners, re-resolves the owner right before the advance, and
+  runs the advance through an idle Claude Code owner's `!` bash mode.
+
 ## 0.35.425
 
 - **Preset-invocation heads drain.** `#gh-fix <url>` queue heads were judged mirrors of a missing

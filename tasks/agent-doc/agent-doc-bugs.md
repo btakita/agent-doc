@@ -13,10 +13,11 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#agent-doc-causes': Fix agent-doc causes
   '#do-backlog': '/goal do backlog items'
+  '#gh-fix': 'fix then close'
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -492,6 +493,23 @@ The queue is now empty.
 - **PyPI:** the job passed, and the PyPI index now lists 0.35.423.
 
 On your coder project: `uv tool install agent-doc==0.35.423` (or `pip install agent-doc==0.35.423`). On first run it downloads the matching Linux or Windows archive from the Release above and checks it against `SHA256SUMS`.
+
+### Re: #gh-fix agent-doc#68 — opus-5-5 · 2026-09-30T15:03-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/68
+
+Fixed and closed [#68](https://github.com/btakita/agent-doc/issues/68) (`c1dfad9ee`, pushed; submodule pointer `8c667de111`). All four findings:
+
+1. **`plan` false `No changes` blocker (`#plansealedturn`).** When preflight has already sealed the turn (open `PreflightStarted` cycle, nothing captured), `plan` no longer reports the blocker. It recovers the free-text queue head preflight selected, and otherwise returns `task_class: preflight_sealed` with no blocker. SKILL.md step 0d and `runbooks/planning-dispatch.md` are updated to match.
+2. **backlog+review split (`#gatecollapse`).** I could not reproduce the gate itself leaving the id in both lists: plain and queue-mirrored gates both move it cleanly. So the fix makes the split self-repairing. `--backlog-gate <id>` on an id already in `agent:review` drops the stale backlog copy and does not add a second review entry. The collision warning now names that flag for this shape instead of "rename the preset".
+3. **Success receipts from rolled-back writes (`#txreceipt`).** Receipts such as `review-resolve: archived …` and `completed and reaped …` are now held in the tracked-work transaction and printed only after the writes publish. A dry run or an aborted write drops them.
+4. **`snapshot is missing` on every queue consume (`#snapmissingquiet`).** This case is expected (transaction planning passes no snapshot on purpose), so it now goes to ops.log only. Real snapshot-sync failures still print. The regression test fails when the old stderr line is put back.
+
+Each fix has a regression test. `make check` passes: all 10231 tests, audit-docs (after `make install` refreshed the superproject skill copies), editor-parity, lean and tla. The build is installed. CI for the push is still running; the previous run was green.
+
+Not fixed here: #67 was already handled in 0.35.423 (`3ee81039b`). The #60 recurrences cannot be diagnosed until the IDE process is restarted, because its loaded plugin is older than the installed one.
+
+Exchange is large (465 lines); continuing the drain.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -500,7 +518,9 @@ On your coder project: `uv tool install agent-doc==0.35.423` (or `pip install ag
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/68~~
+- release + publish
 <!-- /agent:queue -->
 
 

@@ -144,7 +144,10 @@ fn without_blank_lines_immediately_before_response(
     let mut normalized = Vec::with_capacity(lines.len());
     for (index, line) in lines.into_iter().enumerate() {
         if index == heading_index {
-            while normalized.last().is_some_and(|line: &&str| line.trim().is_empty()) {
+            while normalized
+                .last()
+                .is_some_and(|line: &&str| line.trim().is_empty())
+            {
                 normalized.pop();
             }
         }
@@ -285,12 +288,14 @@ fn answered_free_text_head_recurs(
     if !capture_owned || current_content == committed_content {
         return Ok(false);
     }
-    Ok(!agent_doc_queue::queue_consume::answered_free_text_head_node_keys(
-        current_content,
-        response_body,
-        Some(committed_content),
-    )?
-    .is_empty())
+    Ok(
+        !agent_doc_queue::queue_consume::answered_free_text_head_node_keys(
+            current_content,
+            response_body,
+            Some(committed_content),
+        )?
+        .is_empty(),
+    )
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -367,6 +372,95 @@ fn plan_owned_component_commit_rebase<'a>(
         candidate,
         owned_component_names,
     })
+}
+
+const OWNED_DELIVERY_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+const OWNED_DELIVERY_SLICE: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn owned_target_undelivered(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("have not reached the current document authority")
+}
+
+/// Rebase the snapshot onto the operator cut, waiting (bounded) for a retained
+/// write's owned components to reach the authority first (`#owneddeliverydefer`).
+///
+/// The per-component commit correctly refuses to outrun delivery, but a pending
+/// delivery surfaced to the agent as a hard `write` failure (fpe.md, 2026-09-30:
+/// `owned component(s) have not reached the current document authority: review`)
+/// although the retained write committed itself moments later, once the stale
+/// supervisor recycled. The closeout is the owner of that commit, so it waits
+/// for the delivery like the tracked-work and queue-write closeouts do
+/// (`#retaineddeferwedge`, `#qconsumedeferwedge`), then re-reads the authority
+/// and retries. An unproven delivery keeps the original refusal. A commit
+/// running inside the controller never waits: asking the controller for its own
+/// convergence from there could deadlock.
+///
+/// Returns the rebased snapshot (if any) and the authority cut it was built on.
+fn rebase_snapshot_awaiting_owned_delivery(
+    file: &Path,
+    snapshot: &str,
+    initial_current: String,
+) -> Result<(Option<String>, String)> {
+    let may_wait = !controller_commit_in_progress();
+    retry_rebase_until_owned_delivery(
+        initial_current,
+        OWNED_DELIVERY_WAIT,
+        may_wait,
+        |current| rebase_snapshot_onto_operator_current_if_enabled(file, snapshot, current),
+        |slice| {
+            if let Err(wait_err) =
+                agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                    file, slice,
+                )
+            {
+                eprintln!(
+                    "[commit] warning: could not await owned delivery for {}: {wait_err:#}",
+                    file.display()
+                );
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        },
+        || commit_current_document_content(file, "commit_owned_delivery_retry"),
+        |event| agent_doc_ops_log_io::log_op(file, &format!("{event} file={}", file.display())),
+    )
+}
+
+/// The I/O-free core of [`rebase_snapshot_awaiting_owned_delivery`].
+fn retry_rebase_until_owned_delivery(
+    initial_current: String,
+    budget: std::time::Duration,
+    may_wait: bool,
+    mut rebase: impl FnMut(&str) -> Result<Option<String>>,
+    mut wait: impl FnMut(std::time::Duration),
+    mut reread: impl FnMut() -> Result<String>,
+    mut log: impl FnMut(String),
+) -> Result<(Option<String>, String)> {
+    let started = std::time::Instant::now();
+    let deadline = started + budget;
+    let mut current = initial_current;
+    loop {
+        let err = match rebase(&current) {
+            Ok(rebased) => return Ok((rebased, current)),
+            Err(err) => err,
+        };
+        if !owned_target_undelivered(&err) {
+            return Err(err);
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if !may_wait || remaining.is_zero() {
+            log(format!(
+                "owned_delivery_wait_exhausted waited_ms={} may_wait={may_wait}",
+                started.elapsed().as_millis()
+            ));
+            return Err(err);
+        }
+        wait(remaining.min(OWNED_DELIVERY_SLICE));
+        current = reread()?;
+        log(format!(
+            "owned_delivery_retry waited_ms={}",
+            started.elapsed().as_millis()
+        ));
+    }
 }
 
 fn rebase_snapshot_onto_operator_current_if_enabled(
@@ -1162,9 +1256,14 @@ pub fn commit_visible_uncommitted_response(file: &Path) -> Result<bool> {
 /// next prompt lands. Binary-owned components may legitimately advance after the
 /// snapshot (the deferred queue strike and frontmatter session id did on
 /// agent-doc-bugs.md), and committing them records their current value.
-pub fn visible_uncommitted_response_is_absorbable(head: &str, snapshot: &str, current: &str) -> bool {
+pub fn visible_uncommitted_response_is_absorbable(
+    head: &str,
+    snapshot: &str,
+    current: &str,
+) -> bool {
     document_only_exchange_is_unchanged(snapshot, current)
-        && normalize_transient_agent_doc_markers(current) != normalize_transient_agent_doc_markers(head)
+        && normalize_transient_agent_doc_markers(current)
+            != normalize_transient_agent_doc_markers(head)
         && agent_doc_turn::document_drift::detect_bypassed_response_write_between(head, snapshot)
             .is_some()
 }
@@ -1703,10 +1802,16 @@ where
         })?;
     guard_committable_document_content(file, &file_content, "initial_authority")?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
-    if let Some(snapshot) = snapshot_content.as_deref()
-        && let Some(rebased) =
-            rebase_snapshot_onto_operator_current_if_enabled(file, snapshot, &file_content)?
-    {
+    let rebased_snapshot = match snapshot_content.as_deref() {
+        Some(snapshot) => {
+            let (rebased, current) =
+                rebase_snapshot_awaiting_owned_delivery(file, snapshot, file_content)?;
+            file_content = current;
+            rebased
+        }
+        None => None,
+    };
+    if let Some(rebased) = rebased_snapshot {
         agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
             &rebased,
@@ -3197,7 +3302,10 @@ mod visible_response_absorb_tests {
     }
 
     fn with_queue(exchange_body: &str, queue: &str) -> String {
-        format!("{}\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n", with_exchange(exchange_body))
+        format!(
+            "{}\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n",
+            with_exchange(exchange_body)
+        )
     }
 
     const ANSWER: &str = "### Re: issue -- opus\n\n> **Queue prompt:** Fix https://github.com/btakita/agent-doc/issues/59. release + publish\n\nReleased.\n";
@@ -3228,17 +3336,23 @@ mod visible_response_absorb_tests {
     /// `write --commit`, whose empty body could not absorb it.
     #[test]
     fn a_visible_response_missing_from_head_is_absorbable() {
-        let snapshot = with_exchange("### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n");
-        assert!(visible_uncommitted_response_is_absorbable(HEAD, &snapshot, &snapshot));
+        let snapshot =
+            with_exchange("### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n");
+        assert!(visible_uncommitted_response_is_absorbable(
+            HEAD, &snapshot, &snapshot
+        ));
     }
 
     #[test]
     fn an_edit_after_the_closeout_is_never_swallowed() {
-        let snapshot = with_exchange("### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n");
+        let snapshot =
+            with_exchange("### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n");
         let current = with_exchange(
             "### Re: prior — opus-5 · 2026-09-29T18:29-04:00\n\nAnswer.\n\n❯ A new question?\n",
         );
-        assert!(!visible_uncommitted_response_is_absorbable(HEAD, &snapshot, &current));
+        assert!(!visible_uncommitted_response_is_absorbable(
+            HEAD, &snapshot, &current
+        ));
     }
 
     /// The observed shape: after the snapshot, the deferred queue consume struck the
@@ -3253,13 +3367,103 @@ mod visible_response_absorb_tests {
         let current = snapshot
             .replace("- 🚧 Fix it", "- ~~Fix it~~")
             .replace("agent_doc_session: t", "agent_doc_session: t2");
-        assert!(visible_uncommitted_response_is_absorbable(HEAD, &snapshot, &current));
+        assert!(visible_uncommitted_response_is_absorbable(
+            HEAD, &snapshot, &current
+        ));
     }
 
     #[test]
     fn identical_or_non_response_drift_is_not_absorbed() {
-        assert!(!visible_uncommitted_response_is_absorbable(HEAD, HEAD, HEAD));
+        assert!(!visible_uncommitted_response_is_absorbable(
+            HEAD, HEAD, HEAD
+        ));
         let local = HEAD.replace("❯ Prior question?\n", "❯ Prior question, reworded?\n");
-        assert!(!visible_uncommitted_response_is_absorbable(HEAD, &local, &local));
+        assert!(!visible_uncommitted_response_is_absorbable(
+            HEAD, &local, &local
+        ));
+    }
+}
+
+#[cfg(test)]
+mod owned_delivery_defer_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    fn undelivered() -> anyhow::Error {
+        anyhow::anyhow!(
+            "owned component(s) have not reached the current document authority: review"
+        )
+        .context("refusing per-component commit before owned target delivery")
+    }
+
+    #[test]
+    fn a_pending_owned_delivery_is_awaited_then_committed() {
+        // #owneddeliverydefer live shape (fpe.md, 2026-09-30): the review item
+        // reached the authority moments after the first commit attempt.
+        let waits = Cell::new(0);
+        let (rebased, current) = retry_rebase_until_owned_delivery(
+            "cut-without-review".to_string(),
+            std::time::Duration::from_secs(30),
+            true,
+            |current| {
+                if current == "cut-with-review" {
+                    Ok(Some("rebased".to_string()))
+                } else {
+                    Err(undelivered())
+                }
+            },
+            |_| waits.set(waits.get() + 1),
+            || Ok("cut-with-review".to_string()),
+            |_| {},
+        )
+        .expect("a delivered owned target commits");
+        assert_eq!(rebased.as_deref(), Some("rebased"));
+        assert_eq!(
+            current, "cut-with-review",
+            "the commit uses the delivered cut"
+        );
+        assert_eq!(waits.get(), 1);
+    }
+
+    #[test]
+    fn an_undelivered_owned_target_still_refuses_and_other_errors_never_wait() {
+        let waits = Cell::new(0);
+        let err = retry_rebase_until_owned_delivery(
+            "cut".to_string(),
+            std::time::Duration::from_millis(0),
+            true,
+            |_| Err(undelivered()),
+            |_| waits.set(waits.get() + 1),
+            || Ok("cut".to_string()),
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(owned_target_undelivered(&err), "{err:#}");
+
+        // Inside the controller the commit never waits on its own convergence.
+        let err = retry_rebase_until_owned_delivery(
+            "cut".to_string(),
+            std::time::Duration::from_secs(30),
+            false,
+            |_| Err(undelivered()),
+            |_| waits.set(waits.get() + 1),
+            || Ok("cut".to_string()),
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(owned_target_undelivered(&err));
+
+        let err = retry_rebase_until_owned_delivery(
+            "cut".to_string(),
+            std::time::Duration::from_secs(30),
+            true,
+            |_| Err(anyhow::anyhow!("transition parse failed")),
+            |_| waits.set(waits.get() + 1),
+            || Ok("cut".to_string()),
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(!owned_target_undelivered(&err));
+        assert_eq!(waits.get(), 0, "only a pending owned delivery is awaited");
     }
 }

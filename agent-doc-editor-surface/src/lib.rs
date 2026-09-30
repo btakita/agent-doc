@@ -29,6 +29,7 @@
 //! observation arrived rather than because a caller remembered to ask.
 
 pub mod graph;
+pub mod pane_placement;
 
 pub use graph::{EditorSurfaceState, SurfaceFold};
 

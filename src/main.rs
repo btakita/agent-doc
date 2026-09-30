@@ -85,6 +85,7 @@ mod preflight_hook;
 mod queue_dispatch;
 mod queue_recovery;
 mod read;
+mod reliable_sync_status_cmd;
 mod rename;
 mod reset;
 mod self_install;
@@ -5572,55 +5573,7 @@ fn try_main() -> anyhow::Result<()> {
                     agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd)
                 }
             };
-            let status = agent_doc_controller_io::project_controller::reliable_sync_status(&root)?;
-            if json {
-                println!("{}", serde_json::to_string_pretty(&status)?);
-            } else {
-                println!("authority: Lazily current + reliable-sync");
-                println!("plane open docs ({}):", status.plane_open_docs.len());
-                for doc in &status.plane_open_docs {
-                    let pids = status
-                        .per_doc_pids
-                        .iter()
-                        .find(|(d, _)| d == doc)
-                        .map(|(_, p)| p.clone())
-                        .unwrap_or_default();
-                    let live = if status.plane_live_docs.contains(doc) {
-                        "live"
-                    } else {
-                        "not-live"
-                    };
-                    let path = status
-                        .plane_open_paths
-                        .iter()
-                        .find(|(h, _)| h == doc)
-                        .and_then(|(_, p)| p.clone())
-                        .unwrap_or_else(|| "<registration pending>".to_string());
-                    println!("  {live:8}  pids={pids:?}  {path}");
-                }
-                println!(
-                    "live editor registrations ({}):",
-                    status.registrations.len()
-                );
-                for registration in &status.registrations {
-                    println!(
-                        "  {} pid={} {} {} {}",
-                        registration.editor_id,
-                        registration.pid,
-                        registration.editor_kind,
-                        registration.editor_version,
-                        registration.path
-                    );
-                }
-                println!(
-                    "in-memory registry open docs — secondary, empty right after a recycle ({}):",
-                    status.registry_open_docs.len()
-                );
-                for doc in &status.registry_open_docs {
-                    println!("  {doc}");
-                }
-            }
-            Ok(())
+            reliable_sync_status_cmd::run(&root, json)
         }
         Commands::SelfInstall {
             source_root,

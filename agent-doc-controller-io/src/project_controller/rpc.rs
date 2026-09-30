@@ -3243,7 +3243,10 @@ where
     // that window and Run Agent Doc surfaced the raw refusal. The rejected handler
     // bailed before touching any state, so re-submitting until a stable generation
     // answers is the whole recovery.
-    let log_path = request.file.clone().unwrap_or_else(|| project_root.to_path_buf());
+    let log_path = request
+        .file
+        .clone()
+        .unwrap_or_else(|| project_root.to_path_buf());
     let response = retry_controller_handoff_refusal(
         &log_path,
         name,
@@ -14946,12 +14949,17 @@ pub struct ControllerReliableSyncStatusResponse {
     pub registry_open_docs: Vec<String>,
     /// Per open document: the live editor pids the plane sees.
     pub per_doc_pids: Vec<(String, Vec<u64>)>,
+    /// Last editor-surface observation and pane-layout outcome (GH #62).
+    /// `None` means the controller predates this diagnostic — NOT that no
+    /// surface was observed.
+    #[serde(default)]
+    pub surface_sync: Option<ControllerSurfaceSyncDiagnostics>,
 }
 
 /// Handle the `reliable_sync_status` diagnostic RPC from the controller-owned
 /// reliable liveness projection.
 fn handle_reliable_sync_status(
-    _bootstrap: &ControllerBootstrap,
+    bootstrap: &ControllerBootstrap,
 ) -> Result<ControllerReliableSyncStatusResponse> {
     // Read the model registry before the liveness plane, matching the relay
     // authority lock order used by `crdt_authority_for_file`.
@@ -15007,6 +15015,7 @@ fn handle_reliable_sync_status(
         allocated_model_projection_complete: true,
         registry_open_docs: registry_open.into_iter().collect(),
         per_doc_pids,
+        surface_sync: Some(surface_sync_diagnostics_for(&bootstrap.project_root)),
     })
 }
 
@@ -19135,6 +19144,101 @@ fn record_editor_surface_focus_outcome(
 /// observation. Doubling rather than a fixed window is what keeps the most recent
 /// `repeats=` count within a factor of two of the true run length, so no tail is
 /// ever lost: the previous count is still on the page when the run ends.
+/// Last editor-surface observation the controller received for a project
+/// (GH #62). ops.log coalesces repeats and in-memory graph state is not
+/// inspectable, so "has auto-sync stopped publishing?" had no answer without
+/// retroactive debug logging. `reliable-sync-status` reads this.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceObservationDiagnostic {
+    pub client_id: String,
+    pub generation: u64,
+    pub sequence: u64,
+    pub accepted: bool,
+    pub intent: String,
+    pub focused: String,
+    pub visible: Vec<String>,
+    pub observed_at_ms: u64,
+    /// Observations received since the controller started, repeats included.
+    pub received_count: u64,
+}
+
+/// Last structural pane-layout attempt outcome for a project (GH #62).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneLayoutOutcomeDiagnostic {
+    pub generation: u64,
+    pub attempt: u64,
+    pub phase: String,
+    pub expected_documents: Vec<String>,
+    pub actual_documents: Vec<String>,
+    pub recorded_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerSurfaceSyncDiagnostics {
+    #[serde(default)]
+    pub last_observation: Option<SurfaceObservationDiagnostic>,
+    #[serde(default)]
+    pub last_layout_outcome: Option<PaneLayoutOutcomeDiagnostic>,
+}
+
+fn surface_sync_diagnostics()
+-> &'static parking_lot::Mutex<BTreeMap<PathBuf, ControllerSurfaceSyncDiagnostics>> {
+    static DIAGNOSTICS: std::sync::LazyLock<
+        parking_lot::Mutex<BTreeMap<PathBuf, ControllerSurfaceSyncDiagnostics>>,
+    > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(BTreeMap::new()));
+    &DIAGNOSTICS
+}
+
+fn surface_sync_diagnostics_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn record_surface_observation_diagnostic(
+    project_root: &Path,
+    mut observation: SurfaceObservationDiagnostic,
+) {
+    let mut diagnostics = surface_sync_diagnostics().lock();
+    let entry = diagnostics.entry(project_root.to_path_buf()).or_default();
+    observation.received_count = entry
+        .last_observation
+        .as_ref()
+        .map_or(1, |previous| previous.received_count.saturating_add(1));
+    entry.last_observation = Some(observation);
+}
+
+fn record_pane_layout_outcome_diagnostic(
+    project_root: &Path,
+    generation: u64,
+    attempt: u64,
+    phase: &str,
+    expected_documents: &[String],
+    actual_documents: &[String],
+) {
+    surface_sync_diagnostics()
+        .lock()
+        .entry(project_root.to_path_buf())
+        .or_default()
+        .last_layout_outcome = Some(PaneLayoutOutcomeDiagnostic {
+        generation,
+        attempt,
+        phase: phase.to_string(),
+        expected_documents: expected_documents.to_vec(),
+        actual_documents: actual_documents.to_vec(),
+        recorded_at_ms: surface_sync_diagnostics_now_ms(),
+    });
+}
+
+fn surface_sync_diagnostics_for(project_root: &Path) -> ControllerSurfaceSyncDiagnostics {
+    surface_sync_diagnostics()
+        .lock()
+        .get(project_root)
+        .cloned()
+        .unwrap_or_default()
+}
+
 fn fold_repeated_surface_observation(key: &str) -> Option<u64> {
     static LAST_OBSERVATION: std::sync::LazyLock<parking_lot::Mutex<Option<(String, u64)>>> =
         std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
@@ -19178,6 +19282,8 @@ fn handle_editor_surface_observe(
     // pane back to the structural layout owner, so the editor's own visible
     // columns must outlive the fold's move of the observation.
     let surface_columns = observation.surface.columns.clone();
+    let diagnostic_focused = observation.surface.focused.clone();
+    let diagnostic_visible = observation.surface.visible.clone();
     // `#tmuxautosyncreactive`: fold against the RETAINED tmux observation rather
     // than probing synchronously. The background `pane_layout_effect_worker`
     // refreshes it via `observe_tmux_for_project` after each structural
@@ -19207,6 +19313,20 @@ fn handle_editor_surface_observe(
     // first line after a run of repeats carries `repeats=N`, so a heartbeat that
     // stops, changes generation, flips `accepted`, or leaves `idle` is all still
     // visible, with the duration of the quiet period recoverable from the count.
+    record_surface_observation_diagnostic(
+        &bootstrap.project_root,
+        SurfaceObservationDiagnostic {
+            client_id: projection_identity.0.clone(),
+            generation: projection_identity.1,
+            sequence: projection_identity.2,
+            accepted,
+            intent: surface_intent_label(&receipt.intent).to_string(),
+            focused: diagnostic_focused,
+            visible: diagnostic_visible,
+            observed_at_ms: surface_sync_diagnostics_now_ms(),
+            received_count: 0,
+        },
+    );
     let surface_observation_key = format!(
         "{}|{}|{}|{}",
         projection_identity.0,
@@ -20741,6 +20861,14 @@ fn pane_layout_effect_worker(
                         .editor_surface_graph
                         .observe_tmux_for_project(&bootstrap.project_root, Some(layout));
                 }
+                record_pane_layout_outcome_diagnostic(
+                    &bootstrap.project_root,
+                    desired.generation,
+                    attempt,
+                    "operator_owned",
+                    &[],
+                    &operator_owned_documents,
+                );
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
@@ -20875,6 +21003,14 @@ fn pane_layout_effect_worker(
                         .editor_surface_graph
                         .observe_tmux_for_project(&bootstrap.project_root, Some(layout));
                 }
+                record_pane_layout_outcome_diagnostic(
+                    &bootstrap.project_root,
+                    desired.generation,
+                    attempt,
+                    "converged_focus_only",
+                    &logged_expected_documents,
+                    &logged_actual_documents,
+                );
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
@@ -21096,6 +21232,14 @@ fn pane_layout_effect_worker(
                 .editor_surface_graph
                 .observe_tmux_for_project(&bootstrap.project_root, Some(layout));
         }
+        record_pane_layout_outcome_diagnostic(
+            &bootstrap.project_root,
+            desired.generation,
+            attempt,
+            if synced { "converged" } else { "retry_pending" },
+            &logged_expected_documents,
+            &logged_actual_documents,
+        );
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
@@ -24858,9 +25002,13 @@ mod tests {
         assert_eq!(attempts, 3);
         assert_eq!(answered["payload"]["applied"], true);
 
-        let failed = serde_json::json!({ "exit_code": 1, "output": "desired pane layout is empty" });
+        let failed =
+            serde_json::json!({ "exit_code": 1, "output": "desired pane layout is empty" });
         let err = command_submit_response_accepted("sync_tmux_layout", failed).unwrap_err();
-        assert!(!controller_handoff_refusal_is_retryable(&err), "a real failure is not retried");
+        assert!(
+            !controller_handoff_refusal_is_retryable(&err),
+            "a real failure is not retried"
+        );
     }
 
     #[test]
@@ -34964,6 +35112,68 @@ body
             ControllerCommitProjectionDecision::AwaitConvergence,
             "the commit Effect waits on the reactive receipt projection without making ACK transition authority"
         );
+    }
+
+    /// GH #62: auto-sync state must be observable without retroactive debug
+    /// logging — the last observation (with a running count) and the last
+    /// layout outcome are kept per project and read back by status.
+    #[test]
+    fn surface_sync_diagnostics_record_last_observation_and_layout_outcome() {
+        let root = PathBuf::from("/tmp/gh62-surface-sync-diagnostics-root");
+        let other = PathBuf::from("/tmp/gh62-surface-sync-diagnostics-other");
+        let observation = |generation: u64| SurfaceObservationDiagnostic {
+            client_id: "jetbrains-pid:7".to_string(),
+            generation,
+            sequence: generation,
+            accepted: true,
+            intent: "sync".to_string(),
+            focused: "/p/a.md".to_string(),
+            visible: vec!["/p/a.md".to_string(), "/p/b.md".to_string()],
+            observed_at_ms: 1,
+            received_count: 0,
+        };
+        assert_eq!(
+            surface_sync_diagnostics_for(&root),
+            ControllerSurfaceSyncDiagnostics::default()
+        );
+        record_surface_observation_diagnostic(&root, observation(1));
+        record_surface_observation_diagnostic(&root, observation(2));
+        record_pane_layout_outcome_diagnostic(
+            &root,
+            2,
+            0,
+            "retry_pending",
+            &["/p/a.md".to_string(), "/p/b.md".to_string()],
+            &["/p/a.md".to_string()],
+        );
+        let diagnostics = surface_sync_diagnostics_for(&root);
+        let last = diagnostics.last_observation.expect("observation recorded");
+        assert_eq!(last.generation, 2);
+        assert_eq!(last.received_count, 2);
+        let outcome = diagnostics.last_layout_outcome.expect("outcome recorded");
+        assert_eq!(outcome.phase, "retry_pending");
+        assert_eq!(outcome.actual_documents, vec!["/p/a.md".to_string()]);
+        assert_eq!(
+            surface_sync_diagnostics_for(&other),
+            ControllerSurfaceSyncDiagnostics::default(),
+            "diagnostics are per project root"
+        );
+    }
+
+    /// An older controller omits `surface_sync`; the client must read that as
+    /// "unavailable", never as "no surface observed".
+    #[test]
+    fn reliable_sync_status_without_surface_sync_deserializes_as_unavailable() {
+        let json = serde_json::json!({
+            "plane_open_docs": [],
+            "plane_open_paths": [],
+            "plane_live_docs": [],
+            "registrations": [],
+            "registry_open_docs": [],
+            "per_doc_pids": [],
+        });
+        let status: ControllerReliableSyncStatusResponse = serde_json::from_value(json).unwrap();
+        assert!(status.surface_sync.is_none());
     }
 
     #[test]

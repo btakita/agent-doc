@@ -175,6 +175,28 @@ I made no code changes. There are no actionable follow-up items from this head.
 The closing comment on #70 already gives the next step if the problem comes back on ≥0.35.424. The fan-out probably comes from a tmux-side hook or binding, since agent-doc never builds a `send-keys -X` argument. The next thing to check is `tmux show-hooks -g` and the copy-mode bindings on the reporting host.
 
 Next in the queue: `#release`. The exchange is getting large (131 lines); I'm noting that and carrying on with the drain.
+
+### Re: #gh-fix GH #73: supervisor-drain yield now checks the supervisor can drain — opus-5.5 · 2026-09-30T19:22-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/73
+
+**Fixed and closed** in agent-doc `9a36f2e85` (pushed and installed). The commit's `Fixes #73` closed the issue, and I added a comment with the summary.
+
+**The problem:** session-check chose the `deferred_for_supervisor_drain` hand-off by looking at the queue alone. It never checked whether a supervisor existed to take the work. In the reported case the supervisor was 18h old and running a stale binary, and its recycle had been refused. The agent was still told "NOT an operator stall", so it ended its turn and nothing drained the head.
+
+**The fix:**
+- `agent-doc-controller/src/status.rs`: a new pure classifier, `classify_supervisor_drain_readiness`, returns one of `Ready`, `NoLiveSupervisor`, `HeartbeatStale` or `StaleBinary`. It fails closed: missing evidence never counts as a live supervisor.
+- `agent-doc-controller-io`: `supervisor_drain_readiness_for_doc` reads the supervisor lease, checks the pid is alive, and compares the running binary's inode against the installed one. It uses the same 60s lease threshold as the claim guard.
+- `agent-doc-flow`: a new outcome, `supervisor_drain_unavailable` (Operator class, `next_action=operator_retrigger_supervisor_unavailable`).
+- session-check hands off to the supervisor only when it is `Ready`. Otherwise it prints **queue STALLED — needs the operator** with the fix (`agent-doc admin recycle` / `session restart-supervisor`, or re-trigger in a fresh session). The hand-off ops.log line now records `supervisor_drain_readiness=` and `supervisor_pid=`.
+- The skill text (SKILL.md, the cursor rule, `src/skill.rs`) now says to report this outcome as a stall, never as "yielding to supervisor".
+- **Tests:** added a classifier truth table, an outcome/message regression covering all three not-ready states, and a check that readiness fails closed when there is no state. I also removed a copy of `log_supervisor_drain_handoff` that lived in the test file, so the test now exercises the production function.
+
+**Verification:** `make check` passed (exit 0; nextest 10257/10257 passed, 259 skipped). `make install` and `cargo build --release` succeeded. The latest CI run is green.
+
+**Not done:** suggestion 3 from the issue — recording the yield so the next preflight can report "yielded N min ago, still undrained". The hand-off log line now carries enough to build it; I'm leaving it as a [recommended] follow-up.
+
+Next queue head: #gh-fix #74.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -184,8 +206,8 @@ Next in the queue: `#release`. The exchange is getting large (131 lines); I'm no
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/69~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/70~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/73~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/74
 - ⏭️ #release
 <!-- /agent:queue -->
 

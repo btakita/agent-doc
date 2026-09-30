@@ -12,6 +12,13 @@ rule. This runbook carries the rest.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest
   question; answer or group each unresolved prompt in that tail and each
   unresolved `prompt_target`; treat `content_edit` items as user corrections.
+- **Informational components stay informational (`#notes-not-a-prompt`).** Content
+  in `agent:notes` remains available as context when another exchange/queue
+  prompt starts the turn, but it is not itself a prompt or completion target.
+  Do not answer, strike, clear, or otherwise mutate a note merely because its
+  prose looks imperative or ends in a question. Modify notes only when an
+  explicit exchange/queue prompt asks for that notes edit. This keeps completed
+  queue lifecycle separate from persistent operator-owned context.
 - **Realtime steering (`#realtime-steering-verbatim`):** a document is realtime —
   the operator may add a prompt WHILE your turn is running. Every item the
   operator adds must be addressed and worked on, never committed-and-ignored. If
@@ -168,8 +175,12 @@ into `review_done_guard` when review must precede done.
 **Complete over gate.** Default to `--done` — finish the work this cycle. Gating
 to `agent:review` is exceptional, only for work genuinely blocked on something the
 turn cannot do (live editor/pane verify, external approval, CI outage), and the
-item must name what unblocks it. Unblocked follow-up goes to `agent:backlog` as an
-actionable item, not `agent:review`. Keep `agent:review` small (target < 10);
-convert stale/satisfied gated items to `--done` or actionable backlog items rather
-than letting them accumulate. See [pending-ops.md](pending-ops.md) for the full
-review-discipline rule.
+item must name what unblocks it. `[operator-verify]` is metadata, not proof of a
+gate: an item with remaining agent-executable steps belongs in `agent:backlog` and
+may retain the tag. When a review gate clears but work remains, use
+`--backlog-ungate <id>` (and `--backlog-edit` if needed), not `--review-edit`, so
+the same id becomes actionable again. Unblocked follow-up goes to `agent:backlog`,
+not `agent:review`. Keep `agent:review` small (target < 10); convert stale/satisfied
+gated items to `--done` or actionable backlog items rather than letting them
+accumulate. See [pending-ops.md](pending-ops.md) for the full review-discipline
+rule.

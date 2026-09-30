@@ -70,8 +70,10 @@ The core workflow (preflight, respond, persist the response) is identical across
 
 ## Response Header Attribution
 
-- Always attribute `### Re:` headings with the resolved model short name, for example `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`.
-- Never use the harness label as the suffix. `### Re: topic — codex` and `### Re: topic — claude` are wrong.
+- Always attribute `### Re:` headings with the resolved model short name **and** the response timestamp, for example `### Re: topic — opus-5 · 2026-09-11T23:45-04:00` (`#timestampresponseheader`).
+- Never use the harness label as the model name. `### Re: topic — codex` and `### Re: topic — claude` are wrong.
+- The timestamp is local time with its UTC offset, `YYYY-MM-DDTHH:MM±HH:MM`, taken when you begin composing. With no resolvable clock, emit the model alone (`### Re: topic — opus-5`) rather than a dangling separator.
+- Keep **exactly one** spaced em dash in the heading: the model and timestamp are joined to each other by ` · `. Three heading parsers split on the FIRST em dash and `strip_re_heading_attribution` splits on the LAST, so a second em dash leaves the model name behind and reads as permanent post-commit heading drift. Format owned by `agent_doc_turn::response_text::response_heading`.
 
 ## Harness Detection
 
@@ -84,6 +86,39 @@ Identify your harness from your environment:
 | You are OpenCode / `OPENCODE` env var is set | **OpenCode** |
 | You are Cursor / `CURSOR_SESSION_ID` env var is set | **Cursor** |
 | None of the above | **Generic** |
+
+### Another document's harness is not yours (`#otherdocownerfirst`)
+
+The table above identifies **your** harness. It says nothing about a *different*
+document, and an operator can switch one from `agent: claude` to `agent: codex`
+at any time — agent-doc emits `harness_change_detected old=… new=…` followed by
+`agent_restart_performed … action=spawn_fresh_harness` when they do.
+
+So when the operator reports a problem about a document other than this
+session's — a pasted pane excerpt, an error from another tab, a screenshot of a
+lock screen — resolve that document first:
+
+```bash
+agent-doc session status <OTHER_FILE>
+```
+
+It reports the `harness:` actually running it, the owning `actor:` / `registry:`
+pane, live pane state and tail, the supervisor, and any `startup_miss`. A pasted
+excerpt carries none of that, and the harness you happen to be running in is not
+evidence about the other document.
+
+Two failure shapes this prevents, both observed 2026-09-28:
+
+- Reading the wrong harness's state. A Codex lock screen (`This conversation is
+  open in another app`, `r retry  f fork  esc/ctrl+c/q exit  ctrl+t transcript`)
+  was diagnosed against Claude Code's session registry. Codex's equivalent is one
+  advisory lock per conversation under `$CODEX_HOME/thread-writer-locks/`; route
+  now names its holders, and `session status` would have said `harness: codex`
+  before any of that was needed.
+- Quoting a relative path back. A trigger's relative path resolves against the
+  *invoking pane's* working directory. `agent-doc tasks/infra.md` names the real
+  document from a submodule pane and a nonexistent file from the superproject
+  pane one window over. Quote another pane's document absolutely, always.
 
 ## Claude Code
 

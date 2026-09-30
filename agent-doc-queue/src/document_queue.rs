@@ -3005,6 +3005,18 @@ pub fn converge_queue_via_lifecycle(
     let current_struck = current_struck_identities(entries);
     let mut injected_snapshot_struck =
         std::collections::HashSet::<agent_doc_element_queue::QueueItemIdentity>::new();
+    // `#queuefreetextdup`: live copies the snapshot itself holds beside a struck
+    // copy of the same identity are authored repeats (a scheduling FIFO's "run it
+    // again"), not stale re-emits of the struck one.
+    let mut snapshot_live_allowance =
+        std::collections::HashMap::<agent_doc_element_queue::QueueItemIdentity, usize>::new();
+    for entry in snapshot_entries {
+        if let QueueEntry::Prompt(_) = entry
+            && let Some(identity) = queue_item_identity(entry)
+        {
+            *snapshot_live_allowance.entry(identity).or_insert(0) += 1;
+        }
+    }
     let mut lifecycle_changed = false;
     let mut entries_for_convergence = Vec::with_capacity(entries.len());
     for entry in entries {
@@ -3031,17 +3043,25 @@ pub fn converge_queue_via_lifecycle(
             && let Some(identity) = queue_item_identity(entry)
             && let Some(struck_entry) = snapshot_struck.get(&identity)
         {
-            lifecycle_changed = true;
-            if current_struck.contains(&identity) {
-                // A current struck copy already carries the terminal state; the
-                // live copy is a stale re-emit and should disappear.
+            let represented =
+                current_struck.contains(&identity) || injected_snapshot_struck.contains(&identity);
+            if represented {
+                if let Some(allowance) = snapshot_live_allowance.get_mut(&identity)
+                    && *allowance > 0
+                {
+                    // An authored live repeat below its struck first copy stays live.
+                    *allowance -= 1;
+                    entries_for_convergence.push(entry.clone());
+                    continue;
+                }
+                // A struck copy already carries the terminal state; a live copy
+                // beyond the authored repeats is a stale re-emit and disappears.
+                lifecycle_changed = true;
                 continue;
             }
-            if injected_snapshot_struck.insert(identity) {
-                entries_for_convergence.push(struck_entry.clone());
-            }
-            // Additional live copies of the same struck identity are stale
-            // re-emits too; one struck representative is enough.
+            lifecycle_changed = true;
+            injected_snapshot_struck.insert(identity);
+            entries_for_convergence.push(struck_entry.clone());
             continue;
         }
         entries_for_convergence.push(entry.clone());
@@ -6621,6 +6641,35 @@ mod tests {
             converge_queue_via_lifecycle(&entries, &[], &Default::default()).is_none(),
             "a live + struck pair of the same text is not a duplicate"
         );
+    }
+
+    /// `#queuefreetextdup`: a scheduling FIFO may hold an identical free-text line
+    /// twice on purpose. Once the first copy is answered and struck, neither the
+    /// struck-twin bridge (`#qstruckbaredup`) nor snapshot-terminal evidence
+    /// (`#qeditdupguard`) may strike or drop the operator's later live repeat.
+    #[test]
+    fn converge_keeps_an_authored_live_repeat_below_its_struck_first_copy() {
+        let line = "release + publish";
+        let authored = vec![p(line), p("do [#between]"), p(line)];
+        let answered = vec![c(line), p("do [#between]"), p(line)];
+
+        assert_eq!(converge(&answered, &authored), answered, "fresh strike");
+        assert_eq!(
+            converge(&answered, &answered),
+            answered,
+            "strike already in snapshot"
+        );
+
+        // Without an authored repeat, a live replay of the struck line is still a
+        // stale re-emit (`#qeditdupguard`) and disappears.
+        let struck_only = vec![c(line), p("do [#between]")];
+        let replayed = vec![c(line), p("do [#between]"), p(line)];
+        assert_eq!(converge(&replayed, &struck_only), struck_only);
+
+        // A stale flush that un-strikes the first copy is re-struck, and the
+        // authored repeat survives.
+        let unstruck_flush = vec![p(line), p("do [#between]"), p(line)];
+        assert_eq!(converge(&unstruck_flush, &answered), answered);
     }
 
     /// `#qstruckbaredup`: the tolerant parser preserves a bare line as

@@ -663,8 +663,14 @@ fn response_targets_synthetic_queue_head_id(content: &str, response: &str) -> Re
         .any(|topic| crate::queue_directive::topic_resolves_to_exact_id(topic, &head_id)))
 }
 
-/// Node keys of every non-struck free-text queue head that this cycle answered,
+/// Node keys of the non-struck free-text queue heads that this cycle answered,
 /// at any position in the queue.
+///
+/// `#queuefreetextdup`: the queue is a scheduling FIFO, so an identical line
+/// repeated later is an intentional "run it again". One answered quote strikes
+/// only the FIRST unstruck occurrence of that text; later repeats stay live for
+/// their own cycle. Striking every copy (`nodes=2` on 2026-09-30) silently
+/// dropped the operator's second `release + publish`.
 pub fn answered_free_text_head_node_keys(
     content: &str,
     response_body: &str,
@@ -677,6 +683,7 @@ pub fn answered_free_text_head_node_keys(
         anyhow::anyhow!("free-text strike: failed to derive queue node keys: {err}")
     })?;
     let mut keys = Vec::new();
+    let mut struck_texts = HashSet::new();
     for node in nodes {
         if node.item.struck {
             continue;
@@ -684,6 +691,9 @@ pub fn answered_free_text_head_node_keys(
         let text = node.item.text.trim();
         if text.is_empty() || !crate::queue_response::queue_prompt_text_is_free_text(content, text)
         {
+            continue;
+        }
+        if struck_texts.contains(&normalize_queue_prompt_text(text)) {
             continue;
         }
         // `#bugautostruck`: the in-progress marker proves only which queue head
@@ -705,6 +715,7 @@ pub fn answered_free_text_head_node_keys(
         {
             continue;
         }
+        struck_texts.insert(normalize_queue_prompt_text(text));
         keys.push(node.node_key);
     }
     Ok(keys)
@@ -2272,6 +2283,51 @@ Old.
             annotate_newly_struck_free_text_heads(after, &annotated).unwrap(),
             annotated
         );
+    }
+
+    /// `#queuefreetextdup`: an identical free-text line queued twice is an
+    /// intentional repeat in a scheduling FIFO; answering it once strikes only
+    /// the first copy.
+    #[test]
+    fn answered_free_text_strike_leaves_a_later_identical_repeat_live() {
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: queue-repeat\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- release + publish\n",
+            "- do [#between]\n",
+            "- release + publish\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: release — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> release + publish\n\n",
+            "Released and published.\n",
+        );
+
+        let projected = project_answered_free_text_strike(document, response, Some(document))
+            .unwrap()
+            .expect("the first copy is answered");
+
+        assert_eq!(projected.node_keys.len(), 1, "{:?}", projected.node_keys);
+        let target = &projected.target_content;
+        let first = target
+            .find("~~release + publish~~")
+            .expect("first copy struck");
+        let repeat = target
+            .rfind("- release + publish\n")
+            .expect("the later repeat stays live");
+        assert!(
+            first < repeat,
+            "the FIRST copy is the struck one:\n{target}"
+        );
+        assert!(target.contains("- do [#between]"));
     }
 
     #[test]

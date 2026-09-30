@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -208,7 +208,39 @@ Released **agent-doc v0.35.421**: tagged, pushed, and installed with `make insta
 **Workflows at last check:** Release, PyPI and CI in progress; Book and Pages green.
 
 The exchange is past 160 lines; compacting it would be a good next step.
-<!-- agent:boundary:4dd420b8:agent-doc-bugs -->
+> **Queue prompt:** do [#editorlistonlyproj]
+
+### Re: #editorlistonlyproj — the editor dropped a response's prose — opus-5.5 · 2026-09-30T10:26-04:00
+
+**Fixed.** agent-doc `dbcb62e57`, superproject `daad6059d8`, installed with `make install`.
+
+**Root cause.** The editor merge was not at fault. The binary's IPC payload told the editor to write only the bullets:
+- `build_ipc_node_patches_json` sent item-node patches for every component that has list items. The exchange counts as one whenever a response contains bullets.
+- The JetBrains plugin skips a component's full patch once that component has node patches. So the editor wrote only the response's new bullets. Each bullet was placed after the previous bullet, which is the previous response's last bullet. The quote, heading and paragraphs were never sent to the editor.
+- The binary then saw the response missing and appended it in full, so the bullets appeared twice (#respsuffixdup).
+- Evidence from the 03:12 incident (patch `e097816b`): idea.log shows the plugin's own write going from 29880 to 30691 chars. That 811-char gain matches the three new bullets. Feeding the same document and response through the plugin's normal exchange-append path gives the full +2223.
+- The old `…preserves_consecutive_insert_order` test was written for exchange bullets arriving in reverse order. That was the same bug seen from another angle.
+
+**Fix.** A component gets node patches only when the item nodes carry its whole change:
+- The exchange is never node-patched, because a response is headings and prose appended at the boundary.
+- Any other component is node-patched only if its text outside the list items is unchanged. Component markers are left out of that check, so a queue strike that also flips the tag's `go` attribute still travels as node patches.
+
+**Tests.** Two new regression tests:
+- A response with a quote, heading, prose and bullets, plus a concurrent queue strike: the exchange gets no node patches and the strike still does.
+- A component whose summary line changes alongside a new item gets no node patches; the same change without the summary edit still does.
+
+Turning the guard off makes both tests fail. The ordering test now uses a backlog component. `make check` passed 10205/10205. CI run 36728882098 was in progress at last check.
+
+**`#queuefreetextdup`, after your note.** Understood: the queue is a FIFO, and a repeated line means run it again. The duplicate was yours, so the bug is how strikes work:
+- In that cycle, answering one copy struck both (`nodes=2`).
+- `#qstruckbaredup` (`bd6ba2102`, from the previous cycle) drops a plain copy identical to a struck line. That deletes exactly the kind of repeat you scheduled.
+
+I've rewritten the item to cover both. The fix will strike only the first unstruck copy and keep later repeats live.
+
+**Filed at the end of the queue:** `#semmergeargorder`. `try_semantic_merge_convergence` gets its merge roles in the opposite order in production from its own test. It did not cause this incident, but it would put operator text in the agent's slot.
+
+The exchange is past 180 lines. Compaction is left for an explicit opt-in while the queue is draining.
+<!-- agent:boundary:c0e00e2e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -217,19 +249,20 @@ The exchange is past 160 lines; compacting it would be a good next step.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#editorlistonlyproj]
+- ~~do [#editorlistonlyproj]~~
 - do [#stalesupresumedeadlock]
 - do [#jbunloadsig]
-- do [#queuefreetextdup]
+- do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.
+- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#editorlistonlyproj] [agent-doc] Root cause behind #respsuffixdup: under live-prompt drift (operator editing during closeout) the new response's LIST ITEMS land spliced directly after the previous response's last bullet, with its queue quote, heading and paragraphs dropped; materialization then appends the full response, so the bullets show twice. Seen 2026-09-30 01:04, 01:47, 02:17, 03:12 (last: patch e097816b; the 0.35.421 GH #64 bullets inserted after the #qstruckbaredup/rustfmt bullets of the prior response). That placement is exactly document_cell_merge's list-item fallback (agent-added items appended after the last existing item), which merge_exchange_inner uses only when neither side shows ### heading blocks. Next: capture the editor candidate for one such patch (the visible_write_lazily_event content), determine whether the plugin apply or try_semantic_merge_convergence (note its (base, candidate, content_ours) argument order vs document_cell_merge_scoped(base, ours_agent, theirs_operator)) produced it, fix, and add a regression test. The tail-only orphan cleanup cannot remove this mid-exchange copy.
 - [ ] [#stalesupresumedeadlock] [agent-doc] A stale route-owned supervisor (pid 19503, binary from 2026-09-28) ran captured_finalize resume every ~2s with old code that could not see its own materialized response (#queuequotecell), while its recycle stayed deferred with reason=agent_doc_cycle_open: the open cycle needed the new code, and the new code needed the recycle (2026-09-30 06:17-06:35; broken manually with an empty-stdin write --commit). A needs_operator retry loop on a stale binary should count as a recycle boundary, or the resume should run in the fresh controller.
 - [ ] [#jbunloadsig] [agent-doc][jetbrains] GH #63 layer 2: JetBrainsPluginUpgradeAction.java:68 calls DynamicPlugins.checkCanUnloadWithoutRestart(IdeaPluginDescriptorImpl) at compile time; on IU-262.9437.185 that signature does not resolve, so the dynamic upgrade aborts (the file-replacement fallback in 93039df74 now covers it). Look the method up reflectively by name, accept the signatures the supported platform range exposes, and report the build + signatures found on a miss. Needs a plugin version bump in editors/jetbrains/gradle.properties (another session had it dirty 2026-09-30).
-- [ ] [#queuefreetextdup] [agent-doc] 2026-09-30 01:47 cycle: 'release + publish' appeared TWICE in agent:queue before the #ftstrike ran (every answered_free_text_strike_applied reports nodes=2). The operator had rewritten the queue while the live-prompt-drift visible-write repair (ipc_socket_visible_write_drift_missing_response_materialized, patch bc498402) reconciled the editor candidate (18892B) against content_ours (19243B). Trace which merge re-emitted the old free-text line, then fix it with a regression test.
+- [ ] [#queuefreetextdup] [agent-doc] Operator 2026-09-30: the second 'release + publish' was INTENTIONAL, because the queue is a scheduling FIFO and a repeat means run it again. The real defect is strike scope: in the 01:47 cycle every answered_free_text_strike_applied reported nodes=2, so answering one copy struck both. #qstruckbaredup (bd6ba2102) also drops an identical plain copy of a struck line, which deletes an intentional repeat. Fix: a free-text answer strikes only the first unstruck occurrence and later repeats stay live. Re-check #qstruckbaredup against the authored-multiplicity rule (#qdedup-directive-twin) so it collapses only merge re-emits, never operator-authored repeats. Add regression tests for both.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
+- [ ] [#semmergeargorder] [agent-doc] try_semantic_merge_convergence(base, candidate, content_ours) forwards to document_cell_merge_scoped(base, ours_agent, theirs_operator). Its production caller (agent-doc-write-converge-io lib.rs ~1133) passes the EDITOR text as candidate, which lands in the agent slot. Its own test (agent-doc-write-runtime-io ipc.rs ~983) passes the AGENT text there, so the two callers disagree. The operator text then becomes 'ours' and the agent response becomes the skeleton. The path is gated on !is_visible_write_proven() and did not run in the #editorlistonlyproj incident. Decide the intended order, fix the caller or the body (the post-checks also mix the roles), and add a regression test with a concurrent operator deletion.
 <!-- /agent:backlog -->
 
 ## Review

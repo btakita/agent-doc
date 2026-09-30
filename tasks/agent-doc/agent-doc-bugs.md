@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -260,6 +260,24 @@ Landed as `c9b731ea1` (plugin 0.2.447) plus the install bump `674c775ec` (0.2.44
 Thanks. Closing `#focuscrossrootverify`: your live confirmation was the only remaining step, since the agent-side work (`#focuscrossroot`, 730d74600) was already complete and verified.
 
 The agent-doc-bugs queue has no other live heads. When convenient, restart the IDE so plugin 0.2.448 (`#editorauth2` merge-forward registration) loads.
+
+### Re: #advance-review — opus-5 · 2026-09-29T21:58-04:00
+
+> **Queue prompt:** #advance-review
+
+Advanced each review item as far as this session can take it (preset: spec + tests, build + install, commit + push).
+
+- **`#drivecapturedsplice`: its blocker is gone.** It was the "retained delivery unsettled" refusal of the canonical advance, and `#retainedadvanceadmit` (`54452093d`) fixed it this session.
+  - I re-verified the recipe offline. That exposed a harness bug: `--dry-run` died after 30s waiting for a capture receipt that a dry run can never produce, so it never printed the advance or verify steps.
+  - Fixed in `42fe78bd2`, with a spec note. The dry run now prints the whole recipe and exits 0.
+  - The only step left is the live run, which types real keystrokes into your desktop. It needs your go-ahead: say **"run the captured-splice live proof"**.
+- **`#pypiquotarecheck`:** rechecked, and nothing changed.
+  - `make pypi-quota-check` exits 0 at 8.362 of 10 GiB with 152 releases, so nothing needs deleting.
+  - pypi/support#12214 is still untouched since 2026-09-10.
+- **`#grokmcpverify`, `#coder7`:** unchanged. They need a renewed Grok quota and a reachable Coder workspace, and I can't provide either.
+- **Found while running the checks:** HEAD was failing `plugin-version-check`. My `#editorauth2` commit changed VS Code source without a package-generation bump; the version fence only examines committed changes, which is why my earlier `make check` runs missed it. VS Code is now bumped to 0.2.74 (`ac97eb9e6`).
+
+**Verification:** `make check` passed, 10130/10130 (exit 0). `make install` exit 0. Pushed.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -268,7 +286,9 @@ The agent-doc-bugs queue has no other live heads. When convenient, restart the I
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 #advance-review
+- If I make edits in the queue and Run Agent Doc, agent-doc should infer that I want to run the queue even if it is not in go mode. Perhaps we should use `pause` instead of `go` and default to `go`?
 <!-- /agent:queue -->
 
 
@@ -279,8 +299,8 @@ The agent-doc-bugs queue has no other live heads. When convenient, restart the I
 ## Review
 
 <!-- agent:review -->
-- [/] [#drivecapturedsplice] [agent-doc] Run the captured-splice live proof to completion (#activateinstalledjetbrai). HARNESS FIXED 2026-09-28 (095d2af54): the old 'xdotool keystrokes always arrived' premise was false — `type --window` goes through XSendEvent and JetBrains drops send_event=True keys, so nothing ever reached the editor. The harness now types via XTEST under an absolute-path focus guard, keeps scratch docs in tmp/live-repro/ (under .agent-doc/ they became a nested project with their own controller and log), waits only on fresh doc-scoped receipts, pipes a real response into the advance, runs it in the scratch doc's owner pane, and seeds a lint-valid boundary. A live run then produced the first fresh doc-scoped `editor_op_capture_proof operator_ops=N shadow_replay=agreed` any scratch doc has carried. REMAINING BLOCKER: the canonical advance is refused with 'retained document-write delivery from a prior cycle remains unsettled' while the captured edit is still unsaved in the editor (native_editor_save_request_deferred; authority/disk diverge on exchange). Decide whether an independent advance must be admitted while a captured operator edit is retained — that admission is what this recipe exists to prove — and fix whichever side is wrong. Re-run from a desktop with no stale-binary supervisors and a CLI build matching the IDE cdylib (the runs saw crdt_replica_build_mismatch_recovery_requested x4). Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
-- [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically now: a human reply on pypi/support#12214, or `make pypi-quota-check` exiting non-zero. Rechecked 2026-09-29: exit 0 — 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 151 releases (0.35.113..0.35.417), room for ~49,662 further post-cutover releases. Nothing to act on and nothing to delete. pypi/support#12214 is still open with one comment (the acknowledgement bot) and untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check actually reports (next tranche would be 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
+- [/] [#drivecapturedsplice] [agent-doc][operator-verify] Run the captured-splice live proof to completion (#activateinstalledjetbrai). BLOCKER RESOLVED 2026-09-29: the canonical advance was refused while the captured edit was unsaved in the editor; #retainedadvanceadmit (54452093d) admits a new cycle when the authority already holds the retained write and only its disk projection is pending (closeout still waits for disk). Recipe re-verified offline: 'scripts/xdotool-live-verify.sh captured-splice --dry-run' now prints every step and exits 0 (42fe78bd2 stopped it dying on the capture-receipt wait). Harness fixes from 095d2af54 stand (XTEST typing, absolute-path focus guard, tmp/live-repro scratch, fresh doc-scoped receipts). REMAINING: the live run injects real keystrokes into the operator's desktop, so it runs only on the operator's go-ahead ('run the captured-splice live proof'). Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
+- [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or 'make pypi-quota-check' exiting non-zero. Rechecked 2026-09-29 21:5x EDT: exit 0 — 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 152 releases (0.35.113..0.35.418), ~49,630 further post-cutover releases fit. Nothing to act on or delete. pypi/support#12214 still open, 1 comment (acknowledgement bot), untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check reports (next tranche 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 <!-- /agent:review -->

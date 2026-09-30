@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -29,11 +29,40 @@ queue: stop
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260930-035337.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260930-035410.md`*
 
 Compacted content:
-- Archived 14 response topic(s): Fix fpe.md issue; Fix fpe.md issue (paste landed; lint-gate fix); do [#syntheticstrike]; 11 more
-- Prior summary/context: prior compacted content: Archived 31 response topic(s): infra.md "owned by pane %12, invocation from pane %3"; api.md...
+- Prior summary/context: prior compacted content: Archived 14 response topic(s): Fix fpe.md issue; Fix fpe.md issue (paste landed; lint-gate f410.md`*
+
+Compacted content:
+- Prior summary/context: prior compacted content: Archived 14 response topic(s): Fix fpe.md issue; Fix fpe.md issue (paste landed; lint-gate f...
+### Session Summary
+
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260930-035...
+
+### Re: Compact Exchange needed two tries (+ fpe.md stuck closeout) — opus-5.5 · 2026-09-30T00:15-04:00
+
+> **Queue prompt:** Compact Exchange did not work the first time I called it. It worked the second time though.
+
+**Cause (shared with the fpe.md failure you pasted): the binary and the editor library were installed from two different builds.** `make install` compiled the `agent-doc` binary and the JetBrains native library in two separate cargo runs. Each run stamps a build id from a hash of the source tree. Another session edited the shared tree between the two runs, so at 23:33/23:34 the install produced:
+
+- binary `0.35.419+3d7dff…`
+- library `0.35.419+c7a28f…`
+
+After that, the editor and the controller refused every connection to each other. The automatic recovery ("reload the editor's library") reloaded the same mismatched library, so it could never fix anything. The log says so: `withheld reload_library (reload_already_requested_for_listener_build)`.
+
+- **Compact:** the first compact at 03:53:37 was committed to the file, but its write reached **0** editor targets. It only showed up after a forced editor reload a few seconds later. Your second click at 03:54:10 then compacted the *summary itself*: a 663-byte archive and a summary whose only line points to the previous summary. The same pair happened on 09-29 at 00:39/00:40.
+- **fpe.md:** the response was held with `editor_owner_without_registered_replica` for the same reason, and would have stayed held until the next install.
+
+**Fixes (agent-doc `1fbb2e710`, pushed; superproject `83e1aa4753`):**
+- `make install`, `make install-full` and `self-install` now build the binary and the library in **one** cargo run before installing either, so both get the same build id.
+- `lib-install` now **refuses** a library whose build id doesn't match the binary it pairs with, and says how to fix it.
+- Compact is now a no-op when the exchange contains nothing but a compact summary (the same handling as an already-empty exchange). No more summary-of-a-summary and no extra archive file. Operator text or a new response before the boundary still compacts.
+- The spec is updated (`specs/07-core-commands.md`). New tests cover the build-id check (refuse/accept), the build-id scanner, the Makefile single-build rule, and compacting twice. Each regression test was checked by reintroducing the bug: the Makefile test fails with two builds, and the compact-twice test reproduces the exact nested output.
+
+**Verification:** `make check` exit 0, 10161 tests passed. `make install` gave a matching pair (`0.35.419+ecd0acc…` for both). No build-mismatch rejections since 04:07:22. **fpe.md recovered on its own:** its held response committed at 04:08:41 and `session-check` is OK. The editor library reload was deferred to the next idle boundary because a document was mid-cycle. CI for `1fbb2e710` is still running.
+
+**Leftover in this document:** the second compact's summary-of-a-summary is in your editor, and the disk still has the first compact's summary. I left it alone because your editor text is authoritative. It's harmless: the full archive `…-20260930-035337.md` is one link away.
 <!-- agent:boundary:d3c2a789:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -42,7 +71,8 @@ Compacted content:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~Compact Exchange did not work the first time I called it. It worked the second time though.~~
 - Fix https://github.com/btakita/agent-doc/issues/60
 - Fix https://github.com/btakita/agent-doc/issues/61
 - Fix https://github.com/btakita/agent-doc/issues/62

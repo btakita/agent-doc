@@ -21,6 +21,44 @@ struct StatusReport<'a> {
     status: &'a ControllerReliableSyncStatusResponse,
     pane_placements: &'a [PanePlacement],
     surface_pane_findings: &'a [PlacementFinding],
+    unobserved_surface_gap: Option<&'a UnobservedSurfaceGap>,
+}
+
+/// GH #72: the first JetBrains plugin build whose `CpRouteClient` publishes the
+/// editor surface (`observeEditorSurface`, 8ecb433e3).
+const JETBRAINS_SURFACE_PUBLISHER_SINCE: (u64, u64, u64) = (0, 2, 334);
+
+/// GH #72: what can still be said when the controller holds no accepted
+/// surface observation. Without one the layout effect synthesises its
+/// expectation from focus alone and the divergence check has no input, so both
+/// read as success while registered documents sit in stash. The placement of
+/// the registered documents is decidable without the editor, so it is reported
+/// instead of staying silent.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct UnobservedSurfaceGap {
+    registered: usize,
+    in_agent_doc: usize,
+    in_stash: usize,
+    elsewhere: usize,
+    without_pane: usize,
+    /// The last layout outcome's expectation was built without an accepted
+    /// observation, i.e. from focus only.
+    expectation_synthesised: bool,
+    /// Registered documents absent from that synthesised expectation.
+    registered_outside_expectation: usize,
+    publisher: PublisherVerdict,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "verdict", rename_all = "snake_case")]
+enum PublisherVerdict {
+    /// No live JetBrains registration to judge.
+    Unknown,
+    /// Every live JetBrains plugin ships the publisher, so a silent surface is
+    /// a publishing/transport fault, not a missing feature.
+    Ships { versions: Vec<String> },
+    /// At least one live JetBrains plugin predates the publisher.
+    Predates { versions: Vec<String> },
 }
 
 pub fn run(project_root: &Path, json: bool, check: bool) -> Result<()> {
@@ -42,6 +80,7 @@ pub fn run(project_root: &Path, json: bool, check: bool) -> Result<()> {
         .as_ref()
         .map(|visible| surface_pane_divergence(visible, &placements))
         .unwrap_or_default();
+    let gap = unobserved_surface_gap(project_root, &status, &registered, &placements);
     if json {
         println!(
             "{}",
@@ -49,14 +88,15 @@ pub fn run(project_root: &Path, json: bool, check: bool) -> Result<()> {
                 status: &status,
                 pane_placements: &placements,
                 surface_pane_findings: &findings,
+                unobserved_surface_gap: gap.as_ref(),
             })?
         );
         return check_outcome(check, &findings);
     }
     print_plane(&status);
-    print_surface_sync(&status, now_ms());
+    print_surface_sync(&status, gap.as_ref(), now_ms());
     print_pane_placement(&registered, &placements);
-    print_findings(&status, &findings);
+    print_findings(&findings, gap.as_ref());
     check_outcome(check, &findings)
 }
 
@@ -100,6 +140,99 @@ fn project_visible_documents(
             })
             .collect(),
     )
+}
+
+fn has_accepted_observation(status: &ControllerReliableSyncStatusResponse) -> bool {
+    status
+        .surface_sync
+        .as_ref()
+        .and_then(|sync| sync.last_observation.as_ref())
+        .is_some_and(|observation| observation.accepted)
+}
+
+/// `None` when an accepted observation exists (the real divergence check
+/// runs) or the controller predates the surface diagnostic entirely.
+fn unobserved_surface_gap(
+    project_root: &Path,
+    status: &ControllerReliableSyncStatusResponse,
+    registered: &[String],
+    placements: &[PanePlacement],
+) -> Option<UnobservedSurfaceGap> {
+    let surface_sync = status.surface_sync.as_ref()?;
+    if has_accepted_observation(status) {
+        return None;
+    }
+    let mut gap = UnobservedSurfaceGap {
+        registered: registered.len(),
+        in_agent_doc: 0,
+        in_stash: 0,
+        elsewhere: 0,
+        without_pane: 0,
+        expectation_synthesised: false,
+        registered_outside_expectation: 0,
+        publisher: publisher_verdict(&status.registrations),
+    };
+    for document in registered {
+        let windows: Vec<&PaneWindow> = placements
+            .iter()
+            .filter(|placement| &placement.document == document)
+            .map(|placement| &placement.window)
+            .collect();
+        if windows.is_empty() {
+            gap.without_pane += 1;
+        } else if windows.contains(&&PaneWindow::AgentDoc) {
+            gap.in_agent_doc += 1;
+        } else if windows.contains(&&PaneWindow::Stash) {
+            gap.in_stash += 1;
+        } else {
+            gap.elsewhere += 1;
+        }
+    }
+    if let Some(outcome) = &surface_sync.last_layout_outcome {
+        gap.expectation_synthesised = true;
+        let expected: Vec<String> = outcome
+            .expected_documents
+            .iter()
+            .map(|document| normalize_document(project_root, document))
+            .collect();
+        gap.registered_outside_expectation = registered
+            .iter()
+            .filter(|document| !expected.contains(document))
+            .count();
+    }
+    Some(gap)
+}
+
+fn publisher_verdict(
+    registrations: &[agent_doc_reliable_sync_io::liveness::EditorRegistration],
+) -> PublisherVerdict {
+    let mut versions: Vec<String> = registrations
+        .iter()
+        .filter(|registration| registration.editor_kind == "jetbrains")
+        .map(|registration| registration.editor_version.clone())
+        .collect();
+    versions.sort();
+    versions.dedup();
+    if versions.is_empty() {
+        return PublisherVerdict::Unknown;
+    }
+    let predates = versions.iter().any(|version| {
+        parse_version(version).is_some_and(|parsed| parsed < JETBRAINS_SURFACE_PUBLISHER_SINCE)
+    });
+    if predates {
+        PublisherVerdict::Predates { versions }
+    } else {
+        PublisherVerdict::Ships { versions }
+    }
+}
+
+fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version.trim().split(['.', '-', '+']);
+    Some((
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    ))
 }
 
 fn normalize_document(project_root: &Path, document: &str) -> String {
@@ -193,7 +326,11 @@ fn print_plane(status: &ControllerReliableSyncStatusResponse) {
     }
 }
 
-fn print_surface_sync(status: &ControllerReliableSyncStatusResponse, now_ms: u64) {
+fn print_surface_sync(
+    status: &ControllerReliableSyncStatusResponse,
+    gap: Option<&UnobservedSurfaceGap>,
+    now_ms: u64,
+) {
     println!("editor surface auto-sync:");
     let Some(surface_sync) = &status.surface_sync else {
         println!(
@@ -232,6 +369,12 @@ fn print_surface_sync(status: &ControllerReliableSyncStatusResponse, now_ms: u64
                 outcome.attempt,
                 outcome.phase,
             );
+            if let Some(gap) = gap.filter(|gap| gap.expectation_synthesised) {
+                println!(
+                    "    expectation synthesised from focus — no accepted surface observation; {} registered document(s) not in expectation",
+                    gap.registered_outside_expectation
+                );
+            }
             println!("    expected: {:?}", outcome.expected_documents);
             println!("    actual:   {:?}", outcome.actual_documents);
         }
@@ -259,14 +402,11 @@ fn print_pane_placement(registered: &[String], placements: &[PanePlacement]) {
     }
 }
 
-fn print_findings(status: &ControllerReliableSyncStatusResponse, findings: &[PlacementFinding]) {
-    let accepted = status
-        .surface_sync
-        .as_ref()
-        .and_then(|sync| sync.last_observation.as_ref())
-        .is_some_and(|observation| observation.accepted);
-    if !accepted {
-        println!("surface/pane divergence: not evaluated (no accepted surface observation)");
+fn print_findings(findings: &[PlacementFinding], gap: Option<&UnobservedSurfaceGap>) {
+    if let Some(gap) = gap {
+        for line in describe_gap(gap) {
+            println!("{line}");
+        }
         return;
     }
     if findings.is_empty() {
@@ -277,6 +417,39 @@ fn print_findings(status: &ControllerReliableSyncStatusResponse, findings: &[Pla
     for finding in findings {
         println!("  DIVERGED: {}", finding.describe());
     }
+}
+
+fn describe_gap(gap: &UnobservedSurfaceGap) -> Vec<String> {
+    let mut lines = vec![
+        "surface/pane divergence: not evaluated against the editor (no accepted surface observation)"
+            .to_string(),
+        format!(
+            "  placement without an observation: {} registered — {} in agent-doc, {} in stash, {} elsewhere, {} without a pane",
+            gap.registered, gap.in_agent_doc, gap.in_stash, gap.elsewhere, gap.without_pane
+        ),
+    ];
+    if gap.in_stash > 0 {
+        lines.push(format!(
+            "  UNVERIFIED: {} registered document(s) parked in stash; if the editor shows more than {} document(s), the layout is wrong and no check can see it",
+            gap.in_stash, gap.in_agent_doc
+        ));
+    }
+    match &gap.publisher {
+        PublisherVerdict::Unknown => {}
+        PublisherVerdict::Ships { versions } => lines.push(format!(
+            "  publisher: live JetBrains plugin {versions:?} ships the surface publisher (since {}.{}.{}); it is silent, so suspect the editor→controller path, not the plugin version",
+            JETBRAINS_SURFACE_PUBLISHER_SINCE.0,
+            JETBRAINS_SURFACE_PUBLISHER_SINCE.1,
+            JETBRAINS_SURFACE_PUBLISHER_SINCE.2,
+        )),
+        PublisherVerdict::Predates { versions } => lines.push(format!(
+            "  publisher: live JetBrains plugin {versions:?} predates the surface publisher ({}.{}.{}); restart the editor to load a current plugin",
+            JETBRAINS_SURFACE_PUBLISHER_SINCE.0,
+            JETBRAINS_SURFACE_PUBLISHER_SINCE.1,
+            JETBRAINS_SURFACE_PUBLISHER_SINCE.2,
+        )),
+    }
+    lines
 }
 
 fn display_or_none(value: &str) -> &str {
@@ -394,6 +567,152 @@ mod tests {
         let mut status = status_with_visible(true, Vec::new());
         status.surface_sync = None;
         assert!(project_visible_documents(Path::new("/p"), &status).is_none());
+    }
+
+    fn registration(
+        path: &str,
+        version: &str,
+    ) -> agent_doc_reliable_sync_io::liveness::EditorRegistration {
+        agent_doc_reliable_sync_io::liveness::EditorRegistration {
+            document_hash: path.to_string(),
+            pid: 1506046,
+            path: path.to_string(),
+            editor_id: "jetbrains-pid:1506046".to_string(),
+            editor_kind: "jetbrains".to_string(),
+            editor_version: version.to_string(),
+            capabilities: Vec::new(),
+            timestamp_ms: 0,
+        }
+    }
+
+    fn placement(document: &str, window: PaneWindow) -> PanePlacement {
+        PanePlacement {
+            document: document.to_string(),
+            pane_id: format!("%{}", document.len()),
+            window_target: "0:0".to_string(),
+            window,
+        }
+    }
+
+    /// GH #72: the operator's measured shape — seven registered documents, one
+    /// in `agent-doc`, six in stash, no surface observation since controller
+    /// start, and a `converged_focus_only` outcome whose expectation is the
+    /// focused document alone.
+    fn issue_72_status(version: &str) -> (ControllerReliableSyncStatusResponse, Vec<String>) {
+        use agent_doc_controller_io::project_controller::{
+            ControllerSurfaceSyncDiagnostics, PaneLayoutOutcomeDiagnostic,
+        };
+        let registered: Vec<String> = (0..7).map(|i| format!("/p/tasks/{i}.md")).collect();
+        let mut status = status_with_visible(true, Vec::new());
+        status.registrations = registered
+            .iter()
+            .map(|path| registration(path, version))
+            .collect();
+        status.surface_sync = Some(ControllerSurfaceSyncDiagnostics {
+            last_observation: None,
+            last_layout_outcome: Some(PaneLayoutOutcomeDiagnostic {
+                generation: 2,
+                attempt: 1,
+                phase: "converged_focus_only".to_string(),
+                expected_documents: vec![registered[0].clone()],
+                actual_documents: vec![registered[0].clone()],
+                recorded_at_ms: 0,
+            }),
+        });
+        (status, registered)
+    }
+
+    fn issue_72_placements(registered: &[String]) -> Vec<PanePlacement> {
+        registered
+            .iter()
+            .enumerate()
+            .map(|(i, document)| {
+                let window = if i == 0 {
+                    PaneWindow::AgentDoc
+                } else {
+                    PaneWindow::Stash
+                };
+                placement(document, window)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn missing_observation_still_reports_stash_placement() {
+        let (status, registered) = issue_72_status("0.2.392");
+        let placements = issue_72_placements(&registered);
+        let gap = unobserved_surface_gap(Path::new("/p"), &status, &registered, &placements)
+            .expect("no accepted observation must yield a gap report, not silence");
+        assert_eq!(gap.registered, 7);
+        assert_eq!(gap.in_agent_doc, 1);
+        assert_eq!(gap.in_stash, 6);
+        assert_eq!(gap.without_pane, 0);
+        assert!(gap.expectation_synthesised);
+        assert_eq!(gap.registered_outside_expectation, 6);
+        let lines = describe_gap(&gap).join("\n");
+        assert!(
+            lines.contains("UNVERIFIED: 6 registered document(s) parked in stash"),
+            "{lines}"
+        );
+        assert!(lines.contains("ships the surface publisher"), "{lines}");
+    }
+
+    #[test]
+    fn accepted_observation_suppresses_the_gap_report() {
+        let (mut status, registered) = issue_72_status("0.2.392");
+        status.surface_sync.as_mut().unwrap().last_observation =
+            status_with_visible(true, Vec::new())
+                .surface_sync
+                .unwrap()
+                .last_observation;
+        let placements = issue_72_placements(&registered);
+        assert!(
+            unobserved_surface_gap(Path::new("/p"), &status, &registered, &placements).is_none()
+        );
+    }
+
+    #[test]
+    fn rejected_observation_still_reports_the_gap() {
+        let (mut status, registered) = issue_72_status("0.2.392");
+        status.surface_sync.as_mut().unwrap().last_observation =
+            status_with_visible(false, Vec::new())
+                .surface_sync
+                .unwrap()
+                .last_observation;
+        let placements = issue_72_placements(&registered);
+        assert!(
+            unobserved_surface_gap(Path::new("/p"), &status, &registered, &placements).is_some()
+        );
+    }
+
+    #[test]
+    fn plugin_predating_the_publisher_is_named() {
+        let (status, _) = issue_72_status("0.2.300");
+        assert_eq!(
+            publisher_verdict(&status.registrations),
+            PublisherVerdict::Predates {
+                versions: vec!["0.2.300".to_string()]
+            }
+        );
+        assert_eq!(
+            publisher_verdict(&[registration("/p/a.md", "0.2.334")]),
+            PublisherVerdict::Ships {
+                versions: vec!["0.2.334".to_string()]
+            }
+        );
+        assert_eq!(publisher_verdict(&[]), PublisherVerdict::Unknown);
+    }
+
+    #[test]
+    fn no_stash_placement_is_not_flagged_unverified() {
+        let (status, registered) = issue_72_status("0.2.392");
+        let placements: Vec<PanePlacement> = registered
+            .iter()
+            .map(|document| placement(document, PaneWindow::AgentDoc))
+            .collect();
+        let gap =
+            unobserved_surface_gap(Path::new("/p"), &status, &registered, &placements).unwrap();
+        assert!(!describe_gap(&gap).join("\n").contains("UNVERIFIED"));
     }
 
     #[test]

@@ -347,6 +347,13 @@ thread or in a detached periodic timer.
 
 - Mirrors editor split layout in tmux by rejoining the wanted panes into a target window and preserving non-session panes.
 
+## reliable-sync-status
+
+`agent-doc reliable-sync-status [--json] [--check]`
+
+- Reports the reliable-sync plane, the controller's editor-surface auto-sync state (last surface observation, last pane-layout outcome), the tmux pane placement of every registered document, and the surface/pane divergence verdict (GH #62). `--check` exits non-zero only on a divergence finding computed against an accepted surface observation.
+- **No observation is reported, not silenced (GH #72).** Without an accepted surface observation the layout effect synthesises its expectation from focus alone, so a `converged_focus_only` outcome is scoped to focus and cannot vouch for the layout. The status must then (a) label the layout outcome `expectation synthesised from focus` with the count of registered documents absent from that expectation, (b) replace the bare `not evaluated` divergence line with the placement that is decidable without the editor — registered documents counted in `agent-doc`, in `stash`, elsewhere, and without a pane — plus an `UNVERIFIED` line when any are parked in stash, and (c) name whether each live JetBrains plugin build predates the surface publisher (first shipped in 0.2.334) or ships it, which separates "restart the editor" from "the editor→controller path is silent". `--json` carries the same facts as `unobserved_surface_gap` (`null` when an accepted observation exists). The gap is advisory: with no observation, whether a stashed document *should* be visible is undecidable, so it does not fail `--check`.
+
 ## resync
 
 `agent-doc resync [FILE] [--fix]`

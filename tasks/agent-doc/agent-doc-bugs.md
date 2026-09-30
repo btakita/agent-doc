@@ -352,6 +352,33 @@ Two separate paths were erasing your second `release + publish`:
 **`#qstruckbaredup` checked, no change needed.** It only removes a bare line with no leading `- ` that matches a struck item. An authored `- …` repeat is never affected, and the new test pins that down.
 
 Next in the queue: `#fpecapturedresponse`, the fpe.md duplicated response and lost queue items. CI is still running on `fd711bef4`. The exchange is long, but the queue is active, so I'm continuing.
+
+### Re: #fpecapturedresponse (fpe.md duplicate + lost queue items) — opus-5-5 · 2026-09-30T12:58-04:00
+
+> **Queue prompt:**
+>
+> do [#fpecapturedresponse]
+
+**Root cause found and fixed in `eb3d09af1`.** Installed and pushed; `make check` passes (Rust 10221/0, JetBrains 599/0, VS Code 181/0).
+
+What happened on fpe.md, from the state ledger and ops log:
+
+1. **15:26:** Codex answered your question once. That write consumed `do [#awsapproval]` and inserted its quote above the answer, which became copy one. The editor had no registered copy of the document at that moment, so the write was **held** until it could be delivered.
+2. **15:31:36:** while that held write was still pending, a **repair** looked at the live document, which did not show copy one yet. It decided the response was missing and wrote it again from scratch.
+3. That second write's `#awsapproval` was already struck, so its queue step used a fallback that consumes the first free-text items **by count**. By then the first items were your newer ones: "Configure the SBX + STG to have 16 vCPUs…" and "I can't login." Both were marked answered and quoted above a second, identical copy of the answer.
+
+Codex made only one `respond` call; the second copy came entirely from the binary.
+
+**The fixes:**
+- **Repair no longer re-sends a response that a held write already carries.** It waits for the held write to be delivered instead. `--force-disk` is unaffected.
+- **The fallback now needs proof.** When a replay's own items were already struck, it may consume only the queue items its saved response actually quotes. Ordinary closeouts keep their current behaviour: my first version applied the rule everywhere and broke two finalize tests, so I narrowed it to this case.
+- For each fix, I disabled it and its new test failed. I also added a test showing the "already present" check tolerates the inserted quote; it already did, which ruled out that theory.
+
+**Still needed in fpe.md itself.** It is a live document owned by the Codex pane, so I didn't touch it. Through the editor:
+- Put "Configure the SBX + STG to have 16 vCPUs for the FPE instance. Update the haiven-infra costs." and "I can't login." back in the queue.
+- Remove the second `### Re: what a Haiven admin can do about AWS GPU access (HEAD)` section.
+
+Next in the queue: the `presets` → `prompt_presets` frontmatter alias, then `release + publish`. CI is still running on `bc6cb52ef`.
 <!-- agent:boundary:baee6279 -->
 <!-- /agent:exchange -->
 
@@ -361,18 +388,18 @@ Next in the queue: `#fpecapturedresponse`, the fpe.md duplicated response and lo
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release + publish in a subagent so I can test it on my coder project~~
-- ~~do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.~~
-- ~~do [#semmergeargorder]~~
-- do [#fpecapturedresponse]
+- ~~do [#fpecapturedresponse]~~
 - re [#apimdrevert]: I don't recall which text was lost. Can we practically debug log these events or will this cause excessive debug logging?
 - In the frontmatter, alias `presets` to `prompt_presets`.
+- fix https://github.com/btakita/agent-doc/issues/62
+- fix https://github.com/btakita/agent-doc/issues/65
+- fix https://github.com/btakita/agent-doc/issues/66
+- fix https://github.com/btakita/agent-doc/issues/67
 - release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#fpecapturedresponse] [fpereplaydup] [agent-doc] fpe.md 2026-09-30: a captured response retained behind editor_owner_without_registered_replica (intent 1790782003163310509, cycle-1790781814399) was written TWICE and the replay consumed two operator queue heads ("Configure the SBX + STG to have 16 vCPUs..." and "I can't login.") as Queue-prompt quotes over a byte-identical answer (haiven-dev commit 6735e15e). Evidence: ops.log 15:27-15:32Z shows ~9 captured_finalize_resume_tracked_work replays (recorded_tracked_work_is_unlanded kept returning true), capture_baseline_refreshed_for_benign_drift + repair_adopt_existing_response at 15:30:58-59, free_text_queue_strike at 15:30:59, then origin=repair_replay at 15:31:37. Find which step re-renders queue quotes against the CURRENT queue and make replay of an already-written capture idempotent; add a SimWorld regression. The live fpe.md still needs the two queue items restored and the duplicate (HEAD) response removed through the editor.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02 local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

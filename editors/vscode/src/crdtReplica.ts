@@ -860,6 +860,18 @@ export class CrdtReplicaManager {
         if (forceRefresh) {
             if (this.hasPendingLocal(filePath)) return false;
             const staleForwarder = this.forwarders.get(filePath);
+            if (staleForwarder && registrationText !== undefined) {
+                // `#editorauth2`: re-register WITH the retained state vector. A cold
+                // registration made the controller bootstrap this editor from its
+                // canonical (disk on a fresh relay) instead of reseeding the relay
+                // from the editor's retained frontier (`#editorauth3`). The swap is
+                // atomic and fenced; on a race the old membership stays registered
+                // and nothing is dropped. Mirrors JetBrains `forwarderFor`.
+                const replacement = await this.replaceForwarder(filePath, staleForwarder, registrationText);
+                if (!replacement) return false;
+                this.requestRemoteDrain(filePath);
+                return true;
+            }
             if (staleForwarder) {
                 this.forwarders.delete(filePath);
                 await staleForwarder.deregister();

@@ -131,6 +131,54 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
+    fun `a clean three-way merge carries the operator buffer forward instead of holding`() {
+        // `#editorauth2`: api.md 2026-09-29 15:35 shape. The operator typed after the
+        // settled shadow, a handoff moved canonical with an agent write, and the
+        // hold had no exit. A clean reconcile publishes both sides; a conflicting
+        // or unavailable reconcile still holds; no path adopts canonical over the buffer.
+        val shadow = "# doc\n\nlast published state\n"
+        val buffer = "${shadow}do the thing I just typed\n"
+        val canonical = "# doc\nagent write\n\nlast published state\n"
+        for ((clean, expected) in listOf(
+            true to RetainedRegistrationProjectionAction.MergeForward,
+            false to RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            null to RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+        )) {
+            for (retained in listOf(true, false)) {
+                assertEquals(
+                    "clean=$clean retained=$retained",
+                    expected,
+                    retainedRegistrationProjectionActionForAttachUtil(
+                        deferCanonicalProjectionForPendingLocal = false,
+                        canonicalProjectionRetained = retained,
+                        publishedShadow = shadow,
+                        bufferText = buffer,
+                        canonicalText = canonical,
+                        cleanMergeAvailable = clean,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `a proven rebase still adopts canonical ahead of a merge`() {
+        val shadow = "# doc\n\nFix api.md issue\n"
+        val buffer = "${shadow}typed\n"
+        val canonical = "$buffer\n### Re: replayed\n"
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            retainedRegistrationProjectionActionUtil(
+                publishedShadow = shadow,
+                bufferText = buffer,
+                canonicalText = canonical,
+                canonicalContainsOperatorEdits = true,
+                cleanMergeAvailable = true,
+            ),
+        )
+    }
+
+    @Test
     fun `canonical proven to contain the operator edits ends the three-generation hold`() {
         // `#ambiguousholdforever`: the controller ingested the operator's paste,
         // then appended a response beside it. The hold had no exit and refused

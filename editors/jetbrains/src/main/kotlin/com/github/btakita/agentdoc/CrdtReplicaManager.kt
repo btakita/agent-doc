@@ -2899,6 +2899,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 publishedShadow = publishedShadowAtRegistration,
                 bufferText = bufferTextAtRegistration,
                 canonicalText = forwarder.replicaText(),
+                cleanMergeAvailable =
+                    cleanRegistrationMerge(
+                        publishedShadowAtRegistration,
+                        bufferTextAtRegistration,
+                        forwarder.replicaText(),
+                    ) != null,
                 canonicalContainsOperatorEdits =
                     canonicalContainsOperatorEditsAtRegistration(
                         filePath = filePath,
@@ -2979,6 +2985,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "[crdt-replica] deferred retained controller projection for ${File(filePath).name}; " +
                             "a captured local delta owns the visible buffer",
                     )
+                }
+
+                RetainedRegistrationProjectionAction.MergeForward -> {
+                    log.warn(
+                        "[crdt-replica] registration merging the live operator buffer forward onto the " +
+                            "controller canonical for ${File(filePath).name}; " +
+                            "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
+                            "buffer_hash=${contentHash(bufferTextAtRegistration!!)} " +
+                            "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
+                    )
+                    retainedCanonicalProjectionPaths.remove(filePath)
                 }
             }
         } else if (retainedProjectionAction == RetainedRegistrationProjectionAction.HoldOperatorBuffer) {
@@ -3088,6 +3105,28 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         return forwarder
     }
 
+    /**
+     * `#editorauth2`: the clean three-way merge of a registration's generations,
+     * or null when any is missing, they need no merge, the reconciler is
+     * unavailable, or the merge has conflicts (those stay held, never overwritten).
+     */
+    private fun cleanRegistrationMerge(shadow: String?, buffer: String?, canonical: String?): String? {
+        if (shadow == null || buffer == null || canonical == null) return null
+        if (buffer == canonical || buffer == shadow || canonical == shadow) return null
+        val json = NativePatching.reconcileText(shadow, buffer, canonical, -1) ?: return null
+        return try {
+            val root = com.google.gson.JsonParser.parseString(json).asJsonObject
+            if (!root.get("ok").asBoolean || root.get("conflicts").asInt != 0) {
+                null
+            } else {
+                root.get("text").asString
+            }
+        } catch (e: Exception) {
+            log.warn("[crdt-replica] registration merge result unreadable: ${e.message}")
+            null
+        }
+    }
+
     /** Complete the causal projection decision only after this endpoint owns the map slot. */
     private fun finalizeRegistrationProjection(
         filePath: String,
@@ -3142,6 +3181,43 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             RetainedRegistrationProjectionAction.HoldOperatorBuffer -> false
 
             RetainedRegistrationProjectionAction.DeferCanonicalProjection -> true
+
+            RetainedRegistrationProjectionAction.MergeForward -> {
+                // Recheck the captured generations at the publication edge, then
+                // recompute the merge from exactly those bytes.
+                val canonical = forwarder.replicaText()
+                val merged =
+                    if (
+                        publishedShadow == null ||
+                        bufferText == null ||
+                        canonical == null ||
+                        (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]) !=
+                            publishedShadow ||
+                        editorBufferText(filePath) != bufferText
+                    ) {
+                        null
+                    } else {
+                        cleanRegistrationMerge(publishedShadow, bufferText, canonical)
+                    }
+                if (merged == null || !forwarder.ensureEditorText(merged) || forwarder.replicaText() != merged) {
+                    log.warn(
+                        "[crdt-replica] registration merge-forward raced for ${File(filePath).name}; " +
+                            "leaving the operator buffer untouched and retrying registration",
+                    )
+                    false
+                } else {
+                    retainedCanonicalProjectionPaths.remove(filePath)
+                    // The replica now holds the merge and has published it; project
+                    // it into the buffer through the generation-fenced apply, which
+                    // refuses if the operator typed since `bufferText`.
+                    queueRemoteTextApply(filePath, bufferText!!, merged, forwarder, emptyList())
+                    log.info(
+                        "[crdt-replica] merged live buffer forward for ${File(filePath).name}; " +
+                            "merged_hash=${contentHash(merged)} driver=registration-merge-forward",
+                    )
+                    true
+                }
+            }
         }
         if (committed) {
             // A controller transport registration is provisional until its
@@ -4225,6 +4301,14 @@ internal enum class RetainedRegistrationProjectionAction {
     PublishOperatorBuffer,
     HoldOperatorBuffer,
     DeferCanonicalProjection,
+    /**
+     * `#editorauth2`: three generations differ, but reconciling them (base =
+     * settled shadow, yours = buffer, agent = canonical) is clean. Registration
+     * adopts canonical into the replica, publishes the merged text as a local
+     * delta, and projects it into the buffer. Neither side's text is lost, and the
+     * ambiguity hold gets an exit that does not overwrite the operator.
+     */
+    MergeForward,
 }
 
 internal fun retainedRegistrationProjectionActionForAttachUtil(
@@ -4236,6 +4320,7 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
     bufferText: String?,
     canonicalText: String?,
     canonicalContainsOperatorEdits: Boolean? = null,
+    cleanMergeAvailable: Boolean? = null,
 ): RetainedRegistrationProjectionAction =
     if (deferCanonicalProjectionForPendingLocal) {
         RetainedRegistrationProjectionAction.DeferCanonicalProjection
@@ -4255,6 +4340,7 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
             bufferText = bufferText,
             canonicalText = canonicalText,
             canonicalContainsOperatorEdits = canonicalContainsOperatorEdits,
+            cleanMergeAvailable = cleanMergeAvailable,
         )
     } else if (
         publishedShadow != null &&
@@ -4276,6 +4362,7 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
             bufferText = bufferText,
             canonicalText = canonicalText,
             canonicalContainsOperatorEdits = canonicalContainsOperatorEdits,
+            cleanMergeAvailable = cleanMergeAvailable,
         )
     } else {
         RetainedRegistrationProjectionAction.ApplyCanonical
@@ -4294,6 +4381,7 @@ internal fun retainedRegistrationProjectionActionUtil(
     bufferText: String?,
     canonicalText: String?,
     canonicalContainsOperatorEdits: Boolean? = null,
+    cleanMergeAvailable: Boolean? = null,
 ): RetainedRegistrationProjectionAction =
     when {
         // Convergence is safe and must win before the three-generation test;
@@ -4315,6 +4403,9 @@ internal fun retainedRegistrationProjectionActionUtil(
         // all operator text. Without this edge the hold had no exit: the cut
         // never changes, and registration was refused every second for hours.
         canonicalContainsOperatorEdits == true -> RetainedRegistrationProjectionAction.ApplyCanonical
+        // `#editorauth2`: publish the editor state and merge forward instead of
+        // holding forever, when the three-way reconcile has no conflicts.
+        cleanMergeAvailable == true -> RetainedRegistrationProjectionAction.MergeForward
         else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
     }
 

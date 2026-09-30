@@ -96,13 +96,15 @@ class FakeTransport implements ReplicaTransport {
     unavailablePulls = 0;
   projectionFailures = 0;
   registerFailures = 0;
+  registerStateVectors: Array<Uint8Array | null> = [];
 
     async register(
         _filePath: string,
         _identity: string,
-        _stateVector?: Uint8Array | null,
+        stateVector?: Uint8Array | null,
   ): Promise<{ clientId: number; bootstrap?: Uint8Array | null }> {
     this.registerCount += 1;
+    this.registerStateVectors.push(stateVector == null ? null : Buffer.from(stateVector));
     if (this.registerFailures > 0) {
       this.registerFailures -= 1;
       throw new Error('register unavailable');
@@ -1087,5 +1089,37 @@ describe('crdt replica IPC response parsing', () => {
                 reason: 'missing_replica',
             },
         );
+    });
+});
+
+describe('#editorauth2 forced re-registration keeps the retained frontier', () => {
+    class ResumableNode extends FakeNode {
+        stateVector(): Uint8Array | null {
+            return Buffer.from([7, 7]);
+        }
+    }
+
+    // A cold re-registration made the controller bootstrap this editor from its
+    // canonical (disk on a fresh relay) instead of reseeding from the editor.
+    it('re-registers with the prior replica state vector instead of cold', async () => {
+        const transport = new FakeTransport();
+        const filePath = '/work/api.md';
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => new ResumableNode('base'),
+            listDocuments: () => [],
+            currentText: () => 'base',
+            applyText: async () => true,
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        assert.strictEqual(await manager.attachDocument(filePath, 'base', true), true);
+
+        assert.strictEqual(transport.registerCount, 2);
+        assert.strictEqual(transport.registerStateVectors[0], null);
+        assert.deepStrictEqual(transport.registerStateVectors[1], Buffer.from([7, 7]));
+        manager.dispose();
     });
 });

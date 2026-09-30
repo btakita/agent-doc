@@ -157,7 +157,9 @@ impl QueueControl {
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "start" | "go" => Some(Self::Start),
-            "stop" => Some(Self::Stop),
+            // `pause` is the operator-only hold (`#queueeditgo`): inactive like
+            // `stop`, but never written by the binary.
+            "stop" | "pause" => Some(Self::Stop),
             _ => None,
         }
     }
@@ -2036,7 +2038,14 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
 /// `queue:` back onto `queue_active` on parse.
 pub fn merge_queue_state(content: &str, active: bool) -> Result<String> {
     let (mut fm, body) = parse(content)?;
-    fm.queue = Some(if active { "start" } else { "stop" }.to_string());
+    // A drain/halt must not lift an operator `pause` (`#queueeditgo`).
+    let paused = fm
+        .queue
+        .as_deref()
+        .is_some_and(|queue| queue.trim().eq_ignore_ascii_case("pause"));
+    if !(paused && !active) {
+        fm.queue = Some(if active { "start" } else { "stop" }.to_string());
+    }
     fm.queue_active = None;
     write_preserving(content, &fm, body)
 }
@@ -2049,6 +2058,7 @@ pub fn merge_queue_control(content: &str, control: &str) -> Result<String> {
         "go" => "go",
         "start" => "start",
         "stop" => "stop",
+        "pause" => "pause",
         other => anyhow::bail!("unsupported queue control `{other}`"),
     };
     let (mut fm, body) = parse(content)?;
@@ -2775,6 +2785,7 @@ mod tests {
         assert_eq!(QueueControl::parse("go"), Some(QueueControl::Start));
         assert_eq!(QueueControl::parse("STOP"), Some(QueueControl::Stop));
         assert_eq!(QueueControl::parse("  Start  "), Some(QueueControl::Start));
+        assert_eq!(QueueControl::parse("pause"), Some(QueueControl::Stop));
         assert_eq!(QueueControl::parse("auto"), None);
         assert_eq!(QueueControl::parse(""), None);
         assert!(QueueControl::Start.is_active());
@@ -2989,6 +3000,20 @@ mod tests {
         assert_eq!(fm.queue_active, Some(true));
         let (fm, _) = parse(&stopped).unwrap();
         assert_eq!(fm.queue_active, Some(false));
+    }
+
+    #[test]
+    fn merge_queue_state_drain_keeps_operator_pause() {
+        // #queueeditgo: `pause` is operator-owned; a drain/halt writes `stop`
+        // everywhere else but must not lift a pause.
+        let paused = "---\nagent_doc_format: template\nqueue: pause\n---\n\nbody\n";
+        let drained = merge_queue_state(paused, false).unwrap();
+        assert!(drained.contains("queue: pause"), "{drained}");
+        let (fm, _) = parse(&drained).unwrap();
+        assert_eq!(fm.queue_active, Some(false));
+
+        let pause = merge_queue_control("---\nqueue: go\n---\n\nbody\n", "pause").unwrap();
+        assert!(pause.contains("queue: pause"), "{pause}");
     }
 
     #[test]

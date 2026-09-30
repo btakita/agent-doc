@@ -251,8 +251,25 @@ control. It subsumes the deprecated `queue_active:` boolean and the deprecated
 | `queue:` value | meaning | subsumes |
 |----------------|---------|----------|
 | `start` (alias `go`) | activate — drive the queue | `queue_active: true` + marker `auto` |
-| `stop` | deactivate — halt | `queue_active: false` |
+| `stop` | deactivate — halt (the binary writes this on drain) | `queue_active: false` |
+| `pause` | operator hold — inactive; never written by the binary | — |
 | (absent) | unmanaged / inactive | absence of both |
+
+**Queue edits imply `go` (`#queueeditgo`).** Editing the queue is consent to
+run it. When the pre-turn baseline and the current document differ by at least
+one live queue prompt or preset the baseline did not carry (added or reworded;
+removals, strikes, and progress/pin re-marks alone do not count), and the
+operator did not also change the queue control in that window, preflight arms
+`go` on both the marker and `queue:` (`control_binding::infer_queue_go_from_prompt_edit`,
+ops-log `queue_edit_go_inferred`). This overrides `stop`, since the binary
+writes `stop` on every drain: before this, adding an item after a drain and
+invoking Run Agent Doc left the item inert, or armed only `start`, which never
+continues past the first head. `queue: pause` is the operator's standing hold.
+It blocks the inference and free-text admission's queue start, and a
+drain/halt (`merge_queue_state(false)`) or a consumed marker token never
+lifts it; only the operator's own edit to `queue:` does. A control gesture made
+beside the prompt edit (for example setting `stop` while adding an item) wins
+over the inference.
 
 - The value is parsed leniently (case- and whitespace-insensitive). An
   unrecognized value (typo) is ignored and never flips activation.

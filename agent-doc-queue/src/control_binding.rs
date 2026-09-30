@@ -24,11 +24,25 @@ pub fn explicit_queue_start_mode(
     resolved_queue_binding(attrs, frontmatter_queue) == Some(QueueBindingMode::Start)
 }
 
+/// `stop` and the operator-only `pause` hold both keep the queue inactive.
 pub fn explicit_queue_stop_mode(
     attrs: &HashMap<String, String>,
     frontmatter_queue: Option<&str>,
 ) -> bool {
-    resolved_queue_binding(attrs, frontmatter_queue) == Some(QueueBindingMode::Stop)
+    matches!(
+        resolved_queue_binding(attrs, frontmatter_queue),
+        Some(QueueBindingMode::Stop | QueueBindingMode::Pause)
+    )
+}
+
+/// `#queueeditgo`: `queue: pause` is the operator's standing hold. The binary
+/// never writes it (drain/halt writes `stop`), so it is the one control that
+/// survives a queue edit instead of being re-armed to `go`.
+pub fn explicit_queue_pause_mode(
+    attrs: &HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> bool {
+    resolved_queue_binding(attrs, frontmatter_queue) == Some(QueueBindingMode::Pause)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +50,7 @@ enum QueueBindingMode {
     Start,
     Go,
     Stop,
+    Pause,
 }
 
 impl QueueBindingMode {
@@ -44,6 +59,7 @@ impl QueueBindingMode {
             "start" => Some(Self::Start),
             "go" => Some(Self::Go),
             "stop" => Some(Self::Stop),
+            "pause" => Some(Self::Pause),
             _ => None,
         }
     }
@@ -65,6 +81,7 @@ impl QueueBindingMode {
             Self::Start => "start",
             Self::Go => "go",
             Self::Stop => "stop",
+            Self::Pause => "pause",
         }
     }
 
@@ -72,7 +89,7 @@ impl QueueBindingMode {
         match self {
             Self::Start => Some("start"),
             Self::Go => Some("go"),
-            Self::Stop => None,
+            Self::Stop | Self::Pause => None,
         }
     }
 }
@@ -154,7 +171,14 @@ fn queue_binding_target(
     });
 
     if marker_changed && !frontmatter_changed {
-        return Some(current.marker_mode.unwrap_or(QueueBindingMode::Stop));
+        // A marker token disappearing (drain strip) is a stop, except under an
+        // operator `pause`, which only the operator may lift.
+        let fallback = if current.frontmatter_mode == Some(QueueBindingMode::Pause) {
+            QueueBindingMode::Pause
+        } else {
+            QueueBindingMode::Stop
+        };
+        return Some(current.marker_mode.unwrap_or(fallback));
     }
     if frontmatter_changed && !marker_changed {
         // Realtime editor replicas publish intermediate frontmatter states while
@@ -263,6 +287,109 @@ fn set_queue_marker_binding(content: &str, marker_token: Option<&str>) -> Result
     rebuilt.push_str(&new_tag);
     rebuilt.push_str(&content[queue_component.open_end..]);
     Ok(rebuilt)
+}
+
+/// `#queueeditgo`: an operator edit to the queue's prompts is consent to run it.
+///
+/// When the pre-turn baseline (`snapshot_content`) and the current document
+/// differ by at least one live prompt or preset the baseline did not carry
+/// (added or reworded — removals and strikes alone are not a request to run),
+/// and the operator did not touch the queue control itself this window, the
+/// queue is armed to `go` in both the marker and the canonical `queue:` field.
+/// `go` rather than `start` because only `go` keeps the drain continuing past
+/// the first head.
+///
+/// `queue: pause` (or `pause` on the marker) is the operator's hold and blocks
+/// the inference; `stop`, which the binary itself writes on drain, does not —
+/// that was the reported defect: after a drain wrote `stop`, adding a queue item
+/// and invoking Run Agent Doc left the item inert.
+///
+/// Returns `(content, changed)`. Pure; callers own I/O.
+pub fn infer_queue_go_from_prompt_edit(
+    content: &str,
+    snapshot_content: Option<&str>,
+) -> Result<(String, bool)> {
+    let unchanged = || Ok((content.to_string(), false));
+    let Some(snapshot) = snapshot_content else {
+        return unchanged();
+    };
+    let Some(current) = queue_binding_state(content) else {
+        return unchanged();
+    };
+    let Some(previous) = queue_binding_state(snapshot) else {
+        return unchanged();
+    };
+    if current.marker_mode != previous.marker_mode
+        || current.frontmatter_mode != previous.frontmatter_mode
+        || current.legacy_queue_active != previous.legacy_queue_active
+        || current.has_auto != previous.has_auto
+    {
+        // The operator is steering the control directly; that gesture wins and
+        // `converge_queue_control_binding_content` owns projecting it.
+        return unchanged();
+    }
+    let effective = current.marker_mode.or(current.frontmatter_mode);
+    if matches!(
+        effective,
+        Some(QueueBindingMode::Go | QueueBindingMode::Pause)
+    ) {
+        return unchanged();
+    }
+    if !queue_prompts_edited(content, snapshot) {
+        return unchanged();
+    }
+    let mut updated = set_queue_marker_binding(content, QueueBindingMode::Go.marker_token())?;
+    updated = frontmatter::merge_queue_control(&updated, QueueBindingMode::Go.frontmatter_value())?;
+    let changed = updated != content;
+    Ok((updated, changed))
+}
+
+/// Normalized live queue prompt/preset lines, cosmetic progress and pin
+/// markers removed so re-marking an existing item never reads as an edit.
+fn live_queue_prompt_keys(content: &str) -> Option<Vec<String>> {
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let queue_component = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries = crate::document_queue::parse(body).ok()?;
+    Some(
+        entries
+            .iter()
+            .filter_map(|entry| match entry {
+                crate::document_queue::QueueEntry::Prompt(prompt) => Some(prompt.text.as_str()),
+                crate::document_queue::QueueEntry::Preset(preset) => Some(preset.as_str()),
+                _ => None,
+            })
+            .map(|text| {
+                agent_doc_document::queue_projection::strip_priority_markers(
+                    &agent_doc_document::queue_projection::strip_in_progress_marker(text),
+                )
+                .trim()
+                .to_string()
+            })
+            .filter(|text| !text.is_empty())
+            .collect(),
+    )
+}
+
+fn queue_prompts_edited(content: &str, snapshot: &str) -> bool {
+    let (Some(current), Some(previous)) = (
+        live_queue_prompt_keys(content),
+        live_queue_prompt_keys(snapshot),
+    ) else {
+        return false;
+    };
+    let mut remaining = previous;
+    current
+        .iter()
+        .any(|key| match remaining.iter().position(|prev| prev == key) {
+            Some(index) => {
+                remaining.swap_remove(index);
+                false
+            }
+            None => true,
+        })
 }
 
 pub fn strip_queue_activation_tokens_in_content(content: &str) -> Result<String> {
@@ -522,5 +649,128 @@ mod tests {
         let stripped = strip_queue_activation_tokens_in_content(content).unwrap();
 
         assert!(stripped.contains("<!-- agent:queue priority -->"));
+    }
+
+    fn queue_doc(control: Option<&str>, marker: &str, items: &[&str]) -> String {
+        let mut doc = String::from("---\nagent_doc_session: test\n");
+        if let Some(control) = control {
+            doc.push_str(&format!("queue: {control}\n"));
+        }
+        doc.push_str("---\n\n");
+        doc.push_str(&format!("<!-- agent:queue{marker} -->\n"));
+        for item in items {
+            doc.push_str(&format!("- {item}\n"));
+        }
+        doc.push_str("<!-- /agent:queue -->\n");
+        doc
+    }
+
+    #[test]
+    fn queue_edit_after_drain_stop_arms_go() {
+        // #queueeditgo: the drain wrote `queue: stop`; the operator then adds an
+        // item and runs Run Agent Doc. The edit itself is consent to run.
+        let snapshot = queue_doc(Some("stop"), "", &[]);
+        let content = queue_doc(Some("stop"), "", &["fix the thing"]);
+
+        let (updated, changed) =
+            infer_queue_go_from_prompt_edit(&content, Some(&snapshot)).unwrap();
+
+        assert!(changed);
+        assert!(updated.contains("queue: go\n"), "{updated}");
+        assert!(updated.contains("<!-- agent:queue go -->"), "{updated}");
+        // Settled: a second pass over the armed document is a no-op, and the
+        // binding convergence agrees with it.
+        let (again, changed) = infer_queue_go_from_prompt_edit(&updated, Some(&snapshot)).unwrap();
+        assert!(!changed);
+        assert_eq!(again, updated);
+    }
+
+    #[test]
+    fn queue_edit_with_no_control_arms_go() {
+        let snapshot = queue_doc(None, "", &["old"]);
+        let content = queue_doc(None, "", &["old reworded"]);
+
+        let (updated, changed) =
+            infer_queue_go_from_prompt_edit(&content, Some(&snapshot)).unwrap();
+
+        assert!(changed);
+        assert!(updated.contains("queue: go\n"), "{updated}");
+    }
+
+    #[test]
+    fn queue_edit_under_start_upgrades_to_go() {
+        let snapshot = queue_doc(Some("start"), "", &["a"]);
+        let content = queue_doc(Some("start"), "", &["a", "b"]);
+
+        let (updated, changed) =
+            infer_queue_go_from_prompt_edit(&content, Some(&snapshot)).unwrap();
+
+        assert!(changed);
+        assert!(updated.contains("queue: go\n"), "{updated}");
+    }
+
+    #[test]
+    fn queue_edit_under_pause_stays_paused() {
+        let snapshot = queue_doc(Some("pause"), "", &[]);
+        let content = queue_doc(Some("pause"), "", &["held item"]);
+
+        let (updated, changed) =
+            infer_queue_go_from_prompt_edit(&content, Some(&snapshot)).unwrap();
+
+        assert!(!changed);
+        assert_eq!(updated, content);
+        let (fm, _) = frontmatter::parse(&content).unwrap();
+        assert!(explicit_queue_stop_mode(
+            &HashMap::new(),
+            fm.queue.as_deref()
+        ));
+        assert!(explicit_queue_pause_mode(
+            &HashMap::new(),
+            fm.queue.as_deref()
+        ));
+    }
+
+    #[test]
+    fn queue_removal_or_marker_only_edit_does_not_arm() {
+        // Removing a head (what the operator did to `#advance-review`) or only
+        // re-marking an item is not a request to run.
+        let snapshot = queue_doc(Some("stop"), "", &["\u{1f6a7} a", "b"]);
+        for content in [
+            queue_doc(Some("stop"), "", &["b"]),
+            queue_doc(Some("stop"), "", &["a", "\u{1f4cc} b"]),
+        ] {
+            let (_, changed) = infer_queue_go_from_prompt_edit(&content, Some(&snapshot)).unwrap();
+            assert!(!changed, "{content}");
+        }
+    }
+
+    #[test]
+    fn queue_edit_beside_control_gesture_defers_to_the_gesture() {
+        // The operator stopped the queue AND added an item in one window: the
+        // explicit control wins.
+        let snapshot = queue_doc(Some("go"), " go", &[]);
+        let content = queue_doc(Some("stop"), "", &["later"]);
+
+        let (_, changed) = infer_queue_go_from_prompt_edit(&content, Some(&snapshot)).unwrap();
+
+        assert!(!changed);
+    }
+
+    #[test]
+    fn drained_marker_does_not_lift_operator_pause() {
+        let snapshot = queue_doc(Some("pause"), " go", &["a"]);
+        let content = queue_doc(Some("pause"), "", &["a"]);
+
+        let (updated, _) =
+            converge_queue_control_binding_content(&content, Some(&snapshot)).unwrap();
+
+        assert!(updated.contains("queue: pause\n"), "{updated}");
+    }
+
+    #[test]
+    fn queue_edit_without_baseline_is_inert() {
+        let content = queue_doc(Some("stop"), "", &["x"]);
+        let (_, changed) = infer_queue_go_from_prompt_edit(&content, None).unwrap();
+        assert!(!changed);
     }
 }

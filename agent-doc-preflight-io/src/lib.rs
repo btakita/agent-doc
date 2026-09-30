@@ -22,8 +22,9 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
     backlog_sync::AutoBacklogQueueSyncPolicy,
     control_binding::{
-        converge_queue_control_binding_content, explicit_queue_go_mode, explicit_queue_start_mode,
-        explicit_queue_stop_mode, strip_queue_activation_tokens_in_content,
+        converge_queue_control_binding_content, explicit_queue_go_mode, explicit_queue_pause_mode,
+        explicit_queue_start_mode, explicit_queue_stop_mode, infer_queue_go_from_prompt_edit,
+        strip_queue_activation_tokens_in_content,
     },
     free_text_admission::{
         FreeTextAdmissionExecution, FreeTextAdmissionScope, append_empty_agent_component,
@@ -2640,6 +2641,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         .flatten();
     let (content, _) =
         converge_queue_control_binding_content(&content, snapshot_content.as_deref())?;
+    let (content, _) = infer_queue_go_from_prompt_edit(&content, snapshot_content.as_deref())?;
     let components = match agent_doc_element::element::parse(&content) {
         Ok(components) => components,
         Err(_) => return Ok(QueueState::default()),
@@ -3392,6 +3394,26 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         mutated = true;
         eprintln!("[preflight] queue: synchronized queue marker/frontmatter control binding");
     }
+    // `#queueeditgo`: an operator edit to the queue's prompts arms `go` unless
+    // the operator holds the queue with `queue: pause`.
+    if let (projected, true) =
+        infer_queue_go_from_prompt_edit(&current_content, control_snapshot_content.as_deref())?
+    {
+        current_content = projected;
+        content = current_content.clone();
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = components
+            .iter()
+            .find(|c| c.name == "queue")
+            .context("queue maintenance: queue component vanished after queue-edit go inference")?
+            .clone();
+        mutated = true;
+        eprintln!("[preflight] queue: operator queue edit armed `queue: go` (#queueeditgo)");
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("queue_edit_go_inferred file={}", file.display()),
+        );
+    }
 
     let project_root = file.canonicalize().ok().and_then(|canonical| {
         agent_doc_project_root_io::project_root_containing(&canonical)
@@ -3399,6 +3421,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     });
     let queue_active_for_free_text =
         queue_currently_active_for_free_text_admission(&current_content, &comp.attrs);
+    let queue_paused_by_operator = {
+        let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
+        explicit_queue_pause_mode(&comp.attrs, fm.queue.as_deref())
+    };
     let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
@@ -3416,7 +3442,9 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         &entries,
         exchange_prompt.as_deref(),
         &queue_free_text_scope,
-        !queue_active_for_free_text,
+        // `#queueeditgo`: an operator `queue: pause` holds the queue; admission
+        // may still file the free text, but it must not start the queue.
+        !queue_active_for_free_text && !queue_paused_by_operator,
         &document_id,
     )? {
         let (execution, warnings) = resolve_free_text_execution(
@@ -8237,6 +8265,51 @@ mod tests {
         );
     }
     #[test]
+    fn run_queue_maintenance_queue_edit_after_drain_stop_runs_the_queue() {
+        // #queueeditgo: a drain left `queue: stop`; the operator adds a queue item
+        // and invokes Run Agent Doc. Preflight must arm `go` and hand the item to
+        // the drain instead of leaving it inert.
+        let doc_with = |control: &str, items: &str| {
+            format!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n\
+                 agent_doc_write: crdt\nqueue: {control}\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{items}<!-- /agent:queue -->\n"
+            )
+        };
+        for (control, expect_active) in [("stop", true), ("pause", false)] {
+            let dir = setup_project();
+            let doc = dir.path().join("session.md");
+            let baseline = doc_with(control, "");
+            std::fs::write(&doc, &baseline).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &baseline,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            std::fs::write(&doc, doc_with(control, "- fix the thing\n")).unwrap();
+
+            let state = run_queue_maintenance(&doc, None).unwrap();
+            let updated = std::fs::read_to_string(&doc).unwrap();
+
+            if expect_active {
+                assert_eq!(state.queue_active, Some(true), "{updated}");
+                assert!(state.queue_continuation_required, "{updated}");
+                assert!(updated.contains("queue: go\n"), "{updated}");
+                assert!(updated.contains("<!-- agent:queue go"), "{updated}");
+            } else {
+                assert_ne!(
+                    state.queue_active,
+                    Some(true),
+                    "pause must hold:\n{updated}"
+                );
+                assert!(updated.contains("queue: pause\n"), "{updated}");
+            }
+        }
+    }
+
+    #[test]
     fn run_queue_maintenance_controller_pause_surfaces_flag_without_stalling_continuation() {
         // `#qpausego`: an accepted controller `admin queue pause` surfaces
         // `queue_paused` (for visibility + the idle-watch auto-injection guard)
@@ -11164,7 +11237,8 @@ mod tests {
         )
         .unwrap();
 
-        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let components = agent_doc_element::element::parse(&file_after).unwrap();

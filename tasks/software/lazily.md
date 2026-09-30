@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0ee0a-c94f-7de2-800b-cbdbc94e8377
+  codex: 01a0f029-8f29-7543-bbe2-a9f6ccd49e4c
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -16,7 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -501,18 +501,41 @@ The other five stay gated:
 `python3 scripts/review-gate-status.py` independently reported exactly the two extracted items as `evidence_stale`; artifact purge was `blocked_fresh`, and the GitHub budget was `unprobeable`. No credentials were resolved, no patches were applied, no budgets changed, and no artifacts were deleted.
 
 The exchange remains above the accretion warning threshold; because the queue is active, I did not pause it for compaction.
+
+### Re: #lzambientpreimagerefresh completed — GPT-5 · 2026-09-29T22:47:39-04:00
+
+> **Queue prompt:**
+>
+> do [#lzambientpreimagerefresh]
+
+
+Refreshed only the recorded SHA-256 for `src/agent-doc/Makefile` in `tasks/software/plan-ambient-publish-token-point-of-use.md`, from `a0931f…` to the current clean-file preimage `b6df1af196c877fd417e00f20a1db9aad80e40cc15791dab8008859a20a25fd8`.
+
+Verification:
+
+- `src/agent-doc/Makefile` was clean before the edit.
+- `make publish-credential-proof` passed with zero failures: all 8/8 preimages match, all 8/8 context-bearing patches apply, and the fake-publisher success/failure/empty matrix remains green without resolving credentials or invoking a real publisher.
+- `make review-gate-status` now reports `#lzambienttokenresolve` as `blocked_fresh` with the plan still unapplied. Its exit 2 is solely the separately queued `#lzmacosrunner` stale-baseline item.
+- Full root `make check` completed; its captured 865-line log has zero failure or error groups. The repository has no workflow named `CI`; the latest available Actions run is an unrelated older scheduled network-suite failure.
+
+Committed the one-line plan update as `046656c2f823` (`docs: refresh agent-doc publish preimage`). No credential values were resolved or printed, no credential patches were applied, no tokens were rotated, and no interactive-shell credential check was run.
+
+The parent `#lzambienttokenresolve` review gate remains correctly blocked only on the operator quiet window, credential rotation, and the plan's real interactive-shell step. No additional backlog follow-up is needed because the next evidence repair, `#lzmacosbaselinerefresh`, is already queued.
+
+The exchange remains above the accretion warning threshold; because the queue is active, I did not pause it for compaction.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzambientpreimagerefresh]~~
+- do [#lzmacosbaselinerefresh]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzambientpreimagerefresh] [agent-loop superproject] Refresh only the recorded SHA-256 for src/agent-doc/Makefile in tasks/software/plan-ambient-publish-token-point-of-use.md after confirming the file is clean and all eight context-bearing patches remain appliable; rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve no longer reports evidence_stale. Do not resolve or print credentials, apply credential patches, rotate tokens, or run the post-application interactive-shell check.
 - [ ] [#lzmacosbaselinerefresh] [agent-doc/lazily-py] Refresh stale macOS-gap evidence only: add v0.35.418 to MACOS_INCOMPLETE_PAIR_BASELINE in scripts/review-gate-status.py, update #lzmacosrunner review text from five to six incomplete-pair releases and its coverage-probe wording, and run python3 scripts/review-gate-status.py --self-test plus make review-gate-status. Keep the parent review gate blocked on operator Mac access; do not build or upload Darwin assets, change the weekly policy, or alter lazily-py hosted wheels.
 <!-- /agent:backlog -->
 

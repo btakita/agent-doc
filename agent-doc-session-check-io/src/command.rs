@@ -785,6 +785,81 @@ pub fn run_with_options(
     out
 }
 
+/// Default bound for [`run_read_only_settling`] (`#scsettlewindow`, GH #60).
+pub const SESSION_CHECK_SETTLE_WINDOW_SECS: u64 = 15;
+/// Override for the settle window, in seconds; `0` samples once.
+pub const SESSION_CHECK_SETTLE_WINDOW_ENV: &str = "AGENT_DOC_SESSION_CHECK_SETTLE_SECS";
+const SESSION_CHECK_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Interruptions the binary resolves on its own, with no agent action: every
+/// one of these tells the harness to do nothing but re-run `session-check`.
+/// An interruption that asks the agent to act (finalize, write --commit,
+/// answer a prompt, dedupe) is deliberately absent — waiting cannot fix it.
+const SELF_CONVERGING_INTERRUPTIONS: &[&str] = &[
+    "response write landed but no terminal commit followed",
+    "will resume automatically",
+    "remains unsettled",
+    "projection settlement are scheduled automatically",
+    "binary-owned captured closeout",
+];
+
+/// Whether `message` reports a state the binary converges without the agent.
+pub fn is_self_converging_interruption(message: &str) -> bool {
+    message.contains("[session-check] INTERRUPTED")
+        && SELF_CONVERGING_INTERRUPTIONS
+            .iter()
+            .any(|needle| message.contains(needle))
+}
+
+pub fn session_check_settle_window() -> std::time::Duration {
+    let secs = std::env::var(SESSION_CHECK_SETTLE_WINDOW_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(SESSION_CHECK_SETTLE_WINDOW_SECS);
+    std::time::Duration::from_secs(secs)
+}
+
+/// Read-only `session-check` that waits out a self-converging interruption
+/// (`#scsettlewindow`, GH #60).
+///
+/// A zero-replica deferral makes `respond` exit nonzero while the retained
+/// intent commits on its own seconds later, and the harness contract permits
+/// exactly one `session-check` afterwards. Sampling once at entry made the
+/// operator's answer depend on how fast the harness typed: ~1s after `respond`
+/// it said `write_applied` / INTERRUPTED, ~4s after it said `ok / committed`,
+/// for the same cycle. This re-samples a self-converging interruption until it
+/// resolves or `window` elapses, then reports the LAST state — a genuine stall
+/// is still reported, only later. Any other outcome returns at once.
+pub fn run_read_only_settling(
+    file: &Path,
+    codex_final_gate: bool,
+    effects: &impl SessionCheckEffects,
+    window: std::time::Duration,
+) -> Result<()> {
+    settle_until_converged(window, SESSION_CHECK_SETTLE_POLL, || {
+        run_read_only_with_options(file, codex_final_gate, effects)
+    })
+}
+
+fn settle_until_converged(
+    window: std::time::Duration,
+    poll: std::time::Duration,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<()> {
+    let deadline = std::time::Instant::now() + window;
+    loop {
+        let outcome = check();
+        let converging = matches!(
+            &outcome,
+            Err(error) if is_self_converging_interruption(&format!("{error:#}"))
+        );
+        if !converging || std::time::Instant::now() + poll > deadline {
+            return outcome;
+        }
+        std::thread::sleep(poll);
+    }
+}
+
 struct ReadOnlySessionCheckEffects<'a, E> {
     inner: &'a E,
 }
@@ -3972,5 +4047,104 @@ mod terminal_convergence_tests {
         let message = retained_pending_guidance(true, true, false);
         assert!(message.contains("non-capture intent"));
         assert!(message.contains("Run `agent-doc commit <FILE>`"));
+    }
+}
+
+#[cfg(test)]
+mod settle_window_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    const WRITE_APPLIED: &str = "[session-check] INTERRUPTED: cycle `c` is still `write_applied` (e) — response write landed but no terminal commit followed.";
+
+    #[test]
+    fn a_self_converging_interruption_is_resampled_until_it_commits() {
+        let calls = Cell::new(0);
+        let out = settle_until_converged(Duration::from_secs(5), Duration::from_millis(1), || {
+            calls.set(calls.get() + 1);
+            if calls.get() < 3 {
+                anyhow::bail!(WRITE_APPLIED)
+            }
+            Ok(())
+        });
+        assert!(out.is_ok());
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn an_agent_actionable_interruption_is_reported_at_once() {
+        let calls = Cell::new(0);
+        let out = settle_until_converged(Duration::from_secs(5), Duration::from_millis(1), || {
+            calls.set(calls.get() + 1);
+            anyhow::bail!(
+                "[session-check] INTERRUPTED: cycle `c` is `committed` (e), but the document has uncommitted exchange changes beyond the committed snapshot: x. Run `agent-doc finalize f`"
+            )
+        });
+        assert!(out.is_err());
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn a_stall_is_still_reported_when_the_window_closes() {
+        let calls = Cell::new(0);
+        let out =
+            settle_until_converged(Duration::from_millis(30), Duration::from_millis(5), || {
+                calls.set(calls.get() + 1);
+                anyhow::bail!(WRITE_APPLIED)
+            });
+        assert!(format!("{:#}", out.unwrap_err()).contains("write_applied"));
+        assert!(calls.get() > 1);
+        let once = Cell::new(0);
+        let _ = settle_until_converged(Duration::ZERO, Duration::from_millis(5), || {
+            once.set(once.get() + 1);
+            anyhow::bail!(WRITE_APPLIED)
+        });
+        assert_eq!(once.get(), 1, "a zero window samples exactly once");
+    }
+
+    #[test]
+    fn every_retained_resume_message_is_self_converging() {
+        for message in [
+            WRITE_APPLIED,
+            "[session-check] INTERRUPTED: binary-owned response delivery `i` is retained for `f` (reason=r, source=s, target_hash=h); the same capture will resume automatically after editor/controller delivery converges.",
+            "[session-check] INTERRUPTED: retained document-write delivery remains unsettled for f; automatic controller reconciliation remains scheduled.",
+            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for f (authority_hash=a, disk_hash=d, component_divergence=c); refusing a false successful closeout. Automatic editor recovery status: s. Replica re-registration and projection settlement are scheduled automatically;",
+        ] {
+            assert!(is_self_converging_interruption(message), "{message}");
+        }
+        assert!(!is_self_converging_interruption(
+            "will resume automatically"
+        ));
+    }
+
+    #[test]
+    fn every_needle_names_a_real_interruption() {
+        // Pin the needles to the emitting sources: a reworded message must fail
+        // here, not silently turn the settle window off.
+        assert_eq!(
+            agent_doc_workflow::session_check::open_cycle_detail(
+                agent_doc_turn::CyclePhase::WriteApplied
+            ),
+            SELF_CONVERGING_INTERRUPTIONS[0]
+        );
+        let source = include_str!("command.rs");
+        // Production code only (every test module sits below the first
+        // `#[cfg(test)]`), minus the needle table itself.
+        let production = &source[..source.find("\n#[cfg(test)]").expect("test modules")];
+        let table = production
+            .find("const SELF_CONVERGING_INTERRUPTIONS")
+            .expect("needle table");
+        let after = table + production[table..].find("];").expect("needle table ends");
+        let emitters = format!("{}{}", &production[..table], &production[after..]);
+        for needle in &SELF_CONVERGING_INTERRUPTIONS[1..] {
+            assert!(
+                emitters
+                    .split("\"[session-check] INTERRUPTED:")
+                    .skip(1)
+                    .any(|message| message.split("\",").next().unwrap_or("").contains(needle)),
+                "no INTERRUPTED message emits {needle:?}"
+            );
+        }
     }
 }

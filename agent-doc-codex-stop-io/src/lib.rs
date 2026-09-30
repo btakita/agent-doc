@@ -62,10 +62,25 @@ struct StopInput {
     session_id: String,
     turn_id: String,
     cwd: String,
-    #[serde(default)]
+    /// `#stopnullmessage`: Codex sends `null` here when the turn ended on a
+    /// tool call with no final assistant text (observed 2026-09-30 after a
+    /// `sleep 60`). `#[serde(default)]` covers only an ABSENT field, so the
+    /// null failed the whole payload as `parse stop JSON` — a fail-closed stop
+    /// with no document, no session and no recovery guidance — and the
+    /// `missing_last_assistant_message` path written for exactly this
+    /// tool-only stop was unreachable.
+    #[serde(default, deserialize_with = "null_as_default")]
     last_assistant_message: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     stop_hook_active: bool,
+}
+
+fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// Claude Code's Stop payload. Claude does not expose a turn id, so its guard
@@ -1066,9 +1081,11 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
     // `#queuetypingsteer`: a `content_edit` is the operator's own edit inside an
     // existing queue item or prompt; name that edit, not some other prompt the
     // exchange happens to hold.
-    let steering_is_content_edit = reason
-        .find("content_edit:")
-        .is_some_and(|at| reason.find("prompt_target:").is_none_or(|target| at < target));
+    let steering_is_content_edit = reason.find("content_edit:").is_some_and(|at| {
+        reason
+            .find("prompt_target:")
+            .is_none_or(|target| at < target)
+    });
     let prompt = if steering_is_content_edit {
         prompt_target_from_interruption_reason(reason)
     } else {
@@ -1742,7 +1759,9 @@ fn attempt_stop_closeout(
     let mut note = String::new();
     match payload {
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-            if let Some(capture_id) = materialized_cycle_capture_supersedes(file, response.as_ref())? {
+            if let Some(capture_id) =
+                materialized_cycle_capture_supersedes(file, response.as_ref())?
+            {
                 note.push_str(&format!(
                     " The cycle's captured response `{capture_id}` is already in the document, so the closing chat message was not recaptured over it."
                 ));
@@ -2807,13 +2826,23 @@ Done.\n\
         let restatement = "Nothing else to do; the answer is above.";
 
         // Nothing captured yet: recapture is allowed.
-        assert_eq!(materialized_cycle_capture_supersedes(&doc, restatement).unwrap(), None);
+        assert_eq!(
+            materialized_cycle_capture_supersedes(&doc, restatement).unwrap(),
+            None
+        );
 
         let capture = agent_doc_capture_io::capture_response(&doc, real).unwrap();
         // Captured but not yet visible: the Stop hook may still capture.
-        assert_eq!(materialized_cycle_capture_supersedes(&doc, restatement).unwrap(), None);
+        assert_eq!(
+            materialized_cycle_capture_supersedes(&doc, restatement).unwrap(),
+            None
+        );
 
-        fs::write(&doc, original.replace("❯ Hello\n", &format!("❯ Hello\n\n{real}"))).unwrap();
+        fs::write(
+            &doc,
+            original.replace("❯ Hello\n", &format!("❯ Hello\n\n{real}")),
+        )
+        .unwrap();
         invalidate_stop_document_cache();
         assert_eq!(
             materialized_cycle_capture_supersedes(&doc, restatement).unwrap(),
@@ -2821,7 +2850,10 @@ Done.\n\
             "a visible cycle response must not be superseded by the closing chat message"
         );
         // The message IS the visible response: nothing to protect.
-        assert_eq!(materialized_cycle_capture_supersedes(&doc, real).unwrap(), None);
+        assert_eq!(
+            materialized_cycle_capture_supersedes(&doc, real).unwrap(),
+            None
+        );
 
         agent_doc_cycle_state_io::retire_projected_captured_response(
             &doc,
@@ -2830,7 +2862,10 @@ Done.\n\
             "test",
         )
         .unwrap();
-        assert_eq!(materialized_cycle_capture_supersedes(&doc, restatement).unwrap(), None);
+        assert_eq!(
+            materialized_cycle_capture_supersedes(&doc, restatement).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -2839,9 +2874,14 @@ Done.\n\
         for anchor in ["fn attempt_stop_closeout(", "fn capture_assistant_text("] {
             let body = source.split(anchor).nth(1).unwrap();
             let body = &body[..body.find("\nfn ").unwrap()];
-            let guard = body.find("materialized_cycle_capture_supersedes(").unwrap_or(usize::MAX);
+            let guard = body
+                .find("materialized_cycle_capture_supersedes(")
+                .unwrap_or(usize::MAX);
             let save = body.find("pending::save_pending(").unwrap();
-            assert!(guard < save, "{anchor} must check the existing capture before save_pending");
+            assert!(
+                guard < save,
+                "{anchor} must check the existing capture before save_pending"
+            );
         }
     }
 
@@ -5437,11 +5477,20 @@ Reviewed the gated items.\n\
             "the restatement must not be written into the document:\n{content}"
         );
         let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert_eq!(cycle.cycle_id, turn_cycle.cycle_id, "no cycle may be reopened");
+        assert_eq!(
+            cycle.cycle_id, turn_cycle.cycle_id,
+            "no cycle may be reopened"
+        );
         assert_eq!(cycle.phase.as_str(), "committed");
         let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops.contains("codex_stop_post_commit_replay_skipped"), "{ops}");
-        assert!(!ops.contains("codex_stop_post_commit_prompt_cycle_reopened"), "{ops}");
+        assert!(
+            ops.contains("codex_stop_post_commit_replay_skipped"),
+            "{ops}"
+        );
+        assert!(
+            !ops.contains("codex_stop_post_commit_prompt_cycle_reopened"),
+            "{ops}"
+        );
     }
 
     #[test]
@@ -5565,30 +5614,54 @@ Reviewed the gated items.\n\
     fn a_scheduled_loop_reentry_arms_the_continuation() {
         let file = Path::new("/work/tasks/agent-doc/agent-doc-bugs.md");
         let loop_prompt = "/loop agent-doc /work/tasks/agent-doc/agent-doc-bugs.md";
-        let turn_start = transcript_record("user", serde_json::json!("<command-name>/loop</command-name>"));
+        let turn_start = transcript_record(
+            "user",
+            serde_json::json!("<command-name>/loop</command-name>"),
+        );
         let feedback = transcript_record(
             "user",
-            serde_json::json!("Stop hook feedback:\nagent-doc Stop hook kept the active queue moving"),
+            serde_json::json!(
+                "Stop hook feedback:\nagent-doc Stop hook kept the active queue moving"
+            ),
         );
         let tool_result = transcript_record(
             "user",
             serde_json::json!([{"type": "tool_result", "content": "Next wakeup scheduled"}]),
         );
 
-        let armed = [turn_start.clone(), schedule_wakeup(loop_prompt), tool_result.clone(), feedback.clone()].join("\n");
+        let armed = [
+            turn_start.clone(),
+            schedule_wakeup(loop_prompt),
+            tool_result.clone(),
+            feedback.clone(),
+        ]
+        .join("\n");
         assert!(transcript_tail_arms_loop_reentry(&armed, file));
 
         // Stop-hook feedback before the wake-up is still inside the same turn.
-        let after_feedback = [turn_start.clone(), feedback, schedule_wakeup(loop_prompt), tool_result.clone()].join("\n");
+        let after_feedback = [
+            turn_start.clone(),
+            feedback,
+            schedule_wakeup(loop_prompt),
+            tool_result.clone(),
+        ]
+        .join("\n");
         assert!(transcript_tail_arms_loop_reentry(&after_feedback, file));
 
         // A new operator prompt after the wake-up starts a new turn.
-        let operator = transcript_record("user", serde_json::json!("Also fix the Stop hook error in this session"));
+        let operator = transcript_record(
+            "user",
+            serde_json::json!("Also fix the Stop hook error in this session"),
+        );
         let superseded = [schedule_wakeup(loop_prompt), tool_result.clone(), operator].join("\n");
         assert!(!transcript_tail_arms_loop_reentry(&superseded, file));
 
         // A wake-up for another document, or a non-loop prompt, arms nothing.
-        let other = [turn_start.clone(), schedule_wakeup("/loop agent-doc /work/tasks/other.md")].join("\n");
+        let other = [
+            turn_start.clone(),
+            schedule_wakeup("/loop agent-doc /work/tasks/other.md"),
+        ]
+        .join("\n");
         assert!(!transcript_tail_arms_loop_reentry(&other, file));
         let not_loop = [turn_start, schedule_wakeup("check the deploy")].join("\n");
         assert!(!transcript_tail_arms_loop_reentry(&not_loop, file));
@@ -5684,5 +5757,35 @@ Reviewed the gated items.\n\
                 && ops.contains("codex_stop_post_commit_prompt_auto_closed"),
             "recursive Stop must cross the same binary-owned reopen/close path as the first Stop attempt:\n{ops}"
         );
+    }
+}
+
+#[cfg(test)]
+mod stop_input_tests {
+    use super::*;
+
+    #[test]
+    fn stop_input_accepts_null_last_assistant_message() {
+        // `#stopnullmessage`: the shape Codex sends when a turn ends on a tool call.
+        let input: StopInput = serde_json::from_str(
+            r#"{"session_id":"s","turn_id":"t","cwd":"/w","hook_event_name":"Stop","last_assistant_message":null,"stop_hook_active":null}"#,
+        )
+        .expect("a null message is a tool-only stop, not a malformed payload");
+        assert_eq!(input.last_assistant_message, "");
+        assert!(!input.stop_hook_active);
+    }
+
+    #[test]
+    fn stop_input_keeps_present_and_absent_fields() {
+        let input: StopInput = serde_json::from_str(
+            r#"{"session_id":"s","turn_id":"t","cwd":"/w","last_assistant_message":"done","stop_hook_active":true}"#,
+        )
+        .unwrap();
+        assert_eq!(input.last_assistant_message, "done");
+        assert!(input.stop_hook_active);
+        let input: StopInput =
+            serde_json::from_str(r#"{"session_id":"s","turn_id":"t","cwd":"/w"}"#).unwrap();
+        assert_eq!(input.last_assistant_message, "");
+        assert!(!input.stop_hook_active);
     }
 }

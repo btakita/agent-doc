@@ -45,6 +45,8 @@ Cross-session event coordination via `agent-kit` hooks (v0.3).
 - `UserPromptSubmit` → `agent-doc hook codex-user-prompt-submit`
 - `Stop` → `agent-doc hook codex-stop`
 
+The Codex Stop payload's `last_assistant_message` and `stop_hook_active` accept `null` as their defaults (`#stopnullmessage`). Codex sends `"last_assistant_message": null` when a turn ends on a tool call with no final text; a missing field was tolerated but an explicit `null` failed the whole payload as `parse stop JSON`, a fail-closed stop with no document or recovery guidance, and the hook's `missing_last_assistant_message` path for exactly that tool-only stop could never run.
+
 In one binary-owned invocation, `UserPromptSubmit` first makes session tracking durable and then runs preflight for a valid trigger. Its stdout cycle contract ends with the admission success marker and an explicit directive to continue in the current turn without shell-running `agent-doc <FILE>`; Codex injects that context into the arriving turn. Tracking or preflight failures emit diagnostics without the marker. It recognizes both bare `agent-doc <FILE>` reopen prompts and session invocations with same-line or following-line directive bodies, such as `agent-doc <FILE> #code-review` or `agent-doc <FILE>` followed by `do #id ...`. A bare invocation with no body remains a no-op when the document snapshot is unchanged unless an active `agent:queue` supplies the next prompt. Tracked directive bodies and active queue head prompts are exposed to preflight/plan as synthetic prompt diffs so they cannot be lost behind `no_changes=true`.
 
 **Claude queue-continuation bridge:** the Claude `UserPromptSubmit` hook stores an

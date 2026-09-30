@@ -71,7 +71,10 @@ pub fn recover_empty_response_for_strict_closeout(
     }
     // `#visibleresponseabsorb`: the response is already visible in the authority but
     // missing from HEAD, and `agent-doc commit` refuses it by naming this command.
-    if commit_requested && !force_disk && agent_doc_commit_io::commit_visible_uncommitted_response(file)? {
+    if commit_requested
+        && !force_disk
+        && agent_doc_commit_io::commit_visible_uncommitted_response(file)?
+    {
         eprintln!("[write] empty response stdin; committed the visible uncommitted response");
         return Ok(true);
     }
@@ -590,10 +593,14 @@ fn resume_materialized_captured_finalize(
 /// owned by finalize/write/preflight and the route supervisor; observing status
 /// must never manufacture a second document mutation.
 pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
-    agent_doc_session_check_io::run_read_only_with_options(
+    // `#scsettlewindow` (GH #60): the harness runs this exactly once after a
+    // deferred closeout, so it waits out a self-converging state rather than
+    // reporting whatever it sampled at entry.
+    agent_doc_session_check_io::run_read_only_settling(
         file,
         codex_final_gate,
         &agent_doc_closeout_runtime_io::session_check_effects(),
+        agent_doc_session_check_io::session_check_settle_window(),
     )
 }
 

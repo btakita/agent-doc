@@ -197,6 +197,29 @@ Next in the queue: `#release`. The exchange is getting large (131 lines); I'm no
 **Not done:** suggestion 3 from the issue — recording the yield so the next preflight can report "yielded N min ago, still undrained". The hand-off log line now carries enough to build it; I'm leaving it as a [recommended] follow-up.
 
 Next queue head: #gh-fix #74.
+
+### Re: #gh-fix GH #74: an edited, marker-annotated queue item no longer forks into two copies — opus-5.5 · 2026-09-30T19:20-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/74
+
+**Fixed and closed** in agent-doc `52a9b4b1f` (pushed and installed). The commit's `Fixes #74` closed the issue, and I added a comment with the analysis.
+
+**Root cause (reproduced deterministically, not a hypothesis anymore).** The failure is in the three-way merge, not in dedup. A free-text item's text is its key. So when the operator edits `🚧 X` into `🚧 X + extra`, the side carrying that edit looks like it deleted the old item and inserted a new one. Meanwhile the other side only dropped the `🚧` marker (`X`). Two merge paths treated any change on that other side as an update that beats the delete:
+- the per-cell merge in `agent-doc-merge/src/document_cell.rs` (`(None, Some(t))`)
+- the keyed fallback in `crdt::reconcile_component_body`
+
+Both resurrected `X` next to `🚧 X + extra`. That is exactly the operator's captured pair, with the marker on the longer copy.
+
+**Fix.** For list components, a change whose instruction text (markers and strikes stripped via `queue_instruction_text`) equals the base no longer vetoes the delete. A real content correction still survives a delete.
+
+**Tests:**
+- the captured pair verbatim through `merge_by_component` (it failed before the fix)
+- the fallback-path rule, mutation-checked: removing the guard turns it red
+- a boundary test showing a genuine operator content edit is kept
+
+**Verification:** `make check` passed (exit 0; nextest 10260/10260 passed, 259 skipped). `make install` and `cargo build --release` succeeded. Latest CI: see console.
+
+Next queue head: #release.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -207,8 +230,9 @@ Next queue head: #gh-fix #74.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/73~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/74
-- ⏭️ #release
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/74~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/75
+- #release
 <!-- /agent:queue -->
 
 

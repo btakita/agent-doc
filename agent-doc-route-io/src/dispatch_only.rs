@@ -272,6 +272,58 @@ fn classify_dispatch_only_blocker(
     DispatchOnlyBlockerAction::Refuse
 }
 
+/// The cycle identity and phase that decide pane-input ownership.
+///
+/// The raw closeout projection phase can regress after a commit: a retained
+/// pending write projected after `commit_success` re-stamps `write_applied` on
+/// the committed cycle. `session-check` reads the reconstructed cycle state,
+/// where the terminal turn-intent checkpoint wins, and reports `committed`;
+/// reading the raw phase here made the route treat that finished cycle as open
+/// forever, so every Run Agent Doc logged `route_dispatch_only_cycle_owns_input`
+/// and typed nothing (`#fpenoop`, 2026-09-30). The same resolution
+/// (`resolve_closeout_phase`) now governs both. A reconstruction failure keeps
+/// the raw projection, which fails closed.
+fn route_cycle_ownership_stamp(
+    file: &Path,
+) -> Result<(Option<String>, Option<agent_doc_turn::CyclePhase>)> {
+    let projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    let cycle_id = projection
+        .as_ref()
+        .and_then(|projection| projection.cycle_id.clone());
+    let phase = projection.as_ref().and_then(|projection| projection.phase);
+    let reconstructed = if phase.is_some_and(|phase| phase.is_open()) {
+        agent_doc_cycle_state_io::load(file).ok().flatten()
+    } else {
+        None
+    };
+    let resolved = route_ownership_phase(
+        cycle_id.as_deref(),
+        phase,
+        reconstructed
+            .as_ref()
+            .map(|state| (state.cycle_id.as_str(), state.phase)),
+    );
+    Ok((cycle_id, resolved))
+}
+
+/// Pure core of [`route_cycle_ownership_stamp`]: an open projected phase yields
+/// to the reconstructed phase of the SAME cycle; anything else keeps the
+/// projection.
+fn route_ownership_phase(
+    projected_cycle: Option<&str>,
+    projected_phase: Option<agent_doc_turn::CyclePhase>,
+    reconstructed: Option<(&str, agent_doc_turn::CyclePhase)>,
+) -> Option<agent_doc_turn::CyclePhase> {
+    match (projected_phase, reconstructed) {
+        (Some(phase), Some((cycle, reconstructed_phase)))
+            if phase.is_open() && projected_cycle == Some(cycle) =>
+        {
+            Some(reconstructed_phase)
+        }
+        _ => projected_phase,
+    }
+}
+
 /// Re-check document-turn ownership at the pane-input edge.
 ///
 /// The outer route drains closeout before it begins actor/readiness work, but a
@@ -285,14 +337,10 @@ fn dispatch_only_cycle_owns_pane_input(
     harness: &HarnessConfig,
     baseline: DispatchOnlyRouteCycleStamp<'_>,
 ) -> Result<bool> {
-    let current_closeout = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    let (current_cycle_id, current_phase) = route_cycle_ownership_stamp(file)?;
     let current = DispatchOnlyRouteCycleStamp {
-        cycle_id: current_closeout
-            .as_ref()
-            .and_then(|projection| projection.cycle_id.as_deref()),
-        phase: current_closeout
-            .as_ref()
-            .and_then(|projection| projection.phase),
+        cycle_id: current_cycle_id.as_deref(),
+        phase: current_phase,
     };
     let open_cycle_owns_input = dispatch_only_route_cycle_owns_input(current);
     let newer_cycle_owns_input = dispatch_only_route_superseded_by_new_cycle(baseline, current);
@@ -362,14 +410,10 @@ pub fn dispatch_only_send_reopen(
     // instead of stacking an unsubmitted trigger.
     wait_for_dispatch_only_recycle_inflight_settle(file, file_path, pane, &harness.binary)?;
 
-    let route_start_closeout = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    let (route_start_cycle_id, route_start_phase) = route_cycle_ownership_stamp(file)?;
     let route_start_stamp = DispatchOnlyRouteCycleStamp {
-        cycle_id: route_start_closeout
-            .as_ref()
-            .and_then(|projection| projection.cycle_id.as_deref()),
-        phase: route_start_closeout
-            .as_ref()
-            .and_then(|projection| projection.phase),
+        cycle_id: route_start_cycle_id.as_deref(),
+        phase: route_start_phase,
     };
     if dispatch_only_cycle_owns_pane_input(file, pane, harness, route_start_stamp)? {
         return Ok(pane.to_string());
@@ -1278,6 +1322,47 @@ mod tests {
         assert!(
             !dispatch_only_cycle_owns_pane_input(&doc, "%158", &harness, baseline).unwrap(),
             "the same terminal cycle no longer blocks a later route"
+        );
+    }
+
+    #[test]
+    fn committed_cycle_with_stale_write_applied_projection_does_not_own_input() {
+        // #fpenoop live shape (fpe.md, 2026-09-30): the closeout projection held
+        // `write_applied` for synthetic-1790730269723 while its turn-intent
+        // checkpoint and terminal proof said `committed`.
+        use agent_doc_turn::CyclePhase;
+        let cycle = "synthetic-1790730269723";
+        let resolved = route_ownership_phase(
+            Some(cycle),
+            Some(CyclePhase::WriteApplied),
+            Some((cycle, CyclePhase::Committed)),
+        );
+        assert_eq!(resolved, Some(CyclePhase::Committed));
+        assert!(
+            !dispatch_only_route_cycle_owns_input(DispatchOnlyRouteCycleStamp {
+                cycle_id: Some(cycle),
+                phase: resolved,
+            }),
+            "a committed cycle must not swallow Run Agent Doc"
+        );
+
+        // A genuinely open cycle still owns input, and a reconstruction for a
+        // different cycle never overrides the projection.
+        assert_eq!(
+            route_ownership_phase(
+                Some(cycle),
+                Some(CyclePhase::WriteApplied),
+                Some((cycle, CyclePhase::WriteApplied)),
+            ),
+            Some(CyclePhase::WriteApplied)
+        );
+        assert_eq!(
+            route_ownership_phase(
+                Some(cycle),
+                Some(CyclePhase::WriteApplied),
+                Some(("other-cycle", CyclePhase::Committed)),
+            ),
+            Some(CyclePhase::WriteApplied)
         );
     }
 

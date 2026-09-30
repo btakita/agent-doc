@@ -36,6 +36,7 @@ The command emits a structured planning record as JSON.
 6. Otherwise, execute `repo_actions` before `finalize` / `write --commit`.
 7. Resolve `pending_mutations` in the same cycle so backlog/review tracked-work state does not drift.
 8. If `blockers` is non-empty, surface the blocker and stop instead of freelancing around it.
+   A turn the binary's preflight already sealed never reports the `No changes` blocker: plan reads the open cycle, recovers the free-text queue head preflight selected, and otherwise returns `task_class: preflight_sealed` with no blocker — execute the preflight contract (`#plansealedturn`, GH #68 §1).
 
 ## Notes
 

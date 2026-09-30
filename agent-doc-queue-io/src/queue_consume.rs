@@ -192,6 +192,23 @@ fn log_snapshot_recovery_warning(file: &Path, context: &str, detail: impl Displa
     );
 }
 
+/// `#snapmissingquiet` (GH #68 §4): a missing baseline during a queue-consume
+/// snapshot sync is EXPECTED -- callers planning against virtual transaction
+/// content pass `None` deliberately, and the document strike still applies. It
+/// is recorded in ops.log for forensics but not printed: a console warning on
+/// nearly every consume trained readers to ignore real queue warnings.
+fn log_snapshot_sync_skipped(file: &Path, context: &str, detail: impl Display) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "snapshot_recovery_warning file={} context={} detail={} severity=expected_skip",
+            file.display(),
+            context,
+            detail
+        ),
+    );
+}
+
 fn load_snapshot_recovery_only(file: &Path, context: &str) -> Option<String> {
     match agent_doc_snapshot_io::load_document_baseline(file) {
         Ok(snapshot) => snapshot,
@@ -1575,7 +1592,7 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 // against virtual transaction content pass `None` deliberately,
                 // and this line previously read as "the strike was skipped",
                 // which sent a live defect hunt down the wrong path.
-                log_snapshot_recovery_warning(
+                log_snapshot_sync_skipped(
                     file,
                     "queue consume done-id snapshot sync",
                     "snapshot is missing; the document queue strike still applies and only the baseline sync is skipped",
@@ -1921,7 +1938,7 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
             Err(err) => log_snapshot_recovery_warning(file, "queue consume snapshot sync", err),
         }
     } else {
-        log_snapshot_recovery_warning(file, "queue consume snapshot sync", "snapshot is missing");
+        log_snapshot_sync_skipped(file, "queue consume snapshot sync", "snapshot is missing");
     }
 
     Ok(Some(QueueConsumptionPlan {

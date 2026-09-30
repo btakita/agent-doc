@@ -67,10 +67,41 @@ pub fn preset_item_id_collision_warning(content: &str) -> Option<PreflightPolicy
     Some(PreflightPolicyWarning {
         code: "preset_item_id_collision".to_string(),
         message: format!(
-            "Ambiguous identities — the same #id resolves under multiple active sources: {}. Each #id must have one active meaning per document, so `do #id`, queue generation, and \"top backlog item\" are unambiguous. Rename the colliding prompt preset or tracked item before dispatch. (#preset-item-id-collision)",
-            collisions.join("; ")
+            "Ambiguous identities — the same #id resolves under multiple active sources: {}. Each #id must have one active meaning per document, so `do #id`, queue generation, and \"top backlog item\" are unambiguous. {} (#preset-item-id-collision)",
+            collisions.join("; "),
+            collision_remedy(&collisions)
         ),
     })
+}
+
+/// `#gatecollapse` (GH #68 §2): an id live in both `agent:backlog` and
+/// `agent:review` is a half-applied gate, not a naming clash, so "rename" is the
+/// wrong remedy for it. `--backlog-gate <id>` collapses the split onto the
+/// review entry.
+fn collision_remedy(collisions: &[String]) -> String {
+    let split_gate_ids: Vec<&str> = collisions
+        .iter()
+        .filter(|c| c.contains("agent:backlog") && c.contains("agent:review") && !c.contains("preset"))
+        .filter_map(|c| c.split_whitespace().next())
+        .collect();
+    let rename = "Rename the colliding prompt preset or tracked item before dispatch.";
+    if split_gate_ids.is_empty() {
+        return rename.to_string();
+    }
+    let flags = split_gate_ids
+        .iter()
+        .map(|id| format!("--backlog-gate {}", id.trim_start_matches('#')))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if split_gate_ids.len() == collisions.len() {
+        format!(
+            "An agent:backlog + agent:review pair is a half-applied gate, not a naming clash: `agent-doc write --commit <FILE> --backlog-only {flags}` collapses it onto the review entry (add `--done <id>` if the work is finished)."
+        )
+    } else {
+        format!(
+            "{rename} For the agent:backlog + agent:review pair(s), `--backlog-only {flags}` collapses the half-applied gate onto the review entry instead."
+        )
+    }
 }
 
 pub fn component_attr_preflight_warning(
@@ -332,6 +363,28 @@ mod tests {
         assert_eq!(warning.code, "preset_item_id_collision");
         assert!(warning.message.contains("#same"));
         assert!(warning.message.contains("Ambiguous identities"));
+        assert!(warning.message.contains("Rename the colliding prompt preset"));
+    }
+
+    /// `#gatecollapse` (GH #68 §2): a backlog + review split is a half-applied
+    /// gate; the remedy must name `--backlog-gate`, not "rename".
+    #[test]
+    fn collision_warning_names_backlog_gate_for_a_split_gate() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#split] finish it\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#split] finish it\n",
+            "<!-- /agent:review -->\n"
+        );
+        let warning = preset_item_id_collision_warning(content).expect("split should warn");
+        assert!(
+            warning.message.contains("--backlog-gate split"),
+            "{}",
+            warning.message
+        );
+        assert!(!warning.message.contains("Rename"), "{}", warning.message);
     }
 
     #[test]

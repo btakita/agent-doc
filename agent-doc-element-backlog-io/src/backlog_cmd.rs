@@ -76,6 +76,40 @@ struct PendingWriteTransaction {
     primary_file: PathBuf,
     documents: Vec<DeferredPendingWrite>,
     raw_writes: Vec<DeferredRawWrite>,
+    /// `#txreceipt` (GH #68 §3): success receipts staged by mutations inside
+    /// the envelope. They print only after every buffered write publishes; a
+    /// dry run or an aborted envelope drops them, so a rolled-back write can
+    /// never leave an "archived 1 entry" line behind.
+    receipts: Vec<String>,
+}
+
+/// `#txreceipt`: print a mutation's success receipt now, or -- inside a
+/// tracked-work transaction -- hold it until the envelope actually publishes.
+fn emit_pending_receipt(message: String) {
+    let staged = PENDING_WRITE_TRANSACTION.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        match slot.as_mut() {
+            Some(transaction) => {
+                transaction.receipts.push(message.clone());
+                true
+            }
+            None => false,
+        }
+    });
+    if !staged {
+        eprintln!("{message}");
+    }
+}
+
+#[cfg(test)]
+fn staged_receipts() -> Option<Vec<String>> {
+    PENDING_WRITE_TRANSACTION.with(|slot| slot.borrow().as_ref().map(|t| t.receipts.clone()))
+}
+
+macro_rules! pending_receipt {
+    ($($arg:tt)*) => {
+        emit_pending_receipt(format!($($arg)*))
+    };
 }
 
 pub fn with_force_disk_pending_writes<T>(
@@ -295,6 +329,7 @@ fn run_pending_write_transaction<T>(
             primary_file,
             documents: Vec::new(),
             raw_writes: Vec::new(),
+            receipts: Vec::new(),
         });
         Ok(())
     })?;
@@ -349,6 +384,9 @@ fn run_pending_write_transaction<T>(
             document.force_disk,
             document.component_scope.clone(),
         )?;
+    }
+    for receipt in transaction.receipts {
+        eprintln!("{receipt}");
     }
     Ok(value)
 }
@@ -945,7 +983,7 @@ fn reopen_in_list(
     }
 
     persist_pending_write(file, &full_content, &target)?;
-    eprintln!(
+    pending_receipt!(
         "[pending] reopened #{} into {}{}",
         id,
         list.label(),
@@ -1098,7 +1136,7 @@ where
     }
 
     persist_pending_write(file, &full_content, &target)?;
-    eprintln!(
+    pending_receipt!(
         "[pending] completed and reaped {} item(s) atomically: {}",
         removed_ids.len(),
         removed_ids.join(", ")
@@ -1147,6 +1185,23 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
     let (content_with_review, review_comp) = ensure_review_component_in_document(&new_doc)?;
     new_doc = content_with_review;
     let review_body = review_comp.content(&new_doc);
+    // `#gatecollapse` (GH #68 §2): the id is ALREADY live in `agent:review`, so
+    // the backlog copy is the stale half of a split gate (the
+    // `preset_item_id_collision` "agent:backlog + agent:review" shape). Gating
+    // collapses the split onto the existing review entry instead of inserting a
+    // second one, which makes `--backlog-gate <id>` the one-flag repair.
+    let (_, review_items, _) = backlog::parse_items(review_body);
+    if review_items
+        .iter()
+        .any(|existing| existing.id == item.id && !existing.is_done())
+    {
+        persist_pending_write(file, &full_content, &new_doc)?;
+        pending_receipt!(
+            "[pending] backlog-gate: #{} was already live in agent:review; removed the stale agent:backlog copy",
+            item.id
+        );
+        return Ok(());
+    }
     let new_review = backlog::op_insert_item_first(review_body, item);
     let review_comp = find_review_component_in_content(&new_doc)?
         .context("document has no review component after insertion")?;
@@ -1211,7 +1266,7 @@ pub fn review_remove(file: &Path, id: &str) -> Result<()> {
         &agent_doc_hash::document_id_for_path(file),
     )?;
     persist_pending_write(file, &full_content, &plan.content)?;
-    eprintln!(
+    pending_receipt!(
         "[pending] review-remove: removed {} entr{} for #{}",
         plan.removed.len(),
         if plan.removed.len() == 1 { "y" } else { "ies" },
@@ -1236,7 +1291,7 @@ pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
         .context("failed to archive resolved review item(s) to agent:done")?
         .unwrap_or(plan.content);
     persist_pending_write(file, &full_content, &archived)?;
-    eprintln!(
+    pending_receipt!(
         "[pending] review-resolve: archived {} entr{} for #{} to agent:done",
         plan.removed.len(),
         if plan.removed.len() == 1 { "y" } else { "ies" },
@@ -1611,7 +1666,7 @@ pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
     );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
-    eprintln!(
+    pending_receipt!(
         "[pending] resolved {} [/{}] item(s): {}",
         resolved.len(),
         gate_type,
@@ -1634,7 +1689,7 @@ pub fn set_gate_type(file: &Path, id: &str, gate_type: &str) -> Result<()> {
     );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
-    eprintln!("[pending] set gate type [/{}] on [#{}]", gate_type, id);
+    pending_receipt!("[pending] set gate type [/{}] on [#{}]", gate_type, id);
     Ok(())
 }
 
@@ -1655,7 +1710,7 @@ pub fn set_gate_verify(file: &Path, id: &str, spec: &str) -> Result<()> {
     );
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
-    eprintln!(
+    pending_receipt!(
         "[pending] set verify predicate on [#{}] (set_at={})",
         id, set_at
     );
@@ -2639,6 +2694,72 @@ mod tests {
         assert!(content.contains("<!-- agent:review -->"));
         assert!(content.contains("- [/release] [#a1b2] Release v1.0"));
         assert_eq!(content.matches("[#a1b2]").count(), 1);
+    }
+
+    /// `#txreceipt` (GH #68 §3): inside a tracked-work envelope a mutation's
+    /// success receipt is HELD, not printed, so an envelope that later aborts
+    /// (or a validation-only dry run) cannot leave "archived 1 entry" behind.
+    #[test]
+    fn review_resolve_receipt_is_held_until_the_envelope_publishes() {
+        let (_tmp, doc) = doc_with_pending("- [ ] [#c3d4] Other");
+        let content = fs::read_to_string(&doc).unwrap();
+        fs::write(
+            &doc,
+            format!(
+                "{content}\n## Review\n\n<!-- agent:review -->\n- [/] [#a1b2] Release v1.0\n<!-- /agent:review -->\n"
+            ),
+        )
+        .unwrap();
+
+        let staged = with_test_effects(|| {
+            with_pending_write_transaction_dry_run(&doc, || {
+                review_resolve(&doc, "a1b2")?;
+                Ok(staged_receipts().expect("transaction open"))
+            })
+        })
+        .unwrap();
+        assert_eq!(staged.len(), 1, "{staged:?}");
+        assert!(staged[0].contains("review-resolve: archived 1 entry"), "{staged:?}");
+        assert!(staged_receipts().is_none(), "dry run drops the envelope");
+        assert!(
+            fs::read_to_string(&doc).unwrap().contains("- [/] [#a1b2]"),
+            "dry run must not resolve the item"
+        );
+    }
+
+    /// `#gatecollapse` (GH #68 §2): an id live in BOTH backlog and review (the
+    /// `preset_item_id_collision` split) is repaired by one `--backlog-gate`:
+    /// the stale backlog copy goes, and no second review entry is inserted.
+    #[test]
+    fn gate_collapses_backlog_and_review_split_onto_review_entry() {
+        let (_tmp, doc) = doc_with_pending("- [ ] [#a1b2] Release v1.0\n- [ ] [#c3d4] Other");
+        let content = fs::read_to_string(&doc).unwrap();
+        fs::write(
+            &doc,
+            format!(
+                "{content}\n## Review\n\n<!-- agent:review -->\n- [/] [#a1b2] Release v1.0\n<!-- /agent:review -->\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            agent_doc_element_backlog::backlog::detect_identity_collisions(
+                &fs::read_to_string(&doc).unwrap()
+            )
+            .len(),
+            1,
+            "fixture must start in the collision shape"
+        );
+
+        force_pending(|| gate(&doc, "a1b2"));
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(content.matches("[#a1b2]").count(), 1, "{content}");
+        assert!(content.contains("- [/] [#a1b2] Release v1.0"), "{content}");
+        assert!(content.contains("- [ ] [#c3d4] Other"), "{content}");
+        assert!(
+            agent_doc_element_backlog::backlog::detect_identity_collisions(&content).is_empty(),
+            "{content}"
+        );
     }
 
     #[test]

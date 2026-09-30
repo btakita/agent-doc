@@ -1221,6 +1221,43 @@ fn write_commit_malformed_response_rejects_before_done_dry_run_diagnostics() {
     assert_eq!(head_blob(tmp.path()), original);
 }
 
+/// `#snapmissingquiet` (GH #68 §4): a done-id queue consume planned against
+/// virtual transaction content has no snapshot by design. That expected skip
+/// goes to ops.log only; it must not print a console "snapshot recovery
+/// warning" on every consume.
+#[test]
+fn write_commit_done_queue_consume_does_not_warn_about_expected_missing_snapshot() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let original = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n### Re: already handled — gpt-5\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- [ ] [#done1] Close the loop\n<!-- /agent:backlog -->\n\n<!-- agent:queue auto -->\n- do [#done1]\n<!-- /agent:queue -->\n";
+    fs::write(&doc, original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "done1",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: done1 — gpt-5\n\nResolved.\n<!-- /patch:exchange -->\n",
+        )
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "closeout should succeed:\n{stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(!content.contains("- do [#done1]"), "queue head consumed:\n{content}");
+    assert!(
+        !stderr.contains("snapshot is missing"),
+        "expected missing-snapshot skip must stay off the console:\n{stderr}"
+    );
+}
+
 #[test]
 fn write_commit_remains_best_effort_for_non_session_document() {
     let (_tmp, doc) = setup_template_doc();

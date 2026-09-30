@@ -197,16 +197,44 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let queue_head_slash_command = queue_prompt
         .as_deref()
         .and_then(agent_doc_queue::queue_command::slash_command_text);
+    // `#plansealedturn` (GH #68 §1): the binary's preflight already sealed this
+    // turn and consumed the diff baseline, so a re-diff here legitimately finds
+    // nothing. That is NOT "no changes" -- the turn's prompt lives in the sealed
+    // cycle contract. Recover the free-text queue head preflight selected, and
+    // otherwise report no blocker (SKILL.md step 0d stops on blockers, so a
+    // false one aborts a legitimate cycle).
+    let sealed_turn = if doc_diff.is_none() && harness_diff.is_none() && queue_prompt.is_none() {
+        sealed_preflight_turn(file)
+    } else {
+        None
+    };
+    let queue_prompt = queue_prompt.or_else(|| {
+        sealed_turn
+            .as_ref()
+            .and_then(|cycle| cycle.selected_free_text_queue_heads.first().cloned())
+    });
     let queue_diff = queue_prompt
         .as_deref()
         .map(|prompt| diff::synthetic_added_lines_diff(prompt, "queue"));
 
     let Some(diff_text) = doc_diff.or(harness_diff.clone()).or(queue_diff) else {
+        let (task_class, blockers, warnings) = match sealed_turn.as_ref() {
+            Some(cycle) => (
+                "preflight_sealed".to_string(),
+                Vec::new(),
+                vec![sealed_turn_warning(&cycle.cycle_id)],
+            ),
+            None => (
+                "no_changes".to_string(),
+                vec!["No changes detected since the last snapshot.".to_string()],
+                Vec::new(),
+            ),
+        };
         return Ok(DispatchPlan {
             prompt_targets: Vec::new(),
             graph_evidence: None,
             dispatch_candidate: false,
-            task_class: "no_changes".to_string(),
+            task_class,
             risk: "low".to_string(),
             parallelizable: false,
             suggested_parent_tier: "low".to_string(),
@@ -223,8 +251,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             required_commands: finalize_placeholder_commands(file, &fm, &[]),
             pending_mutations: Vec::new(),
             handoff: HandoffTarget::None,
-            blockers: vec!["No changes detected since the last snapshot.".to_string()],
-            warnings: Vec::new(),
+            blockers,
+            warnings,
         });
     };
 
@@ -935,6 +963,34 @@ fn extract_do_pending_ids(action: &str) -> Vec<String> {
     agent_doc_queue::queue_directive::explicit_do_directive_target_ids(action)
 }
 
+/// `#plansealedturn`: the open, not-yet-captured preflight cycle for `file`,
+/// if the binary's preflight has sealed this turn. Uses the same re-entry policy
+/// preflight uses, so a stalled (crashed/superseded) older cycle never counts.
+fn sealed_preflight_turn(file: &Path) -> Option<agent_doc_cycle_state_io::CycleState> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    agent_doc_cycle_state_io::load(file)
+        .ok()
+        .flatten()
+        .filter(|cycle| {
+            cycle.reusable_by_reentrant_preflight(
+                0,
+                now,
+                agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
+            )
+        })
+}
+
+fn sealed_turn_warning(cycle_id: &str) -> String {
+    format!(
+        "#plansealedturn: no diff remains because preflight already sealed this turn \
+         (cycle `{cycle_id}`) and consumed the baseline; this is not a no-op -- execute \
+         the preflight cycle contract (`user_intent_prompt_changes`, `queue_prompts`)"
+    )
+}
+
 fn shared_doc_security_blockers(
     file: &Path,
     fm: &frontmatter::Frontmatter,
@@ -1324,6 +1380,88 @@ What changed?
         );
         assert_eq!(plan.handoff, HandoffTarget::None);
         assert!(plan.blockers.is_empty());
+    }
+
+    fn sealed_turn_doc() -> &'static str {
+        r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+"#
+    }
+
+    /// `#plansealedturn` (GH #68 §1): once the binary's preflight has sealed the
+    /// turn and consumed the baseline, plan's re-diff is empty. That must not be
+    /// reported as a `No changes` blocker: SKILL.md step 0d stops on blockers.
+    #[test]
+    fn build_plan_reports_no_blocker_when_preflight_sealed_the_turn() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = sealed_turn_doc();
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let unsealed = build(&doc).unwrap();
+        assert_eq!(unsealed.task_class, "no_changes");
+        assert_eq!(unsealed.blockers.len(), 1, "no open cycle keeps the blocker");
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let plan = build(&doc).unwrap();
+        assert!(plan.blockers.is_empty(), "sealed turn: {:?}", plan.blockers);
+        assert_eq!(plan.task_class, "preflight_sealed");
+        assert!(
+            plan.warnings.iter().any(|w| w.contains("#plansealedturn")),
+            "{:?}",
+            plan.warnings
+        );
+    }
+
+    /// `#plansealedturn`: the free-text queue head preflight selected for the
+    /// sealed turn is recovered as the plan's prompt rather than dropped.
+    #[test]
+    fn build_plan_recovers_selected_queue_head_from_sealed_turn() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = sealed_turn_doc();
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(
+            &doc,
+            &["run tests".to_string()],
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+        assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
+        assert_ne!(plan.task_class, "no_changes");
+        assert_ne!(plan.task_class, "preflight_sealed");
+        assert!(
+            plan.repo_actions.iter().any(|a| a.contains("run tests")),
+            "selected head should drive repo actions: {:?}",
+            plan.repo_actions
+        );
     }
 
     #[test]

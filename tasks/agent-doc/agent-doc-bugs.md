@@ -309,8 +309,8 @@ The exchange here is long (warn level), but the queue is active, so I'm continui
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#jbunloadsig]~~
 - ~~fix https://github.com/btakita/agent-doc/issues/65~~
-- fix https://github.com/btakita/agent-doc/issues/62
-- release + publish in a subagent so I can test it on my coder project
+- ~~fix https://github.com/btakita/agent-doc/issues/62~~
+- 🚧 release + publish in a subagent so I can test it on my coder project
 - do [#queuefreetextdup]: I wrote the second `release + publish` because I wanted another release + publish scheduled after the 3 queue items were complete. I see the queue as a scheduling FIFO.
 - do [#semmergeargorder]
 - re [#apimdrevert]: I don't recall which text was lost. Can we practically debug log these events or will this cause excessive debug logging?

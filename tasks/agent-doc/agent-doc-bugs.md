@@ -474,7 +474,7 @@ Last in the queue: `release + publish`.
 - ~~fix https://github.com/btakita/agent-doc/issues/66~~
 - ~~fix https://github.com/btakita/agent-doc/issues/67~~
 - ~~https://github.com/btakita/agent-doc/issues/62 is still open on github. Please close it if it is done. If it's not yet done, fix it then close the issue.~~
-- release + publish
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 

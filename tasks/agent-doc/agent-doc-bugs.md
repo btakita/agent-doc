@@ -220,6 +220,29 @@ Both resurrected `X` next to `🚧 X + extra`. That is exactly the operator's ca
 **Verification:** `make check` passed (exit 0; nextest 10260/10260 passed, 259 skipped). `make install` and `cargo build --release` succeeded. Latest CI: see console.
 
 Next queue head: #release.
+
+### Re: #gh-fix GH #75: preflight no longer waits forever on an unanswered editor re-register — opus-5.5 · 2026-09-30T19:39-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/75
+
+**Fixed and closed** in agent-doc `10f428a96` (pushed and installed). The commit's `Fixes #75` closed the issue, and I added a comment with the details.
+
+**Cause.** `schedule_stale_editor_replica_cp_recycle` (`agent-doc-controller-io/.../rpc.rs`) returned `request_skipped reason=editor_reregister_primary` on every call whenever the re-register reached a live endpoint, with no bound. Preflight deferred forever while session-check forbade every escape hatch. The byte-identical `issue_key` across three refusals was the tell.
+
+**Fix, following the issue's first suggested direction:**
+- `agent-doc-controller`: a new pure function, `classify_editor_reregister_wait`, returns `StartWindow`, `Pending` or `Unanswered`. It uses a 45s bound, and a record older than 15 minutes counts as a new episode rather than escalating.
+- `agent-doc-controller-io`: the episode start is stored per document in `state.db` (`document_runtime_state`, kind `editor_reregister_wait`). That lets it survive the short-lived preflight processes.
+- Past the bound, the status becomes `escalated reason=editor_reregister_unanswered unanswered_secs=N` and the supervisor-recycle fallback is requested once.
+- The record is cleared on escalation and on the terminal no-live-editor or refused outcomes, so escalation cannot turn into a recycle storm.
+- **Tests:** a classifier truth table (bound, TTL restart, clock skew) and an IO round-trip test (record → pending → backdated unanswered → cleared → new window).
+
+**Not done:**
+- The issue's secondary point: refusals warn about unanswered steering but show no text. That lives in `agent-doc-document-realtime-io/src/lib.rs`, which has another session's uncommitted `#rebasedsavefalsefail` work, so I left it alone. It's captured as `#refusalsteeringverbatim`.
+- I also captured #73's third suggestion as `#supdrainyieldfalsifiable` [recommended]. Both follow-ups are appended after `#release`.
+
+**Verification:** `make check` passed (exit 0; nextest 10262/10262 passed, 259 skipped). `make install` and `cargo build --release` succeeded. CI for #74/#75: see console.
+
+Exchange is at about 190 lines with 8 sections (accretion warn); I'm continuing the drain per the active-queue rule. Next queue head: #release.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -231,12 +254,14 @@ Next queue head: #release.
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/73~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/74~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/75
-- #release
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/75~~
+- ⏭️ #release
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#refusalsteeringverbatim] [agent-doc] GH #75 secondary: preflight refusals warn operator steering 'may be waiting unanswered' but session-check lists no prompt verbatim when the edit sits inside an unmerged editor save; surface the divergent components' operator text (agent-doc-document-realtime-io — coordinate with the in-flight #rebasedsavefalsefail edit there)
+- [ ] [#supdrainyieldfalsifiable] [agent-doc][recommended] GH #73 suggestion 3: record the supervisor-drain hand-off (session_check_supervisor_drain_handoff now logs head_sha256 + supervisor_drain_readiness) so the next preflight reports 'yielded N min ago, still undrained' instead of silently re-presenting the same heads
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

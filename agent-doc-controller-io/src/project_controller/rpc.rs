@@ -3783,18 +3783,15 @@ pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
 /// Directional — see [`agent_doc_supervisor::config::host_supervisor_build_is_stale`].
 /// `None` when the installed binary cannot be observed.
 fn host_supervisor_binary_is_stale(supervisor_pid: u32, installed_path: &Path) -> Option<bool> {
-    let to_identity = |build: agent_doc_fs::BinaryBuild| {
-        agent_doc_supervisor::config::BinaryBuildIdentity {
+    let to_identity =
+        |build: agent_doc_fs::BinaryBuild| agent_doc_supervisor::config::BinaryBuildIdentity {
             inode: build.inode,
             modified_nanos: build.modified_nanos,
             unlinked: build.unlinked,
-        }
-    };
+        };
     let installed = agent_doc_fs::binary_build_for_path(installed_path).map(to_identity)?;
     let running = agent_doc_fs::running_exe_build_for_pid(supervisor_pid).map(to_identity);
-    Some(agent_doc_supervisor::config::host_supervisor_build_is_stale(
-        running, installed,
-    ))
+    Some(agent_doc_supervisor::config::host_supervisor_build_is_stale(running, installed))
 }
 
 /// The supervisor's own projection wins; an older supervisor that omits it
@@ -3860,9 +3857,7 @@ pub fn recycle_stale_supervisor_for_command(file: &Path, source: &str) -> Option
 /// ordinary auto-recycle opt-out controls proactive recycling, but cannot leave
 /// a known-stale supervisor serving later generation/write/commit stages.
 pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Option<String> {
-    let (message, recycle_status) = if let Some(message) =
-        stale_supervisor_warning_for_doc(file)
-    {
+    let (message, recycle_status) = if let Some(message) = stale_supervisor_warning_for_doc(file) {
         (message, schedule_stale_supervisor_cp_recycle(file, stage))
     } else if reliable_sync_editor_live_for_file(file)
         && matches!(
@@ -4020,8 +4015,8 @@ struct EditorReregisterWaitRecord {
 fn observe_editor_reregister_wait(file: &Path) -> status::EditorReregisterWait {
     let now = timestamp_secs();
     let observed = (|| -> Result<status::EditorReregisterWait> {
-        let project_root = agent_doc_project_root_io::project_root_containing(file)
-            .context("no project root")?;
+        let project_root =
+            agent_doc_project_root_io::project_root_containing(file).context("no project root")?;
         let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         let conn = open_state_db(&project_root)?;
@@ -4088,8 +4083,8 @@ fn supervisor_drain_head_sha256(content: &str) -> Option<String> {
 pub fn record_supervisor_drain_handoff(file: &Path, head: &str) {
     let head_sha256 = agent_doc_hash::content_hash(head);
     let recorded = (|| -> Result<()> {
-        let project_root = agent_doc_project_root_io::project_root_containing(file)
-            .context("no project root")?;
+        let project_root =
+            agent_doc_project_root_io::project_root_containing(file).context("no project root")?;
         let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         let conn = open_state_db(&project_root)?;
@@ -4143,7 +4138,9 @@ pub fn undrained_supervisor_drain_handoff_age(file: &Path, content: &str) -> Opt
     )
     .ok()
     .flatten()
-    .and_then(|state| serde_json::from_str::<SupervisorDrainHandoffRecord>(&state.payload_json).ok())?;
+    .and_then(|state| {
+        serde_json::from_str::<SupervisorDrainHandoffRecord>(&state.payload_json).ok()
+    })?;
     status::undrained_supervisor_handoff_age(
         Some(&record.head_sha256),
         Some(record.handed_off_secs),
@@ -21587,6 +21584,7 @@ fn pane_layout_effect_worker(
         let logged_operator_owned_documents = report.operator_owned_documents.clone();
         let logged_expected_focus_pane = report.expected_focus_pane.clone();
         let logged_active_pane = report.active_pane.clone();
+        let geometry_target = report.session_name.clone().zip(report.window_id.clone());
         if report.synced {
             runtime.record_pane_layout_structural_assignment(
                 &desired,
@@ -21656,6 +21654,9 @@ fn pane_layout_effect_worker(
                 logged_active_pane,
             ),
         );
+        if let Some((session, window)) = geometry_target {
+            log_tmux_client_geometry(&bootstrap.project_root, &session, &window);
+        }
         match pane_layout_effect_worker_complete(
             &runtime,
             &state,
@@ -22949,6 +22950,42 @@ fn publish_pane_layout_desired(
         None,
         PaneLayoutPublication::CoalesceIdentical,
     )
+}
+
+/// GH #83: report which client the layout window renders for. Several attached
+/// clients of different sizes under `window-size latest` render the computed layout
+/// at whichever client was last active, dot-padding the rest, which looks exactly like
+/// a missing or empty pane. Logged when the geometry changes, and on every pass while
+/// the clients disagree, so a layout report can always be checked against it.
+fn log_tmux_client_geometry(project_root: &Path, session: &str, window: &str) {
+    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let Some(geometry) = agent_doc_tmux_io::client_geometry(&tmux, session, window) else {
+        return;
+    };
+    let summary = geometry.summary();
+    let changed = LAST
+        .lock()
+        .map(|mut last| {
+            let changed = last.as_deref() != Some(summary.as_str());
+            *last = Some(summary.clone());
+            changed
+        })
+        .unwrap_or(true);
+    if !changed && !geometry.clients_mismatched() {
+        return;
+    }
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "tmux_client_geometry session={session} window={window} {summary}{}",
+            if geometry.clients_mismatched() {
+                " warning=clients_of_different_sizes_attached remedy=detach_the_extra_client_or_set_window-size_largest"
+            } else {
+                ""
+            },
+        ),
+    );
 }
 
 fn publish_pane_layout_desired_invocation(
@@ -33155,15 +33192,23 @@ mod tests {
         let head = "[focused-cycle] fix queue identity loss";
         let content = doc(head);
         std::fs::write(&file, &content).unwrap();
-        assert!(supervisor_drain_head_sha256(&content).is_some(), "fixture must have a supervisor head");
+        assert!(
+            supervisor_drain_head_sha256(&content).is_some(),
+            "fixture must have a supervisor head"
+        );
 
         record_supervisor_drain_handoff(&file, head);
-        assert_eq!(undrained_supervisor_drain_handoff_age(&file, &content), None, "inside window");
+        assert_eq!(
+            undrained_supervisor_drain_handoff_age(&file, &content),
+            None,
+            "inside window"
+        );
 
         // Backdate past the window; re-recording the same head keeps the first time.
         let canonical = file.canonicalize().unwrap();
         let conn = open_state_db(dir.path()).unwrap();
-        let backdated = timestamp_secs() - status::SUPERVISOR_DRAIN_HANDOFF_UNDRAINED_AFTER.as_secs() - 60;
+        let backdated =
+            timestamp_secs() - status::SUPERVISOR_DRAIN_HANDOFF_UNDRAINED_AFTER.as_secs() - 60;
         agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
             &conn,
             &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
@@ -33184,7 +33229,10 @@ mod tests {
 
         // The head drained (a different head is first): the promise was kept.
         let drained = doc("[focused-cycle] a different head");
-        assert_eq!(undrained_supervisor_drain_handoff_age(&file, &drained), None);
+        assert_eq!(
+            undrained_supervisor_drain_handoff_age(&file, &drained),
+            None
+        );
     }
 
     #[test]
@@ -33210,9 +33258,7 @@ mod tests {
         let canonical = file.canonicalize().unwrap();
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         let conn = open_state_db(dir.path()).unwrap();
-        let backdated = timestamp_secs()
-            - status::EDITOR_REREGISTER_UNANSWERED_AFTER.as_secs()
-            - 5;
+        let backdated = timestamp_secs() - status::EDITOR_REREGISTER_UNANSWERED_AFTER.as_secs() - 5;
         agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
             &conn,
             &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {

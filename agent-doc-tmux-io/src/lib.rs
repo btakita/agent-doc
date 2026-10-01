@@ -233,7 +233,11 @@ impl TmuxCommandRunner for tmux_router::IsolatedTmux {
 /// it through turned a no-op into `editor_route ... applied=false` and dropped
 /// the operator's route. Any other stderr line keeps the failure.
 fn stderr_is_only_not_in_a_mode(stderr: &str) -> bool {
-    let mut lines = stderr.lines().map(str::trim).filter(|line| !line.is_empty()).peekable();
+    let mut lines = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .peekable();
     lines.peek().is_some() && lines.all(|line| line == "not in a mode")
 }
 
@@ -710,6 +714,45 @@ pub fn display_message_value(
     )
 }
 
+/// Probe the clients attached to `session` and the size `window` renders at (GH #83).
+/// `None` when tmux cannot be asked; an empty client list is a real answer.
+pub fn client_geometry(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    session: &str,
+    window: &str,
+) -> Option<agent_doc_tmux::TmuxClientGeometry> {
+    let clients = runner
+        .run(&agent_doc_tmux_commands::TmuxCommand::new([
+            "list-clients",
+            "-t",
+            session,
+            "-F",
+            "#{client_name} #{client_width} #{client_height}",
+        ]))
+        .ok()?;
+    let window_size = runner
+        .run(&agent_doc_tmux_commands::TmuxCommand::new([
+            "show-options",
+            "-wAv",
+            "-t",
+            window,
+            "window-size",
+        ]))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let (window_width, window_height) =
+        display_message_value(runner, Some(window), "#{window_width} #{window_height}")
+            .map(|value| agent_doc_tmux::TmuxClientGeometry::parse_window_size(&value))
+            .unwrap_or((None, None));
+    Some(agent_doc_tmux::TmuxClientGeometry {
+        clients: agent_doc_tmux::TmuxClientGeometry::parse_clients(&clients),
+        window_size,
+        window_width,
+        window_height,
+    })
+}
+
 pub fn display_message_value_nonempty(
     runner: &(impl TmuxCommandRunner + ?Sized),
     target: Option<&str>,
@@ -747,11 +790,16 @@ mod tests {
             stderr: stderr.as_bytes().to_vec(),
         };
         assert_eq!(
-            tmux_output_to_string(output("not in a mode\nnot in a mode\nnot in a mode\n"), "tmux")
-                .unwrap(),
+            tmux_output_to_string(
+                output("not in a mode\nnot in a mode\nnot in a mode\n"),
+                "tmux"
+            )
+            .unwrap(),
             "ok"
         );
-        assert!(tmux_output_to_string(output("not in a mode\ncan't find pane: %9\n"), "tmux").is_err());
+        assert!(
+            tmux_output_to_string(output("not in a mode\ncan't find pane: %9\n"), "tmux").is_err()
+        );
         assert!(tmux_output_to_string(output(""), "tmux").is_err());
     }
 
@@ -775,6 +823,29 @@ mod tests {
 
     struct FakeRunner {
         response: String,
+    }
+
+    /// Answers by the tmux subcommand, so a multi-command probe can be driven.
+    struct ScriptedRunner;
+
+    impl TmuxCommandRunner for ScriptedRunner {
+        fn run(&self, command: &TmuxCommand) -> Result<String, TmuxIoError> {
+            Ok(match command.args().first().map(String::as_str) {
+                Some("list-clients") => "/dev/pts/65 120 30\n/dev/pts/66 243 21\n".to_string(),
+                Some("show-options") => "latest\n".to_string(),
+                _ => "120 29\n".to_string(),
+            })
+        }
+    }
+
+    #[test]
+    fn client_geometry_reports_clients_policy_and_window_size() {
+        // GH #83: the measurement that settled a "two panes, one empty" report.
+        let geometry = super::client_geometry(&ScriptedRunner, "0", "@1").unwrap();
+        assert_eq!(
+            geometry.summary(),
+            "clients=2 [/dev/pts/65 120x30, /dev/pts/66 243x21] window_size=latest window=120x29 mismatch=true"
+        );
     }
 
     impl TmuxCommandRunner for FakeRunner {

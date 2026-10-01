@@ -1112,6 +1112,143 @@ impl TmuxModelMachine {
     }
 }
 
+/// One attached tmux client's size (GH #83).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TmuxClientSize {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Which client a window renders for, and at what size (GH #83).
+///
+/// With several clients attached and tmux's default `window-size latest`, the
+/// window takes the size of whichever client was last active. A wider client then
+/// shows the window in a corner with the rest dot-padded, which reads as an empty
+/// adjacent pane. Nothing in the layout agent-doc computed changes; only the
+/// client tmux sized to. No pane or layout diagnostic can tell that apart without
+/// these numbers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TmuxClientGeometry {
+    pub clients: Vec<TmuxClientSize>,
+    /// The effective `window-size` option (`latest`, `largest`, `smallest`, `manual`).
+    pub window_size: Option<String>,
+    pub window_width: Option<u32>,
+    pub window_height: Option<u32>,
+}
+
+/// Clients whose widths or heights differ by more than this many cells cannot both
+/// see the computed layout at full size.
+pub const CLIENT_SIZE_MISMATCH_CELLS: u32 = 10;
+
+impl TmuxClientGeometry {
+    /// Parse `list-clients -F '#{client_name} #{client_width} #{client_height}'`.
+    pub fn parse_clients(output: &str) -> Vec<TmuxClientSize> {
+        output
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.split_whitespace();
+                let name = fields.next()?.to_string();
+                let width = fields.next()?.parse().ok()?;
+                let height = fields.next()?.parse().ok()?;
+                Some(TmuxClientSize {
+                    name,
+                    width,
+                    height,
+                })
+            })
+            .collect()
+    }
+
+    /// Parse `display -p '#{window_width} #{window_height}'`.
+    pub fn parse_window_size(output: &str) -> (Option<u32>, Option<u32>) {
+        let mut fields = output.split_whitespace();
+        (
+            fields.next().and_then(|value| value.parse().ok()),
+            fields.next().and_then(|value| value.parse().ok()),
+        )
+    }
+
+    /// Two or more attached clients whose sizes differ materially: the window can
+    /// render faithfully for at most one of them.
+    pub fn clients_mismatched(&self) -> bool {
+        let widths = self.clients.iter().map(|client| client.width);
+        let heights = self.clients.iter().map(|client| client.height);
+        let spread = |values: &mut dyn Iterator<Item = u32>| {
+            let values: Vec<u32> = values.collect();
+            match (values.iter().min(), values.iter().max()) {
+                (Some(min), Some(max)) => max - min,
+                _ => 0,
+            }
+        };
+        self.clients.len() > 1
+            && (spread(&mut { widths }) > CLIENT_SIZE_MISMATCH_CELLS
+                || spread(&mut { heights }) > CLIENT_SIZE_MISMATCH_CELLS)
+    }
+
+    /// One log/diagnostic line: every client's size, the policy, the window size,
+    /// and whether the clients disagree.
+    pub fn summary(&self) -> String {
+        let dimension =
+            |value: Option<u32>| value.map_or("?".to_string(), |value| value.to_string());
+        format!(
+            "clients={} [{}] window_size={} window={}x{} mismatch={}",
+            self.clients.len(),
+            self.clients
+                .iter()
+                .map(|client| format!("{} {}x{}", client.name, client.width, client.height))
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.window_size.as_deref().unwrap_or("?"),
+            dimension(self.window_width),
+            dimension(self.window_height),
+            self.clients_mismatched(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod client_geometry_tests {
+    use super::*;
+
+    #[test]
+    fn the_gh83_rig_reads_as_mismatched_clients_under_latest() {
+        let geometry = TmuxClientGeometry {
+            clients: TmuxClientGeometry::parse_clients("/dev/pts/65 120 30\n/dev/pts/66 243 21\n"),
+            window_size: Some("latest".to_string()),
+            window_width: Some(120),
+            window_height: Some(29),
+        };
+        assert!(geometry.clients_mismatched());
+        assert_eq!(
+            geometry.summary(),
+            "clients=2 [/dev/pts/65 120x30, /dev/pts/66 243x21] window_size=latest window=120x29 mismatch=true"
+        );
+    }
+
+    #[test]
+    fn one_client_or_near_equal_clients_are_not_a_mismatch() {
+        let one = TmuxClientGeometry {
+            clients: TmuxClientGeometry::parse_clients("/dev/pts/1 243 21\n"),
+            window_size: None,
+            window_width: None,
+            window_height: None,
+        };
+        assert!(!one.clients_mismatched());
+        assert!(one.summary().contains("window_size=? window=?x?"));
+        let close = TmuxClientGeometry {
+            clients: TmuxClientGeometry::parse_clients("a 200 40\nb 205 38\nmalformed\n"),
+            ..one
+        };
+        assert_eq!(close.clients.len(), 2);
+        assert!(!close.clients_mismatched());
+        assert_eq!(
+            TmuxClientGeometry::parse_window_size("243 20\n"),
+            (Some(243), Some(20))
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

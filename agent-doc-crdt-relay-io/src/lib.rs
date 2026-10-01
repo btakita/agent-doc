@@ -3106,6 +3106,47 @@ fn apply_cp_write_on_hub(
     })
 }
 
+/// `#responsecellweldguard` (GH #86 follow-up): the response-cell target is
+/// binary-computed but, unlike every other canonical target, it was applied
+/// without the semantic guard. A response that lands inside a tracked
+/// component (`- [ ] [#id] push### Re: push ...`) was therefore accepted by the
+/// write and only refused later by commit, stranding the cycle. Validate the
+/// target here: a weld this write introduced is moved back into `exchange` by
+/// the same byte-preserving repair `agent-doc repair` uses, and a weld the
+/// repair cannot prove is refused with the canonical left unchanged. A weld
+/// that predates this write is not this write's to judge, so it passes through
+/// to the existing commit-side remedy.
+fn guard_response_cell_target_against_tracked_weld(
+    file: &Path,
+    before: &str,
+    mut outcome: agent_doc_merge::response_cell::ResponseCellAddOutcome,
+) -> Result<agent_doc_merge::response_cell::ResponseCellAddOutcome> {
+    use agent_doc_template::guard_no_conversation_content_inside_tracked_components as guard;
+    if !outcome.applied || guard(&outcome.content).is_ok() || guard(before).is_err() {
+        return Ok(outcome);
+    }
+    let repaired = agent_doc_template::repair_response_welded_inside_backlog_item(&outcome.content)?
+        .filter(|repaired| guard(repaired).is_ok());
+    let Some(repaired) = repaired else {
+        anyhow::bail!(
+            "response cell add refused for {}: the response target would embed binary conversation content inside a tracked component and the weld repair cannot prove a safe placement; canonical is unchanged",
+            file.display()
+        );
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_response_cell_weld_repaired file={} cell_id={} welded_hash={} repaired_hash={} (#responsecellweldguard)",
+            file.display(),
+            outcome.cell_id,
+            agent_doc_hash::content_hash(&outcome.content),
+            agent_doc_hash::content_hash(&repaired),
+        ),
+    );
+    outcome.content = repaired;
+    Ok(outcome)
+}
+
 fn apply_response_cell_on_hub(
     hub: &mut RelayHub,
     file: &Path,
@@ -3134,6 +3175,7 @@ fn apply_response_cell_on_hub(
     } else {
         agent_doc_merge::response_cell::add_response_cell(&normalized, response)?
     };
+    let outcome = guard_response_cell_target_against_tracked_weld(file, &normalized, outcome)?;
     let applied = repaired_scaffolding || outcome.applied;
     let (update_bytes, targets) = if applied {
         let packet = hub.apply_canonical_replace(&canonical, &outcome.content)?;
@@ -6180,6 +6222,77 @@ mod tests {
                 pid: pid.into(),
                 tag: format!("test-editor-{pid}:{file}"),
             }]);
+    }
+
+    const WELD_CLEAN: &str = concat!(
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n\n",
+        "Add the rule then push\n",
+        "<!-- agent:boundary:abc123 -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] 🚧 [#plcite] push\n",
+        "- [ ] [#rotate-secrets] Rotate terminal secrets\n",
+        "<!-- /agent:backlog -->\n",
+    );
+
+    fn weld_outcome(content: String) -> agent_doc_merge::response_cell::ResponseCellAddOutcome {
+        agent_doc_merge::response_cell::ResponseCellAddOutcome {
+            content,
+            cell_id: "cell-weld".to_string(),
+            applied: true,
+        }
+    }
+
+    fn welded_target() -> String {
+        WELD_CLEAN.replace(
+            "- [ ] 🚧 [#plcite] push\n",
+            "- [ ] 🚧 [#plcite] push### Re: push — fable-5\n> **Queue prompt:** push\n\nPushed `main`.\n",
+        )
+    }
+
+    /// `#responsecellweldguard` (GH #86 follow-up): a response-cell target that
+    /// welds the response into a tracked backlog row is repaired before it is
+    /// applied, instead of being accepted and refused later by commit.
+    #[test]
+    fn response_cell_target_weld_is_repaired_before_apply() {
+        let (_dir, doc) = temp_doc("weld-guard.md");
+        let guarded = guard_response_cell_target_against_tracked_weld(
+            &doc,
+            WELD_CLEAN,
+            weld_outcome(welded_target()),
+        )
+                .expect("a provable weld is repaired, not refused");
+        agent_doc_template::guard_no_conversation_content_inside_tracked_components(
+            &guarded.content,
+        )
+        .expect("the applied target carries no tracked-component weld");
+        assert!(guarded.content.contains("- [ ] 🚧 [#plcite] push\n"));
+        assert_eq!(guarded.content.matches("### Re: push").count(), 1);
+
+        // A weld the repair cannot place is refused; canonical stays unchanged.
+        let unprovable = welded_target().replace(
+            "<!-- /agent:backlog -->",
+            "### Re: other — fable-5\nmore\n<!-- /agent:backlog -->",
+        );
+        assert!(
+            guard_response_cell_target_against_tracked_weld(
+                &doc,
+                WELD_CLEAN,
+                weld_outcome(unprovable)
+            )
+            .is_err()
+        );
+
+        // A clean target passes through untouched.
+        let clean = guard_response_cell_target_against_tracked_weld(
+            &doc,
+            WELD_CLEAN,
+            weld_outcome(WELD_CLEAN.to_string()),
+        )
+        .unwrap();
+        assert_eq!(clean.content, WELD_CLEAN);
     }
 
     /// `#droppedreplicapull`: a replica dropped from the delivery cut that keeps

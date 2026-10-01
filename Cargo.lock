@@ -587,6 +587,7 @@ dependencies = [
  "agent-doc-reliable-sync-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
+ "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
  "lazily 0.57.1",

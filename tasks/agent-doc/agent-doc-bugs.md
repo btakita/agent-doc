@@ -45,8 +45,10 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/77
-- 🚧 :pin: #release
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/77
+- #gh-fix https://github.com/btakita/agent-doc/issues/78
+- :pin: #release
+- Look at all the old gh issue that I created. Close any of the issues that are no longer relevant.
 <!-- /agent:queue -->
 
 

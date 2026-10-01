@@ -271,10 +271,33 @@ pub fn host_supervisor_stale_warning_message(supervisor_pid: u32) -> String {
     format!(
         "the route-owned host supervisor (pid {supervisor_pid}) serving this document is mapping \
          a STALE agent-doc binary while a newer build is installed, so it can keep producing File \
-         Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift). Refresh it without discarding the \
-         live turn: `agent-doc admin recycle` (recycles at the next idle boundary) or \
-         `agent-doc session restart-supervisor <FILE>` (refuses busy panes)."
+         Cache Conflict / IPC-drift dialogs (#fcc0/#ipcdrift).{HOST_SUPERVISOR_STALE_REMEDY}"
     )
+}
+
+const HOST_SUPERVISOR_STALE_REMEDY: &str = " Refresh it without discarding the live turn: \
+     `agent-doc admin recycle` (recycles at the next idle boundary) or \
+     `agent-doc session restart-supervisor <FILE>` (refuses busy panes).";
+
+/// `#stalewarnscheduled`: append the automatic recycle request's outcome to a
+/// stale-supervisor warning.
+///
+/// When the request is already `requested`, the manual-refresh remedy is wrong
+/// advice: the supervisor re-execs itself at the next idle boundary — for a
+/// mid-turn install, the moment this cycle closes — and a manual
+/// `admin recycle` from inside the turn only races that. Replace the remedy
+/// with that fact instead of printing both.
+pub fn stale_supervisor_warning_with_recycle_status(message: &str, recycle_status: &str) -> String {
+    let scheduled = recycle_status.trim_start().starts_with("requested");
+    match message.strip_suffix(HOST_SUPERVISOR_STALE_REMEDY) {
+        Some(condition) if scheduled => format!(
+            "{condition} A safe-boundary recycle is already scheduled, so no operator action is \
+             needed: the supervisor re-execs onto the installed build at its next idle boundary \
+             (after a mid-turn install, when this cycle closes). Do not run `agent-doc admin \
+             recycle` or `restart-supervisor` for this. Recycle request status: {recycle_status}."
+        ),
+        _ => format!("{message} Automatic safe-boundary recycle request status: {recycle_status}."),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1533,6 +1556,25 @@ mod tests {
         assert!(msg.contains("refuses busy panes"), "message: {msg}");
         assert!(!msg.contains("--force"), "message: {msg}");
         assert!(!msg.contains("interrupt-clear"), "message: {msg}");
+    }
+
+    #[test]
+    fn stale_supervisor_warning_drops_manual_remedy_once_recycle_is_scheduled() {
+        let msg = host_supervisor_stale_warning_message(19503);
+        let scheduled = stale_supervisor_warning_with_recycle_status(
+            &msg,
+            "requested project_root=/p checkpoint=deferred",
+        );
+        assert!(scheduled.contains("pid 19503"), "{scheduled}");
+        assert!(scheduled.contains("already scheduled"), "{scheduled}");
+        assert!(scheduled.contains("no operator action"), "{scheduled}");
+        assert!(!scheduled.contains("Refresh it"), "{scheduled}");
+        assert!(scheduled.contains("checkpoint=deferred"), "{scheduled}");
+
+        // A refused request keeps the manual remedy.
+        let refused = stale_supervisor_warning_with_recycle_status(&msg, "refused reason=x");
+        assert!(refused.contains("agent-doc admin recycle"), "{refused}");
+        assert!(refused.contains("request status: refused"), "{refused}");
     }
 
     #[test]

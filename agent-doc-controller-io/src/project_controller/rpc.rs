@@ -3845,12 +3845,12 @@ fn stale_supervisor_pid_from_command_probe(file: &Path) -> Option<u32> {
 /// recycle when any document-scoped CLI command starts.
 pub fn recycle_stale_supervisor_for_command(file: &Path, source: &str) -> Option<String> {
     let supervisor_pid = stale_supervisor_pid_from_command_probe(file)?;
-    let mut message = status::host_supervisor_stale_warning_message(supervisor_pid);
+    let message = status::host_supervisor_stale_warning_message(supervisor_pid);
     let recycle_status = schedule_stale_supervisor_cp_recycle(file, source);
-    message.push_str(&format!(
-        " Automatic safe-boundary recycle request status: {recycle_status}."
-    ));
-    Some(message)
+    Some(status::stale_supervisor_warning_with_recycle_status(
+        &message,
+        &recycle_status,
+    ))
 }
 
 /// Detect a stale route-owned supervisor at a turn stage and unconditionally
@@ -3860,7 +3860,7 @@ pub fn recycle_stale_supervisor_for_command(file: &Path, source: &str) -> Option
 /// ordinary auto-recycle opt-out controls proactive recycling, but cannot leave
 /// a known-stale supervisor serving later generation/write/commit stages.
 pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Option<String> {
-    let (mut message, recycle_status) = if let Some(message) =
+    let (message, recycle_status) = if let Some(message) =
         stale_supervisor_warning_for_doc(file)
     {
         (message, schedule_stale_supervisor_cp_recycle(file, stage))
@@ -3883,10 +3883,10 @@ pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Opti
     } else {
         return None;
     };
-    message.push_str(&format!(
-        " Automatic safe-boundary recycle request status: {recycle_status}."
-    ));
-    Some(message)
+    Some(status::stale_supervisor_warning_with_recycle_status(
+        &message,
+        &recycle_status,
+    ))
 }
 
 /// `#fccsupwarn4` — preflight stale-supervisor self-heal.

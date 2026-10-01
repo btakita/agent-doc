@@ -1411,16 +1411,41 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let path = PathBuf::from(&file);
             // `#jbdisprecycle`: a freshly-started (post-recycle) supervisor
             // publishes the CP graph settle transition so route waiters reopen.
-            if let Err(err) =
-                agent_doc_controller_io::project_controller::supervisor_recycle_settled_for_file(
+            // `#recyclesettleretry`: retried every tick (with backoff) until the
+            // controller accepts it — an install recycles the controller at the
+            // same moment, so a one-shot publish was lost in its restart gap.
+            let watch_started_at = std::time::Instant::now();
+            let mut recycle_settle_publish =
+                agent_doc_supervisor::idle_watch::RecycleSettlePublish::default();
+            let publish_recycle_settled = |publish: &mut agent_doc_supervisor::idle_watch::RecycleSettlePublish| {
+                let now = watch_started_at.elapsed();
+                if !publish.due(now) {
+                    return;
+                }
+                match agent_doc_controller_io::project_controller::supervisor_recycle_settled_for_file(
                     &path,
                     "watch_loop_started",
-                )
-            {
-                eprintln!(
-                    "[agent-doc] warning: failed to publish supervisor recycle settled: {err:#}"
-                );
-            }
+                ) {
+                    Ok(_) => {
+                        if publish.failures() > 0 {
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                "supervisor_recycle_settle_published_after_retry (#recyclesettleretry)",
+                            );
+                        }
+                        publish.record_success();
+                    }
+                    Err(err) => {
+                        let failures = publish.record_failure(now);
+                        if failures == 1 || failures.is_power_of_two() {
+                            eprintln!(
+                                "[agent-doc] warning: failed to publish supervisor recycle settled (attempt {failures}; retrying): {err:#}"
+                            );
+                        }
+                    }
+                }
+            };
+            publish_recycle_settled(&mut recycle_settle_publish);
             let mut last_dispatched: Option<String> = None;
             let queue_head_settle_duration = std::time::Duration::from_millis(
                 agent_doc_preflight_io::debounce::authority_settle_ms(&path),
@@ -1645,6 +1670,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
                 }
+                publish_recycle_settled(&mut recycle_settle_publish);
                 // `#adturnscopehotloop`: one turn-attribution memo per tick.
                 //
                 // Every `log_op` resolves a `turn=` id, and outside a scope that

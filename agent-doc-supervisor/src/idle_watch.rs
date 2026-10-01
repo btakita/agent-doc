@@ -639,6 +639,55 @@ impl StaleRecycleDeferralTracking {
     }
 }
 
+/// `#recyclesettleretry`: retry state for a freshly (re)started supervisor's
+/// "recycle settled" publish to the project controller.
+///
+/// The publish used to run once when the idle watch started. `make install`
+/// recycles the controller at the same moment the supervisor re-execs onto the
+/// new binary, so that single RPC routinely landed in the controller's restart
+/// gap (`Connection refused`, or a 5s timeout) and the recycle graph stayed
+/// `InFlight` forever, with every recycle-gated route waiter waiting on it.
+/// Retry with capped exponential backoff until the controller accepts it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecycleSettlePublish {
+    settled: bool,
+    failures: u32,
+    next_attempt_at: Option<Duration>,
+}
+
+impl RecycleSettlePublish {
+    pub const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+    pub const MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+    /// `now` is elapsed time since the watch started.
+    pub fn due(&self, now: Duration) -> bool {
+        !self.settled && self.next_attempt_at.is_none_or(|at| now >= at)
+    }
+
+    pub fn record_success(&mut self) {
+        self.settled = true;
+        self.next_attempt_at = None;
+    }
+
+    /// Records a failed attempt; returns the consecutive failure count so the
+    /// caller can log the first failure loudly and later ones sparsely.
+    pub fn record_failure(&mut self, now: Duration) -> u32 {
+        let shift = self.failures.min(5);
+        let backoff = (Self::INITIAL_BACKOFF * (1u32 << shift)).min(Self::MAX_BACKOFF);
+        self.failures = self.failures.saturating_add(1);
+        self.next_attempt_at = Some(now + backoff);
+        self.failures
+    }
+
+    pub fn settled(&self) -> bool {
+        self.settled
+    }
+
+    pub fn failures(&self) -> u32 {
+        self.failures
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1215,6 +1264,35 @@ mod tests {
                 "idle_queue_watch_context_reset file=plan.md harness=codex cmd=\"/clear\" target=%1 head_bytes=16 head_sha256={} reason=\"fresh context\"",
                 agent_doc_hash::content_hash(active_head)
             )
+        );
+    }
+
+    #[test]
+    fn recycle_settle_publish_retries_with_capped_backoff_until_it_lands() {
+        let mut publish = RecycleSettlePublish::default();
+        let t = Duration::from_secs;
+        assert!(publish.due(t(0)), "the first attempt runs immediately");
+
+        // Controller restart gap: refused attempts back off 1s, 2s, 4s, ...
+        assert_eq!(publish.record_failure(t(0)), 1);
+        assert!(!publish.due(Duration::from_millis(500)));
+        assert!(publish.due(t(1)));
+        publish.record_failure(t(1));
+        assert!(!publish.due(t(2)));
+        assert!(publish.due(t(3)));
+
+        // ... capped, never abandoned: an unsettled graph pins InFlight forever.
+        for _ in 0..20 {
+            publish.record_failure(t(100));
+        }
+        assert!(!publish.due(t(129)));
+        assert!(publish.due(t(130)));
+
+        publish.record_success();
+        assert!(publish.settled());
+        assert!(
+            !publish.due(t(10_000)),
+            "a settled publish is never repeated"
         );
     }
 }

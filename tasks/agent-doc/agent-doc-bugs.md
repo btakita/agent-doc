@@ -63,6 +63,36 @@ Compacted content:
 I stopped here instead of patching: whether the settled intent really survived in `pending_write` across the recycle needs a ledger trace I haven't done yet.
 
 Next queue heads: `do [#supdrainyieldfalsifiable]`, then `#release`, which is still carried-skipped; see my previous question about fixing that.
+
+### Re: #gh-fix GH #76 + fixing agent-doc's causes of the recycle churn — opus-5.5 · 2026-09-30T20:35-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/76
+
+**Both are done** in agent-doc `6cb1ede86` (pushed, `make install` only). #76 is closed, with a comment explaining what I changed.
+
+**The recycle churn: fixed (`#supdirstale`).**
+- **Cause:** host-supervisor staleness compared the supervisor's running inode with the inode of the CLI's *own* binary. There are two launchable copies of one build: `~/.cargo/bin` from `make install`, and `target/release` behind the `.bin/agent-doc` newest-build shim. A CLI on one copy flagged every supervisor on the other as stale, *even a newer one*, and requested a recycle at every stage (`preflight_entry`, `commit_start`, `finalize_write_start`…). The re-exec went back through the shim onto the same newer copy, and the next command asked again. The live supervisors were measurably split between the two copies, and infra's supervisor re-exec'd three times in 2.5 minutes, each time refusing admission. That is your 7:27 `infra.md` refusal.
+- **Fix:** staleness is now directional. A supervisor is stale only if its running bytes were unlinked or the CLI's binary is a *strictly newer build*. The new pieces:
+  - the pure rule `host_supervisor_build_is_stale` in `agent-doc-supervisor`;
+  - `BinaryBuild` probes in `agent-doc-fs`, which read the running binary's mtime through `/proc/<pid>/exe`;
+  - one helper, `host_supervisor_binary_is_stale`, shared by all three recycle-driving sites;
+  - `supervisor_stale_warning_message` now uses the existing `controller_binary_identity_is_newer` instead of an equality check that includes the path.
+- **Workflow half:** the per-fix `cargo build --release` I had been running added a second recycle wave. I removed that from my workflow and corrected the memory note that prescribed it.
+
+**#76: fixed.**
+- `editor_route` now refuses *before dispatch*, with the pid, the mapped jar and the remedy, when the document's live JetBrains editor maps superseded plugin bytes. Previously it burned the full 125s.
+- The probe moved from `agent-doc-preflight-io` to `agent-doc-fs` (re-exported), so the controller and preflight share one implementation.
+- I kept the established remedy ordering (try the restart-free update first; restart only after an install records the IDE refused it) because existing tests pin it deliberately.
+- One correction to the issue: the 125s wait is on the controller's own worker, not on an editor reply.
+
+**Verification:** `make check` passed (exit 0; nextest 10265/10265, 259 skipped). Tests cover the directional rule across six cases and the route refusal.
+
+**Not done (now in the backlog):**
+- `#queueselectreversed`: this cycle's contract listed the queue in *reverse* order and selected the carried-skipped `#release`. I drained #76 by document order instead.
+- `#releaseskipcarried`: removing a `⏭️` doesn't clear the carried skip.
+- `#gh76secondary`.
+
+Remaining queue: `do [#supdrainyieldfalsifiable]`, then `#release`, which will stay skipped until `#releaseskipcarried` is fixed or the line is rewritten.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -77,12 +107,17 @@ Next queue heads: `do [#supdrainyieldfalsifiable]`, then `#release`, which is st
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/75~~
 - ~~Do the "things you need from me"~~
 - ~~do [#refusalsteeringverbatim]~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/76
+- do [#stopreplaynoopretained]
 - do [#supdrainyieldfalsifiable]
-- ⏭️ #release
+- 🚧 #release
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#queueselectreversed] [agent-doc] 2026-10-01 preflight selected '#release' (carried ⏭️) as head while queue_prompts listed the live heads in REVERSE of document order (doc: supdrainyieldfalsifiable, #gh-fix 76, #release → contract: #release, #76, supdrain). Operator-authored order is authoritative (#qauthorder).
+- [ ] [#releaseskipcarried] [agent-doc] An operator removing a head's ⏭️ marker does not clear it from cycle-state skipped_queue_head_ids (#queueskip, agent-doc-preflight-io/src/lib.rs ~4840): '#release' (no backlog item/preset, so never 'consumed') is re-stamped every cycle. Treat a snapshot→document ⏭️ removal as an operator un-skip.
+- [ ] [#gh76secondary] [agent-doc] GH #76 leftovers: stale_plugin expects 0.2.453 while the installer leaves 0.2.451 on disk (install vs expected-version disagree); full sync left window 0:1 named 'stash-' holding 19 panes instead of renaming to 'stash'.
 - [ ] [#stopreplaynoopretained] [agent-doc] lazily.md Codex Stop hook failed closed 2026-10-01T00:08Z: serialized_atomic_write retained intent 1790781617611427022 (from 11:20, settled 15:20:24Z per retained_write_settled_from_derived_verdict) was re-used because the Stop replay's target hash == that intent's target f42c0100 == the authority already at 00:08:13 — a no-op replay that failed only because the controller had just recycled (make install) and the model was mid-reseed (crdt_replica_register_retained_reseed turn=cycle-1790781610027). Self-healed: captured_finalize_resume_committed 00:09:17. Fix: (1) a write whose target already equals live authority must not fail closed on a transient model-missing; (2) prove whether pending_write still held the settled 11:20 intent across the recycle (ensure_deferred_document_write_intent reuse at agent-doc-document-realtime-io/src/lib.rs:4732) and clear it at settlement; (3) derive_settled_closeout_resume_signal (project_controller.rs) pairs the current capture with an unrelated latest_converged_write — gate it to writes after the capture
 - [ ] [#supdrainyieldfalsifiable] [agent-doc][recommended] GH #73 suggestion 3: record the supervisor-drain hand-off (session_check_supervisor_drain_handoff now logs head_sha256 + supervisor_drain_readiness) so the next preflight reports 'yielded N min ago, still undrained' instead of silently re-presenting the same heads
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02

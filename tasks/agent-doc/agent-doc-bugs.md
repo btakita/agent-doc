@@ -567,6 +567,37 @@ The exchange is now 481 lines; the queue does not auto-compact.
 - CI run `36933407786` is still pending.
 
 The exchange is now 506 lines; I'm continuing the queue rather than stopping to compact.
+
+### Re: #gh-fix GH #87 + the sdk.md controller timeout — opus-5.5 · 2026-10-01T18:39-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/87
+
+**GH #87: fixed and closed** (`b5239609c`). The `stale_plugin` warning now checks whether the expected build is already staged for the next IDE start. It does that before it says "a restart alone cannot reach parity". It reads two sources:
+
+- IntelliJ's own pending-install queue: `unzip:` lines in `<system>/plugins/action.script` that name `agent-doc-jetbrains-<expected>.zip`.
+- agent-doc's restart-required marker. A staged install now records `staged_version=<v>` there.
+
+When either source shows the expected version, the warning says the build is already staged and that the fix is to restart the IDE, not to install again. The other messages are unchanged. New tests cover the parser, the marker round-trip, and both message entry points.
+
+**sdk.md "timed out after 5.0s waiting for project controller response":**
+
+- **What you saw.** At 18:21:18 local, the IDE's "Run Agent Doc" route on sdk.md failed. Its `route_document_prep` call to the controller timed out.
+- **The stall window.** From 22:20:43 to 22:21:44Z, every state-event call from the idle watch, session-check, captured finalize and route timed out at 5 s. Calls to the CRDT relay kept succeeding.
+- **What was happening at the same time:**
+  - A retained editor save stayed unsettled for those 70 s. The IDE refused `persist_current` four times with `visible_length_mismatch` while you typed, then with `document_lane_timeout`.
+  - sdk.md was re-registered with a 974 KB full bootstrap for a 12 KB document.
+  - The stall ended at 22:21:44, the moment that save settled. The second route attempt then dispatched and committed.
+- **Not yet proven.** Each state-event call waits on one controller lock (`state_event_ingress`). Nothing logged how long that lock was held, so the logs can't show what held it. I didn't want to ship a guessed fix. Two commits instead:
+  - `80d82d4ad`: every holder of that lock now logs `state_event_ingress_slow site=… fact=… wait_ms=… hold_ms=…` to ops.log once a wait or hold reaches 1 s. The next stall will name its holder. That follow-up is backlog item `#sdkingressstall`, which also covers haiven-dev's 305 MB `reliable_sync_liveness_journal`.
+  - `f66059470` fixes the cause that the new `#jbrejectlog` logging confirmed today: `cause=editor_id_mismatch` for IDE pid 2960722. A dynamic plugin reload rebuilt `EditorIdentity` and gave the same IDE a new id, while the controller kept using the old one. That is the IDE involved here, and its re-register churn overlapped the stall. The id and the `:refresh-N` counter are now kept for the life of the IDE process. Plugin 0.2.461.
+
+**Verification:**
+- `make check` passed (10,333 tests) and the new Kotlin tests pass.
+- `make install` hot-swapped plugin 0.2.461 into the IDE.
+- Pushed; CI run `36936340958` is queued.
+- This upgrade was the last one that changes the editor id, because the old build never saved it.
+
+The exchange is over 500 lines; I'm still draining the queue rather than stopping to compact it.
 <!-- agent:boundary:9acd1e79 -->
 <!-- /agent:exchange -->
 
@@ -591,7 +622,7 @@ The exchange is now 506 lines; I'm continuing the queue rather than stopping to 
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~
 - ~~Look at https://github.Look at https://github.com/btakita/agent-doc/issues/86 response. Fix the remaining issues.com/btakita/agent-doc/issues/86 response. Fix the remaining issues. complete https://github.com/btakita/agent-doc/issues/81~~
 - ~~do [#jbrejectlog]~~
- - #gh-fix https://github.com/btakita/agent-doc/issues/87
+ - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/87
  - #gh-fix https://github.com/btakita/agent-doc/issues/88
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
@@ -599,6 +630,7 @@ The exchange is now 506 lines; I'm continuing the queue rather than stopping to 
 
 
 <!-- agent:backlog priority -->
+- [ ] [#sdkingressstall] haiven-dev sdk.md: find what held the controller's state-event ingress lock on 2026-10-01 22:20:43-22:21:44Z, when every state-event RPC (including the IDE route's route_document_prep) timed out after 5.0s. The window matched a retained editor save that the IDE kept refusing (persist_current visible_length_mismatch, then document_lane_timeout) and a 974 KB full replica bootstrap of a 12 KB document. 80d82d4ad now logs state_event_ingress_slow site=… fact=… wait_ms=… hold_ms= at 1s or more. Unblocked by the next occurrence: grep haiven-dev ops.log for state_event_ingress_slow, then fix that holder. Also check why reliable_sync_liveness_journal is 305 MB in haiven-dev state.db.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

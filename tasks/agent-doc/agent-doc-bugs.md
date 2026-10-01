@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -195,7 +195,7 @@ This changes what the drain writes and how the supervisor behaves, so I've recor
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do https://github.com/btakita/agent-doc/issues/79
+- ~~do https://github.com/btakita/agent-doc/issues/79~~ — auto-struck: answered this cycle (#ftstrike)
 - do https://github.com/btakita/agent-doc/issues/80
 - do https://github.com/btakita/agent-doc/issues/81
 - do https://github.com/btakita/agent-doc/issues/82

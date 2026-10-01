@@ -125,6 +125,20 @@ Next queue head: `do [#supdrainyieldfalsifiable]`.
 - **Verification:** `make check` passed (exit 0; nextest 10269/10269, 259 skipped).
 
 Remaining queue: `do [#stopreplaynoopretained]` (open: the stale-intent trace), then `#release`, which is still affected by `#releaseskipcarried`.
+
+### Re: #release — agent-doc 0.35.427 tagged and pushed — opus-5.5 · 2026-09-30T21:19-04:00
+
+> **Queue prompt:** #release
+
+**Released `v0.35.427`.**
+- `make release-version VERSION=0.35.427` projected the version across 144 manifests, `Cargo.lock`, `pyproject.toml` and the skill copies.
+- I added a `VERSIONS.md` entry covering the nine commits since 0.35.426: GH #72–#76, `#supdirstale`, `#supdrainyieldfalsifiable`, `#stopreplaynoopretained` and `#rebasedsavefalsefail`.
+- The release commit is `133ceb8f9`. `make release` re-ran `check` (exit 0; nextest 10269/10269, 259 skipped), tagged and pushed `v0.35.427`, then ran `make install-full` once.
+- **One fix on the way:** the first `make check` failed the editor-parity audit with "release 0.35.427 requires exactly one editor parity audit row". I added the row to `editors/release-parity.tsv` (no JetBrains- or VS Code-specific changes this release), and the audit now passes.
+
+**CI:** the Book and Pages jobs passed. **Release** (GitHub assets) and **PyPI** were still running when I checked; I recorded that status rather than waiting.
+
+**Queue:** `#release` is now consumed. The only head left is `do [#stopreplaynoopretained]`, whose open half needs the `state_events` trace across the 00:08 controller recycle.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -140,8 +154,8 @@ Remaining queue: `do [#stopreplaynoopretained]` (open: the stale-intent trace), 
 - ~~Do the "things you need from me"~~
 - ~~do [#refusalsteeringverbatim]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/76~~
-- ⏭️ #release
-- ⏭️ do [#stopreplaynoopretained]
+- 🚧 #release
+- do [#stopreplaynoopretained]
 - ~~do [#supdrainyieldfalsifiable]~~
 <!-- /agent:queue -->
 

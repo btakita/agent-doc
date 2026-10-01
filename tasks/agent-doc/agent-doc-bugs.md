@@ -311,6 +311,33 @@ Fixed in agent-doc `21ad58344`, pushed. #84 is closed.
 - 6 new regression tests: 3 in `fs::plugin_jar`, 3 in realtime-io.
 - `make check` exit 0, 10301/10301 passed.
 - `make install` done. CI run 36906135836 is still pending.
+
+### Re: #jbstageonfail + fpe.md Codex Stop-hook overrun — opus-5.5 · 2026-10-01T14:39-04:00
+
+> **Queue prompt:** do [#jbstageonfail]
+
+**#jbstageonfail: done in `5c6df493f`, JetBrains plugin 0.2.459.**
+
+- **What changed:** if the restart-free upgrade fails, the in-IDE upgrader now stages the package with the IDE's own `PluginInstaller.installAfterRestart` and returns `staged:<version>:<reason>`.
+  - It finds the method by parameter types, because the descriptor argument has moved between first and last position across IDE builds.
+  - It copies the package into the IDE's plugin temp directory first, because the launcher deletes its own copy on exit.
+- **Installer:** a `staged:` result leaves the plugin tree alone, so the live jars are no longer deleted from under the running IDE. It still writes the restart-required marker that preflight reads. A process that does finish the hot-swap still takes precedence.
+- **Tests:** 3 Java tests and 2 Rust tests.
+- **Not tested live:** this install's hot-swap succeeded, so the staging path hasn't run against a real IDE yet.
+- I posted on #80 that point 3 landed; the original upgrade failure in #80 is still open.
+
+**fpe.md Stop hook over its 45s budget: fixed in `07bb0e667`.**
+
+- **Cause:** it was my own `make install` from the #84 cycle, not anything in fpe.md.
+  1. `binary-install` swapped the binary, and haiven-dev's controller restarted onto the new build (generation 2034 → 2035).
+  2. `lib-install` then sent a plain `recycle` to all 9 controllers, including 2035, which was already on the new build.
+  3. That pointless handoff sat in `Preparing` for its full 30s successor wait (18:21:19 → 18:21:49 UTC) and refused every `crdt_replica` call meanwhile.
+  4. The Stop hook's `active_session_prompt_or_queue_head` waited 28.7s through that window, so the hook went over 45s.
+- **Nothing was lost.** At 18:21:50 the hook reopened the cycle and saved your capture (`codex_stop_capture_saved`); the supervisor retained it from there. Typing directly into the Codex session was fine.
+- **Fix:** install fan-outs now tag their recycle as `install_fanout`. A controller whose binary exactly matches the installed one declines it and logs `controller_recycle_skipped`. Unknown binary identity still recycles, and an explicit `admin recycle` always does.
+- **Verified live:** this cycle's install reported "1 controller marked, 8 skipped", and haiven-dev logged `controller_recycle_skipped pid=818850 generation=2037 reason=install_fanout skip=binary_already_current`, with no handoff aborted.
+
+**Verification:** `make check` exit 0, 10304/10304 passed; JetBrains Java tests 3/3; `make install` done.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -326,7 +353,7 @@ Fixed in agent-doc `21ad58344`, pushed. #84 is closed.
 - ~~do https://github.com/btakita/agent-doc/issues/82~~
 - ~~do https://github.com/btakita/agent-doc/issues/83~~
 - ~~do https://github.com/btakita/agent-doc/issues/84~~
-- do [#jbstageonfail]
+- ~~do [#jbstageonfail]~~
 - [#queuestopretire]: do option 1
 - When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.
 - release + publish
@@ -334,7 +361,6 @@ Fixed in agent-doc `21ad58344`, pushed. #84 is closed.
 
 
 <!-- agent:backlog priority -->
-- [ ] [#jbstageonfail] [recommended] GH #80 point 3: when the JetBrains dynamic upgrade fails for a live pid, stage the package (applied at next IDE start) instead of replacing jars under the live JVM, so a failed hot-swap stops manufacturing the plugin_bytes_superseded state. src/agent-doc/src/plugin.rs install_jetbrains_package_bytes / replace_jetbrains_plugin_tree.
 - [ ] [#queuestopretire] [agent-doc][decision] Retire the binary-written queue: stop now that a queue with no control defaults to go (operator question, 2026-10-01). Proposal: (1) a DRAIN (no live heads left) clears the control on both surfaces instead of writing stop; (2) a HALT with heads left writes a typed hold instead of a bare stop (pause, or a binary-owned 'halted' that a queue edit re-arms); (3) decide whether a queue with no control drains through the supervisor idle watch and the Codex Stop hook. Today preflight treats it as active, but drainable_head_count and required_continuation require an explicit control (kept that way in the GH #79 fix to avoid a silent behavior change). Code: agent-doc-queue/src/control_binding.rs, agent-doc-queue/src/queue_continuation.rs, the drain/clear path in agent-doc-preflight-io/src/lib.rs.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and ### Re: sections. Close #19 when shipped.

@@ -184,9 +184,6 @@ pub fn required_continuation(
     snapshot_content: Option<&str>,
 ) -> Result<Option<QueueContinuation>> {
     let (fm, _) = frontmatter::parse(content)?;
-    if fm.queue_active != Some(true) {
-        return Ok(None);
-    }
     let components = element::parse(content)?;
     let Some(queue_component) = components
         .iter()
@@ -194,7 +191,15 @@ pub fn required_continuation(
     else {
         return Ok(None);
     };
-    if !explicit_go_mode(&fm, &queue_component.attrs) {
+    // `#qbindingone` (GH #79): the resolved control binding is the only
+    // activation authority. Requiring the legacy `queue_active: true`, which
+    // current writers no longer emit, kept this detector silent for every
+    // `queue: go` document (`#qstartinert` fixed the same flag elsewhere).
+    let control = crate::control_binding::frontmatter_queue_control(&fm);
+    // An explicit control only; see `active_queue_for_supervisor_start`.
+    if crate::control_binding::queue_control_defaults_to_go(&queue_component.attrs, control)
+        || !crate::control_binding::explicit_queue_go_mode(&queue_component.attrs, control)
+    {
         return Ok(None);
     }
     let has_auto = document_queue::has_auto_attr(&queue_component.attrs);
@@ -279,11 +284,13 @@ fn continuation_head_skipping_answered_residue(content: &str) -> Option<QueuePro
         .entries_after
         .into_iter()
         .filter(|entry| match entry {
-            QueueEntry::Prompt(prompt) => !crate::queue_heads::free_text_queue_head_is_completed_residue(
-                content,
-                &exchange_text,
-                prompt.text.trim(),
-            ),
+            QueueEntry::Prompt(prompt) => {
+                !crate::queue_heads::free_text_queue_head_is_completed_residue(
+                    content,
+                    &exchange_text,
+                    prompt.text.trim(),
+                )
+            }
             _ => true,
         })
         .collect();
@@ -731,11 +738,12 @@ pub fn queue_stale_noise_lines(content: &str) -> usize {
         .count()
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct QueueFacts {
     has_auto: bool,
-    marker_go: bool,
-    marker_start: bool,
+    /// The marker's attributes, read through `control_binding` so the marker
+    /// and frontmatter controls have one precedence (`#qbindingone`).
+    attrs: HashMap<String, String>,
     preset_supplies_directive: bool,
 }
 
@@ -747,8 +755,7 @@ fn queue_component_entries(content: &str) -> Option<(QueueFacts, Vec<QueueEntry>
     Some((
         QueueFacts {
             has_auto: document_queue::has_auto_attr(&queue_component.attrs),
-            marker_go: queue_component.attrs.contains_key("go"),
-            marker_start: queue_component.attrs.contains_key("start"),
+            attrs: queue_component.attrs.clone(),
             preset_supplies_directive: queue_component.attrs.contains_key("preset"),
         },
         entries,
@@ -773,29 +780,28 @@ fn active_queue_for_supervisor_start(
     // authority; `queue_active` now only participates as an explicit halt.
     //
     // `queue_active: false` IS meaningful — the drain/clear path writes it when a
-    // queue finishes — so it still stops drainability, as does `queue: stop`.
-    if fm.queue_active == Some(false) {
-        return None;
-    }
-    if fm
-        .queue
-        .as_deref()
-        .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("stop"))
-    {
-        return None;
-    }
+    // queue finishes — so with no marker control it still stops drainability, as
+    // does `queue: stop`.
+    //
+    // `#qbindingone` (GH #79): the gate is the resolved control binding, the same
+    // authority `activation` uses, never a second reading of raw frontmatter.
+    // Checking `queue: stop` here first made a marker `go` beside a stale
+    // `queue: stop` ACTIVE for preflight yet `drainable_head_count: 0` here, so
+    // the queue never drained. The binding lets an explicit marker token win
+    // (`#qactsync`), keeps a lone legacy `queue_active` flag inert, and applies
+    // the `#queuegodefault` go when neither surface carries a control.
     let (queue_facts, entries) = queue_component_entries(content)?;
-    let explicit_go = queue_facts.marker_go
-        || fm
-            .queue
-            .as_deref()
-            .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"));
+    let control = crate::control_binding::frontmatter_queue_control(&fm);
+    // Only an EXPLICIT control drains. The binding's `#queuegodefault` go for a
+    // queue with no control on either surface is left out on purpose: it would
+    // make every hand-kept queue auto-drain through the idle watch, a behavior
+    // change GH #79 does not ask for (`#queuegodefaultdrain` tracks it).
+    if crate::control_binding::queue_control_defaults_to_go(&queue_facts.attrs, control) {
+        return None;
+    }
+    let explicit_go = crate::control_binding::explicit_queue_go_mode(&queue_facts.attrs, control);
     let explicit_start = allow_supervisor_start
-        && (queue_facts.marker_start
-            || fm
-                .queue
-                .as_deref()
-                .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("start")));
+        && crate::control_binding::explicit_queue_start_mode(&queue_facts.attrs, control);
     if !explicit_go && !explicit_start {
         return None;
     }
@@ -808,17 +814,6 @@ fn active_queue_for_supervisor_start(
         return None;
     }
     Some((queue_facts, activation))
-}
-
-fn explicit_go_mode(
-    fm: &frontmatter::Frontmatter,
-    attrs: &std::collections::HashMap<String, String>,
-) -> bool {
-    attrs.contains_key("go")
-        || fm
-            .queue
-            .as_deref()
-            .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"))
 }
 
 fn first_drainable_head<'a>(
@@ -1883,7 +1878,11 @@ mod tests {
             "- [ ] [#c3d4] Other\n",
             "<!-- /agent:backlog -->\n",
         );
-        assert_eq!(drainable_head_count(content), 2, "both sibling invocations drain");
+        assert_eq!(
+            drainable_head_count(content),
+            2,
+            "both sibling invocations drain"
+        );
         assert_eq!(
             live_drainable_continuation_head(content, DrainScope::InSessionLoop).as_deref(),
             Some("#gh-fix https://x/issues/69"),
@@ -2329,29 +2328,114 @@ mod tests {
     }
 
     /// `#qstartinert` guard: the explicit halts must still stop drainability.
+    /// `#qbindingone` (GH #79): "explicit" means the RESOLVED control binding,
+    /// so drainability agrees with preflight activation on every combination.
     #[test]
     fn drainable_head_count_respects_explicit_halts_without_legacy_flag() {
-        let stopped = concat!(
-            "---\nsession: sid\nagent_doc_format: template\nqueue: stop\n---\n\n",
-            "<!-- agent:queue go -->\n",
-            "- do [#c]\n",
-            "<!-- /agent:queue -->\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#c] plain drainable\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        assert_eq!(
-            drainable_head_count(stopped),
-            0,
-            "`queue: stop` must dominate a stale marker `go`"
-        );
+        let doc = |frontmatter: &str, marker: &str| {
+            format!(
+                concat!(
+                    "---\nsession: sid\nagent_doc_format: template\n{}---\n\n",
+                    "<!-- agent:queue{} -->\n",
+                    "- do [#c]\n",
+                    "<!-- /agent:queue -->\n\n",
+                    "<!-- agent:backlog -->\n",
+                    "- [ ] [#c] plain drainable\n",
+                    "<!-- /agent:backlog -->\n",
+                ),
+                frontmatter, marker
+            )
+        };
+        for (frontmatter, marker, expected, why) in [
+            ("queue: stop\n", "", 0, "a bare `queue: stop` halts"),
+            (
+                "queue: go\n",
+                " stop",
+                0,
+                "a marker `stop` halts a `queue: go`",
+            ),
+            (
+                "queue: go\n",
+                " pause",
+                0,
+                "a marker `pause` holds the queue",
+            ),
+            (
+                "queue_active: false\n",
+                "",
+                0,
+                "a lone legacy `queue_active: false` halts",
+            ),
+            ("queue: go\n", "", 1, "`queue: go` drains"),
+            (
+                "queue: stop\n",
+                " go",
+                1,
+                "GH #79: a marker `go` overrides a stale `queue: stop` (#qactsync)",
+            ),
+            (
+                "queue_active: false\n",
+                " go",
+                1,
+                "a marker `go` overrides a stale legacy halt",
+            ),
+        ] {
+            let content = doc(frontmatter, marker);
+            assert_eq!(
+                drainable_head_count(&content),
+                expected,
+                "{why}:\n{content}"
+            );
+            let (fm, _) = frontmatter::parse(&content).unwrap();
+            let components = element::parse(&content).unwrap();
+            let queue = components.iter().find(|c| c.name == "queue").unwrap();
+            assert_eq!(
+                crate::control_binding::queue_control_activation(
+                    &queue.attrs,
+                    crate::control_binding::frontmatter_queue_control(&fm),
+                ),
+                expected == 1,
+                "drainability must agree with preflight's activation control ({why})"
+            );
+        }
+    }
 
-        // A drained queue writes `queue_active: false`; that remains an explicit halt.
-        let cleared = stopped.replace("queue: stop", "queue_active: false");
-        assert_eq!(
-            drainable_head_count(&cleared),
-            0,
-            "a persisted `queue_active: false` must still halt the drain"
+    /// A queue with no control on either surface keeps its pre-#79 behavior:
+    /// not drained by the idle watch or the continuation detector
+    /// (`#queuegodefaultdrain` owns whether it should be).
+    #[test]
+    fn control_less_queue_is_not_auto_drained() {
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue -->\n",
+            "- Remove the max character count cap\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(drainable_head_count(content), 0);
+        assert!(
+            required_continuation(content, Some(content))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// GH #79 repro: a free-text head under `<!-- agent:queue priority go -->`
+    /// beside a persisted `queue: stop` is drainable, so the supervisor and the
+    /// in-session loop both pick it up.
+    #[test]
+    fn marker_go_beside_stale_queue_stop_drains_a_free_text_head() {
+        let content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\nqueue: stop\n---\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- What is the current status of this MR?\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(drainable_head_count(content) > 0, "{content}");
+        assert!(
+            required_continuation(content, Some(content))
+                .unwrap()
+                .is_some(),
+            "the continuation detector must agree"
         );
     }
 

@@ -331,6 +331,18 @@ opening tag carries `go`/`start` is recognized as an activatable head, so
 queue even when the frontmatter still reads `queue: stop`. A marker-side `stop`
 keeps the queue inert on that path and wins over `auto`/`go`/`start`.
 
+Activation readers that run without a preflight convergence pass first share
+preflight's control predicate (`#qbindingone`, GH #79):
+`control_binding::queue_control_activation`. These are the supervisor/loop
+drainability count (`drainable_head_count`) and the continuation detector
+(`required_continuation`). Before this, they re-derived activation from raw
+frontmatter. A marker `go` beside a stale `queue: stop` was then active for
+preflight but reported `drainable_head_count: 0`, so the idle watch never
+dispatched and the queue never drained. Closeout-time readers (consumption,
+noise pruning) see frontmatter that preflight's `#qactsync` convergence has
+already synchronized. A lone legacy `queue_active:` flag with no marker control
+stays inert, matching preflight.
+
 #### Writer emits canonical `queue:` (phase 4)
 
 Queue-maintenance write paths persist the canonical control directly:

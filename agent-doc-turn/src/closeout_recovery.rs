@@ -1048,7 +1048,11 @@ mod tests {
             "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
             "<!-- agent:queue auto go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
         );
-        let local = head.replace("queue_active: true", "queue_active: false");
+        // A dropped continuation loses BOTH control surfaces: a marker `go`
+        // beside a halted flag still continues (`#qbindingone`, GH #79).
+        let local = head
+            .replace("queue_active: true", "queue_active: false")
+            .replace("<!-- agent:queue auto go -->", "<!-- agent:queue auto -->");
         assert_eq!(
             metadata_drift_authority(&local, head),
             MetadataDriftAuthority::Head

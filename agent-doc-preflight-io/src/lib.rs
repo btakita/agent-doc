@@ -23,8 +23,8 @@ use agent_doc_queue::{
     backlog_sync::AutoBacklogQueueSyncPolicy,
     control_binding::{
         converge_queue_control_binding_content, explicit_queue_go_mode, explicit_queue_pause_mode,
-        explicit_queue_start_mode, explicit_queue_stop_mode, frontmatter_queue_control,
-        infer_queue_go_from_prompt_edit, strip_queue_activation_tokens_in_content,
+        explicit_queue_stop_mode, frontmatter_queue_control, infer_queue_go_from_prompt_edit,
+        strip_queue_activation_tokens_in_content,
     },
     free_text_admission::{
         FreeTextAdmissionExecution, FreeTextAdmissionScope, append_empty_agent_component,
@@ -2895,9 +2895,7 @@ fn queue_control_activation(
     attrs: &std::collections::HashMap<String, String>,
     frontmatter_queue: Option<&str>,
 ) -> bool {
-    !explicit_queue_stop_mode(attrs, frontmatter_queue)
-        && (explicit_queue_go_mode(attrs, frontmatter_queue)
-            || explicit_queue_start_mode(attrs, frontmatter_queue))
+    agent_doc_queue::control_binding::queue_control_activation(attrs, frontmatter_queue)
 }
 
 /// Queue maintenance cannot truthfully classify the queue until the retained

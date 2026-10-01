@@ -1547,7 +1547,11 @@ mod tests {
             "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue auto go -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n",
         );
-        let snapshot = head.replace("queue_active: true", "queue_active: false");
+        // The drift drops the continuation on BOTH control surfaces: a marker
+        // `go` beside a halted flag still continues (`#qbindingone`, GH #79).
+        let snapshot = head
+            .replace("queue_active: true", "queue_active: false")
+            .replace("<!-- agent:queue auto go -->", "<!-- agent:queue auto -->");
         let (dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(

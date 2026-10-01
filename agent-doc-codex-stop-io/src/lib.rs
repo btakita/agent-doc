@@ -3994,6 +3994,9 @@ Done.\n\
 
     #[test]
     fn stop_passes_through_committed_cycle_with_stopped_queue_head() {
+        // A halt writes `queue: stop` AND strips the marker's `go`. A leftover
+        // `go` beside `stop` is an explicit marker control that wins on every
+        // activation reader (`#qbindingone`, GH #79), so it is not a stopped queue.
         let dir = setup_project();
         let doc = dir.path().join("task.md");
         let original = "---\nsession: sid\nqueue: stop\n---\n\n\
@@ -4003,7 +4006,7 @@ Done.\n\
 Reviewed the gated items.\n\
 <!-- /agent:exchange -->\n\n\
 ## Queue\n\n\
-<!-- agent:queue priority go -->\n\
+<!-- agent:queue priority -->\n\
 - #advance-review\n\
 <!-- /agent:queue -->\n";
         fs::write(&doc, original).unwrap();

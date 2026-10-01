@@ -45,6 +45,24 @@ pub fn explicit_queue_pause_mode(
     resolved_queue_binding(attrs, frontmatter_queue) == Some(QueueBindingMode::Pause)
 }
 
+/// Whether the queue's resolved control activates it: `go` or `start`, and not
+/// `stop`/`pause` (`#qbindingone`, GH #79).
+///
+/// Preflight's persisted-activation input reads it, and so do the readers that
+/// run WITHOUT a preflight convergence pass first (the supervisor/loop
+/// drainability count and the continuation detector), so a marker `go` beside a
+/// stale `queue: stop` can no longer be active for preflight and inert for the
+/// idle watch. A legacy `queue_active:` flag with no `queue:` key stays inert
+/// unless the marker carries a control.
+pub fn queue_control_activation(
+    attrs: &HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> bool {
+    !explicit_queue_stop_mode(attrs, frontmatter_queue)
+        && (explicit_queue_go_mode(attrs, frontmatter_queue)
+            || explicit_queue_start_mode(attrs, frontmatter_queue))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum QueueBindingMode {
     Start,

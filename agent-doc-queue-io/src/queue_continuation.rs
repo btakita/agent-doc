@@ -220,7 +220,15 @@ mod tests {
     };
 
     fn write_doc(dir: &Path, prompts: &[&str], queue_active: bool, has_auto: bool) -> PathBuf {
-        let queue_attrs = if has_auto { " auto go" } else { "" };
+        // A drained or halted queue has its `go` token stripped from the marker
+        // (`strip_queue_activation_tokens_in_content`). Keeping it beside
+        // `queue_active: false` would model a stale marker that, per the single
+        // activation authority (`#qbindingone`, GH #79), still means `go`.
+        let queue_attrs = match (has_auto, queue_active) {
+            (true, true) => " auto go",
+            (true, false) => " auto",
+            (false, _) => "",
+        };
         write_doc_with_queue_attrs(dir, prompts, queue_active, queue_attrs)
     }
 

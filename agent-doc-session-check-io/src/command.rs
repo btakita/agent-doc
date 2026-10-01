@@ -586,10 +586,8 @@ pub fn supervisor_drain_unavailable_message(
         None => "no live supervisor".to_string(),
     };
     format!(
-        "[session-check] queue STALLED — needs the operator: a [focused-cycle] head remains for the supervisor clear-and-continue path, but {who} cannot drain it (supervisor_drain_readiness={}). Yielding would leave it undrained. Refresh the supervisor (`agent-doc admin recycle`, or `agent-doc session restart-supervisor {}`) or re-trigger `agent-doc {}` in a fresh session ({}; #supdrainlive).",
+        "[session-check] queue continues IN-SESSION: a [focused-cycle] head remains for the supervisor clear-and-continue path, but {who} cannot drain it (supervisor_drain_readiness={}). Yielding would leave it undrained, so drain it in this session now; do not hand it back to the operator or ask for a re-trigger ({}; #supdrainlive, #focusedfallback).",
         readiness.reason(),
-        file.display(),
-        file.display(),
         file.display(),
     )
 }
@@ -1669,15 +1667,20 @@ fn run_with_options_inner(
                     let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(kind)
                         .expect("static supervisor-drain outcome is valid")
                         .log_fields();
-                    log_supervisor_drain_handoff(file, &supervisor_head, readiness, &outcome_fields);
-                    println!(
-                        "queue_continuation_required=false queue_deferred_heads={} queue_stale_noise_lines={} supervisor_drain_readiness={} {}",
-                        deferred,
-                        noise,
-                        readiness.reason(),
-                        outcome_fields
+                    log_supervisor_drain_handoff(
+                        file,
+                        &supervisor_head,
+                        readiness,
+                        &outcome_fields,
                     );
                     if readiness.is_ready() {
+                        println!(
+                            "queue_continuation_required=false queue_deferred_heads={} queue_stale_noise_lines={} supervisor_drain_readiness={} {}",
+                            deferred,
+                            noise,
+                            readiness.reason(),
+                            outcome_fields
+                        );
                         // #supdrainyieldfalsifiable: make the yield falsifiable —
                         // the next preflight reports a head that outlived it.
                         agent_doc_controller_io::project_controller::record_supervisor_drain_handoff(
@@ -1690,11 +1693,36 @@ fn run_with_options_inner(
                             outcome_fields
                         );
                     } else {
+                        // #focusedfallback: the supervisor cannot take the
+                        // head, so the in-session loop does. Handing it to the
+                        // operator was a stall.
+                        println!(
+                            "queue_continuation_required=true next_queue_prompt={:?} supervisor_drain_readiness={}",
+                            agent_doc_queue::queue_continuation::supervisor_only_head_prompt_text(
+                                content.as_deref().unwrap_or_default()
+                            )
+                            .unwrap_or_else(|| supervisor_head.clone()),
+                            readiness.reason(),
+                        );
                         eprintln!(
                             "{} {}",
                             supervisor_drain_unavailable_message(file, readiness),
                             outcome_fields
                         );
+                        let stall_cycle_id =
+                            agent_doc_cycle_state_io::load_with_closeout_projection(file)
+                                .ok()
+                                .flatten()
+                                .map(|s| s.cycle_id)
+                                .unwrap_or_default();
+                        if let Err(err) = agent_doc_controller_io::project_controller::record_queue_drain_stall_continuation_pending_for_file(
+                            file,
+                            &stall_cycle_id,
+                        ) {
+                            eprintln!(
+                                "[session-check] warning: failed to record continuation projection: {err}"
+                            );
+                        }
                     }
                 } else if deferred > 0 || noise > 0 {
                     let outcome_fields = agent_doc_flow::outcome::UserFacingOutcome::new(

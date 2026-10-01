@@ -7592,13 +7592,17 @@ Body\n\
     }
 
     /// `#supdrainlive` (GH #73): a hand-off is only valid if the receiver can
-    /// receive. Every non-ready supervisor must turn the yield into an
-    /// operator-class outcome that says STALLED — never the "NOT an operator
+    /// receive. Every non-ready supervisor must refuse the "NOT an operator
     /// stall" yield that stranded the queue behind an 18h-stale supervisor.
+    /// `#focusedfallback`: and it must not hand the head to the operator either
+    /// (the fpe.md Codex turn ended with "re-run in a fresh session"); the
+    /// in-session loop drains it.
     #[test]
     fn supervisor_drain_handoff_refuses_yield_when_supervisor_cannot_drain() {
         use agent_doc_controller::status::SupervisorDrainReadiness as R;
-        use agent_doc_flow::outcome::{BinaryOutcomeClass, UserFacingOutcome, UserFacingOutcomeKind};
+        use agent_doc_flow::outcome::{
+            BinaryOutcomeClass, UserFacingOutcome, UserFacingOutcomeKind,
+        };
 
         assert_eq!(
             supervisor_drain_outcome_kind(R::Ready { supervisor_pid: 1 }),
@@ -7607,18 +7611,32 @@ Body\n\
         let doc = Path::new("tasks/doc.md");
         for readiness in [
             R::NoLiveSupervisor,
-            R::HeartbeatStale { supervisor_pid: 1872747 },
-            R::StaleBinary { supervisor_pid: 1872747 },
+            R::HeartbeatStale {
+                supervisor_pid: 1872747,
+            },
+            R::StaleBinary {
+                supervisor_pid: 1872747,
+            },
         ] {
             let kind = supervisor_drain_outcome_kind(readiness);
             assert_eq!(kind, UserFacingOutcomeKind::SupervisorDrainUnavailable);
             let outcome = UserFacingOutcome::new(kind).unwrap();
-            assert_eq!(outcome.class, BinaryOutcomeClass::Operator);
+            assert_eq!(outcome.class, BinaryOutcomeClass::Recoverable);
             let fields = outcome.log_fields();
-            assert!(fields.contains("ui_outcome=supervisor_drain_unavailable"), "{fields}");
+            assert!(
+                fields.contains("ui_outcome=supervisor_drain_unavailable"),
+                "{fields}"
+            );
+            assert!(
+                fields.contains("drain_in_session_supervisor_unavailable"),
+                "{fields}"
+            );
             assert!(!fields.contains("yield_to_supervisor"), "{fields}");
+            assert!(!fields.contains("operator_retrigger"), "{fields}");
             let message = supervisor_drain_unavailable_message(doc, readiness);
-            assert!(message.contains("STALLED"), "{message}");
+            assert!(message.contains("IN-SESSION"), "{message}");
+            assert!(!message.contains("STALLED"), "{message}");
+            assert!(!message.contains("re-trigger `agent-doc"), "{message}");
             assert!(!message.contains("NOT an operator stall"), "{message}");
             assert!(message.contains(readiness.reason()), "{message}");
         }

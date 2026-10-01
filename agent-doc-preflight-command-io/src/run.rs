@@ -2073,19 +2073,66 @@ pub fn run_with_options_to_writer(
     // `#queueblockquoteintent`: do NOT pre-fold the preemption into
     // `raw_required` — a stop with heads remaining must name its reason instead
     // of looking identical to a drained queue.
+    // `#focusedfallback`: only a `[focused-cycle]` head is left, which the
+    // in-session loop yields to the supervisor. When that supervisor cannot
+    // drain it, keep the drain in-session instead of reporting no drainable work
+    // (which stopped the loop and handed the head back to the operator). A
+    // pending recycle-yield keeps precedence: that recycle is what makes the
+    // supervisor ready again.
+    let supervisor_fallback = if !options.probe
+        && !queue_state.queue_continuation_required
+        && queue_state.queue_active == Some(true)
+        && !recycle_yield_pending
+        && !exchange_prompt_preempts_queue
+    {
+        agent_doc_queue::queue_continuation::supervisor_only_head_prompt_text(
+            &model_source_content,
+        )
+        .and_then(|head| {
+            let readiness =
+                agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc(
+                    file,
+                );
+            (!readiness.is_ready()).then(|| {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_supervisor_unavailable_fallback source=preflight head_bytes={} supervisor_drain_readiness={} (#focusedfallback)",
+                        head.len(),
+                        readiness.reason()
+                    ),
+                );
+                readiness
+            })
+        })
+    } else {
+        None
+    };
     let effective_continuation =
         agent_doc_queue::queue_continuation::effective_continuation_output_with_preemption(
-            queue_state.queue_continuation_required,
+            queue_state.queue_continuation_required || supervisor_fallback.is_some(),
             exchange_prompt_preempts_queue,
             recycle_yield_pending,
             queue_state.queue_pause_reason.as_deref(),
         );
     let queue_continuation_required = effective_continuation.required;
-    let queue_continuation_guidance = effective_continuation.guidance.or_else(|| {
+    let queue_continuation_guidance = match supervisor_fallback {
+        Some(readiness) => Some(
+            agent_doc_queue::queue_continuation::supervisor_unavailable_fallback_guidance(
+                readiness.reason(),
+            ),
+        ),
+        None => effective_continuation.guidance,
+    }
+    .or_else(|| {
         agent_doc_queue::queue_continuation::supervisor_scoped_activation_guidance(
             &model_source_content,
         )
     });
+    if supervisor_fallback.is_some() {
+        preflight_read_facts.queue.drainable_head_count =
+            preflight_read_facts.queue.drainable_head_count.max(1);
+    }
     preflight_read_facts.queue.continuation_required = queue_continuation_required;
     preflight_read_facts.queue.continuation_guidance = queue_continuation_guidance.clone();
     preflight_reads.observe(preflight_read_facts.clone());

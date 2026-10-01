@@ -45,8 +45,8 @@ pub enum UserFacingOutcomeKind {
     /// `#supdrainlive` (GH #73) — a `[focused-cycle]` head remains for the supervisor
     /// clear-and-continue path, but the supervisor cannot receive it (none live, a
     /// stale heartbeat, or a stale binary). Yielding would strand the queue with
-    /// nobody draining it, so this admits a human is needed instead of claiming
-    /// "NOT an operator stall".
+    /// nobody draining it, so the in-session loop drains it instead
+    /// (`#focusedfallback`); it is never handed back to the operator.
     SupervisorDrainUnavailable,
     /// `#turnsaferecycle` Goal 3 — the hosting supervisor is running a stale binary,
     /// so the current turn phase (preflight / route / stream / session-check / write)
@@ -82,9 +82,8 @@ impl UserFacingOutcomeKind {
             | Self::DeferredForSupervisorDrain
             | Self::DeferredForRecycle => BinaryOutcomeClass::Ok,
             Self::RecoveredAndRetried => BinaryOutcomeClass::Recoverable,
-            Self::DeferredForOperatorProof | Self::SupervisorDrainUnavailable => {
-                BinaryOutcomeClass::Operator
-            }
+            Self::DeferredForOperatorProof => BinaryOutcomeClass::Operator,
+            Self::SupervisorDrainUnavailable => BinaryOutcomeClass::Recoverable,
             Self::RealComponentConflict | Self::BlockedWithExactUnblocker => {
                 BinaryOutcomeClass::Blocked
             }
@@ -97,7 +96,7 @@ impl UserFacingOutcomeKind {
             Self::RecoveredAndRetried => "continue_after_recovery_retry",
             Self::DeferredForOperatorProof => "operator_proof_required",
             Self::DeferredForSupervisorDrain => "yield_to_supervisor_clear_and_continue",
-            Self::SupervisorDrainUnavailable => "operator_retrigger_supervisor_unavailable",
+            Self::SupervisorDrainUnavailable => "drain_in_session_supervisor_unavailable",
             Self::DeferredForRecycle => "yield_for_supervisor_recycle",
             Self::NoDrainableWork => "no_agent_action",
             Self::RealComponentConflict => "resolve_component_conflict",
@@ -414,8 +413,8 @@ mod tests {
             (
                 Kind::SupervisorDrainUnavailable,
                 "supervisor_drain_unavailable",
-                BinaryOutcomeClass::Operator,
-                "operator_retrigger_supervisor_unavailable",
+                BinaryOutcomeClass::Recoverable,
+                "drain_in_session_supervisor_unavailable",
             ),
             (
                 Kind::DeferredForRecycle,

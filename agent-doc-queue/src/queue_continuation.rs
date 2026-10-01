@@ -668,6 +668,28 @@ pub fn live_drainable_head_prompt_text(content: &str, scope: DrainScope) -> Opti
     Some(strip_in_progress_marker(&head.text))
 }
 
+/// `#focusedfallback`: the head only the supervisor scope drains (a
+/// `[focused-cycle]` head), when the in-session loop has none of its own.
+///
+/// The in-session loop yields such a head to the supervisor's
+/// clear-and-continue path. When that supervisor cannot drain (none live, a
+/// stale heartbeat, or a stale binary), the caller hands this head back to the
+/// in-session loop instead of stalling the queue on the operator.
+pub fn supervisor_only_head_prompt_text(content: &str) -> Option<String> {
+    if live_drainable_head_prompt_text(content, DrainScope::InSessionLoop).is_some() {
+        return None;
+    }
+    live_drainable_head_prompt_text(content, DrainScope::Supervisor)
+}
+
+/// Guidance printed when the in-session loop takes over a `[focused-cycle]` head
+/// because its supervisor cannot drain it (`#focusedfallback`).
+pub fn supervisor_unavailable_fallback_guidance(readiness: &str) -> String {
+    format!(
+        "queue continuation required — the next head is `[focused-cycle]`, which normally yields to the supervisor's clear-and-continue path, but the supervisor cannot drain it (supervisor_drain_readiness={readiness}). Drain it IN-SESSION now instead of handing it back: a stale or missing supervisor is not a stop reason, and asking the operator to re-trigger is a stall (#focusedfallback)."
+    )
+}
+
 /// The head prompt a dispatching caller should work, honouring the same deferral
 /// rules preflight applies when it fills `selected_queue_prompts`.
 ///
@@ -1936,6 +1958,18 @@ mod tests {
             Some("f")
         );
         assert_eq!(drainable_head_count(&content), 0);
+        // `#focusedfallback`: the head the in-session loop takes over when the
+        // supervisor cannot drain it.
+        assert_eq!(
+            supervisor_only_head_prompt_text(&content).as_deref(),
+            Some("do [#f]")
+        );
+        // A head the in-session loop drains itself is never a fallback.
+        let plain = doc_with_backlog(
+            &["do [#p]", "do [#f]"],
+            &["- [ ] [#p] plain", "- [ ] [#f] [focused-cycle] x"],
+        );
+        assert!(supervisor_only_head_prompt_text(&plain).is_none());
     }
 
     #[test]
@@ -2426,9 +2460,7 @@ mod tests {
             assert_ne!(held, content);
             assert_eq!(drainable_head_count(&held), 0, "{held}");
             assert!(
-                required_continuation(&held, Some(&held))
-                    .unwrap()
-                    .is_none(),
+                required_continuation(&held, Some(&held)).unwrap().is_none(),
                 "{held}"
             );
         }

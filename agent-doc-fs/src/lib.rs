@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::path::{Component, Path, PathBuf};
 
 pub mod install_freshness;
+pub mod plugin_jar;
 pub mod rotating_log;
 
 pub use rotating_log::{SharedAppendLog, read_rotated_log, rotate_log_if_oversized};
@@ -202,6 +203,73 @@ pub fn running_exe_inode_for_pid(pid: u32) -> Option<u64> {
 
 /// Inode of the on-disk file at `path`. Returns `None` on non-Unix platforms or
 /// any stat error.
+/// The build identity of an on-disk or mapped executable, for directional
+/// staleness (`#supdirstale`): which file it is, when it was built, and whether
+/// the running mapping's file has since been unlinked (replaced on disk).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BinaryBuild {
+    pub inode: u64,
+    /// Modification time in nanoseconds since the Unix epoch, when readable.
+    pub modified_nanos: Option<u128>,
+    /// `/proc/<pid>/exe` names a file that was unlinked — the bytes this
+    /// process runs are no longer on disk at that path.
+    pub unlinked: bool,
+}
+
+fn modified_nanos(meta: &std::fs::Metadata) -> Option<u128> {
+    meta.modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_nanos())
+}
+
+/// Build identity of the executable at `path`.
+pub fn binary_build_for_path(path: &Path) -> Option<BinaryBuild> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let meta = std::fs::metadata(path).ok()?;
+        Some(BinaryBuild {
+            inode: meta.ino(),
+            modified_nanos: modified_nanos(&meta),
+            unlinked: false,
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// Build identity of the executable `pid` is running. `stat` through
+/// `/proc/<pid>/exe` reaches the mapped inode even after it was unlinked, so the
+/// mtime is that of the bytes actually running.
+pub fn running_exe_build_for_pid(pid: u32) -> Option<BinaryBuild> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let exe = format!("/proc/{pid}/exe");
+        let meta = std::fs::metadata(&exe).ok()?;
+        let unlinked = std::fs::read_link(&exe)
+            .map(|target| target.to_string_lossy().ends_with(" (deleted)"))
+            .unwrap_or(false);
+        Some(BinaryBuild {
+            inode: meta.ino(),
+            modified_nanos: modified_nanos(&meta),
+            unlinked,
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
 pub fn inode_of_path(path: &Path) -> Option<u64> {
     #[cfg(unix)]
     {

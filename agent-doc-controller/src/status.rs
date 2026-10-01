@@ -240,7 +240,10 @@ pub fn supervisor_stale_warning_message(
     if !status.active {
         return None;
     }
-    if !process_binary_is_stale(status.controller_binary.as_ref(), current_binary) {
+    // `#supdirstale`: directional. A controller launched from a different
+    // copy of the same or a NEWER build (`target/release` vs `~/.cargo/bin`)
+    // is not stale; only a strictly newer installed build makes it so.
+    if !controller_binary_identity_is_newer(current_binary, status.controller_binary.as_ref()) {
         return None;
     }
     let pid = status

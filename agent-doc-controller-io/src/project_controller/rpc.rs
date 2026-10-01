@@ -3708,9 +3708,7 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
     // `/proc/<pid>/exe`) against the installed binary's inode. A supervisor that
     // hot-reloaded onto the fresh binary in place (`execve`) maps the install inode and
     // must read FRESH even though its process start time predates the install.
-    let installed_inode = agent_doc_fs::inode_of_path(&current_binary_identity().ok()?.path)?;
-    let running_inode = agent_doc_fs::running_exe_inode_for_pid(supervisor_pid);
-    if !agent_doc_supervisor::config::host_supervisor_is_stale(running_inode, installed_inode) {
+    if !host_supervisor_binary_is_stale(supervisor_pid, &current_binary_identity().ok()?.path)? {
         return None;
     }
     Some(status::host_supervisor_stale_warning_message(
@@ -3738,17 +3736,11 @@ pub fn supervisor_drain_readiness_for_doc(file: &Path) -> status::SupervisorDrai
     };
     let alive = lease.supervisor_pid.is_some_and(process_is_alive);
     let binary_stale = lease.supervisor_pid.filter(|_| alive).is_some_and(|pid| {
-        match current_binary_identity()
+        current_binary_identity()
             .ok()
-            .and_then(|current| agent_doc_fs::inode_of_path(&current.path))
-        {
-            Some(installed_inode) => agent_doc_supervisor::config::host_supervisor_is_stale(
-                agent_doc_fs::running_exe_inode_for_pid(pid),
-                installed_inode,
-            ),
+            .and_then(|current| host_supervisor_binary_is_stale(pid, &current.path))
             // No installed identity to compare against: cannot vouch for it.
-            None => true,
-        }
+            .unwrap_or(true)
     });
     status::classify_supervisor_drain_readiness(
         lease.supervisor_pid,
@@ -3787,16 +3779,32 @@ pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
     None
 }
 
+/// `#supdirstale`: the one IO helper every host-supervisor staleness site uses.
+/// Directional — see [`agent_doc_supervisor::config::host_supervisor_build_is_stale`].
+/// `None` when the installed binary cannot be observed.
+fn host_supervisor_binary_is_stale(supervisor_pid: u32, installed_path: &Path) -> Option<bool> {
+    let to_identity = |build: agent_doc_fs::BinaryBuild| {
+        agent_doc_supervisor::config::BinaryBuildIdentity {
+            inode: build.inode,
+            modified_nanos: build.modified_nanos,
+            unlinked: build.unlinked,
+        }
+    };
+    let installed = agent_doc_fs::binary_build_for_path(installed_path).map(to_identity)?;
+    let running = agent_doc_fs::running_exe_build_for_pid(supervisor_pid).map(to_identity);
+    Some(agent_doc_supervisor::config::host_supervisor_build_is_stale(
+        running, installed,
+    ))
+}
+
+/// The supervisor's own projection wins; an older supervisor that omits it
+/// falls back to the directional host verdict (`#supdirstale`), and an
+/// unobservable fallback fails open.
 fn command_supervisor_probe_is_stale(
     reported_binary_stale: Option<bool>,
-    running_inode: Option<u64>,
-    installed_inode: Option<u64>,
+    host_fallback_stale: Option<bool>,
 ) -> bool {
-    reported_binary_stale.unwrap_or_else(|| {
-        installed_inode.is_some_and(|installed_inode| {
-            agent_doc_supervisor::config::host_supervisor_is_stale(running_inode, installed_inode)
-        })
-    })
+    reported_binary_stale.unwrap_or_else(|| host_fallback_stale.unwrap_or(false))
 }
 
 /// Ask the document's live supervisor for its process-scoped binary freshness.
@@ -3823,16 +3831,13 @@ fn stale_supervisor_pid_from_command_probe(file: &Path) -> Option<u32> {
     let reported_binary_stale = data
         .get("binary_stale")
         .and_then(serde_json::Value::as_bool);
-    let (running_inode, installed_inode) = if reported_binary_stale.is_none() {
+    let host_fallback_stale = if reported_binary_stale.is_none() {
         let current = current_binary_identity().ok()?;
-        (
-            agent_doc_fs::running_exe_inode_for_pid(supervisor_pid),
-            agent_doc_fs::inode_of_path(&current.path),
-        )
+        host_supervisor_binary_is_stale(supervisor_pid, &current.path)
     } else {
-        (None, None)
+        None
     };
-    command_supervisor_probe_is_stale(reported_binary_stale, running_inode, installed_inode)
+    command_supervisor_probe_is_stale(reported_binary_stale, host_fallback_stale)
         .then_some(supervisor_pid)
 }
 
@@ -9672,6 +9677,9 @@ fn handle_editor_command_submit_async_rpc(
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
     let command_kind = AsyncEditorCommandKind::try_from(submit.name.as_str())?;
     validate_async_editor_command_payload(command_kind, &payload_json)?;
+    if command_kind == AsyncEditorCommandKind::EditorRoute {
+        refuse_editor_route_to_superseded_editor(bootstrap, &payload_json)?;
+    }
     let focus_fence = admit_async_editor_focus_fence(
         bootstrap,
         &runtime.async_editor_commands,
@@ -9758,6 +9766,75 @@ fn handle_editor_command_submit_async_rpc(
     }
 
     Ok(accepted_response)
+}
+
+const JETBRAINS_PLUGIN_JAR_STEM: &str = "agent-doc-jetbrains-";
+
+/// GH #76 pure core: the first live JetBrains editor proven to be executing
+/// superseded plugin bytes, rendered as a refusal reason. `None` when every
+/// probe is current or inconclusive (fails open — `Unknown` never refuses).
+fn superseded_editor_route_refusal(
+    probes: &[(String, u32, agent_doc_fs::plugin_jar::MappedPluginJar)],
+) -> Option<String> {
+    probes.iter().find_map(|(kind, pid, mapped)| {
+        let path = match mapped {
+            agent_doc_fs::plugin_jar::MappedPluginJar::Deleted { path }
+            | agent_doc_fs::plugin_jar::MappedPluginJar::Superseded { path, .. } => path,
+            _ => return None,
+        };
+        Some(format!(
+            "plugin_bytes_superseded: editor_route refused before dispatch — live {kind} editor \
+             pid {pid} is executing superseded plugin bytes ({path} is no longer the installed \
+             jar), so it cannot publish the observations this route waits on and the command \
+             would only burn its timeout. Run the plugin install once so its restart-free \
+             update can converge; if the install reports the process refused that update, \
+             restart the editor backend (pid {pid}). Then retry (#76)."
+        ))
+    })
+}
+
+/// GH #76: refuse an `editor_route` whose document is held by an editor already
+/// proven to run superseded plugin bytes, instead of dispatching a route that
+/// consumes the full await budget (125s) and then reports only a timeout.
+fn refuse_editor_route_to_superseded_editor(
+    bootstrap: &ControllerBootstrap,
+    payload_json: &str,
+) -> Result<()> {
+    let payload: ControllerEditorRoutePayload =
+        serde_json::from_str(payload_json).context("parse editor_route payload")?;
+    let Some(relative_path) = payload.relative_path.as_deref() else {
+        return Ok(());
+    };
+    let file = bootstrap.project_root.join(relative_path);
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let registrations = controller_liveness_plane()
+        .lock()
+        .projection()
+        .live_registrations(&document_hash);
+    let probes = registrations
+        .into_iter()
+        .filter(|registration| registration.editor_kind.contains("jetbrains"))
+        .filter_map(|registration| {
+            // A pid that does not fit `/proc`'s u32 cannot be probed: skip it
+            // (fail open) rather than refuse on a truncated id.
+            let pid = u32::try_from(registration.pid).ok()?;
+            let mapped =
+                agent_doc_fs::plugin_jar::probe_mapped_plugin_jar(pid, JETBRAINS_PLUGIN_JAR_STEM);
+            Some((registration.editor_kind, pid, mapped))
+        })
+        .collect::<Vec<_>>();
+    if let Some(reason) = superseded_editor_route_refusal(&probes) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "editor_route_refused_superseded_editor file={} reason=plugin_bytes_superseded",
+                canonical.display()
+            ),
+        );
+        anyhow::bail!(reason);
+    }
+    Ok(())
 }
 
 fn validate_async_editor_command_payload(
@@ -25387,15 +25464,11 @@ mod tests {
 
     #[test]
     fn command_probe_prefers_supervisor_projection_and_supports_old_pid_responses() {
-        assert!(command_supervisor_probe_is_stale(Some(true), None, None));
-        assert!(!command_supervisor_probe_is_stale(
-            Some(false),
-            Some(11),
-            Some(12)
-        ));
-        assert!(command_supervisor_probe_is_stale(None, Some(11), Some(12)));
-        assert!(!command_supervisor_probe_is_stale(None, Some(11), Some(11)));
-        assert!(!command_supervisor_probe_is_stale(None, None, Some(12)));
+        assert!(command_supervisor_probe_is_stale(Some(true), None));
+        assert!(!command_supervisor_probe_is_stale(Some(false), Some(true)));
+        assert!(command_supervisor_probe_is_stale(None, Some(true)));
+        assert!(!command_supervisor_probe_is_stale(None, Some(false)));
+        assert!(!command_supervisor_probe_is_stale(None, None));
     }
 
     #[test]
@@ -26389,7 +26462,6 @@ mod tests {
     /// what stalled #tmuxfocussyncverify. Assert the ingress receipt exists for BOTH
     /// outcomes, and that the logged `accepted=` matches the graph's own verdict
     /// rather than a constant.
-    #[test]
     /// The churn half of `#surfaceobservesilent`. Logging every ingress literally
     /// produced a steady 30 lines/min per attached editor at an unchanging
     /// generation — ~43k lines/day, the bulk of an 11.5MB ops.log — which buried
@@ -32939,6 +33011,45 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn superseded_editor_route_refusal_names_pid_and_restart_remedy() {
+        // GH #76: an editor proven to run unlinked plugin bytes must refuse the
+        // route up front, naming the cause and the backend-restart remedy.
+        use agent_doc_fs::plugin_jar::MappedPluginJar;
+        let jar = "/plugins/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.392.jar";
+        let refusal = superseded_editor_route_refusal(&[
+            ("jetbrains".to_string(), 7, MappedPluginJar::Unknown),
+            (
+                "jetbrains".to_string(),
+                1506046,
+                MappedPluginJar::Deleted {
+                    path: jar.to_string(),
+                },
+            ),
+        ])
+        .expect("a deleted mapping must refuse");
+        assert!(refusal.starts_with("plugin_bytes_superseded"), "{refusal}");
+        assert!(refusal.contains("pid 1506046"), "{refusal}");
+        assert!(refusal.contains(jar), "{refusal}");
+        assert!(refusal.contains("restart-free update"), "{refusal}");
+
+        // Fail open: current or inconclusive mappings never refuse.
+        assert_eq!(
+            superseded_editor_route_refusal(&[
+                ("jetbrains".to_string(), 7, MappedPluginJar::Unknown),
+                (
+                    "jetbrains".to_string(),
+                    8,
+                    MappedPluginJar::Current {
+                        path: jar.to_string(),
+                        inode: 1,
+                    },
+                ),
+            ]),
+            None
+        );
+    }
+
     #[test]
     fn editor_reregister_wait_records_episode_escalates_and_clears() {
         // `#reregisterbound` (GH #75): the unanswered-re-register window must be

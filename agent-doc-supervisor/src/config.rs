@@ -163,6 +163,49 @@ pub fn host_supervisor_is_stale(
     }
 }
 
+/// Build identity of one executable (mapped or on disk), as observed by the IO
+/// layer. Plain data so the staleness rule stays pure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BinaryBuildIdentity {
+    pub inode: u64,
+    pub modified_nanos: Option<u128>,
+    pub unlinked: bool,
+}
+
+/// `#supdirstale`: directional host-supervisor staleness.
+///
+/// [`host_supervisor_is_stale`] treats ANY inode difference as stale. With two
+/// launchable copies of the same build (`~/.cargo/bin` from `make install`,
+/// `target/release` behind the `.bin/agent-doc` newest-build shim), a CLI
+/// running one copy saw every supervisor running the other as stale — even a
+/// NEWER one — and requested a recycle from every command stage; the recycle
+/// re-exec'd through the shim onto the same newer copy and the next command
+/// requested again. Observed 2026-10-01 on haiven-dev: three intra-turn
+/// re-execs of one supervisor in 2.5 minutes, each refusing admission.
+///
+/// Stale only when the running bytes were replaced on disk (unlinked), or the
+/// candidate is a strictly newer build than what is running. Unknown running
+/// identity fails open (not stale), as before; unknown mtimes keep the old
+/// inode rule so missing evidence never hides a real replacement.
+pub fn host_supervisor_build_is_stale(
+    running: Option<BinaryBuildIdentity>,
+    installed: BinaryBuildIdentity,
+) -> bool {
+    let Some(running) = running else {
+        return false;
+    };
+    if running.unlinked {
+        return true;
+    }
+    if running.inode == installed.inode {
+        return false;
+    }
+    match (running.modified_nanos, installed.modified_nanos) {
+        (Some(running_mtime), Some(installed_mtime)) => installed_mtime > running_mtime,
+        _ => true,
+    }
+}
+
 /// Positive proof that a live supervisor maps the currently installed binary.
 ///
 /// An unreadable `/proc/<pid>/exe` is unknown, not fresh. Callers that report a
@@ -510,6 +553,28 @@ mod tests {
             vec!["bin"],
             "a binary older than the source edit beyond the grace must still flag"
         );
+    }
+
+    #[test]
+    fn host_supervisor_staleness_is_directional_by_build() {
+        let build = |inode, mtime, unlinked| BinaryBuildIdentity {
+            inode,
+            modified_nanos: mtime,
+            unlinked,
+        };
+        let installed = build(10, Some(2_000), false);
+        // Same file: fresh.
+        assert!(!host_supervisor_build_is_stale(Some(build(10, Some(2_000), false)), installed));
+        // #supdirstale: a supervisor on a NEWER different copy is not stale —
+        // the churn shape (CLI on ~/.cargo/bin, supervisor on target/release).
+        assert!(!host_supervisor_build_is_stale(Some(build(11, Some(3_000), false)), installed));
+        // An older different copy is stale.
+        assert!(host_supervisor_build_is_stale(Some(build(11, Some(1_000), false)), installed));
+        // Running bytes replaced on disk: stale regardless of mtime.
+        assert!(host_supervisor_build_is_stale(Some(build(11, Some(9_000), true)), installed));
+        // Unknown mtime keeps the inode rule; unknown running identity fails open.
+        assert!(host_supervisor_build_is_stale(Some(build(11, None, false)), installed));
+        assert!(!host_supervisor_build_is_stale(None, installed));
     }
 
     #[test]

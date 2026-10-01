@@ -201,6 +201,30 @@ I reproduced both with no operator edit at all.
 **Verification:** `make check` passed (exit 0; nextest 10275/10275, 259 skipped). The first run caught the DAG edge case above, and the fix is included. `make install` succeeded. CI run 36805034363 was still pending when I checked.
 
 Next queue head: `do [#releaseskipcarried]`.
+
+### Re: do [#releaseskipcarried] — removing a ⏭️ now un-skips the head — opus-5.5 · 2026-09-30T22:20-04:00
+
+> **Queue prompt:** do [#releaseskipcarried]
+
+**Fixed** (`agent-doc` `dd8bb1eff`, installed).
+
+**Cause:** preflight rebuilt the skip set every cycle from the previous cycle's evidence: a head that was dispatched and never consumed is skipped again. A bare `:pin: #release` has no backlog item, so it is never consumed. That re-stamped it every cycle, whether or not you had deleted its `⏭️`.
+
+**Fix:** preflight now checks the snapshot→document diff. If a line with `⏭️` was removed and a line with the same `#id` but no `⏭️` was added, that is an operator un-skip. It does two things:
+- drops the id from the carried skip set;
+- stops the previous cycle's evidence from re-stamping it, since that evidence predates your edit.
+
+When this happens, the ops log records `preflight_queue_operator_unskip ids=…`. If preflight only moves a line and keeps its marker, or deletes it outright, nothing is un-skipped.
+
+**Verification:** `make check` passed (exit 0; nextest 10277/10277, 259 skipped). New tests:
+- `operator_removing_a_skip_marker_is_an_unskip`, which reads the diff;
+- `an_operator_unskip_clears_a_carried_skip_and_blocks_its_restamp`, which covers the set advance.
+
+The CI run for `dd8bb1eff` is still in progress.
+
+Exchange is 173 lines (accretion warn); queue is active, so I'm continuing to drain.
+
+Next queue head: `do [#gh76secondary]`, then `#release`, which is pinned last.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -211,15 +235,14 @@ Next queue head: `do [#releaseskipcarried]`.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/73~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/74~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/75~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/74~~- ~~#gh-fix https://github.com/btakita/agent-doc/issues/75~~
 - ~~Do the "things you need from me"~~
 - ~~do [#refusalsteeringverbatim]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/76~~
 - ~~📌 do [#stopreplaynoopretained]~~
 - ~~You keep on reordering the queue~~
 - ~~do [#queueselectreversed]~~
-- do [#releaseskipcarried]
+- ~~do [#releaseskipcarried]~~
 - ~~do [#supdrainyieldfalsifiable]~~
 - do [#gh76secondary]
 - :pin: #release
@@ -227,7 +250,6 @@ Next queue head: `do [#releaseskipcarried]`.
 
 
 <!-- agent:backlog -->
-- [ ] [#releaseskipcarried] [agent-doc] An operator removing a head's ⏭️ marker does not clear it from cycle-state skipped_queue_head_ids (#queueskip, agent-doc-preflight-io/src/lib.rs ~4840): '#release' (no backlog item/preset, so never 'consumed') is re-stamped every cycle. Treat a snapshot→document ⏭️ removal as an operator un-skip.
 - [ ] [#gh76secondary] [agent-doc] GH #76 leftovers: stale_plugin expects 0.2.453 while the installer leaves 0.2.451 on disk (install vs expected-version disagree); full sync left window 0:1 named 'stash-' holding 19 panes instead of renaming to 'stash'.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.

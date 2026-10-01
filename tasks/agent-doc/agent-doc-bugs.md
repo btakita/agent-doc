@@ -363,6 +363,28 @@ Fixed in agent-doc `21ad58344`, pushed. #84 is closed.
 **Verification:** `make check`: exit 0, 10307 passed. `make install`: OK. CI for `965257125` was still running at closeout.
 
 **Still open:** options 2 and 3 are now `#queueholdtyped`. Option 3 matters more now: every drained queue has no control, so a head you add later runs when you invoke the document, but the idle watch does not dispatch it on its own yet.
+
+### Re: #followqueuestopretireopt — a queue with no control drains unattended — opus-5.5 · 2026-10-01T15:32-04:00
+
+> **Queue prompt:** [#followqueuestopretireopt]: Yes, the queue should continue draining. No stalling.
+
+**Done: agent-doc `026fb0e46`, pushed and installed.** The superproject pointer is `f2e3ee7938`.
+
+**What changed (option 3).** A queue with no control on either surface now drains unattended, the same as an explicit `go`. Two readers used to skip it, and both now accept the default `go`:
+- the supervisor idle watch's drainability count, and
+- the continuation detector that the Codex Stop hook reads.
+
+After `#queuestopretire`, a drained queue has no control. So a head you add to a finished queue now gets dispatched without you invoking the document. To hold a queue on purpose, write `pause` or `stop` on either surface. Those still hold.
+
+**Option 2 needed no code.** A halt that leaves heads still writes `queue: stop`, but that already acts as the typed "halted" state I proposed. Editing the queue re-arms a `stop` to `go` (`#queueeditgo`). Only your `pause` survives a queue edit. So a halt doesn't stall: it waits for your next queue edit, then drains.
+
+**Tests:**
+- Flipped `control_less_queue_is_not_auto_drained` to `..._is_auto_drained`. It also checks that `pause`, `stop`, a marker `pause`, and the legacy `queue_active: false` all still hold the queue.
+- New Stop-hook test: a control-less queue with a ready head blocks the turn and continues it.
+- Two Stop-hook tests about the direct-chat writeback guard used a control-less queue to mean "a head the continuation doesn't drive". That shape now drains, so their fixture is now `queue: start` (supervisor-scoped), which keeps what they were testing.
+- Updated `specs/07`.
+
+**Verification:** `make check`: exit 0, 10308 passed. `make install`: OK. CI for `026fb0e46` was still running at closeout.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -380,6 +402,7 @@ Fixed in agent-doc `21ad58344`, pushed. #84 is closed.
 - ~~do https://github.com/btakita/agent-doc/issues/84~~
 - ~~do [#jbstageonfail]~~
 - ~~[#queuestopretire]: do option 1~~
+- ~~[#followqueuestopretireopt]: Yes, the queue should continue draining. No stalling.~~
 - When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
@@ -387,7 +410,6 @@ Fixed in agent-doc `21ad58344`, pushed. #84 is closed.
 
 
 <!-- agent:backlog priority -->
-- [ ] [#followqueuestopretireopt] [agent-doc][decision] Follow-up to queuestopretire (options 2+3; the 14:59 response calls this queueholdtyped). (2) A HALT with heads left still writes a bare queue: stop; make it a typed hold (pause, or a binary-owned 'halted' that a queue edit re-arms). (3) Decide whether a queue with no control drains through the supervisor idle watch and the Codex Stop hook. After option 1 (agent-doc 965257125), every drained queue has no control, so (3) now covers every finished queue: an added head runs in-session through preflight, but nothing dispatches it unattended. Code: agent-doc-queue/src/control_binding.rs, agent-doc-queue/src/queue_continuation.rs, run_queue_maintenance in agent-doc-preflight-io/src/lib.rs.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and ### Re: sections. Close #19 when shipped.
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

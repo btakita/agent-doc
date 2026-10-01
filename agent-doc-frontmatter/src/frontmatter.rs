@@ -1609,17 +1609,34 @@ struct FrontmatterBlock {
 /// to full re-serialisation.
 fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String> {
     let old_yaml = raw_frontmatter_yaml(original)?;
-    let old_map = match serde_yaml::from_str::<serde_yaml::Value>(old_yaml).ok()? {
-        serde_yaml::Value::Mapping(m) => m,
-        serde_yaml::Value::Null => serde_yaml::Mapping::new(),
-        _ => return None,
-    };
     let canonical = canonical_for_write(fm);
     let new_map = match serde_yaml::to_value(canonical.as_ref()).ok()? {
         serde_yaml::Value::Mapping(m) => m,
         _ => return None,
     };
-    let blocks = split_top_level_key_blocks(old_yaml, &old_map)?;
+    let (blocks, old_map) = match serde_yaml::from_str::<serde_yaml::Value>(old_yaml) {
+        Ok(serde_yaml::Value::Mapping(m)) => (split_top_level_key_blocks(old_yaml, &m)?, m),
+        Ok(serde_yaml::Value::Null) => {
+            let m = serde_yaml::Mapping::new();
+            (split_top_level_key_blocks(old_yaml, &m)?, m)
+        }
+        Ok(_) => return None,
+        // `#presetrevert`: the region does not parse as a YAML value, typically
+        // a key repeated mid-edit inside a nested map (an operator copying a
+        // `prompt_presets` line to rename it). The typed parse still read it, so
+        // compare each key's typed value before and after the write instead: a
+        // key the writer did not change keeps the operator's bytes, unparsable
+        // or not. Re-serialising here dropped the pasted line and every other
+        // preset's quotes in the middle of the operator's edit.
+        Err(_) => {
+            let (parsed, _) = parse(original).ok()?;
+            let old_map = match serde_yaml::to_value(&parsed).ok()? {
+                serde_yaml::Value::Mapping(m) => m,
+                _ => return None,
+            };
+            (split_unparsed_key_blocks(old_yaml)?, old_map)
+        }
+    };
 
     let mut out: Vec<String> = Vec::with_capacity(blocks.len() + new_map.len());
     let mut emitted: Vec<String> = Vec::with_capacity(blocks.len());
@@ -1670,36 +1687,7 @@ fn split_top_level_key_blocks(
     yaml: &str,
     old_map: &serde_yaml::Mapping,
 ) -> Option<Vec<FrontmatterBlock>> {
-    let mut blocks: Vec<FrontmatterBlock> = Vec::new();
-    let mut current: Option<FrontmatterBlock> = None;
-    for line in yaml.split('\n') {
-        match top_level_key(line) {
-            Some(key) => {
-                if let Some(block) = current.take() {
-                    blocks.push(block);
-                }
-                current = Some(FrontmatterBlock {
-                    key: Some(key),
-                    text: line.to_string(),
-                });
-            }
-            None => match current.as_mut() {
-                Some(block) => {
-                    block.text.push('\n');
-                    block.text.push_str(line);
-                }
-                None => {
-                    current = Some(FrontmatterBlock {
-                        key: None,
-                        text: line.to_string(),
-                    });
-                }
-            },
-        }
-    }
-    if let Some(block) = current.take() {
-        blocks.push(block);
-    }
+    let blocks = key_block_text(yaml);
 
     let last = blocks.len().saturating_sub(1);
     let mut seen: Vec<&str> = Vec::with_capacity(blocks.len());
@@ -1741,6 +1729,72 @@ fn split_top_level_key_blocks(
         }
         if old_map.get(&parsed_key) != Some(&parsed_value) {
             return None;
+        }
+    }
+    Some(blocks)
+}
+
+/// Split a raw frontmatter YAML region into per-top-level-key text blocks,
+/// without validating them.
+fn key_block_text(yaml: &str) -> Vec<FrontmatterBlock> {
+    let mut blocks: Vec<FrontmatterBlock> = Vec::new();
+    let mut current: Option<FrontmatterBlock> = None;
+    for line in yaml.split('\n') {
+        match top_level_key(line) {
+            Some(key) => {
+                if let Some(block) = current.take() {
+                    blocks.push(block);
+                }
+                current = Some(FrontmatterBlock {
+                    key: Some(key),
+                    text: line.to_string(),
+                });
+            }
+            None => match current.as_mut() {
+                Some(block) => {
+                    block.text.push('\n');
+                    block.text.push_str(line);
+                }
+                None => {
+                    current = Some(FrontmatterBlock {
+                        key: None,
+                        text: line.to_string(),
+                    });
+                }
+            },
+        }
+    }
+    if let Some(block) = current.take() {
+        blocks.push(block);
+    }
+    blocks
+}
+
+/// `#presetrevert`: split a region that does not parse as one YAML value.
+///
+/// Only the block boundaries are trusted: every top-level key must be unique
+/// (a repeated TOP-level key cannot be attributed safely) and the keyless
+/// preamble must be comments or blank lines.
+fn split_unparsed_key_blocks(yaml: &str) -> Option<Vec<FrontmatterBlock>> {
+    let blocks = key_block_text(yaml);
+    let mut seen: Vec<&str> = Vec::with_capacity(blocks.len());
+    for block in &blocks {
+        match block.key.as_deref() {
+            Some(key) => {
+                if seen.contains(&key) {
+                    return None;
+                }
+                seen.push(key);
+            }
+            None => {
+                if block
+                    .text
+                    .lines()
+                    .any(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+                {
+                    return None;
+                }
+            }
         }
     }
     Some(blocks)
@@ -3902,6 +3956,49 @@ mod tests {
             "{created}"
         );
         assert!(created.ends_with("Body only\n"), "{created}");
+    }
+
+    /// `#presetrevert`: an operator copying a `prompt_presets` line to rename it
+    /// briefly repeats a NESTED key. Queue maintenance writing `queue:` in that
+    /// window used to fall back to full re-serialisation, which dropped the
+    /// pasted line and the quotes on every other preset, so the operator's next
+    /// keystrokes landed in the original line.
+    #[test]
+    fn a_queue_write_keeps_a_mid_edit_duplicate_preset_line() {
+        let content = concat!(
+            "---\n",
+            "agent: claude\n",
+            "prompt_presets:\n",
+            "  '#do-backlog': '/goal do backlog items'\n",
+            "  '#gh-fix': 'fix then close'\n",
+            "  '#gh-fix': 'fix then close'\n",
+            "  '#self': agent-doc-bugs.md\n",
+            "queue: start\n",
+            "---\n",
+            "Body\n",
+        );
+        for updated in [
+            merge_queue_state(content, true).unwrap(),
+            merge_queue_control(content, "go").unwrap(),
+            clear_queue_control(content).unwrap(),
+        ] {
+            let expected_presets = concat!(
+                "prompt_presets:\n",
+                "  '#do-backlog': '/goal do backlog items'\n",
+                "  '#gh-fix': 'fix then close'\n",
+                "  '#gh-fix': 'fix then close'\n",
+                "  '#self': agent-doc-bugs.md\n",
+            );
+            assert!(updated.contains(expected_presets), "{updated}");
+            assert!(updated.starts_with("---\nagent: claude\n"), "{updated}");
+            assert!(updated.ends_with("---\nBody\n"), "{updated}");
+        }
+        assert!(
+            merge_queue_control(content, "go")
+                .unwrap()
+                .contains("queue: go\n---")
+        );
+        assert!(!clear_queue_control(content).unwrap().contains("queue:"));
     }
 
     #[test]

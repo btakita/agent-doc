@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -239,6 +239,30 @@ The surface path had the same gap. A surface with no columns produced an empty `
 - `make install` dynamically upgraded the live IntelliJ 2026.1 with no restart, which is a second live confirmation of the #80 fix.
 
 **What remains.** On IU-262, two outcomes are possible. If the backend exposes **one** `EditorWindow` to plugins (`windows=1`), no plugin-side fix can see the client's split, and that is a deeper Remote Dev problem. The comment asks the reporter for the `observed windows=` line, the post-fix `pane_layout_projection` lines, and any `layout detection failed` line, which tells the two apart. The exchange is now about 200 lines; the queue keeps draining.
+
+### Re: GH #82 — route refuses a document through its own pane, which runs a bare harness — opus-5.5 · 2026-10-01T13:56-04:00
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/82
+
+**Fixed, installed, and closed.** The fix is agent-doc `9f79342f3`, pushed to `main`. I posted a comment explaining it and closed #82.
+
+**Cause.** `pane_runs_other_document_owner` returns true both for a pane owned by a **different document** and for an **unmanaged bare harness** (`#bare-foreign-session-guard`). The dispatch-only route guard treated both as "it now runs another document". As a result, `1109.md` was refused through its own registry pane even though that pane held only `-zsh` + `claude`.
+
+**Fix:**
+- `pane_occupant_for_document` (sync-io) returns `Free`, `OtherDocument(doc)`, or `ForeignHarness`. The boolean predicate keeps its old meaning for other callers.
+- **Another document:** the route still refuses. The message now names the owning document and the registry binding.
+- **Bare harness:** the route releases this document's stale registry binding and any actor binding to that pane. It does this before associated-pane discovery reads them, then routes to a **new pane**. The operator's session is never dispatched into or reaped. The release is logged as `route_foreign_harness_pane_released`.
+- **Not adopted: issue suggestion 2** (the registry outranks the pane). A managed pane always runs `agent-doc start <doc>`, so a pane with only a bare harness has no agent-doc session. Letting the registry win would type the prompt into the operator's own Claude session. I explained this on the issue.
+
+**Verification:**
+- `make check` passes: exit 0, 10292/10292.
+- The new live-tmux classifier test passes, as do the route message tests.
+- I had to update one architecture assertion in `tests/test_cli.rs`. The boolean `process_tree_owns_other_document` no longer has a call site in `sync.rs`; it is still required in `process-owner-io`.
+- I installed with `make install`.
+- The ignored tmux suite for sync-io and route-io fails 49 tests on a clean HEAD worktree too, so those failures predate this change. My change adds no new failures: the 4 tests that failed only on my run pass in isolation, twice.
+- CI for `ca1ac2267` was still running at closeout.
+
+The exchange is now about 230 lines; the queue keeps draining.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -250,8 +274,8 @@ The surface path had the same gap. A surface with no columns produced an empty `
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do https://github.com/btakita/agent-doc/issues/79~~
 - ~~do https://github.com/btakita/agent-doc/issues/80~~
-- ~~do https://github.com/btakita/agent-doc/issues/81~~ — auto-struck: answered this cycle (#ftstrike)
-- do https://github.com/btakita/agent-doc/issues/82
+- ~~do https://github.com/btakita/agent-doc/issues/81~~
+- ~~do https://github.com/btakita/agent-doc/issues/82~~
 - do https://github.com/btakita/agent-doc/issues/83
 - do https://github.com/btakita/agent-doc/issues/84
 - When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.

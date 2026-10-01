@@ -136,6 +136,35 @@ There were 24 issues open in `btakita/agent-doc`. I closed **20**, each with a c
 All three backlog items went to the bottom. This document's backlog does not feed the queue, so none of them will start until you queue them.
 
 **Not touched:** your open issues in other projects (opencv, uv, ray, ZigBrains, pypi/support#12214, and so on). Those are reports to other maintainers, not agent-doc work. pypi/support#12214 is already tracked as `#pypiquotarecheck`.
+
+### Re: Stop skipping my release item, and release — opus-5.5 · 2026-10-01T11:15-04:00
+
+> **Queue prompt:** :pin: #release
+
+**0.35.428 is tagged and pushed (`v0.35.428`, commit `3fb2e90a7`), and CI is publishing it.** Other machines can install it once the GitHub Release workflow finishes, around 11:26 EDT (about 25 minutes per release; started 11:01). PyPI publishes right after. Until then `agent-doc upgrade` / `pip install agent-doc` still get 0.35.427. This machine already runs 0.35.428 (`make install-full`).
+
+**Why `#release` kept getting ⏭️ (fixed in this release, `#releaseskipblame`):** the queue-skip rule marks a head ⏭️ when the previous turn ran it and it came back unfinished. But the previous cycle's record holds *every* live queue line, and "the head that ran" was taken to be the first tracked line that isn't a preset. Every `#gh-fix <url>` turn is a preset, so the rule walked past the line that actually ran and blamed `:pin: #release`. It was re-skipped on every turn this session. The fix:
+- The head that ran is now the one carrying `🚧`.
+- If that head is a preset or free text, nothing is skipped.
+
+There are two regression tests, and both fail against the old rule. I checked that by temporarily restoring the old rule.
+
+**Release contents** (`VERSIONS.md`):
+- The skip fix above.
+- Deleting a ⏭️ by hand now un-skips the head.
+- Queue lines with no priority hold their slot.
+- GH #78: preflight overrun refusals name the measured phase.
+- GH #77: the JetBrains Remote Dev split layout (plugin 0.2.455).
+- Recycle-settle retry.
+- The stale-plugin message reads the on-disk install.
+- External-disk candidates settle by intent id.
+
+**Verification:**
+- `make check`: exit 0, 10286 passed. The first 0.35.428 run failed only because the new version had no editor-parity audit row; I added it to `editors/release-parity.tsv`.
+- `make install-full`: OK.
+- The superproject submodule pointer is pushed (`55e8e59631`).
+
+**Why it took long:** about 15 minutes went to `make release` re-running the full check and a second fat-LTO `install-full` after I had already run both. The rest is CI's roughly 25-minute four-platform build.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

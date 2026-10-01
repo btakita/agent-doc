@@ -441,6 +441,32 @@ The exchange is now 360+ lines. The queue is still active, so I'm continuing to 
 **Verification:** `make check`: exit 0, 10311 passed. `make install`: OK. CI for `c7564f69d` was still running at closeout.
 
 The queue is `queue: start`, so the supervisor drains the next head (`#gh-fix` #85).
+
+### Re: #gh-fix GH #85 — the Stop hook's continuation led with a known no-op — opus-5.5 · 2026-10-01T16:22-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/85
+
+**Fixed and closed: agent-doc `728c98fc6`, pushed and installed.** The superproject pointer is `707f8c3f62`. I commented on #85 with the details.
+
+**The problem:** whenever another queue item was ready, the Claude Code Stop hook told the agent to "Invoke the `loop` skill now". Once `/loop` is loaded, that Skill call does nothing. The instruction that actually works, scheduling a wake-up that submits `/loop agent-doc <FILE>`, appeared only later, inside the explanation of why the first step fails. The message also opened like a report, and Claude Code shows any blocking Stop reason as `Stop hook error:`.
+
+**The fix:**
+- The hook already reads the end of the transcript. It now also checks whether `/loop` is loaded: either you typed `/loop`, or the agent made a `loop` Skill call.
+- **Once `/loop` is loaded,** the message leads with "Re-enter now: schedule a wake-up that SUBMITS `/loop agent-doc <FILE>`" (`ScheduleWakeup`). It also says not to invoke the Skill again, and explains why.
+- **On the first iteration,** it still leads with the Skill call, which works then and needs no wake-up delay. The scheduled re-entry is named as the fallback.
+- Both versions now open with "Queue continuation, not an error:".
+- The bans on shell-running the trigger and on shelling `agent-doc preflight` are unchanged.
+
+**Tests:**
+- `loaded_loop_continuation_leads_with_the_scheduled_reentry`: once `/loop` is loaded, the wake-up comes before any mention of the Skill.
+- `transcript_detects_an_already_loaded_loop_skill`: a typed `/loop` counts in both string and block form, and so does a `loop` Skill call. Another skill, or quoted text from the assistant, does not count.
+- The existing content test now covers both versions.
+
+**Verification:** `make check`: exit 0, 10313 passed. `make install`: OK.
+
+**About the `#gh-fix` preset:** its value still reads `fix then closerelease`. That's leftover from the earlier frontmatter rebuild, and you can fix it by hand. I read it as "fix then close". The release is its own queue item.
+
+The exchange is now 410+ lines. The queue is still active.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -461,7 +487,7 @@ The queue is `queue: start`, so the supervisor drains the next head (`#gh-fix` #
 - ~~[#followqueuestopretireopt]: Yes, the queue should continue draining. No stalling.~~
 - ~~When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.~~
 - ~~do [#supstaleopencycle]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/85
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/85~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/86
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.

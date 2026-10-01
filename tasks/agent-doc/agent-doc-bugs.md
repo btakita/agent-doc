@@ -60,6 +60,44 @@ That one cause explains both symptoms in the issue: the single pane and the focu
 - CI for the push is still running.
 
 **Still to check (by you, on the Remote Dev host):** this is not confirmed live yet. Install plugin 0.2.455 there, then look for the `share an origin` line in idea.log and for `panes=2` in tmux. The issue comment says to reopen #77 if the line is missing and tmux still shows 1 pane.
+
+### Re: #gh-fix GH #78 (preflight overrun refusal had no measured cause) — opus-5.5 · 2026-10-01T10:31-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/78
+
+**Fixed and closed.** Commit `ef529c47f` is pushed and installed. #78 closed automatically from the commit, and the issue comment says what changed. All four of the issue's asks are done:
+
+1. **The refusal names the measured phase.** Preflight now marks each of its 29 top-level steps (`commit_previous_cycle`, `settle_debounce`, `queue_maintenance`, and so on) with `progress::enter(<phase>)`. The record is a per-run handle that the hook installs on the worker thread, so runs happening at the same time never write into each other's record. On an overrun, the refusal names the phase still running and how long it had run, then lists the finished phases, slowest first. The same breakdown goes to stderr and to ops.log as `preflight_admission_overrun … running=<phase>:<ms> completed=…`.
+2. **The guess is removed.** The fixed sentence "usually a wedged project controller or supervisor" is gone. The refusal now carries the measured phase instead.
+3. **The suggested command works.** The refusal now names `agent-doc admin inspect <FILE>`. The bare `agent-doc admin inspect` is rejected without a target.
+4. **The abandoned worker cannot cause trouble.** I checked `main`: it returns right after the refusal, so the abandoned worker dies with the hook process and cannot race the next trigger. A half-finished SQLite write rolls back, and a `preflight_started` cycle it opened is closed by the next turn's recovery. The refusal now says this.
+
+**Verification:**
+- 3 new tests for the progress record.
+- The overrun test now asserts four things: the phase still running, the finished phases, that the old guess is gone, and the working `admin inspect <FILE>` form.
+- A new test covers an overrun that happens before preflight reaches any phase.
+- `make check`: exit 0, 10284 passed.
+- `make install`: OK.
+- New spec bullet `#preflightoverrunphase` in `specs/07-core-commands.md`.
+- CI on the push is still running.
+
+### Re: Can we make the "genuinely wedged run" never happen? — opus-5.5 · 2026-10-01T10:31-04:00
+
+**Not with this fix alone, but yes, it can be made impossible.**
+
+**Why it can happen today.** Every wait inside preflight has its own small limit: the settle waits default to 3 seconds, and each controller call has a timeout. Nothing limits their **sum**. The #78 report shows the shape: `session-check` ran `resolve_current_document_content` 13 times on a 518-byte document. Many short waits, each within its limit, can add up past the hook's 90 seconds with nothing actually stuck. From outside it then looks like a wedge.
+
+**How to make it impossible, in two steps:**
+
+1. **One deadline for the whole run.** Store the admission deadline (the budget minus a safety margin) on the same per-run progress handle this fix added.
+    - Every bounded wait inside preflight is cut down to the time left.
+    - Each `progress::enter` step boundary checks the deadline.
+    - Preflight then stops between steps with a named, retryable refusal, instead of being abandoned in the middle of a step.
+
+    That makes "abandoned at the hook boundary" impossible. A slow run would still be refused, just cleanly and earlier.
+2. **Take the slow step off the admission path.** The overrun on the reporting host has not been measured yet. Its first occurrence on the new build will name the phase that used the time. If that phase is maintenance-like (`commit_previous_cycle`, `cross_document_sweep`, `pending_maintenance`), it can move to the supervisor's idle boundary. Admission then stops paying for it at all, and the turn is not refused.
+
+Step 1 does not depend on any live measurement, so I'm adding it as `#preflightdeadline` at the end of the queue, after the items already there. Step 2 depends on the first overrun that names its phase.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -70,13 +108,14 @@ That one cause explains both symptoms in the issue: the single pane and the focu
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/77~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/78
-- :pin: #release
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/78~~
+- ⏭️ :pin: #release
 - Look at all the old gh issue that I created. Close any of the issues that are no longer relevant. Anything relevant should be added in the backlog.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#preflightdeadline] [agent-doc] Make a preflight admission overrun impossible by construction (GH #78 follow-up). Today every wait inside preflight has its own local bound (3s settle waits, per-call controller timeouts), but nothing caps their SUM against the hook's 90s budget. The #78 session-check profile ran resolve_current_document_content 13x on a 518-byte document. Fix: (1) carry an admission deadline (the budget minus a margin) on the per-run PreflightProgress handle, and clamp every bounded wait in preflight to the time remaining; (2) check the deadline at each progress::enter phase boundary, so preflight returns a typed, named, retryable refusal at a step boundary instead of being abandoned mid-step; (3) once the first live overrun names its phase (now logged as preflight_admission_overrun), move that work off the admission path, e.g. to the supervisor's idle boundary. Code: agent-doc-preflight-command-io/src/progress.rs, src/preflight_hook.rs, agent-doc-preflight-io/src/debounce.rs.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

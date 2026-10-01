@@ -13415,6 +13415,92 @@ mod tests {
             "verbatim-resolvable observations must not be logged:\n{log}"
         );
     }
+
+    /// Run one queue-maintenance pass over a `priority` queue whose backlog
+    /// mirrors into it, returning `(queue_prompts, rendered queue body)`.
+    fn priority_queue_maintenance(snap_q: &str, cur_q: &str) -> (Vec<String>, String) {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let mk = |q: &str| {
+            format!(
+                concat!(
+                    "---\n",
+                    "agent_doc_session: test\n",
+                    "agent_doc_format: template\n",
+                    "agent_doc_write: crdt\n",
+                    "agent: claude\n",
+                    "prompt_presets:\n",
+                    "  '#ship': update spec + tests. commit + push\n",
+                    "queue: go\n",
+                    "---\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "### Re: prior — opus-5.5\n\nDone.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue preset=\"#ship\" priority go -->\n",
+                    "{}",
+                    "<!-- /agent:queue -->\n\n",
+                    "<!-- agent:backlog -->\n",
+                    "- [ ] [#sr] stop replay\n",
+                    "- [ ] [#sd] sup drain\n",
+                    "- [ ] [#qsr] queue select reversed\n",
+                    "- [ ] [#rsc] release skip carried\n",
+                    "- [ ] [#g76] gh76 secondary\n",
+                    "<!-- /agent:backlog -->\n",
+                ),
+                q
+            )
+        };
+        std::fs::write(&doc, mk(cur_q)).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &mk(snap_q),
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        (state.queue_prompts, component_body(&updated, "queue"))
+    }
+
+    /// `#queuerankless-anchor`: a bare `#release` preset reference has no
+    /// backlog rank. It used to sort in the "pre-existing" append-stable group,
+    /// ahead of every backlog-sourced head, so each maintenance pass lifted it
+    /// from the tail to the first live slot with no operator edit at all
+    /// (2026-09-30, `tasks/agent-doc/agent-doc-bugs.md`: "You keep on reordering
+    /// the queue").
+    #[test]
+    fn priority_maintenance_keeps_a_rankless_reference_at_its_authored_slot() {
+        let queue = concat!(
+            "- ~~do [#sr]~~\n",
+            "- do [#qsr]\n",
+            "- do [#rsc]\n",
+            "- do [#g76]\n",
+            "- ~~do [#sd]~~\n",
+            "- #release\n",
+        );
+        let (prompts, body) = priority_queue_maintenance(queue, queue);
+        assert_eq!(
+            prompts,
+            vec!["do [#qsr]", "do [#rsc]", "do [#g76]", "#release"],
+            "{body}"
+        );
+        assert!(body.trim_end().ends_with("- #release"), "{body}");
+    }
+
+    /// `#queuemovepinneighbors`: parking one line at the tail must not stamp an
+    /// operator pin on the lines that merely shifted up beneath it.
+    #[test]
+    fn priority_maintenance_moving_a_line_down_pins_no_neighbor() {
+        let snap = "- #release\n- do [#qsr]\n- do [#rsc]\n- do [#g76]\n";
+        let cur = "- do [#qsr]\n- do [#rsc]\n- do [#g76]\n- #release\n";
+        let (prompts, body) = priority_queue_maintenance(snap, cur);
+        assert!(!body.contains('📌'), "no line was raised:\n{body}");
+        assert_eq!(
+            prompts,
+            vec!["do [#qsr]", "do [#rsc]", "do [#g76]", "#release"],
+            "{body}"
+        );
+    }
 }
 
 /// One requested prompt preset paired with its frontmatter body

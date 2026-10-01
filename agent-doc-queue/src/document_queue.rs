@@ -1369,34 +1369,82 @@ pub fn annotate_operator_priority_reorders(
         return None;
     }
 
+    // Match each current prompt to its snapshot slot (first unused identical
+    // identity). Freshly added lines have no slot and never pin here (`#7r2s`).
     let mut used = vec![false; snapshot_prompts.len()];
+    // (index into `out`, current prompt slot, snapshot slot)
+    let mut matched: Vec<(usize, usize, usize)> = Vec::new();
     let mut prompt_slot = 0usize;
-    let mut changed = false;
-    let mut out = current.to_vec();
-
-    for entry in &mut out {
+    for (idx, entry) in current.iter().enumerate() {
         let QueueEntry::Prompt(prompt) = entry else {
             continue;
         };
         let identity = strip_priority_markers(&prompt.text);
-        let original_slot =
-            snapshot_prompts
-                .iter()
-                .enumerate()
-                .find_map(|(slot, snapshot_identity)| {
-                    (!used[slot] && snapshot_identity == &identity).then_some(slot)
-                });
-        if let Some(slot) = original_slot {
+        if let Some(slot) = snapshot_prompts
+            .iter()
+            .enumerate()
+            .find_map(|(slot, snap)| (!used[slot] && snap == &identity).then_some(slot))
+        {
             used[slot] = true;
-            if slot > prompt_slot && !is_prioritized(&prompt.text) {
-                // Idempotent promotion: drop any existing agent pin so an operator
-                // reorder of a `:round_pushpin:` head yields a single `:pushpin:`,
-                // not `:pushpin: :round_pushpin:` (`#pushpinaccum`).
-                prompt.text = apply_operator_pin(&prompt.text);
-                changed = true;
-            }
+            matched.push((idx, prompt_slot, slot));
         }
         prompt_slot += 1;
+    }
+
+    // `#queuemovepinneighbors`: only the line the operator actually MOVED is a
+    // promotion. The old rule pinned every prompt whose slot index fell, so
+    // moving ONE line down shifted each line beneath it up a slot and stamped a
+    // 📌 the operator never typed on all of them (observed 2026-09-30 when the
+    // operator parked `#release` at the queue tail). The lines that kept their
+    // relative order form the longest increasing run of snapshot slots; a line
+    // outside it that now sits above a line it used to follow, AND whose slot
+    // actually rose, moved UP. Ties pick the run ending on the smallest slot, so
+    // in a two-line swap the line that rose is the one pinned.
+    let n = matched.len();
+    let mut len = vec![1usize; n];
+    let mut prev: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
+        for j in 0..i {
+            if matched[j].2 < matched[i].2
+                && (len[j] + 1 > len[i]
+                    || (len[j] + 1 == len[i]
+                        && prev[i].is_some_and(|p| matched[j].2 < matched[p].2)))
+            {
+                len[i] = len[j] + 1;
+                prev[i] = Some(j);
+            }
+        }
+    }
+    let mut kept = vec![false; n];
+    let mut cursor = (0..n).max_by(|&a, &b| {
+        len[a]
+            .cmp(&len[b])
+            .then_with(|| matched[b].2.cmp(&matched[a].2))
+    });
+    while let Some(i) = cursor {
+        kept[i] = true;
+        cursor = prev[i];
+    }
+
+    let mut changed = false;
+    let mut out = current.to_vec();
+    for i in 0..n {
+        let (idx, current_slot, slot) = matched[i];
+        let moved_up = !kept[i]
+            && current_slot < slot
+            && matched[i + 1..].iter().any(|&(_, _, later)| later < slot);
+        if !moved_up {
+            continue;
+        }
+        if let QueueEntry::Prompt(prompt) = &mut out[idx]
+            && !is_prioritized(&prompt.text)
+        {
+            // Idempotent promotion: drop any existing agent pin so an operator
+            // reorder of a `:round_pushpin:` head yields a single `:pushpin:`,
+            // not `:pushpin: :round_pushpin:` (`#pushpinaccum`).
+            prompt.text = apply_operator_pin(&prompt.text);
+            changed = true;
+        }
     }
 
     changed.then_some(out)
@@ -1516,6 +1564,26 @@ fn entry_is_operator_authored(
         && entry_identity(entry).is_some_and(|identity| operator_authored.contains(&identity))
 }
 
+/// True when the `priority` sort has nothing to rank `entry` by
+/// (`#queuerankless-anchor`): an unpinned prompt whose id is neither
+/// backlog-sourced nor present in the backlog rank. A bare `#release` preset
+/// reference is the observed case — it is not free text (so `#qauthorder`'s
+/// free-text lock missed it), it has no backlog item, and its only sort key was
+/// the "pre-existing" append-stable group, which floated it above every
+/// backlog-sourced head on EVERY maintenance pass. An operator who parked it at
+/// the tail watched it jump back up each cycle (2026-09-30,
+/// `tasks/agent-doc/agent-doc-bugs.md`). A prompt with no priority signal has
+/// no reason to move, so it holds its authored slot.
+fn entry_has_no_priority_rank(
+    entry: &QueueEntry,
+    rank: &std::collections::HashMap<String, u8>,
+    backlog_sourced: &std::collections::HashSet<String>,
+) -> bool {
+    entry_priority_tier(entry) == 2
+        && !entry_is_backlog_sourced(entry, backlog_sourced)
+        && !entry_do_id(entry).is_some_and(|id| rank.contains_key(&id))
+}
+
 pub fn sort_prompts_by_priority(
     entries: &[QueueEntry],
     rank: &std::collections::HashMap<String, u8>,
@@ -1580,13 +1648,15 @@ pub fn sort_prompts_by_priority_with_operator_authored(
         }
     };
     // Anchored slots are position-locked: operator pins (tier 0),
-    // operator-authored identities (`#qauthorderpin`), and free-text operator
-    // lines (`#qauthorder`). Only the remaining movable prompts reorder, filling
-    // the slots not held by an anchor.
+    // operator-authored identities (`#qauthorderpin`), free-text operator
+    // lines (`#qauthorder`), and prompts with no priority rank
+    // (`#queuerankless-anchor`). Only the remaining movable prompts reorder,
+    // filling the slots not held by an anchor.
     let is_anchored = |idx: usize| {
         entry_priority_tier(&prompts[idx]) == 0
             || entry_is_operator_authored(&prompts[idx], operator_authored)
             || is_free_text_prompt(&prompts[idx])
+            || entry_has_no_priority_rank(&prompts[idx], rank, backlog_sourced)
     };
     let mut movable: Vec<usize> = (0..n).filter(|&i| !is_anchored(i)).collect();
     movable.sort_by_key(|&i| key(i));
@@ -1745,13 +1815,26 @@ pub fn sort_prompts_by_dag_with_operator_authored(
         }
     };
     // Anchored slots are position-locked in the DAG order: operator pins (tier 0),
-    // operator-authored identities (`#qauthorderpin`), and free-text operator
-    // lines (`#qauthorder`). Only movable prompts reorder around them, in
-    // dependency-respecting priority order.
+    // operator-authored identities (`#qauthorderpin`), free-text operator
+    // lines (`#qauthorder`), and prompts with no priority rank
+    // (`#queuerankless-anchor`). An `after=` edge is itself an ordering signal,
+    // so a rankless prompt on either end of an edge stays movable. Only movable
+    // prompts reorder around the anchors, in dependency-respecting priority order.
+    let mut on_edge = vec![false; n];
+    for (i, pre) in prereq.iter().enumerate() {
+        if !pre.is_empty() {
+            on_edge[i] = true;
+        }
+        for &j in pre {
+            on_edge[j] = true;
+        }
+    }
     let is_anchored = |idx: usize| {
         entry_priority_tier(&prompts[idx]) == 0
             || entry_is_operator_authored(&prompts[idx], operator_authored)
             || is_free_text_prompt(&prompts[idx])
+            || (!on_edge[idx]
+                && entry_has_no_priority_rank(&prompts[idx], rank, backlog_sourced))
     };
 
     // Plain priority-weighted topological order over ALL prompts (Kahn). Used for
@@ -3647,6 +3730,36 @@ mod tests {
         assert_eq!(
             render(&marked),
             "- :pushpin: do [#b]\n- 📌 do [#c]\n- do [#a]\n"
+        );
+    }
+
+    #[test]
+    fn annotate_operator_priority_reorders_moving_a_line_down_pins_nothing() {
+        // #queuemovepinneighbors: parking one line at the tail shifts every line
+        // beneath it up a slot; none of them moved, so none is pinned.
+        let snapshot =
+            parse("- #release\n- do [#qsr]\n- do [#rsc]\n- do [#g76]\n").unwrap();
+        let current =
+            parse("- do [#qsr]\n- do [#rsc]\n- do [#g76]\n- #release\n").unwrap();
+        assert_eq!(annotate_operator_priority_reorders(&snapshot, &current), None);
+    }
+
+    #[test]
+    fn annotate_operator_priority_reorders_deleting_a_line_pins_nothing() {
+        let snapshot = parse("- do [#a]\n- do [#b]\n- do [#c]\n").unwrap();
+        let current = parse("- do [#b]\n- do [#c]\n").unwrap();
+        assert_eq!(annotate_operator_priority_reorders(&snapshot, &current), None);
+    }
+
+    #[test]
+    fn annotate_operator_priority_reorders_pins_only_the_line_moved_up_mid_queue() {
+        let snapshot = parse("- do [#a]\n- do [#b]\n- do [#c]\n- do [#d]\n").unwrap();
+        let current = parse("- do [#a]\n- do [#d]\n- do [#b]\n- do [#c]\n").unwrap();
+        let marked = annotate_operator_priority_reorders(&snapshot, &current)
+            .expect("the raised line pins");
+        assert_eq!(
+            render(&marked),
+            "- do [#a]\n- 📌 do [#d]\n- do [#b]\n- do [#c]\n"
         );
     }
 

@@ -2,6 +2,34 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.428
+
+- **The release head stops being skipped (`#releaseskipblame`, `#releaseskipcarried`).** `#queueskip`
+  blamed the wrong head. When the turn that ran was a preset invocation (`#gh-fix <url>`) or free
+  text, the search walked past it to the next tracked line. Each `#gh-fix` turn therefore left a
+  pinned `#release` marked `⏭️`. Now only the head that actually ran (the one carrying `🚧`) can be
+  skipped. Deleting a `⏭️` by hand also un-skips the head; before, the next cycle stamped it back.
+- **Queue order holds still (`#queueselectreversed`).** A prompt with no priority rank (a bare preset
+  reference) keeps its authored slot instead of being lifted to the top on every maintenance pass.
+  Moving one line down pins only that line, not every line beneath it.
+- **A preflight budget overrun names its measured phase (GH #78, `#preflightoverrunphase`).**
+  Preflight records each top-level step. The refusal names the step still running, lists the
+  finished steps costliest first, and logs `preflight_admission_overrun` to ops.log, replacing the
+  fixed "usually a wedged controller" guess. The remedy names `agent-doc admin inspect <FILE>`; the
+  bare form was rejected. The refusal also says the abandoned worker ends with the hook process.
+- **JetBrains Remote Dev mirrors both editor splits (GH #77, plugin 0.2.455).** A backend that never
+  lays out its splitters reports every split at (0,0). That folded them into one column, so tmux
+  converged to a single pane. Splits that share an origin now stay separate columns.
+- **Recycle settlement survives a concurrent controller restart (`#recyclesettleretry`).** A
+  re-exec'd supervisor retries its "recycle settled" publish with backoff instead of sending it once
+  into the controller's restart gap and leaving the recycle graph `InFlight`. The stale-supervisor
+  warning during an install turn says the recycle is already scheduled (`#stalewarnscheduled`).
+- **The stale-plugin remedy matches the on-disk install (GH #76).** It says to install first when the
+  JetBrains install is behind, and to restart only when it already matches.
+- **An external-disk candidate settles by intent id (`#stopreplaynoopretained`).** The FFI
+  editor-supersedes path never cleared a pending force-disk candidate, which produced hundreds of
+  no-op `external_disk_editor_decision` lines.
+
 ## 0.35.427
 
 - **Supervisor recycle churn stops (`#supdirstale`).** Staleness compared a supervisor's running

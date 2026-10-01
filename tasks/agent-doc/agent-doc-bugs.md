@@ -17,7 +17,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -98,6 +98,44 @@ That one cause explains both symptoms in the issue: the single pane and the focu
 2. **Take the slow step off the admission path.** The overrun on the reporting host has not been measured yet. Its first occurrence on the new build will name the phase that used the time. If that phase is maintenance-like (`commit_previous_cycle`, `cross_document_sweep`, `pending_maintenance`), it can move to the supervisor's idle boundary. Admission then stops paying for it at all, and the turn is not refused.
 
 Step 1 does not depend on any live measurement, so I'm adding it as `#preflightdeadline` at the end of the queue, after the items already there. Step 2 depends on the first overrun that names its phase.
+
+### Re: Old GitHub issue sweep — opus-5.5 · 2026-10-01T10:40-04:00
+
+> **Queue prompt:** Look at all the old gh issue that I created. Close any of the issues that are no longer relevant. Anything relevant should be added in the backlog.
+
+There were 24 issues open in `btakita/agent-doc`. I closed **20**, each with a comment explaining why, and **4** stay open, tracked here.
+
+**Closed as done (5):**
+- #39: socket IPC through `interprocess`.
+- #30: `install.sh`.
+- #21: parallel worktree fan-out, which shipped as `orchestrate --mode parallel|dag`.
+- #20: multi-agent backends. Codex, OpenCode, Grok and Cursor shipped; Gemini is not on the roadmap.
+- #33: `/btw`, which is now a native Claude Code command, plus realtime steering for prompts added mid-turn.
+
+**Closed as superseded or not planned (15):**
+- #42: done items coming back. The old `pending` component and the write path it describes no longer exist, and convergence now explicitly never brings back a deleted item. The comment says to reopen if it happens again.
+- #18: several editors sharing one tmux session. Lazily editor replicas already allow this.
+- #32: caching `find_code_ranges`. The issue itself rated this under a millisecond, and nothing has measured it as a cost.
+- #29: streaming raw stdout into the document. That conflicts with the rule that partial output never enters the document.
+- #28: the "document modes" blog post. That vocabulary is deprecated.
+- #27: the capture-to-log workflow. The response ledger and the ops log now cover it.
+- #25: a direct HTTP API backend. agent-doc now runs through harnesses instead.
+- #24: Docker sandboxing. The harnesses own sandboxing.
+- #23: sub-profiles for submodules. Project-root resolution plus the cross-repo guard cover this.
+- #22: a Ratatui dashboard.
+- #34: ClawTeam.
+- #35, #36, #37: MDX, Jupyter and Notion support. None is on the Patchboard-first roadmap.
+- #26: `init --dashboard`.
+
+**Still relevant, left open and tracked here:**
+- `#ghbrew` (#31): the Homebrew formula. The tap repo has only `chromium-bridge.rb`. This is work an agent can do.
+- `#ghjbfolding` (#19): JetBrains folding, gutter icons and a structure view.
+- `#ghmultitmux` (#17): one editor driving several tmux sessions.
+- `#ghrecvpolicy` (#40): a policy letting the recipient decide which components senders may create. It went to the **icebox**, not the backlog, because it only matters once multi-user workspaces exist.
+
+All three backlog items went to the bottom. This document's backlog does not feed the queue, so none of them will start until you queue them.
+
+**Not touched:** your open issues in other projects (opencv, uv, ray, ZigBrains, pypi/support#12214, and so on). Those are reports to other maintainers, not agent-doc work. pypi/support#12214 is already tracked as `#pypiquotarecheck`.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -110,11 +148,14 @@ Step 1 does not depend on any live measurement, so I'm adding it as `#preflightd
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/77~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/78~~
 - ⏭️ :pin: #release
-- Look at all the old gh issue that I created. Close any of the issues that are no longer relevant. Anything relevant should be added in the backlog.
+- ~~Look at all the old gh issue that I created. Close any of the issues that are no longer relevant. Anything relevant should be added in the backlog.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
+- [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and ### Re: sections. Close #19 when shipped.
+- [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.
 - [ ] [#preflightdeadline] [agent-doc] Make a preflight admission overrun impossible by construction (GH #78 follow-up). Today every wait inside preflight has its own local bound (3s settle waits, per-call controller timeouts), but nothing caps their SUM against the hook's 90s budget. The #78 session-check profile ran resolve_current_document_content 13x on a 518-byte document. Fix: (1) carry an admission deadline (the budget minus a margin) on the per-run PreflightProgress handle, and clamp every bounded wait in preflight to the time remaining; (2) check the deadline at each progress::enter phase boundary, so preflight returns a typed, named, retryable refusal at a step boundary instead of being abandoned mid-step; (3) once the first live overrun names its phase (now logged as preflight_admission_overrun), move that work off the admission path, e.g. to the supervisor's idle boundary. Code: agent-doc-preflight-command-io/src/progress.rs, src/preflight_hook.rs, agent-doc-preflight-io/src/debounce.rs.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
@@ -129,6 +170,7 @@ Step 1 does not depend on any live measurement, so I'm adding it as `#preflightd
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
+- [ ] [#ghrecvpolicy] [agent-doc] Recipient-side [receive] auto_create_components policy for multi-user workspaces (GH #40, https://github.com/btakita/agent-doc/issues/40). Parked until multi-user workspace support exists.
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

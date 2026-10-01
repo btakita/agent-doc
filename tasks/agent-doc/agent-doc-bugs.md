@@ -36,6 +36,30 @@ queue: go
 Compacted content:
 - Archived 9 response topic(s): do [#refusalsteeringverbatim] + the lazily.md Stop-hook failure; #gh-fix GH #76 + fixing agent-doc's causes of the recycle churn; do [#stopreplaynoopretained]; 6 more
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): #advance-review; Drive Idea for #drivecapturedsplice; #coder7...
+
+### Re: #gh-fix GH #77 (tmux shows 1 pane while the editor shows 2 documents) — opus-5.5 · 2026-10-01T10:05-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/77
+
+**Fixed and closed.** Commit `52b43df8f` in agent-doc, JetBrains plugin 0.2.455. It is pushed and installed (`make install`, which also reloaded the plugin in IDE pid 2960722).
+
+**Cause:** the JetBrains plugin works out which editor splits sit side by side from where each split appears on screen. A JetBrains Remote Dev backend never lays its splits out, so both report position (0,0).
+
+- The plugin grouped them into **one** column.
+- One column counts as "no layout detected", so the surface sent to the controller carried no columns.
+- The controller then synced tmux to the focused document alone. The result was one pane whose document swapped on every switch.
+
+That one cause explains both symptoms in the issue: the single pane and the focus that never moved.
+
+**Fix:** two splits that are actually laid out can never share a position, so a shared position now means the geometry is unknown. Each split then stays its own column. When this happens, the plugin logs `[layout-detect] … share an origin; geometry unavailable` to idea.log at info level, so a live run can confirm the cause. The diagnosis started in the turn before the `/clear`, which left uncommitted plugin changes in the tree. I checked that work against the code path, extended it with the log line, and shipped it.
+
+**Verification:**
+- New regression test `LayoutDetectorTest … keeps unlaid-out splits apart`.
+- JetBrains plugin suite: 603 tests, 0 failures.
+- `make check`: exit 0, 10280 passed. The first run had 4 failures in `agent-doc-controller-io` dispatch tests. A second `make check` left over from before the `/clear` was running at the same time. Those tests pass alone, the crate passed twice in full parallel runs, and the rerun with no other suite running was all green.
+- CI for the push is still running.
+
+**Still to check (by you, on the Remote Dev host):** this is not confirmed live yet. Install plugin 0.2.455 there, then look for the `share an origin` line in idea.log and for `panes=2` in tmux. The issue comment says to reopen #77 if the line is missing and tmux still shows 1 pane.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -45,14 +69,14 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/77
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/77~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/78
 - :pin: #release
-- Look at all the old gh issue that I created. Close any of the issues that are no longer relevant.
+- Look at all the old gh issue that I created. Close any of the issues that are no longer relevant. Anything relevant should be added in the backlog.
 <!-- /agent:queue -->
 
 
-<!-- agent:backlog -->
+<!-- agent:backlog priority -->
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

@@ -1047,8 +1047,7 @@ impl serde::Serialize for PromptPresets {
 
 impl<'de> serde::Deserialize<'de> for PromptPresets {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let entries =
-            indexmap::IndexMap::<String, Option<PresetValue>>::deserialize(deserializer)?;
+        let entries = indexmap::IndexMap::<String, Option<PresetValue>>::deserialize(deserializer)?;
         let mut presets = Self {
             entries,
             resolved: indexmap::IndexMap::new(),
@@ -2189,6 +2188,17 @@ pub fn merge_queue_state(content: &str, active: bool) -> Result<String> {
     // materializes its default `go`, never `start` — `start` would silently
     // downgrade it to a first-head-only drain.
     let default_go = fm.queue.is_none() && fm.queue_active.is_none();
+    // `#queuegokeep`: activating an already-active control keeps it. Rewriting
+    // `go` as `start` downgraded the in-session drain to the supervisor-scoped
+    // first-head trigger.
+    let already_active = fm.queue.as_deref().is_some_and(|queue| {
+        let queue = queue.trim();
+        queue.eq_ignore_ascii_case("go") || queue.eq_ignore_ascii_case("start")
+    });
+    if active && already_active {
+        fm.queue_active = None;
+        return write_preserving(content, &fm, body);
+    }
     if !(paused && !active) {
         fm.queue = Some(
             match (active, default_go) {
@@ -3808,23 +3818,36 @@ mod tests {
             fm.prompt_presets.get("triage").map(String::as_str),
             Some("Triage {issue}.\n")
         );
-        assert_eq!(fm.prompt_presets.get("plain").map(String::as_str), Some("do it"));
-        assert!(fm.prompt_presets.get("odd").is_none(), "unsupported shape does not resolve");
+        assert_eq!(
+            fm.prompt_presets.get("plain").map(String::as_str),
+            Some("do it")
+        );
+        assert!(
+            fm.prompt_presets.get("odd").is_none(),
+            "unsupported shape does not resolve"
+        );
 
         let diagnostics = fm.prompt_presets.diagnostics();
         assert!(
-            diagnostics.iter().any(|d| d.contains("triage") && d.contains("response")),
+            diagnostics
+                .iter()
+                .any(|d| d.contains("triage") && d.contains("response")),
             "{diagnostics:?}"
         );
         assert!(
-            diagnostics.iter().any(|d| d.contains("odd") && d.contains("{prompt: <string>}")),
+            diagnostics
+                .iter()
+                .any(|d| d.contains("odd") && d.contains("{prompt: <string>}")),
             "{diagnostics:?}"
         );
 
         let written = write(&fm, body).unwrap();
         let (reparsed, _) = parse(&written).unwrap();
         assert_eq!(reparsed.prompt_presets, fm.prompt_presets, "{written}");
-        assert!(written.contains("response"), "structured form kept: {written}");
+        assert!(
+            written.contains("response"),
+            "structured form kept: {written}"
+        );
     }
 
     #[test]
@@ -3956,6 +3979,30 @@ mod tests {
             "{created}"
         );
         assert!(created.ends_with("Body only\n"), "{created}");
+    }
+
+    /// `#queuegokeep`: activating a queue that is already `go` keeps `go`. The
+    /// free-text strike (`#ftstrike`) strips the marker token and then
+    /// re-activates through `merge_queue_state(.., true)`, which rewrote
+    /// `queue: go` as `start`, the supervisor-scoped first-head trigger, so the
+    /// in-session drain stopped once the marker token was gone.
+    #[test]
+    fn activating_a_go_queue_keeps_go() {
+        let go = "---\nagent: claude\nqueue: go\n---\nBody\n";
+        assert_eq!(merge_queue_state(go, true).unwrap(), go);
+        let start = "---\nagent: claude\nqueue: start\n---\nBody\n";
+        assert_eq!(merge_queue_state(start, true).unwrap(), start);
+        let stopped = "---\nagent: claude\nqueue: stop\n---\nBody\n";
+        assert!(
+            merge_queue_state(stopped, true)
+                .unwrap()
+                .contains("queue: start\n")
+        );
+        assert!(
+            merge_queue_state(go, false)
+                .unwrap()
+                .contains("queue: stop\n")
+        );
     }
 
     /// `#presetrevert`: an operator copying a `prompt_presets` line to rename it

@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -186,6 +186,33 @@ There are two regression tests, and both fail against the old rule. I checked th
 - **Decide together:** whether a queue with no control drains through the supervisor. That is the case I held back above, and it is the same question from the other direction.
 
 This changes what the drain writes and how the supervisor behaves, so I've recorded it as `#queuestopretire` (`[decision]`) in the backlog instead of doing it now. Tell me which way to go on the no-control drain and I'll implement it.
+
+### Re: GH #80 — restart-free JetBrains upgrade fails linking `UnloadPluginOptions` — opus-5.5 · 2026-10-01T13:16-04:00
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/80
+
+**Fixed and installed.** agent-doc `743c97f83` + `c8da0ef1d` (plugin 0.2.457), pushed to `main`. I commented the root cause and verification on the issue; it stays open until someone confirms the fix on IU-262.
+
+**Root cause.** The error `com/intellij/ide/plugins/DynamicPlugins$UnloadPluginOptions` was a `NoClassDefFoundError`. `JetBrainsPluginUpgradeAction.run()` re-wrapped it as `IllegalStateException(message)`, which dropped the class name. The class did **not** move in 262. I pulled the published `ide-impl` 262.9437.185 module and checked: the nested class has the same no-arg constructor and `withDisable` / `withUpdate`. What changed is which classloader can see it. The attach bootstrap loads the action child-first, with the IDE's system classloader as parent. On 262 that loader resolves `DynamicPlugins` but not its nested class, so the compile-time `new` failed before any unload ran.
+
+**Fix:**
+- `updateUnloadOptions` resolves the nested class through the loader that defined `DynamicPlugins`, then the outgoing plugin's classloader. It builds the update-mode options reflectively (`disable=false`, `update=true`). If neither loader can see the class, it fails closed with a message naming the build and the loaders tried.
+- A failure in agent-doc's upgrader and a refusal by the IDE are now reported differently (issue point 2):
+  - An upgrader failure keeps its exception class and is prefixed `agent-doc upgrader could not call the platform`.
+  - A real `unloadPlugin` refusal is prefixed `plugin cannot unload dynamically`.
+  - `plugin.rs` says "the IDE refused" only for a real refusal. Otherwise it says the upgrade "failed before the IDE could accept or refuse it".
+- Regression tests:
+  - `JetBrainsPluginUpgradeOptionsLoaderTest` loads the owner class in an isolated loader. I mutation-checked it: switching resolution back to the system loader makes it fail.
+  - A new Rust test covers the refused-vs-failed wording.
+  - The source-shape assertion in `PluginLifecycleListenerTest` now matches the reflective form.
+
+**Verification:**
+- `make check` passes: exit 0, 10289/10289 Rust tests, 606/606 JetBrains tests.
+- `make install` upgraded the live IntelliJ 2026.1 through the new path with no restart. 15 documents were still re-registering their replicas on the editor's own retry schedule.
+- I did not reproduce on IU-262 itself.
+- The latest CI run was still **pending** at closeout.
+
+**Follow-up.** Issue point 3 is filed as `jbstageonfail` [recommended]: stage the package instead of replacing jars under the live JVM when the hot-swap fails. With the dynamic path working, this only matters when the hot-swap fails.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -195,8 +222,8 @@ This changes what the drain writes and how the supervisor behaves, so I've recor
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do https://github.com/btakita/agent-doc/issues/79~~ — auto-struck: answered this cycle (#ftstrike)
-- do https://github.com/btakita/agent-doc/issues/80
+- ~~do https://github.com/btakita/agent-doc/issues/79~~
+- 🚧 do https://github.com/btakita/agent-doc/issues/80
 - do https://github.com/btakita/agent-doc/issues/81
 - do https://github.com/btakita/agent-doc/issues/82
 - do https://github.com/btakita/agent-doc/issues/83
@@ -207,6 +234,7 @@ This changes what the drain writes and how the supervisor behaves, so I've recor
 
 
 <!-- agent:backlog priority -->
+- [ ] [#jbstageonfail] [recommended] GH #80 point 3: when the JetBrains dynamic upgrade fails for a live pid, stage the package (applied at next IDE start) instead of replacing jars under the live JVM, so a failed hot-swap stops manufacturing the plugin_bytes_superseded state. src/agent-doc/src/plugin.rs install_jetbrains_package_bytes / replace_jetbrains_plugin_tree.
 - [ ] [#queuestopretire] [agent-doc][decision] Retire the binary-written queue: stop now that a queue with no control defaults to go (operator question, 2026-10-01). Proposal: (1) a DRAIN (no live heads left) clears the control on both surfaces instead of writing stop; (2) a HALT with heads left writes a typed hold instead of a bare stop (pause, or a binary-owned 'halted' that a queue edit re-arms); (3) decide whether a queue with no control drains through the supervisor idle watch and the Codex Stop hook. Today preflight treats it as active, but drainable_head_count and required_continuation require an explicit control (kept that way in the GH #79 fix to avoid a silent behavior change). Code: agent-doc-queue/src/control_binding.rs, agent-doc-queue/src/queue_continuation.rs, the drain/clear path in agent-doc-preflight-io/src/lib.rs.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and ### Re: sections. Close #19 when shipped.

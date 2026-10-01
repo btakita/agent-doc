@@ -72,6 +72,30 @@ const RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL: u32 = 30;
 fn supervisor_may_reclaim_empty_preflight(attempt_tick: bool, harness_turn_live: bool) -> bool {
     attempt_tick && !harness_turn_live
 }
+
+/// `#supstaleopencycle`: the `harness_turn_live=` value for an open-cycle
+/// deferral receipt. The turn marker is only read on reclaim-attempt ticks, so
+/// any other tick has no answer and must not print `false`.
+///
+/// Live 2026-10-01 on fpe.md: 1135 per-second receipts printed
+/// `harness_turn_live=false` while the Codex turn was in fact live for 34
+/// minutes, which was read as an orphaned cycle the reclaim had wrongly missed.
+/// Every probed tick in that window had printed `true`.
+fn reclaim_turn_probe_label(harness_turn_live: Option<bool>) -> &'static str {
+    match harness_turn_live {
+        Some(true) => "true",
+        Some(false) => "false",
+        None => "unprobed",
+    }
+}
+
+/// `#supstaleopencycle`: emit the open-cycle deferral receipt only on ticks
+/// that probed the turn marker and attempted the reclaim. The first tick of an
+/// episode is always one, so a deferral is never silent, and the receipt
+/// carries the episode's deferral count instead of one line per ~1s tick.
+fn log_cycle_open_deferral_receipt(attempt_reclaim: bool) -> bool {
+    attempt_reclaim
+}
 static ZERO_REPLICA_IDLE_WATCH_LAST_PROBE: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
@@ -3521,34 +3545,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             recycle_cycle_open_deferrals.saturating_add(1);
                         // Read the marker fresh: the loop's `turn_active` is only
                         // assigned inside the drain, which may have exited early.
-                        let harness_turn_live = attempt_reclaim
-                            && turn_active_for_owned_pane_with_idle_evidence(
+                        let harness_turn_live = attempt_reclaim.then(|| {
+                            turn_active_for_owned_pane_with_idle_evidence(
                                 &path,
                                 &shared,
                                 false,
                                 &mut session_log,
-                            );
+                            )
+                        });
                         let reclaimed = supervisor_may_reclaim_empty_preflight(
                             attempt_reclaim,
-                            harness_turn_live,
+                            harness_turn_live.unwrap_or(false),
                         ) && matches!(
                                 agent_doc_repair_command_io::cancel_preflight_cycle_after_owner_release(
                                     &path,
                                 ),
                                 Ok(agent_doc_turn::repair::CancelOutcome::Abandoned)
                             );
-                        agent_doc_ops_log_io::log_op(
-                            &path,
-                            &format!(
-                                "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open reclaimed_empty_preflight={} harness_turn_live={} (#midturn-recycle-resume) (#suprecyclespin-staleopencycle) (#reclaimliveturn)",
-                                path.display(),
-                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
-                                supervisor_stale,
-                                inflight_handlers,
-                                reclaimed,
-                                harness_turn_live,
-                            ),
-                        );
+                        if log_cycle_open_deferral_receipt(attempt_reclaim) {
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open deferrals={} reclaimed_empty_preflight={} harness_turn_live={} (#midturn-recycle-resume) (#suprecyclespin-staleopencycle) (#reclaimliveturn) (#supstaleopencycle)",
+                                    path.display(),
+                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                    supervisor_stale,
+                                    inflight_handlers,
+                                    recycle_cycle_open_deferrals,
+                                    reclaimed,
+                                    reclaim_turn_probe_label(harness_turn_live),
+                                ),
+                            );
+                        }
                     }
                     SupervisorRecycleAction::DeferUnsafeCheckpoint => {
                         agent_doc_ops_log_io::log_op(
@@ -5589,6 +5617,33 @@ mod tests {
             source.contains("harness_turn_live={}"),
             "the deferral receipt must report whether a live turn vetoed the reclaim"
         );
+    }
+
+    /// `#supstaleopencycle`: a tick that never read the turn marker must not
+    /// report `harness_turn_live=false`, and only probed ticks emit a receipt.
+    #[test]
+    fn cycle_open_deferral_receipt_never_reports_an_unprobed_turn_as_idle() {
+        assert_eq!(reclaim_turn_probe_label(None), "unprobed");
+        assert_eq!(reclaim_turn_probe_label(Some(true)), "true");
+        assert_eq!(reclaim_turn_probe_label(Some(false)), "false");
+        assert!(log_cycle_open_deferral_receipt(true));
+        assert!(!log_cycle_open_deferral_receipt(false));
+
+        // The first deferral of an episode attempts the reclaim, so it is
+        // always probed and always logged.
+        let first_tick = 0_u32;
+        assert!(first_tick.is_multiple_of(RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL));
+
+        let source = include_str!("idle_watch.rs");
+        // Built from fragments so this guard never matches its own source text.
+        let label = ["reclaim_turn_probe_label", "(harness_turn_live)"].concat();
+        let gate = ["if log_cycle_open_deferral", "_receipt(attempt_reclaim)"].concat();
+        for needle in [&label, &gate] {
+            assert!(
+                source.contains(needle.as_str()),
+                "the open-cycle deferral receipt lost its probe wiring: missing `{needle}`"
+            );
+        }
     }
 
     #[test]

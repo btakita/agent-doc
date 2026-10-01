@@ -292,7 +292,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             override fun invoke(message: Pointer): Int {
                 return try {
                     val json = message.getString(0)
-                    handleSocketMessageV2(json)
+                    dispatchSocketMessage(json)
                 } catch (e: Exception) {
                     LOG.warn("[socket] callback error", e)
                     0
@@ -316,7 +316,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             override fun invoke(message: Pointer): Boolean {
                 return try {
                     val json = message.getString(0)
-                    handleSocketMessageV2(json) == 1
+                    dispatchSocketMessage(json) == 1
                 } catch (e: Exception) {
                     LOG.warn("[socket] callback error", e)
                     false
@@ -331,6 +331,20 @@ class PatchWatcher(private val project: Project) : Disposable {
         } else {
             LOG.warn("[socket] Failed to start IPC listener via FFI for ${state.root}")
         }
+    }
+
+    /**
+     * #jbmultiprojectroute: the native socket for a root is per IDE *process* and holds
+     * exactly one callback -- that of whichever project started the listener last. With
+     * two projects open, that project need not be the one with the file open, and its
+     * replica manager then has no record of it (measured 2026-10-01: every
+     * `editor_replica_reregister` for agent-doc-bugs.md refused `cause=no_replica_manager`).
+     * Route each message to the watcher whose project owns its file, so the callback the
+     * socket happens to hold no longer decides which project answers.
+     */
+    private fun dispatchSocketMessage(json: String): Int {
+        val owner = extractStringField(json, "file")?.let(::owningWatcherFor) ?: this
+        return owner.handleSocketMessageV2(json)
     }
 
     private fun recordDocumentActivity(filePath: String, reason: String) {
@@ -1650,6 +1664,16 @@ class PatchWatcher(private val project: Project) : Disposable {
         private const val UI_OUTCOME_REAL_COMPONENT_CONFLICT =
             "ui_outcome_contract=ui-outcome-v1 ui_outcome=real_component_conflict ui_outcome_class=blocked next_action=resolve_component_conflict"
 
+        /** The live watcher whose project owns [filePath], deepest base path first. */
+        private fun owningWatcherFor(filePath: String): PatchWatcher? {
+            val live = synchronized(instances) {
+                instances.values.filter { it.running && !it.project.isDisposed }
+            }
+            val ownerBase = owningBasePathUtil(live.mapNotNull { it.project.basePath }, filePath)
+                ?: return null
+            return live.firstOrNull { it.project.basePath == ownerBase }
+        }
+
         const val APPLY_FAILED = 0
         const val APPLY_APPLIED = 1
         const val APPLY_ALREADY_APPLIED = 2
@@ -2840,4 +2864,26 @@ internal fun extractBooleanField(json: String, field: String): Boolean {
     } catch (e: Exception) {
         false
     }
+}
+
+/**
+ * #jbmultiprojectroute: the project base path that owns [filePath] -- the deepest base
+ * path containing it, matching [CrdtReplicaManager]'s replica ownership -- or null when
+ * no open project contains the file.
+ */
+internal fun owningBasePathUtil(basePaths: List<String>, filePath: String): String? {
+    val file = try {
+        File(filePath).absoluteFile.toPath().normalize()
+    } catch (_: Exception) {
+        return null
+    }
+    return basePaths
+        .filter { base ->
+            try {
+                file.startsWith(File(base).absoluteFile.toPath().normalize())
+            } catch (_: Exception) {
+                false
+            }
+        }
+        .maxWithOrNull(compareBy<String> { it.length }.thenBy { it })
 }

@@ -535,6 +535,38 @@ The regression test fails when the guard is disabled. I posted a follow-up comme
 **Verification:** `make check` passed (exit 0, 10328/10328 tests) and `make install` passed. Both commits are pushed. CI was still in progress at closeout and was not awaited.
 
 The exchange is now 481 lines; the queue does not auto-compact.
+
+### Re: do [#jbrejectlog] — opus-5.5 · 2026-10-01T18:12-04:00
+
+> **Queue prompt:**
+>
+> do [#jbrejectlog]
+
+
+**Done.** The JetBrains plugin now logs why it rejects a `deliver_crdt_remote` event. Commit `348160fb0`, plugin 0.2.460, installed and pushed.
+
+**What was silent before.** The controller only gets a bare `rejected` receipt. On four paths the plugin returned that receipt without writing anything to `idea.log`:
+
+- `file` missing.
+- `editor_id` missing, or different from this editor's id.
+- The recovery re-register could not find the replica manager, the file, or its document. When the manager was missing there was not even a logger to write with.
+- A socket message had no `type`.
+
+**Now each rejection writes one line:**
+
+- `[socket] deliver_crdt_remote rejected cause=missing_file|missing_editor_id|editor_id_mismatch file=… reason=… editor_id=… this_editor_id=…`
+- `[socket] deliver_crdt_remote rejected cause=reregister_not_attached`
+- `[crdt-replica] recovery re-register rejected … cause=project_disposed|no_replica_manager|file_not_found|no_document`
+
+**Likely cause of the 2026-10-01 rejection (not yet proven).** `EditorIdentity.id` is a random UUID created inside a Kotlin `object`. A dynamic plugin reload loads that class again in a new classloader, so the id changes. A controller still addressing the old id would then be rejected with no log line. That matches what happened after the reload. The new `editor_id_mismatch` line prints both ids, so the next time this happens the log will confirm or rule it out. Installing this build was itself a dynamic upgrade, and a few seconds afterwards `idea.log` held no rejection lines.
+
+**Verification:**
+- New tests cover both reason functions, and the existing source check now also requires that no silent `editor_id` early return remains.
+- `make check` passed (10328 tests, 0 failed).
+- `make install` hot-swapped the plugin into the running IDE.
+- CI run `36933407786` is still pending.
+
+The exchange is now 506 lines; I'm continuing the queue rather than stopping to compact.
 <!-- agent:boundary:9acd1e79 -->
 <!-- /agent:exchange -->
 
@@ -558,15 +590,15 @@ The exchange is now 481 lines; the queue does not auto-compact.
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/85~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~
 - ~~Look at https://github.Look at https://github.com/btakita/agent-doc/issues/86 response. Fix the remaining issues.com/btakita/agent-doc/issues/86 response. Fix the remaining issues. complete https://github.com/btakita/agent-doc/issues/81~~
-- 🚧 do [#jbrejectlog]
+- ~~do [#jbrejectlog]~~
  - #gh-fix https://github.com/btakita/agent-doc/issues/87
+ - #gh-fix https://github.com/btakita/agent-doc/issues/88
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#jbrejectlog] JetBrains plugin: log why a DeliverCrdtRemote event is rejected (editor_id mismatch vs missing file vs failed re-register). On 2026-10-01 after a dynamic plugin reload, IDE pid 2960722 answered response_cell_add/editor_replica_reregister with a bare rejected receipt and nothing in idea.log, so the cause could not be proven. #droppedreplicapull now self-heals the symptom; this item is the diagnosis.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

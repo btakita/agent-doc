@@ -122,8 +122,10 @@ class PluginLifecycleListenerTest {
                 0 until upgradeAction.indexOf("\"unloadPlugin\", current, updateOptions"),
         )
         assertTrue(upgradeAction.contains("documents="))
-        assertTrue(upgradeAction.contains(".withDisable(false)"))
-        assertTrue(upgradeAction.contains(".withUpdate(true)"))
+        // GH #80: the options are built reflectively through DynamicPlugins' own loader.
+        assertTrue(upgradeAction.contains("updateUnloadOptions(\n                DynamicPlugins.class"))
+        assertTrue(upgradeAction.contains("\"withDisable\", boolean.class).invoke(value, false)"))
+        assertTrue(upgradeAction.contains("\"withUpdate\", boolean.class).invoke(value, true)"))
         assertFalse(upgradeAction.contains("unloadPlugin(current)"))
         assertTrue(upgradeAction.contains("actual == current"))
         assertTrue(upgradeAction.contains("actual.getPluginClassLoader() == current.getPluginClassLoader()"))

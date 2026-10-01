@@ -42,7 +42,7 @@ public final class JetBrainsPluginUpgradeAction {
             }
         });
         if (failure.get() != null) {
-            throw new IllegalStateException(failure.get().getMessage(), failure.get());
+            throw new IllegalStateException(describeFailure(failure.get()), failure.get());
         }
         IdeaPluginDescriptorImpl loaded = replacement.get();
         if (loaded == null) {
@@ -77,15 +77,14 @@ public final class JetBrainsPluginUpgradeAction {
                 throw new IllegalStateException(unloadBlocker);
             }
             int cleanedProjects = cleanupOutgoingGeneration(current);
-            DynamicPlugins.UnloadPluginOptions updateOptions =
-                new DynamicPlugins.UnloadPluginOptions()
-                    .withDisable(false)
-                    .withUpdate(true);
+            Object updateOptions = updateUnloadOptions(
+                DynamicPlugins.class, current.getPluginClassLoader()
+            );
             if (!Boolean.TRUE.equals(invokeDescriptorMethod(
                 DynamicPlugins.class, DynamicPlugins.INSTANCE, "unloadPlugin", current, updateOptions
             ))) {
                 throw new IllegalStateException(
-                    "JetBrains refused to unload the current plugin generation after cleaning "
+                    DYNAMIC_UNLOAD_REFUSED + ": JetBrains refused to unload the current plugin generation after cleaning "
                         + cleanedProjects + " open project(s)"
                 );
             }
@@ -208,6 +207,78 @@ public final class JetBrainsPluginUpgradeAction {
         String text = message == null || message.isBlank() ? cause.getClass().getName() : message;
         return text.replace('\n', ' ').replace('\r', ' ').trim();
     }
+
+    /**
+     * Name a failure by its class as well as its message (GH #80).
+     *
+     * A {@link LinkageError}'s message is only the binary class name in slash form, so wrapping
+     * it as {@code IllegalStateException(message)} printed
+     * {@code com/intellij/ide/plugins/DynamicPlugins$UnloadPluginOptions} with nothing saying the
+     * upgrader failed to link a class rather than the platform refusing an unload. Failures this
+     * class raises itself are already {@link IllegalStateException}s with their own wording.
+     */
+    static String describeFailure(Throwable failure) {
+        if (failure instanceof IllegalStateException) {
+            return String.valueOf(failure.getMessage());
+        }
+        return UPGRADER_FAILED + ": " + failure.getClass().getName() + ": " + singleLine(failure);
+    }
+
+    /**
+     * Build the update-mode {@code UnloadPluginOptions} through the loader that defined
+     * {@code owner} (`#jbunloadoptsloader`, GH #80).
+     *
+     * The action is loaded by the bootstrap's child-first loader, whose parent is the IDE's
+     * system classloader. On IU-262.9437.185 that loader resolved {@code DynamicPlugins} but not
+     * its nested {@code UnloadPluginOptions}, so a compile-time {@code new} died with
+     * {@code NoClassDefFoundError} before any unload ran -- every upgrade then fell back to
+     * replacing the jars under the live JVM. The class still exists with the same no-arg
+     * constructor and {@code with*} builders; only its visibility from the system loader moved.
+     * The loader that defined {@code DynamicPlugins} always sees its own nested class, and
+     * {@code fallbacks} (the plugin's own classloader, which compiles against these classes)
+     * cover a platform that splits them further.
+     */
+    static Object updateUnloadOptions(Class<?> owner, ClassLoader... fallbacks) {
+        String name = owner.getName() + "$UnloadPluginOptions";
+        List<ClassLoader> loaders = new ArrayList<>();
+        loaders.add(owner.getClassLoader());
+        Collections.addAll(loaders, fallbacks);
+        List<String> tried = new ArrayList<>();
+        for (ClassLoader loader : loaders) {
+            if (loader == null) {
+                continue;
+            }
+            try {
+                Class<?> options = Class.forName(name, true, loader);
+                Object value = options.getConstructor().newInstance();
+                value = options.getMethod("withDisable", boolean.class).invoke(value, false);
+                return options.getMethod("withUpdate", boolean.class).invoke(value, true);
+            } catch (ClassNotFoundException | LinkageError missing) {
+                tried.add(loader.getClass().getName());
+            } catch (ReflectiveOperationException shape) {
+                Throwable cause = shape instanceof InvocationTargetException invocation
+                    && invocation.getCause() != null
+                    ? invocation.getCause()
+                    : shape;
+                throw new IllegalStateException(
+                    UPGRADER_FAILED + ": " + name + " has an unexpected shape on build "
+                        + platformBuild() + ": " + singleLine(cause),
+                    cause
+                );
+            }
+        }
+        throw new IllegalStateException(
+            UPGRADER_FAILED + ": " + name + " is not visible on build " + platformBuild()
+                + " from " + (tried.isEmpty() ? "any classloader" : String.join(", ", tried))
+        );
+    }
+
+    /**
+     * Stable prefix for an upgrade agent-doc could not perform -- a platform API it could not
+     * link or call -- as opposed to {@link #DYNAMIC_UNLOAD_REFUSED}, the platform declining.
+     * The launcher keys on both to word the restart message (GH #80).
+     */
+    static final String UPGRADER_FAILED = "agent-doc upgrader could not call the platform";
 
     /**
      * Call a {@code DynamicPlugins} method whose descriptor parameter type moves across platform

@@ -1195,10 +1195,9 @@ fn install_jetbrains_package_bytes(
             Ok(None) => None,
             Err(error) => {
                 // GH #67: the reason is printed once, in the final restart message.
-                eprintln!(
-                    "WARNING: the restart-free upgrade was refused; replacing the plugin files instead."
-                );
-                Some(format!("dynamic upgrade unavailable: {error:#}"))
+                let reason = format!("{error:#}");
+                eprintln!("WARNING: {}", dynamic_upgrade_fallback_warning(&reason));
+                Some(format!("dynamic upgrade unavailable: {reason}"))
             }
         }
     } else {
@@ -1236,6 +1235,22 @@ fn install_jetbrains_package_bytes(
         Some(reason) => JetbrainsLocalInstallOutcome::RestartRequired { reason },
         None => JetbrainsLocalInstallOutcome::Installed,
     })
+}
+
+/// Stable prefix the JetBrains upgrade action puts on a genuine platform refusal
+/// (`JetBrainsPluginUpgradeAction.DYNAMIC_UNLOAD_REFUSED`).
+const JETBRAINS_DYNAMIC_UNLOAD_REFUSED: &str = "plugin cannot unload dynamically";
+
+/// GH #80: say whether the platform declined the unload or the upgrade never
+/// reached it. "Refused" used to cover both, so an upgrader that could not even
+/// link `DynamicPlugins$UnloadPluginOptions` read as a platform policy -- the one
+/// outcome where accepting the restart is the right conclusion.
+fn dynamic_upgrade_fallback_warning(reason: &str) -> &'static str {
+    if reason.contains(JETBRAINS_DYNAMIC_UNLOAD_REFUSED) {
+        "the IDE refused the restart-free upgrade; replacing the plugin files instead."
+    } else {
+        "the restart-free upgrade failed before the IDE could accept or refuse it; replacing the plugin files instead."
+    }
 }
 
 fn clear_restart_required_marker(marker: &Path) {
@@ -2395,6 +2410,23 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         )
         .unwrap();
         assert!(!marker.exists());
+    }
+
+    #[test]
+    fn fallback_warning_separates_a_platform_refusal_from_an_upgrader_failure() {
+        // GH #80: a class the upgrader could not link is not the IDE refusing.
+        let linkage = "JetBrains dynamic upgrade failed for pid 3814926: Exception in thread \"main\" \
+             java.lang.IllegalStateException: error:java.lang.IllegalStateException:\
+             agent-doc upgrader could not call the platform: java.lang.NoClassDefFoundError: \
+             com/intellij/ide/plugins/DynamicPlugins$UnloadPluginOptions";
+        let warning = super::dynamic_upgrade_fallback_warning(linkage);
+        assert!(warning.contains("failed before the IDE"), "{warning}");
+        assert!(!warning.contains("refused"), "{warning}");
+
+        let refused = "JetBrains dynamic upgrade failed for pid 1: error:java.lang.IllegalStateException:\
+             plugin cannot unload dynamically (the platform reported the plugin cannot unload without a restart)";
+        let warning = super::dynamic_upgrade_fallback_warning(refused);
+        assert!(warning.contains("IDE refused"), "{warning}");
     }
 
     #[test]

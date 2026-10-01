@@ -154,8 +154,8 @@ Remaining queue: `do [#stopreplaynoopretained]` (open: the stale-intent trace), 
 - ~~Do the "things you need from me"~~
 - ~~do [#refusalsteeringverbatim]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/76~~
-- 🚧 #release
-- do [#stopreplaynoopretained]
+- ⏭️ #release
+- 🚧 do [#stopreplaynoopretained]
 - ~~do [#supdrainyieldfalsifiable]~~
 <!-- /agent:queue -->
 
@@ -164,7 +164,7 @@ Remaining queue: `do [#stopreplaynoopretained]` (open: the stale-intent trace), 
 - [ ] [#queueselectreversed] [agent-doc] 2026-10-01 preflight selected '#release' (carried ⏭️) as head while queue_prompts listed the live heads in REVERSE of document order (doc: supdrainyieldfalsifiable, #gh-fix 76, #release → contract: #release, #76, supdrain). Operator-authored order is authoritative (#qauthorder).
 - [ ] [#releaseskipcarried] [agent-doc] An operator removing a head's ⏭️ marker does not clear it from cycle-state skipped_queue_head_ids (#queueskip, agent-doc-preflight-io/src/lib.rs ~4840): '#release' (no backlog item/preset, so never 'consumed') is re-stamped every cycle. Treat a snapshot→document ⏭️ removal as an operator un-skip.
 - [ ] [#gh76secondary] [agent-doc] GH #76 leftovers: stale_plugin expects 0.2.453 while the installer leaves 0.2.451 on disk (install vs expected-version disagree); full sync left window 0:1 named 'stash-' holding 19 panes instead of renaming to 'stash'.
-- [ ] [#stopreplaynoopretained] [agent-doc] lazily.md Codex Stop hook failed closed 2026-10-01T00:08Z on retained intent 1790781617611427022 (11:20 turn, settled 15:20:24Z). Part 3 FIXED 9242f60b5 (settled-delivery resume no longer pairs a capture with a converged write older than its cycle). REMAINING: (1) prove via a state_events trace across the 00:08:04Z controller recycle (crdt_replica_register_retained_reseed turn=cycle-1790781610027) why pending_write still held the settled intent so ensure_deferred_document_write_intent (agent-doc-document-realtime-io/src/lib.rs:4732) reused it, and clear it at settlement; (2) a write whose target hash already equals the live authority must not fail closed on a transient model-missing during reseed
+- [ ] 🚧 [#stopreplaynoopretained] [agent-doc] lazily.md Codex Stop hook failed closed 2026-10-01T00:08Z on retained intent 1790781617611427022 (11:20 turn, settled 15:20:24Z). Part 3 FIXED 9242f60b5 (settled-delivery resume no longer pairs a capture with a converged write older than its cycle). REMAINING: (1) prove via a state_events trace across the 00:08:04Z controller recycle (crdt_replica_register_retained_reseed turn=cycle-1790781610027) why pending_write still held the settled intent so ensure_deferred_document_write_intent (agent-doc-document-realtime-io/src/lib.rs:4732) reused it, and clear it at settlement; (2) a write whose target hash already equals the live authority must not fail closed on a transient model-missing during reseed
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

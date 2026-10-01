@@ -111,6 +111,20 @@ Remaining queue: `do [#supdrainyieldfalsifiable]`, then `#release`, which will s
 Neither is reproducible right now: `lazily.md` is healthy and its latest cycle is committed. They need the ledger trace first.
 
 Next queue head: `do [#supdrainyieldfalsifiable]`.
+
+### Re: do [#supdrainyieldfalsifiable] — supervisor hand-offs are now falsifiable — opus-5.5 · 2026-09-30T20:57-04:00
+
+> **Queue prompt:** do [#supdrainyieldfalsifiable]
+
+**Done** in agent-doc `5c901e869` (pushed, `make install`). This is GH #73's third suggestion.
+
+- **Record:** when session-check really yields a `[focused-cycle]` head to a supervisor that can take it, it now saves the head's hash and the *first* hand-off time (`state.db` `document_runtime_state`, kind `supervisor_drain_handoff`). Re-yielding the same head therefore builds up age instead of resetting.
+- **Report:** if a later preflight finds the **same** head still first in line more than 5 minutes after the hand-off, it warns `supervisor_drain_handoff_undrained` ("handed to the supervisor N min ago and is still undrained"), with the remedy. If the head drained or a different one is now first, nothing is reported. Previously the head was silently presented again as if nothing had been promised.
+- **Consistency:** the current head is computed with the same `live_drainable_continuation_head(DrainScope::Supervisor)` rule session-check uses to choose the yield.
+- **Tests:** the pure age rule (5 cases), the warning text, and an IO round trip: record → inside window → backdated → undrained → head changed → nothing.
+- **Verification:** `make check` passed (exit 0; nextest 10269/10269, 259 skipped).
+
+Remaining queue: `do [#stopreplaynoopretained]` (open: the stale-intent trace), then `#release`, which is still affected by `#releaseskipcarried`.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -127,8 +141,8 @@ Next queue head: `do [#supdrainyieldfalsifiable]`.
 - ~~do [#refusalsteeringverbatim]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/76~~
 - ⏭️ #release
-- 🚧 do [#stopreplaynoopretained]
-- do [#supdrainyieldfalsifiable]
+- ⏭️ do [#stopreplaynoopretained]
+- ~~do [#supdrainyieldfalsifiable]~~
 <!-- /agent:queue -->
 
 
@@ -136,8 +150,7 @@ Next queue head: `do [#supdrainyieldfalsifiable]`.
 - [ ] [#queueselectreversed] [agent-doc] 2026-10-01 preflight selected '#release' (carried ⏭️) as head while queue_prompts listed the live heads in REVERSE of document order (doc: supdrainyieldfalsifiable, #gh-fix 76, #release → contract: #release, #76, supdrain). Operator-authored order is authoritative (#qauthorder).
 - [ ] [#releaseskipcarried] [agent-doc] An operator removing a head's ⏭️ marker does not clear it from cycle-state skipped_queue_head_ids (#queueskip, agent-doc-preflight-io/src/lib.rs ~4840): '#release' (no backlog item/preset, so never 'consumed') is re-stamped every cycle. Treat a snapshot→document ⏭️ removal as an operator un-skip.
 - [ ] [#gh76secondary] [agent-doc] GH #76 leftovers: stale_plugin expects 0.2.453 while the installer leaves 0.2.451 on disk (install vs expected-version disagree); full sync left window 0:1 named 'stash-' holding 19 panes instead of renaming to 'stash'.
-- [ ] 🚧 [#stopreplaynoopretained] [agent-doc] lazily.md Codex Stop hook failed closed 2026-10-01T00:08Z on retained intent 1790781617611427022 (11:20 turn, settled 15:20:24Z). Part 3 FIXED 9242f60b5 (settled-delivery resume no longer pairs a capture with a converged write older than its cycle). REMAINING: (1) prove via a state_events trace across the 00:08:04Z controller recycle (crdt_replica_register_retained_reseed turn=cycle-1790781610027) why pending_write still held the settled intent so ensure_deferred_document_write_intent (agent-doc-document-realtime-io/src/lib.rs:4732) reused it, and clear it at settlement; (2) a write whose target hash already equals the live authority must not fail closed on a transient model-missing during reseed
-- [ ] [#supdrainyieldfalsifiable] [agent-doc][recommended] GH #73 suggestion 3: record the supervisor-drain hand-off (session_check_supervisor_drain_handoff now logs head_sha256 + supervisor_drain_readiness) so the next preflight reports 'yielded N min ago, still undrained' instead of silently re-presenting the same heads
+- [ ] [#stopreplaynoopretained] [agent-doc] lazily.md Codex Stop hook failed closed 2026-10-01T00:08Z on retained intent 1790781617611427022 (11:20 turn, settled 15:20:24Z). Part 3 FIXED 9242f60b5 (settled-delivery resume no longer pairs a capture with a converged write older than its cycle). REMAINING: (1) prove via a state_events trace across the 00:08:04Z controller recycle (crdt_replica_register_retained_reseed turn=cycle-1790781610027) why pending_write still held the settled intent so ensure_deferred_document_write_intent (agent-doc-document-realtime-io/src/lib.rs:4732) reused it, and clear it at settlement; (2) a write whose target hash already equals the live authority must not fail closed on a transient model-missing during reseed
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

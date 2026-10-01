@@ -165,6 +165,42 @@ Remaining queue: `do [#stopreplaynoopretained]` (open: the stale-intent trace), 
 The uncommitted `retained_write.rs` in the agent-doc tree belongs to another session; I left it alone.
 
 Remaining queue: `#release`, then `do [#queueselectreversed]`, `do [#releaseskipcarried]`, `do [#gh76secondary]`.
+
+### Re: "You keep on reordering the queue" + do [#queueselectreversed] — opus-5.5 · 2026-09-30T22:32-04:00
+
+> **Queue prompt:** You keep on reordering the queue
+
+**You were right, and it's fixed** in agent-doc `585623eee` (pushed, `make install`). It was the binary, not you editing: queue maintenance reordered the queue on its own on every pass. This is also `#queueselectreversed`, which is now done.
+
+**What the history showed.** In the committed queue, `#release` jumped from the tail to the top with no edit from you, twice:
+- 20:38 → 20:46: `[stopreplay, supdrain, #release]` became `[#release, stopreplay, supdrain]`.
+- 21:42 → 21:57: `[…, g76, supdrain, #release]` became `[#release, qsr, rsc, supdrain, g76]`.
+
+I reproduced both with no operator edit at all.
+
+**Cause 1: the priority sort (`#queuerankless-anchor`).**
+- `#release` is a bare `#id` reference, so it wasn't classed as free text, and free text is the only kind of line the `#qauthorder` slot lock covered.
+- It has no backlog item, so its only sort key was the "pre-existing line" group, which sorts *ahead of* every backlog-sourced `do [#id]`.
+- Each pass therefore lifted it to the first live slot.
+- That is also the "reversed" contract from the GH #76 cycle. The only two movable heads, `#release` and `supdrain`, swapped slots around the anchored `#gh-fix 76` line, giving `[#release, #76, supdrain]`.
+
+**Fix:** a prompt with no priority rank now holds its authored slot. In the DAG sort, a prompt on an `after=` edge stays movable, because the edge is itself an ordering signal.
+
+**Cause 2: pinning lines you didn't move (`#queuemovepinneighbors`).**
+- The "operator raised this line" detector pinned every prompt whose slot number fell.
+- Moving one line *down* shifts every line beneath it up a slot, so all of them got a 📌 you never typed. Your parked-at-the-tail `#release` would have pinned `qsr`, `rsc` and `g76`.
+
+**Fix:** only a line that left the longest run of lines still in their original relative order, and whose own slot actually rose, gets pinned. A pure swap still pins the line that rose, and deleting a line pins nothing.
+
+**About this cycle's contract.** It selected `#release` because preflight read your buffer mid-edit (hash `a82e03dd`, while deltas were arriving every second). At that moment the queue was still the committed order. Its write-back was refused (`queue_maintenance_not_persisted`), so your edit stood. Your `:pin: #release` at the tail is honored: an operator pin is locked in place, so `#release` runs **last**, after `#releaseskipcarried` and `#gh76secondary`. I did not release this cycle.
+
+**Tests:**
+- Preflight-level regressions: a rankless tail reference keeps its slot, and moving a line down pins no neighbour.
+- Unit tests: move-down, delete, and mid-queue raise.
+
+**Verification:** `make check` passed (exit 0; nextest 10275/10275, 259 skipped). The first run caught the DAG edge case above, and the fix is included. `make install` succeeded. CI run 36805034363 was still pending when I checked.
+
+Next queue head: `do [#releaseskipcarried]`.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -181,16 +217,16 @@ Remaining queue: `#release`, then `do [#queueselectreversed]`, `do [#releaseskip
 - ~~do [#refusalsteeringverbatim]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/76~~
 - ~~📌 do [#stopreplaynoopretained]~~
-- #release
-- do [#queueselectreversed]
+- ~~You keep on reordering the queue~~
+- ~~do [#queueselectreversed]~~
 - do [#releaseskipcarried]
 - ~~do [#supdrainyieldfalsifiable]~~
 - do [#gh76secondary]
+- :pin: #release
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#queueselectreversed] [agent-doc] 2026-10-01 preflight selected '#release' (carried ⏭️) as head while queue_prompts listed the live heads in REVERSE of document order (doc: supdrainyieldfalsifiable, #gh-fix 76, #release → contract: #release, #76, supdrain). Operator-authored order is authoritative (#qauthorder).
 - [ ] [#releaseskipcarried] [agent-doc] An operator removing a head's ⏭️ marker does not clear it from cycle-state skipped_queue_head_ids (#queueskip, agent-doc-preflight-io/src/lib.rs ~4840): '#release' (no backlog item/preset, so never 'consumed') is re-stamped every cycle. Treat a snapshot→document ⏭️ removal as an operator un-skip.
 - [ ] [#gh76secondary] [agent-doc] GH #76 leftovers: stale_plugin expects 0.2.453 while the installer leaves 0.2.451 on disk (install vs expected-version disagree); full sync left window 0:1 named 'stash-' holding 19 panes instead of renaming to 'stash'.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02

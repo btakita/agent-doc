@@ -289,6 +289,28 @@ So the second client was not agent-doc's.
 - New unit tests cover the model (using the issue's exact rig numbers) and the probe.
 
 The exchange is now about 250 lines; the queue keeps draining.
+
+### Re: agent-doc#84 — superseded-but-attached editor refusal names a remedy — opus-5.5 · 2026-10-01T14:35-04:00
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/84
+
+Fixed in agent-doc `21ad58344`, pushed. #84 is closed.
+
+**Root cause:** if an editor is still attached but its replica can't be recovered, `resolve_editor_unavailable_disk_read_fallback` refuses to fall back to disk. It reported only the mechanism (`missing_replica recovery exhausted and disk read authority is refused`). It gave no pid, no jar and no action, so finalize and session-check dead-ended.
+
+**Fix:**
+- **One shared diagnosis:** the superseded-editor check (restart-required marker, `recorded_restart_verdict`, ladder remedy, `probe_superseded_editors`) moved into the leaf crate `agent-doc-fs::plugin_jar`. Preflight's `plugin_bytes_superseded` warning and the write path now use the same code. The warning text is unchanged.
+- **Superseded editor:** the refusal now names the editor kind, pid and replaced jar. It derives the remedy from the #67/#76 ladder:
+  - by default, re-run the install once (restart-free);
+  - if an install already recorded that *this* process refused the dynamic update, restart the editor.
+- **No superseded bytes:** the refusal names the holding editor and says to run `agent-doc admin reload-lib`, then retry.
+- **Disk stays refused for a superseded editor.** Its JVM still owns a buffer that may hold unsaved operator text, so adopting the disk copy could drop it. The retry predicate still matches, because the existing message prefix is kept.
+- **Not done here:** making the installer stage the update instead of unlinking live jars after a dynamic failure (the issue's suggestion 2) belongs to #80, which is still open.
+
+**Verification:**
+- 6 new regression tests: 3 in `fs::plugin_jar`, 3 in realtime-io.
+- `make check` exit 0, 10301/10301 passed.
+- `make install` done. CI run 36906135836 is still pending.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -303,7 +325,9 @@ The exchange is now about 250 lines; the queue keeps draining.
 - ~~do https://github.com/btakita/agent-doc/issues/81~~
 - ~~do https://github.com/btakita/agent-doc/issues/82~~
 - ~~do https://github.com/btakita/agent-doc/issues/83~~
-- do https://github.com/btakita/agent-doc/issues/84
+- ~~do https://github.com/btakita/agent-doc/issues/84~~
+- do [#jbstageonfail]
+- [#queuestopretire]: do option 1
 - When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.
 - release + publish
 <!-- /agent:queue -->

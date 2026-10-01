@@ -16068,7 +16068,11 @@ fn run_closeout_owner_claim(
     // not retain the projection lock across durable I/O. Ordinary ingress is
     // SQLite -> memory; the former memory -> SQLite order here deadlocked
     // finalize against concurrent editor/state publication.
-    let _state_event_ingress = runtime.state_event_ingress.lock();
+    let _state_event_ingress = runtime.lock_state_event_ingress(
+        &bootstrap.project_root,
+        "closeout_owner_claim",
+        "closeout_owner_claimed",
+    );
     // The wake is a Lazily state-plane projection produced only after exact
     // retained Base -> Target convergence. Read it before the state-memory
     // lock, then validate its full capture identity inside the pure backbone
@@ -16195,7 +16199,11 @@ fn run_closeout_owner_release(
 ) -> Result<bool> {
     use agent_doc_state_backbone::StateFact;
     let document_hash = agent_doc_hash::document_id_for_path(file);
-    let _state_event_ingress = runtime.state_event_ingress.lock();
+    let _state_event_ingress = runtime.lock_state_event_ingress(
+        &bootstrap.project_root,
+        "closeout_owner_release",
+        "closeout_owner_released",
+    );
 
     let released = {
         let memory = runtime.memory.lock();

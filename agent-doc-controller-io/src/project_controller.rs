@@ -2181,6 +2181,49 @@ impl ControllerMemoryState {
     }
 }
 
+/// Threshold past which an ingress wait or hold is logged as
+/// `state_event_ingress_slow`. Clients time out at 5s, so 1s is early warning.
+pub(crate) const STATE_EVENT_INGRESS_SLOW: Duration = Duration::from_secs(1);
+
+/// The ops-log line for a slow ingress wait or hold, or `None` when both were fast.
+pub(crate) fn state_event_ingress_slow_line(
+    site: &str,
+    fact: &str,
+    waited: Duration,
+    held: Duration,
+) -> Option<String> {
+    (waited >= STATE_EVENT_INGRESS_SLOW || held >= STATE_EVENT_INGRESS_SLOW).then(|| {
+        format!(
+            "state_event_ingress_slow site={site} fact={fact} wait_ms={} hold_ms={}",
+            waited.as_millis(),
+            held.as_millis(),
+        )
+    })
+}
+
+/// Holds `state_event_ingress` and logs a slow wait/hold when dropped.
+pub(crate) struct StateEventIngressGuard<'a> {
+    _guard: parking_lot::MutexGuard<'a, ()>,
+    project_root: &'a Path,
+    site: &'static str,
+    fact: &'a str,
+    waited: Duration,
+    acquired: Instant,
+}
+
+impl Drop for StateEventIngressGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(line) = state_event_ingress_slow_line(
+            self.site,
+            self.fact,
+            self.waited,
+            self.acquired.elapsed(),
+        ) {
+            agent_doc_ops_log_io::log_op(self.project_root, &line);
+        }
+    }
+}
+
 pub(crate) struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
     memory: Mutex<ControllerMemoryState>,
@@ -6368,12 +6411,39 @@ impl ControllerRuntime {
         Ok(())
     }
 
+    /// Take the state-event ingress lock, recording how long it was awaited and
+    /// held when either crosses [`STATE_EVENT_INGRESS_SLOW`]. Every state-event
+    /// RPC queues on this lock, so a slow holder surfaces to clients only as an
+    /// anonymous `timed out after 5.0s waiting for project controller response`
+    /// (sdk.md, 2026-10-01 22:20:43-22:21:44Z); this names the site that held it.
+    pub(crate) fn lock_state_event_ingress<'a>(
+        &'a self,
+        project_root: &'a Path,
+        site: &'static str,
+        fact: &'a str,
+    ) -> StateEventIngressGuard<'a> {
+        let requested = Instant::now();
+        let guard = self.state_event_ingress.lock();
+        StateEventIngressGuard {
+            _guard: guard,
+            project_root,
+            site,
+            fact,
+            waited: requested.elapsed(),
+            acquired: Instant::now(),
+        }
+    }
+
     fn append_apply_state_event_serialized(
         &self,
         project_root: &Path,
         event: &agent_doc_state_backbone::StateEvent,
     ) -> Result<bool> {
-        let _ingress = self.state_event_ingress.lock();
+        let _ingress = self.lock_state_event_ingress(
+            project_root,
+            "append_apply_state_event",
+            event.fact.label(),
+        );
         let inserted = append_state_event(project_root, event)?;
         if inserted {
             self.apply_state_event(event)?;
@@ -16668,7 +16738,10 @@ agent:queue\n\
     fn settled_resume_ignores_a_converged_write_older_than_the_capture_cycle() {
         // `#stopreplaynoopretained`: the lazily.md incident ids.
         let old_intent = "1790781617611427022-1-f42c0100300d2c99324e60396c08f7b32ffb6b46c732eaba0226b0ec53ea128f";
-        assert!(converged_write_predates_cycle(old_intent, "cycle-1790813345975"));
+        assert!(converged_write_predates_cycle(
+            old_intent,
+            "cycle-1790813345975"
+        ));
         // A write made during the cycle belongs to it.
         assert!(!converged_write_predates_cycle(
             "1790813350000000000-3-abc",
@@ -16676,7 +16749,10 @@ agent:queue\n\
         ));
         // Non-clock shapes are not evidence: fail open.
         assert!(!converged_write_predates_cycle("intent-1", "cycle-1"));
-        assert!(!converged_write_predates_cycle(old_intent, "cycle-1790813345975-deadbeef"));
+        assert!(!converged_write_predates_cycle(
+            old_intent,
+            "cycle-1790813345975-deadbeef"
+        ));
     }
 
     #[test]
@@ -18536,6 +18612,42 @@ revised operator request
         assert!(
             matches!(projection, PaneLayoutProjection::NeedsEffect(_)),
             "a new editor projection must apply once before later drift becomes operator-owned (got {projection:?})"
+        );
+    }
+}
+
+#[cfg(test)]
+mod state_event_ingress_slow_tests {
+    use super::*;
+
+    #[test]
+    fn slow_ingress_names_the_site_and_both_durations() {
+        assert_eq!(
+            state_event_ingress_slow_line(
+                "closeout_owner_claim",
+                "closeout_owner_claimed",
+                Duration::from_millis(5),
+                Duration::from_millis(4_200),
+            )
+            .as_deref(),
+            Some(
+                "state_event_ingress_slow site=closeout_owner_claim fact=closeout_owner_claimed wait_ms=5 hold_ms=4200"
+            ),
+        );
+        assert!(
+            state_event_ingress_slow_line("s", "f", Duration::from_millis(1_500), Duration::ZERO)
+                .is_some(),
+            "a slow wait alone is reported"
+        );
+        assert_eq!(
+            state_event_ingress_slow_line(
+                "s",
+                "f",
+                Duration::from_millis(999),
+                Duration::from_millis(999)
+            ),
+            None,
+            "fast ingress stays silent"
         );
     }
 }

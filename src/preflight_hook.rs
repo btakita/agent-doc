@@ -543,9 +543,12 @@ where
     F: FnOnce() -> anyhow::Result<T> + Send + 'static,
 {
     let (tx, rx) = std::sync::mpsc::channel();
+    let progress = agent_doc_preflight_command_io::progress::PreflightProgress::new();
+    let worker_progress = progress.clone();
     let worker = std::thread::Builder::new()
         .name("agent-doc-preflight-hook".to_string())
         .spawn(move || {
+            let _phases = agent_doc_preflight_command_io::progress::install(worker_progress);
             let outcome = work();
             // The receiver is gone on a budget overrun; the send failing there is
             // the expected shape, not a swallowed error.
@@ -563,20 +566,97 @@ where
             worker.join().ok();
             Err(anyhow::anyhow!(message))
         }
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(anyhow::anyhow!(
-            "preflight exceeded the hook's {}s admission budget for {} and was abandoned. \
-             This is usually a wedged project controller or supervisor rather than document size; \
-             check `agent-doc admin inspect` and `.agent-doc/logs/ops.log`. \
-             Override the budget with {}=<seconds>.",
-            budget.as_secs(),
-            file.display(),
-            HOOK_ADMISSION_BUDGET_ENV
-        )),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            let snapshot = progress.snapshot();
+            report_overrun_phases(file, budget, &snapshot);
+            Err(anyhow::anyhow!(overrun_reason(file, budget, &snapshot)))
+        }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(anyhow::anyhow!(
             "preflight worker terminated without reporting an outcome for {}",
             file.display()
         )),
     }
+}
+
+/// Where the preflight was when the admission budget expired (GH #78).
+///
+/// The phase still running is the measured cause; it replaces the fixed guess
+/// ("usually a wedged project controller or supervisor") this refusal used to
+/// carry, which an observed overrun with a ready controller had already refuted.
+fn overrun_phase_clause(
+    snapshot: &agent_doc_preflight_command_io::progress::ProgressSnapshot,
+) -> String {
+    let completed = if snapshot.completed.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; completed phases, costliest first: {}",
+            snapshot.breakdown()
+        )
+    };
+    match snapshot.running {
+        Some((label, running)) => format!(
+            "It was still in preflight phase `{label}` ({}ms in that phase) when the budget expired{completed}.",
+            running.as_millis()
+        ),
+        None if snapshot.completed.is_empty() => {
+            "Preflight recorded no phase before the budget expired: it never reached its first step."
+                .to_string()
+        }
+        None => format!("Preflight had left every instrumented phase{completed}."),
+    }
+}
+
+/// The refusal reason for a budget overrun.
+///
+/// It names the measured phase, an `admin inspect` invocation that is accepted
+/// as written (the bare form is rejected without a target), and what happened
+/// to the abandoned worker: it ends when this hook process exits, so it cannot
+/// race the next trigger.
+fn overrun_reason(
+    file: &Path,
+    budget: std::time::Duration,
+    snapshot: &agent_doc_preflight_command_io::progress::ProgressSnapshot,
+) -> String {
+    format!(
+        "preflight exceeded the hook's {}s admission budget for {} and was abandoned. {} \
+         Check `agent-doc admin inspect {}` and that phase in `.agent-doc/logs/ops.log`. \
+         The abandoned preflight worker stops when this hook process exits, so it cannot race \
+         the next trigger; a `preflight_started` cycle it opened is closed by the next turn's \
+         recovery. Override the budget with {}=<seconds>.",
+        budget.as_secs(),
+        file.display(),
+        overrun_phase_clause(snapshot),
+        file.display(),
+        HOOK_ADMISSION_BUDGET_ENV
+    )
+}
+
+/// Record the overrun's phase breakdown where an operator reads after the fact,
+/// in the same `[perf]` shape as `session_check.operations`.
+fn report_overrun_phases(
+    file: &Path,
+    budget: std::time::Duration,
+    snapshot: &agent_doc_preflight_command_io::progress::ProgressSnapshot,
+) {
+    let running = snapshot
+        .running
+        .map(|(label, running)| format!("{label}:{}ms", running.as_millis()))
+        .unwrap_or_else(|| "-".to_string());
+    let line = format!(
+        "preflight_admission_overrun file={} budget_ms={} elapsed_ms={} running={} completed={} (#preflightoverrunphase)",
+        file.display(),
+        budget.as_millis(),
+        snapshot.elapsed.as_millis(),
+        running,
+        if snapshot.completed.is_empty() {
+            "-".to_string()
+        } else {
+            snapshot.breakdown()
+        },
+    );
+    eprintln!("[perf] {line}");
+    agent_doc_ops_log_io::log_op(file, &line);
 }
 
 /// Claude Code `UserPromptSubmit` hook entry point.
@@ -931,6 +1011,9 @@ mod tests {
             Path::new("/nonexistent/agent-doc-budget-probe.md"),
             std::time::Duration::from_millis(50),
             move || {
+                agent_doc_preflight_command_io::progress::enter("resolve_initial_document");
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                agent_doc_preflight_command_io::progress::enter("settle_debounce");
                 while !worker_release.load(std::sync::atomic::Ordering::SeqCst) {
                     std::thread::sleep(std::time::Duration::from_millis(5));
                 }
@@ -949,6 +1032,38 @@ mod tests {
             message.contains(HOOK_ADMISSION_BUDGET_ENV),
             "overrun must name the override: {message}"
         );
+        // GH #78: the cause is measured, not asserted.
+        assert!(
+            message.contains("still in preflight phase `settle_debounce`"),
+            "overrun must name the phase still running: {message}"
+        );
+        assert!(
+            message.contains("resolve_initial_document:"),
+            "overrun must list completed phases: {message}"
+        );
+        assert!(
+            !message.contains("usually a wedged"),
+            "the fixed guess must not survive a measured phase: {message}"
+        );
+        // GH #78: bare `agent-doc admin inspect` is rejected without a target.
+        assert!(
+            message.contains("`agent-doc admin inspect /nonexistent/agent-doc-budget-probe.md`"),
+            "the remedy must name an accepted inspect invocation: {message}"
+        );
+        assert!(
+            message.contains("stops when this hook process exits"),
+            "the refusal must say what happens to the abandoned worker: {message}"
+        );
+    }
+
+    /// A preflight that never reached its first step says so instead of naming
+    /// a phase it was not in.
+    #[test]
+    fn overrun_before_any_phase_says_no_phase_was_reached() {
+        let snapshot =
+            agent_doc_preflight_command_io::progress::PreflightProgress::new().snapshot();
+        let clause = overrun_phase_clause(&snapshot);
+        assert!(clause.contains("never reached its first step"), "{clause}");
     }
 
     /// The complementary branch: a worker that finishes inside its budget must
@@ -1014,13 +1129,28 @@ mod tests {
                       recovery=retry_crdt_merge";
         let payload = admission_failure_payload("tasks/doc.md", reason);
         assert!(payload.starts_with(ADMISSION_FAILURE_MARKER), "{payload}");
-        assert!(payload.contains("pending: operator steering may be waiting"), "{payload}");
-        assert!(payload.contains("agent-doc session-check tasks/doc.md"), "{payload}");
-        assert!(payload.contains("may not have been received yet"), "{payload}");
-        assert!(payload.contains("Do NOT shell `agent-doc preflight`"), "{payload}");
+        assert!(
+            payload.contains("pending: operator steering may be waiting"),
+            "{payload}"
+        );
+        assert!(
+            payload.contains("agent-doc session-check tasks/doc.md"),
+            "{payload}"
+        );
+        assert!(
+            payload.contains("may not have been received yet"),
+            "{payload}"
+        );
+        assert!(
+            payload.contains("Do NOT shell `agent-doc preflight`"),
+            "{payload}"
+        );
 
         let other = admission_failure_payload("tasks/doc.md", "no project root found");
-        assert!(other.contains("agent-doc session-check tasks/doc.md"), "{other}");
+        assert!(
+            other.contains("agent-doc session-check tasks/doc.md"),
+            "{other}"
+        );
         assert!(!other.contains("may not have been received yet"), "{other}");
     }
 

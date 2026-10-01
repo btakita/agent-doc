@@ -157,6 +157,7 @@ fn enforce_cycle_completion(
     )
 }
 
+pub mod progress;
 mod run;
 pub use run::*;
 

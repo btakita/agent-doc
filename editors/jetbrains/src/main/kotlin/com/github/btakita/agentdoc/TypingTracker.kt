@@ -18,24 +18,59 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
 
+/** JVM system property holding this IDE process's editor id across plugin reloads. */
+internal const val EDITOR_ID_PROPERTY = "agentdoc.editor.id"
+
+/** JVM system property holding the last replica connection epoch across plugin reloads. */
+internal const val REPLICA_EPOCH_PROPERTY = "agentdoc.editor.replicaEpoch"
+
+/**
+ * #jbrejectlog: the editor id is per IDE *process*, not per plugin classloader.
+ * A Kotlin `object` is re-initialized by every dynamic plugin reload, so a
+ * per-object UUID gave the same IDE a new id each reload while the controller
+ * kept addressing the old one -- measured 2026-10-01 as
+ * `deliver_crdt_remote rejected cause=editor_id_mismatch` for pid 2960722.
+ * JVM system properties outlive the classloader, so the first load mints the
+ * id and every later load in the same process adopts it.
+ */
+internal fun processStableEditorIdUtil(
+    properties: java.util.Properties,
+    mint: () -> String,
+): String = synchronized(properties) {
+    properties.getProperty(EDITOR_ID_PROPERTY)?.takeIf { it.isNotBlank() }
+        ?: mint().also { properties.setProperty(EDITOR_ID_PROPERTY, it) }
+}
+
+/**
+ * The next replica connection epoch, persisted beside the editor id so a
+ * reloaded plugin never reissues a `:refresh-N` its predecessor already used.
+ */
+internal fun nextReplicaConnectionEpochUtil(properties: java.util.Properties): Long =
+    synchronized(properties) {
+        val next = (properties.getProperty(REPLICA_EPOCH_PROPERTY)?.toLongOrNull() ?: 0L) + 1
+        properties.setProperty(REPLICA_EPOCH_PROPERTY, next.toString())
+        next
+    }
+
 object EditorIdentity {
-    val id: String = "jetbrains-${ProcessHandle.current().pid()}-${UUID.randomUUID()}"
-    private val replicaConnectionEpoch = AtomicLong(0)
+    val id: String = processStableEditorIdUtil(System.getProperties()) {
+        "jetbrains-${ProcessHandle.current().pid()}-${UUID.randomUUID()}"
+    }
 
     /**
      * Allocate a distinct transport identity for every native replica incarnation.
      *
-     * The editor id is stable across an in-process native reload, while an old
-     * manager can finish deregistering after its replacement has registered. A
-     * generation suffix lets the relay recognize that late close as belonging to
-     * the retired member instead of removing the replacement's identical client id.
+     * The editor id is stable across an in-process native reload and a dynamic
+     * plugin reload, while an old manager can finish deregistering after its
+     * replacement has registered. A generation suffix lets the relay recognize
+     * that late close as belonging to the retired member instead of removing the
+     * replacement's identical client id.
      */
     internal fun nextReplicaConnectionIdentity(filePath: String): String =
-        "$id:$filePath:refresh-${replicaConnectionEpoch.incrementAndGet()}"
+        "$id:$filePath:refresh-${nextReplicaConnectionEpochUtil(System.getProperties())}"
 }
 
 internal data class PendingEditorOp(

@@ -1678,6 +1678,12 @@ fn run_with_options_inner(
                         outcome_fields
                     );
                     if readiness.is_ready() {
+                        // #supdrainyieldfalsifiable: make the yield falsifiable —
+                        // the next preflight reports a head that outlived it.
+                        agent_doc_controller_io::project_controller::record_supervisor_drain_handoff(
+                            file,
+                            &supervisor_head,
+                        );
                         eprintln!(
                             "[session-check] queue continues via supervisor: a [focused-cycle] head remains that the CP/supervisor clear-and-continue path drains (force /clear + re-dispatch to a fresh session). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
                             file.display(),

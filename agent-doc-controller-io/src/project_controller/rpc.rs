@@ -4065,6 +4065,94 @@ fn observe_editor_reregister_wait(file: &Path) -> status::EditorReregisterWait {
     })
 }
 
+const SUPERVISOR_DRAIN_HANDOFF_STATE_KIND: &str = "supervisor_drain_handoff";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SupervisorDrainHandoffRecord {
+    head_sha256: String,
+    handed_off_secs: u64,
+}
+
+fn supervisor_drain_head_sha256(content: &str) -> Option<String> {
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+        content,
+        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+    )
+    .map(|head| agent_doc_hash::content_hash(&head))
+}
+
+/// `#supdrainyieldfalsifiable`: record that session-check handed `head` to the
+/// supervisor. Keeps the FIRST hand-off time of a given head, so a head that is
+/// re-yielded every cycle without draining accrues age instead of resetting.
+/// Fail-open: storage errors are logged and never block the yield.
+pub fn record_supervisor_drain_handoff(file: &Path, head: &str) {
+    let head_sha256 = agent_doc_hash::content_hash(head);
+    let recorded = (|| -> Result<()> {
+        let project_root = agent_doc_project_root_io::project_root_containing(file)
+            .context("no project root")?;
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let conn = open_state_db(&project_root)?;
+        let prior = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
+            &conn,
+            &document_hash,
+            SUPERVISOR_DRAIN_HANDOFF_STATE_KIND,
+        )?
+        .and_then(|state| {
+            serde_json::from_str::<SupervisorDrainHandoffRecord>(&state.payload_json).ok()
+        });
+        if prior.is_some_and(|prior| prior.head_sha256 == head_sha256) {
+            return Ok(());
+        }
+        let now = timestamp_secs();
+        agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+                document_hash,
+                state_kind: SUPERVISOR_DRAIN_HANDOFF_STATE_KIND.to_string(),
+                canonical_path: canonical.to_string_lossy().into_owned(),
+                payload_json: serde_json::to_string(&SupervisorDrainHandoffRecord {
+                    head_sha256,
+                    handed_off_secs: now,
+                })?,
+                updated_at_ms: now.saturating_mul(1_000),
+            },
+        )?;
+        Ok(())
+    })();
+    if let Err(err) = recorded {
+        eprintln!(
+            "[agent-doc] warning: failed to record supervisor drain hand-off for {}: {err:#}",
+            file.display()
+        );
+    }
+}
+
+/// `#supdrainyieldfalsifiable`: seconds since the current supervisor head was
+/// handed off, when it is still that same head past the bound — i.e. the
+/// promised supervisor drain did not happen. Fail-open to `None`.
+pub fn undrained_supervisor_drain_handoff_age(file: &Path, content: &str) -> Option<u64> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let conn = open_state_db(&project_root).ok()?;
+    let record = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
+        &conn,
+        &document_hash,
+        SUPERVISOR_DRAIN_HANDOFF_STATE_KIND,
+    )
+    .ok()
+    .flatten()
+    .and_then(|state| serde_json::from_str::<SupervisorDrainHandoffRecord>(&state.payload_json).ok())?;
+    status::undrained_supervisor_handoff_age(
+        Some(&record.head_sha256),
+        Some(record.handed_off_secs),
+        supervisor_drain_head_sha256(content).as_deref(),
+        timestamp_secs(),
+        status::SUPERVISOR_DRAIN_HANDOFF_UNDRAINED_AFTER,
+    )
+}
+
 fn clear_editor_reregister_wait(file: &Path) {
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
         return;
@@ -33048,6 +33136,55 @@ mod tests {
             ]),
             None
         );
+    }
+
+    #[test]
+    fn supervisor_drain_handoff_becomes_undrained_only_for_the_same_head() {
+        // `#supdrainyieldfalsifiable`: a recorded hand-off is reported once the
+        // SAME supervisor head outlives the window, and never after it changes.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let doc = |head: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+## Backlog\n\n<!-- agent:backlog queue=sync -->\n<!-- /agent:backlog -->\n\n\
+## Queue\n\n<!-- agent:queue auto go -->\n- {head}\n<!-- /agent:queue -->\n"
+            )
+        };
+        let head = "[focused-cycle] fix queue identity loss";
+        let content = doc(head);
+        std::fs::write(&file, &content).unwrap();
+        assert!(supervisor_drain_head_sha256(&content).is_some(), "fixture must have a supervisor head");
+
+        record_supervisor_drain_handoff(&file, head);
+        assert_eq!(undrained_supervisor_drain_handoff_age(&file, &content), None, "inside window");
+
+        // Backdate past the window; re-recording the same head keeps the first time.
+        let canonical = file.canonicalize().unwrap();
+        let conn = open_state_db(dir.path()).unwrap();
+        let backdated = timestamp_secs() - status::SUPERVISOR_DRAIN_HANDOFF_UNDRAINED_AFTER.as_secs() - 60;
+        agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+                document_hash: agent_doc_hash::document_id_for_path(&canonical),
+                state_kind: SUPERVISOR_DRAIN_HANDOFF_STATE_KIND.to_string(),
+                canonical_path: canonical.to_string_lossy().into_owned(),
+                payload_json: format!(
+                    "{{\"head_sha256\":\"{}\",\"handed_off_secs\":{backdated}}}",
+                    agent_doc_hash::content_hash(head)
+                ),
+                updated_at_ms: backdated * 1_000,
+            },
+        )
+        .unwrap();
+        record_supervisor_drain_handoff(&file, head);
+        let age = undrained_supervisor_drain_handoff_age(&file, &content).expect("undrained");
+        assert!(age >= status::SUPERVISOR_DRAIN_HANDOFF_UNDRAINED_AFTER.as_secs());
+
+        // The head drained (a different head is first): the promise was kept.
+        let drained = doc("[focused-cycle] a different head");
+        assert_eq!(undrained_supervisor_drain_handoff_age(&file, &drained), None);
     }
 
     #[test]

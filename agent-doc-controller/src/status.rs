@@ -827,6 +827,34 @@ pub fn classify_supervisor_drain_readiness(
     SupervisorDrainReadiness::Ready { supervisor_pid }
 }
 
+/// `#supdrainyieldfalsifiable` (GH #73 §3) — how long a `[focused-cycle]` head
+/// handed to the supervisor may stay queued before the hand-off is reported as
+/// undrained instead of silently re-presented.
+pub const SUPERVISOR_DRAIN_HANDOFF_UNDRAINED_AFTER: Duration = Duration::from_secs(300);
+
+/// Age (seconds) of a supervisor-drain hand-off whose head is STILL the current
+/// supervisor head past `undrained_after`. `None` when nothing was handed off,
+/// the head changed (it drained, or a different head is now first), or the
+/// hand-off is still inside its window. Pure: `now` is an input.
+pub fn undrained_supervisor_handoff_age(
+    handed_off_head_sha256: Option<&str>,
+    handed_off_secs: Option<u64>,
+    current_head_sha256: Option<&str>,
+    now: u64,
+    undrained_after: Duration,
+) -> Option<u64> {
+    let (Some(handed), Some(at), Some(current)) =
+        (handed_off_head_sha256, handed_off_secs, current_head_sha256)
+    else {
+        return None;
+    };
+    if handed != current {
+        return None;
+    }
+    let age = now.saturating_sub(at);
+    (age >= undrained_after.as_secs()).then_some(age)
+}
+
 /// `#reregisterbound` (GH #75) — how long an editor-replica re-register request
 /// may go unanswered before waiting stops counting as recovery.
 pub const EDITOR_REREGISTER_UNANSWERED_AFTER: Duration = Duration::from_secs(45);
@@ -1163,6 +1191,23 @@ impl Error for ParseControllerHandoffStateError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supervisor_handoff_is_reported_only_when_the_same_head_outlives_its_window() {
+        let after = Duration::from_secs(300);
+        let age = |handed, at, current| {
+            undrained_supervisor_handoff_age(handed, at, current, 10_000, after)
+        };
+        // Same head still queued past the window: report its age.
+        assert_eq!(age(Some("h1"), Some(9_000), Some("h1")), Some(1_000));
+        // Inside the window: not yet a stall.
+        assert_eq!(age(Some("h1"), Some(9_900), Some("h1")), None);
+        // The head drained or changed: the hand-off was honoured.
+        assert_eq!(age(Some("h1"), Some(9_000), Some("h2")), None);
+        assert_eq!(age(Some("h1"), Some(9_000), None), None);
+        // Nothing handed off.
+        assert_eq!(age(None, None, Some("h1")), None);
+    }
 
     #[test]
     fn editor_reregister_wait_is_bounded() {

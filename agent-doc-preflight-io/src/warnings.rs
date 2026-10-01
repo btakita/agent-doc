@@ -110,7 +110,35 @@ pub fn content_and_staleness_warnings(
     }
     warnings.extend(stale_plugin_warnings(file));
     warnings.extend(plugin_byte_identity_warnings(file));
+    if let Some(age_secs) =
+        agent_doc_controller_io::project_controller::undrained_supervisor_drain_handoff_age(
+            file, content,
+        )
+    {
+        warnings.push(supervisor_drain_handoff_undrained_warning(file, age_secs));
+    }
     warnings
+}
+
+/// `#supdrainyieldfalsifiable` (GH #73 §3): a `[focused-cycle]` head that
+/// session-check handed to the supervisor is still the supervisor head long
+/// after the hand-off. Without this the same head was silently re-presented as
+/// if nothing had been promised.
+pub fn supervisor_drain_handoff_undrained_warning(file: &Path, age_secs: u64) -> PreflightWarning {
+    PreflightWarning {
+        code: "supervisor_drain_handoff_undrained".to_string(),
+        message: format!(
+            "the [focused-cycle] queue head of {} was handed to the supervisor {} min ago and is \
+             still undrained — the supervisor clear-and-continue drain did not happen. Treat it \
+             as a stalled queue: refresh the supervisor (`agent-doc admin recycle` after this \
+             turn closes, or `agent-doc session restart-supervisor <FILE>`) or drain the head \
+             in a fresh session.",
+            file.display(),
+            age_secs / 60
+        ),
+        document_agent: None,
+        active_harness: None,
+    }
 }
 
 /// Surface semantic memory matches for likely completed work and fail-open
@@ -776,6 +804,18 @@ mod tests {
 
     /// GH #67: once an install recorded that this process refused the restart-free
     /// upgrade, prescribing another install can never converge; the advice is restart.
+    #[test]
+    fn supervisor_drain_handoff_undrained_warning_names_age_and_remedy() {
+        let warning = super::supervisor_drain_handoff_undrained_warning(
+            std::path::Path::new("tasks/doc.md"),
+            1_260,
+        );
+        assert_eq!(warning.code, "supervisor_drain_handoff_undrained");
+        assert!(warning.message.contains("21 min ago"), "{}", warning.message);
+        assert!(warning.message.contains("still undrained"), "{}", warning.message);
+        assert!(warning.message.contains("restart-supervisor"), "{}", warning.message);
+    }
+
     #[test]
     fn a_recorded_restart_verdict_turns_the_remedy_into_restart() {
         let probes = vec![(

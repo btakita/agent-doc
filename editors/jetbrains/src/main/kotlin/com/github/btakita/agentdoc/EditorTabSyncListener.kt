@@ -237,12 +237,20 @@ ActiveEditorSplit,
 BackgroundOrUnknownSplit;
 
 companion object {
+/**
+ * GH #88: [editorWindowsAvailable] is false on a JetBrains Remote Dev backend, whose editor
+ * UI lives in the thin client: it exposes no `EditorWindow`, so `currentWindow` is always
+ * null and no split can ever match. A selection event is then the only focus signal there
+ * is, so it owns focus; the old gate dropped every selection and the pane never followed.
+ */
 fun decide(
 selectionPath: String,
 activeWindowPath: String?,
 previousSelectionPath: String? = null,
+editorWindowsAvailable: Boolean = true,
 ): SelectionFocusAuthority =
 if (
+    !editorWindowsAvailable ||
     activeWindowPath == selectionPath ||
         (previousSelectionPath != null && activeWindowPath == previousSelectionPath)
 ) {
@@ -477,6 +485,18 @@ private data class CapturedSurface(
             } else {
                 ProjectionReadiness.Current
             }
+
+        /**
+         * GH #88: the selected file of each editor split. A JetBrains Remote Dev backend
+         * exposes no `EditorWindow` (its editor UI lives in the thin client), so the window
+         * list is empty while `FileEditorManager.selectedFiles` still names one file per
+         * visible split -- the source the manual Sync Tmux Panes action already used, which
+         * is why only the manual action moved panes there.
+         */
+        fun splitSelections(
+            windowSelections: List<String?>,
+            managerSelectedFiles: List<String>,
+        ): List<String?> = windowSelections.ifEmpty { managerSelectedFiles }
 
         fun restoredEditorWindowsReady(selectedWindowFiles: List<String?>): Boolean =
             selectedWindowFiles.isNotEmpty() && selectedWindowFiles.all { it != null }
@@ -875,22 +895,24 @@ private data class CapturedSurface(
     ): CapturedSurface? {
         val manager = FileEditorManager.getInstance(project)
         val managerEx = FileEditorManagerEx.getInstanceEx(project)
-        val selectedWindowFiles = managerEx.windows.map { it.selectedFile }
-        if (
-            !SurfaceReport.restoredEditorWindowsReady(
-                selectedWindowFiles.map { it?.path },
+        val editorWindows = managerEx.windows
+        val selectedWindowPaths =
+            SurfaceReport.splitSelections(
+                editorWindows.map { it.selectedFile?.path },
+                manager.selectedFiles.map { it.path },
             )
-        ) {
+        if (!SurfaceReport.restoredEditorWindowsReady(selectedWindowPaths)) {
             return null
         }
         val openSessionFiles = manager.openFiles.filter(AgentDocSessionFiles::isSessionDocument)
         val sessionDocumentPaths = openSessionFiles.map { it.path }.toSet()
         val rawVisibleMdFiles =
             SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
-                selectedWindowFiles.map { it?.path },
+                selectedWindowPaths,
                 // `#stickymdpane`: keep a window that has switched to a source
-                // file standing for the last document it showed.
-                managerEx.windows.map { window ->
+                // file standing for the last document it showed. A backend with no
+                // editor windows (GH #88) has no per-window tab history to consult.
+                editorWindows.map { window ->
                     LayoutDetector.stickyMarkdownForWindow(
                         selectedPath = window.selectedFile?.path,
                         windowMarkdownTabsMruLast =
@@ -1220,15 +1242,24 @@ val project = event.manager.project
 log("selectionChanged: non-session file=${file.name}; spanning projection queued")
 return
 }
+val selectionManagerEx = FileEditorManagerEx.getInstanceEx(project)
+val selectionWindowCount = selectionManagerEx.windows.size
+val selectionActiveWindowPath = selectionManagerEx.currentWindow?.selectedFile?.path
 val selectionFocusAuthority =
 SelectionFocusAuthority.decide(
 selectionPath = file.path,
-activeWindowPath =
-FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile?.path,
+activeWindowPath = selectionActiveWindowPath,
 previousSelectionPath = event.oldFile?.path,
+editorWindowsAvailable = selectionWindowCount > 0,
 )
 val selectionOwnsFocus =
 selectionFocusAuthority == SelectionFocusAuthority.ActiveEditorSplit
+// GH #88: an arriving selection is observable at INFO, so "never ran" and
+// "ran and was gated" are distinguishable from an operator's idea.log.
+LOG.info(
+"[layout-sync] selection file=${file.name} authority=$selectionFocusAuthority " +
+    "windows=$selectionWindowCount activeWindow=${selectionActiveWindowPath?.let { java.io.File(it).name } ?: "<none>"}",
+)
 val requestedFocusGeneration =
 if (selectionOwnsFocus) {
 requestFocusProjection(project, file)

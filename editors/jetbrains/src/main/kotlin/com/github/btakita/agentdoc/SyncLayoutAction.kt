@@ -568,6 +568,23 @@ object LayoutDetector {
         try {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
             val windows = managerEx.windows
+            if (windows.isEmpty()) {
+                // GH #88: a Remote Dev backend exposes no EditorWindow at all, yet
+                // `selectedFiles` still names one file per visible split. Publishing
+                // `columns=0` there was a false fact that froze the tmux layout at one
+                // pane; mirror the selected session documents instead, one column each
+                // (geometry is unknown, the same rule as the shared-origin case).
+                val selectedSessionFiles = FileEditorManager.getInstance(project).selectedFiles
+                    .filter { file ->
+                        sessionDocumentPaths?.contains(file.path)
+                            ?: AgentDocSessionFiles.isSessionDocument(file)
+                    }
+                    .map { TerminalUtil.relativePath(project, it) }
+                val snapshots = headlessSelectionSnapshots(selectedSessionFiles)
+                val columns = buildColumnsFromSnapshots(snapshots)
+                logObservedLayout(0, snapshots, columns, source = "selected_files")
+                return if (columns.size >= 2) EditorLayout(columns) else null
+            }
             if (windows.size < 2) {
                 LOG.debug("[layout-detect] single editor window (count=${windows.size}); no split layout to mirror")
                 logObservedLayout(
@@ -674,6 +691,23 @@ object LayoutDetector {
 
     @Volatile private var lastObservedLayout: String? = null
 
+    /** GH #88: observations since the plugin loaded, carried in the INFO line. */
+    private val layoutObservationCount = java.util.concurrent.atomic.AtomicLong(0)
+
+    /** Re-log an unchanged observation every this many runs, so "stuck" reads differently from "never ran". */
+    internal const val OBSERVED_LAYOUT_HEARTBEAT = 50L
+
+    /**
+     * GH #88: one snapshot per selected session document on a backend with no editor
+     * windows. Every snapshot shares the origin, so each becomes its own column.
+     */
+    internal fun headlessSelectionSnapshots(selectedSessionFiles: List<String>): List<LayoutWindowSnapshot> =
+        selectedSessionFiles.distinct().map { LayoutWindowSnapshot(x = 0, y = 0, file = it) }
+
+    /** Log a changed observation, and an unchanged one on every [OBSERVED_LAYOUT_HEARTBEAT]th run. */
+    internal fun shouldLogObservedLayout(changed: Boolean, observation: Long): Boolean =
+        changed || observation % OBSERVED_LAYOUT_HEARTBEAT == 0L
+
     /**
      * GH #81 discriminator: what this IDE reported, before the controller sees it.
      *
@@ -687,11 +721,14 @@ object LayoutDetector {
         windowCount: Int,
         snapshots: List<LayoutWindowSnapshot>,
         columns: List<LayoutColumn>,
+        source: String = "windows",
     ) {
-        val line = observedLayoutLine(windowCount, snapshots, columns)
-        if (line != lastObservedLayout) {
-            lastObservedLayout = line
-            LOG.info(line)
+        val line = observedLayoutLine(windowCount, snapshots, columns) + " source=$source"
+        val observation = layoutObservationCount.incrementAndGet()
+        val changed = line != lastObservedLayout
+        lastObservedLayout = line
+        if (shouldLogObservedLayout(changed, observation)) {
+            LOG.info("$line obs=$observation")
         }
     }
 

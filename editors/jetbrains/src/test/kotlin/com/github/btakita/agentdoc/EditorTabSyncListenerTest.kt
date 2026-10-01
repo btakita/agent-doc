@@ -918,6 +918,33 @@ selectionPath = "/repo/tasks/left.md",
 activeWindowPath = "/repo/tasks/fpe.md",
 ),
 )
+// GH #88: a Remote Dev backend exposes no editor windows, so currentWindow is null for
+// every selection; the selection itself must own focus there.
+assertEquals(
+EditorTabSyncListener.SelectionFocusAuthority.ActiveEditorSplit,
+EditorTabSyncListener.SelectionFocusAuthority.decide(
+selectionPath = "/repo/tasks/left.md",
+activeWindowPath = null,
+editorWindowsAvailable = false,
+),
+)
+// With windows present, a null current window stays unknown (the settled probe owns it).
+assertEquals(
+EditorTabSyncListener.SelectionFocusAuthority.BackgroundOrUnknownSplit,
+EditorTabSyncListener.SelectionFocusAuthority.decide(
+selectionPath = "/repo/tasks/left.md",
+activeWindowPath = null,
+),
+)
+// GH #88: with no editor windows the per-split selections come from selectedFiles.
+assertEquals(
+listOf<String?>("/repo/a.md", "/repo/b.md"),
+EditorTabSyncListener.SurfaceReport.splitSelections(emptyList(), listOf("/repo/a.md", "/repo/b.md")),
+)
+assertEquals(
+listOf<String?>("/repo/a.md"),
+EditorTabSyncListener.SurfaceReport.splitSelections(listOf("/repo/a.md"), listOf("/repo/a.md", "/repo/b.md")),
+)
 assertEquals(
 EditorTabSyncListener.SelectionFocusAuthority.BackgroundOrUnknownSplit,
 EditorTabSyncListener.SelectionFocusAuthority.decide(

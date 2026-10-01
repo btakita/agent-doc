@@ -1,6 +1,8 @@
 package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LayoutDetectorTest {
@@ -93,6 +95,37 @@ class LayoutDetectorTest {
             "[layout-detect] observed windows=2 snapshots=[(0,0) a.md, (0,0) <none>] " +
                 "columns=2 [a.md | <empty>]",
             line,
+        )
+    }
+
+    @Test
+    fun `a backend with no editor windows mirrors each selected session document as a column`() {
+        // GH #88: Remote Dev backend, two documents side by side, `windows=0`.
+        val snapshots = LayoutDetector.headlessSelectionSnapshots(
+            listOf("tasks/laptop.md", "tasks/1099.md", "tasks/laptop.md"),
+        )
+        assertEquals(
+            listOf(LayoutColumn(listOf("tasks/laptop.md")), LayoutColumn(listOf("tasks/1099.md"))),
+            LayoutDetector.buildColumnsFromSnapshots(snapshots),
+        )
+        assertEquals(
+            listOf(LayoutColumn(listOf("tasks/laptop.md"))),
+            LayoutDetector.buildColumnsFromSnapshots(
+                LayoutDetector.headlessSelectionSnapshots(listOf("tasks/laptop.md")),
+            ),
+        )
+    }
+
+    @Test
+    fun `an unchanged layout observation is re-logged on a heartbeat`() {
+        // GH #88: a single deduplicated line could not tell "never ran" from "stuck".
+        assertTrue(LayoutDetector.shouldLogObservedLayout(changed = true, observation = 7))
+        assertFalse(LayoutDetector.shouldLogObservedLayout(changed = false, observation = 7))
+        assertTrue(
+            LayoutDetector.shouldLogObservedLayout(
+                changed = false,
+                observation = LayoutDetector.OBSERVED_LAYOUT_HEARTBEAT,
+            ),
         )
     }
 

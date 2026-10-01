@@ -1281,7 +1281,13 @@ fn install_jetbrains_package_bytes(
                     )
                 );
                 let reason = format!("dynamic upgrade unavailable, staged for restart: {reason}");
-                record_restart_required_marker(&restart_marker, &reason);
+                // GH #87: name the staged version so preflight can tell a staged
+                // install (restart is the remedy) from a plain stale one.
+                record_restart_required_marker(
+                    &restart_marker,
+                    &reason,
+                    jetbrains_zip_version(zip_path).as_deref(),
+                );
                 return Ok(JetbrainsLocalInstallOutcome::StagedForRestart { reason });
             }
             Ok(None) => None,
@@ -1312,7 +1318,7 @@ fn install_jetbrains_package_bytes(
         // GH #67: record the refusal so preflight's `plugin_bytes_superseded` advises
         // a restart instead of prescribing another install that re-learns the same
         // refusal every cycle. It sits beside the plugin tree, never inside it.
-        Some(reason) => record_restart_required_marker(&restart_marker, reason),
+        Some(reason) => record_restart_required_marker(&restart_marker, reason, None),
         None => clear_restart_required_marker(&restart_marker),
     }
     Ok(match restart_reason {
@@ -1337,8 +1343,27 @@ fn dynamic_upgrade_fallback_warning(reason: &str) -> &'static str {
     }
 }
 
-fn record_restart_required_marker(marker: &Path, reason: &str) {
-    if let Err(err) = fs::write(marker, format!("{}\n", reason.replace('\n', " "))) {
+/// Version named by an `agent-doc-jetbrains-<version>.zip` package filename.
+fn jetbrains_zip_version(zip_path: &Path) -> Option<String> {
+    zip_path
+        .file_name()?
+        .to_str()?
+        .strip_prefix("agent-doc-jetbrains-")?
+        .strip_suffix(".zip")
+        .map(|version| version.trim_end_matches("-signed").to_string())
+}
+
+/// The first line is the refusal reason; a staged install adds a
+/// `staged_version=<v>` line (GH #87).
+fn record_restart_required_marker(marker: &Path, reason: &str, staged_version: Option<&str>) {
+    let mut body = format!("{}\n", reason.replace('\n', " "));
+    if let Some(version) = staged_version {
+        body.push_str(&format!(
+            "{}{version}\n",
+            agent_doc_fs::jetbrains_install::STAGED_VERSION_MARKER_PREFIX
+        ));
+    }
+    if let Err(err) = fs::write(marker, body) {
         eprintln!(
             "[plugin] could not record the restart-required verdict at {}: {err}",
             marker.display()
@@ -2602,6 +2627,13 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let marker = target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
         let recorded = fs::read_to_string(&marker).unwrap();
         assert!(recorded.contains("staged for restart"), "{recorded}");
+        // GH #87: the staged version is recorded so preflight advises a restart.
+        assert_eq!(
+            agent_doc_fs::jetbrains_install::staged_version_from_restart_marker(&recorded)
+                .as_deref(),
+            Some("0.2.456"),
+            "{recorded}"
+        );
     }
 
     #[test]

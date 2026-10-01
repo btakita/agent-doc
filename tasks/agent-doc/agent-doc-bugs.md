@@ -139,6 +139,32 @@ Remaining queue: `do [#stopreplaynoopretained]` (open: the stale-intent trace), 
 **CI:** the Book and Pages jobs passed. **Release** (GitHub assets) and **PyPI** were still running when I checked; I recorded that status rather than waiting.
 
 **Queue:** `#release` is now consumed. The only head left is `do [#stopreplaynoopretained]`, whose open half needs the `state_events` trace across the 00:08 controller recycle.
+
+### Re: do [#stopreplaynoopretained] — the "00:08 failure" was a re-paste; the real stale intent is fixed — opus-5.5 · 2026-09-30T21:45-04:00
+
+> **Queue prompt:** 📌 do [#stopreplaynoopretained]
+
+**Done.** The fix is agent-doc `4df8440c0` (pushed, `make install`). The trace overturned the item's premise, so the two open parts became one different, real fix.
+
+**The trace (`state_events` + ops.log + transcripts):**
+- **There was no failure at 00:08Z.** Your 00:08:58Z report is the same text as the paste at 16:16Z: Codex scrollback from the **11:20 AM** turn ("Worked for 6m 8s · 11:20 AM").
+- **The settled intent was never reused.** `1790781617611427022` appears in the ledger exactly once, as `document_write_converged` at 15:20:24Z. After that, the ops.log has no line for it until 00:09:12Z, and that line is the `ResumeSettledDelivery` pairing that `9242f60b5` already fixed.
+- Parts (1) and (2) of the item rested on that misreading, so neither is a real defect:
+  - nothing held the settled intent across the recycle;
+  - the Stop replay was not a no-op against the live authority.
+- **The real 11:20 failure was already fixed.** At 15:20:17Z the editor endpoint refused, `serialized_atomic_write` retained the write, and the Codex Stop hook failed closed on it. The same intent settled 7 s later and committed at 15:20:28Z. `a829b5ae5` (`#stopretainedfailclosed`, 11:34 EDT, 14 minutes later) turns exactly that error into a still-open closeout instead of a hook failure. No retained-repair event has fired since that fix, so it is proven only by its unit test.
+
+**What the trace did find: a candidate stuck since Aug 5 (fixed).** `lazily.md` carried a force-disk external-disk candidate from 2026-08-05, intent `1785894534338092647-10`. The ops.log shows **260** `external_disk_editor_decision … pending_cleared=true` lines for it, and none of them cleared it.
+- **Cause:** when the editor supersedes an external-disk candidate, `observe_editor_current_from_ffi` (`src/ffi.rs`) recorded the editor's own hash as the settled target. That hash is by definition different from the candidate's target, and the reducer required both intent and target to match. The event id `document-write-converged-{doc}-{intent}` is keyed by intent only, so the `UNIQUE` constraint silently dropped every later, correct settlement. The `#[cfg(test)]` branch routes through a different function that passes the right hash, so the tests never saw this.
+- **Fix:** the reducer now clears an external-disk candidate by intent id alone, because every settlement of a user decision resolves it. Agent writes keep the exact-target rule. The FFI now settles with the candidate's own target.
+- **Test:** a candidate settled with the editor's hash now clears, and an agent write settled with a different target stays pending. I re-applied the old rule and the new test failed, so it does guard the fix.
+- **Healing:** the controller replays `state.db` when it starts, so the stuck `lazily.md` candidate clears at its next recycle. The last no-op "clear" was at 01:53:39Z.
+
+**Verification:** `make check` passed (exit 0; nextest 10270/10270, 259 skipped). `make install` passed. CI run 36803322459 had not finished when I checked.
+
+The uncommitted `retained_write.rs` in the agent-doc tree belongs to another session; I left it alone.
+
+Remaining queue: `#release`, then `do [#queueselectreversed]`, `do [#releaseskipcarried]`, `do [#gh76secondary]`.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -154,20 +180,19 @@ Remaining queue: `do [#stopreplaynoopretained]` (open: the stale-intent trace), 
 - ~~Do the "things you need from me"~~
 - ~~do [#refusalsteeringverbatim]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/76~~
-- ⏭️ 📌 do [#stopreplaynoopretained]
-- 🚧 do [#queueselectreversed]
+- ~~📌 do [#stopreplaynoopretained]~~
+- #release
+- do [#queueselectreversed]
 - do [#releaseskipcarried]
-- do [#gh76secondary]
 - ~~do [#supdrainyieldfalsifiable]~~
-- ⏭️ #release
+- do [#gh76secondary]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#queueselectreversed] [agent-doc] 2026-10-01 preflight selected '#release' (carried ⏭️) as head while queue_prompts listed the live heads in REVERSE of document order (doc: supdrainyieldfalsifiable, #gh-fix 76, #release → contract: #release, #76, supdrain). Operator-authored order is authoritative (#qauthorder).
+- [ ] [#queueselectreversed] [agent-doc] 2026-10-01 preflight selected '#release' (carried ⏭️) as head while queue_prompts listed the live heads in REVERSE of document order (doc: supdrainyieldfalsifiable, #gh-fix 76, #release → contract: #release, #76, supdrain). Operator-authored order is authoritative (#qauthorder).
 - [ ] [#releaseskipcarried] [agent-doc] An operator removing a head's ⏭️ marker does not clear it from cycle-state skipped_queue_head_ids (#queueskip, agent-doc-preflight-io/src/lib.rs ~4840): '#release' (no backlog item/preset, so never 'consumed') is re-stamped every cycle. Treat a snapshot→document ⏭️ removal as an operator un-skip.
 - [ ] [#gh76secondary] [agent-doc] GH #76 leftovers: stale_plugin expects 0.2.453 while the installer leaves 0.2.451 on disk (install vs expected-version disagree); full sync left window 0:1 named 'stash-' holding 19 panes instead of renaming to 'stash'.
-- [ ] [#stopreplaynoopretained] [agent-doc] lazily.md Codex Stop hook failed closed 2026-10-01T00:08Z on retained intent 1790781617611427022 (11:20 turn, settled 15:20:24Z). Part 3 FIXED 9242f60b5 (settled-delivery resume no longer pairs a capture with a converged write older than its cycle). REMAINING: (1) prove via a state_events trace across the 00:08:04Z controller recycle (crdt_replica_register_retained_reseed turn=cycle-1790781610027) why pending_write still held the settled intent so ensure_deferred_document_write_intent (agent-doc-document-realtime-io/src/lib.rs:4732) reused it, and clear it at settlement; (2) a write whose target hash already equals the live authority must not fail closed on a transient model-missing during reseed
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

@@ -552,13 +552,45 @@ fn log_three_way_merge_steering_observation(file: &Path) {
 /// Disk is the older projection and the authority carries the operator's
 /// edit, so the prompt-bearing diff disk → authority is exactly that steering.
 /// Empty when the unmerged save carries none.
-pub fn unmerged_editor_steering_note(authority_content: &str, disk_content: &str) -> String {
-    agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(
+///
+/// `#committedsteeringecho`: "disk is older, so disk → authority is the
+/// operator's edit" is false when the authority is ahead of disk by a
+/// COMMITTED binary write. Observed 2026-10-01 on
+/// `tasks/agent-doc/agent-doc-bugs.md`: the response was in HEAD and in the
+/// authority, only the disk projection lagged, and every paragraph of that
+/// committed response was relayed as "5 concurrent operator steering
+/// directives". Text already in `committed` (HEAD) is not unanswered operator
+/// steering, so it is filtered out; with no HEAD the old behaviour stands.
+pub fn unmerged_editor_steering_note(
+    authority_content: &str,
+    disk_content: &str,
+    committed: Option<&str>,
+) -> String {
+    let steering = agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(
         disk_content,
         authority_content,
     )
-    .realtime_steering_all()
-    .verbatim_aggregate()
+    .realtime_steering_all();
+    let steering = match committed {
+        Some(committed) => {
+            agent_doc_document_realtime::baseline_comparison::RealtimeSteeringSet::new(
+                steering
+                    .directives()
+                    .iter()
+                    .filter(|directive| {
+                        directive
+                            .verbatim()
+                            .map(str::trim)
+                            .is_none_or(|body| body.is_empty() || !committed.contains(body))
+                    })
+                    .cloned()
+                    .collect(),
+            )
+        }
+        None => steering,
+    };
+    steering
+        .verbatim_aggregate()
     .map(|verbatim| {
         format!(
             " Operator steering inside the unmerged editor save (not yet on disk; relay it to the operator verbatim, do not answer it until the save settles): {verbatim}"
@@ -746,7 +778,11 @@ fn ensure_terminal_authority_disk_convergence(
             disk_content,
         ),
         recovery_status,
-        unmerged_editor_steering_note(authority_content, disk_content),
+        unmerged_editor_steering_note(
+            authority_content,
+            disk_content,
+            agent_doc_git_io::revision::show_head(file).ok().flatten().as_deref(),
+        ),
     );
 }
 
@@ -1372,7 +1408,11 @@ fn run_with_options_inner(
                     "the projection changed after its converged observation",
             },
             divergence_owner_note,
-            unmerged_editor_steering_note(&authority_content, &disk_content),
+            unmerged_editor_steering_note(
+                &authority_content,
+                &disk_content,
+                agent_doc_git_io::revision::show_head(file).ok().flatten().as_deref(),
+            ),
         );
         if retained_closeout_resume.should_resume() {
             match crate::profile::timed("resume_retained_closeout_after_native_save", || {

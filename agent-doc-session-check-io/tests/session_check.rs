@@ -7652,16 +7652,48 @@ Body\n\
         let authority = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n\
 ### Re: earlier\nanswer\n\nWhy does the release keep skipping? Please check the carried skip set.\n\
 <!-- /agent:exchange -->\n";
-        let note = unmerged_editor_steering_note(authority, disk);
+        let note = unmerged_editor_steering_note(authority, disk, Some(disk));
         assert!(
             note.contains("Why does the release keep skipping? Please check the carried skip set."),
             "authority-only operator prompt must be relayed verbatim: {note:?}"
         );
         assert!(note.contains("unmerged editor save"), "{note:?}");
         assert!(
-            unmerged_editor_steering_note(disk, disk).is_empty(),
+            unmerged_editor_steering_note(disk, disk, None).is_empty(),
             "no divergence ⇒ no steering note"
         );
+    }
+
+    /// `#committedsteeringecho`: when the authority is ahead of disk only by a
+    /// COMMITTED response (in HEAD), that response is not operator steering. A
+    /// genuine operator edit beside it is still relayed.
+    #[test]
+    fn unmerged_editor_steering_note_ignores_committed_response_paragraphs() {
+        let disk = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n\
+### Re: earlier\nanswer\n<!-- /agent:exchange -->\n";
+        let committed = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n\
+### Re: earlier\nanswer\n\n### Re: complete GH #80 — opus-5\n\n\
+> **Queue prompt:** complete https://github.com/btakita/agent-doc/issues/80\n\n\
+**GH #80: closed.** Both fixes shipped.\n\n\
+The exchange is now 461 lines; this queue does not auto-compact.\n<!-- /agent:exchange -->\n";
+        assert!(
+            unmerged_editor_steering_note(committed, disk, Some(committed)).is_empty(),
+            "a committed response lagging on disk is not steering"
+        );
+        assert!(
+            !unmerged_editor_steering_note(committed, disk, None).is_empty(),
+            "the fixture must reproduce the misclassification without HEAD"
+        );
+        let authority = committed.replace(
+            "<!-- /agent:exchange -->",
+            "\nPlease also fix the remaining GH #86 issues.\n<!-- /agent:exchange -->",
+        );
+        let note = unmerged_editor_steering_note(&authority, disk, Some(committed));
+        assert!(
+            note.contains("Please also fix the remaining GH #86 issues."),
+            "{note:?}"
+        );
+        assert!(!note.contains("GH #80: closed"), "{note:?}");
     }
 
     /// `#supdrainlive`: with no controller state at all the readiness probe must

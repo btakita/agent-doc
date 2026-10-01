@@ -3466,6 +3466,30 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
         return Ok(None);
     };
     let (updates, delivery, recovery_now) = pull?;
+    // `#droppedreplicapull`: a member dropped from the delivery cut is
+    // disconnected, so its pending queue was cleared and later broadcasts skip
+    // it. An editor that keeps pulling as that member therefore receives
+    // `updates=0` forever while its visible buffer never gets the response the
+    // canonical already holds; the native save that would settle the retained
+    // write can never come. Observed 2026-10-01 on
+    // `tasks/agent-doc/agent-doc-bugs.md` and `src/haiven-dev/tasks/fpe.md`
+    // after a dynamic plugin reload: `crdt_replica_dropped_from_delivery_cut`,
+    // then minutes of `crdt_replica_pull ... updates=0` from the SAME client.
+    // A pull is proof the endpoint is alive and serving this document, so
+    // answer it with the typed invalidation the frontends already consume
+    // (`missing_replica`): they re-register atomically, and registration's
+    // state-vector bootstrap delivers everything the member missed.
+    if !delivery.live {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_pull_refused file={} authority=multi_replica client_id={} reason=replica_disconnected recovery=reregister",
+                file.display(),
+                client_id,
+            ),
+        );
+        return Ok(None);
+    }
     // Only log a pull that actually delivers work or advances the ack frontier.
     // The editor replica forwarder polls this ~4×/second while attached; logging
     // every empty steady-state poll floods ops.log (observed growing it to
@@ -6156,6 +6180,56 @@ mod tests {
                 pid: pid.into(),
                 tag: format!("test-editor-{pid}:{file}"),
             }]);
+    }
+
+    /// `#droppedreplicapull`: a replica dropped from the delivery cut that keeps
+    /// pulling must be told to re-register, and re-registering must deliver the
+    /// response it missed. Before the fix the pull answered `updates=0` forever.
+    #[test]
+    fn pull_from_dropped_replica_is_refused_until_reregister_delivers_missed_response() {
+        let (_dir, doc) = temp_doc("dropped-replica-pull.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n❯ operator prompt\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        seed_live_reliable_sync_open(&doc.display().to_string());
+        let identity = "intellij:dropped-replica-pull";
+        let (client_id, _) = register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("live editor should register with the relay");
+
+        // The controller drops the member (endpoint refused), then commits a
+        // response the dropped member never receives.
+        assert!(
+            with_existing_hub(&doc, |hub| hub.disconnect(client_id))
+                .unwrap()
+                .unwrap()
+        );
+        let response = "### Re: operator prompt — gpt-5\n\nDelivered after re-register.";
+        add_response_cell_for_file(&doc, None, response, "test")
+            .unwrap()
+            .expect("editor-attached response add should use the relay");
+
+        assert!(
+            pull_replica_updates_for_file(&doc, identity).unwrap().is_none(),
+            "a pull from a disconnected member must be refused so the editor re-registers"
+        );
+
+        let (reregistered_id, bootstrap) = register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("the same editor re-registers");
+        assert_eq!(reregistered_id, client_id);
+        let replica = agent_doc_merge::crdt_sync::ReplicaState::new(reregistered_id);
+        replica.apply_update(&bootstrap).unwrap();
+        assert!(
+            replica.text().contains("Delivered after re-register."),
+            "the re-register bootstrap must carry the missed response"
+        );
+        let pull = pull_replica_updates_for_file(&doc, identity)
+            .unwrap()
+            .expect("a re-registered member pulls normally");
+        assert!(pull.delivery.live);
     }
 
     #[test]

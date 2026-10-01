@@ -865,6 +865,7 @@ fn advance_skipped_queue_head_ids(
     prior_dispatched: Option<&str>,
     prior_resolved: &std::collections::HashSet<String>,
     current_live_ids: &std::collections::HashSet<String>,
+    operator_unskipped: &std::collections::HashSet<String>,
 ) -> std::collections::HashSet<String> {
     let mut fresh = if prior_resolved.is_empty() {
         carried
@@ -879,6 +880,9 @@ fn advance_skipped_queue_head_ids(
     }
     // Clear ids that are no longer live heads or were just consumed.
     fresh.retain(|id| current_live_ids.contains(id) && !prior_resolved.contains(id));
+    // `#releaseskipcarried`: an operator who removed a head's `⏭️` overrules the
+    // stall claim, including the prior cycle's evidence, which predates that edit.
+    fresh.retain(|id| !operator_unskipped.contains(id));
     fresh
 }
 
@@ -4886,11 +4890,26 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                     .filter_map(|h| agent_doc_queue::queue_response::queue_prompt_done_id(h))
                     .find(|id| !carried.contains(id) && !preset_only.contains(id))
             });
+        let operator_unskipped =
+            agent_doc_queue::queue_projection::operator_unskipped_queue_ids(diff);
+        if !operator_unskipped.is_empty() {
+            let mut ids = operator_unskipped.iter().cloned().collect::<Vec<_>>();
+            ids.sort();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_queue_operator_unskip file={} ids={} (#releaseskipcarried)",
+                    file.display(),
+                    ids.join(","),
+                ),
+            );
+        }
         advance_skipped_queue_head_ids(
             carried,
             prior_dispatched.as_deref(),
             &prior_resolved,
             &current_live_ids,
+            &operator_unskipped,
         )
     } else {
         std::collections::HashSet::new()
@@ -12473,6 +12492,7 @@ mod tests {
             None,
             &std::collections::HashSet::new(),
             &live,
+            &std::collections::HashSet::new(),
         );
         assert!(
             fresh.is_empty(),
@@ -12485,6 +12505,7 @@ mod tests {
             Some("alpha"),
             &std::collections::HashSet::new(),
             &live,
+            &std::collections::HashSet::new(),
         );
         assert_eq!(fresh, id_set(["alpha"]));
 
@@ -12495,6 +12516,7 @@ mod tests {
             Some("beta"),
             &id_set(["alpha"]),
             &live,
+            &std::collections::HashSet::new(),
         );
         assert_eq!(fresh, id_set(["beta"]));
     }
@@ -12514,6 +12536,7 @@ mod tests {
             None,
             &std::collections::HashSet::new(),
             &live,
+            &std::collections::HashSet::new(),
         );
         assert_eq!(fresh, id_set(["alpha", "beta"]));
 
@@ -12523,6 +12546,7 @@ mod tests {
             None,
             &id_set(["gamma"]),
             &live,
+            &std::collections::HashSet::new(),
         );
         assert!(
             fresh.is_empty(),
@@ -12536,6 +12560,33 @@ mod tests {
             Some("beta"),
             &id_set(["gamma"]),
             &live,
+            &std::collections::HashSet::new(),
+        );
+        assert_eq!(fresh, id_set(["beta"]));
+    }
+
+    #[test]
+    fn an_operator_unskip_clears_a_carried_skip_and_blocks_its_restamp() {
+        // `#releaseskipcarried`: a bare `#release` head is never consumed, so the
+        // prior cycle's evidence re-stamps it every cycle. Removing its `⏭️` is
+        // the operator overruling that claim, and must win over both.
+        let live = id_set(["release", "beta"]);
+        let fresh = advance_skipped_queue_head_ids(
+            id_set(["release"]),
+            Some("release"),
+            &std::collections::HashSet::new(),
+            &live,
+            &id_set(["release"]),
+        );
+        assert!(fresh.is_empty(), "operator un-skip must stick: {fresh:?}");
+
+        // Other carried skips are untouched by an unrelated un-skip.
+        let fresh = advance_skipped_queue_head_ids(
+            id_set(["release", "beta"]),
+            None,
+            &std::collections::HashSet::new(),
+            &live,
+            &id_set(["release"]),
         );
         assert_eq!(fresh, id_set(["beta"]));
     }

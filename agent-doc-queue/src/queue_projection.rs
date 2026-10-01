@@ -270,6 +270,51 @@ pub fn queue_worklist_entries(content: &str, entries: &[QueueEntry]) -> Vec<Queu
         .collect()
 }
 
+/// `#releaseskipcarried`: ids whose `⏭️` skip marker the operator removed.
+///
+/// `diff` is the snapshot→document diff, so a removed line carrying `⏭️` paired
+/// with an added line for the same `#id` without it is an operator edit, not
+/// preflight's own marker maintenance. That edit is the operator overruling the
+/// stall claim behind the carried skip; without honoring it, a head that is
+/// never "consumed" (a bare `#release` with no backlog item) is re-stamped
+/// every cycle and can only be unstuck by rewriting the line.
+pub fn operator_unskipped_queue_ids(diff: Option<&str>) -> std::collections::HashSet<String> {
+    let Some(diff) = diff else {
+        return std::collections::HashSet::new();
+    };
+    let mut removed_skipped = std::collections::HashSet::new();
+    let mut added_unskipped = std::collections::HashSet::new();
+    for line in diff.lines() {
+        if line.starts_with("+++") || line.starts_with("---") {
+            continue;
+        }
+        let (body, added) = if let Some(body) = line.strip_prefix('+') {
+            (body, true)
+        } else if let Some(body) = line.strip_prefix('-') {
+            (body, false)
+        } else {
+            continue;
+        };
+        let Some(id) = crate::queue_response::queue_prompt_done_id(body) else {
+            continue;
+        };
+        let skipped = body.contains(agent_doc_document::queue_projection::SKIP_MARKER);
+        match (added, skipped) {
+            (false, true) => {
+                removed_skipped.insert(id);
+            }
+            (true, false) => {
+                added_unskipped.insert(id);
+            }
+            _ => {}
+        }
+    }
+    removed_skipped
+        .intersection(&added_unskipped)
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,5 +463,18 @@ first
             deduped.is_none(),
             "intentional duplicate queue prompt text must not be collapsed"
         );
+    }
+
+    #[test]
+    fn operator_removing_a_skip_marker_is_an_unskip() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,2 @@\n-- \u{23ed}\u{fe0f} :pin: #release\n+- :pin: #release\n - do [#other]\n";
+        assert_eq!(
+            operator_unskipped_queue_ids(Some(diff)),
+            ["release".to_string()].into_iter().collect()
+        );
+        // A moved line that keeps its marker, a bare removal, or no diff is not.
+        let moved = "-- \u{23ed}\u{fe0f} do [#a]\n+- \u{23ed}\u{fe0f} do [#a]\n-- \u{23ed}\u{fe0f} do [#b]\n";
+        assert!(operator_unskipped_queue_ids(Some(moved)).is_empty());
+        assert!(operator_unskipped_queue_ids(None).is_empty());
     }
 }

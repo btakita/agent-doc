@@ -2727,6 +2727,10 @@ Done.\n\
         doc
     }
 
+    /// A queue whose head is live session work that the Stop hook's in-session
+    /// continuation does not drive: `queue: start` is supervisor-scoped. With no
+    /// control at all the queue would default to `go` and the continuation
+    /// block would answer first (`#queuegodefaultdrain`).
     fn write_manual_queue_doc(dir: &tempfile::TempDir, prompts: &[&str]) -> PathBuf {
         let doc = dir.path().join("task.md");
         let queue = prompts
@@ -2737,6 +2741,7 @@ Done.\n\
             "---\n\
 session: sid\n\
 agent_doc_format: template\n\
+queue: start\n\
 ---\n\n\
 ## Exchange\n\n\
 <!-- agent:exchange patch=append -->\n\
@@ -4151,6 +4156,44 @@ Reviewed the gated items.\n\
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix1"));
+    }
+
+    /// `#queuegodefaultdrain`: a queue with no control on either surface (the
+    /// shape every drained queue has after `#queuestopretire`) is in its
+    /// default `go`, so the Stop hook keeps it moving like an explicit `go`.
+    #[test]
+    fn stop_blocks_clean_closeout_when_control_less_queue_has_next_prompt() {
+        let dir = setup_project();
+        let doc = write_manual_queue_doc(&dir, &["Remove the max character count cap"]);
+        let content = fs::read_to_string(&doc)
+            .unwrap()
+            .replacen("queue: start\n", "", 1);
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Done.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("max character count cap"), "{reason}");
+                assert!(reason.contains("send the final answer"), "{reason}");
+            }
+            other => panic!("expected control-less queue continuation block, got {other:?}"),
+        }
     }
 
     #[test]

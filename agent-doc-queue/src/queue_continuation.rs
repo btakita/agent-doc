@@ -196,10 +196,9 @@ pub fn required_continuation(
     // current writers no longer emit, kept this detector silent for every
     // `queue: go` document (`#qstartinert` fixed the same flag elsewhere).
     let control = crate::control_binding::frontmatter_queue_control(&fm);
-    // An explicit control only; see `active_queue_for_supervisor_start`.
-    if crate::control_binding::queue_control_defaults_to_go(&queue_component.attrs, control)
-        || !crate::control_binding::explicit_queue_go_mode(&queue_component.attrs, control)
-    {
+    // `#queuegodefaultdrain`: a queue with no control on either surface is in
+    // its default `go`, so it continues exactly like an explicit `go`.
+    if !crate::control_binding::explicit_queue_go_mode(&queue_component.attrs, control) {
         return Ok(None);
     }
     let has_auto = document_queue::has_auto_attr(&queue_component.attrs);
@@ -790,15 +789,14 @@ fn active_queue_for_supervisor_start(
     // the queue never drained. The binding lets an explicit marker token win
     // (`#qactsync`), keeps a lone legacy `queue_active` flag inert, and applies
     // the `#queuegodefault` go when neither surface carries a control.
+    //
+    // `#queuegodefaultdrain`: that default `go` drains here too. A drain clears
+    // the control (`#queuestopretire`), so excluding control-less queues left
+    // every finished queue undispatched by the idle watch and the Codex Stop
+    // hook once a new head was added; only an in-session invocation ran it. An
+    // operator who wants a queue kept by hand writes `pause` or `stop`.
     let (queue_facts, entries) = queue_component_entries(content)?;
     let control = crate::control_binding::frontmatter_queue_control(&fm);
-    // Only an EXPLICIT control drains. The binding's `#queuegodefault` go for a
-    // queue with no control on either surface is left out on purpose: it would
-    // make every hand-kept queue auto-drain through the idle watch, a behavior
-    // change GH #79 does not ask for (`#queuegodefaultdrain` tracks it).
-    if crate::control_binding::queue_control_defaults_to_go(&queue_facts.attrs, control) {
-        return None;
-    }
     let explicit_go = crate::control_binding::explicit_queue_go_mode(&queue_facts.attrs, control);
     let explicit_start = allow_supervisor_start
         && crate::control_binding::explicit_queue_start_mode(&queue_facts.attrs, control);
@@ -2400,23 +2398,40 @@ mod tests {
         }
     }
 
-    /// A queue with no control on either surface keeps its pre-#79 behavior:
-    /// not drained by the idle watch or the continuation detector
-    /// (`#queuegodefaultdrain` owns whether it should be).
+    /// `#queuegodefaultdrain`: a queue with no control on either surface is in
+    /// its default `go`, so the idle watch and the continuation detector both
+    /// drain it. This is the shape every drained queue has after
+    /// `#queuestopretire`, once the operator adds a new head.
     #[test]
-    fn control_less_queue_is_not_auto_drained() {
+    fn control_less_queue_is_auto_drained() {
         let content = concat!(
             "---\nsession: sid\nagent_doc_format: template\n---\n\n",
             "<!-- agent:queue -->\n",
             "- Remove the max character count cap\n",
             "<!-- /agent:queue -->\n",
         );
-        assert_eq!(drainable_head_count(content), 0);
+        assert_eq!(drainable_head_count(content), 1);
         assert!(
             required_continuation(content, Some(content))
                 .unwrap()
-                .is_none()
+                .is_some()
         );
+        // An explicit hold on either surface still keeps it.
+        for held in [
+            content.replace("template\n---", "template\nqueue: pause\n---"),
+            content.replace("template\n---", "template\nqueue: stop\n---"),
+            content.replace("<!-- agent:queue -->", "<!-- agent:queue pause -->"),
+            content.replace("template\n---", "template\nqueue_active: false\n---"),
+        ] {
+            assert_ne!(held, content);
+            assert_eq!(drainable_head_count(&held), 0, "{held}");
+            assert!(
+                required_continuation(&held, Some(&held))
+                    .unwrap()
+                    .is_none(),
+                "{held}"
+            );
+        }
     }
 
     /// GH #79 repro: a free-text head under `<!-- agent:queue priority go -->`

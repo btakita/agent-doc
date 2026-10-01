@@ -351,7 +351,10 @@ Queue-maintenance write paths persist the canonical control directly:
 same write. A drain (no live head left, `#queuestopretire`) instead removes the
 control from both surfaces with `frontmatter::clear_queue_control`: the queue
 falls back to its default `go` (`#queuegodefault`), is idle while empty, and a
-head added later runs without a stale `stop`. An operator `pause` survives a
+head added later runs without a stale `stop`. That default `go` drains unattended
+too (`#queuegodefaultdrain`): the supervisor idle watch's drainability count and
+the continuation detector the Codex Stop hook reads treat a control-less queue
+exactly like an explicit `go`. An operator `pause` survives a
 drain. A drain that held fresh backlog ids out of a non-`go` queue keeps
 `queue: stop`, because with no control the next cycle would mirror and run them. Both fields are normalized away together by the replay-hash /
 boundary-compare paths (`strip_queue_active_frontmatter`,

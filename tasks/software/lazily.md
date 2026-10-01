@@ -16,7 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -599,6 +599,11 @@ The general npm metadata endpoint is still briefly returning 404 during propagat
 
 ### Re: recovered response
 
+> **Queue prompt:**
+>
+> Resolve #lzrustpublish
+
+
 Great—the npm approval succeeded. React `0.3.0` is published, tagged, and released; no further npm action is needed.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
@@ -606,9 +611,6 @@ Great—the npm approval succeeded. React `0.3.0` is published, tagged, and rele
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
-- ~~I'm logged into npm. Continue with #lsreactpublish~~ — auto-struck: answered this cycle (#ftstrike)
-- Resolve #lzrustpublish
-- re #lzreleasepins: commit + push uncommitted changes
 <!-- /agent:queue -->
 
 ## Backlog

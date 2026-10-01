@@ -263,6 +263,32 @@ The surface path had the same gap. A surface with no columns produced an empty `
 - CI for `ca1ac2267` was still running at closeout.
 
 The exchange is now about 230 lines; the queue keeps draining.
+
+### Re: GH #83 — tmux renders at ~50% width with two differently-sized clients — opus-5.5 · 2026-10-01T14:08-04:00
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/83
+
+**Done: agent-doc `c1a7667f0`, installed and pushed.** I explained the change on #83 and closed the issue.
+
+**Diagnostic and warning** (issue suggestions 1 and 3):
+- `agent-doc-tmux` has a new `TmuxClientGeometry` type. It records the clients, the effective `window-size`, and the window's size, and flags a mismatch when clients differ by more than 10 cells.
+- `tmux-io` has a new `client_geometry` probe. It reads `list-clients`, `show-options -wAv window-size`, and the window's size.
+- After each `pane_layout_projection` line, the controller logs `tmux_client_geometry … clients=N […] window_size=… window=WxH mismatch=…`. It logs whenever the geometry changes, and on every pass while the clients disagree. When they disagree, the line adds a warning and a remedy.
+- I checked the probe's commands against a live tmux 3.7c.
+
+**Not pinning `window-size`** (issue suggestion 2). agent-doc already removes per-window overrides on purpose, and `largest` would just crop the smaller client instead. The warning names `window-size largest` as a choice for the operator to make.
+
+**The issue's open question is now answered.** agent-doc attaches a client only when the session has none:
+- the IDE terminal returns `NOOP_EXTERNAL_ATTACHED` when a client is already attached;
+- `agent-doc terminal` checks `is_session_attached` first.
+
+So the second client was not agent-doc's.
+
+**Verification:**
+- `make check` passes: exit 0, 10295/10295.
+- New unit tests cover the model (using the issue's exact rig numbers) and the probe.
+
+The exchange is now about 250 lines; the queue keeps draining.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -276,7 +302,7 @@ The exchange is now about 230 lines; the queue keeps draining.
 - ~~do https://github.com/btakita/agent-doc/issues/80~~
 - ~~do https://github.com/btakita/agent-doc/issues/81~~
 - ~~do https://github.com/btakita/agent-doc/issues/82~~
-- do https://github.com/btakita/agent-doc/issues/83
+- ~~do https://github.com/btakita/agent-doc/issues/83~~
 - do https://github.com/btakita/agent-doc/issues/84
 - When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.
 - release + publish

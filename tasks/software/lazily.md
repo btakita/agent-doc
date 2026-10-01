@@ -592,10 +592,14 @@ Published successfully.
 - npm: [`@lazily-hub/lazily-react@0.3.0`](https://www.npmjs.com/package/@lazily-hub/lazily-react/v/0.3.0)
 - npm access: public
 - npm `latest` tag: `0.3.0`
-- Git tag `v0.3.0` points exactly to `dc2198713cdce925bccb5651ae6229ed27cf5347`
+- Git tag `v0.3.0` point exactly to `dc2198713cdce925bccb5651ae6229ed27cf5347`
 - [GitHub release v0.3.0](https://github.com/lazily-hub/lazily-react/releases/tag/v0.3.0)
 
 The general npm metadata endpoint is still briefly returning 404 during propagation, but npm’s access and dist-tag APIs confirm the publication.
+
+### Re: recovered response
+
+Great—the npm approval succeeded. React `0.3.0` is published, tagged, and released; no further npm action is needed.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  

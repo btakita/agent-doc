@@ -3089,16 +3089,23 @@ pub fn adopt_verified_editor_text_through_relay_authority_within(
 fn await_canonical_revision_edge(
     file: &Path,
     version: u64,
-    controller_cursor: &mut Option<agent_doc_controller_io::project_controller::ControllerStatePlaneCursor>,
+    controller_cursor: &mut Option<
+        agent_doc_controller_io::project_controller::ControllerStatePlaneCursor,
+    >,
     remaining: std::time::Duration,
 ) -> Result<bool> {
     if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
-        let observed =
-            agent_doc_crdt_relay_io::await_delivery_revision_change_for_file(file, version, remaining)?;
+        let observed = agent_doc_crdt_relay_io::await_delivery_revision_change_for_file(
+            file, version, remaining,
+        )?;
         return Ok(observed.is_some_and(|observed| observed.version != version));
     }
-    let subscription = agent_doc_controller_io::project_controller::
-        subscribe_document_delivery_wakes_for_file(file, *controller_cursor, remaining)?;
+    let subscription =
+        agent_doc_controller_io::project_controller::subscribe_document_delivery_wakes_for_file(
+            file,
+            *controller_cursor,
+            remaining,
+        )?;
     *controller_cursor = Some(
         agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
             controller_generation: subscription.controller_generation,
@@ -7881,6 +7888,71 @@ fn try_resolve_current_doc_with_disk_inner(
     }
 }
 
+/// GH #84: the action an operator (or agent) takes when an attached editor
+/// refuses both replica recovery and the disk fallback. The refusal used to name
+/// only the mechanism, so a superseded-plugin editor — the state a plugin update
+/// manufactures when it unlinks live jars — dead-ended finalize and session-check
+/// with no stated way out.
+///
+/// The disk fallback stays refused even for a superseded editor: its JVM still
+/// owns the buffer, which may hold unsaved operator text, so adopting disk could
+/// silently drop it. What changes is that the refusal now says how to leave.
+fn attached_editor_refusal_remedy(file: &std::path::Path) -> String {
+    let editors = agent_doc_crdt_relay_io::reliable_sync_editor_registrations_for_file(file)
+        .into_iter()
+        .filter_map(|reg| Some((reg.editor_kind, u32::try_from(reg.pid).ok()?)))
+        .collect::<Vec<_>>();
+    let superseded = agent_doc_fs::plugin_jar::probe_superseded_editors(editors.iter().cloned());
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "realtime_doc_resolve_disk_read_refused_remedy file={} superseded_editors={} \
+             restart_verdicts={}",
+            file.display(),
+            superseded.len(),
+            superseded
+                .iter()
+                .filter(|e| e.restart_verdict.is_some())
+                .count(),
+        ),
+    );
+    attached_editor_refusal_remedy_from(&superseded, &editors)
+}
+
+/// Pure core of [`attached_editor_refusal_remedy`].
+fn attached_editor_refusal_remedy_from(
+    superseded: &[agent_doc_fs::plugin_jar::SupersededEditor],
+    editors: &[(String, u32)],
+) -> String {
+    if let Some(editor) = superseded.first() {
+        return format!(
+            "plugin_bytes_superseded: live {kind} editor pid {pid} is executing superseded \
+             plugin bytes ({detail}), so it cannot serve this document's replica; disk is not \
+             adopted because that editor's buffer may still hold unsaved text. {remedy} Then \
+             retry the same command; a captured response is re-delivered, not lost (#84).",
+            kind = editor.editor_kind,
+            pid = editor.pid,
+            detail = editor.detail,
+            remedy = editor.remedy(),
+        );
+    }
+    let pids = editors
+        .iter()
+        .map(|(kind, pid)| format!("{kind} pid {pid}"))
+        .collect::<Vec<_>>();
+    let holder = if pids.is_empty() {
+        "the attached editor".to_string()
+    } else {
+        pids.join(", ")
+    };
+    format!(
+        "Remedy: {holder} holds the document but is not serving its replica, and no plugin \
+         byte replacement explains it. Run `agent-doc admin reload-lib` so the editor \
+         re-registers its replica, then retry the same command; restart that editor only if \
+         the retry is refused again (#84)."
+    )
+}
+
 /// Read-path resolution when an attached editor cannot answer.
 ///
 /// Precedence is `editor buffer -> disk`, with **rebuild before descent**: if an
@@ -8163,8 +8235,9 @@ fn resolve_editor_unavailable_disk_read_fallback(
                 },
             ),
         );
+        let remedy = attached_editor_refusal_remedy(file);
         anyhow::bail!(
-            "editor is still attached for {}; {reason} recovery exhausted and disk read authority is refused",
+            "editor is still attached for {}; {reason} recovery exhausted and disk read authority is refused. {remedy}",
             file.display()
         );
     }
@@ -8869,6 +8942,67 @@ fn retained_compact_projection_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GH #84: an editor running superseded plugin bytes refuses with the pid,
+    /// the replaced jar, and a restart-free first rung — never a bare mechanism.
+    #[test]
+    fn attached_editor_refusal_names_superseded_editor_and_restart_free_rung() {
+        let editor = agent_doc_fs::plugin_jar::SupersededEditor {
+            editor_kind: "jetbrains".into(),
+            pid: 4242,
+            detail: "/p/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.455.jar is mapped but \
+                     its inode was unlinked"
+                .into(),
+            restart_verdict: None,
+        };
+        let remedy = attached_editor_refusal_remedy_from(
+            std::slice::from_ref(&editor),
+            &[("jetbrains".into(), 4242)],
+        );
+        assert!(remedy.starts_with("plugin_bytes_superseded"), "{remedy}");
+        assert!(remedy.contains("pid 4242"), "{remedy}");
+        assert!(
+            remedy.contains("agent-doc-jetbrains-0.2.455.jar"),
+            "{remedy}"
+        );
+        assert!(
+            remedy.contains("Re-run the plugin installation once"),
+            "{remedy}"
+        );
+        assert!(
+            !remedy.contains("Restart the editor to load them"),
+            "{remedy}"
+        );
+    }
+
+    /// GH #84: once an install recorded that this process refused the dynamic
+    /// update, the refusal derives the restart from that record.
+    #[test]
+    fn attached_editor_refusal_advises_restart_only_after_a_recorded_refusal() {
+        let editor = agent_doc_fs::plugin_jar::SupersededEditor {
+            editor_kind: "jetbrains".into(),
+            pid: 4242,
+            detail: "jar unlinked".into(),
+            restart_verdict: Some("dynamic upgrade unavailable: plugin cannot unload".into()),
+        };
+        let remedy = attached_editor_refusal_remedy_from(&[editor], &[]);
+        assert!(
+            remedy.contains("Restart the editor to load them"),
+            "{remedy}"
+        );
+        assert!(remedy.contains("plugin cannot unload"), "{remedy}");
+    }
+
+    /// GH #84: with no superseded editor the refusal still names an action and
+    /// the holding editor instead of only the mechanism.
+    #[test]
+    fn attached_editor_refusal_names_a_remedy_without_superseded_bytes() {
+        let remedy = attached_editor_refusal_remedy_from(&[], &[("jetbrains".into(), 7)]);
+        assert!(remedy.contains("jetbrains pid 7"), "{remedy}");
+        assert!(remedy.contains("agent-doc admin reload-lib"), "{remedy}");
+        let unnamed = attached_editor_refusal_remedy_from(&[], &[]);
+        assert!(unnamed.contains("the attached editor"), "{unnamed}");
+    }
 
     #[test]
     fn controller_delivery_wake_proves_only_the_exact_visible_target() {
@@ -13675,8 +13809,7 @@ mod tests {
     #[test]
     fn editor_receipt_waits_for_canonical_to_catch_up() {
         let baseline = "# Session\n\n<!-- agent:exchange -->\nprompt\n<!-- /agent:exchange -->\n";
-        let receipt =
-            "# Session\n\n<!-- agent:exchange -->\nprompt\n### Re: answer\n\nbody\n<!-- /agent:exchange -->\n";
+        let receipt = "# Session\n\n<!-- agent:exchange -->\nprompt\n### Re: answer\n\nbody\n<!-- /agent:exchange -->\n";
         let (_dir, file, _canonical) = temp_doc(baseline);
         let identity = "test-editor-receipt-canonical-catchup";
         seed_reliable_sync_open(&file, identity);

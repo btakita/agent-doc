@@ -566,12 +566,7 @@ pub fn plugin_byte_identity_warnings_from(
     plugin_byte_identity_warnings_with_restart_verdicts(probes, &HashMap::new())
 }
 
-/// GH #67: file written into the IDE's plugins directory, beside (never inside) the
-/// `agent-doc-jetbrains` tree, when an install had to fall back to a file replacement
-/// because the live IDE refused the restart-free upgrade. Its body is the refusal
-/// reason. It lives outside the plugin tree so the install's byte-identity check
-/// never counts it as package content.
-pub const PLUGIN_RESTART_REQUIRED_MARKER: &str = ".agent-doc-jetbrains-restart-required";
+pub use agent_doc_fs::plugin_jar::{PLUGIN_RESTART_REQUIRED_MARKER, plugin_jar_stem};
 
 /// Like [`plugin_byte_identity_warnings_from`], but a process whose last install
 /// already recorded a refused restart-free upgrade (`restart_verdicts[pid]`) is told
@@ -587,31 +582,12 @@ pub fn plugin_byte_identity_warnings_with_restart_verdicts(
         if !mapped.is_superseded() || !seen.insert((kind.clone(), *pid)) {
             continue;
         }
-        let detail = match mapped {
-            MappedPluginJar::Deleted { path } => {
-                format!("{path} is mapped but its inode was unlinked")
-            }
-            MappedPluginJar::Superseded {
-                path,
-                mapped_inode,
-                disk_inode,
-            } => format!(
-                "{path} is mapped as inode {mapped_inode} but disk now holds inode {disk_inode}"
-            ),
-            _ => continue,
+        let Some(detail) = agent_doc_fs::plugin_jar::superseded_mapping_detail(mapped) else {
+            continue;
         };
-        let remedy = match restart_verdicts.get(pid) {
-            Some(reason) => format!(
-                "The last install already recorded that this process refused the restart-free \
-                 upgrade ({}), so another install cannot converge: the plugin files on disk are \
-                 current. Restart the editor to load them.",
-                reason.trim()
-            ),
-            None => "Re-run the plugin installation once so its dynamic update transaction \
-                     can converge. Restart the editor only if that install explicitly reports \
-                     a dynamic-unload failure."
-                .to_string(),
-        };
+        let remedy = agent_doc_fs::plugin_jar::superseded_editor_remedy(
+            restart_verdicts.get(pid).map(String::as_str),
+        );
         warnings.push(PreflightWarning {
             code: "plugin_bytes_superseded".to_string(),
             message: format!(
@@ -653,44 +629,11 @@ pub fn plugin_byte_identity_warnings(file: &Path) -> Vec<PreflightWarning> {
     let restart_verdicts = probes
         .iter()
         .filter_map(|(_, pid, mapped)| {
-            recorded_restart_verdict(*pid, mapped).map(|reason| (*pid, reason))
+            agent_doc_fs::plugin_jar::recorded_restart_verdict(*pid, mapped)
+                .map(|reason| (*pid, reason))
         })
         .collect::<HashMap<_, _>>();
     plugin_byte_identity_warnings_with_restart_verdicts(&probes, &restart_verdicts)
-}
-
-/// The refusal an install recorded next to the jar this process maps, when that
-/// record is newer than the process (so it was this process that refused).
-fn recorded_restart_verdict(pid: u32, mapped: &MappedPluginJar) -> Option<String> {
-    let path = match mapped {
-        MappedPluginJar::Deleted { path } | MappedPluginJar::Superseded { path, .. } => path,
-        _ => return None,
-    };
-    // <plugins>/agent-doc-jetbrains/lib/<jar>
-    let plugins_dir = std::path::Path::new(path.trim_end_matches(" (deleted)"))
-        .parent()?
-        .parent()?
-        .parent()?;
-    let marker = plugins_dir.join(PLUGIN_RESTART_REQUIRED_MARKER);
-    let recorded_at = std::fs::metadata(&marker).ok()?.modified().ok()?;
-    let started_at = std::fs::metadata(format!("/proc/{pid}"))
-        .ok()?
-        .modified()
-        .ok()?;
-    if recorded_at < started_at {
-        return None;
-    }
-    let reason = std::fs::read_to_string(&marker).ok()?;
-    Some(reason.lines().next().unwrap_or("").to_string()).filter(|r| !r.trim().is_empty())
-}
-
-/// Jar filename prefix for an editor kind. Only editors that load agent-doc as a
-/// jar inside their own process can be probed this way.
-pub fn plugin_jar_stem(editor_kind: &str) -> Option<&'static str> {
-    match editor_kind.to_ascii_lowercase().as_str() {
-        "jetbrains" | "intellij" | "idea" => Some("agent-doc-jetbrains-"),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

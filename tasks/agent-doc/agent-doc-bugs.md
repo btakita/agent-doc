@@ -532,8 +532,8 @@ The exchange is now 461 lines; this queue does not auto-compact.
 - ~~do [#supstaleopencycle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/85~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~
-- 🚧 complete https://github.com/btakita/agent-doc/issues/80
-- complete https://github.com/btakita/agent-doc/issues/81
+- ~~complete https://github.com/btakita/agent-doc/issues/80~~
+- 🚧 complete https://github.com/btakita/agent-doc/issues/81
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue -->

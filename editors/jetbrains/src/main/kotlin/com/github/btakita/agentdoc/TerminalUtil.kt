@@ -669,8 +669,11 @@ object TerminalUtil {
             for (col in editorLayout.columns) {
                 args.addAll(listOf("--col", col.files.joinToString(",")))
             }
-        } else if (visibleMdFiles.isNotEmpty()) {
-            args.addAll(listOf("--col", visibleMdFiles.joinToString(",")))
+        } else {
+            // GH #81: each visible document is its own split; see `undetectedLayoutColumns`.
+            for (column in SyncLayoutAction.undetectedLayoutColumns(visibleMdFiles)) {
+                args.addAll(listOf("--col", column))
+            }
         }
         if (focusedFile != null) {
             args.addAll(listOf("--focus", focusedFile))

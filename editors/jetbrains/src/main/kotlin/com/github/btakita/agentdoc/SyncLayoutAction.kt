@@ -271,10 +271,26 @@ class SyncLayoutAction : AnAction() {
                     }
                 listOf(agentDoc, "sync") + colArgs + focusArgs + exactVisibleArgs + noAutostartArgs
             } else {
-                val colArg = visibleMdFiles.joinToString(",")
-                listOf(agentDoc, "sync", "--col", colArg) + focusArgs + exactVisibleArgs + noAutostartArgs
+                val colArgs = undetectedLayoutColumns(visibleMdFiles)
+                    .ifEmpty { listOf("") }
+                    .flatMap { column -> listOf("--col", column) }
+                listOf(agentDoc, "sync") + colArgs + focusArgs + exactVisibleArgs + noAutostartArgs
             }
         }
+
+        /**
+         * Columns for a surface whose split layout was not detected (GH #81).
+         *
+         * Every visible document is the selected tab of its own editor window, so two of them are
+         * two splits, never two tabs of one window. Joining them as `--col a,b` told the
+         * controller "one column whose tabs are a and b", and it keeps the FIRST agent document
+         * per column -- IntelliJ lists the focused window's selection first, so tmux kept one
+         * pane whose occupant swapped on every document switch while the sibling's pane stayed
+         * in the stash window. Each visible document therefore gets its own column, in the order
+         * observed.
+         */
+        internal fun undetectedLayoutColumns(visibleMdFiles: List<String>): List<String> =
+            visibleMdFiles.filter(String::isNotBlank).distinct()
 
         internal fun buildSyncColumns(
             visibleMdFiles: List<String>,
@@ -283,7 +299,7 @@ class SyncLayoutAction : AnAction() {
             if (editorLayout != null && editorLayout.columns.size > 1) {
                 editorLayout.columns.map { column -> column.files.joinToString(",") }
             } else {
-                listOf(visibleMdFiles.joinToString(","))
+                undetectedLayoutColumns(visibleMdFiles).ifEmpty { listOf("") }
             }
 
         /**
@@ -554,6 +570,11 @@ object LayoutDetector {
             val windows = managerEx.windows
             if (windows.size < 2) {
                 LOG.debug("[layout-detect] single editor window (count=${windows.size}); no split layout to mirror")
+                logObservedLayout(
+                    windows.size,
+                    windows.map { LayoutWindowSnapshot(0, 0, it.selectedFile?.path) },
+                    emptyList(),
+                )
                 return null
             }
 
@@ -585,15 +606,30 @@ object LayoutDetector {
                 val file = stickyPath
                     ?.let { path -> window.fileList.firstOrNull { it.path == path } }
                     ?.let { TerminalUtil.relativePath(project, it) }
-                val component = window.tabbedPane.component
-                val bounds = component.parent?.let { parent ->
-                    SwingUtilities.convertRectangle(parent, component.bounds, splittersComponent)
-                } ?: component.bounds
-                LayoutWindowSnapshot(
-                    x = bounds.x,
-                    y = bounds.y,
-                    file = file,
-                )
+                // GH #81: a window whose bounds cannot be read (a headless or remote
+                // backend component) means geometry is unavailable for the whole layout,
+                // never that the layout does not exist.
+                val bounds = try {
+                    val component = window.tabbedPane.component
+                    component.parent?.let { parent ->
+                        SwingUtilities.convertRectangle(parent, component.bounds, splittersComponent)
+                    } ?: component.bounds
+                } catch (e: Exception) {
+                    LOG.debug("[layout-detect] editor window bounds unavailable: ${e.message}")
+                    null
+                }
+                Triple(bounds?.x, bounds?.y, file)
+            }.let { measured ->
+                // Any unmeasured window collapses every window onto one origin, which
+                // `buildColumnsFromSnapshots` reads as "keep each window its own column".
+                val geometryKnown = measured.all { it.first != null && it.second != null }
+                measured.map { (x, y, file) ->
+                    LayoutWindowSnapshot(
+                        x = if (geometryKnown) x!! else 0,
+                        y = if (geometryKnown) y!! else 0,
+                        file = file,
+                    )
+                }
             }
             LOG.debug(
                 "[layout-detect] ${windows.size} editor window(s): " +
@@ -620,6 +656,8 @@ object LayoutDetector {
                     }
             )
 
+            logObservedLayout(windows.size, snapshots, columns)
+
             // Return layout if at least 2 columns exist (even if some are empty).
             // Empty columns tell sync to leave that tmux pane position alone.
             return if (columns.size >= 2) {
@@ -633,6 +671,40 @@ object LayoutDetector {
             return null
         }
     }
+
+    @Volatile private var lastObservedLayout: String? = null
+
+    /**
+     * GH #81 discriminator: what this IDE reported, before the controller sees it.
+     *
+     * A single-document observation has two possible causes that the controller log cannot
+     * tell apart -- the IDE exposing one editor window, or a lossy join downstream. This line
+     * names the window count, each window's origin and document, and the columns built from
+     * them. It is logged at info only when it changes, since detection runs on every surface
+     * observation.
+     */
+    private fun logObservedLayout(
+        windowCount: Int,
+        snapshots: List<LayoutWindowSnapshot>,
+        columns: List<LayoutColumn>,
+    ) {
+        val line = observedLayoutLine(windowCount, snapshots, columns)
+        if (line != lastObservedLayout) {
+            lastObservedLayout = line
+            LOG.info(line)
+        }
+    }
+
+    internal fun observedLayoutLine(
+        windowCount: Int,
+        snapshots: List<LayoutWindowSnapshot>,
+        columns: List<LayoutColumn>,
+    ): String =
+        "[layout-detect] observed windows=$windowCount " +
+            "snapshots=[" + snapshots.joinToString(", ") {
+                "(${it.x},${it.y}) ${it.file ?: "<none>"}"
+            } + "] columns=" + columns.size + " [" +
+            columns.joinToString(" | ") { it.files.joinToString(",").ifEmpty { "<empty>" } } + "]"
 
     private fun sharesOrigin(snapshots: List<LayoutWindowSnapshot>): Boolean =
         snapshots.groupBy { it.x to it.y }.any { (_, atOrigin) -> atOrigin.size > 1 }

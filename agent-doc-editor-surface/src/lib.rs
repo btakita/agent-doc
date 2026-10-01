@@ -236,6 +236,34 @@ impl EditorSurface {
             .join(&COLUMN_SEPARATOR.to_string())
     }
 
+    /// The columns a `Sync` should lay out (GH #81).
+    ///
+    /// The detected layout when there is one. Otherwise each visible document
+    /// is its own column, in observed order, which is the same reading
+    /// [`Self::visible_signature`] already gives an undetected layout. Every
+    /// visible document is some editor window's selected tab, so two of them
+    /// are two splits. Handing the controller an empty layout instead refused
+    /// the sync (`desired pane layout is empty`), and the only layout that
+    /// reached tmux was the route's single joined column, which keeps one
+    /// document and strands the sibling's pane in the stash window.
+    pub fn sync_columns(&self) -> Vec<SurfaceColumn> {
+        if !self.columns.is_empty() {
+            return self.columns.clone();
+        }
+        let mut columns: Vec<SurfaceColumn> = Vec::new();
+        for file in self.visible.iter().filter(|file| !file.is_empty()) {
+            if !columns
+                .iter()
+                .any(|column| column.files.first() == Some(file))
+            {
+                columns.push(SurfaceColumn {
+                    files: vec![file.clone()],
+                });
+            }
+        }
+        columns
+    }
+
     /// An observation with nothing visible cannot imply any tmux consequence.
     pub fn is_inert(&self) -> bool {
         self.visible.is_empty() || self.focused.is_empty()
@@ -407,7 +435,7 @@ impl SurfaceTracking {
             return (
                 advanced,
                 SurfaceIntent::Sync {
-                    columns: surface.columns.clone(),
+                    columns: surface.sync_columns(),
                     document: surface.focused.clone(),
                     preserve_focus,
                 },
@@ -430,7 +458,7 @@ impl SurfaceTracking {
         (
             advanced,
             SurfaceIntent::Sync {
-                columns: surface.columns.clone(),
+                columns: surface.sync_columns(),
                 document: surface.focused.clone(),
                 preserve_focus,
             },
@@ -473,6 +501,37 @@ mod tests {
         assert!(matches!(intent, SurfaceIntent::Sync { .. }));
         assert_eq!(intent.document(), Some("/a.md"));
         assert_eq!(tracking.focused_document.as_deref(), Some("/a.md"));
+    }
+
+    #[test]
+    fn an_undetected_layout_syncs_each_visible_document_as_its_own_column() {
+        // GH #81: two visible documents with no detected layout are two splits.
+        // An empty Sync layout was refused, leaving tmux on one pane.
+        let undetected = EditorSurface {
+            focused: "/b.md".to_string(),
+            visible: vec![
+                "/b.md".to_string(),
+                "/a.md".to_string(),
+                "/b.md".to_string(),
+            ],
+            open: vec!["/b.md".to_string(), "/a.md".to_string()],
+            columns: Vec::new(),
+            force_reconcile: false,
+            focus_only: false,
+            preserve_focus: false,
+        };
+        let (_, intent) = SurfaceTracking::default().advance(&undetected, None);
+        let SurfaceIntent::Sync { columns, .. } = intent else {
+            panic!("expected Sync, got {intent:?}");
+        };
+        assert_eq!(
+            columns,
+            vec![SurfaceColumn::new(["/b.md"]), SurfaceColumn::new(["/a.md"]),]
+        );
+
+        // A detected layout is still mirrored as-is.
+        let detected = surface("/a.md", &[&["/a.md", "/c.md"], &["/b.md"]]);
+        assert_eq!(detected.sync_columns(), detected.columns);
     }
 
     #[test]

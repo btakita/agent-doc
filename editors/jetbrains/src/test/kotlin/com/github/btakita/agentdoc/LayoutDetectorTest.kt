@@ -79,6 +79,24 @@ class LayoutDetectorTest {
     }
 
     @Test
+    fun `observed layout line names windows origins documents and columns`() {
+        // GH #81 discriminator: tells "the IDE exposed one window" from a lossy join.
+        val line = LayoutDetector.observedLayoutLine(
+            2,
+            listOf(
+                LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = "a.md"),
+                LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = null),
+            ),
+            listOf(LayoutColumn(listOf("a.md")), LayoutColumn(emptyList())),
+        )
+        assertEquals(
+            "[layout-detect] observed windows=2 snapshots=[(0,0) a.md, (0,0) <none>] " +
+                "columns=2 [a.md | <empty>]",
+            line,
+        )
+    }
+
+    @Test
     fun `stickyMarkdownForWindow prefers the live selection`() {
         assertEquals(
             "/repo/tasks/now.md",

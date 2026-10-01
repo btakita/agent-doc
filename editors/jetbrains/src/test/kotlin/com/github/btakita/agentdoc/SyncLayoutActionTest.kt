@@ -514,4 +514,47 @@ class SyncLayoutActionTest {
         ) {
         override fun getPath(): String = rawPath
     }
+
+    @Test
+    fun `undetected layout gives each visible document its own column`() {
+        // GH #81: visible documents are selected tabs of distinct editor windows. A joined
+        // `--col focused,sibling` kept only the first (focused) document, so tmux held one
+        // pane whose occupant swapped on every switch.
+        val visible = listOf("/repo/tasks/pmt2/mr/1109.md", "/repo/tasks/agent-doc/agent-doc.md")
+
+        assertEquals(
+            listOf(
+                "agent-doc", "sync",
+                "--col", "/repo/tasks/pmt2/mr/1109.md",
+                "--col", "/repo/tasks/agent-doc/agent-doc.md",
+                "--focus", "/repo/tasks/pmt2/mr/1109.md",
+            ),
+            SyncLayoutAction.buildSyncCommand(
+                agentDoc = "agent-doc",
+                visibleMdFiles = visible,
+                editorLayout = null,
+                focusedFile = "/repo/tasks/pmt2/mr/1109.md",
+                noAutostart = false,
+            ),
+        )
+        assertEquals(visible, SyncLayoutAction.buildSyncColumns(visible, null))
+        assertEquals(
+            listOf(
+                "--col", "/repo/tasks/pmt2/mr/1109.md",
+                "--col", "/repo/tasks/agent-doc/agent-doc.md",
+                "--focus", "/repo/tasks/pmt2/mr/1109.md",
+            ),
+            TerminalUtil.buildRouteLayoutArgs(
+                visibleMdFiles = visible + visible.first(),
+                editorLayout = null,
+                focusedFile = "/repo/tasks/pmt2/mr/1109.md",
+            ),
+        )
+        // Nothing visible keeps the old shapes: an empty sync column, no route columns.
+        assertEquals(listOf(""), SyncLayoutAction.buildSyncColumns(emptyList(), null))
+        assertEquals(
+            emptyList<String>(),
+            TerminalUtil.buildRouteLayoutArgs(emptyList(), null, null),
+        )
+    }
 }

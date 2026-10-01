@@ -2,6 +2,41 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.429
+
+- **A response welded into a backlog item no longer strands the cycle (GH #86).** When a response
+  landed inside a tracked `agent:backlog` row (`- [ ] [#id] push### Re: push …`), commit correctly
+  refused the document, but nothing could repair it, so the cycle stayed `preflight_started` and
+  every route failed closed. `agent-doc repair <FILE>` and preflight now move the welded turn back
+  into `agent:exchange` byte-for-byte. The row returns to its own line, or is dropped when its exact
+  twin follows. The repair runs only when the weld is the component's single scaffold; any ambiguous
+  shape still fails closed. The commit refusal now names `agent-doc repair <FILE>` when this repair
+  applies. Compact runs the same repair before its integrity gate.
+- **Blocked route guidance keeps the computed remedy (GH #86).** A blocked closeout now keeps the
+  caller's specific blocker reason (staleness window, rerun/start commands) instead of replacing it
+  with generic "resume durable checkpoint" prose. Only a real `agent-doc …` invocation is reported as
+  `recovery_command=`; prose is no longer presented as a command to run. A fail-closed route says
+  it was NOT queued instead of "keep the new route queued behind its owner".
+- **Queue control fixes (GH #79, `#queuestopretire`, `#queuegodefaultdrain`, `#queuegokeep`).** A
+  drain removes the queue control instead of writing `queue: stop`, and a queue with no control
+  drains unattended like `go`. Activating an already-`go` queue keeps `go`. Drainability and
+  continuation read preflight's control binding. A `[focused-cycle]` head drains in-session when
+  its supervisor cannot.
+- **Stop-hook continuation leads with the re-entry that works (GH #85).** Once `/loop` is loaded, the
+  hook asks for a scheduled `/loop agent-doc <FILE>` re-entry instead of another `loop` Skill call,
+  and it opens with "Queue continuation, not an error:".
+- **Routing and layout (GH #81, #82, #83).** An undetected JetBrains split layout keeps each visible
+  document as its own column. A document's pane that now runs only a bare harness is released
+  instead of refused. Layout logs record tmux client-vs-window geometry.
+- **JetBrains upgrades (GH #80, #84, plugin 0.2.457).** The restart-free upgrade builds
+  `UnloadPluginOptions` through `DynamicPlugins`' own loader (IU-262). A failed hot-swap stages the
+  package for the next IDE start instead of replacing live jars. An attached-editor disk-read
+  refusal names its remedy.
+- **Fewer false wedges.** An install fan-out recycle is declined by a controller already on the new
+  build. The open-cycle deferral receipt prints `unprobed` instead of reporting an unprobed turn as
+  idle (`#supstaleopencycle`). A managed frontmatter write keeps a mid-edit preset line instead of
+  re-serialising it.
+
 ## 0.35.428
 
 - **The release head stops being skipped (`#releaseskipblame`, `#releaseskipcarried`).** `#queueskip`

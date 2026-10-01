@@ -2136,7 +2136,10 @@ fn observe_editor_current_from_ffi(
             ) == agent_doc_document_realtime::ExternalDiskDecision::EditorSupersedes
         };
         if supersedes {
-            append_editor_convergence_from_ffi(project_root, file, pending, &editor_hash, source)?;
+            // Settle the candidate's own target (as the in-process path does);
+            // the editor hash is not the intent's target (`#stopreplaynoopretained`).
+            let target_hash = pending.target_hash.clone();
+            append_editor_convergence_from_ffi(project_root, file, pending, &target_hash, source)?;
         }
         Ok(())
     }

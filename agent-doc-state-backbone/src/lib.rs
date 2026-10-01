@@ -1813,13 +1813,20 @@ impl DocumentStateProjection {
                     self.closeout
                         .prove_write_through(write_pipeline::DocumentWritePhase::DiskProjected);
                 }
+                // An external disk candidate is a replaceable user-decision
+                // value: every settlement (accepted, saved over, superseded by
+                // the editor, last editor closed) resolves the decision, and
+                // the intent id alone names it. Matching the target too left a
+                // candidate settled with the *editor's* hash pending forever,
+                // and the intent-keyed event id deduplicated every later
+                // corrected settlement (`#stopreplaynoopretained`: lazily.md
+                // logged 260 `pending_cleared=true` for one 2026-08-05
+                // candidate).
                 if self
                     .document
                     .pending_external_disk
                     .as_ref()
-                    .is_some_and(|pending| {
-                        pending.intent_id == *intent_id && pending.target_hash == *target_hash
-                    })
+                    .is_some_and(|pending| pending.intent_id == *intent_id)
                 {
                     self.document.pending_external_disk = None;
                 }
@@ -8807,6 +8814,71 @@ mod tests {
         let projected = ledger.project_document("doc-a").unwrap();
         assert!(projected.document.pending_write_journal.is_empty());
         assert!(projected.document.pending_write.is_none());
+    }
+
+    #[test]
+    fn external_disk_candidate_settles_by_intent_even_with_editor_target_hash() {
+        // `#stopreplaynoopretained`: the editor-supersedes path recorded the
+        // editor's hash as the settled target. The candidate must still clear.
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "external-disk-deferred",
+            StateFact::DocumentWriteDeferred {
+                document_hash: "doc-a".into(),
+                intent_id: "disk-intent".into(),
+                expected_hash: "editor-base".into(),
+                expected_content: Some("editor base".into()),
+                target_hash: "disk-target".into(),
+                target_content: "external disk edit".into(),
+                source: "force_disk".into(),
+                reason: DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
+            },
+        ));
+        ledger.append(state_event(
+            "agent-write-deferred",
+            StateFact::DocumentWriteDeferred {
+                document_hash: "doc-a".into(),
+                intent_id: "agent-intent".into(),
+                expected_hash: "editor-base".into(),
+                expected_content: Some("editor base".into()),
+                target_hash: "agent-target".into(),
+                target_content: "agent response".into(),
+                source: "finalize".into(),
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
+            },
+        ));
+        ledger.append(state_event(
+            "external-disk-converged",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "disk-intent".into(),
+                target_hash: "editor-hash".into(),
+                source: "editor_reconnect_superseded_external_disk".into(),
+                intent_source: DocumentWriteSource::from("force_disk"),
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert!(projected.document.pending_external_disk.is_none());
+        // The agent-write lineage keeps its exact-target rule.
+        ledger.append(state_event(
+            "agent-converged-other-target",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "agent-intent".into(),
+                target_hash: "other-target".into(),
+                source: "editor_ack".into(),
+                intent_source: DocumentWriteSource::PendingWrite,
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(
+            projected
+                .document
+                .pending_write
+                .as_ref()
+                .map(|pending| pending.intent_id.as_str()),
+            Some("agent-intent")
+        );
     }
 
     #[test]

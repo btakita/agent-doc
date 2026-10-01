@@ -5735,6 +5735,31 @@ fn derive_pending_retained_resume_signal(
     retained_resume_signal_for_action(projection, delivery, controller_generation, action)
 }
 
+/// `#stopreplaynoopretained`: whether the latest converged write was stamped
+/// before the capture's cycle began. `latest_converged_write` is document-wide,
+/// so without this an open capture was paired with ANY earlier converged write:
+/// on 2026-10-01 `tasks/software/lazily.md` woke `ResumeSettledDelivery` for
+/// cycle `cycle-1790813345975` (20:09) carrying intent `1790781617611427022-…`
+/// from the 11:20 turn, settled nine hours earlier. A write that predates the
+/// cycle cannot carry this cycle's response.
+///
+/// Both ids are clock-stamped: `cycle-<unix millis>` and
+/// `<unix nanos>-<sequence>-<target hash>`. Any other shape is not evidence and
+/// fails open (returns `false`), preserving the prior behavior.
+fn converged_write_predates_cycle(intent_id: &str, cycle_id: &str) -> bool {
+    let cycle_started_millis = cycle_id
+        .strip_prefix("cycle-")
+        .and_then(|millis| millis.parse::<u128>().ok());
+    let intent_created_millis = intent_id
+        .split_once('-')
+        .and_then(|(nanos, _)| nanos.parse::<u128>().ok())
+        .map(|nanos| nanos / 1_000_000);
+    matches!(
+        (intent_created_millis, cycle_started_millis),
+        (Some(intent), Some(cycle)) if intent < cycle
+    )
+}
+
 fn derive_settled_closeout_resume_signal(
     projection: &agent_doc_state_backbone::DocumentStateProjection,
     delivery: Option<&RetainedDeliveryObservation>,
@@ -5765,6 +5790,9 @@ fn derive_settled_closeout_resume_signal(
     }
     let converged = projection.document.latest_converged_write.as_ref()?;
     if converged.source == agent_doc_state_backbone::DocumentWriteSource::PostCommitReposition {
+        return None;
+    }
+    if converged_write_predates_cycle(&converged.intent_id, &capture.cycle_id) {
         return None;
     }
     Some(RetainedResumeSignal {
@@ -16634,6 +16662,21 @@ agent:queue\n\
         assert!(rebased.contains("<!-- agent:boundary:editor -->\nnew queue\n"));
         assert!(rebased.contains("- version 2"));
         assert!(!rebased.contains("answer one"));
+    }
+
+    #[test]
+    fn settled_resume_ignores_a_converged_write_older_than_the_capture_cycle() {
+        // `#stopreplaynoopretained`: the lazily.md incident ids.
+        let old_intent = "1790781617611427022-1-f42c0100300d2c99324e60396c08f7b32ffb6b46c732eaba0226b0ec53ea128f";
+        assert!(converged_write_predates_cycle(old_intent, "cycle-1790813345975"));
+        // A write made during the cycle belongs to it.
+        assert!(!converged_write_predates_cycle(
+            "1790813350000000000-3-abc",
+            "cycle-1790813345975"
+        ));
+        // Non-clock shapes are not evidence: fail open.
+        assert!(!converged_write_predates_cycle("intent-1", "cycle-1"));
+        assert!(!converged_write_predates_cycle(old_intent, "cycle-1790813345975-deadbeef"));
     }
 
     #[test]

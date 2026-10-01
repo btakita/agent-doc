@@ -622,7 +622,7 @@ The exchange is over 500 lines; I'm still draining the queue rather than stoppin
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~
 - ~~Look at https://github.Look at https://github.com/btakita/agent-doc/issues/86 response. Fix the remaining issues.com/btakita/agent-doc/issues/86 response. Fix the remaining issues. complete https://github.com/btakita/agent-doc/issues/81~~
 - ~~do [#jbrejectlog]~~
- - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/87
+ - ~~#gh-fix https://github.com/btakita/agent-doc/issues/87~~ — auto-struck: answered this cycle (#ftstrike)
  - #gh-fix https://github.com/btakita/agent-doc/issues/88
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.

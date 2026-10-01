@@ -385,6 +385,39 @@ After `#queuestopretire`, a drained queue has no control. So a head you add to a
 - Updated `specs/07`.
 
 **Verification:** `make check`: exit 0, 10308 passed. `make install`: OK. CI for `026fb0e46` was still running at closeout.
+
+### Re: agent-doc reverted my `'#release'` preset edit, and the fpe.md queue handed back to you — opus-5.5 · 2026-10-01T15:52-04:00
+
+> **Queue prompt:** When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.
+
+**Fixed: agent-doc `9195e04f7`, pushed and installed.** The superproject pointer is `532730b2fd`.
+
+**What happened (ops.log, 16:15:26–27Z):**
+- You pasted a copy of the `'#gh-fix': 'fix then close'` line, presumably to rename it. For a moment, `prompt_presets` held the same key twice.
+- One second later, queue maintenance wrote the `queue:` control. Frontmatter writes keep the bytes of every key they don't change, but that relies on the frontmatter parsing as YAML. The repeated key made it fail to parse, so the write fell back to rebuilding the whole frontmatter from the parsed struct.
+- That dropped your pasted line and removed the quotes from every preset. The log shows it: the editor text was 19094 bytes with your paste, and the write produced 19061.
+- Your next keystrokes then landed in the original line. That's why `'#gh-fix'` now reads `fix then closerelease`. **Please fix that value by hand.** I didn't edit your frontmatter on the live document.
+
+**The fix:** when the frontmatter can't be parsed as one YAML value, the write still splits it into top-level keys. Each key's value from before and after the write is compared using the struct parse, which tolerates the repeated key. A key the write didn't change keeps your bytes verbatim, even if it doesn't parse. Full rebuilding now only happens for a repeated **top-level** key. Every agent-doc frontmatter writer goes through this path, so queue control, pipeline state, and session/resume ids are all covered.
+
+**Test:** the frontmatter from your edit (the repeated `'#gh-fix'` line) passes through `merge_queue_state`, `merge_queue_control`, and `clear_queue_control`. It must keep the repeated line and the quotes byte-for-byte. Before the fix it reproduced the bug exactly.
+
+**Your mid-turn report: the fpe.md queue was handed back to you.** Fixed in agent-doc `c04b1ffd9` (superproject `f9ae08a320`).
+- **Cause:** the next fpe head was `[focused-cycle]`, and the in-session loop always leaves those to the supervisor. That supervisor's heartbeat was stale, so session-check printed `queue_continuation_required=false` and "queue STALLED — … re-trigger in a fresh session". Codex followed it.
+- **Now:** when the supervisor can't drain such a head, the in-session loop drains it:
+  - Preflight sets `queue_continuation_required` and prints a fallback guidance line.
+  - Session-check prints `queue_continuation_required=true` with the next head, and records the continuation as pending. If a loop still stops there, the next preflight reports `queue_stall_detected`.
+  - `supervisor_drain_unavailable` is now a recoverable outcome. Its next action is `drain_in_session_supervisor_unavailable`; it was `operator_retrigger_supervisor_unavailable`.
+  - The skill text says to drain it and never to ask for a re-trigger.
+  - If a recycle-yield is pending, that still wins, because the recycle is what makes the supervisor ready again.
+- **Tests:**
+  - The readiness test now requires an in-session message, with no STALLED and no re-trigger.
+  - A new unit test covers the fallback head.
+- **Not fixed yet:** I filed `#supstaleopencycle` for why that supervisor was stuck. It logged `supervisor_recycle_deferred_cycle_open stale=true harness_turn_live=false` about once a second for 15 minutes.
+
+**Verification:** `make check` after each fix: exit 0, 10309 passed. `make install`: OK both times.
+
+The exchange is now 360+ lines. The queue is still active, so I'm continuing to drain it.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -403,13 +436,14 @@ After `#queuestopretire`, a drained queue has no control. So a head you add to a
 - ~~do [#jbstageonfail]~~
 - ~~[#queuestopretire]: do option 1~~
 - ~~[#followqueuestopretireopt]: Yes, the queue should continue draining. No stalling.~~
-- When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.
+- ~~When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.~~
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#supstaleopencycle] [agent-doc] The fpe.md supervisor (pid 454699) logged supervisor_recycle_deferred_cycle_open stale=true reason=agent_doc_cycle_open with harness_turn_live=false about once per second from about 19:15Z to 19:30Z on 2026-10-01 (1135 lines), so a stale supervisor could not recycle while a cycle stayed open with no live harness turn, and its heartbeat went stale. Find why the open cycle was not reclaimed (reclaimed_empty_preflight=false) and let the recycle proceed. Evidence: src/haiven-dev/.agent-doc/logs/ops.log.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and ### Re: sections. Close #19 when shipped.
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

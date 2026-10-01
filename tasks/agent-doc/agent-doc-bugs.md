@@ -467,7 +467,30 @@ The queue is `queue: start`, so the supervisor drains the next head (`#gh-fix` #
 **About the `#gh-fix` preset:** its value still reads `fix then closerelease`. That's leftover from the earlier frontmatter rebuild, and you can fix it by hand. I read it as "fix then close". The release is its own queue item.
 
 The exchange is now 410+ lines. The queue is still active.
-<!-- agent:boundary:4df2c95c:agent-doc-bugs -->
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/86
+
+### Re: GH #86 — welded backlog response + route remedy — opus-5-5 · 2026-10-01T16:45-04:00
+
+Fixed and released **agent-doc 0.35.429** (`95feade0b`, tag `v0.35.429`). GitHub closed GH #86 through the commit.
+
+**1. Response welded into a backlog row.** Commit was right to refuse this document. The bug was that nothing could repair it, so the open cycle never closed.
+- New `repair_response_welded_inside_backlog_item` (agent-doc-template). It moves the welded turn into `agent:exchange` at the boundary without changing any bytes, or drops it when `exchange` already holds the same turn.
+- The row goes back on its own line. If an exact twin of the row follows the weld, the welded copy is dropped instead.
+- It refuses ambiguous shapes: a second scaffold, a prefix that is not a row, or a weld inside code or a comment.
+- `agent-doc repair` and preflight run it before the live-steering guard. That is safe because it moves only binary-authored bytes. Compact runs it before its integrity gate.
+- The commit refusal now names `agent-doc repair <FILE>` whenever this repair applies. That is the escape hatch the issue's item 2 asked for.
+
+**2. Route guidance (items 3–4).**
+- A blocked decision now leads with the caller's blocker reason, but only when that reason names a runnable `agent-doc` command. This keeps the existing rule that low-level capture text stays out of route output.
+- `blocked_closeout_recovery_command` no longer falls back to prose, so a sentence is never reported as `recovery_command=`.
+- Open-cycle text no longer says "keep the new route queued". A route that fails closed now says it was NOT queued.
+
+**Not fixed:** how the weld happened in the first place. Every target the controller writes already passes this same guard before relay, so the weld most likely came from an editor-side CRDT interleave. Finding it needs the reporter's document or ops.log, which live on a remote workspace. For now the weld is repairable instead of terminal.
+
+**Verification:** `make check` passed (10321 tests, exit 0). New tests: 5 for the template repair and 3 for closeout guidance. `make install-full` → `agent-doc 0.35.429`. Pushed main, the tag, and the superproject bump (`36a46c8374`). CI, Release, and PyPI runs are queued and were not awaited.
+
+The next queue head, `release + publish`, is covered by this release.
+<!-- agent:boundary:9acd1e79 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -488,7 +511,9 @@ The exchange is now 410+ lines. The queue is still active.
 - ~~When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.~~
 - ~~do [#supstaleopencycle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/85~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/86
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~ — auto-struck: answered this cycle (#ftstrike)
+- complete https://github.com/btakita/agent-doc/issues/80
+- complete https://github.com/btakita/agent-doc/issues/81
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue -->

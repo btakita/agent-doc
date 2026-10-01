@@ -598,6 +598,27 @@ When either source shows the expected version, the warning says the build is alr
 - This upgrade was the last one that changes the editor id, because the old build never saved it.
 
 The exchange is over 500 lines; I'm still draining the queue rather than stopping to compact it.
+### Re: #gh-fix GH #88 + follow-ups on the stale plugin callback — opus-5.5 · 2026-10-01T19:04-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/88
+
+**GH #88: fixed and closed** (`fb65d4557`, plugin 0.2.462). A JetBrains Remote Dev backend exposes **no** editor windows, because its editor UI lives in the thin client. Every automatic path enumerated `FileEditorManagerEx.windows`:
+
+- **Layout:** with `windows=0` the plugin published `columns=0`, so tmux stayed at one pane. Manual Sync Tmux Panes worked because it reads `FileEditorManager.selectedFiles`, which still lists one file per visible split. The automatic capture and `LayoutDetector` now use that same fallback when the IDE has no editor windows, giving one column per selected session document.
+- **Focus:** with no editor windows, `currentWindow` is always null, so every selection used to fall through to "background split" and the pane never followed. With no editor windows, a selection now owns focus.
+- **Observability:** each selection now logs its focus decision at INFO. The `[layout-detect] observed` line also carries `source=` and `obs=N` and re-logs every 50th unchanged observation, so "never ran" and "stuck" now look different.
+- **Not verified on Remote Dev:** I tested on this desktop IDE only. If it still fails there, the new INFO lines show where. I asked the reporter to reopen the issue with them.
+
+**Fix landed after the last response was written:** `0e491da01`. A dynamic plugin reload asked the native library to start its message listener while the old one was still running. That call was a no-op, so the retired plugin's code kept answering the IDE's socket. That is what rejected every delivery with `editor_id_mismatch` and held the previous closeout until the native reload. Now the newest plugin takes over the running listener. A regression test fails without the fix.
+
+**Verified by this cycle's 0.2.462 reload**, the first one with both fixes active:
+- Mismatches stopped within one second (19:00:59 to 19:01:00), where before they went on for minutes.
+- The plugin now logs `[layout-sync] selection … authority=ActiveEditorSplit windows=2` on selection.
+- The few rejections left were addressed to ids from 0.2.455, hours old. The controller never pruned those registrations. I queued that as `#staleeditorregprune`, behind the release.
+
+**Verification:** 618 Kotlin tests pass; `make check` passed (10,335 tests); installed and hot-swapped with no restart needed; pushed.
+
+The exchange is now 569 lines; I'm continuing the queue rather than stopping to compact.
 <!-- agent:boundary:9acd1e79 -->
 <!-- /agent:exchange -->
 
@@ -622,14 +643,15 @@ The exchange is over 500 lines; I'm still draining the queue rather than stoppin
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~
 - ~~Look at https://github.Look at https://github.com/btakita/agent-doc/issues/86 response. Fix the remaining issues.com/btakita/agent-doc/issues/86 response. Fix the remaining issues. complete https://github.com/btakita/agent-doc/issues/81~~
 - ~~do [#jbrejectlog]~~
- - ~~#gh-fix https://github.com/btakita/agent-doc/issues/87~~ — auto-struck: answered this cycle (#ftstrike)
- - #gh-fix https://github.com/btakita/agent-doc/issues/88
+ - ~~#gh-fix https://github.com/btakita/agent-doc/issues/87~~
+ - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/88
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#staleeditorregprune] Controller keeps replica records for documents under editor ids that the same IDE pid has since replaced (2960722 still had 0.2.455-era ids 941e20cf/5f4ff3f8 for api.md, contracts.md and agent-loop.md hours later). Every plugin reload fans out once to those dead ids, and the plugin rejects them with cause=editor_id_mismatch. When a pid registers a new editor_id, prune or rebind that pid's registrations that carry an older editor_id.
 - [ ] [#sdkingressstall] haiven-dev sdk.md: find what held the controller's state-event ingress lock on 2026-10-01 22:20:43-22:21:44Z, when every state-event RPC (including the IDE route's route_document_prep) timed out after 5.0s. The window matched a retained editor save that the IDE kept refusing (persist_current visible_length_mismatch, then document_lane_timeout) and a 974 KB full replica bootstrap of a 12 KB document. 80d82d4ad now logs state_event_ingress_slow site=… fact=… wait_ms=… hold_ms= at 1s or more. Unblocked by the next occurrence: grep haiven-dev ops.log for state_event_ingress_slow, then fix that holder. Also check why reliable_sync_liveness_journal is 305 MB in haiven-dev state.db.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and

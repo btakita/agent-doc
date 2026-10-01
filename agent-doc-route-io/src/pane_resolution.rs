@@ -305,6 +305,43 @@ pub fn should_preserve_failed_route_pane(
         && tmux.pane_alive(pane_id)
 }
 
+/// GH #82: name the evidence. The refusal used to assert an ownership conclusion with
+/// nothing to check it against, and it was false whenever the pane ran a bare harness.
+pub fn other_document_route_refusal(
+    file: &Path,
+    pane: &str,
+    other: &str,
+    registry_pane: Option<&str>,
+) -> String {
+    format!(
+        "refusing to route {} through pane {} because that pane runs agent-doc for {} \
+         (registry binds {} to {}); tmux focus was preserved",
+        file.display(),
+        pane,
+        other,
+        file.display(),
+        registry_pane.unwrap_or("no pane"),
+    )
+}
+
+/// GH #82: what happened when a document's bound pane turned out to hold the operator's own
+/// harness (`#bare-foreign-session-guard`): the stale binding is dropped, the pane is not.
+pub fn foreign_harness_pane_release_note(
+    file: &Path,
+    pane: &str,
+    registry_pane: Option<&str>,
+) -> String {
+    format!(
+        "pane {} runs a harness session agent-doc did not launch and owns no document; \
+         released {}'s stale binding (registry: {}) and routing to a new pane, \
+         leaving {} untouched",
+        pane,
+        file.display(),
+        registry_pane.unwrap_or("none"),
+        pane,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_or_create_pane_dispatch_only(
     tmux: &Tmux,
@@ -321,15 +358,68 @@ pub fn resolve_or_create_pane_dispatch_only(
     dispatch_only_effects: DispatchOnlyRouteEffects,
     startup_effects: RouteStartupEffects,
 ) -> Result<String> {
-    let registered = lookup_dispatch_registration(file_path, session_id)?;
+    let mut registered = lookup_dispatch_registration(file_path, session_id)?;
     let cycle_baseline = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let pending_prompt_context = if plain_trigger {
         None
     } else {
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?
     };
-    let authoritative_actor =
+    let mut authoritative_actor =
         load_authoritative_actor_binding(tmux, file, session_id, file_path, harness, false, false)?;
+    // GH #82: a registry binding to a pane the operator's own bare harness now occupies is
+    // stale, not a conflict. Release it before any other resolution step reads it, so the
+    // document routes to a pane of its own and the operator's session is left untouched.
+    let probe_pane = authoritative_actor
+        .as_ref()
+        .map(|actor| actor.record.pane_id.clone())
+        .or_else(|| registered.clone());
+    if let Some(probe_pane) = probe_pane
+        && tmux.pane_alive(&probe_pane)
+    {
+        match agent_doc_sync_io::sync::pane_occupant_for_document(tmux, &probe_pane, file) {
+            agent_doc_sync_io::sync::PaneOccupant::Free => {}
+            agent_doc_sync_io::sync::PaneOccupant::OtherDocument(other) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_inactive_pane_focus_guard file={} pane={} outcome=blocked reason=foreign_document_owner pane_owns={} registry_pane={} focus_effect=preserved pane_effect=none",
+                        file.display(),
+                        probe_pane,
+                        other,
+                        registered.as_deref().unwrap_or("none"),
+                    ),
+                );
+                anyhow::bail!(
+                    "{}",
+                    other_document_route_refusal(file, &probe_pane, &other, registered.as_deref())
+                );
+            }
+            agent_doc_sync_io::sync::PaneOccupant::ForeignHarness => {
+                let released = deregister_dispatch_registration(file_path, session_id)?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_foreign_harness_pane_released file={} pane={} registry_pane={} registry_released={} actor_pane={} pane_effect=none recovery=route_new_pane",
+                        file.display(),
+                        probe_pane,
+                        registered.as_deref().unwrap_or("none"),
+                        released,
+                        authoritative_actor
+                            .as_ref()
+                            .map(|actor| actor.record.pane_id.as_str())
+                            .unwrap_or("none"),
+                    ),
+                );
+                eprintln!(
+                    "[route] {}",
+                    foreign_harness_pane_release_note(file, &probe_pane, registered.as_deref())
+                );
+                registered = None;
+                authoritative_actor = None;
+            }
+        }
+    }
     let registered_actor = if authoritative_actor.is_none() {
         registered.as_deref().map_or(Ok(None), |pane| {
             load_authoritative_actor_for_registered_pane(tmux, file, session_id, file_path, pane)
@@ -343,27 +433,6 @@ pub fn resolve_or_create_pane_dispatch_only(
     } else {
         None
     };
-    let resolved_pane = resolved_actor
-        .map(|actor| actor.record.pane_id.as_str())
-        .or(registered.as_deref());
-    if let Some(resolved_pane) = resolved_pane
-        && tmux.pane_alive(resolved_pane)
-        && agent_doc_sync_io::sync::pane_runs_other_document_owner(tmux, resolved_pane, file)
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_inactive_pane_focus_guard file={} pane={} outcome=blocked reason=foreign_document_owner focus_effect=preserved pane_effect=none",
-                file.display(),
-                resolved_pane,
-            ),
-        );
-        anyhow::bail!(
-            "refusing to route {} through pane {} because it now runs another document; tmux focus was preserved",
-            file.display(),
-            resolved_pane,
-        );
-    }
 
     let background_existing_pane_only = crate::invocation::background_existing_pane_only();
     if background_existing_pane_only {
@@ -1930,5 +1999,39 @@ pub fn controller_dispatch_actor_state(
         agent_doc_controller::actor::ActorState::Ready => DispatchActorState::Ready,
         agent_doc_controller::actor::ActorState::Busy => DispatchActorState::Busy,
         _ => DispatchActorState::Other,
+    }
+}
+
+#[cfg(test)]
+mod gh82_route_occupant_messages {
+    use super::{foreign_harness_pane_release_note, other_document_route_refusal};
+    use std::path::Path;
+
+    #[test]
+    fn the_refusal_names_the_owning_document_and_the_registry_binding() {
+        let message = other_document_route_refusal(
+            Path::new("/r/tasks/1109.md"),
+            "%53",
+            "/r/tasks/agent-doc.md",
+            Some("%53"),
+        );
+        assert!(
+            message.contains("pane %53 because that pane runs agent-doc for /r/tasks/agent-doc.md"),
+            "{message}"
+        );
+        assert!(
+            message.contains("registry binds /r/tasks/1109.md to %53"),
+            "{message}"
+        );
+        assert!(!message.contains("now runs another document"), "{message}");
+    }
+
+    #[test]
+    fn a_bare_harness_pane_is_released_not_refused() {
+        let note =
+            foreign_harness_pane_release_note(Path::new("/r/tasks/1109.md"), "%53", Some("%53"));
+        assert!(note.contains("owns no document"), "{note}");
+        assert!(note.contains("routing to a new pane"), "{note}");
+        assert!(note.contains("leaving %53 untouched"), "{note}");
     }
 }

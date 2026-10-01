@@ -16790,10 +16790,10 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && sync_source
                 .contains("agent_doc_process_owner_io::process_tree_has_agent_doc_owner_for_file(")
             && sync_source.contains("agent_doc_process_owner_io::process_tree_has_agent_session(")
+            // GH #82: the pane-occupant classifier reads the owning document itself, so
+            // the boolean `process_tree_owns_other_document` has no call site in sync.rs.
             && sync_source
-                .contains("agent_doc_process_owner_io::process_tree_owner_document_other_than(")
-            && sync_source
-                .contains("agent_doc_process_owner_io::process_tree_owns_other_document("),
+                .contains("agent_doc_process_owner_io::process_tree_owner_document_other_than("),
         "sync.rs should adapt tmux panes into focused process-owner IO directly"
     );
 

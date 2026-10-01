@@ -6029,8 +6029,27 @@ pub fn log_cross_document_execution_context(file: &Path, origin: &str) {
 /// the durable registry, so it enforces the one-live-pane-per-document binding
 /// invariant across project/submodule roots.
 pub fn pane_runs_other_document_owner(tmux: &Tmux, pane_id: &str, claimed_file: &Path) -> bool {
+    pane_occupant_for_document(tmux, pane_id, claimed_file) != PaneOccupant::Free
+}
+
+/// Who occupies a pane, relative to the document a caller wants to put there (GH #82).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneOccupant {
+    /// Nothing in the pane binds a document other than the claimed one.
+    Free,
+    /// An agent-doc/codex owner session for this other document runs there.
+    OtherDocument(String),
+    /// A bare harness session agent-doc did not launch (`#bare-foreign-session-guard`):
+    /// it owns NO document, and it is not ours to claim, dispatch into, or reap.
+    ForeignHarness,
+}
+
+/// [`pane_runs_other_document_owner`], keeping the answer's evidence. "Runs another
+/// document" and "runs the operator's own harness" lead to different routes: the first is
+/// a real conflict, the second means the binding that pointed here is stale.
+pub fn pane_occupant_for_document(tmux: &Tmux, pane_id: &str, claimed_file: &Path) -> PaneOccupant {
     let Some(pane_pid) = pane_pid_from_tmux(tmux, pane_id) else {
-        return false;
+        return PaneOccupant::Free;
     };
     let pane_pid = pane_pid.to_string();
     // `#bare-foreign-session-guard`: a bare `claude`/`codex` pane the operator
@@ -6049,9 +6068,15 @@ pub fn pane_runs_other_document_owner(tmux: &Tmux, pane_id: &str, claimed_file: 
     // derives from one walk per pane.
     let _observations = agent_doc_process_owner_io::begin_process_observation_scope();
     if agent_doc_process_owner_io::process_tree_runs_unmanaged_harness_session(&pane_pid) {
-        return true;
+        return PaneOccupant::ForeignHarness;
     }
-    agent_doc_process_owner_io::process_tree_owns_other_document(&pane_pid, claimed_file)
+    match agent_doc_process_owner_io::process_tree_owner_document_other_than(
+        &pane_pid,
+        claimed_file,
+    ) {
+        Some(other) => PaneOccupant::OtherDocument(other),
+        None => PaneOccupant::Free,
+    }
 }
 
 #[cfg(test)]
@@ -6986,6 +7011,81 @@ mod tests {
             "latest open session-log owner must win over older same-file process-tree matches"
         );
     }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn pane_occupant_tells_a_bare_harness_from_another_documents_owner() {
+        // GH #82: both used to answer `pane_runs_other_document_owner == true`, and the
+        // route then refused "it now runs another document" for a pane running only the
+        // operator's own `claude`, which owns no document.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("tasks").join("1109.md");
+        let other = tmp.path().join("tasks").join("agent-doc.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: occupant-doc\n---\n").unwrap();
+        std::fs::write(&other, "---\nagent_doc_session: occupant-other\n---\n").unwrap();
+
+        let fake_bin_dir = tmp.path().join("bin");
+        std::fs::create_dir_all(&fake_bin_dir).unwrap();
+        for name in ["claude", "agent-doc"] {
+            let fake = fake_bin_dir.join(name);
+            std::fs::write(&fake, "#!/bin/sh\nsleep 60\n").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&fake).unwrap().permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&fake, perms).unwrap();
+            }
+        }
+
+        let iso = IsolatedTmux::new("sync-pane-occupant-classes");
+        let shell_pane = iso.new_session("test", tmp.path()).unwrap();
+        let bare_pane = iso.split_window(&shell_pane, tmp.path(), "-dh").unwrap();
+        let owner_pane = iso.split_window(&shell_pane, tmp.path(), "-dv").unwrap();
+        assert!(wait_for_shell(&iso, &shell_pane, Duration::from_secs(15)));
+        for (pane, command) in [
+            (
+                &bare_pane,
+                fake_bin_dir.join("claude").display().to_string(),
+            ),
+            (
+                &owner_pane,
+                format!(
+                    "{} start {}",
+                    fake_bin_dir.join("agent-doc").display(),
+                    other.display()
+                ),
+            ),
+        ] {
+            iso.raw_cmd(&["send-keys", "-t", pane, &command, "Enter"])
+                .unwrap();
+        }
+
+        assert!(
+            wait_for(Duration::from_secs(15), || {
+                pane_occupant_for_document(&iso, &bare_pane, &doc) == PaneOccupant::ForeignHarness
+            }),
+            "a bare harness owns no document and must read as foreign, not as another document"
+        );
+        assert!(
+            wait_for(Duration::from_secs(15), || {
+                matches!(
+                    pane_occupant_for_document(&iso, &owner_pane, &doc),
+                    PaneOccupant::OtherDocument(ref owned) if owned.ends_with("agent-doc.md")
+                )
+            }),
+            "an agent-doc owner of a different document is the real conflict, and names it"
+        );
+        assert_eq!(
+            pane_occupant_for_document(&iso, &shell_pane, &doc),
+            PaneOccupant::Free
+        );
+        // The boolean predicate keeps its old meaning for every other caller.
+        assert!(pane_runs_other_document_owner(&iso, &bare_pane, &doc));
+        assert!(pane_runs_other_document_owner(&iso, &owner_pane, &doc));
+        assert!(!pane_runs_other_document_owner(&iso, &shell_pane, &doc));
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn find_live_owner_pane_reuses_live_registry_rebind_successor() {

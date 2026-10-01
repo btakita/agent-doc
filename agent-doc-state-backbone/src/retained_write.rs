@@ -1407,7 +1407,10 @@ mod tests {
         settlement.observe_authority(Some(observed("captured-target", true)));
         settlement.observe_disk(Some(observed("pre-capture-disk", false)));
         let retained = settlement.verdict();
-        assert!(!retained.blocks_new_cycle(), "the advance must be admitted: {retained:?}");
+        assert!(
+            !retained.blocks_new_cycle(),
+            "the advance must be admitted: {retained:?}"
+        );
         assert!(retained.blocks_session_closeout());
 
         // The admitted advance composes onto the authority; the captured edit
@@ -1415,7 +1418,10 @@ mod tests {
         settlement.observe_authority(Some(observed("captured-plus-advance", true)));
         let advanced = settlement.verdict();
         assert!(!advanced.blocks_new_cycle(), "{advanced:?}");
-        assert!(!advanced.should_clear_intent(), "disk still lags: {advanced:?}");
+        assert!(
+            !advanced.should_clear_intent(),
+            "disk still lags: {advanced:?}"
+        );
 
         // The native save lands: the retained intent settles by payload.
         settlement.observe_disk(Some(observed("captured-plus-advance", true)));

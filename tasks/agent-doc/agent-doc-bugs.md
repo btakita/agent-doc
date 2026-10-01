@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -418,6 +418,29 @@ After `#queuestopretire`, a drained queue has no control. So a head you add to a
 **Verification:** `make check` after each fix: exit 0, 10309 passed. `make install`: OK both times.
 
 The exchange is now 360+ lines. The queue is still active, so I'm continuing to drain it.
+
+### Re: do [#supstaleopencycle] — opus-5.5 · 2026-10-01T16:05-04:00
+
+> **Queue prompt:** do [#supstaleopencycle]
+
+**Fixed: agent-doc `c7564f69d`, pushed and installed.** The superproject pointer is `e9983bc4d3`.
+
+**Root cause: the fpe.md supervisor was not stuck. Its log line was wrong.**
+- The supervisor dispatched `agent-doc fpe.md` into Codex pane %51 at 18:51:08Z. Preflight opened `cycle-1790880699535` at 18:51:39Z.
+- The Codex rollout shows that turn was **live the whole time**. It worked on `#removelegacymany` until 19:25:39Z: tests, benchmarks, live conformance stacks, and PR #167. A long work turn stays in `preflight_started` until it captures a response, so the cycle was open for a real reason.
+- The supervisor reads the turn marker only on 1 tick in 30, when it tries the reclaim. **Each of those ticks logged `harness_turn_live=true`**, so the live-turn veto (`#reclaimliveturn`) correctly blocked the reclaim. The other 29 ticks never read the marker, but they still printed `harness_turn_live=false`. Those were the 1135 lines the backlog item quoted.
+- The recycle then happened as designed: at 19:25:52Z, the first boundary after the turn ended, `supervisor_binary_stale_self_recycled`. The interlock didn't need to change.
+
+**The fix (telemetry only):**
+- A tick that didn't read the marker now prints `harness_turn_live=unprobed`, not `false`.
+- The receipt is logged only on ticks that read the marker. The first tick of each deferral is always one of them, so a deferral is never silent. That's about 30× fewer lines.
+- The receipt now has a `deferrals=N` count, so a long deferral is still easy to see.
+
+**Test:** `cycle_open_deferral_receipt_never_reports_an_unprobed_turn_as_idle` checks the three labels and the logging gate. It also checks that the first tick of an episode is probed, and that the receipt is wired through both helpers.
+
+**Verification:** `make check`: exit 0, 10311 passed. `make install`: OK. CI for `c7564f69d` was still running at closeout.
+
+The queue is `queue: start`, so the supervisor drains the next head (`#gh-fix` #85).
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -426,7 +449,7 @@ The exchange is now 360+ lines. The queue is still active, so I'm continuing to 
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
 - ~~do https://github.com/btakita/agent-doc/issues/79~~
 - ~~do https://github.com/btakita/agent-doc/issues/80~~
 - ~~do https://github.com/btakita/agent-doc/issues/81~~
@@ -437,13 +460,15 @@ The exchange is now 360+ lines. The queue is still active, so I'm continuing to 
 - ~~[#queuestopretire]: do option 1~~
 - ~~[#followqueuestopretireopt]: Yes, the queue should continue draining. No stalling.~~
 - ~~When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.~~
+- ~~do [#supstaleopencycle]~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/85
+- #gh-fix https://github.com/btakita/agent-doc/issues/86
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#supstaleopencycle] [agent-doc] The fpe.md supervisor (pid 454699) logged supervisor_recycle_deferred_cycle_open stale=true reason=agent_doc_cycle_open with harness_turn_live=false about once per second from about 19:15Z to 19:30Z on 2026-10-01 (1135 lines), so a stale supervisor could not recycle while a cycle stayed open with no live harness turn, and its heartbeat went stale. Find why the open cycle was not reclaimed (reclaimed_empty_preflight=false) and let the recycle proceed. Evidence: src/haiven-dev/.agent-doc/logs/ops.log.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and ### Re: sections. Close #19 when shipped.
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

@@ -17,7 +17,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -107,7 +107,7 @@ Remaining queue: `do [#supdrainyieldfalsifiable]`, then `#release`, which will s
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/75~~
 - ~~Do the "things you need from me"~~
 - ~~do [#refusalsteeringverbatim]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/76
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/76~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#stopreplaynoopretained]
 - do [#supdrainyieldfalsifiable]
 - 🚧 #release

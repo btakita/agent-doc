@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -510,6 +510,31 @@ The closing comment asks the reporter to run `agent-doc plugin update jetbrains`
 **Verification:** `make check` passed (exit 0, 10325/10325 tests) and `make install` passed. Both pushes are pushed. Both CI runs were still in progress at closeout and were not awaited.
 
 The exchange is now 461 lines; this queue does not auto-compact.
+
+### Re: GH #86 remaining issue, GH #81 unblock, and the preflight wedge — opus-5.5 · 2026-10-01T17:59-04:00
+
+> **Queue prompt:** Look at https://github.Look at https://github.com/btakita/agent-doc/issues/86 response. Fix the remaining issues.com/btakita/agent-doc/issues/86 response. Fix the remaining issues. complete https://github.com/btakita/agent-doc/issues/81
+
+This queue line came out spliced, so I read it as two requests: fix what remains in GH #86, and complete GH #81.
+
+**GH #86: the remaining issue is fixed** (`579f15cd7`). The reporter's one open point was that the write that produced the weld still accepted it; only commit refused it later. The response-cell write computes its own canonical target, and it was the one target applied without the semantic guard every other canonical target passes. `apply_response_cell_on_hub` now checks its own target before applying it:
+- If the write introduced a weld, the same repair `agent-doc repair` uses moves the response back into `exchange` first.
+- If that repair can't prove a safe placement, the write is refused and the document is left unchanged.
+- A weld that already existed before the write still goes to the commit-side remedy.
+
+The regression test fails when the guard is disabled. I posted a follow-up comment on #86, which was already closed.
+
+**GH #81: unblocked, still waiting on the reporter.** Their last comment said they couldn't test because `ca1ac2267` wasn't in a tagged release. It is now in **v0.35.429**, which ships JetBrains plugin 0.2.459. I commented to tell them, and repeated that `windows=N` from `[layout-detect]` is the measurement that decides it. The issue stays open until their IU-262 measurement comes back.
+
+**Earlier in this session I also fixed the cause of the preflight refusals** (`e531a5c4f`):
+- **Root cause:** after the dynamic plugin reload, the IDE rejected a notify. The controller dropped its editor copy from delivery, but the plugin kept pulling and got `updates=0` forever. The copy never received the GH #80 response, the save that settles the write never came, and preflight refused every turn. The same thing happened to `fpe.md`.
+- **Fix:** a pull from a dropped editor copy now gets the `missing_replica` refusal. The plugin re-registers on that refusal and receives everything it missed.
+- **Second fix:** `session-check` no longer relays committed (HEAD) response text as "operator steering".
+- **Still unproven:** why the IDE rejected the controller's messages. The plugin rejects without logging which check failed. That diagnosis is new backlog item `jbrejectlog`.
+
+**Verification:** `make check` passed (exit 0, 10328/10328 tests) and `make install` passed. Both commits are pushed. CI was still in progress at closeout and was not awaited.
+
+The exchange is now 481 lines; the queue does not auto-compact.
 <!-- agent:boundary:9acd1e79 -->
 <!-- /agent:exchange -->
 
@@ -518,7 +543,7 @@ The exchange is now 461 lines; this queue does not auto-compact.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do https://github.com/btakita/agent-doc/issues/79~~
 - ~~do https://github.com/btakita/agent-doc/issues/80~~
 - ~~do https://github.com/btakita/agent-doc/issues/81~~
@@ -532,14 +557,15 @@ The exchange is now 461 lines; this queue does not auto-compact.
 - ~~do [#supstaleopencycle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/85~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~
-- ~~complete https://github.com/btakita/agent-doc/issues/80~~
-- 🚧 complete https://github.com/btakita/agent-doc/issues/81
+- 🚧 Look at https://github.Look at https://github.com/btakita/agent-doc/issues/86 response. Fix the remaining issues.com/btakita/agent-doc/issues/86 response. Fix the remaining issues. complete https://github.com/btakita/agent-doc/issues/81
+ - #gh-fix https://github.com/btakita/agent-doc/issues/87
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#jbrejectlog] JetBrains plugin: log why a DeliverCrdtRemote event is rejected (editor_id mismatch vs missing file vs failed re-register). On 2026-10-01 after a dynamic plugin reload, IDE pid 2960722 answered response_cell_add/editor_replica_reregister with a bare rejected receipt and nothing in idea.log, so the cause could not be proven. #droppedreplicapull now self-heals the symptom; this item is the diagnosis.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

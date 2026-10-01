@@ -490,6 +490,26 @@ Fixed and released **agent-doc 0.35.429** (`95feade0b`, tag `v0.35.429`). GitHub
 **Verification:** `make check` passed (10321 tests, exit 0). New tests: 5 for the template repair and 3 for closeout guidance. `make install-full` → `agent-doc 0.35.429`. Pushed main, the tag, and the superproject bump (`36a46c8374`). CI, Release, and PyPI runs are queued and were not awaited.
 
 The next queue head, `release + publish`, is covered by this release.
+
+### Re: complete GH #80, plus the prose `### Re:` split repair — opus-5 · 2026-10-01T17:14-04:00
+
+> **Queue prompt:** complete https://github.com/btakita/agent-doc/issues/80
+
+**GH #80: closed.** Both fixes shipped in **v0.35.429**, which is published with JetBrains plugin 0.2.459:
+- 743c97f83: the restart-free upgrade builds `UnloadPluginOptions` through the `DynamicPlugins` loader.
+- 5c6df493f: a failed hot-swap stages the package for the next IDE start instead of unlinking the live jars.
+
+The closing comment asks the reporter to run `agent-doc plugin update jetbrains` on IU-262 and to reopen the issue if it still fails. I have not reproduced the bug on IU-262.
+
+**The corrupted `### Re:` heading: source fixed and a repair added** (`7155446bd`, superproject `71e288bd69`). The source was my own 0.35.429 GH #86 repair. It treated *any* `### Re:` inside a backlog row as a welded response. So it moved the tail of `#ghjbfolding` ("…components and ### Re: sections. Close #19 when shipped.") into the exchange as an empty heading. After that, every turn was refused.
+- The welded-response repair now also requires the `> **Queue prompt:**` quote that a real weld always carries. A row that only mentions `### Re:` is left alone.
+- New `repair_prose_response_heading_split_from_tracked_row` undoes the split, using committed HEAD as evidence. It applies only when exactly one empty heading sits at the end of the exchange and rejoining it to exactly one current row rebuilds a HEAD row. Text typed after the boundary is kept, and every other shape stays fail-closed. `agent-doc repair` runs it on every preflight, before the step that misread the heading as a hand-pasted response.
+- Checked byte-for-byte against the real corrupted document: the repair restores HEAD exactly. It does nothing on the half-fixed state left after the heading was deleted. This cycle restores `#ghjbfolding`'s tail with "response sections" in place of the literal `### Re:`, because live sessions on the old binary would misread it until they recycle.
+- Also added the missing 0.35.429 row to `editors/release-parity.tsv`. Without it, `make check` was already failing at HEAD.
+
+**Verification:** `make check` passed (exit 0, 10325/10325 tests) and `make install` passed. Both pushes are pushed. Both CI runs were still in progress at closeout and were not awaited.
+
+The exchange is now 461 lines; this queue does not auto-compact.
 <!-- agent:boundary:9acd1e79 -->
 <!-- /agent:exchange -->
 
@@ -511,8 +531,8 @@ The next queue head, `release + publish`, is covered by this release.
 - ~~When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.~~
 - ~~do [#supstaleopencycle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/85~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~ — auto-struck: answered this cycle (#ftstrike)
-- complete https://github.com/btakita/agent-doc/issues/80
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~
+- 🚧 complete https://github.com/btakita/agent-doc/issues/80
 - complete https://github.com/btakita/agent-doc/issues/81
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.

@@ -6415,6 +6415,24 @@ pub fn recycle_controller(project_root: &Path) -> Result<bool> {
 /// no-controller fallback, `force` may still authorize interrupting a busy
 /// supervisor pane.
 pub fn recycle_controller_force(project_root: &Path, force: bool) -> Result<bool> {
+    recycle_controller_request(
+        project_root,
+        if force { "recycle_force" } else { "recycle" },
+        None,
+    )
+}
+
+/// `recycle_controller` carrying a request `reason`. Returns `Ok(false)` when the
+/// controller declined because it already runs the installed binary.
+pub fn recycle_controller_with_reason(project_root: &Path, reason: &str) -> Result<bool> {
+    recycle_controller_request(project_root, "recycle", Some(reason))
+}
+
+fn recycle_controller_request(
+    project_root: &Path,
+    command: &str,
+    reason: Option<&str>,
+) -> Result<bool> {
     let checkpoint =
         checkpoint_route_owned_documents_for_project(project_root, "controller_recycle_request")?;
     warn_controller_recycle_checkpoint_failures(&project_root.display().to_string(), checkpoint);
@@ -6423,9 +6441,12 @@ pub fn recycle_controller_force(project_root: &Path, force: bool) -> Result<bool
     // reap below must run even when no authoritative controller answers (an orphaned
     // `Preparing` zombie can be the only process in this root, invisible to the
     // socket recycle).
-    let command = if force { "recycle_force" } else { "recycle" };
     let result = if connect(project_root).is_ok() {
-        request(project_root, command).map(|response| response.contains("\"ok\":true"))
+        match reason {
+            Some(reason) => request_with_reason(project_root, command, reason),
+            None => request(project_root, command),
+        }
+        .map(|response| response.contains("\"ok\":true") && !response.contains("\"skipped\""))
     } else {
         Ok(false)
     };
@@ -6447,8 +6468,25 @@ pub fn recycle_controller_force(project_root: &Path, force: bool) -> Result<bool
 /// running `controller serve` process (the cross-project breadth of `admin recycle
 /// --all-projects`). Walks `/proc` for controllers, dedups by canonical project
 /// root, and sends each a `recycle`. Returns `(recycled, skipped)`.
+///
+/// Install fan-outs only: each request carries
+/// [`agent_doc_controller::recycle::INSTALL_FANOUT_RECYCLE_REASON`], so a
+/// controller already running the installed binary declines it (counted as
+/// skipped) instead of launching a redundant handoff.
 pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
-    recycle_controllers_all_projects_force(false)
+    let roots = crate::process::controller_project_roots(std::process::id());
+    let mut recycled = 0;
+    let mut skipped = 0;
+    for root in roots {
+        match recycle_controller_with_reason(
+            &root,
+            agent_doc_controller::recycle::INSTALL_FANOUT_RECYCLE_REASON,
+        ) {
+            Ok(true) => recycled += 1,
+            _ => skipped += 1,
+        }
+    }
+    Ok((recycled, skipped))
 }
 
 /// `#recycleforce` — `recycle_controllers_all_projects` with an explicit operator
@@ -13893,6 +13931,29 @@ pub(crate) fn handle_request_locked(
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "recycle" => {
+            // An install fan-out reaching a controller that already restarted
+            // onto the installed binary has nothing to promote; a second
+            // handoff would only hold every RPC in `Preparing` for the full
+            // successor wait.
+            let current_binary = current_binary_identity().ok();
+            if agent_doc_controller::recycle::install_fanout_recycle_is_redundant(
+                request.reason.as_deref(),
+                bootstrap_snapshot.controller_binary.as_ref(),
+                current_binary.as_ref(),
+            ) {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap_snapshot.project_root,
+                    &format!(
+                        "controller_recycle_skipped pid={} generation={} reason={} skip=binary_already_current",
+                        bootstrap_snapshot.pid,
+                        bootstrap_snapshot.controller_generation,
+                        agent_doc_controller::recycle::INSTALL_FANOUT_RECYCLE_REASON,
+                    ),
+                );
+                return Ok(serde_json::to_string(
+                    &serde_json::json!({ "ok": true, "skipped": "binary_already_current" }),
+                )?);
+            }
             // R2 (#ctlrecycle): mark this controller for a two-phase handoff.
             // Promotion redirects new clients; the predecessor drains accepted
             // clients. A durable harness dispatch may remain open because the

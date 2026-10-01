@@ -28,6 +28,25 @@ pub fn controller_recycle_safe_to_handoff(handoff_stable: bool) -> bool {
     handoff_stable
 }
 
+/// Reason an install fan-out attaches to its `recycle` request.
+pub const INSTALL_FANOUT_RECYCLE_REASON: &str = "install_fanout";
+
+/// An install fan-out `recycle` is redundant when the controller is provably
+/// already executing the installed binary — typically because it self-detected
+/// the stale binary and restarted onto the new build between `binary-install`
+/// and the fan-out. Launching a second handoff then buys nothing and holds every
+/// RPC in `Preparing` for the whole successor wait (GH: fpe Stop hook overran its
+/// 45s budget behind exactly that handoff). Unknown identities are not proof, so
+/// they still recycle.
+pub fn install_fanout_recycle_is_redundant(
+    reason: Option<&str>,
+    recorded: Option<&crate::status::ControllerBinaryIdentity>,
+    current: Option<&crate::status::ControllerBinaryIdentity>,
+) -> bool {
+    reason == Some(INSTALL_FANOUT_RECYCLE_REASON)
+        && crate::status::controller_binary_identity_matches(recorded, current)
+}
+
 /// Explicit force and protocol-skew recovery skip the normal recycle debounce.
 /// Neither case may interrupt an RPC; promotion and predecessor drain own that
 /// proof.
@@ -64,6 +83,57 @@ pub fn routine_stale_recycle_deferred_intra_turn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn identity(modified_secs: u64) -> crate::status::ControllerBinaryIdentity {
+        crate::status::ControllerBinaryIdentity {
+            path: "/bin/agent-doc".into(),
+            version: "0.35.428".into(),
+            len: 10,
+            modified_secs,
+            modified_nanos: 0,
+        }
+    }
+
+    /// A controller that already restarted onto the installed build declines the
+    /// install fan-out's recycle instead of launching a redundant handoff.
+    #[test]
+    fn install_fanout_recycle_is_redundant_only_for_a_proven_current_binary() {
+        let current = identity(2);
+        let reason = Some(INSTALL_FANOUT_RECYCLE_REASON);
+        assert!(install_fanout_recycle_is_redundant(
+            reason,
+            Some(&current),
+            Some(&current)
+        ));
+        // Same version, different build: still a real recycle.
+        assert!(!install_fanout_recycle_is_redundant(
+            reason,
+            Some(&identity(1)),
+            Some(&current)
+        ));
+        // Unknown identity is not proof.
+        assert!(!install_fanout_recycle_is_redundant(
+            reason,
+            None,
+            Some(&current)
+        ));
+        assert!(!install_fanout_recycle_is_redundant(
+            reason,
+            Some(&current),
+            None
+        ));
+        // An explicit operator recycle always recycles.
+        assert!(!install_fanout_recycle_is_redundant(
+            None,
+            Some(&current),
+            Some(&current)
+        ));
+        assert!(!install_fanout_recycle_is_redundant(
+            Some("operator_request"),
+            Some(&current),
+            Some(&current)
+        ));
+    }
 
     #[test]
     fn debounce_requires_continuous_idle_grace() {

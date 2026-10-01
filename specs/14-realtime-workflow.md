@@ -398,6 +398,13 @@ unconsumed once is recorded in `skipped_queue_head_ids` and carried forward unti
 resolved. When every remaining head is skipped or depends (via the `after=` DAG)
 on a skipped head, selection is empty and the queue falls back to stall-stop.
 
+"Dispatched" means the head the prior turn actually ran (`#releaseskipblame`):
+the head carrying `🚧`, or with none recorded, the first head selection would not
+pass over. The cycle's recorded heads include every live queue line, so a later
+tracked head must never inherit the blame. When the head that ran is a
+preset-only invocation (`#gh-fix <url>`) or free text, no tracked id was
+dispatched and nothing is skipped.
+
 If the operator moves `🚧` in the current realtime source epoch, realtime treats
 that as a retarget request, validates it through the same auto-DAG dependency
 projection, and projects `🚧` onto the selected head plus required prerequisites.

@@ -860,6 +860,51 @@ fn preset_only_identity_ids(content: &str) -> std::collections::HashSet<String> 
     agent_doc_queue::queue_continuation::preset_only_identity_ids(content)
 }
 
+/// The tracked id the prior cycle actually dispatched, if any
+/// (`#releaseskipblame`).
+///
+/// `active_queue_heads` records **every** live queue line, not just the one the
+/// turn ran: preflight start captures them all, and the write boundary adds any
+/// it sees. Taking "the first id-backed head that is not preset-only" therefore
+/// walked PAST the head that actually ran whenever that head was a preset
+/// invocation (`#gh-fix <url>`) or free text, and blamed the next tracked line
+/// instead. Observed 2026-10-01 on `tasks/agent-doc/agent-doc-bugs.md`: each
+/// `#gh-fix` turn left the operator's `:pin: #release` marked `⏭️`, so the
+/// release was never offered.
+///
+/// So identify the dispatched head first, then ask whether it is a tracked id.
+/// The head carrying the `🚧` in-progress marker is the one the turn ran; with
+/// no marker recorded, it is the first head selection would not pass over. A
+/// preset-only, free-text, or non-directive head means no tracked id was
+/// dispatched, and nothing is skipped: a false non-skip costs one
+/// re-dispatch, while a false skip silently drops the operator's work.
+fn prior_dispatched_queue_id(
+    heads: &[String],
+    carried: &std::collections::HashSet<String>,
+    preset_only: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let head_id = |head: &str| {
+        let bare = agent_doc_element_queue::strip_priority_markers(head);
+        agent_doc_queue::queue_heads::is_do_directive(&bare)
+            .then(|| agent_doc_queue::queue_response::queue_prompt_done_id(&bare))
+            .flatten()
+    };
+    // Only `🚧` marks the running head; `⏭️` shares the same leading marker
+    // region but means the opposite.
+    let in_progress = |head: &str| {
+        let head = head.trim();
+        let bare = agent_doc_element_queue::strip_priority_markers(head);
+        head.strip_suffix(bare.as_str())
+            .is_some_and(|markers| markers.contains('🚧'))
+    };
+    let dispatched = heads.iter().find(|head| in_progress(head)).or_else(|| {
+        heads
+            .iter()
+            .find(|head| head_id(head).is_none_or(|id| !carried.contains(&id)))
+    })?;
+    head_id(dispatched).filter(|id| !preset_only.contains(id) && !carried.contains(id))
+}
+
 fn advance_skipped_queue_head_ids(
     carried: std::collections::HashSet<String>,
     prior_dispatched: Option<&str>,
@@ -4879,17 +4924,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                     .collect()
             })
             .unwrap_or_default();
-        // The head the prior cycle actually dispatched: its first live id-backed
-        // head that was not already skipped.
         let prior_dispatched = prior
             .as_ref()
             .filter(|s| prior_cycle_hosted_a_turn(s))
-            .and_then(|s| {
-                s.active_queue_heads
-                    .iter()
-                    .filter_map(|h| agent_doc_queue::queue_response::queue_prompt_done_id(h))
-                    .find(|id| !carried.contains(id) && !preset_only.contains(id))
-            });
+            .and_then(|s| prior_dispatched_queue_id(&s.active_queue_heads, &carried, &preset_only));
         let operator_unskipped =
             agent_doc_queue::queue_projection::operator_unskipped_queue_ids(diff);
         if !operator_unskipped.is_empty() {
@@ -6659,9 +6697,129 @@ mod tests {
             vec!["#gh-fix https://x/issues/69".to_string()],
             "the next sibling invocation must be selected:\n{updated}"
         );
-        assert!(!updated.contains("⏭️"), "no sibling may be skipped:\n{updated}");
+        assert!(
+            !updated.contains("⏭️"),
+            "no sibling may be skipped:\n{updated}"
+        );
         let persisted = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert!(persisted.skipped_queue_head_ids.is_empty(), "{:?}", persisted.skipped_queue_head_ids);
+        assert!(
+            persisted.skipped_queue_head_ids.is_empty(),
+            "{:?}",
+            persisted.skipped_queue_head_ids
+        );
+    }
+
+    /// `#releaseskipblame` (live, agent-doc-bugs.md 2026-10-01): the prior turn
+    /// ran a `#gh-fix <url>` preset head, but `active_queue_heads` also held the
+    /// operator's later `:pin: #release`. Skipping preset-only ids inside the
+    /// search walked past the head that ran and blamed `release`, which was then
+    /// marked `⏭️` every cycle.
+    #[test]
+    fn prior_dispatched_queue_id_never_blames_a_head_that_did_not_run() {
+        let preset_only: std::collections::HashSet<String> = ["gh-fix".to_string()].into();
+        let none = std::collections::HashSet::new();
+        let heads = vec![
+            "#gh-fix https://x/issues/77".to_string(),
+            "🚧 #gh-fix https://x/issues/77".to_string(),
+            ":pin: #release".to_string(),
+        ];
+        assert_eq!(prior_dispatched_queue_id(&heads, &none, &preset_only), None);
+        // No `🚧` recorded: the first head ran, and it is a preset.
+        assert_eq!(
+            prior_dispatched_queue_id(&heads[..1], &none, &preset_only),
+            None
+        );
+        // A free-text head that ran dispatches no tracked id either.
+        let free = vec![
+            "look at the old issues".to_string(),
+            ":pin: #release".to_string(),
+        ];
+        assert_eq!(prior_dispatched_queue_id(&free, &none, &preset_only), None);
+        // A `⏭️` head is not the running one.
+        let skipped = vec!["⏭️ :pin: #release".to_string(), "🚧 do [#hmw9]".to_string()];
+        assert_eq!(
+            prior_dispatched_queue_id(&skipped, &none, &preset_only),
+            Some("hmw9".to_string())
+        );
+        // A tracked head that ran and came back is still reported.
+        let tracked = vec!["do [#sy71]".to_string(), "do [#hmw9]".to_string()];
+        assert_eq!(
+            prior_dispatched_queue_id(&tracked, &none, &preset_only),
+            Some("sy71".to_string())
+        );
+        // A head already skipped is passed over, as selection passes over it.
+        let carried: std::collections::HashSet<String> = ["sy71".to_string()].into();
+        assert_eq!(
+            prior_dispatched_queue_id(&tracked, &carried, &preset_only),
+            Some("hmw9".to_string())
+        );
+    }
+
+    /// End to end: after a `#gh-fix` turn, the operator's pinned release head
+    /// stays selectable and carries no `⏭️`.
+    #[test]
+    fn run_queue_maintenance_does_not_skip_a_pinned_head_after_a_preset_turn() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "prompt_presets:\n",
+            "  '#gh-fix': fix then close\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- ~~#gh-fix https://x/issues/77~~\n",
+            "- #gh-fix https://x/issues/78\n",
+            "- :pin: #release\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_active_queue_heads(
+            &doc,
+            &[
+                "🚧 #gh-fix https://x/issues/77".to_string(),
+                "#gh-fix https://x/issues/78".to_string(),
+                ":pin: #release".to_string(),
+            ],
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(content),
+            Some(content),
+            &agent_doc_hash::content_hash("### Re: 77\n\nfixed\n"),
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "committed", Some(content), Some(content))
+            .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("⏭️"),
+            "the release head must not be skipped:\n{updated}"
+        );
+        let persisted = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(
+            persisted.skipped_queue_head_ids.is_empty(),
+            "{:?}",
+            persisted.skipped_queue_head_ids
+        );
     }
 
     #[test]

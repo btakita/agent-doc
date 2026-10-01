@@ -618,6 +618,17 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         }
     }
     let has_active_capture_evidence = capture.is_some() || projected_capture.is_some();
+    // A prose `### Re:` split out of a backlog row leaves a bodyless heading at
+    // the exchange tail. Undo it before visible-response recovery, which would
+    // otherwise read that heading as an out-of-band response and propose
+    // committing it, and before the integrity gate refuses every turn on it.
+    if !has_pending_response
+        && !has_active_capture_evidence
+        && repair_prose_heading_split_if_needed(effects.repair_io_effects, file, &doc_content)?
+            != doc_content
+    {
+        return Ok(RepairOutcome::TemplateNormalized);
+    }
     log_slow_repair_phase(
         &canonical,
         "structural_and_lossy_projection_history",
@@ -1869,6 +1880,52 @@ fn repair_backlog_response_weld_if_needed(
     );
     eprintln!(
         "[repair] moved a response welded into an agent:backlog item back into agent:exchange in {}",
+        file.display()
+    );
+    Ok(settled)
+}
+
+/// Undo a 0.35.429 GH #86 misfire: the tail of a backlog row that merely
+/// mentioned `### Re:` was moved into `agent:exchange` as an empty response
+/// heading, so the integrity gate refused every turn. Committed HEAD proves the
+/// original row, so the repair only restores bytes HEAD already holds.
+fn repair_prose_heading_split_if_needed(
+    effects: &impl RepairTemplateWriteEffects,
+    file: &Path,
+    doc_content: &str,
+) -> Result<String> {
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(doc_content.to_string());
+    };
+    let Some(repaired) = agent_doc_template::repair_prose_response_heading_split_from_tracked_row(
+        doc_content,
+        &head,
+    )?
+    else {
+        return Ok(doc_content.to_string());
+    };
+    let settled = effects.atomic_write_if_current(
+        file,
+        &repaired,
+        doc_content,
+        "repair_prose_heading_split",
+    )?;
+    anyhow::ensure!(
+        settled == repaired,
+        "[repair] prose heading split repair for {} returned a non-exact authority cut",
+        file.display(),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "repair_prose_heading_split file={} prior_hash={} repaired_hash={}",
+            file.display(),
+            agent_doc_hash::content_hash(doc_content),
+            agent_doc_hash::content_hash(&settled),
+        ),
+    );
+    eprintln!(
+        "[repair] restored a backlog row whose `### Re:` text had been split into agent:exchange as an empty heading in {}",
         file.display()
     );
     Ok(settled)

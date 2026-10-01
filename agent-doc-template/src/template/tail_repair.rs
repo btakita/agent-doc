@@ -538,10 +538,16 @@ pub fn repair_response_welded_inside_backlog_item(doc: &str) -> Result<Option<St
     if headings.is_empty() {
         return Ok(None);
     }
-    let markers: Vec<usize> = headings
-        .into_iter()
-        .chain(live("> **Queue prompt:**"))
-        .collect();
+    // A weld is a binary response turn, which always carries its
+    // `> **Queue prompt:**` quote — the same scaffold the commit guard refuses.
+    // A bare `### Re:` is prose: the 0.35.429 repair lacked this check and
+    // moved the tail of a row that merely *mentioned* "### Re: sections" into
+    // `exchange` as an empty response heading, wedging every later turn.
+    let quotes = live("> **Queue prompt:**");
+    if quotes.is_empty() {
+        return Ok(None);
+    }
+    let markers: Vec<usize> = headings.into_iter().chain(quotes).collect();
     let Some(&start) = markers.iter().min() else {
         return Ok(None);
     };
@@ -605,6 +611,155 @@ pub fn repair_response_welded_inside_backlog_item(doc: &str) -> Result<Option<St
     };
     element::parse(&repaired).context("backlog weld repair broke component structure")?;
     guard_no_conversation_content_inside_tracked_components(&repaired)?;
+    Ok(Some(repaired))
+}
+
+/// Undo a prose `### Re:` mention that was split out of a tracked backlog row
+/// and left in `agent:exchange` as a response heading with no body.
+///
+/// agent-doc 0.35.429's [`repair_response_welded_inside_backlog_item`] treated
+/// any `### Re:` inside a row as a welded response, so a row ending
+/// "...components and ### Re: sections. Close #19 when shipped." lost its tail
+/// to an empty heading at the exchange boundary. The integrity gate then
+/// refuses every turn (`has no response body`) and nothing could repair it.
+///
+/// Committed HEAD is the evidence: the repair applies only when exactly one
+/// bodyless heading sits at the end of `exchange` (only blanks/comments/the
+/// boundary follow it), HEAD's exchange does not hold that heading, exactly one
+/// current tracked row plus the heading text rebuilds exactly one HEAD row, and
+/// that HEAD row is absent from the current document. The row gets its tail
+/// back and the heading line (plus the one separator blank the move inserted)
+/// is removed. Every other shape stays fail-closed.
+pub fn repair_prose_response_heading_split_from_tracked_row(
+    doc: &str,
+    head: &str,
+) -> Result<Option<String>> {
+    let Ok(components) = element::parse(doc) else {
+        return Ok(None);
+    };
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return Ok(None);
+    };
+    let Some(backlog) = components
+        .iter()
+        .find(|component| element::is_backlog_component(&component.name))
+    else {
+        return Ok(None);
+    };
+    let code_ranges = element::find_code_ranges(doc);
+    let in_code = |position: usize| {
+        code_ranges
+            .iter()
+            .any(|&(start, end)| position >= start && position < end)
+    };
+
+    // (offset, line-with-newline) for every line of the exchange body.
+    let exchange_lines: Vec<(usize, &str)> = {
+        let mut offset = exchange.open_end;
+        doc[exchange.open_end..exchange.close_start]
+            .split_inclusive('\n')
+            .map(|line| {
+                let entry = (offset, line);
+                offset += line.len();
+                entry
+            })
+            .collect()
+    };
+    let is_heading = |line: &str| line.trim_start().starts_with("### Re:");
+    let headings: Vec<usize> = exchange_lines
+        .iter()
+        .enumerate()
+        .filter(|(_, (offset, line))| is_heading(line) && !in_code(*offset))
+        .map(|(index, _)| index)
+        .collect();
+    let Some(&last) = headings.last() else {
+        return Ok(None);
+    };
+    // Bodyless up to the boundary; text after the boundary is a new operator
+    // prompt, which the repair preserves.
+    for (_, line) in &exchange_lines[last + 1..] {
+        let trimmed = line.trim();
+        if trimmed.starts_with("<!-- agent:boundary:") {
+            break;
+        }
+        if !trimmed.is_empty() && !trimmed.starts_with("<!--") {
+            return Ok(None);
+        }
+    }
+    let heading = exchange_lines[last].1.trim();
+
+    let Ok(head_components) = element::parse(head) else {
+        return Ok(None);
+    };
+    let Some(head_exchange) = head_components.iter().find(|c| c.name == "exchange") else {
+        return Ok(None);
+    };
+    if head_exchange
+        .content(head)
+        .lines()
+        .any(|line| line.trim() == heading)
+    {
+        return Ok(None);
+    }
+    let Some(head_backlog) = head_components
+        .iter()
+        .find(|component| element::is_backlog_component(&component.name))
+    else {
+        return Ok(None);
+    };
+    let head_rows: Vec<&str> = head_backlog
+        .content(head)
+        .lines()
+        .filter(|line| is_tracked_item_row(line))
+        .collect();
+
+    // Current tracked rows that, joined with the heading text, rebuild a HEAD row.
+    let mut candidates = Vec::new();
+    let mut offset = backlog.open_end;
+    for line in doc[backlog.open_end..backlog.close_start].split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+        let (text, _) = line_and_newline(line);
+        if in_code(line_start) || !is_tracked_item_row(text) {
+            continue;
+        }
+        let row = text.trim_end();
+        for head_row in &head_rows {
+            let Some(rest) = head_row.strip_prefix(row) else {
+                continue;
+            };
+            if rest.starts_with(char::is_whitespace) && rest.trim() == heading {
+                candidates.push((line_start, row.len(), *head_row));
+            }
+        }
+    }
+    let [(row_start, row_len, head_row)] = candidates.as_slice() else {
+        return Ok(None);
+    };
+    if doc.lines().any(|line| line == *head_row) {
+        return Ok(None);
+    }
+
+    // Remove the heading line, plus the separator blank the move inserted.
+    let (heading_start, heading_line) = exchange_lines[last];
+    let remove_start = match last.checked_sub(1).map(|index| exchange_lines[index]) {
+        Some((blank_start, blank)) if blank.trim().is_empty() => blank_start,
+        _ => heading_start,
+    };
+    let remove_end = heading_start + heading_line.len();
+    let row_end = row_start + row_len;
+    debug_assert!(row_end <= remove_start || remove_end <= *row_start);
+
+    let mut edits = [
+        (*row_start, row_end, head_row.to_string()),
+        (remove_start, remove_end, String::new()),
+    ];
+    edits.sort_by_key(|edit| std::cmp::Reverse(edit.0));
+    let mut repaired = doc.to_string();
+    for (start, end, replacement) in edits {
+        repaired.replace_range(start..end, &replacement);
+    }
+    element::parse(&repaired).context("prose heading split repair broke component structure")?;
     Ok(Some(repaired))
 }
 
@@ -1591,9 +1746,10 @@ mod tests {
         let exchange = components.iter().find(|c| c.name == "exchange").unwrap();
         let exchange_body = exchange.content(&repaired);
         assert!(exchange_body.contains("Add the rule then push\n"));
-        assert!(exchange_body.contains(
-            "### Re: push — fable-5\n> **Queue prompt:** push\n\nPushed `main`."
-        ));
+        assert!(
+            exchange_body
+                .contains("### Re: push — fable-5\n> **Queue prompt:** push\n\nPushed `main`.")
+        );
         assert_eq!(repaired.matches("### Re: push").count(), 1);
     }
 
@@ -1646,6 +1802,108 @@ mod tests {
         );
         assert_eq!(
             repair_response_welded_inside_backlog_item(document).unwrap(),
+            None
+        );
+    }
+
+    const PROSE_HEADING_ROW: &str = "- [ ] [#ghjbfolding] [agent-doc][jetbrains] fold regions, and a structure view of components and ### Re: sections. Close #19 when shipped.";
+
+    fn prose_heading_head() -> String {
+        format!(
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "### Re: prior — gpt-5\n\n",
+                "The next queue head is covered by this release.\n",
+                "<!-- agent:boundary:9acd1e79 -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#ghmultitmux] One editor managing panes. Close #17 when shipped.\n",
+                "{}\n",
+                "- [ ] [#preflightdeadline] Make an overrun impossible.\n",
+                "<!-- /agent:backlog -->\n",
+            ),
+            PROSE_HEADING_ROW
+        )
+    }
+
+    /// The exact corruption 0.35.429 left in `tasks/agent-doc/agent-doc-bugs.md`.
+    fn prose_heading_split_doc() -> String {
+        prose_heading_head()
+            .replace(
+                "release.\n<!-- agent:boundary",
+                "release.\n\n### Re: sections. Close #19 when shipped.\n<!-- agent:boundary",
+            )
+            .replace(
+                PROSE_HEADING_ROW,
+                "- [ ] [#ghjbfolding] [agent-doc][jetbrains] fold regions, and a structure view of components and",
+            )
+    }
+
+    #[test]
+    fn prose_response_heading_in_a_backlog_row_is_not_a_weld() {
+        let head = prose_heading_head();
+        guard_no_conversation_content_inside_tracked_components(&head).unwrap();
+        assert_eq!(
+            repair_response_welded_inside_backlog_item(&head).unwrap(),
+            None,
+            "a row that only mentions `### Re:` must not lose its tail to exchange"
+        );
+    }
+
+    #[test]
+    fn prose_heading_split_from_backlog_row_is_restored_from_head() {
+        let head = prose_heading_head();
+        let broken = prose_heading_split_doc();
+        let repaired = repair_prose_response_heading_split_from_tracked_row(&broken, &head)
+            .unwrap()
+            .expect("the split should be restored from HEAD");
+        assert_eq!(repaired, head);
+    }
+
+    #[test]
+    fn prose_heading_split_repair_keeps_later_operator_edits() {
+        let head = prose_heading_head();
+        let broken = prose_heading_split_doc().replace(
+            "<!-- /agent:exchange -->",
+            "please fix the bug\n<!-- /agent:exchange -->",
+        );
+        let repaired = repair_prose_response_heading_split_from_tracked_row(&broken, &head)
+            .unwrap()
+            .expect("an operator prompt after the boundary is not part of the split");
+        assert_eq!(
+            repaired,
+            head.replace(
+                "<!-- /agent:exchange -->",
+                "please fix the bug\n<!-- /agent:exchange -->"
+            )
+        );
+    }
+
+    #[test]
+    fn prose_heading_split_repair_needs_head_evidence() {
+        let broken = prose_heading_split_doc();
+        // HEAD already has the split: no row to rebuild.
+        assert_eq!(
+            repair_prose_response_heading_split_from_tracked_row(&broken, &broken).unwrap(),
+            None
+        );
+        // A real bodyless response heading that HEAD does not explain.
+        let head = prose_heading_head();
+        let interrupted = head.replace(
+            "release.\n<!-- agent:boundary",
+            "release.\n\n### Re: unrelated — gpt-5\n<!-- agent:boundary",
+        );
+        assert_eq!(
+            repair_prose_response_heading_split_from_tracked_row(&interrupted, &head).unwrap(),
+            None
+        );
+        // A heading with a body is not the split shape.
+        let with_body = broken.replace(
+            "shipped.\n<!-- agent:boundary",
+            "shipped.\n\nbody text\n<!-- agent:boundary",
+        );
+        assert_eq!(
+            repair_prose_response_heading_split_from_tracked_row(&with_body, &head).unwrap(),
             None
         );
     }

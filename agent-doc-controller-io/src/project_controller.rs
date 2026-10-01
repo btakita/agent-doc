@@ -2646,6 +2646,9 @@ struct ControllerDocumentGraphs {
     /// prevents an editor update RPC from synchronously waiting on a save that
     /// is correctly queued behind that same update in the editor lane.
     retained_persistence_sender: Arc<OnceLock<std::sync::mpsc::Sender<RetainedPersistenceCommand>>>,
+    /// `#retainedsaveretry`: refused-attempt count per document for its current
+    /// epoch. Bookkeeping for the bounded backoff only, never authority.
+    retained_persistence_retries: Mutex<std::collections::HashMap<String, (u64, u32)>>,
     /// Non-authoritative adapter for retained-transition effects that can
     /// enter an editor, actor, state-ledger, or controller boundary. The
     /// reactive graph admits exact typed commands; this worker executes them
@@ -3171,6 +3174,63 @@ struct RetainedTransitionCommand {
 enum RetainedTransitionCompletion {
     Delivery(Option<RetainedDeliveryObservation>),
     Applied(bool),
+}
+
+/// `#retainedsaveretry`: most refused attempts re-claimed for one epoch. A new
+/// epoch (any further edit or delivery) restarts the count.
+const RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES: u32 = 8;
+
+/// Backoff before re-claim attempt `attempt` (1-based): 1s doubling, capped at 30s.
+fn retained_persistence_retry_delay(attempt: u32) -> Duration {
+    let secs = 1u64 << attempt.saturating_sub(1).min(5);
+    Duration::from_secs(secs.min(30))
+}
+
+/// Advance the refused-attempt bookkeeping for one completion and decide whether
+/// to retry. Only a refused CURRENT epoch retries: an applied save or a newer
+/// pending epoch clears the count, since each has its own edge.
+fn retained_persistence_retry_step(
+    retries: &mut std::collections::HashMap<String, (u64, u32)>,
+    key: &str,
+    epoch: u64,
+    applied: bool,
+    newer_pending: bool,
+) -> Option<Duration> {
+    if applied || newer_pending {
+        retries.remove(key);
+        return None;
+    }
+    let entry = retries.entry(key.to_string()).or_insert((epoch, 0));
+    if entry.0 != epoch {
+        *entry = (epoch, 0);
+    }
+    if entry.1 >= RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES {
+        return None;
+    }
+    entry.1 += 1;
+    Some(retained_persistence_retry_delay(entry.1))
+}
+
+/// Wait out the backoff off every lock, then re-claim the refused epoch.
+fn schedule_refused_retained_persistence_retry(
+    runtime: std::sync::Weak<ControllerRuntime>,
+    document_hash: String,
+    epoch: u64,
+    delay: Duration,
+) {
+    let spawned = std::thread::Builder::new()
+        .name("agent-doc-retained-persistence-retry".to_string())
+        .spawn(move || {
+            std::thread::sleep(delay);
+            if let Some(runtime) = runtime.upgrade() {
+                runtime
+                    .document_graphs
+                    .retry_refused_retained_persistence(&document_hash, epoch);
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("[controller] failed to schedule retained-persistence retry: {error}");
+    }
 }
 
 /// Claim the latest desired projection after an older in-flight attempt
@@ -3892,6 +3952,7 @@ impl ControllerDocumentGraphs {
             retained_transition_effect: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_persistence: lazily::ThreadSafeLatestDurableProjection::new(&ctx, 1),
             retained_persistence_sender: Arc::new(OnceLock::new()),
+            retained_persistence_retries: Mutex::new(std::collections::HashMap::new()),
             retained_transition_sender: Arc::new(OnceLock::new()),
             retained_transition_attempted_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
             retained_transition_published_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -4036,9 +4097,20 @@ impl ControllerDocumentGraphs {
                         let Some(runtime) = worker_sink.runtime.upgrade() else {
                             break;
                         };
-                        runtime
+                        let document_hash = command.document_hash.clone();
+                        let epoch = command.envelope.epoch;
+                        let retry = runtime
                             .document_graphs
                             .complete_retained_persistence(command, applied);
+                        drop(runtime);
+                        if let Some(delay) = retry {
+                            schedule_refused_retained_persistence_retry(
+                                worker_sink.runtime.clone(),
+                                document_hash,
+                                epoch,
+                                delay,
+                            );
+                        }
                     }
                 }) {
                 Ok(_) => {
@@ -5162,10 +5234,17 @@ impl ControllerDocumentGraphs {
         effects.insert(key, effect);
     }
 
-    fn complete_retained_persistence(&self, command: RetainedPersistenceCommand, applied: bool) {
+    /// Record one native-save attempt. Returns the delay after which a REFUSED
+    /// current epoch should be re-claimed (`#retainedsaveretry`), or `None`.
+    fn complete_retained_persistence(
+        &self,
+        command: RetainedPersistenceCommand,
+        applied: bool,
+    ) -> Option<Duration> {
         let key = command.document_hash;
         let envelope = command.envelope;
         let mut superseding_command = None;
+        let mut refused_retry = None;
         self.ctx.batch(|ctx| {
             let outcome = if applied {
                 format!(
@@ -5208,6 +5287,18 @@ impl ControllerDocumentGraphs {
                     )),
                 );
             }
+            // `#retainedsaveretry`: a refused save of the CURRENT epoch has no
+            // delivery or generation edge to re-arm it -- the editor refused
+            // (a plugin reload window, a lane timeout) without changing the
+            // document -- so the retained write, and every preflight it blocks,
+            // waited forever. Re-claim it on a bounded backoff instead.
+            refused_retry = retained_persistence_retry_step(
+                &mut self.retained_persistence_retries.lock(),
+                &key,
+                envelope.epoch,
+                applied,
+                newer_pending,
+            );
             if newer_pending {
                 superseding_command = claim_superseding_retained_persistence(
                     &self.retained_persistence,
@@ -5230,9 +5321,51 @@ impl ControllerDocumentGraphs {
                 ),
             );
         });
-        let Some(command) = superseding_command else {
-            return;
-        };
+        if let Some(command) = superseding_command {
+            self.dispatch_retained_persistence(command);
+        }
+        refused_retry
+    }
+
+    /// `#retainedsaveretry`: re-claim a refused epoch if it is still the latest
+    /// desired save and nothing else holds the single flight.
+    fn retry_refused_retained_persistence(&self, document_hash: &str, epoch: u64) {
+        let key = document_hash.to_string();
+        let mut command = None;
+        self.ctx.batch(|ctx| {
+            let Some(desired) = self
+                .retained_persistence
+                .state(&key)
+                .and_then(|state| state.desired)
+            else {
+                return;
+            };
+            if desired.epoch != epoch {
+                return;
+            }
+            let generation = desired.value.controller_generation;
+            if let lazily::LatestDurableClaim::Claimed(envelope) =
+                self.retained_persistence.claim(ctx, &key, generation)
+            {
+                agent_doc_ops_log_io::log_op(
+                    &envelope.value.file,
+                    &format!(
+                        "retained_persistence_retry document_hash={key} generation={} epoch={} reason=refused_receipt",
+                        envelope.generation, envelope.epoch,
+                    ),
+                );
+                command = Some(RetainedPersistenceCommand {
+                    document_hash: key.clone(),
+                    envelope,
+                });
+            }
+        });
+        if let Some(command) = command {
+            self.dispatch_retained_persistence(command);
+        }
+    }
+
+    fn dispatch_retained_persistence(&self, command: RetainedPersistenceCommand) {
         let Some(sender) = self.retained_persistence_sender.get() else {
             self.ctx.batch(|ctx| {
                 let failure = self.retained_persistence.fail_retryable(
@@ -18648,6 +18781,58 @@ mod state_event_ingress_slow_tests {
             ),
             None,
             "fast ingress stays silent"
+        );
+    }
+}
+
+#[cfg(test)]
+mod retained_persistence_retry_tests {
+    use super::*;
+
+    #[test]
+    fn a_refused_current_epoch_retries_on_a_bounded_backoff() {
+        // `#retainedsaveretry`: 2026-10-01 the editor refused the save during a
+        // plugin reload and nothing re-armed it, so preflight refused every cycle.
+        let mut retries = std::collections::HashMap::new();
+        let delays: Vec<_> = (0..RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES)
+            .map(|_| retained_persistence_retry_step(&mut retries, "doc", 7, false, false))
+            .collect();
+        assert!(delays.iter().all(Option::is_some));
+        assert_eq!(delays[0], Some(Duration::from_secs(1)));
+        assert_eq!(delays[1], Some(Duration::from_secs(2)));
+        assert_eq!(
+            delays.last().copied().flatten(),
+            Some(Duration::from_secs(30)),
+            "the backoff is capped"
+        );
+        assert_eq!(
+            retained_persistence_retry_step(&mut retries, "doc", 7, false, false),
+            None,
+            "the retry budget is bounded per epoch"
+        );
+        assert_eq!(
+            retained_persistence_retry_step(&mut retries, "doc", 8, false, false),
+            Some(Duration::from_secs(1)),
+            "a new epoch restarts the budget"
+        );
+    }
+
+    #[test]
+    fn an_applied_save_or_a_newer_epoch_never_schedules_a_retry() {
+        let mut retries = std::collections::HashMap::new();
+        retained_persistence_retry_step(&mut retries, "doc", 3, false, false);
+        assert_eq!(
+            retained_persistence_retry_step(&mut retries, "doc", 3, true, false),
+            None
+        );
+        assert!(
+            !retries.contains_key("doc"),
+            "an applied save clears the count"
+        );
+        assert_eq!(
+            retained_persistence_retry_step(&mut retries, "doc", 3, false, true),
+            None,
+            "a newer pending epoch has its own claim edge"
         );
     }
 }

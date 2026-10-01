@@ -228,6 +228,20 @@ internal fun replicaRecoveryCaptureMissReasonUtil(
     else -> null
 }
 
+/**
+ * #jbmanagerbyfile: which replica manager serves a file-scoped request. The manager
+ * already holding the file's replica wins; then [preferred] (the requesting project's
+ * own manager); otherwise null, and the caller falls back to project ownership.
+ */
+internal fun <M> selectReplicaManagerUtil(
+    candidates: List<M>,
+    preferred: M?,
+    holdsReplica: (M) -> Boolean,
+): M? {
+    if (preferred != null && holdsReplica(preferred)) return preferred
+    return candidates.firstOrNull(holdsReplica) ?: preferred
+}
+
 /** Only the controller's typed missing-membership recovery may republish editor state. */
 internal fun shouldReregisterForRemoteEventUtil(reasonToken: String?): Boolean =
     reasonToken == "editor_replica_reregister"
@@ -3724,11 +3738,39 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
 
         fun requestRemoteDrain(project: Project, filePath: String? = null, reason: String = "event") {
-            instances[project]?.requestRemoteDrain(filePath, reason)
+            val manager = filePath?.let { managerForFile(project, it) } ?: instances[project]
+            manager?.requestRemoteDrain(filePath, reason)
         }
 
         fun requestUrgentRemoteDrain(project: Project, filePath: String, reason: String) {
-            instances[project]?.requestUrgentRemoteDrain(filePath, reason)
+            managerForFile(project, filePath)?.requestUrgentRemoteDrain(filePath, reason)
+        }
+
+        /**
+         * #jbmanagerbyfile: the replica manager that serves [filePath] for a request that
+         * arrived through [project]'s socket handler. The native socket is per IDE process,
+         * so the handler's project need not be the one holding the file's replica -- with
+         * two projects open, keying by the handler's project answered every
+         * `persist_current` and `editor_replica_reregister` with a silent `false`
+         * (2026-10-01: the retained save for agent-doc-bugs.md was refused for epochs 7-33,
+         * and preflight refused every later cycle). Prefer the manager that holds the
+         * file's replica, then the project's own manager, then the deepest owning project.
+         */
+        private fun managerForFile(project: Project, filePath: String): CrdtReplicaManager? {
+            val projectManager = if (project.isDisposed) null else instances[project]
+            val live = instances.values.filter { !it.disposed.get() }
+            val chosen = selectReplicaManagerUtil(
+                candidates = live,
+                preferred = projectManager?.takeUnless { it.disposed.get() },
+                holdsReplica = { it.forwarders.containsKey(filePath) },
+            ) ?: managerForFilePath(filePath)
+            if (chosen != null && chosen !== projectManager) {
+                chosen.log.info(
+                    "[crdt-replica] routed $filePath to the manager holding its replica " +
+                        "(project=${chosen.project.name}, via=${project.name})",
+                )
+            }
+            return chosen
         }
 
         fun persistCurrentVisibleRevision(
@@ -3737,8 +3779,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             expectedContentHash: String,
             expectedContentLen: Int,
         ): Boolean {
-            if (project.isDisposed) return false
-            val manager = instances[project] ?: return false
+            val manager = managerForFile(project, filePath) ?: run {
+                com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java).warn(
+                    "[crdt-replica] native persist-current rejected reason=no_replica_manager " +
+                        "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
+                )
+                return false
+            }
             if (SwingUtilities.isEventDispatchThread()) {
                 manager.log.warn(
                     "[crdt-replica] native persist-current rejected reason=edt_cannot_wait_for_document_lane " +
@@ -4119,7 +4166,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             var captureMiss: String? = null
             val captureOnEdt = {
                 val disposed = project.isDisposed
-                val manager = if (disposed) null else instances[project]
+                val manager = if (disposed) null else managerForFile(project, filePath)
                 val file = if (disposed) null else LocalFileSystem.getInstance().findFileByPath(filePath)
                 val document = file?.let { FileDocumentManager.getInstance().getDocument(it) }
                 captureMiss = replicaRecoveryCaptureMissReasonUtil(

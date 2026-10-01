@@ -213,6 +213,33 @@ class CrdtReplicaProjectionFrontierTest {
     }
 
     @Test
+    fun `a file-scoped request reaches the manager holding the replica`() {
+        // #jbmanagerbyfile: two projects open; the socket handler belongs to "b", the
+        // replica of agent-doc-bugs.md lives in "a".
+        val holds = setOf("a")
+        assertEquals(
+            "a",
+            selectReplicaManagerUtil(listOf("a", "b"), preferred = "b") { it in holds },
+        )
+        // The requesting project's own manager wins when it holds the replica.
+        assertEquals(
+            "b",
+            selectReplicaManagerUtil(listOf("a", "b"), preferred = "b") { true },
+        )
+        // No holder anywhere: fall back to the requesting project's manager.
+        assertEquals(
+            "b",
+            selectReplicaManagerUtil(listOf("a", "b"), preferred = "b") { false },
+        )
+        // No manager for the requesting project: the holder still answers.
+        assertEquals(
+            "a",
+            selectReplicaManagerUtil(listOf("a"), preferred = null) { it in holds },
+        )
+        assertEquals(null, selectReplicaManagerUtil(emptyList<String>(), preferred = null) { true })
+    }
+
+    @Test
     fun `crdt remote admission names each refusal cause`() {
         assertEquals("missing_file", crdtRemoteAdmissionRejectReasonUtil(null, "jb-1", "jb-1"))
         assertEquals("missing_editor_id", crdtRemoteAdmissionRejectReasonUtil("/a.md", null, "jb-1"))

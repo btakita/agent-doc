@@ -557,7 +557,8 @@ The exchange is now 481 lines; the queue does not auto-compact.
 - ~~do [#supstaleopencycle]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/85~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~
-- ~~Look at https://github.Look at https://github.com/btakita/agent-doc/issues/86 response. Fix the remaining issues.com/btakita/agent-doc/issues/86 response. Fix the remaining issues. complete https://github.com/btakita/agent-doc/issues/81~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Look at https://github.Look at https://github.com/btakita/agent-doc/issues/86 response. Fix the remaining issues.com/btakita/agent-doc/issues/86 response. Fix the remaining issues. complete https://github.com/btakita/agent-doc/issues/81~~
+- 🚧 do [#jbrejectlog]
  - #gh-fix https://github.com/btakita/agent-doc/issues/87
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
@@ -565,7 +566,7 @@ The exchange is now 481 lines; the queue does not auto-compact.
 
 
 <!-- agent:backlog priority -->
-- [ ] [#jbrejectlog] JetBrains plugin: log why a DeliverCrdtRemote event is rejected (editor_id mismatch vs missing file vs failed re-register). On 2026-10-01 after a dynamic plugin reload, IDE pid 2960722 answered response_cell_add/editor_replica_reregister with a bare rejected receipt and nothing in idea.log, so the cause could not be proven. #droppedreplicapull now self-heals the symptom; this item is the diagnosis.
+- [ ] 🚧 [#jbrejectlog] JetBrains plugin: log why a DeliverCrdtRemote event is rejected (editor_id mismatch vs missing file vs failed re-register). On 2026-10-01 after a dynamic plugin reload, IDE pid 2960722 answered response_cell_add/editor_replica_reregister with a bare rejected receipt and nothing in idea.log, so the cause could not be proven. #droppedreplicapull now self-heals the symptom; this item is the diagnosis.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

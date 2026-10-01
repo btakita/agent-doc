@@ -213,6 +213,32 @@ This changes what the drain writes and how the supervisor behaves, so I've recor
 - The latest CI run was still **pending** at closeout.
 
 **Follow-up.** Issue point 3 is filed as `jbstageonfail` [recommended]: stage the package instead of replacing jars under the live JVM when the hot-swap fails. With the dynamic path working, this only matters when the hot-swap fails.
+
+### Re: GH #81 — layout still 1 pane after #77; focus lands in `1:stash` — opus-5.5 · 2026-10-01T13:58-04:00
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/81
+
+**Fixed and installed: agent-doc `ca1ac2267` (plugin 0.2.458).** The issue stays open until I get evidence from IU-262. As you suggested, I posted a comment on #81 asking the reporter for exactly what I need.
+
+**Probable mechanism.** It fits every symptom in the report, but I could not confirm it on IU-262. When the plugin detects no split layout, the route, the sync command, and the sync columns all fell back to one **joined** column of the visible documents: `--col 1109.md,agent-doc.md`. The controller keeps only the **first** agent document per column (`first_agent_doc_in_layout_column`). IntelliJ's `selectedFiles` lists the focused window's selection first. That produces every symptom in the report:
+- `expected=[<focused doc>]`, flipping on each switch;
+- `columns=1`;
+- one pane whose occupant swaps;
+- the sibling's pane left in `1:stash`, where focus then lands invisibly.
+
+The surface path had the same gap. A surface with no columns produced an empty `Sync` layout, which the controller refuses (`desired pane layout is empty`).
+
+**Fix:**
+- **Fallback columns:** with no detected layout, each visible document is its own column. This applies to the plugin's `undetectedLayoutColumns` (route args, sync command, sync columns) and to the controller's `EditorSurface::sync_columns`. Visible documents are the selected tabs of distinct editor windows, so each one is a split. The surface signature already read an undetected layout this way.
+- **Window bounds:** if a window's bounds can't be read, the layout degrades to window order (the #77 path) instead of detection failing.
+- **Discriminator log:** the issue's suggestion, at info level and logged only when it changes: `[layout-detect] observed windows=N snapshots=[(x,y) file…] columns=K […]`.
+
+**Verification:**
+- `make check` passes: exit 0, 10290 Rust tests, 608/608 JetBrains tests.
+- New regression tests: `SyncLayoutActionTest`, mutation-checked (restoring the joined column fails it); `LayoutDetectorTest` for the discriminator line; and an editor-surface `Sync` test.
+- `make install` dynamically upgraded the live IntelliJ 2026.1 with no restart, which is a second live confirmation of the #80 fix.
+
+**What remains.** On IU-262, two outcomes are possible. If the backend exposes **one** `EditorWindow` to plugins (`windows=1`), no plugin-side fix can see the client's split, and that is a deeper Remote Dev problem. The comment asks the reporter for the `observed windows=` line, the post-fix `pane_layout_projection` lines, and any `layout detection failed` line, which tells the two apart. The exchange is now about 200 lines; the queue keeps draining.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -223,8 +249,8 @@ This changes what the drain writes and how the supervisor behaves, so I've recor
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do https://github.com/btakita/agent-doc/issues/79~~
-- ~~do https://github.com/btakita/agent-doc/issues/80~~ — auto-struck: answered this cycle (#ftstrike)
-- do https://github.com/btakita/agent-doc/issues/81
+- ~~do https://github.com/btakita/agent-doc/issues/80~~
+- ~~do https://github.com/btakita/agent-doc/issues/81~~ — auto-struck: answered this cycle (#ftstrike)
 - do https://github.com/btakita/agent-doc/issues/82
 - do https://github.com/btakita/agent-doc/issues/83
 - do https://github.com/btakita/agent-doc/issues/84

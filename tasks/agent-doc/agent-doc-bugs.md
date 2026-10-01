@@ -12,12 +12,13 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#agent-doc-causes': Fix agent-doc causes
-  '#do-backlog': '/goal do backlog items'
-  '#gh-fix': 'fix then close'
+  '#do-backlog': /goal do backlog items
+  '#gh-fix': fix then closerelease
+  '#release': release + publish
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -165,6 +166,26 @@ There are two regression tests, and both fail against the old rule. I checked th
 - The superproject submodule pointer is pushed (`55e8e59631`).
 
 **Why it took long:** about 15 minutes went to `make release` re-running the full check and a second fat-LTO `install-full` after I had already run both. The rest is CI's roughly 25-minute four-platform build.
+
+### Re: GH #79, and should `queue: stop` go away? — opus-5.5 · 2026-10-01T12:35-04:00
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/79
+
+**#79 is fixed and closed** (commit `1bfd97afe`, pushed and installed).
+- **The defect:** preflight treated a marker `go` beside a stale `queue: stop` as active, because the marker wins (`#qactsync`). But the supervisor's drainability check and the continuation detector read the raw frontmatter and saw `stop`. The document was active with 0 drainable heads, so nothing ever dispatched.
+- **The fix:** both now read the same predicate as preflight, `control_binding::queue_control_activation`, which I moved out of preflight-io. The continuation detector also no longer needs the legacy `queue_active: true`.
+- **Tests:** a regression for the document in the issue, and a matrix asserting that drainability agrees with preflight's activation control. Both fail against the old gate.
+- **Other tests changed:** five fixtures modelled a halt or drain as a frontmatter flip with the marker `go` left in place. A real halt strips that token, so I updated the fixtures to strip it too. With a single authority, a leftover `go` means go.
+- **One change I held back:** a queue with **no** control on either surface defaults to `go` (`#queuegodefault`). Preflight treats such a queue as active, but the idle watch and the Codex Stop hook still don't auto-drain it, because these two readers require an explicit control. Changing that would make every queue without a control auto-drain, a behavior change #79 doesn't ask for.
+- **Verification:** `make check` passed, exit 0, 10288 tests.
+
+**Your question: should `queue: stop` go away, given a queue defaults to `go`?** Mostly yes. Here is how I'd split it:
+- **Drain (queue empty): stop writing `stop`.** Clear the control on both surfaces instead. An empty queue has nothing to run, so the default `go` is harmless there. When you add a head later, it just runs. That removes the stale-`stop` state that caused #79 in the first place.
+- **Halt (heads left that the agent couldn't finish): keep a hold, but make it a typed one.** Without a hold, the default `go` would re-dispatch the head the turn just gave up on. Use `pause`, or a binary-owned `halted` state that editing the queue re-arms (`#queueeditgo`).
+- **Operator `stop`/`pause` tokens on the marker: keep them.** They are how you hold the queue on purpose.
+- **Decide together:** whether a queue with no control drains through the supervisor. That is the case I held back above, and it is the same question from the other direction.
+
+This changes what the drain writes and how the supervisor behaves, so I've recorded it as `#queuestopretire` (`[decision]`) in the backlog instead of doing it now. Tell me which way to go on the no-control drain and I'll implement it.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -174,14 +195,19 @@ There are two regression tests, and both fail against the old rule. I checked th
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/77~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/78~~
-- ⏭️ :pin: #release
-- ~~Look at all the old gh issue that I created. Close any of the issues that are no longer relevant. Anything relevant should be added in the backlog.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 do https://github.com/btakita/agent-doc/issues/79
+- do https://github.com/btakita/agent-doc/issues/80
+- do https://github.com/btakita/agent-doc/issues/81
+- do https://github.com/btakita/agent-doc/issues/82
+- do https://github.com/btakita/agent-doc/issues/83
+- do https://github.com/btakita/agent-doc/issues/84
+- When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.
+- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#queuestopretire] [agent-doc][decision] Retire the binary-written queue: stop now that a queue with no control defaults to go (operator question, 2026-10-01). Proposal: (1) a DRAIN (no live heads left) clears the control on both surfaces instead of writing stop; (2) a HALT with heads left writes a typed hold instead of a bare stop (pause, or a binary-owned 'halted' that a queue edit re-arms); (3) decide whether a queue with no control drains through the supervisor idle watch and the Codex Stop hook. Today preflight treats it as active, but drainable_head_count and required_continuation require an explicit control (kept that way in the GH #79 fix to avoid a silent behavior change). Code: agent-doc-queue/src/control_binding.rs, agent-doc-queue/src/queue_continuation.rs, the drain/clear path in agent-doc-preflight-io/src/lib.rs.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and ### Re: sections. Close #19 when shipped.
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

@@ -336,6 +336,13 @@ pub struct CycleState {
     /// skip marker on these heads and excludes them from selection.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped_queue_head_ids: Vec<String>,
+    /// `#stalemarkerretarget`: the queue heads (marker-stripped text) the binary
+    /// itself last projected the `🚧` in-progress marker onto. A `🚧` on one of
+    /// these rows is the binary's own projection, never an operator retarget —
+    /// even when a baseline rebuilt from HEAD lost the marker and the diff shows
+    /// it as freshly added. Carried forward like `skipped_queue_head_ids`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projected_in_progress_queue_heads: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1239,6 +1246,10 @@ pub fn start_preflight_with_task(
         .as_ref()
         .map(|prior| prior.skipped_queue_head_ids.clone())
         .unwrap_or_default();
+    let carried_projected_in_progress_queue_heads = prior
+        .as_ref()
+        .map(|prior| prior.projected_in_progress_queue_heads.clone())
+        .unwrap_or_default();
     // `#preflightinbinary`: a second preflight inside the same open turn is a
     // re-entry, not a new turn — see `reusable_by_reentrant_preflight`. Keep the
     // turn's IDENTITY (cycle id and start time) and recompute everything else,
@@ -1320,6 +1331,7 @@ pub fn start_preflight_with_task(
             .unwrap_or_default(),
         blocked_closeout: None,
         skipped_queue_head_ids: carried_skipped_queue_head_ids,
+        projected_in_progress_queue_heads: carried_projected_in_progress_queue_heads,
     };
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::PreflightStarted)?;
@@ -1798,6 +1810,29 @@ pub fn set_skipped_queue_head_ids(file: &Path, ids: &[String]) -> Result<Option<
         .collect();
     if state.skipped_queue_head_ids != normalized {
         state.skipped_queue_head_ids = normalized;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#stalemarkerretarget`: record the queue heads the binary projected `🚧` onto
+/// this pass (marker-stripped text). A replace, like the skipped-head set.
+pub fn set_projected_in_progress_queue_heads(
+    file: &Path,
+    heads: &[String],
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let mut seen = std::collections::HashSet::new();
+    let normalized: Vec<String> = heads
+        .iter()
+        .map(|head| head.trim().to_string())
+        .filter(|head| !head.is_empty() && seen.insert(head.clone()))
+        .collect();
+    if state.projected_in_progress_queue_heads != normalized {
+        state.projected_in_progress_queue_heads = normalized;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -3365,6 +3400,7 @@ fn synthetic_state_with_id(
         semantic_merge_conflict_advisories: Vec::new(),
         blocked_closeout: None,
         skipped_queue_head_ids: Vec::new(),
+        projected_in_progress_queue_heads: Vec::new(),
     }
 }
 

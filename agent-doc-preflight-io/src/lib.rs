@@ -2833,6 +2833,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             .flatten()
             .map(|state| state.skipped_queue_head_ids.into_iter().collect())
             .unwrap_or_default();
+    let projected_in_progress_queue_heads = load_projected_in_progress_queue_heads(file);
     let selected_queue_prompts = if activation.active {
         agent_doc_queue::queue_projection::active_queue_prompt_projection(
             &drainability_content,
@@ -2842,6 +2843,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
                 diff,
                 &drainability_content,
                 &activation.entries_after,
+                &projected_in_progress_queue_heads,
             ),
             &skipped_queue_head_ids,
         )
@@ -4989,6 +4991,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                 diff,
                 &current_content,
                 &activation.entries_after,
+                &load_projected_in_progress_queue_heads(file),
             ),
             &skipped_queue_head_ids,
         )
@@ -5028,6 +5031,17 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         });
     }
     let active_queue_prompt_texts = active_queue_projection.prompts;
+    if activation.active
+        && let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
+            file,
+            &active_queue_prompt_texts
+                .iter()
+                .map(|text| strip_priority_markers(text))
+                .collect::<Vec<_>>(),
+        )
+    {
+        eprintln!("[preflight] queue: failed to persist projected in-progress heads ({err:#})");
+    }
     let current_head_ids = active_queue_prompt_texts
         .iter()
         .filter_map(|text| agent_doc_queue::queue_response::queue_prompt_done_id(text))
@@ -5828,6 +5842,16 @@ fn ensure_document_model_with_replica_reregistration(
         }
     }
     Err(last_err)
+}
+
+/// `#stalemarkerretarget`: the heads the binary last projected `🚧` onto, so a
+/// marker it wrote itself is never read back as an operator retarget.
+fn load_projected_in_progress_queue_heads(file: &Path) -> std::collections::HashSet<String> {
+    agent_doc_cycle_state_io::load(file)
+        .ok()
+        .flatten()
+        .map(|state| state.projected_in_progress_queue_heads.into_iter().collect())
+        .unwrap_or_default()
 }
 
 pub(crate) fn persist_queue_maintenance_doc(
@@ -10172,6 +10196,64 @@ mod tests {
         assert_eq!(head.backlog_id.as_deref(), Some("ready"));
         assert_eq!(head.prompt_text.as_deref(), Some("do [#ready]"));
         assert!(head.drainable);
+    }
+
+    /// `#stalemarkerretarget`: maintenance projected `🚧` onto `release + publish`
+    /// while it was the only live head. The operator then queued two `do` heads
+    /// above it, and the baseline was rebuilt from a HEAD that predates the
+    /// projection, so the preflight diff showed the marker as freshly added. The
+    /// binary's own stale marker must not pin selection: the first head wins and
+    /// the marker moves to it.
+    #[test]
+    fn run_queue_maintenance_moves_stale_binary_marker_to_new_first_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let header = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+        );
+        let only_head = format!("{header}- release + publish\n<!-- /agent:queue -->\n");
+        std::fs::write(&doc, &only_head).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &only_head,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&only_head), Some(&only_head))
+            .unwrap();
+        run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("- 🚧 release + publish"),
+            "the sole head is projected in progress first"
+        );
+
+        // Baseline rebuilt from HEAD (no marker); operator queued heads above.
+        let edited = format!(
+            "{header}- do [#a]\n- do [#b]\n- 🚧 release + publish\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &edited).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &only_head,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let diff = "-- release + publish\n+- do [#a]\n+- do [#b]\n+- 🚧 release + publish\n";
+        run_queue_maintenance(&doc, Some(diff)).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- 🚧 do [#a]\n- do [#b]\n- release + publish\n"),
+            "a stale binary-projected marker must move to the operator's first head:\n{updated}"
+        );
     }
 
     #[test]

@@ -108,9 +108,14 @@ pub fn in_progress_marker_retarget_requested(
     diff: Option<&str>,
     content: &str,
     entries: &[QueueEntry],
+    binary_projected: &std::collections::HashSet<String>,
 ) -> bool {
     let rows = queue_prompt_projection_rows(content, entries);
-    agent_doc_document::queue_projection::in_progress_marker_retarget_requested(diff, &rows)
+    agent_doc_document::queue_projection::in_progress_marker_retarget_requested(
+        diff,
+        &rows,
+        binary_projected,
+    )
 }
 
 pub fn selected_queue_head_node_key(content: &str, head_text: &str) -> Option<String> {
@@ -369,7 +374,8 @@ mod tests {
         assert!(in_progress_marker_retarget_requested(
             Some("+ - 🚧 do [#beta]"),
             content,
-            &entries
+            &entries,
+            &std::collections::HashSet::new()
         ));
     }
 

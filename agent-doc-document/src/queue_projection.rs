@@ -234,8 +234,21 @@ pub fn strip_priority_markers(text: &str) -> String {
     t.trim().to_string()
 }
 
-pub fn in_progress_marker_retarget_requested(diff: Option<&str>, rows: &[QueuePromptRow]) -> bool {
-    if !rows.iter().any(QueuePromptRow::marked_in_progress) {
+/// True when the operator moved the `🚧` marker onto a head the binary would
+/// not have selected. `binary_projected` holds the heads (marker-stripped text)
+/// the binary itself last projected `🚧` onto (`#stalemarkerretarget`): a marker
+/// on one of those rows is the binary's own projection, not a retarget, even
+/// when a baseline rebuilt from HEAD lost it and the diff shows it as added.
+/// Otherwise a stale projection outranks heads the operator queued above it.
+pub fn in_progress_marker_retarget_requested(
+    diff: Option<&str>,
+    rows: &[QueuePromptRow],
+    binary_projected: &HashSet<String>,
+) -> bool {
+    if !rows.iter().any(|row| {
+        row.marked_in_progress()
+            && !binary_projected.contains(&strip_priority_markers(&row.text))
+    }) {
         return false;
     }
     let Some(diff) = diff else {
@@ -612,14 +625,53 @@ mod tests {
             Some("ship".to_string()),
             true,
         )];
-        assert!(!in_progress_marker_retarget_requested(None, &rows));
+        let none = HashSet::new();
+        assert!(!in_progress_marker_retarget_requested(None, &rows, &none));
         assert!(!in_progress_marker_retarget_requested(
             Some("+- do [#ship]"),
-            &rows
+            &rows,
+            &none
         ));
         assert!(in_progress_marker_retarget_requested(
             Some("+- 🚧 do [#ship]"),
-            &rows
+            &rows,
+            &none
+        ));
+    }
+
+    /// `#stalemarkerretarget`: the binary projected `🚧` onto `release + publish`
+    /// while it was the only live head; the operator then queued two `do` heads
+    /// above it; a HEAD-rebuilt baseline lost the marker, so the diff showed it as
+    /// added. That stale projection must not read as an operator retarget.
+    #[test]
+    fn binary_projected_marker_is_not_an_operator_retarget() {
+        let rows = vec![
+            QueuePromptRow::new("do [#a]", Some("a".to_string()), true),
+            QueuePromptRow::new("do [#b]", Some("b".to_string()), true),
+            QueuePromptRow::new("🚧 release + publish", None, true),
+        ];
+        let diff = Some("-- release + publish\n+- 🚧 release + publish");
+        let projected: HashSet<String> = ["release + publish".to_string()].into_iter().collect();
+
+        assert!(!in_progress_marker_retarget_requested(diff, &rows, &projected));
+        let projection = project_active_queue_prompts(
+            &rows,
+            &HashMap::new(),
+            in_progress_marker_retarget_requested(diff, &rows, &projected),
+            &HashSet::new(),
+        );
+        assert_eq!(projection.prompts, vec!["do [#a]"]);
+        assert!(!projection.retargeted);
+
+        // The operator moving the marker onto a different head is still honored.
+        let moved = vec![
+            QueuePromptRow::new("do [#a]", Some("a".to_string()), true),
+            QueuePromptRow::new("🚧 do [#b]", Some("b".to_string()), true),
+            QueuePromptRow::new("release + publish", None, true),
+        ];
+        let moved_diff = Some("-- do [#b]\n+- 🚧 do [#b]");
+        assert!(in_progress_marker_retarget_requested(
+            moved_diff, &moved, &projected
         ));
     }
 }

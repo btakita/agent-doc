@@ -209,7 +209,8 @@ fn admission_failure_payload(target: &str, reason: &str) -> String {
          reason: {reason}\n\
          pending: operator steering may be waiting unanswered -- this refused turn read no \
          document changes. `agent-doc session-check {target}` is a permitted follow-up: it lists \
-         any unreconciled operator prompt verbatim without starting a response.{edit_note}\n\
+         any unreconciled operator prompt verbatim -- including one still inside an unmerged editor \
+         save (`#refusalsteeringverbatim`) -- without starting a response.{edit_note}\n\
          remedy: preflight refused to admit this turn, so no cycle contract exists. \
          Do NOT shell `agent-doc preflight` to recreate admission, and do not start a response \
          or write the document. Report this failure and its reason to the operator, run \

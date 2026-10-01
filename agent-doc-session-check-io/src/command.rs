@@ -541,6 +541,32 @@ fn log_three_way_merge_steering_observation(file: &Path) {
     );
 }
 
+/// `#refusalsteeringverbatim` (GH #75): operator steering carried by the
+/// unmerged editor save, verbatim.
+///
+/// The authority/disk divergence INTERRUPT bails before the steering scan ever
+/// runs, and a refused preflight names `session-check` as the one permitted way
+/// to read pending operator prompts — so an operator edit living only in the
+/// editor authority (the side the save could not merge) was invisible on BOTH
+/// paths while each told the agent steering "may be waiting unanswered".
+/// Disk is the older projection and the authority carries the operator's
+/// edit, so the prompt-bearing diff disk → authority is exactly that steering.
+/// Empty when the unmerged save carries none.
+pub fn unmerged_editor_steering_note(authority_content: &str, disk_content: &str) -> String {
+    agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(
+        disk_content,
+        authority_content,
+    )
+    .realtime_steering_all()
+    .verbatim_aggregate()
+    .map(|verbatim| {
+        format!(
+            " Operator steering inside the unmerged editor save (not yet on disk; relay it to the operator verbatim, do not answer it until the save settles): {verbatim}"
+        )
+    })
+    .unwrap_or_default()
+}
+
 pub fn supervisor_drain_outcome_kind(
     readiness: agent_doc_controller::status::SupervisorDrainReadiness,
 ) -> agent_doc_flow::outcome::UserFacingOutcomeKind {
@@ -713,7 +739,7 @@ fn ensure_terminal_authority_disk_convergence(
             "session_check_terminal_convergence",
         );
     anyhow::bail!(
-        "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); refusing a false successful closeout. Automatic editor recovery status: {}. Replica re-registration and projection settlement are scheduled automatically; supervisor recycle is fallback-only when the targeted event cannot be published. `session-check` is status-only. Do not rerun `finalize`, run `write --commit`, repair, or force-disk the response.",
+        "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); refusing a false successful closeout. Automatic editor recovery status: {}. Replica re-registration and projection settlement are scheduled automatically; supervisor recycle is fallback-only when the targeted event cannot be published. `session-check` is status-only. Do not rerun `finalize`, run `write --commit`, repair, or force-disk the response.{}",
         file.display(),
         agent_doc_hash::content_hash(authority_content),
         agent_doc_hash::content_hash(disk_content),
@@ -722,6 +748,7 @@ fn ensure_terminal_authority_disk_convergence(
             disk_content,
         ),
         recovery_status,
+        unmerged_editor_steering_note(authority_content, disk_content),
     );
 }
 
@@ -1328,7 +1355,7 @@ fn run_with_options_inner(
         };
         anyhow::ensure!(
             terminal_projection_matches_required_scope(file, &authority_content, &disk_content,)?,
-            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); {}. {}",
+            "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); {}. {}{}",
             file.display(),
             agent_doc_hash::content_hash(&authority_content),
             agent_doc_hash::content_hash(&disk_content),
@@ -1347,6 +1374,7 @@ fn run_with_options_inner(
                     "the projection changed after its converged observation",
             },
             divergence_owner_note,
+            unmerged_editor_steering_note(&authority_content, &disk_content),
         );
         if retained_closeout_resume.should_resume() {
             match crate::profile::timed("resume_retained_closeout_after_native_save", || {

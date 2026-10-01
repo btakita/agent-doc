@@ -37,7 +37,7 @@ fn continuation_guidance_for(file: &Path) -> String {
 #[cfg(test)]
 use agent_doc_session_check_io::{
     log_supervisor_drain_handoff, supervisor_drain_outcome_kind,
-    supervisor_drain_unavailable_message,
+    supervisor_drain_unavailable_message, unmerged_editor_steering_note,
 };
 
 #[cfg(test)]
@@ -7622,6 +7622,28 @@ Body\n\
             assert!(!message.contains("NOT an operator stall"), "{message}");
             assert!(message.contains(readiness.reason()), "{message}");
         }
+    }
+
+    /// `#refusalsteeringverbatim` (GH #75): an operator prompt that exists only
+    /// in the editor authority (the unmerged save) must be surfaced verbatim by
+    /// the divergence INTERRUPT, which bails before the ordinary steering scan.
+    #[test]
+    fn unmerged_editor_steering_note_surfaces_authority_only_prompt_verbatim() {
+        let disk = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n\
+### Re: earlier\nanswer\n<!-- /agent:exchange -->\n";
+        let authority = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n\
+### Re: earlier\nanswer\n\nWhy does the release keep skipping? Please check the carried skip set.\n\
+<!-- /agent:exchange -->\n";
+        let note = unmerged_editor_steering_note(authority, disk);
+        assert!(
+            note.contains("Why does the release keep skipping? Please check the carried skip set."),
+            "authority-only operator prompt must be relayed verbatim: {note:?}"
+        );
+        assert!(note.contains("unmerged editor save"), "{note:?}");
+        assert!(
+            unmerged_editor_steering_note(disk, disk).is_empty(),
+            "no divergence ⇒ no steering note"
+        );
     }
 
     /// `#supdrainlive`: with no controller state at all the readiness probe must

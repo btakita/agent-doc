@@ -36,7 +36,8 @@ pub fn explicit_queue_stop_mode(
 }
 
 /// `#queueeditgo`: `queue: pause` is the operator's standing hold. The binary
-/// never writes it (drain/halt writes `stop`), so it is the one control that
+/// never writes it (a halt writes `stop`; a drain clears the control,
+/// `#queuestopretire`), so it is the one control that
 /// survives a queue edit instead of being re-armed to `go`.
 pub fn explicit_queue_pause_mode(
     attrs: &HashMap<String, String>,

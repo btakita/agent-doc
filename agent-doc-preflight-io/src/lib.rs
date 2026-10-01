@@ -3632,6 +3632,12 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // explicitly marked for enqueue. Per-item enqueue markers
     // (#queue-enqueue-action) append marked ids without requiring the component
     // attribute.
+    // `#queuestopretire`: backlog ids an active non-`go` queue held out this
+    // cycle. A drain may clear the queue control only when none were held: with
+    // no control the queue defaults to `go`, so the next cycle would mirror these
+    // held ids and run them, silently upgrading a `start` drain into a
+    // continuous backlog loop.
+    let mut backlog_ids_held_out_of_queue = 0usize;
     if let Some(sync_request) =
         agent_doc_queue::backlog_sync::collect_backlog_queue_sync(&components, &content)
     {
@@ -3758,6 +3764,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                 );
             }
             AutoBacklogQueueSyncPolicy::HoldFreshIds if sync_plan.active_held_count > 0 => {
+                backlog_ids_held_out_of_queue = sync_plan.active_held_count;
                 eprintln!(
                     "[preflight] queue: held {} freshly-added backlog id(s) out of the active auto-loop \
                      (they sync at the next activation; #backlog-queue-sync-pending-add-amplification)",
@@ -4803,6 +4810,13 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     let need_clear_drained_body = (need_strip_auto || need_clear_non_auto_residue)
         && !activation.deferred
         && queue_body_clear_is_lossless(&activation.entries_after);
+    // `#queuestopretire`: a DRAIN — no live prompt left, not a `stop`-marker
+    // halt, nothing held back from the backlog — clears the control on both
+    // surfaces instead of writing `queue: stop` (the marker token is stripped
+    // below). A HALT with heads left keeps the `stop` hold so the default `go`
+    // does not re-dispatch the head the turn just gave up on.
+    let drain_clears_control =
+        !queue_has_prompts && !marker_stop && backlog_ids_held_out_of_queue == 0;
 
     if need_clear_drained_body {
         let comps = agent_doc_element::element::parse(&current_content)?;
@@ -4879,6 +4893,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         current_content = frontmatter::merge_queue_state(&current_content, true)?;
         mutated = true;
         eprintln!("[preflight] queue: set queue: start");
+    } else if need_clear_active && drain_clears_control {
+        current_content = frontmatter::clear_queue_control(&current_content)?;
+        mutated = true;
+        eprintln!("[preflight] queue: drained — cleared queue control (#queuestopretire)");
     } else if need_clear_active {
         current_content = frontmatter::merge_queue_state(&current_content, false)?;
         mutated = true;
@@ -5171,12 +5189,20 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         {
             new_snap = merged;
         } else if need_clear_active
-            && let Ok(merged) = frontmatter::merge_queue_state(&new_snap, false)
+            && let Ok(merged) = if drain_clears_control {
+                frontmatter::clear_queue_control(&new_snap)
+            } else {
+                frontmatter::merge_queue_state(&new_snap, false)
+            }
         {
             new_snap = merged;
         }
         if need_clear_drained_body
-            && let Ok(merged) = frontmatter::merge_queue_state(&new_snap, false)
+            && let Ok(merged) = if need_clear_active && drain_clears_control {
+                frontmatter::clear_queue_control(&new_snap)
+            } else {
+                frontmatter::merge_queue_state(&new_snap, false)
+            }
         {
             new_snap = merged;
         }
@@ -9237,6 +9263,104 @@ mod tests {
             "no ids may be synced into a drained active queue without `go`: {:?}",
             state.synced_queue_ids
         );
+        // #queuestopretire: backlog ids were held out of this drain, so the
+        // control is NOT cleared — with no control the queue defaults to `go`
+        // and the next cycle would mirror and run them.
+        assert!(
+            updated.contains("queue: stop"),
+            "a drain that held backlog ids keeps the stop hold:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_drain_clears_control_and_added_head_runs() {
+        // #queuestopretire: a DRAIN (no live heads, nothing held from the
+        // backlog) clears the queue control instead of writing `queue: stop`, so
+        // the stale-stop state behind GH #79 never exists. The cleared queue is
+        // idle, and a head the operator adds later runs in the default `go`.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let drained = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !drained.contains("queue: stop") && !drained.contains("queue: start"),
+            "a drain must clear the control, not write stop:\n{drained}"
+        );
+        let (fm, _) = frontmatter::parse(&drained).unwrap();
+        assert_eq!(fm.queue, None, "{drained}");
+        assert_eq!(fm.queue_active, None, "{drained}");
+
+        // Idle: a second pass over the empty, control-less queue writes nothing.
+        let idle = run_queue_maintenance(&doc, None).unwrap();
+        assert_ne!(idle.queue_active, Some(true), "an empty queue with no control is idle");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), drained);
+
+        // The operator adds a head: it runs in the default `go`.
+        let with_head = drained.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- do the next thing\n",
+        );
+        std::fs::write(&doc, &with_head).unwrap();
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(state.queue_active, Some(true), "an added head runs with no stale stop");
+        let rearmed = std::fs::read_to_string(&doc).unwrap();
+        assert!(rearmed.contains("queue: go"), "{rearmed}");
+    }
+
+    #[test]
+    fn run_queue_maintenance_stop_marker_halt_with_heads_keeps_stop() {
+        // #queuestopretire: a HALT with heads left is not a drain — it keeps the
+        // `stop` hold so the default `go` cannot re-dispatch the remaining head.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue stop -->\n",
+            "- do the remaining thing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let halted = std::fs::read_to_string(&doc).unwrap();
+        assert_ne!(state.queue_active, Some(true));
+        assert!(halted.contains("queue: stop"), "{halted}");
+        assert!(halted.contains("- do the remaining thing"), "{halted}");
     }
     #[test]
     fn run_queue_maintenance_no_warning_when_queue_already_synced() {
@@ -10416,7 +10540,11 @@ mod tests {
         assert!(state.queue_prompts.is_empty());
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: stop"), "file: {updated}");
+        // #queuestopretire: a drain clears the control instead of writing stop.
+        assert!(
+            !updated.contains("queue: stop") && !updated.contains("queue_active:"),
+            "file: {updated}"
+        );
         assert!(
             !updated.contains("agent:queue auto"),
             "auto must be stripped on drain: {updated}"
@@ -10431,7 +10559,7 @@ mod tests {
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
-        assert!(snap.contains("queue: stop"));
+        assert!(!snap.contains("queue: stop") && !snap.contains("queue_active:"));
         assert!(!snap.contains("agent:queue auto"));
         assert!(!snap.contains("- do [#alpha]"));
     }
@@ -12970,7 +13098,10 @@ mod tests {
             .map(|queue| updated[queue.open_end..queue.close_start].to_string())
             .unwrap();
         assert!(
-            queue_body.trim().is_empty() && updated.contains("queue: stop"),
+            queue_body.trim().is_empty()
+                && !updated.contains("queue: start")
+                && !updated.contains("queue: stop"),
+            // #queuestopretire: the drain clears the control instead of writing stop.
             "the sole historical completed residue must strike and drain the queue:\n{updated}"
         );
     }

@@ -347,8 +347,13 @@ stays inert, matching preflight.
 
 Queue-maintenance write paths persist the canonical control directly:
 `frontmatter::merge_queue_state` writes `queue: start` on activation and
-`queue: stop` on drain/halt, clearing any deprecated `queue_active:` line in the
-same write. Both fields are normalized away together by the replay-hash /
+`queue: stop` on a halt, clearing any deprecated `queue_active:` line in the
+same write. A drain (no live head left, `#queuestopretire`) instead removes the
+control from both surfaces with `frontmatter::clear_queue_control`: the queue
+falls back to its default `go` (`#queuegodefault`), is idle while empty, and a
+head added later runs without a stale `stop`. An operator `pause` survives a
+drain. A drain that held fresh backlog ids out of a non-`go` queue keeps
+`queue: stop`, because with no control the next cycle would mirror and run them. Both fields are normalized away together by the replay-hash /
 boundary-compare paths (`strip_queue_active_frontmatter`,
 `strip_route_queue_state_for_boundary_compare`), so a legacy `queue_active:` and
 a migrated `queue: start|stop` compare equal and do not regenerate the

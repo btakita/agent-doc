@@ -3752,7 +3752,9 @@ mod tests {
         assert!(!updated.contains("preset #spec-test-build-install-commit-push"));
         assert!(!updated.contains("[#crossdocpend]"));
         assert!(!updated.contains("[#spfxnorm]"));
-        assert!(updated.contains("queue: stop"));
+        // #queuestopretire: the `auto` gesture activated the queue and it
+        // drained, so the control is cleared rather than written as `stop`.
+        assert!(!updated.contains("queue: stop") && !updated.contains("queue_active:"));
 
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()

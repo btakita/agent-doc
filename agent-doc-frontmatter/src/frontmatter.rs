@@ -2149,6 +2149,26 @@ pub fn merge_queue_state(content: &str, active: bool) -> Result<String> {
     write_preserving(content, &fm, body)
 }
 
+/// `#queuestopretire`: a DRAIN (no live heads left) removes the queue control
+/// instead of writing `queue: stop`. A queue with no control is in its default
+/// `go` mode (`#queuegodefault`), and an empty queue has nothing to run, so the
+/// cleared state is idle until a head is added — and then it simply runs,
+/// without the stale `stop` that wedged GH #79. An operator `pause` is kept
+/// (`#queueeditgo`). A HALT with heads left still uses [`merge_queue_state`].
+pub fn clear_queue_control(content: &str) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
+    let paused = fm
+        .queue
+        .as_deref()
+        .is_some_and(|queue| queue.trim().eq_ignore_ascii_case("pause"));
+    if paused {
+        return merge_queue_state(content, false);
+    }
+    fm.queue = None;
+    fm.queue_active = None;
+    write_preserving(content, &fm, body)
+}
+
 /// Persist an explicit canonical `queue:` control value, clearing the deprecated
 /// `queue_active:` line so the queue marker/frontmatter binding has one written
 /// frontmatter source.
@@ -3131,6 +3151,26 @@ mod tests {
 
         let pause = merge_queue_control("---\nqueue: go\n---\n\nbody\n", "pause").unwrap();
         assert!(pause.contains("queue: pause"), "{pause}");
+    }
+
+    #[test]
+    fn clear_queue_control_removes_both_spellings_but_keeps_pause() {
+        // #queuestopretire: a drain leaves no control, so the queue reads as its
+        // default `go` and an added head runs without a stale `stop`.
+        for doc in [
+            "---\nagent_doc_format: template\nqueue: start\n---\n\nbody\n",
+            "---\nagent_doc_format: template\nqueue: go\n---\n\nbody\n",
+            "---\nagent_doc_format: template\nqueue_active: true\n---\n\nbody\n",
+        ] {
+            let cleared = clear_queue_control(doc).unwrap();
+            assert_eq!(cleared, "---\nagent_doc_format: template\n---\n\nbody\n");
+            let (fm, _) = parse(&cleared).unwrap();
+            assert_eq!(fm.queue, None);
+            assert_eq!(fm.queue_active, None);
+        }
+        let paused = "---\nagent_doc_format: template\nqueue: pause\n---\n\nbody\n";
+        let kept = clear_queue_control(paused).unwrap();
+        assert!(kept.contains("queue: pause"), "{kept}");
     }
 
     #[test]

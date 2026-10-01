@@ -294,7 +294,7 @@ pub fn route_via_authoritative_actor(
                 CloseoutBlockDispatchDecision::FailClosed => {
                     let reason = decision.route_terminal_reason();
                     anyhow::bail!(
-                        "authoritative actor generation {} for {} owns pane {} but route could not drain the active closeout before dispatch: {}",
+                        "authoritative actor generation {} for {} owns pane {} but route could not drain the active closeout before dispatch; this route was NOT queued: {}",
                         actor.record.generation,
                         file.display(),
                         dispatch_pane,

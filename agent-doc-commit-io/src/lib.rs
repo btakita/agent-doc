@@ -1637,8 +1637,19 @@ fn guard_committable_document_content(file: &Path, content: &str, stage: &str) -
     }
     agent_doc_template::guard_no_conversation_content_inside_tracked_components(content)
         .with_context(|| {
+            // GH #86: a refusal with no remedy strands the open cycle forever.
+            let remedy = match agent_doc_template::repair_response_welded_inside_backlog_item(
+                content,
+            ) {
+                Ok(Some(_)) => format!(
+                    "; run `agent-doc repair {}` to move the response welded into `agent:backlog` back into `agent:exchange`",
+                    file.display()
+                ),
+                Ok(None) => String::new(),
+                Err(err) => format!("; backlog weld repair is unavailable: {err:#}"),
+            };
             format!(
-                "commit refused semantically corrupt document {} at {stage}",
+                "commit refused semantically corrupt document {} at {stage}{remedy}",
                 file.display()
             )
         })

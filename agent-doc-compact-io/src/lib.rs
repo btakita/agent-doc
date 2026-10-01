@@ -704,6 +704,14 @@ fn run_in_controller_scoped(
     } else {
         replay_repaired_content
     };
+    let review_repaired_content = if let Some(repaired) =
+        agent_doc_template::repair_response_welded_inside_backlog_item(&review_repaired_content)?
+    {
+        agent_doc_ops_log_io::log_op(file, "compact_repaired_backlog_response_weld");
+        repaired
+    } else {
+        review_repaired_content
+    };
     let semantic_base_content = if let Some(repaired) =
         agent_doc_template::repair_duplicate_queue_prompt_scaffold_inside_queue(
             &review_repaired_content,

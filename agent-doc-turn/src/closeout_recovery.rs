@@ -471,10 +471,10 @@ pub fn blocked_closeout_recovery_command(decision: &CloseoutRecoveryDecision) ->
     let CloseoutRecoveryDecision::Blocked { recommended, .. } = decision else {
         return None;
     };
-    Some(
-        short_recovery_command_from_recommendation(recommended)
-            .unwrap_or_else(|| recommended.clone()),
-    )
+    // GH #86: only a real `agent-doc` invocation is an exact unblocker. Falling
+    // back to the whole recommendation presented prose ("resume durable
+    // checkpoint ...") as `recovery_command=` with `next_action=follow_unblocker`.
+    short_recovery_command_from_recommendation(recommended)
 }
 
 pub fn open_cycle_recovery_command(
@@ -483,7 +483,7 @@ pub fn open_cycle_recovery_command(
 ) -> String {
     let Some(state) = state else {
         return format!(
-            "the active closeout already owns {document}; keep the new route queued until its durable checkpoint reaches a terminal commit, without resubmitting finalize or write"
+            "the active closeout already owns {document}; wait for its durable checkpoint to reach a terminal commit, without resubmitting finalize or write"
         );
     };
     let phase = state.phase.as_str();
@@ -504,7 +504,7 @@ pub fn open_cycle_recovery_command(
         .unwrap_or_default();
     let continuation = match state.phase {
         CyclePhase::PreflightStarted => {
-            "the active response has not been captured yet; keep the new route queued behind its owner"
+            "the active response has not been captured yet; its owning turn must capture and commit it"
         }
         CyclePhase::ResponseCaptured => {
             "the response is already captured; retained write and commit recovery own the continuation"
@@ -841,6 +841,25 @@ pub fn closeout_recovery_decision_from_state(
     }
 
     let command = || recovery_command.unwrap_or_default().to_string();
+    // GH #86: a caller's blocker reason that names a runnable `agent-doc`
+    // command is the decision-specific remedy (for example the staleness window
+    // plus the exact rerun/start commands for an empty `preflight_started`
+    // cycle), strictly more actionable than the generic per-state text, so the
+    // `Blocked` arms lead with it and keep the document-anchored recommendation
+    // after it. A reason with no command is low-level evidence and stays out of
+    // route-visible text.
+    let blocked_recommendation = || {
+        let command = command();
+        match input
+            .blocker_reason
+            .map(str::trim)
+            .filter(|reason| short_recovery_command_from_recommendation(reason).is_some())
+        {
+            Some(reason) if command.is_empty() || reason.contains(&command) => reason.to_string(),
+            Some(reason) => format!("{reason}; {command}"),
+            None => command,
+        }
+    };
     match state {
         CloseoutRecoveryState::Clean => CloseoutRecoveryDecision::AlreadyCommitted,
         CloseoutRecoveryState::DirectResponsePatchback
@@ -861,23 +880,23 @@ pub fn closeout_recovery_decision_from_state(
             state,
             missing_proof: "open cycle must finish, be replayed, or be explicitly queued behind"
                 .to_string(),
-            recommended: command(),
+            recommended: blocked_recommendation(),
         },
         CloseoutRecoveryState::MissingResponseBody => CloseoutRecoveryDecision::Blocked {
             state,
             missing_proof: "captured response body presence or supersession proof".to_string(),
-            recommended: command(),
+            recommended: blocked_recommendation(),
         },
         CloseoutRecoveryState::EscapedTemplatePatch => CloseoutRecoveryDecision::Blocked {
             state,
             missing_proof: "unescaped patchback blocks that can be applied safely".to_string(),
-            recommended: command(),
+            recommended: blocked_recommendation(),
         },
         CloseoutRecoveryState::UnsafeUserContentDrift => CloseoutRecoveryDecision::Blocked {
             state,
             missing_proof: "proof that visible user-authored content is metadata-only drift"
                 .to_string(),
-            recommended: command(),
+            recommended: blocked_recommendation(),
         },
     }
 }
@@ -1193,7 +1212,7 @@ mod tests {
             None
         );
         for (state, name, needle) in [
-            (OpenCycle, "open_cycle", "keep the new route queued"),
+            (OpenCycle, "open_cycle", "wait for its durable checkpoint"),
             (
                 MissingResponseBody,
                 "missing_response_body",
@@ -1311,6 +1330,69 @@ mod tests {
             short_recovery_command_from_recommendation(mixed).as_deref(),
             Some("agent-doc reset --from-current --preserve-session /path/session.md")
         );
+    }
+
+    #[test]
+    fn gh86_blocked_arms_keep_the_callers_blocker_reason() {
+        let blocker = "empty preflight_started cycle has no response capture; wait until it is stale or rerun `agent-doc /abs/318.md`";
+        let decision = closeout_recovery_decision_from_state(
+            CloseoutRecoveryState::OpenCycle,
+            CloseoutRecoveryDecisionInput {
+                prompt_context_available: false,
+                blocker_reason: Some(blocker),
+                stale_capture_supersession_proof: None,
+            },
+            Some("resume durable checkpoint cycle=c phase=preflight_started"),
+        );
+        let CloseoutRecoveryDecision::Blocked { recommended, .. } = &decision else {
+            panic!("open cycle must stay blocked: {decision:?}");
+        };
+        assert!(recommended.starts_with(blocker), "{recommended}");
+        assert!(recommended.contains("resume durable checkpoint"), "{recommended}");
+        assert_eq!(
+            blocked_closeout_recovery_command(&decision).as_deref(),
+            Some("agent-doc /abs/318.md")
+        );
+    }
+
+    #[test]
+    fn gh86_blocker_reason_without_a_command_stays_evidence_only() {
+        let decision = closeout_recovery_decision_from_state(
+            CloseoutRecoveryState::OpenCycle,
+            CloseoutRecoveryDecisionInput {
+                prompt_context_available: false,
+                blocker_reason: Some("captured response baseline no longer matches"),
+                stale_capture_supersession_proof: None,
+            },
+            Some("resume durable checkpoint cycle=c"),
+        );
+        let CloseoutRecoveryDecision::Blocked { recommended, .. } = &decision else {
+            panic!("open cycle must stay blocked: {decision:?}");
+        };
+        assert_eq!(recommended, "resume durable checkpoint cycle=c");
+    }
+
+    #[test]
+    fn gh86_prose_recommendation_is_not_an_exact_unblocker() {
+        let prose = CloseoutRecoveryDecision::Blocked {
+            state: CloseoutRecoveryState::OpenCycle,
+            missing_proof: "open cycle".to_string(),
+            recommended: open_cycle_recovery_command(
+                "tasks/doc.md",
+                Some(&OpenCycleRecoveryCommandInput {
+                    cycle_id: "cycle-1".to_string(),
+                    phase: CyclePhase::PreflightStarted,
+                    target: None,
+                    has_pending_mutations: true,
+                    capture_id: None,
+                }),
+            ),
+        };
+        assert_eq!(blocked_closeout_recovery_command(&prose), None);
+        let CloseoutRecoveryDecision::Blocked { recommended, .. } = &prose else {
+            unreachable!()
+        };
+        assert!(!recommended.contains("queued"), "{recommended}");
     }
 
     #[test]

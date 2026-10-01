@@ -710,6 +710,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         if inline_boundary_repaired_doc != doc_content {
             return Ok(RepairOutcome::TemplateNormalized);
         }
+        let backlog_weld_repaired_doc =
+            repair_backlog_response_weld_if_needed(effects.repair_io_effects, file, &doc_content)?;
+        if backlog_weld_repaired_doc != doc_content {
+            return Ok(RepairOutcome::TemplateNormalized);
+        }
         let has_live_prompt =
             agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?.is_present();
         if !has_live_prompt {
@@ -1823,6 +1828,47 @@ fn repair_inline_boundary_fragmentation_if_needed(
     );
     eprintln!(
         "[repair] restored a fragmented prompt/response boundary in {}",
+        file.display()
+    );
+    Ok(settled)
+}
+
+/// GH #86: a response turn welded into an `agent:backlog` row makes the
+/// document uncommittable, so the open cycle can never close and every route
+/// fails closed. The repair moves only binary-authored scaffold bytes, so like
+/// inline boundary fragmentation it runs before the live-steering guard.
+fn repair_backlog_response_weld_if_needed(
+    effects: &impl RepairTemplateWriteEffects,
+    file: &Path,
+    doc_content: &str,
+) -> Result<String> {
+    let Some(repaired) =
+        agent_doc_template::repair_response_welded_inside_backlog_item(doc_content)?
+    else {
+        return Ok(doc_content.to_string());
+    };
+    let settled = effects.atomic_write_if_current(
+        file,
+        &repaired,
+        doc_content,
+        "repair_backlog_response_weld",
+    )?;
+    anyhow::ensure!(
+        settled == repaired,
+        "[repair] backlog response weld repair for {} returned a non-exact authority cut",
+        file.display(),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "repair_backlog_response_weld file={} prior_hash={} repaired_hash={}",
+            file.display(),
+            agent_doc_hash::content_hash(doc_content),
+            agent_doc_hash::content_hash(&settled),
+        ),
+    );
+    eprintln!(
+        "[repair] moved a response welded into an agent:backlog item back into agent:exchange in {}",
         file.display()
     );
     Ok(settled)

@@ -475,6 +475,139 @@ pub fn repair_exchange_proven_response_scaffold_inside_review(doc: &str) -> Resu
     Ok(Some(repaired))
 }
 
+fn is_tracked_item_row(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("- [")
+        && trimmed.get(3..5).is_some_and(|mark| mark.ends_with(']'))
+        && trimmed.contains("[#")
+}
+
+/// Move one binary response turn welded into an `agent:backlog` item back into
+/// `agent:exchange` (GH #86).
+///
+/// The weld shape is a tracked row with its newline lost and a `### Re:`
+/// response (with its `> **Queue prompt:**` quote) appended to the row text:
+///
+/// ```text
+/// - [ ] 🚧 [#push] push### Re: push — model
+/// > **Queue prompt:** push
+/// ...rest of the response...
+/// ```
+///
+/// Commit correctly refuses that document, which left the cycle open forever
+/// with every route failing closed. The repair is byte-preserving: the row is
+/// restored to its own line (or dropped when the next row is its exact twin),
+/// and the welded turn moves verbatim into `exchange` at the boundary — or is
+/// dropped when `exchange` already holds the identical turn. It applies only
+/// when every binary scaffold marker in the component lies inside the single
+/// weld, the weld starts mid-row or at a line start, and the weld ends at the
+/// next tracked row or the component end; anything else stays fail-closed.
+pub fn repair_response_welded_inside_backlog_item(doc: &str) -> Result<Option<String>> {
+    let Ok(components) = element::parse(doc) else {
+        return Ok(None);
+    };
+    let Some(backlog) = components
+        .iter()
+        .find(|component| element::is_backlog_component(&component.name))
+    else {
+        return Ok(None);
+    };
+    if !components
+        .iter()
+        .any(|component| component.name == "exchange")
+    {
+        return Ok(None);
+    }
+
+    let code_ranges = element::find_code_ranges(doc);
+    let comment_ranges = element::find_non_agent_html_comment_ranges(doc);
+    let ignored = |position: usize| {
+        code_ranges
+            .iter()
+            .chain(comment_ranges.iter())
+            .any(|&(start, end)| position >= start && position < end)
+    };
+    let body = backlog.content(doc);
+    let live = |marker: &'static str| {
+        body.match_indices(marker)
+            .map(|(position, _)| position)
+            .filter(|position| !ignored(backlog.open_end + position))
+            .collect::<Vec<_>>()
+    };
+    let headings = live("### Re:");
+    if headings.is_empty() {
+        return Ok(None);
+    }
+    let markers: Vec<usize> = headings
+        .into_iter()
+        .chain(live("> **Queue prompt:**"))
+        .collect();
+    let Some(&start) = markers.iter().min() else {
+        return Ok(None);
+    };
+
+    let line_start = body[..start].rfind('\n').map_or(0, |index| index + 1);
+    let row_prefix = &body[line_start..start];
+    let welded_into_row = !row_prefix.trim().is_empty();
+    if welded_into_row && !is_tracked_item_row(row_prefix) {
+        return Ok(None);
+    }
+
+    let next_line = |from: usize| body[from..].find('\n').map_or(body.len(), |i| from + i + 1);
+    let mut end = body.len();
+    let mut cursor = next_line(start);
+    while cursor < body.len() {
+        let line_end = next_line(cursor);
+        let (line, _) = line_and_newline(&body[cursor..line_end]);
+        if is_tracked_item_row(line) {
+            end = cursor;
+            break;
+        }
+        cursor = line_end;
+    }
+    if markers.iter().any(|&position| position >= end) {
+        return Ok(None);
+    }
+
+    let weld = body[start..end].trim();
+    let after = &body[end..];
+    let next_row = after.lines().next().map(str::trim_end);
+    let mut repaired_body = String::with_capacity(body.len());
+    repaired_body.push_str(&body[..line_start]);
+    if welded_into_row && next_row != Some(row_prefix.trim_end()) {
+        repaired_body.push_str(row_prefix.trim_end());
+        repaired_body.push('\n');
+    }
+    repaired_body.push_str(after);
+    if !repaired_body.ends_with('\n') && !repaired_body.is_empty() {
+        repaired_body.push('\n');
+    }
+    let without_weld = backlog.replace_content(doc, &repaired_body);
+
+    let components =
+        element::parse(&without_weld).context("backlog weld repair broke component structure")?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .context("exchange component disappeared during backlog weld repair")?;
+    let exchange_body = exchange.content(&without_weld);
+    let repaired = if exchange_body.contains(weld) {
+        without_weld
+    } else if let Some(boundary_id) = find_boundary_in_component(&without_weld, exchange) {
+        exchange.append_with_boundary(&without_weld, weld, &boundary_id)
+    } else {
+        let new_content = if exchange_body.trim().is_empty() {
+            format!("{weld}\n")
+        } else {
+            format!("{}\n\n{weld}\n", exchange_body.trim_end())
+        };
+        exchange.replace_content(&without_weld, &new_content)
+    };
+    element::parse(&repaired).context("backlog weld repair broke component structure")?;
+    guard_no_conversation_content_inside_tracked_components(&repaired)?;
+    Ok(Some(repaired))
+}
+
 /// Repair only a provably duplicated binary queue-prompt quote scaffold that
 /// was stranded inside `agent:queue` by a torn editor/controller projection.
 ///
@@ -1422,6 +1555,99 @@ mod tests {
         let error = guard_no_conversation_content_inside_tracked_components(document)
             .expect_err("welded response debris must fail closed");
         assert!(error.to_string().contains("agent:review"));
+    }
+
+    const GH86_WELDED_BACKLOG: &str = concat!(
+        "<!-- agent:exchange -->\n",
+        "### Re: prior — gpt-5\n\n",
+        "Done.\n\n",
+        "Add the rule then push\n",
+        "<!-- agent:boundary:abc123 -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] 🚧 [#plcite] push### Re: push — fable-5\n",
+        "> **Queue prompt:** push\n\n",
+        "Pushed `main`.\n",
+        "- [ ] [#rotate-secrets] Rotate terminal secrets\n",
+        "<!-- /agent:backlog -->\n",
+    );
+
+    #[test]
+    fn gh86_response_welded_into_backlog_row_moves_back_into_exchange() {
+        guard_no_conversation_content_inside_tracked_components(GH86_WELDED_BACKLOG)
+            .expect_err("the GH #86 weld must fail the commit guard");
+
+        let repaired = repair_response_welded_inside_backlog_item(GH86_WELDED_BACKLOG)
+            .unwrap()
+            .expect("a single welded response turn should repair");
+
+        guard_no_conversation_content_inside_tracked_components(&repaired).unwrap();
+        let components = element::parse(&repaired).unwrap();
+        let backlog = components.iter().find(|c| c.name == "backlog").unwrap();
+        assert_eq!(
+            backlog.content(&repaired),
+            "- [ ] 🚧 [#plcite] push\n- [ ] [#rotate-secrets] Rotate terminal secrets\n"
+        );
+        let exchange = components.iter().find(|c| c.name == "exchange").unwrap();
+        let exchange_body = exchange.content(&repaired);
+        assert!(exchange_body.contains("Add the rule then push\n"));
+        assert!(exchange_body.contains(
+            "### Re: push — fable-5\n> **Queue prompt:** push\n\nPushed `main`."
+        ));
+        assert_eq!(repaired.matches("### Re: push").count(), 1);
+    }
+
+    #[test]
+    fn gh86_backlog_weld_drops_the_row_when_its_twin_follows() {
+        let document = GH86_WELDED_BACKLOG.replace(
+            "- [ ] [#rotate-secrets] Rotate terminal secrets\n",
+            "- [ ] 🚧 [#plcite] push\n",
+        );
+        let repaired = repair_response_welded_inside_backlog_item(&document)
+            .unwrap()
+            .expect("weld with a twin row should repair");
+        assert_eq!(repaired.matches("[#plcite] push").count(), 1);
+        guard_no_conversation_content_inside_tracked_components(&repaired).unwrap();
+    }
+
+    #[test]
+    fn gh86_backlog_weld_already_in_exchange_is_only_removed() {
+        let document = GH86_WELDED_BACKLOG.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            "### Re: push — fable-5\n> **Queue prompt:** push\n\nPushed `main`.\n",
+        );
+        let repaired = repair_response_welded_inside_backlog_item(&document)
+            .unwrap()
+            .expect("exchange-proven weld should repair");
+        assert_eq!(repaired.matches("### Re: push").count(), 1);
+        guard_no_conversation_content_inside_tracked_components(&repaired).unwrap();
+    }
+
+    #[test]
+    fn gh86_backlog_weld_with_a_second_scaffold_stays_fail_closed() {
+        let document = GH86_WELDED_BACKLOG.replace(
+            "<!-- /agent:backlog -->",
+            "### Re: other — fable-5\nmore\n<!-- /agent:backlog -->",
+        );
+        assert_eq!(
+            repair_response_welded_inside_backlog_item(&document).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn gh86_backlog_scaffold_inside_a_code_fence_is_not_a_weld() {
+        let document = concat!(
+            "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#plcite] example:\n",
+            "```\n### Re: x\n> **Queue prompt:** y\n```\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(
+            repair_response_welded_inside_backlog_item(document).unwrap(),
+            None
+        );
     }
 
     #[test]

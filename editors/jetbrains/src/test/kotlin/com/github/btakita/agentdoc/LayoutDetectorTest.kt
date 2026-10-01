@@ -57,6 +57,28 @@ class LayoutDetectorTest {
     }
 
     @Test
+    fun `buildColumnsFromSnapshots keeps unlaid-out splits apart instead of stacking them`() {
+        // GH #77: a JetBrains Remote Dev backend never lays the editor splitters out,
+        // so both splits report origin (0,0). Grouping by x folded them into one
+        // column, the controller kept only the first document, and tmux converged to
+        // a single pane swapped on every switch.
+        val columns = LayoutDetector.buildColumnsFromSnapshots(
+            listOf(
+                LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = "tasks/agent-doc/agent-doc.md"),
+                LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = "tasks/pmt2/mr/1109.md"),
+            )
+        )
+
+        assertEquals(
+            listOf(
+                LayoutColumn(listOf("tasks/agent-doc/agent-doc.md")),
+                LayoutColumn(listOf("tasks/pmt2/mr/1109.md")),
+            ),
+            columns,
+        )
+    }
+
+    @Test
     fun `stickyMarkdownForWindow prefers the live selection`() {
         assertEquals(
             "/repo/tasks/now.md",

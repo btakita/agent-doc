@@ -603,6 +603,14 @@ object LayoutDetector {
                 LOG.debug("[layout-detect] no .md file selected in any editor window; no layout to mirror")
                 return null
             }
+            if (sharesOrigin(snapshots)) {
+                // GH #77: surfaced at info so a live run shows whether this IDE lays its
+                // splitters out at all (a Remote Dev backend does not).
+                LOG.info(
+                    "[layout-detect] ${windows.size} editor windows share an origin; " +
+                        "geometry unavailable, keeping each window as its own column"
+                )
+            }
 
             val columns = buildColumnsFromSnapshots(snapshots)
             LOG.debug(
@@ -626,11 +634,25 @@ object LayoutDetector {
         }
     }
 
+    private fun sharesOrigin(snapshots: List<LayoutWindowSnapshot>): Boolean =
+        snapshots.groupBy { it.x to it.y }.any { (_, atOrigin) -> atOrigin.size > 1 }
+
     internal fun buildColumnsFromSnapshots(
         snapshots: List<LayoutWindowSnapshot>,
         columnTolerancePx: Int = COLUMN_X_TOLERANCE_PX,
     ): List<LayoutColumn> {
         if (snapshots.isEmpty()) return emptyList()
+
+        // GH #77: two editor windows can never share an on-screen origin in a laid-out
+        // split, so a shared origin means the IDE never laid the splitters out — a
+        // JetBrains Remote Dev backend reports every split at (0,0). Grouping that by x
+        // folded both splits into ONE column, the controller kept only its first agent
+        // doc, and the tmux layout converged to a single pane that was swapped on every
+        // document switch. Geometry is unavailable, so keep the windows apart, in window
+        // order, rather than inventing a vertical stack the operator never made.
+        if (sharesOrigin(snapshots)) {
+            return snapshots.map { LayoutColumn(listOfNotNull(it.file)) }
+        }
 
         val sorted = snapshots.sortedWith(compareBy<LayoutWindowSnapshot>({ it.x }, { it.y }))
         val grouped = mutableListOf<MutableList<LayoutWindowSnapshot>>()

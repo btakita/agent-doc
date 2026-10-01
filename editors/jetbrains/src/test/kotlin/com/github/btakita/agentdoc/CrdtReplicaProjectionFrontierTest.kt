@@ -193,8 +193,42 @@ class CrdtReplicaProjectionFrontierTest {
             "typed missing-membership recovery must wait for a truthful editor-replica receipt",
             deliveryBranch.contains("shouldReregisterForRemoteEventUtil(reasonToken)") &&
                 deliveryBranch.contains("refreshOpenDocumentReplicaForRecoveryAndWait(") &&
-                deliveryBranch.contains("if (reregistered) APPLY_APPLIED else APPLY_FAILED"),
+                deliveryBranch.contains("if (reregistered) {"),
         )
+        // #jbrejectlog: every refusal must name its cause in idea.log, because the
+        // controller only ever receives a bare `rejected` receipt.
+        assertTrue(
+            "admission refusals must log the cause from the shared reason helper",
+            deliveryBranch.contains("crdtRemoteAdmissionRejectReasonUtil(file, editorId, EditorIdentity.id)") &&
+                deliveryBranch.contains("deliver_crdt_remote rejected cause=\$cause"),
+        )
+        assertTrue(
+            "a re-register that did not attach must log before the rejected receipt",
+            deliveryBranch.contains("cause=reregister_not_attached"),
+        )
+        assertFalse(
+            "no silent editor_id early return may remain",
+            deliveryBranch.contains("if (!targetsThisEditorId(editorId)) return APPLY_FAILED"),
+        )
+    }
+
+    @Test
+    fun `crdt remote admission names each refusal cause`() {
+        assertEquals("missing_file", crdtRemoteAdmissionRejectReasonUtil(null, "jb-1", "jb-1"))
+        assertEquals("missing_editor_id", crdtRemoteAdmissionRejectReasonUtil("/a.md", null, "jb-1"))
+        // A dynamic plugin reload mints a new EditorIdentity.id; a controller still
+        // addressing the old id must be told apart from every other refusal.
+        assertEquals("editor_id_mismatch", crdtRemoteAdmissionRejectReasonUtil("/a.md", "jb-old", "jb-new"))
+        assertEquals(null, crdtRemoteAdmissionRejectReasonUtil("/a.md", "jb-1", "jb-1"))
+    }
+
+    @Test
+    fun `recovery re-register names the missing editor state`() {
+        assertEquals("project_disposed", replicaRecoveryCaptureMissReasonUtil(true, false, false, false))
+        assertEquals("no_replica_manager", replicaRecoveryCaptureMissReasonUtil(false, false, true, true))
+        assertEquals("file_not_found", replicaRecoveryCaptureMissReasonUtil(false, true, false, false))
+        assertEquals("no_document", replicaRecoveryCaptureMissReasonUtil(false, true, true, false))
+        assertEquals(null, replicaRecoveryCaptureMissReasonUtil(false, true, true, true))
     }
 
     /**

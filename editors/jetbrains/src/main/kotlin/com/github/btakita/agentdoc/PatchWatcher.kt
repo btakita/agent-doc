@@ -357,7 +357,10 @@ class PatchWatcher(private val project: Project) : Disposable {
      * `#ipcpluginalready`.
      */
     private fun handleSocketMessageV2(json: String): Int {
-        val type = extractStringField(json, "type") ?: return 0
+        val type = extractStringField(json, "type") ?: run {
+            LOG.warn("[socket] message rejected cause=missing_type")
+            return 0
+        }
 
         return when (type) {
             // `ApplyStructuralOp` (CRDT structural ops, `#crdtstructops` Phase C)
@@ -495,10 +498,20 @@ class PatchWatcher(private val project: Project) : Disposable {
                 }
             }
             EditorIntent.DeliverCrdtRemote.token -> {
-                val file = extractStringField(json, "file") ?: return APPLY_FAILED
+                val file = extractStringField(json, "file")
                 val editorId = extractStringField(json, "editor_id")
-                if (!targetsThisEditorId(editorId)) return APPLY_FAILED
                 val reasonToken = extractStringField(json, "reason")
+                // #jbrejectlog: the controller only sees a bare `rejected` receipt,
+                // so every refusal names its cause here.
+                crdtRemoteAdmissionRejectReasonUtil(file, editorId, EditorIdentity.id)?.let { cause ->
+                    LOG.warn(
+                        "[socket] deliver_crdt_remote rejected cause=$cause file=${file ?: "-"} " +
+                            "reason=${reasonToken ?: "-"} editor_id=${editorId ?: "-"} " +
+                            "this_editor_id=${EditorIdentity.id}",
+                    )
+                    return APPLY_FAILED
+                }
+                if (file == null) return APPLY_FAILED
                 // #editorreplicareregister: a reliable editor can outlive its relay
                 // membership. Only this typed recovery event republishes the current
                 // editor-owned buffer; routine projection wakeups remain drain-only.
@@ -529,7 +542,15 @@ class PatchWatcher(private val project: Project) : Disposable {
                 // controller event needs. Refreshing through recordDocumentActivity here
                 // queued a second pull for every delivery signal.
                 TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "socket-crdt-remote")
-                if (reregistered) APPLY_APPLIED else APPLY_FAILED
+                if (reregistered) {
+                    APPLY_APPLIED
+                } else {
+                    LOG.warn(
+                        "[socket] deliver_crdt_remote rejected cause=reregister_not_attached file=$file " +
+                            "reason=${reasonToken ?: "-"}",
+                    )
+                    APPLY_FAILED
+                }
             }
             EditorIntent.RefreshVcs.token -> {
                 recordProjectSurfaceOps("vcs_refresh", "refresh_vcs", "commit_vcs_refresh", "triggered")

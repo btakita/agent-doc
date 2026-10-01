@@ -195,6 +195,39 @@ internal fun registerFailureNeedsLivenessRepublishUtil(reason: String?): Boolean
 
 internal const val STALE_ENDPOINT_REGISTER_RETRY_MS = 1_000L
 
+/**
+ * #jbrejectlog: name why a `deliver_crdt_remote` event is refused before any
+ * replica work runs, or null when it is admitted. The receipt the controller
+ * sees is a bare `rejected`, so the plugin log is the only place this can be read.
+ */
+internal fun crdtRemoteAdmissionRejectReasonUtil(
+    file: String?,
+    editorId: String?,
+    thisEditorId: String,
+): String? = when {
+    file == null -> "missing_file"
+    editorId == null -> "missing_editor_id"
+    editorId != thisEditorId -> "editor_id_mismatch"
+    else -> null
+}
+
+/**
+ * #jbrejectlog: name which piece of editor state a recovery re-register could
+ * not capture, or null when everything it needs is present.
+ */
+internal fun replicaRecoveryCaptureMissReasonUtil(
+    projectDisposed: Boolean,
+    managerPresent: Boolean,
+    filePresent: Boolean,
+    documentPresent: Boolean,
+): String? = when {
+    projectDisposed -> "project_disposed"
+    !managerPresent -> "no_replica_manager"
+    !filePresent -> "file_not_found"
+    !documentPresent -> "no_document"
+    else -> null
+}
+
 /** Only the controller's typed missing-membership recovery may republish editor state. */
 internal fun shouldReregisterForRemoteEventUtil(reasonToken: String?): Boolean =
     reasonToken == "editor_replica_reregister"
@@ -4083,14 +4116,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             reason: String,
         ): Boolean {
             var captured: Triple<CrdtReplicaManager, String, Document>? = null
+            var captureMiss: String? = null
             val captureOnEdt = {
-                if (!project.isDisposed) {
-                    val manager = instances[project]
-                    val file = LocalFileSystem.getInstance().findFileByPath(filePath)
-                    val document = file?.let { FileDocumentManager.getInstance().getDocument(it) }
-                    if (manager != null && file != null && document != null) {
-                        captured = Triple(manager, file.path, document)
-                    }
+                val disposed = project.isDisposed
+                val manager = if (disposed) null else instances[project]
+                val file = if (disposed) null else LocalFileSystem.getInstance().findFileByPath(filePath)
+                val document = file?.let { FileDocumentManager.getInstance().getDocument(it) }
+                captureMiss = replicaRecoveryCaptureMissReasonUtil(
+                    projectDisposed = disposed,
+                    managerPresent = manager != null,
+                    filePresent = file != null,
+                    documentPresent = document != null,
+                )
+                if (manager != null && file != null && document != null) {
+                    captured = Triple(manager, file.path, document)
                 }
             }
 
@@ -4108,7 +4147,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 return false
             }
 
-            val (manager, resolvedFilePath, document) = captured ?: return false
+            val (manager, resolvedFilePath, document) = captured ?: run {
+                // #jbrejectlog: with no manager there is no manager log, so this
+                // miss used to return a bare rejected receipt and log nothing.
+                com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java).warn(
+                    "[crdt-replica] recovery re-register rejected for $filePath reason=$reason " +
+                        "cause=${captureMiss ?: "capture_not_run"} receipt=not_attached",
+                )
+                return false
+            }
             val fileName = File(resolvedFilePath).name
             if (!manager.beginProjectionRecoveryReregister(resolvedFilePath)) {
                 manager.log.info(

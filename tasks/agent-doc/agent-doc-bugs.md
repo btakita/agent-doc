@@ -225,6 +225,27 @@ The CI run for `dd8bb1eff` is still in progress.
 Exchange is 173 lines (accretion warn); queue is active, so I'm continuing to drain.
 
 Next queue head: `do [#gh76secondary]`, then `#release`, which is pinned last.
+
+### Re: do [#gh76secondary] — the stale_plugin remedy now reads the on-disk install; `stash-` was tmux's flag — opus-5.5 · 2026-09-30T22:45-04:00
+
+> **Queue prompt:** do [#gh76secondary]
+
+**Version mismatch: fixed** (`agent-doc` `72bbb3cdf`, installed).
+
+The `stale_plugin` warning always said "update to {expected} and restart" without checking what was on disk. In #76 the disk held 0.2.451, so a restart could never reach 0.2.453. The warning now reads the newest installed JetBrains jar:
+- **Disk behind the expected version:** it names the on-disk version, says a restart alone can't reach parity, and gives `agent-doc plugin install jetbrains` (or `--local`) followed by a restart.
+- **Disk already at the expected version:** it says the build is already installed. It tells you to restart only and **not** reinstall.
+- **Disk version unknown:** it keeps the old generic remedy.
+
+To support this, the JetBrains plugin-dir discovery and installed-jar scan moved into `agent-doc-fs::jetbrains_install`. The installer, the activation probe and this warning now share one implementation, re-exported from `plugin`/`plugin_activation`.
+
+**`stash-` window: not a defect.** tmux's default `list-windows` output appends the window flags, and `-` marks the last window. `#{window_name}` is `stash` (`1 name=stash flags=-`), so no rename was missing. The pane count is just what the stash holds. It is 10 now.
+
+**Verification:** `make check` passed (exit 0; nextest 10278/10278, 259 skipped). The new test `stale_plugin_remedy_follows_the_on_disk_install` covers all three cases and the production core path. I posted a follow-up comment on GH #76. The CI run for `72bbb3cdf` is still in progress.
+
+Exchange is about 200 lines (accretion warn). The queue is still active.
+
+Next queue head: `:pin: #release`.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -235,7 +256,8 @@ Next queue head: `do [#gh76secondary]`, then `#release`, which is pinned last.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/73~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/74~~- ~~#gh-fix https://github.com/btakita/agent-doc/issues/75~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/74~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/75~~
 - ~~Do the "things you need from me"~~
 - ~~do [#refusalsteeringverbatim]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/76~~
@@ -244,13 +266,12 @@ Next queue head: `do [#gh76secondary]`, then `#release`, which is pinned last.
 - ~~do [#queueselectreversed]~~
 - ~~do [#releaseskipcarried]~~
 - ~~do [#supdrainyieldfalsifiable]~~
-- do [#gh76secondary]
+- ~~do [#gh76secondary]~~
 - :pin: #release
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#gh76secondary] [agent-doc] GH #76 leftovers: stale_plugin expects 0.2.453 while the installer leaves 0.2.451 on disk (install vs expected-version disagree); full sync left window 0:1 named 'stash-' holding 19 panes instead of renaming to 'stash'.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

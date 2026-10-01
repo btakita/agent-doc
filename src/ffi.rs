@@ -74,10 +74,24 @@ static SYNC_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 static SYNC_LOCK_ACQUIRED_AT_MS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+/// The plugin callback one IPC listener dispatches to.
+type IpcHandler = std::sync::Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// Swappable handler slot shared by a listener thread and its registry entry.
+type IpcHandlerSlot = std::sync::Arc<parking_lot::RwLock<IpcHandler>>;
+
 struct IpcListenerGeneration {
     root: PathBuf,
     shutdown: std::sync::Arc<AtomicBool>,
     thread: std::thread::JoinHandle<()>,
+    handler: IpcHandlerSlot,
+}
+
+/// `#jbstalecallback`: route a message through the slot's CURRENT handler, so
+/// a restart against a live listener takes effect on the next message.
+fn dispatch_ipc_message(slot: &IpcHandlerSlot, message: &str) -> Option<String> {
+    let handler = std::sync::Arc::clone(&slot.read());
+    handler(message)
 }
 
 static IPC_LISTENER_GENERATIONS: std::sync::LazyLock<
@@ -766,11 +780,31 @@ where
     let mut generations = IPC_LISTENER_GENERATIONS.lock();
     if let Some(existing) = generations.remove(&root_str) {
         if !existing.thread.is_finished() {
+            // `#jbstalecallback`: a running listener used to make this call a
+            // silent no-op, so after a dynamic plugin reload the RETIRED
+            // classloader's callback kept answering the socket -- with its own
+            // editor id and code (2026-10-01: `deliver_crdt_remote rejected
+            // cause=editor_id_mismatch` from IDE pid 2960722 for minutes after a
+            // reload). The newest caller owns the socket, so swap its handler in.
+            *existing.handler.write() = std::sync::Arc::new(handler);
+            agent_doc_ops_log_io::log_op(
+                &existing.root,
+                &format!(
+                    "ipc_listener_handler_replaced root={} label={label} reason=listener_already_running",
+                    existing.root.display()
+                ),
+            );
             generations.insert(root_str, existing);
             return 1;
         }
-        let _ = existing.thread.join();
+        if existing.thread.join().is_err() {
+            eprintln!("[ffi] previous IPC listener for {root_str} panicked");
+        }
     }
+    let handler: IpcHandlerSlot = std::sync::Arc::new(parking_lot::RwLock::new(
+        std::sync::Arc::new(handler) as IpcHandler,
+    ));
+    let thread_handler = std::sync::Arc::clone(&handler);
 
     let root = PathBuf::from(&root_str);
     let thread_root = root.clone();
@@ -781,7 +815,7 @@ where
         .spawn(move || {
             let result = agent_doc_ipc_io::start_listener_with_logger_until(
                 &thread_root,
-                handler,
+                move |message: &str| dispatch_ipc_message(&thread_handler, message),
                 agent_doc_ops_log_io::log_op,
                 thread_shutdown,
             );
@@ -801,6 +835,7 @@ where
             root,
             shutdown,
             thread,
+            handler,
         },
     );
     1
@@ -5547,6 +5582,69 @@ mod ack_content_tests {
         assert!(
             log_str.contains("agent-doc(session):"),
             "git log should contain agent-doc commit, got:\n{log_str}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod ipc_listener_handler_swap_tests {
+    use super::*;
+
+    #[test]
+    fn dispatch_uses_the_handler_installed_last() {
+        let slot: IpcHandlerSlot =
+            std::sync::Arc::new(parking_lot::RwLock::new(std::sync::Arc::new(|_: &str| {
+                Some("retired".to_string())
+            }) as IpcHandler));
+        assert_eq!(
+            dispatch_ipc_message(&slot, "{}").as_deref(),
+            Some("retired")
+        );
+        *slot.write() = std::sync::Arc::new(|_: &str| Some("current".to_string()));
+        assert_eq!(
+            dispatch_ipc_message(&slot, "{}").as_deref(),
+            Some("current")
+        );
+    }
+
+    /// `#jbstalecallback`: a second start against a live listener (a reloaded
+    /// plugin generation) must take over the socket instead of being ignored.
+    #[test]
+    fn restarting_a_live_listener_routes_to_the_new_handler() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let root_str = root.to_string_lossy().into_owned();
+
+        let retired = r#"{"type":"receipt","status":"rejected"}"#;
+        let current = r#"{"type":"receipt","status":"applied"}"#;
+        assert_eq!(
+            spawn_ipc_listener(root_str.clone(), "v2", move |_| Some(retired.to_string())),
+            1
+        );
+        assert_eq!(
+            spawn_ipc_listener(root_str.clone(), "v2", move |_| Some(current.to_string())),
+            1
+        );
+
+        let mut response = None;
+        for _ in 0..200 {
+            if let Ok(Some(reply)) =
+                agent_doc_ipc_io::send_message(&root, &serde_json::json!({ "type": "refresh_vcs" }))
+            {
+                response = Some(reply);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(stop_ipc_listener_generation(
+            &root_str,
+            std::time::Duration::from_secs(7)
+        ));
+        let response = response.expect("listener never answered");
+        assert!(
+            response.contains("\"applied\""),
+            "the retired handler still answered: {response}"
         );
     }
 }

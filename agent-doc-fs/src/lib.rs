@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::path::{Component, Path, PathBuf};
 
 pub mod install_freshness;
+pub mod jetbrains_install;
 pub mod plugin_jar;
 pub mod rotating_log;
 

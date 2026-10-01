@@ -434,70 +434,9 @@ fn release_version(release: &Value) -> &str {
 
 // --- JetBrains ---
 
-pub(crate) fn jetbrains_plugin_dirs() -> Vec<PathBuf> {
-    let home = match std::env::var("HOME") {
-        Ok(h) => PathBuf::from(h),
-        Err(_) => return vec![],
-    };
-
-    let search_roots = if cfg!(target_os = "macos") {
-        vec![home.join("Library/Application Support/JetBrains")]
-    } else {
-        vec![
-            std::env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".local/share"))
-                .join("JetBrains"),
-        ]
-    };
-
-    jetbrains_plugin_dirs_in_roots(&search_roots)
-}
-
-fn jetbrains_plugin_dirs_in_roots(search_roots: &[PathBuf]) -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    for root in search_roots {
-        if let Ok(entries) = fs::read_dir(root) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = entry.file_name();
-                if !path.is_dir() || !is_jetbrains_ide_data_dir(&name.to_string_lossy()) {
-                    continue;
-                }
-                let plugins = path.join("plugins");
-                if plugins.is_dir() {
-                    dirs.push(plugins);
-                } else {
-                    // Modern IDEs commonly expose the product-version data root itself as
-                    // `idea.plugins.path`.
-                    dirs.push(path);
-                }
-            }
-        }
-    }
-    dirs.sort();
-    dirs.dedup();
-    dirs
-}
-
-fn is_jetbrains_ide_data_dir(name: &str) -> bool {
-    const PRODUCTS: &[&str] = &[
-        "Aqua",
-        "CLion",
-        "DataGrip",
-        "GoLand",
-        "IdeaIC",
-        "IntelliJIdea",
-        "PhpStorm",
-        "PyCharm",
-        "Rider",
-        "RubyMine",
-        "RustRover",
-        "WebStorm",
-    ];
-    name.chars().any(|ch| ch.is_ascii_digit())
-        && PRODUCTS.iter().any(|product| name.starts_with(product))
-}
+pub(crate) use agent_doc_fs::jetbrains_install::jetbrains_plugin_dirs;
+#[cfg(test)]
+use agent_doc_fs::jetbrains_install::{is_jetbrains_ide_data_dir, jetbrains_plugin_dirs_in_roots};
 
 fn choose_plugins_dir_with_interactivity(
     dirs: &[PathBuf],

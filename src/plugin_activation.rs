@@ -38,16 +38,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// The newest installed plugin artifact found under one IDE plugins directory.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InstalledPluginArtifact {
-    /// The jar itself, e.g. `…/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.35.400.jar`.
-    pub path: PathBuf,
-    /// Version parsed from the jar filename.
-    pub version: String,
-    /// When the jar was written — the moment the install landed.
-    pub modified: SystemTime,
-}
+pub use agent_doc_fs::jetbrains_install::InstalledPluginArtifact;
 
 /// A live JetBrains IDE process.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,36 +169,7 @@ pub fn classify_activation(
     }
 }
 
-/// Newest installed `agent-doc-jetbrains-<version>.jar` across `plugins_dirs`.
-pub fn newest_installed_artifact(plugins_dirs: &[PathBuf]) -> Option<InstalledPluginArtifact> {
-    plugins_dirs
-        .iter()
-        .flat_map(|dir| installed_artifacts_in(dir))
-        .max_by_key(|artifact| artifact.modified)
-}
-
-fn installed_artifacts_in(plugins_dir: &Path) -> Vec<InstalledPluginArtifact> {
-    let lib_dir = plugins_dir.join("agent-doc-jetbrains/lib");
-    let Ok(entries) = std::fs::read_dir(&lib_dir) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let version = name
-                .strip_prefix("agent-doc-jetbrains-")?
-                .strip_suffix(".jar")?
-                .to_string();
-            let modified = entry.metadata().ok()?.modified().ok()?;
-            Some(InstalledPluginArtifact {
-                path: entry.path(),
-                version,
-                modified,
-            })
-        })
-        .collect()
-}
+pub use agent_doc_fs::jetbrains_install::newest_installed_artifact;
 
 /// Every live JetBrains IDE process, with an OS-derived start time.
 ///
@@ -273,11 +235,8 @@ fn mapped_plugin_version(pid: u32) -> Option<String> {
 #[cfg(target_os = "linux")]
 fn process_maps_jetbrains_runtime(pid: u32) -> bool {
     const RUNTIME_MARKERS: &[&str] = &["/JetBrains", "/jetbrains", "/jbr/", "/idea"];
-    std::fs::read_to_string(format!("/proc/{pid}/maps")).is_ok_and(|maps| {
-        RUNTIME_MARKERS
-            .iter()
-            .any(|marker| maps.contains(*marker))
-    })
+    std::fs::read_to_string(format!("/proc/{pid}/maps"))
+        .is_ok_and(|maps| RUNTIME_MARKERS.iter().any(|marker| maps.contains(*marker)))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -571,7 +530,9 @@ mod tests {
 
         // Path-shaped and main-class matches prove themselves and must not be
         // sent through corroboration.
-        assert!(!jetbrains_ide_label_is_bare_product_name("/opt/idea/bin/idea"));
+        assert!(!jetbrains_ide_label_is_bare_product_name(
+            "/opt/idea/bin/idea"
+        ));
         assert!(!jetbrains_ide_label_is_bare_product_name(
             "/usr/lib/jvm/java-21/bin/java -cp x com.intellij.idea.Main"
         ));

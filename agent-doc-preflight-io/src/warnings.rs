@@ -339,8 +339,26 @@ pub fn stale_generation_side(running: &str, expected: &str) -> Option<StaleGener
 /// The single `stale_plugin` message body, shared by the preflight warning and
 /// the replay-boundary console line so an operator cannot be handed two
 /// different remedies for one mismatch.
-pub fn stale_plugin_message(kind: &str, running: &str, expected: &str) -> String {
+///
+/// `installed` is the on-disk installed plugin version, when it is known
+/// (`#gh76secondary`). A restart only loads what is on disk, so "update to
+/// {expected} and restart" is unreachable advice when the disk holds an older
+/// build, and redundant install advice when the disk already holds {expected}.
+pub fn stale_plugin_message(
+    kind: &str,
+    running: &str,
+    expected: &str,
+    installed: Option<&str>,
+) -> String {
     match stale_generation_side(running, expected) {
+        Some(StaleGenerationSide::Plugin) if installed.is_some_and(|v| v.trim() == expected) => {
+            format!(
+                "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The {expected} build is ALREADY installed on disk, so do not reinstall: restart/reload the IDE so the live process loads it (a long-lived JVM keeps the old plugin bytes mapped). `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot replace Kotlin/TypeScript plugin code or change the reported plugin version. A later live registration at {expected} or newer supersedes this warning."
+            )
+        }
+        Some(StaleGenerationSide::Plugin) if let Some(on_disk) = installed => format!(
+            "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with, and the on-disk install is {on_disk}, not {expected} — so a restart alone cannot reach parity. Install {expected} first (`agent-doc plugin install {kind}`, or `--local` from a build of this checkout), then restart/reload the IDE. `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot replace Kotlin/TypeScript plugin code or change the reported plugin version. A later live registration at {expected} or newer supersedes this warning."
+        ),
         Some(StaleGenerationSide::Plugin) => format!(
             "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The live editor may run pre-fix IPC/plugin code (a known source of live_prompt_drift / content_ours merge regressions). Install/update the {kind} plugin (JetBrains: update to {expected} and restart/reload the IDE; VS Code: reinstall the extension and reload the window). `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot replace Kotlin/TypeScript plugin code or change the reported plugin version. A later live registration at {expected} or newer supersedes this warning."
         ),
@@ -442,7 +460,12 @@ pub fn report_live_plugin_generation_refresh(file: &Path) {
         if status.stale {
             eprintln!(
                 "[editor] {}",
-                stale_plugin_message(&status.kind, &status.running, &status.expected),
+                stale_plugin_message(
+                    &status.kind,
+                    &status.running,
+                    &status.expected,
+                    installed_plugin_version(&status.kind).as_deref(),
+                ),
             );
         } else {
             eprintln!(
@@ -472,13 +495,25 @@ pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
     // Delegate to the pure core rather than re-deriving the message here: the
     // two bodies had drifted, so every message assertion in this module tested
     // text production never emitted.
-    stale_plugin_warnings_from_statuses(live_plugin_generation_statuses(file))
+    stale_plugin_warnings_from_statuses(
+        live_plugin_generation_statuses(file),
+        installed_plugin_version,
+    )
+}
+
+/// On-disk installed plugin version for `kind`; only JetBrains installs are
+/// discoverable from this side.
+pub fn installed_plugin_version(kind: &str) -> Option<String> {
+    kind.eq_ignore_ascii_case("jetbrains")
+        .then(agent_doc_fs::jetbrains_install::installed_jetbrains_plugin_version)
+        .flatten()
 }
 
 /// Shared tail of both `stale_plugin` entry points: one deduplicated warning per
 /// stale (kind, running-version) pair.
 fn stale_plugin_warnings_from_statuses(
     statuses: impl IntoIterator<Item = LivePluginGenerationStatus>,
+    installed_for_kind: impl Fn(&str) -> Option<String>,
 ) -> Vec<PreflightWarning> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
     statuses
@@ -489,7 +524,12 @@ fn stale_plugin_warnings_from_statuses(
             }
             Some(PreflightWarning {
                 code: "stale_plugin".to_string(),
-                message: stale_plugin_message(&status.kind, &status.running, &status.expected),
+                message: stale_plugin_message(
+                    &status.kind,
+                    &status.running,
+                    &status.expected,
+                    installed_for_kind(&status.kind).as_deref(),
+                ),
                 document_agent: None,
                 active_harness: None,
             })
@@ -504,16 +544,15 @@ pub fn stale_plugin_warnings_from_registrations(
     registrations: &[agent_doc_reliable_sync_io::liveness::EditorRegistration],
     expected_for_kind: impl Fn(&str) -> Option<&'static str>,
 ) -> Vec<PreflightWarning> {
-    stale_plugin_warnings_from_statuses(live_plugin_generation_statuses_from_registrations(
-        registrations,
-        &expected_for_kind,
-    ))
+    stale_plugin_warnings_from_statuses(
+        live_plugin_generation_statuses_from_registrations(registrations, &expected_for_kind),
+        |_| None,
+    )
 }
 
 pub use agent_doc_fs::plugin_jar::{
     MappedPluginJar, classify_mapped_plugin_jar, prefer_mapped_plugin_jar, probe_mapped_plugin_jar,
 };
-
 
 /// Pure core: one deduplicated warning per (kind, pid) running superseded bytes.
 ///
@@ -588,7 +627,6 @@ pub fn plugin_byte_identity_warnings_with_restart_verdicts(
     }
     warnings
 }
-
 
 /// `#pluginbyteidentity`: warn when a live editor is executing plugin bytes that
 /// the installed jar has already replaced.
@@ -811,9 +849,21 @@ mod tests {
             1_260,
         );
         assert_eq!(warning.code, "supervisor_drain_handoff_undrained");
-        assert!(warning.message.contains("21 min ago"), "{}", warning.message);
-        assert!(warning.message.contains("still undrained"), "{}", warning.message);
-        assert!(warning.message.contains("restart-supervisor"), "{}", warning.message);
+        assert!(
+            warning.message.contains("21 min ago"),
+            "{}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("still undrained"),
+            "{}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("restart-supervisor"),
+            "{}",
+            warning.message
+        );
     }
 
     #[test]
@@ -1174,7 +1224,7 @@ mod tests {
         let core = stale_plugin_warnings_from_registrations(&registrations, |_| Some("0.2.206"));
         let statuses =
             live_plugin_generation_statuses_from_registrations(&registrations, |_| Some("0.2.206"));
-        let shared = stale_plugin_warnings_from_statuses(statuses);
+        let shared = stale_plugin_warnings_from_statuses(statuses, |_| None);
         assert_eq!(core.len(), 1);
         assert_eq!(shared.len(), 1);
         assert_eq!(
@@ -1183,8 +1233,51 @@ mod tests {
         );
         assert_eq!(
             core[0].message,
-            stale_plugin_message("jetbrains", "0.2.205", "0.2.206")
+            stale_plugin_message("jetbrains", "0.2.205", "0.2.206", None)
         );
+    }
+
+    #[test]
+    fn stale_plugin_remedy_follows_the_on_disk_install() {
+        // `#gh76secondary`: the warning said "update to 0.2.453" while disk held
+        // 0.2.451, so following it could not reach parity even after a restart.
+        let behind = stale_plugin_message("jetbrains", "0.2.392", "0.2.453", Some("0.2.451"));
+        assert!(behind.contains("on-disk install is 0.2.451"), "{behind}");
+        assert!(
+            behind.contains("agent-doc plugin install jetbrains"),
+            "{behind}"
+        );
+        assert!(
+            behind.contains("restart alone cannot reach parity"),
+            "{behind}"
+        );
+
+        // Disk already current: restart, never reinstall.
+        let current = stale_plugin_message("jetbrains", "0.2.392", "0.2.453", Some("0.2.453"));
+        assert!(current.contains("ALREADY installed on disk"), "{current}");
+        assert!(current.contains("do not reinstall"), "{current}");
+
+        // Unknown install falls back to the generic remedy.
+        let unknown = stale_plugin_message("jetbrains", "0.2.392", "0.2.453", None);
+        assert!(unknown.contains("update to 0.2.453"), "{unknown}");
+
+        // The binary-stale side ignores the on-disk plugin.
+        assert_eq!(
+            stale_plugin_message("jetbrains", "0.2.454", "0.2.453", Some("0.2.451")),
+            stale_plugin_message("jetbrains", "0.2.454", "0.2.453", None),
+        );
+
+        // The production core threads the lookup into the message.
+        let statuses = vec![LivePluginGenerationStatus {
+            editor_id: Some("e".to_string()),
+            kind: "jetbrains".to_string(),
+            running: "0.2.392".to_string(),
+            expected: "0.2.453".to_string(),
+            timestamp_ms: 1,
+            stale: true,
+        }];
+        let warnings = stale_plugin_warnings_from_statuses(statuses, |_| Some("0.2.451".into()));
+        assert!(warnings[0].message.contains("on-disk install is 0.2.451"));
     }
 
     #[test]

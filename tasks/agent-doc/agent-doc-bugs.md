@@ -338,6 +338,31 @@ Fixed in agent-doc `21ad58344`, pushed. #84 is closed.
 - **Verified live:** this cycle's install reported "1 controller marked, 8 skipped", and haiven-dev logged `controller_recycle_skipped pid=818850 generation=2037 reason=install_fanout skip=binary_already_current`, with no handoff aborted.
 
 **Verification:** `make check` exit 0, 10304/10304 passed; JetBrains Java tests 3/3; `make install` done.
+
+### Re: #queuestopretire option 1 — a drain clears the queue control — opus-5.5 · 2026-10-01T14:59-04:00
+
+> **Queue prompt:** [#queuestopretire]: do option 1
+
+**Done: agent-doc `965257125`, pushed and installed.** The superproject pointer is `bbdae60efb`.
+
+**What changed.** When the queue drains (no live heads left), preflight now removes the control from both surfaces instead of writing `queue: stop`. The frontmatter `queue:` line is removed, and the marker token was already stripped. The empty queue is idle. When you add a head later, it runs in the default `go` and writes `queue: go`. A drain can no longer leave the stale `stop` behind GH #79.
+
+**What still writes `stop`:**
+- **A halt with heads left** (a `stop` marker, or an `item_modified` halt). Without the hold, the default `go` would re-dispatch the head the turn gave up on. Typed holds are option 2, which I left for later.
+- **An operator `pause`.** A drain keeps it.
+- **A drain that held backlog items back.** I found this case while implementing, and my earlier answer missed it. A queue with no control resolves to `go`, and the next cycle mirrors the whole `queue`-attr backlog into it. So clearing the control after a `start` drain would have turned it into a continuous backlog loop. When backlog ids were held out of the queue this cycle, the drain keeps `queue: stop`.
+
+**Tests:**
+- New: a drain clears the control, a second pass is idle and writes nothing, and an added head re-arms to `go`.
+- New: a `stop`-marker halt with heads left keeps `stop`.
+- New: `clear_queue_control` removes both spellings but keeps `pause`.
+- Extended: the held-backlog drain test now asserts `stop` is kept.
+- Updated: three tests that asserted the old drain-writes-`stop` behavior.
+- Spec: `specs/07` now describes the drain rule.
+
+**Verification:** `make check`: exit 0, 10307 passed. `make install`: OK. CI for `965257125` was still running at closeout.
+
+**Still open:** options 2 and 3 are now `#queueholdtyped`. Option 3 matters more now: every drained queue has no control, so a head you add later runs when you invoke the document, but the idle watch does not dispatch it on its own yet.
 <!-- agent:boundary:4df2c95c:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -354,14 +379,15 @@ Fixed in agent-doc `21ad58344`, pushed. #84 is closed.
 - ~~do https://github.com/btakita/agent-doc/issues/83~~
 - ~~do https://github.com/btakita/agent-doc/issues/84~~
 - ~~do [#jbstageonfail]~~
-- [#queuestopretire]: do option 1
+- ~~[#queuestopretire]: do option 1~~
 - When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.
 - release + publish
+- agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#queuestopretire] [agent-doc][decision] Retire the binary-written queue: stop now that a queue with no control defaults to go (operator question, 2026-10-01). Proposal: (1) a DRAIN (no live heads left) clears the control on both surfaces instead of writing stop; (2) a HALT with heads left writes a typed hold instead of a bare stop (pause, or a binary-owned 'halted' that a queue edit re-arms); (3) decide whether a queue with no control drains through the supervisor idle watch and the Codex Stop hook. Today preflight treats it as active, but drainable_head_count and required_continuation require an explicit control (kept that way in the GH #79 fix to avoid a silent behavior change). Code: agent-doc-queue/src/control_binding.rs, agent-doc-queue/src/queue_continuation.rs, the drain/clear path in agent-doc-preflight-io/src/lib.rs.
+- [ ] [#followqueuestopretireopt] [queueholdtyped] [agent-doc][decision] Follow-up to queuestopretire (options 2+3). (2) A HALT with heads left still writes a bare queue: stop; make it a typed hold (pause, or a binary-owned 'halted' that a queue edit re-arms). (3) Decide whether a queue with no control drains through the supervisor idle watch and the Codex Stop hook. After option 1 (agent-doc 965257125), every drained queue has no control, so (3) now covers every finished queue: an added head runs in-session through preflight, but nothing dispatches it unattended. Code: agent-doc-queue/src/control_binding.rs, agent-doc-queue/src/queue_continuation.rs, run_queue_maintenance in agent-doc-preflight-io/src/lib.rs.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and ### Re: sections. Close #19 when shipped.
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

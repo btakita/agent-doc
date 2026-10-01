@@ -2,6 +2,35 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.427
+
+- **Supervisor recycle churn stops (`#supdirstale`).** Staleness compared a supervisor's running
+  inode with the CLI's own binary, so with two launchable copies of one build (`~/.cargo/bin` and
+  `target/release` behind the `.bin/agent-doc` newest-build shim) a CLI on one copy flagged every
+  supervisor on the other — even a newer one — and requested a recycle at every turn stage. On
+  haiven-dev one supervisor re-exec'd three times in 2.5 minutes, each refusing preflight admission.
+  A supervisor is now stale only when its running bytes were unlinked or the installed build is
+  strictly newer; the controller-side check uses the existing directional comparison.
+- **The supervisor-drain hand-off is checked and recorded (GH #73).** `deferred_for_supervisor_drain`
+  is emitted only when the supervisor is live, heartbeating, and on the installed binary; otherwise a
+  new `supervisor_drain_unavailable` outcome reports the queue as STALLED with the remedy. A recorded
+  hand-off whose head is still queued 5 minutes later raises `supervisor_drain_handoff_undrained` at
+  preflight (`#supdrainlive`, `#supdrainyieldfalsifiable`).
+- **An edited, marker-annotated queue item no longer forks (GH #74).** A decoration-only change (an
+  agent `🚧`, a strike) on one side can no longer veto the other side's delete of a list child, in
+  both the per-cell merge and the keyed fallback — that resurrected the old copy beside the edited one.
+- **Preflight stops waiting forever on an unanswered editor re-register (GH #75).** Re-registering is
+  the primary repair for 45s; past that the supervisor-recycle fallback is requested once
+  (`#reregisterbound`). Divergence INTERRUPTs now relay operator steering that lives only in the
+  unmerged editor save, verbatim (`#refusalsteeringverbatim`).
+- **`editor_route` refuses a superseded editor up front (GH #76)** instead of burning its 125s await;
+  the mapped-plugin-jar probe moved into `agent-doc-fs` so controller and preflight share it.
+- **Settled-delivery resume ignores a converged write older than the capture's cycle**
+  (`#stopreplaynoopretained`) — it paired an open 20:09 capture with an 11:20 write.
+- **A save-pending write settles from a successor cut that carries it** (`#rebasedsavefalsefail`),
+  and `reliable-sync-status` reports decidable placement when no editor-surface observation exists
+  (GH #72).
+
 ## 0.35.426
 
 - **`session-check` waits out a converging `write_applied` again.** The settle window

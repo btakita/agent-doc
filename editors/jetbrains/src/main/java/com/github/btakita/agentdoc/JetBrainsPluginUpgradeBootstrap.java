@@ -54,7 +54,7 @@ public final class JetBrainsPluginUpgradeBootstrap {
                 vm.detach();
             }
             String result = Files.readString(status, StandardCharsets.UTF_8).trim();
-            if (result.startsWith("ok:") || result.startsWith("skip:")) {
+            if (result.startsWith("ok:") || result.startsWith("skip:") || result.startsWith("staged:")) {
                 System.out.println(result);
                 return;
             }

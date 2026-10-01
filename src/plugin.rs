@@ -663,6 +663,12 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
                 restart_required_message(&target_dir, &reason)
             );
         }
+        JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
+            eprintln!(
+                "WARNING: {}",
+                staged_for_restart_message(&target_dir, &reason)
+            );
+        }
         JetbrainsLocalInstallOutcome::Unchanged => {
             eprintln!(
                 "Plugin already byte-identical at {}; kept the live generation in place",
@@ -713,6 +719,13 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
             JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
                 installed += 1;
                 eprintln!("WARNING: {}", restart_required_message(target_dir, &reason));
+            }
+            JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
+                installed += 1;
+                eprintln!(
+                    "WARNING: {}",
+                    staged_for_restart_message(target_dir, &reason)
+                );
             }
             JetbrainsLocalInstallOutcome::Unchanged => {
                 unchanged += 1;
@@ -806,7 +819,25 @@ enum JetbrainsLocalInstallOutcome {
     RestartRequired {
         reason: String,
     },
+    /// `#jbstageonfail`: the dynamic upgrade failed, so the live IDE staged the
+    /// package for its next start and the jars it maps were left in place.
+    StagedForRestart {
+        reason: String,
+    },
     Unchanged,
+}
+
+/// What the restart-free upgrade did across the live JetBrains processes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum JetbrainsHotUpgrade {
+    Upgraded {
+        processes: usize,
+    },
+    /// No process accepted the hot-swap, but at least one staged the package
+    /// through its own pending-install script.
+    StagedForRestart {
+        reason: String,
+    },
 }
 
 /// GH #63: `--no-dynamic` turns the restart-free upgrade off for this process.
@@ -828,6 +859,13 @@ fn restart_required_message(target_dir: &Path, reason: &str) -> String {
     )
 }
 
+fn staged_for_restart_message(target_dir: &Path, reason: &str) -> String {
+    format!(
+        "The restart-free upgrade failed, so the running IDE staged the new plugin for its next start and the plugin files in {} were left in place ({reason}). Restart the IDE to load the new plugin.",
+        target_dir.display()
+    )
+}
+
 fn print_jetbrains_activation_outcome(outcome: JetbrainsLocalInstallOutcome) {
     match outcome {
         JetbrainsLocalInstallOutcome::Installed => {
@@ -839,6 +877,11 @@ fn print_jetbrains_activation_outcome(outcome: JetbrainsLocalInstallOutcome) {
         }
         JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
             eprintln!("WARNING: restart the IDE to load the new plugin ({reason}).");
+        }
+        JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
+            eprintln!(
+                "WARNING: the new plugin is staged for the next IDE start; restart the IDE to load it ({reason})."
+            );
         }
         JetbrainsLocalInstallOutcome::Unchanged => {
             eprintln!("No JetBrains restart is required; no installed plugin bytes changed.");
@@ -1033,7 +1076,7 @@ fn try_hot_upgrade_jetbrains(
     zip_path: &Path,
     target_dir: &Path,
     expected_version: &str,
-) -> Result<Option<usize>> {
+) -> Result<Option<JetbrainsHotUpgrade>> {
     let pids = live_jetbrains_ide_pids()?;
     if pids.is_empty() {
         return Ok(None);
@@ -1051,6 +1094,7 @@ fn try_hot_upgrade_jetbrains(
         .context("Failed to stage JetBrains package for dynamic install")?;
     fs::copy(zip_path, archive.path()).context("Failed to stage JetBrains package")?;
     let mut upgraded = 0usize;
+    let mut staged: Option<String> = None;
     for pid in pids {
         let java = java_executable_for_ide(pid)?;
         let output = Command::new(&java)
@@ -1080,9 +1124,36 @@ fn try_hot_upgrade_jetbrains(
             if let Some(warning) = jetbrains_upgrade_reattach_warning(pid, status) {
                 eprintln!("WARNING: {warning}");
             }
+        } else if let Some(reason) = stdout.lines().find_map(staged_upgrade_reason) {
+            staged.get_or_insert_with(|| format!("pid {pid}: {reason}"));
         }
     }
-    Ok((upgraded > 0).then_some(upgraded))
+    Ok(jetbrains_hot_upgrade_verdict(upgraded, staged))
+}
+
+/// The failure reason carried by a `staged:<version>:<reason>` upgrader status.
+fn staged_upgrade_reason(line: &str) -> Option<String> {
+    let rest = line.trim().strip_prefix("staged:")?;
+    let reason = rest.split_once(':').map_or("", |(_, reason)| reason).trim();
+    Some(if reason.is_empty() {
+        "the dynamic upgrade failed".to_string()
+    } else {
+        reason.to_string()
+    })
+}
+
+/// Any converged hot-swap wins: its install already rewrote the shared plugin
+/// tree. Only when none converged does a staged package keep the tree as is.
+fn jetbrains_hot_upgrade_verdict(
+    upgraded: usize,
+    staged: Option<String>,
+) -> Option<JetbrainsHotUpgrade> {
+    if upgraded > 0 {
+        return Some(JetbrainsHotUpgrade::Upgraded {
+            processes: upgraded,
+        });
+    }
+    staged.map(|reason| JetbrainsHotUpgrade::StagedForRestart { reason })
 }
 
 #[cfg(test)]
@@ -1095,7 +1166,7 @@ fn try_hot_upgrade_jetbrains(
     _zip_path: &Path,
     _target_dir: &Path,
     _expected_version: &str,
-) -> Result<Option<usize>> {
+) -> Result<Option<JetbrainsHotUpgrade>> {
     Ok(None)
 }
 
@@ -1163,7 +1234,13 @@ fn install_jetbrains_zip_into(
         || try_hot_upgrade_jetbrains(zip_path, target_dir, expected_version),
         live_jetbrains_ide_pids,
     )?;
-    if !jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
+    // A staged package is applied by the IDE at its next start, so the plugin
+    // tree still holds the live generation's bytes by design.
+    if !matches!(
+        outcome,
+        JetbrainsLocalInstallOutcome::StagedForRestart { .. }
+    ) && !jetbrains_local_zip_matches_installation(zip_path, target_dir)?
+    {
         bail!(
             "JetBrains package verification failed in {}: installed bytes differ from the package",
             target_dir.display()
@@ -1181,16 +1258,31 @@ fn install_jetbrains_package_bytes(
     zip_path: &Path,
     target_dir: &Path,
     dynamic: bool,
-    hot_upgrade: impl FnOnce() -> Result<Option<usize>>,
+    hot_upgrade: impl FnOnce() -> Result<Option<JetbrainsHotUpgrade>>,
     live_pids: impl FnOnce() -> Result<Vec<u32>>,
 ) -> Result<JetbrainsLocalInstallOutcome> {
     let restart_marker =
         target_dir.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
     let restart_reason = if dynamic {
         match hot_upgrade() {
-            Ok(Some(processes)) => {
+            Ok(Some(JetbrainsHotUpgrade::Upgraded { processes })) => {
                 clear_restart_required_marker(&restart_marker);
                 return Ok(JetbrainsLocalInstallOutcome::HotUpgraded { processes });
+            }
+            Ok(Some(JetbrainsHotUpgrade::StagedForRestart { reason })) => {
+                // `#jbstageonfail`: never replace jars under the live JVM once its
+                // own hot-swap failed. The restart verdict is still recorded so
+                // preflight advises a restart rather than another install.
+                eprintln!(
+                    "WARNING: {}",
+                    dynamic_upgrade_fallback_warning(&reason).replace(
+                        "replacing the plugin files instead",
+                        "staged it for the next IDE start instead"
+                    )
+                );
+                let reason = format!("dynamic upgrade unavailable, staged for restart: {reason}");
+                record_restart_required_marker(&restart_marker, &reason);
+                return Ok(JetbrainsLocalInstallOutcome::StagedForRestart { reason });
             }
             Ok(None) => None,
             Err(error) => {
@@ -1220,15 +1312,7 @@ fn install_jetbrains_package_bytes(
         // GH #67: record the refusal so preflight's `plugin_bytes_superseded` advises
         // a restart instead of prescribing another install that re-learns the same
         // refusal every cycle. It sits beside the plugin tree, never inside it.
-        Some(reason) => {
-            if let Err(err) = fs::write(&restart_marker, format!("{}\n", reason.replace('\n', " ")))
-            {
-                eprintln!(
-                    "[plugin] could not record the restart-required verdict at {}: {err}",
-                    restart_marker.display()
-                );
-            }
-        }
+        Some(reason) => record_restart_required_marker(&restart_marker, reason),
         None => clear_restart_required_marker(&restart_marker),
     }
     Ok(match restart_reason {
@@ -1250,6 +1334,15 @@ fn dynamic_upgrade_fallback_warning(reason: &str) -> &'static str {
         "the IDE refused the restart-free upgrade; replacing the plugin files instead."
     } else {
         "the restart-free upgrade failed before the IDE could accept or refuse it; replacing the plugin files instead."
+    }
+}
+
+fn record_restart_required_marker(marker: &Path, reason: &str) {
+    if let Err(err) = fs::write(marker, format!("{}\n", reason.replace('\n', " "))) {
+        eprintln!(
+            "[plugin] could not record the restart-required verdict at {}: {err}",
+            marker.display()
+        );
     }
 }
 
@@ -2405,7 +2498,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             &zip,
             &target,
             true,
-            || Ok(Some(1)),
+            || Ok(Some(super::JetbrainsHotUpgrade::Upgraded { processes: 1 })),
             || panic!("the dynamic path does not enumerate pids"),
         )
         .unwrap();
@@ -2458,6 +2551,83 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         )
         .unwrap();
         assert_eq!(idle, JetbrainsLocalInstallOutcome::Installed);
+    }
+
+    /// `#jbstageonfail`: a failed hot-swap that the IDE staged for its next start
+    /// leaves the live jars untouched instead of unlinking them under the JVM,
+    /// and still records the restart verdict preflight reads.
+    #[test]
+    fn staged_dynamic_upgrade_leaves_live_jars_in_place_and_records_restart() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        let live_jar = lib.join("agent-doc-jetbrains-0.2.455.jar");
+        fs::write(&live_jar, b"live").unwrap();
+        let live_inode = {
+            use std::os::unix::fs::MetadataExt;
+            fs::metadata(&live_jar).unwrap().ino()
+        };
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.456.zip");
+        write_test_jetbrains_zip(&zip, "0.2.456", b"new");
+
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            true,
+            || {
+                Ok(Some(super::JetbrainsHotUpgrade::StagedForRestart {
+                    reason: "pid 9: plugin cannot unload dynamically".to_string(),
+                }))
+            },
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+
+        match &outcome {
+            JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
+                assert!(
+                    reason.contains("plugin cannot unload dynamically"),
+                    "{reason}"
+                );
+            }
+            other => panic!("expected StagedForRestart, got {other:?}"),
+        }
+        assert_eq!(fs::read(&live_jar).unwrap(), b"live");
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(fs::metadata(&live_jar).unwrap().ino(), live_inode);
+        }
+        assert!(!lib.join("agent-doc-jetbrains-0.2.456.jar").exists());
+        let marker = target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
+        let recorded = fs::read_to_string(&marker).unwrap();
+        assert!(recorded.contains("staged for restart"), "{recorded}");
+    }
+
+    #[test]
+    fn staged_status_parses_reason_and_a_converged_process_wins() {
+        assert_eq!(
+            super::staged_upgrade_reason("staged:0.2.456:plugin cannot unload dynamically: x")
+                .as_deref(),
+            Some("plugin cannot unload dynamically: x")
+        );
+        assert_eq!(
+            super::staged_upgrade_reason("staged:0.2.456").as_deref(),
+            Some("the dynamic upgrade failed")
+        );
+        assert_eq!(super::staged_upgrade_reason("ok:0.2.456"), None);
+
+        assert_eq!(
+            super::jetbrains_hot_upgrade_verdict(1, Some("pid 2: refused".into())),
+            Some(super::JetbrainsHotUpgrade::Upgraded { processes: 1 })
+        );
+        assert_eq!(
+            super::jetbrains_hot_upgrade_verdict(0, Some("pid 2: refused".into())),
+            Some(super::JetbrainsHotUpgrade::StagedForRestart {
+                reason: "pid 2: refused".into()
+            })
+        );
+        assert_eq!(super::jetbrains_hot_upgrade_verdict(0, None), None);
     }
 }
 

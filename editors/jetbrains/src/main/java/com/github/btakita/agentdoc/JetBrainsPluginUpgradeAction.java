@@ -16,7 +16,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -42,7 +44,19 @@ public final class JetBrainsPluginUpgradeAction {
             }
         });
         if (failure.get() != null) {
-            throw new IllegalStateException(describeFailure(failure.get()), failure.get());
+            String reason = describeFailure(failure.get());
+            // `#jbstageonfail` (GH #80 point 3): a failed hot-swap stages the package for
+            // the next IDE start instead of letting the launcher replace jars under this
+            // live JVM, which is what manufactured the `plugin_bytes_superseded` state.
+            try {
+                stageForRestart(archiveValue, pluginsDirValue, expectedVersion);
+                return "staged:" + expectedVersion + ":" + reason.replace('\n', ' ').replace('\r', ' ');
+            } catch (Throwable stagingFailure) {
+                throw new IllegalStateException(
+                    reason + " (staging for restart also failed: " + singleLine(stagingFailure) + ")",
+                    failure.get()
+                );
+            }
         }
         IdeaPluginDescriptorImpl loaded = replacement.get();
         if (loaded == null) {
@@ -113,6 +127,91 @@ public final class JetBrainsPluginUpgradeAction {
         }
         replacement.set(actual);
         return "ok:" + expectedVersion;
+    }
+
+    /**
+     * Stage {@code archiveValue} through the IDE's own pending-install script so the next IDE
+     * start replaces the plugin, leaving the jars this JVM maps untouched (`#jbstageonfail`).
+     *
+     * The archive the launcher passes is a temp file it deletes on exit, so a durable copy goes
+     * into the IDE's plugin temp directory first and the install script owns its deletion.
+     */
+    private static void stageForRestart(String archiveValue, String pluginsDirValue, String expectedVersion)
+        throws Exception {
+        IdeaPluginDescriptor descriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
+        if (descriptor == null) {
+            throw new IllegalStateException("no " + PLUGIN_ID + " descriptor to stage against");
+        }
+        Path existing = Path.of(pluginsDirValue).toAbsolutePath().normalize().resolve("agent-doc-jetbrains");
+        Object tempPath = Class.forName("com.intellij.openapi.application.PathManager")
+            .getMethod("getPluginTempPath")
+            .invoke(null);
+        Path tempDir = Path.of(tempPath.toString());
+        Files.createDirectories(tempDir);
+        Path staged = tempDir.resolve("agent-doc-jetbrains-" + expectedVersion + ".zip");
+        Files.copy(Path.of(archiveValue), staged, StandardCopyOption.REPLACE_EXISTING);
+        Method install = findInstallAfterRestart(PluginInstaller.class, descriptor);
+        if (install == null) {
+            throw new IllegalStateException(
+                "PluginInstaller has no installAfterRestart accepting a descriptor and two paths on build "
+                    + platformBuild() + "; found: " + signaturesNamed(PluginInstaller.class, "installAfterRestart")
+            );
+        }
+        Object accepted = install.invoke(null, installAfterRestartArguments(install, descriptor, staged, existing));
+        if (Boolean.FALSE.equals(accepted)) {
+            throw new IllegalStateException("PluginInstaller.installAfterRestart declined " + staged);
+        }
+    }
+
+    /**
+     * The static {@code installAfterRestart} overload whose parameters are a descriptor, two
+     * {@link Path}s (source, then existing plugin) and optionally one {@code boolean}, in any
+     * order -- the platform has moved the descriptor between first and last across builds.
+     */
+    static Method findInstallAfterRestart(Class<?> owner, Object descriptor) {
+        for (Method candidate : owner.getMethods()) {
+            if (!candidate.getName().equals("installAfterRestart")
+                || !Modifier.isStatic(candidate.getModifiers())) {
+                continue;
+            }
+            int descriptors = 0;
+            int paths = 0;
+            int booleans = 0;
+            boolean other = false;
+            for (Class<?> type : candidate.getParameterTypes()) {
+                if (type == Path.class) {
+                    paths++;
+                } else if (type == boolean.class) {
+                    booleans++;
+                } else if (type.isInstance(descriptor)) {
+                    descriptors++;
+                } else {
+                    other = true;
+                }
+            }
+            if (!other && descriptors == 1 && paths == 2 && booleans <= 1) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /** Arguments for {@link #findInstallAfterRestart}'s method: delete the staged copy after use. */
+    static Object[] installAfterRestartArguments(Method install, Object descriptor, Path source, Path existing) {
+        Class<?>[] types = install.getParameterTypes();
+        Object[] args = new Object[types.length];
+        boolean sourceAssigned = false;
+        for (int index = 0; index < types.length; index++) {
+            if (types[index] == Path.class) {
+                args[index] = sourceAssigned ? existing : source;
+                sourceAssigned = true;
+            } else if (types[index] == boolean.class) {
+                args[index] = true;
+            } else {
+                args[index] = descriptor;
+            }
+        }
+        return args;
     }
 
     /**

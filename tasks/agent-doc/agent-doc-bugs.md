@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -751,6 +751,32 @@ This failure is fixed, and the fix shipped in **0.35.431** as `8e9ee719f`. That 
 **Release status:** tag `v0.35.431` is pushed. The Release, PyPI and CI workflows are still running, so PyPI still shows 0.35.430. I'm not waiting on them.
 
 Next in the queue: `#fix-gh` btakita/agent-doc#91. (The exchange is about 700 lines; noting the size only.)
+
+### Re: GH #91 — a blocked Run Agent Doc said "dispatched" — opus-5.5 · 2026-10-01T23:52-04:00
+
+> **Queue prompt:** #fix-gh https://github.com/btakita/agent-doc/issues/91
+
+**Fixed** in `fbe94b5ab`, pushed to `main` and installed. Issue #91 is closed with a summary comment. The full `make check` passed (10375 tests). The new CI run is still in progress.
+
+**Root cause:** the controller's editor route reported the fixed string "dispatched" whenever the route returned `Ok`. But the route also returns `Ok` in two cases where it dispatches nothing:
+- it queued the prompt behind an open closeout
+- it left the existing queue head waiting behind that closeout
+
+Those outcomes went only to stderr, so the plugin showed nothing.
+
+**What changed:**
+1. **Deferrals are reported.** Both cases record their outcome, and the second now names the blocker. The editor route returns exit code 75 with that text. The plugin's existing "queued behind the active owner" warning or route-failure notification now shows it, with no plugin change needed. A failed route's terminal reason also carries the route's first output line.
+2. **An unlandable capture fails closed right away.** The closeout drain checks the capture *before* any recovery. If its bytes can never land (the GH 90 rule), the route refuses and names `agent-doc repair <FILE> --requote-unlandable-capture`. It no longer waits 30s and then reports a wait.
+3. **A second gap, found by the new test:** plain `agent-doc repair`, the drain's own recovery step, wrote an unlandable capture straight into an append-format document. The template replay guard does not cover append documents. `repair` now refuses it and keeps both the document and the capture intact.
+4. **`repair-blocked/` keeps one record per document and payload.** Repeats only refresh the file's timestamp, so `gc`'s 7-day cleanup still sees the latest one.
+
+**Tests:** four new regressions cover the drain, `repair`, the repair-blocked dedup, and the terminal reason.
+
+**For the live wedge:** `laptop.md` (in the other project) still needs `agent-doc repair tasks/laptop/laptop.md --requote-unlandable-capture`. I didn't run it from here.
+
+**Why the loop skipped this head:** it was written `#fix-gh`, but the defined preset is `#gh-fix`, so it matched no preset. Write it as `#gh-fix` to get "fix then close".
+
+The exchange is about 740 lines; noting the size only.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -759,34 +785,7 @@ Next in the queue: `#fix-gh` btakita/agent-doc#91. (The exchange is about 700 li
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do https://github.com/btakita/agent-doc/issues/79~~
-- ~~do https://github.com/btakita/agent-doc/issues/80~~
-- ~~do https://github.com/btakita/agent-doc/issues/81~~
-- ~~do https://github.com/btakita/agent-doc/issues/82~~
-- ~~do https://github.com/btakita/agent-doc/issues/83~~
-- ~~do https://github.com/btakita/agent-doc/issues/84~~
-- ~~do [#jbstageonfail]~~
-- ~~[#queuestopretire]: do option 1~~
-- ~~[#followqueuestopretireopt]: Yes, the queue should continue draining. No stalling.~~
-- ~~When I was adding `'#release': release + publish` into prompt_presets, agent-doc reverted my change.~~
-- ~~do [#supstaleopencycle]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/85~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/86~~
-- ~~Look at https://github.Look at https://github.com/btakita/agent-doc/issues/86 response. Fix the remaining issues.com/btakita/agent-doc/issues/86 response. Fix the remaining issues. complete https://github.com/btakita/agent-doc/issues/81~~
-- ~~do [#jbrejectlog]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/87~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/88~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/89~~
-- ~~do [#staleeditorregprune]~~
-- ~~do [#midinstallreloadstall]~~
-- ~~do [#sdkingressstall]~~
-- ~~release + publish~~
-- ~~agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/90~~
-- ~~Editing lazily.md `agent:queue` then Run Agent Doc: the queue reverted to the previous state. Then the edits came back as I was rewriting the queue items.~~
-- ~~Diagnose + fix agent-doc command failed (exit 1): Error: session_clear codex command `/clear` for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md was not proven submitted in pane %51 after supervisor_ipc_acceptance (result=pane_not_rendered, command_visible=false); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_pane_render unblocker=wait_for_pane_render. The codex pane stayed blank while awaiting its repaint. No duplicate clear was sent; wait for the prompt to render and check its context~~
-- 🚧 #fix-gh https://github.com/btakita/agent-doc/issues/91
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue --> 
 
 

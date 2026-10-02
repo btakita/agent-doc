@@ -637,7 +637,30 @@ The exchange is now 569 lines; I'm continuing the queue rather than stopping to 
 **Verification:** `make check` passed after each fix (10341 tests on the last run). `make install` is done and everything is pushed. CI for these pushes is still running. Release stays with the queued `release + publish` head. Next head: `do [#staleeditorregprune]`.
 
 The exchange is 590+ lines; I'm continuing the queue rather than stopping to compact.
-<!-- agent:boundary:9acd1e79 -->
+
+### Re: do [#staleeditorregprune], #midinstallreloadstall, and why writes stopped reaching the file — opus-5.5 · 2026-10-01T20:57-04:00
+
+> **Queue prompt:**
+>
+> do [#staleeditorregprune]
+>
+> do [#midinstallreloadstall]
+
+
+**`#staleeditorregprune` — done** (`b6bbb617a`). When the IDE registers a document under a new editor id, the relay now also removes that IDE process's old-id registrations on every other document. Before, only the document being registered was cleaned up, so closed documents (`api.md`, `contracts.md`, `agent-loop.md`) kept dead ids, and every plugin reload was rejected against them as `editor_id_mismatch`. Each document is cleaned under its own lock, after the registering document's lock is released, so two registrations can't deadlock. Other editor processes are untouched. Tests cover the end-to-end prune and show other processes and the current document are spared. One caveat: under plain `cargo test`, which runs tests as threads of one process, the prune crosses into other tests that use the same pid. nextest (`make check`) and serial runs pass all 110 tests in the crate.
+
+**`#midinstallreloadstall` — done** (`42e54fd97`). This was why nothing reached the file for about 50 minutes. A listener from an old library build (`c32820c7`) stayed alive inside the IDE and kept the editor's connection point. Each later reload saw a live listener and stepped aside (`ipc_listener_bind_refused_live_peer`, four times). Meanwhile the old listener turned away every newer build, including the reload message that could have replaced it, so only an IDE restart recovered. Now:
+- A listener reporting a different build on the IDE's own connection point is replaced by the current one. A same-build duplicate is still refused.
+- The build-mismatch error no longer swaps "listener" and "client" when the sending side reports it. That swap is why I first blamed the controller, and why the retry throttle was keyed on the wrong build.
+
+After installing, the IDE reloaded cleanly, with no refusals or mismatches.
+
+**Also fixed earlier, not yet recorded here** (`ac33d5b73`, `#retainedsteeringecho`): while my response was still being delivered, `session-check` reported its own paragraphs as your "operator steering". It now ignores text the binary itself wrote: the committed document plus the response still being delivered.
+
+**Verification:** `make check` passed (10346 tests). Everything is installed and pushed.
+
+**Next:** as you asked, the remaining heads run in parallel, each in its own git worktree with its own build: `#sdkingressstall` and the "active while Idea is Analyzing project" item. I'll merge them, run one full check and install, then do `release + publish` last, because it ships what they produce.
+<!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -663,8 +686,9 @@ The exchange is 590+ lines; I'm continuing the queue rather than stopping to com
 - ~~do [#jbrejectlog]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/87~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/88~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/89
-- do [#staleeditorregprune]
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/89~~
+- ~~do [#staleeditorregprune]~~
+- ~~do [#midinstallreloadstall]~~
 - do [#sdkingressstall]
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
@@ -672,7 +696,6 @@ The exchange is 590+ lines; I'm continuing the queue rather than stopping to com
 
 
 <!-- agent:backlog priority -->
-- [ ] [#staleeditorregprune] Controller keeps replica records for documents under editor ids that the same IDE pid has since replaced (2960722 still had 0.2.455-era ids 941e20cf/5f4ff3f8 for api.md, contracts.md and agent-loop.md hours later). Every plugin reload fans out once to those dead ids, and the plugin rejects them with cause=editor_id_mismatch. When a pid registers a new editor_id, prune or rebind that pid's registrations that carry an older editor_id.
 - [ ] [#sdkingressstall] haiven-dev sdk.md: find what held the controller's state-event ingress lock on 2026-10-01 22:20:43-22:21:44Z, when every state-event RPC (including the IDE route's route_document_prep) timed out after 5.0s. The window matched a retained editor save that the IDE kept refusing (persist_current visible_length_mismatch, then document_lane_timeout) and a 974 KB full replica bootstrap of a 12 KB document. 80d82d4ad now logs state_event_ingress_slow site=… fact=… wait_ms=… hold_ms= at 1s or more. Unblocked by the next occurrence: grep haiven-dev ops.log for state_event_ingress_slow, then fix that holder. Also check why reliable_sync_liveness_journal is 305 MB in haiven-dev state.db.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and

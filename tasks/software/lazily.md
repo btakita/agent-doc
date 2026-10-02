@@ -109,6 +109,30 @@ Changed path: `scripts/review-gate-status.py` only. Commit: `a5bd438c1` (`test: 
 The exchange is at the session-accretion warning threshold; the active queue was not stalled for compaction.
 
 Confidence: high. Escalation: operator Mac access only.
+
+### Re: #releasepublish — gpt-5 · 2026-10-01T22:50-04:00
+
+> **Queue prompt:**
+>
+> do [#releasepublish]
+
+
+No—not as a blanket release and publish operation yet.
+
+The live evidence has four concrete blockers or scope mismatches:
+
+- The superproject's `make publish` is the wrong release surface for this question: it publishes `instruction-files`, then `agent-doc` and `corky`; it does not publish the Lazily language packages.
+- Rust is not ready to publish from this checkout. crates.io and the latest GitHub release both remain at `lazily` `v0.58.0`; `src/lazily-rs` is nine commits past that tag and its working tree is not clean. The prepared `v0.59.0` publication remains review-gated on crates.io Trusted Publishing.
+- The superproject's Lazily gitlinks all differ from the currently checked-out submodule commits, so the existing `#lzreleasepins` quiet-window gate is still material.
+- `make review-gate-status` now reports `#lzmacosrunner` stale again because `v0.35.430` added an eighteenth release with an incomplete Darwin asset pair. The credential plan remains safely unapplied and operator-gated as well.
+
+Recommendation: do not invoke the root publish target and do not create a broad release. First refresh the `v0.35.430` macOS evidence, settle the intended Lazily gitlink pins, configure crates.io Trusted Publishing for `lazily-rs`, and choose an explicit repository/version set. Then release each selected package through its own verified workflow.
+
+I returned `#lzmacosrunner` to the actionable queue with the new 18-release evidence-refresh target. The release-readiness question itself is complete.
+
+Changed paths before closeout: none. Verification: `make review-gate-status` self-test passed and the aggregate intentionally exited nonzero for exactly the newly stale macOS gate; `cargo search`, GitHub Releases, `git describe`, repository status, and submodule status supplied the remaining evidence. No tag, release, credential, or publisher was invoked.
+
+Confidence: high. Escalation: operator selection of the intended repository/version set plus the existing external gates.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -120,12 +144,12 @@ Confidence: high. Escalation: operator Mac access only.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Evidence refreshed 2026-10-01: MACOS_INCOMPLETE_PAIR_BASELINE pins the 17 measured incomplete Darwin-pair releases v0.35.399, v0.35.400, v0.35.401, v0.35.406, and v0.35.417 through v0.35.429; make review-gate-self-test, make review-gate-status, and the full root make check pass. Blocked solely on operator Mac access: run make release-macos-assets TAG=<tag> on a Mac, or supply a build host. No agent-executable slice remains.
 - [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.

@@ -116,14 +116,19 @@ class PluginLifecycleListenerTest {
         assertTrue(upgradeAction.contains("cleanupOutgoingGeneration(current)"))
         assertTrue(upgradeAction.contains("disposeOpenProjectsForDynamicUnload"))
         assertTrue(upgradeAction.contains("disposeProjectResources$"))
-        assertTrue(
-            "outgoing document listeners must stop before IntelliJ unloads their descriptor",
-            upgradeAction.indexOf("cleanupOutgoingGeneration(current)") in
-                0 until upgradeAction.indexOf("\"unloadPlugin\", current, updateOptions"),
-        )
+        // GH #94: outgoing document listeners stop before IntelliJ unloads their descriptor, but
+        // only after the unload is known to be callable; an abort after the release restores.
+        val resolve = upgradeAction.indexOf("UnloadCall unload = generation.resolveUnload();")
+        val release = upgradeAction.indexOf("generation.releaseOpenProjects()")
+        val unload = upgradeAction.indexOf("unload.invoke()")
+        assertTrue(resolve >= 0)
+        assertTrue("the release must follow unload resolution", release > resolve)
+        assertTrue("outgoing document listeners must stop before the unload", unload > release)
+        assertTrue(upgradeAction.contains("recoverAbortedUnload("))
+        assertTrue(source.contains("?.endInitialization()"))
         assertTrue(upgradeAction.contains("documents="))
-        // GH #80: the options are built reflectively through DynamicPlugins' own loader.
-        assertTrue(upgradeAction.contains("updateUnloadOptions(\n                DynamicPlugins.class"))
+        // GH #80: the unload shape comes from DynamicPlugins' own signatures.
+        assertTrue(upgradeAction.contains("resolveUpdateUnload(DynamicPlugins.class"))
         assertTrue(upgradeAction.contains("\"withDisable\", boolean.class).invoke(value, false)"))
         assertTrue(upgradeAction.contains("\"withUpdate\", boolean.class).invoke(value, true)"))
         assertFalse(upgradeAction.contains("unloadPlugin(current)"))

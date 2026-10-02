@@ -13,7 +13,9 @@ import com.intellij.openapi.project.ProjectManagerListener
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.IdeFrame
+import com.intellij.openapi.util.Disposer
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Owns per-project startup and cleanup for both project close and dynamic plugin unload.
@@ -26,8 +28,11 @@ class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
         // Force creation of the application service whose Disposable boundary is plugin unload.
         ApplicationManager.getApplication().getService(PluginUnloadCleanupService::class.java)
-        val lifecycle = project.getService(ProjectPluginLifecycleService::class.java)
-        if (!lifecycle.beginInitialization()) return
+        // `lifecycle` is this initialization's own scope, not the project service itself, so a
+        // dynamic-unload release can drop every listener below and a later projectOpened -- the
+        // still-live generation's restore after an aborted upgrade (GH #94) -- rebuilds them.
+        val lifecycle =
+            project.getService(ProjectPluginLifecycleService::class.java).beginInitialization() ?: return
         // Track document changes for typing debounce in SubmitAction
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, lifecycle)
         // Publish the live editor registration from a generation-owned listener.
@@ -216,6 +221,13 @@ class PluginLifecycleListener : ProjectManagerListener {
             }
             val projects = ProjectManager.getInstance().openProjects.filterNot { it.isDisposed }
             projects.forEach(::disposeProjectResources)
+            // GH #94: also end each project's initialization scope, so the
+            // listeners bound to it stop too and, if the upgrade then aborts with this generation
+            // still loaded, initializeOpenProjectsAfterDynamicLoad can rebuild the project rather
+            // than finding it already initialized and leaving its replica transport torn down.
+            projects.forEach { project ->
+                project.getServiceIfCreated(ProjectPluginLifecycleService::class.java)?.endInitialization()
+            }
             return projects.size
         }
 
@@ -243,13 +255,59 @@ class PluginLifecycleListener : ProjectManagerListener {
 class ProjectPluginLifecycleService(
     private val project: Project,
 ) : Disposable {
-    private val initialized = AtomicBoolean(false)
+    private val scope = InitializationScope<Disposable>(
+        open = { Disposer.newDisposable("agent-doc project lifecycle").also { Disposer.register(this, it) } },
+        close = Disposer::dispose,
+    )
 
-    fun beginInitialization(): Boolean = initialized.compareAndSet(false, true)
+    /** This initialization's listener scope, or null when the project is already initialized. */
+    fun beginInitialization(): Disposable? = scope.begin()
+
+    /** Drop the current initialization's listeners so a later [beginInitialization] succeeds. */
+    fun endInitialization() {
+        scope.end()
+    }
 
     override fun dispose() {
+        scope.forget()
         PluginLifecycleListener.disposeProjectResources(project)
     }
+}
+
+/**
+ * One-at-a-time initialization scope (GH #94).
+ *
+ * The project service used to hold a one-shot `initialized` flag, so after a dynamic-unload
+ * release the still-live generation could never re-initialize the project: an upgrade that then
+ * aborted left the replica transport deregistered until the IDE restarted. A scope can be ended
+ * and begun again; [end] closes the listeners bound to the scope it hands out.
+ */
+internal class InitializationScope<S : Any>(
+    private val open: () -> S,
+    private val close: (S) -> Unit,
+) {
+    private val current = AtomicReference<S?>(null)
+    private val opening = AtomicBoolean(false)
+
+    fun begin(): S? {
+        if (!opening.compareAndSet(false, true)) return null
+        return try {
+            if (current.get() != null) null else open().also { current.set(it) }
+        } finally {
+            opening.set(false)
+        }
+    }
+
+    fun end() {
+        current.getAndSet(null)?.let(close)
+    }
+
+    /** The owner is disposing and closes the scope itself; just stop tracking it. */
+    fun forget() {
+        current.set(null)
+    }
+
+    fun isOpen(): Boolean = current.get() != null
 }
 
 /**

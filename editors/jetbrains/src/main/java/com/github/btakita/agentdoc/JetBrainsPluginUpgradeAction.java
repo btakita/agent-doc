@@ -36,15 +36,27 @@ public final class JetBrainsPluginUpgradeAction {
         AtomicReference<String> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicReference<IdeaPluginDescriptorImpl> replacement = new AtomicReference<>();
+        AtomicReference<IdeaPluginDescriptorImpl> released = new AtomicReference<>();
         ApplicationManager.getApplication().invokeAndWait(() -> {
             try {
-                result.set(runOnEdt(archiveValue, pluginsDirValue, expectedVersion, replacement));
+                result.set(runOnEdt(archiveValue, pluginsDirValue, expectedVersion, replacement, released));
             } catch (Throwable caught) {
                 failure.set(caught);
             }
         });
         if (failure.get() != null) {
-            String reason = describeFailure(failure.get());
+            // GH #94: the outgoing generation released its open projects --
+            // CRDT replica transport included -- before the unload was attempted. When the
+            // upgrade then aborted with that generation still loaded, nothing re-registered the
+            // transport and every write to a document this IDE holds deferred until a restart.
+            // Rebuild it from the still-live generation before reporting the failure. This runs
+            // here, off the EDT, because the rebuild waits for replica receipts.
+            IdeaPluginDescriptorImpl outgoing = released.get();
+            String reason = describeFailure(failure.get()) + recoverAbortedUnload(
+                outgoing != null,
+                () -> isLoaded(outgoing),
+                () -> reattachOpenDocuments(outgoing)
+            );
             // `#jbstageonfail` (GH #80 point 3): a failed hot-swap stages the package for
             // the next IDE start instead of letting the launcher replace jars under this
             // live JVM, which is what manufactured the `plugin_bytes_superseded` state.
@@ -65,11 +77,42 @@ public final class JetBrainsPluginUpgradeAction {
         return result.get() + ":" + reattachOpenDocuments(loaded);
     }
 
+    /**
+     * Restore the outgoing generation's project services after an upgrade that aborted once
+     * they were released (GH #94), and say so in the failure receipt.
+     *
+     * Nothing to do when the release never ran. When the outgoing generation is still loaded,
+     * its own lifecycle entry point rebuilds every open project's listeners and re-registers
+     * each open document's replica. When it is no longer loaded the platform already unloaded
+     * it and no generation of this plugin serves the IDE, which only a restart repairs.
+     */
+    static String recoverAbortedUnload(
+        boolean released,
+        java.util.function.BooleanSupplier stillLoaded,
+        java.util.function.Supplier<String> reattach
+    ) {
+        if (!released) {
+            return "";
+        }
+        if (!stillLoaded.getAsBoolean()) {
+            return "; the outgoing plugin generation was already unloaded, so no replica transport"
+                + " is served until the IDE restarts";
+        }
+        String receipt;
+        try {
+            receipt = reattach.get();
+        } catch (Throwable restoreFailure) {
+            receipt = "documents=0/0:reattach_error=" + singleLine(restoreFailure);
+        }
+        return "; restored the live plugin generation's replica transport: " + receipt;
+    }
+
     private static String runOnEdt(
         String archiveValue,
         String pluginsDirValue,
         String expectedVersion,
-        AtomicReference<IdeaPluginDescriptorImpl> replacement
+        AtomicReference<IdeaPluginDescriptorImpl> replacement,
+        AtomicReference<IdeaPluginDescriptorImpl> released
     ) {
         Path archive = Path.of(archiveValue).toAbsolutePath().normalize();
         Path pluginsDir = Path.of(pluginsDirValue).toAbsolutePath().normalize();
@@ -84,24 +127,25 @@ public final class JetBrainsPluginUpgradeAction {
         }
 
         if (isLoaded(current)) {
-            String unloadBlocker = unloadBlockerReason(invokeDescriptorMethod(
-                DynamicPlugins.class, DynamicPlugins.INSTANCE, "checkCanUnloadWithoutRestart", current
-            ));
-            if (unloadBlocker != null) {
-                throw new IllegalStateException(unloadBlocker);
-            }
-            int cleanedProjects = cleanupOutgoingGeneration(current);
-            Object updateOptions = updateUnloadOptions(
-                DynamicPlugins.class, current.getPluginClassLoader()
-            );
-            if (!Boolean.TRUE.equals(invokeDescriptorMethod(
-                DynamicPlugins.class, DynamicPlugins.INSTANCE, "unloadPlugin", current, updateOptions
-            ))) {
-                throw new IllegalStateException(
-                    DYNAMIC_UNLOAD_REFUSED + ": JetBrains refused to unload the current plugin generation after cleaning "
-                        + cleanedProjects + " open project(s)"
-                );
-            }
+            unloadOutgoingGeneration(new OutgoingGeneration() {
+                @Override
+                public Object unloadVerdict() {
+                    return invokeDescriptorMethod(
+                        DynamicPlugins.class, DynamicPlugins.INSTANCE, "checkCanUnloadWithoutRestart", current
+                    );
+                }
+
+                @Override
+                public UnloadCall resolveUnload() {
+                    return resolveUpdateUnload(DynamicPlugins.class, DynamicPlugins.INSTANCE, current);
+                }
+
+                @Override
+                public int releaseOpenProjects() {
+                    released.set(current);
+                    return cleanupOutgoingGeneration(current);
+                }
+            });
         }
 
         IdeaPluginDescriptor residualDescriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
@@ -323,53 +367,111 @@ public final class JetBrainsPluginUpgradeAction {
         return UPGRADER_FAILED + ": " + failure.getClass().getName() + ": " + singleLine(failure);
     }
 
+    /** The platform calls one outgoing-generation unload needs, in the order they must run. */
+    interface OutgoingGeneration {
+        /** {@code checkCanUnloadWithoutRestart}'s raw verdict; computes a state, disposes nothing. */
+        Object unloadVerdict();
+
+        /** Resolve -- without running -- the update-mode unload; throws if it cannot be called. */
+        UnloadCall resolveUnload();
+
+        /** Stop this generation's per-project listeners and replica transport. */
+        int releaseOpenProjects();
+    }
+
+    /** A resolved {@code DynamicPlugins.unloadPlugin} call, ready to run. */
+    interface UnloadCall {
+        Object invoke();
+    }
+
     /**
-     * Build the update-mode {@code UnloadPluginOptions} through the loader that defined
-     * {@code owner} (`#jbunloadoptsloader`, GH #80).
+     * Unload the outgoing generation, releasing its projects only once the unload is known to be
+     * callable (GH #94).
      *
-     * The action is loaded by the bootstrap's child-first loader, whose parent is the IDE's
-     * system classloader. On IU-262.9437.185 that loader resolved {@code DynamicPlugins} but not
-     * its nested {@code UnloadPluginOptions}, so a compile-time {@code new} died with
-     * {@code NoClassDefFoundError} before any unload ran -- every upgrade then fell back to
-     * replacing the jars under the live JVM. The class still exists with the same no-arg
-     * constructor and {@code with*} builders; only its visibility from the system loader moved.
-     * The loader that defined {@code DynamicPlugins} always sees its own nested class, and
-     * {@code fallbacks} (the plugin's own classloader, which compiles against these classes)
-     * cover a platform that splits them further.
+     * The release has to precede the unload itself -- live old-generation DocumentListeners
+     * beside the replacement's create a CRDT echo loop -- but it must not precede anything that
+     * can still abort the upgrade for a reason knowable up front. It used to run before the
+     * {@code UnloadPluginOptions} lookup, so a build without that class (GH #80) tore down the
+     * replica transport and then aborted, leaving a live plugin serving no replica. A failure
+     * after the release is the caller's to repair via {@link #recoverAbortedUnload}.
      */
-    static Object updateUnloadOptions(Class<?> owner, ClassLoader... fallbacks) {
-        String name = owner.getName() + "$UnloadPluginOptions";
-        List<ClassLoader> loaders = new ArrayList<>();
-        loaders.add(owner.getClassLoader());
-        Collections.addAll(loaders, fallbacks);
-        List<String> tried = new ArrayList<>();
-        for (ClassLoader loader : loaders) {
-            if (loader == null) {
+    static int unloadOutgoingGeneration(OutgoingGeneration generation) {
+        String unloadBlocker = unloadBlockerReason(generation.unloadVerdict());
+        if (unloadBlocker != null) {
+            throw new IllegalStateException(unloadBlocker);
+        }
+        UnloadCall unload = generation.resolveUnload();
+        int cleanedProjects = generation.releaseOpenProjects();
+        if (!Boolean.TRUE.equals(unload.invoke())) {
+            throw new IllegalStateException(
+                DYNAMIC_UNLOAD_REFUSED + ": JetBrains refused to unload the current plugin generation after cleaning "
+                    + cleanedProjects + " open project(s)"
+            );
+        }
+        return cleanedProjects;
+    }
+
+    /**
+     * Resolve the update-mode {@code DynamicPlugins.unloadPlugin} for {@code descriptor} from the
+     * signatures {@code owner} actually exposes (GH #80).
+     *
+     * Through 261 the method is {@code unloadPlugin(descriptor, UnloadPluginOptions)}, and the
+     * options type is taken from that parameter -- its declaring loader always sees it, so no
+     * classloader has to be guessed. From 263 the nested {@code UnloadPluginOptions} no longer
+     * exists: the platform reconfigures to a computed plugin state and {@code unloadPlugin}
+     * takes the descriptor alone, with no disable flag to clear. Looking the class up by name
+     * there could only fail ("not visible ... from PathClassLoader, PluginClassLoader"), which
+     * is what every upgrade on IU-263.6259.32 hit. The options overload is preferred whenever it
+     * exists, because an older build's one-argument default disables the plugin.
+     */
+    static UnloadCall resolveUpdateUnload(Class<?> owner, Object receiver, Object descriptor) {
+        Method withOptions = null;
+        Method descriptorOnly = null;
+        for (Method candidate : owner.getMethods()) {
+            Class<?>[] types = candidate.getParameterTypes();
+            if (!candidate.getName().equals("unloadPlugin")
+                || Modifier.isStatic(candidate.getModifiers())
+                || types.length == 0
+                || !types[0].isInstance(descriptor)) {
                 continue;
             }
-            try {
-                Class<?> options = Class.forName(name, true, loader);
-                Object value = options.getConstructor().newInstance();
-                value = options.getMethod("withDisable", boolean.class).invoke(value, false);
-                return options.getMethod("withUpdate", boolean.class).invoke(value, true);
-            } catch (ClassNotFoundException | LinkageError missing) {
-                tried.add(loader.getClass().getName());
-            } catch (ReflectiveOperationException shape) {
-                Throwable cause = shape instanceof InvocationTargetException invocation
-                    && invocation.getCause() != null
-                    ? invocation.getCause()
-                    : shape;
-                throw new IllegalStateException(
-                    UPGRADER_FAILED + ": " + name + " has an unexpected shape on build "
-                        + platformBuild() + ": " + singleLine(cause),
-                    cause
-                );
+            if (types.length == 2 && types[1].getSimpleName().equals("UnloadPluginOptions")) {
+                withOptions = candidate;
+            } else if (types.length == 1) {
+                descriptorOnly = candidate;
             }
         }
+        if (withOptions != null) {
+            Object options = updateUnloadOptions(withOptions.getParameterTypes()[1]);
+            return () -> invokeDescriptorMethod(owner, receiver, "unloadPlugin", descriptor, options);
+        }
+        if (descriptorOnly != null) {
+            return () -> invokeDescriptorMethod(owner, receiver, "unloadPlugin", descriptor);
+        }
         throw new IllegalStateException(
-            UPGRADER_FAILED + ": " + name + " is not visible on build " + platformBuild()
-                + " from " + (tried.isEmpty() ? "any classloader" : String.join(", ", tried))
+            UPGRADER_FAILED + ": DynamicPlugins.unloadPlugin has no signature accepting "
+                + descriptor.getClass().getName() + " on build " + platformBuild()
+                + "; found: " + signaturesNamed(owner, "unloadPlugin")
         );
+    }
+
+    /** Build update-mode options ({@code disable=false}, {@code update=true}) of {@code options}. */
+    static Object updateUnloadOptions(Class<?> options) {
+        try {
+            Object value = options.getConstructor().newInstance();
+            value = options.getMethod("withDisable", boolean.class).invoke(value, false);
+            return options.getMethod("withUpdate", boolean.class).invoke(value, true);
+        } catch (ReflectiveOperationException | LinkageError shape) {
+            Throwable cause = shape instanceof InvocationTargetException invocation
+                && invocation.getCause() != null
+                ? invocation.getCause()
+                : shape;
+            throw new IllegalStateException(
+                UPGRADER_FAILED + ": " + options.getName() + " has an unexpected shape on build "
+                    + platformBuild() + ": " + singleLine(cause),
+                cause
+            );
+        }
     }
 
     /**

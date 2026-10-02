@@ -10,13 +10,17 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * `#jbunloadoptsloader` (GH #80): the update-mode {@code UnloadPluginOptions} is built through the
- * loader that defined {@code DynamicPlugins}, not the bootstrap's system-classloader parent.
- * On IU-262.9437.185 the system loader resolved {@code DynamicPlugins} but not its nested class,
- * so a compile-time {@code new} died with {@code NoClassDefFoundError} before anything unloaded.
+ * GH #80: the update-mode unload is resolved from the signatures
+ * {@code DynamicPlugins} actually exposes. Through 261 that is
+ * {@code unloadPlugin(descriptor, UnloadPluginOptions)}, whose options type is taken from the
+ * parameter itself; from 263 the nested options class is gone and {@code unloadPlugin} takes the
+ * descriptor alone. A by-name lookup of {@code DynamicPlugins$UnloadPluginOptions} could only
+ * fail there, which is what every restart-free upgrade on IU-263.6259.32 hit.
  */
 public class JetBrainsPluginUpgradeOptionsLoaderTest {
-    /** The platform shape: a nested options builder on the owner. */
+    public static class Descriptor {}
+
+    /** The 2024.2-261 shape: a nested options builder, plus a disabling one-argument default. */
     public static final class FakeDynamicPlugins {
         public static final class UnloadPluginOptions {
             public boolean disable = true;
@@ -34,41 +38,91 @@ public class JetBrainsPluginUpgradeOptionsLoaderTest {
                 return this;
             }
         }
+
+        public Object lastOptions;
+        public boolean disabledByDefault;
+
+        public boolean unloadPlugin(Descriptor descriptor, UnloadPluginOptions options) {
+            lastOptions = options;
+            return true;
+        }
+
+        public boolean unloadPlugin(Descriptor descriptor) {
+            disabledByDefault = true;
+            return true;
+        }
     }
 
-    /** An owner whose nested options class exists nowhere. */
-    public static final class OwnerWithoutOptions {}
+    /** The 263 shape: no {@code UnloadPluginOptions}; {@code unloadPlugin(descriptor)} only. */
+    public static final class ReconfiguringDynamicPlugins {
+        public int unloads;
+
+        public boolean unloadPlugin(Descriptor descriptor) {
+            unloads++;
+            return true;
+        }
+    }
+
+    /** An owner with no usable {@code unloadPlugin} at all. */
+    public static final class OwnerWithoutUnload {
+        public boolean unloadPlugin(String notADescriptor) {
+            return true;
+        }
+    }
 
     @Test
-    public void optionsResolveFromTheOwnersDefiningLoaderInUpdateMode() throws Exception {
+    public void optionsComeFromTheUnloadSignatureInUpdateMode() throws Exception {
         // Define the owner and its nested class in a loader the test's own loader cannot see,
         // mirroring the IDE: the action's loader is not the one that defined DynamicPlugins.
         ClassLoader isolated = new IsolatedLoader(
+            Descriptor.class.getName(),
             FakeDynamicPlugins.class.getName(),
             FakeDynamicPlugins.UnloadPluginOptions.class.getName()
         );
         Class<?> owner = Class.forName(FakeDynamicPlugins.class.getName(), true, isolated);
+        Object platform = owner.getConstructor().newInstance();
+        Object descriptor = Class.forName(Descriptor.class.getName(), true, isolated)
+            .getConstructor().newInstance();
         assertSame(isolated, owner.getClassLoader());
 
-        Object options = JetBrainsPluginUpgradeAction.updateUnloadOptions(owner);
+        Object unloaded = JetBrainsPluginUpgradeAction.resolveUpdateUnload(owner, platform, descriptor).invoke();
 
+        assertEquals(Boolean.TRUE, unloaded);
+        Object options = owner.getField("lastOptions").get(platform);
         assertSame(isolated, options.getClass().getClassLoader());
         assertEquals(Boolean.FALSE, options.getClass().getField("disable").get(options));
         assertEquals(Boolean.TRUE, options.getClass().getField("isUpdate").get(options));
+        assertEquals(
+            "the disabling one-argument default must not be chosen while the options overload exists",
+            Boolean.FALSE,
+            owner.getField("disabledByDefault").get(platform)
+        );
     }
 
     @Test
-    public void anUnresolvableOptionsClassIsAnUpgraderFailureNotARefusal() {
+    public void aBuildWithoutUnloadPluginOptionsUnloadsThroughTheDescriptorOnlyOverload() {
+        ReconfiguringDynamicPlugins platform = new ReconfiguringDynamicPlugins();
+
+        Object unloaded = JetBrainsPluginUpgradeAction.resolveUpdateUnload(
+            ReconfiguringDynamicPlugins.class, platform, new Descriptor()
+        ).invoke();
+
+        assertEquals(Boolean.TRUE, unloaded);
+        assertEquals(1, platform.unloads);
+    }
+
+    @Test
+    public void anUnresolvableUnloadIsAnUpgraderFailureNotARefusal() {
         try {
-            JetBrainsPluginUpgradeAction.updateUnloadOptions(
-                OwnerWithoutOptions.class, ClassLoader.getSystemClassLoader()
+            JetBrainsPluginUpgradeAction.resolveUpdateUnload(
+                OwnerWithoutUnload.class, new OwnerWithoutUnload(), new Descriptor()
             );
-            fail("a missing options class must fail closed");
+            fail("a missing unload signature must fail closed");
         } catch (IllegalStateException missing) {
             String message = missing.getMessage();
             assertTrue(message, message.startsWith(JetBrainsPluginUpgradeAction.UPGRADER_FAILED));
             assertTrue(message, !message.contains(JetBrainsPluginUpgradeAction.DYNAMIC_UNLOAD_REFUSED));
-            assertTrue(message, message.contains("OwnerWithoutOptions$UnloadPluginOptions"));
+            assertTrue(message, message.contains("unloadPlugin(String)"));
         }
     }
 

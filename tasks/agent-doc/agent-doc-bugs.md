@@ -777,6 +777,17 @@ Those outcomes went only to stderr, so the plugin showed nothing.
 **Why the loop skipped this head:** it was written `#fix-gh`, but the defined preset is `#gh-fix`, so it matched no preset. Write it as `#gh-fix` to get "fix then close".
 
 The exchange is about 740 lines; noting the size only.
+
+### Re: #gh-fix GH #81 — opus-5.5 · 2026-10-01T23:52-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/81
+
+**Closed [GH #81](https://github.com/btakita/agent-doc/issues/81). No new code was needed: both halves are already fixed and released.**
+
+- **Joined-column fallback:** fixed in `ca1ac2267` (plugin 0.2.458), shipped in **v0.35.429**. With no detected layout, each visible document gets its own column. Before, `first_agent_doc_in_layout_column` kept only the focused document.
+- **The IU-262 discriminator #81 was waiting on** came back in [GH #88](https://github.com/btakita/agent-doc/issues/88): `windows=0`. The Remote Dev backend exposes no `EditorWindow`. Fixed in `fb65d4557` (plugin 0.2.462), shipped in **v0.35.430**: the layout and surface paths fall back to `selectedFiles`, and focus follows the selection.
+- **Local evidence (IU-261 desktop, v0.35.431):** `[layout-detect] observed windows=2 ... columns=2 [agent-doc-bugs.md | sdk.md] source=windows`, and `0:agent-doc` has 2 panes.
+- **Not confirmed on the IU-262 Remote Dev rig itself.** The closing comment asks the reporter to reopen #88 with the `source=selected_files` / `[layout-sync] ... windows=0` lines if it still stays at one pane.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

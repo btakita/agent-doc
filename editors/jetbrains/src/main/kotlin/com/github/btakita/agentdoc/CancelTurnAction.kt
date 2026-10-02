@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.DumbAware
 
 /**
  * A "Cancel Turn" menu command that runs `agent-doc session cancel-turn`,
@@ -12,7 +13,7 @@ import com.intellij.openapi.diagnostic.Logger
  * supervisor alive. No-op when the agent is idle, so it never closes the agent.
  * Mirrors [StopAgentAction].
  */
-class CancelTurnAction : AnAction() {
+class CancelTurnAction : AnAction(), DumbAware {
     private val log = Logger.getInstance(CancelTurnAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {

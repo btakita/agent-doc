@@ -4,8 +4,9 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.DumbAware
 
-class InitAction : AnAction() {
+class InitAction : AnAction(), DumbAware {
 
     companion object {
         private val LOG = Logger.getInstance(InitAction::class.java)

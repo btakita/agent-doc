@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.DumbAware
 
 /**
  * "Restart Agent" replaces the harness child and re-resolves the current
@@ -12,7 +13,7 @@ import com.intellij.openapi.diagnostic.Logger
  * [RestartSupervisorProcessAction], which recycles controller code while
  * preserving the child.
  */
-class RestartAgentAction : AnAction() {
+class RestartAgentAction : AnAction(), DumbAware {
     private val log = Logger.getInstance(RestartAgentAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {

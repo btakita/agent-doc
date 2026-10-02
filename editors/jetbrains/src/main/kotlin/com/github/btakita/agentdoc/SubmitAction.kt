@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.project.DumbAware
 
 /**
  * Action that routes the active document through the Project Controller editor_route RPC.
@@ -16,7 +17,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
  * editor does not try to infer whether the tmux session is "already running" or otherwise
  * mid-recovery.
  */
-class SubmitAction : AnAction() {
+class SubmitAction : AnAction(), DumbAware {
 
     companion object {
         private val LOG =

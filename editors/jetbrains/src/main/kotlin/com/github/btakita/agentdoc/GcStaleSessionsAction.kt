@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.project.DumbAware
 
 /**
  * #plugin-cleanup-menu-command: "GC Stale Sessions" wraps `agent-doc gc` so an
@@ -13,7 +14,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
  * surfaces the result. Project-scoped (not file-scoped) — enabled whenever a
  * project is open.
  */
-class GcStaleSessionsAction : AnAction() {
+class GcStaleSessionsAction : AnAction(), DumbAware {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         TerminalUtil.gcStaleSessions(project)

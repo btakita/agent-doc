@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditor
+import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.EditorNotificationProvider
@@ -29,7 +30,7 @@ import javax.swing.JPanel
  * space. Native projection reads run only on the refresher event loop, not from
  * notification collection.
  */
-class TurnStateBannerProvider : EditorNotificationProvider {
+class TurnStateBannerProvider : EditorNotificationProvider, DumbAware {
     override fun collectNotificationData(
         project: Project,
         file: VirtualFile,

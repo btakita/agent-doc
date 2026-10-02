@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
+import com.intellij.openapi.project.DumbAware
 
 /**
  * Force-claim the focused .md file, overriding the binding invariant.
@@ -14,7 +15,7 @@ import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
  * already claimed by another document. Use when the normal claim provisions
  * a new pane but you want to reuse the existing one.
  */
-class ForceClaimAction : AnAction() {
+class ForceClaimAction : AnAction(), DumbAware {
 
     companion object {
         private val LOG = Logger.getInstance(ForceClaimAction::class.java)

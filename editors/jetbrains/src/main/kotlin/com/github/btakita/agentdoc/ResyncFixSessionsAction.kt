@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.project.DumbAware
 
 /**
  * #plugin-cleanup-menu-command: "Resync / Fix Sessions" wraps
@@ -13,7 +14,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
  *
  * Project-scoped (not file-scoped) — enabled whenever a project is open.
  */
-class ResyncFixSessionsAction : AnAction() {
+class ResyncFixSessionsAction : AnAction(), DumbAware {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         TerminalUtil.resyncFixSessions(project)

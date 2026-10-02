@@ -4,6 +4,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.DumbAware
 
 /**
  * Action that loads (autostarts) the tmux window for the focused .md session
@@ -22,7 +23,7 @@ import com.intellij.openapi.diagnostic.Logger
  * call `agent-doc start` directly: that runs the harness as a blocking child
  * inside a restart loop and is not appropriate to invoke from a plugin thread.
  */
-class LoadTmuxWindowAction : AnAction() {
+class LoadTmuxWindowAction : AnAction(), DumbAware {
 
     companion object {
         private val LOG = Logger.getInstance(LoadTmuxWindowAction::class.java)

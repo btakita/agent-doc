@@ -1,12 +1,21 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.ui.popup.JBPopupFactory
+
+/**
+ * Dumb mode: every agent-doc action, and the popup groups that hold them, is
+ * [DumbAware]. The actions read markdown files and call the native library, never
+ * the PSI indexes, so "Analyzing project..." must not disable or hide the menu.
+ */
+internal class DumbAwareGroup(name: String? = null, popup: Boolean = false) :
+    DefaultActionGroup(name, popup), DumbAware
 
 /**
  * Shows a popup menu with Agent Doc commands when Alt+Enter is pressed in a .md file.
  */
-class AgentDocPopupAction : AnAction() {
+class AgentDocPopupAction : AnAction(), DumbAware {
     companion object {
         internal val PRIMARY_ACTION_IDS = listOf(
             "AgentDoc.Submit",
@@ -37,11 +46,11 @@ class AgentDocPopupAction : AnAction() {
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
         val actionManager = ActionManager.getInstance()
 
-        val group = DefaultActionGroup().apply {
+        val group = DumbAwareGroup().apply {
             PRIMARY_ACTION_IDS.forEach { add(actionManager.getAction(it)) }
             addSeparator()
             add(
-                DefaultActionGroup("More Actions", true).apply {
+                DumbAwareGroup("More Actions", true).apply {
                     OVERFLOW_ACTION_IDS.forEach { add(actionManager.getAction(it)) }
                 }
             )

@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.DumbAware
 
 /**
  * #s81q: a "Kill Supervisor" menu command that runs
@@ -13,7 +14,7 @@ import com.intellij.openapi.diagnostic.Logger
  * ancestor, so this is safe to run from an editor terminal (not the supervisor's
  * own pane). Mirrors [RestartAgentAction] / [StopAgentAction].
  */
-class KillSupervisorAction : AnAction() {
+class KillSupervisorAction : AnAction(), DumbAware {
     private val log = Logger.getInstance(KillSupervisorAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {

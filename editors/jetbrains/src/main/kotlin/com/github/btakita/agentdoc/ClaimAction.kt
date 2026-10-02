@@ -10,6 +10,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
+import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.VirtualFile
@@ -77,7 +78,7 @@ internal class ClaimDocumentFence private constructor(
  * surfacing the raw exit-1 text, this action parses the marker and prompts the
  * user with New Pane in This Session / Force Claim / Switch Project Session / Cancel.
  */
-class ClaimAction : AnAction() {
+class ClaimAction : AnAction(), DumbAware {
 
     companion object {
         private val LOG = Logger.getInstance(ClaimAction::class.java)

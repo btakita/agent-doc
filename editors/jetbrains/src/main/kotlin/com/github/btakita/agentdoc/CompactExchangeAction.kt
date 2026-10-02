@@ -6,8 +6,9 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.project.DumbAware
 
-class CompactExchangeAction : AnAction() {
+class CompactExchangeAction : AnAction(), DumbAware {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CompactExchangeAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {

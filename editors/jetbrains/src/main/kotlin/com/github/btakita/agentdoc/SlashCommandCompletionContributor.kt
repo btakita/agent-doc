@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.intellij.codeInsight.completion.*
 import com.intellij.codeInsight.lookup.LookupElementBuilder
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.DumbAware
 import com.intellij.patterns.PlatformPatterns
 import com.intellij.util.ProcessingContext
 
@@ -12,7 +13,7 @@ import com.intellij.util.ProcessingContext
  * Triggers when the user types `/` at the start of a line.
  * Commands are loaded from `agent-doc commands` CLI output on first use.
  */
-class SlashCommandCompletionContributor : CompletionContributor() {
+class SlashCommandCompletionContributor : CompletionContributor(), DumbAware {
 
     private val log = Logger.getInstance(SlashCommandCompletionContributor::class.java)
 

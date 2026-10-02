@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.DumbAware
 
 /**
  * #s81q: a "Stop Agent" menu command that runs `agent-doc session stop-agent`,
@@ -12,7 +13,7 @@ import com.intellij.openapi.diagnostic.Logger
  * restart-or-quit keepalive prompt. Mirrors [RestartAgentAction]; the operator
  * can bring the agent back with "Restart Agent".
  */
-class StopAgentAction : AnAction() {
+class StopAgentAction : AnAction(), DumbAware {
     private val log = Logger.getInstance(StopAgentAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {

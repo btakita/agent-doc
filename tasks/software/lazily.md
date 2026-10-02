@@ -64,25 +64,47 @@ Verification and provenance:
 - Tests: no source or build surface changed, so no project test suite was required.
 - Confidence: high.
 - Escalation: none. The remaining operator decisions stay explicit in their review items.
+
+### Re: #lzambienttokenresolve — gpt-5 · 2026-10-01T21:46-04:00
+
+> **Queue prompt:**
+>
+> do [#lzambienttokenresolve]
+
+
+Refreshed the stale `src/agent-doc/Makefile` evidence without applying the credential patch or touching credential values:
+
+- Updated the recorded SHA-256 from `b6df1af1…` to the current `39f4ae18…`.
+- Shifted the prepared patch hunk from `@@ -352,7 +352,10` to `@@ -361,7 +361,10`, matching the current `wheel: python-bootstrap-test` context.
+- `make publish-credential-proof` passed with exit 0 and zero failures. It exercised all eight publish sites using fake tooling, recording 21 fake `passage` lookups and 13 fake publisher invocations.
+- `make review-gate-status` intentionally exited 2 because `#lzmacosrunner` remains stale, but it reports `#lzambienttokenresolve` as `blocked_fresh`: 8/8 preimages match, 8/8 patch sets apply, proof exit 0, and the plan remains unapplied.
+- No credential was resolved or printed, no prepared patch was applied, and no publisher was invoked.
+
+The evidence-only change is committed as `6e57996f3` (`docs: refresh ambient credential proof evidence`). Changed path: `tasks/software/plan-ambient-publish-token-point-of-use.md` only. `git diff --check` passed. The superproject has no GitHub Actions workflow named `CI` and `gh workflow list` returned no workflows, so there was no CI run to inspect.
+
+`#lzambienttokenresolve` is re-gated on the remaining operator-only quiet-window patch application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification described in the plan. No additional actionable backlog follow-up is needed because those remaining steps require operator action and are retained in this review gate.
+
+Confidence: high. Escalation: operator action only; no agent-side escalation occurred.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 #advance-review
+- ~~do [#lzambienttokenresolve]~~
+- do [#lzmacosrunner]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh the stale macOS coverage evidence: update MACOS_INCOMPLETE_PAIR_BASELINE in scripts/review-gate-status.py and the recorded review list from 6 to the currently measured 16 incomplete-pair releases by adding v0.35.419 through v0.35.428; run make review-gate-self-test and make review-gate-status, confirm #lzmacosrunner reports blocked_fresh, commit and push the evidence refresh, then return it to review blocked on the unchanged Mac-only release or SSH operator decision.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] 🚧 [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.

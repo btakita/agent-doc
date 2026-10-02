@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: agent-doc <file>. Requires binary admission and committed closeout."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.421"
+agent-doc-version: "0.35.436"
 ---
 
 # agent-doc
@@ -69,14 +69,14 @@ Read `effective_tier`, `required_tier`, `suggested_tier`, and `model_switch_tier
 
 ### 0d. Plan / Dispatch
 
-After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execution_scope`, `repo_actions`, `required_commands`, `pending_mutations`, `handoff`, and `blockers` as the execution contract. Stop on `blockers`. If `handoff=orchestrate`, run the emitted `agent-doc orchestrate ...` command before manual response. If `handoff=compact`, follow the emitted compact/restart instruction and stop before repo work or finalization. Full contract: [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md).
+After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execution_scope`, `repo_actions`, `required_commands`, `pending_mutations`, `handoff`, and `blockers` as the execution contract. Stop on `blockers`; `task_class: preflight_sealed` is not a no-op — preflight consumed the diff, so execute its contract (`#plansealedturn`). If `handoff=orchestrate`, run the emitted `agent-doc orchestrate ...` command before manual response. If `handoff=compact`, follow the emitted compact/restart instruction and stop before repo work or finalization. Full contract: [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md).
 
 ### 1. Respond
 
 - Address the user's changes naturally in the console; that response is the document response.
 - Keep routine progress in the console; persist a standalone pre-closeout conclusion with `agent-doc salient-checkpoint <FILE>` (non-final, no queue-answer/commit authority, removed by final response). See the streaming runbook.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; answer or group each unresolved prompt in that tail and each unresolved `prompt_target`; treat `content_edit` items as user corrections.
-- Execute from the planning record. If `execution_scope=plan_backlog_only`, stay in plan/backlog capture mode. Otherwise complete the requested repo work before persistence or stop on a blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone. When draining a free-text queue head (no `#id`), quote it as a `> **Queue prompt:**` blockquote so `#ftstrike` can strike it (see [runbooks/respond.md](runbooks/respond.md), `#qdeferstrike`).
+- Execute from the planning record. If `execution_scope=plan_backlog_only`, stay in plan/backlog capture mode. Otherwise complete the requested repo work before persistence or stop on a blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone. When draining a free-text queue head (no `#id`), quote it as a `> **Queue prompt:**` blockquote so `#ftstrike` can strike it (see [runbooks/respond.md](runbooks/respond.md), `#qdeferstrike`). A resolved `#preset` reference is a preset head, not ordinary free text: address every expansion supplied by preflight; no literal `#preset` quote is required.
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings.
 

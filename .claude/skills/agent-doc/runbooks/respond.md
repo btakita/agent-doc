@@ -51,6 +51,12 @@ free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
 
+A queue head that references one or more registered `#preset` names is a preset
+head, not ordinary free text, including composable forms such as `#gh-fix URL`.
+Address every resolved preset expansion supplied by preflight. The closeout gate
+matches response evidence against those expansions, so a literal `#preset` or
+`[#preset]` queue-head quote is optional.
+
 An in-progress marker on a free-text head records selection, not completion
 (`#bugautostruck`). It never replaces the exact `> **Queue prompt:**` evidence.
 If the response does not actually quote and answer that head, closeout must leave

@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.436
+
+- **Stranded `write_applied` cycles have a terminal repair path (GH #99).** `cancel` now exits
+  nonzero when a captured response is outside its scope and names the actual condition. When a
+  response is already materialized but no document-scoped editor registration can converge,
+  `repair` skips the unreachable optional normalization step and completes the terminal closeout;
+  stale-worker diagnostics now direct that case to the actionable repair command.
+- **Prompt-preset queue heads validate against their resolved expansions (GH #100).** The existing
+  composable `#preset` syntax remains canonical, including bracketed heads, trailing context such
+  as `#gh-fix <URL>`, and multiple references. Closeout and queue consumption accept response
+  evidence for every resolved expansion without requiring a literal `[#preset]` echo, while
+  ordinary free-text heads still require their exact queue-prompt quote.
+- **Editors can initialize a session from the selected Markdown file (GH #101).** The shared
+  `init-session` command scaffolds a plain file as a template session while preserving its content,
+  derives a title from the filename, and starts it; an existing session is claimed instead.
+  VS Code exposes the flow from the active editor, Explorer, command palette, and popup menu;
+  JetBrains exposes it from editor, project-view, Tools, and popup menus. VS Code extension 0.2.77
+  and JetBrains plugin 0.2.473.
+
 ## 0.35.435
 
 - **Queued prompt closeout is complete across consecutive singular echoes.** When one response

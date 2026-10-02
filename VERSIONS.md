@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.433
+
+- **Codex Stop hook replays a post-commit capture before committing.** Structural cleanup no longer
+  returns before the capture it just reopened has been replayed. When the commit guard refuses a
+  capture that a durable owner already holds, the hook treats it as a deferral instead of blocking
+  the agent.
+- **Lint gate (GH #93).** A component marker prefix quoted in backticks is prose (the GH #90 rule now
+  also applies to the lint gate). `write --commit` / `finalize` refuse, before anything is captured or
+  written, any blocking finding the write cannot repair.
+- **Restart-free plugin upgrade (GH #80, GH #94).** The upgrader picks the platform's unload method by
+  its signature, so it works on 263, where `DynamicPlugins$UnloadPluginOptions` is gone. A failed
+  upgrade rebuilds the replica transport it tore down. `admin reload-lib` exits nonzero for an
+  unreachable or refusing editor endpoint, and names it. Response prevalidation checks the response
+  against a read-only disk view when the holding editor serves no replica.
+- **Staged plugin version (GH #87).** A staged JetBrains install records its version from the package,
+  not from the temp filename.
+- **JetBrains plugin 0.2.468:**
+  - The CRDT replica thread looks up the Document inside a read action, which fixes the
+    `Read access is allowed from inside read-action only` exception from `withEditorCaptureCut`.
+  - Element bodies get a visible, theme-aware background again.
+
 ## 0.35.432
 
 - **A cited id resolves across the project, not just the active document (GH #92).** Both coined-id

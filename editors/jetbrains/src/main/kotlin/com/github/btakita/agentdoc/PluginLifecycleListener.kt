@@ -191,7 +191,11 @@ class PluginLifecycleListener : ProjectManagerListener {
                                 "receipt for $label",
                             failure,
                         )
-                        nativeReloadReplicaRestartReport(listOf(label), emptyList())
+                        nativeReloadReplicaRestartReport(
+                            listOf(label),
+                            emptyList(),
+                            liveProjects = 1,
+                        )
                     }
                 },
             )

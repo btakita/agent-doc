@@ -93,7 +93,8 @@ describe('typed reload_library intent', () => {
         assert.ok(coordinator.includes('CrdtReplicaManager.quiesceAllForNativeReload()'));
         assert.ok(coordinator.includes('PatchWatcher.quiesceAllForNativeReload()'));
         assert.ok(coordinator.includes('AgentDocLib.hotReload(trigger, announcedLibVersion)'));
-        assert.ok(coordinator.includes('CrdtReplicaManager.restartAfterNativeReload(replicaHandoff)'));
+  assert.ok(coordinator.includes('CrdtReplicaManager.restartAfterNativeReload('));
+  assert.ok(coordinator.includes('surfaceProjects'));
         assert.ok(coordinator.includes('if (report.converged)'));
     });
 });

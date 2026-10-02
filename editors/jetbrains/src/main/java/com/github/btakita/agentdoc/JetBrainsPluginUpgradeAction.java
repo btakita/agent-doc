@@ -31,6 +31,8 @@ public final class JetBrainsPluginUpgradeAction {
     private static final String PLUGIN_ID = "com.github.btakita.agent-doc";
     private static final String LIFECYCLE_CLASS =
         "com.github.btakita.agentdoc.PluginLifecycleListener";
+    private static final String ASYNC_CLASSLOADER_AWAIT_STRATEGY =
+        "com.intellij.ide.plugins.AwaitClassloaderUnloadAsyncPostReconfiguration";
 
     private JetBrainsPluginUpgradeAction() {}
 
@@ -126,6 +128,13 @@ public final class JetBrainsPluginUpgradeAction {
         Path expectedRoot = pluginsDir.resolve("agent-doc-jetbrains").toAbsolutePath().normalize();
         if (!sameInstallRoot(current.getPluginPath(), expectedRoot)) {
             return "skip:different-plugin-root:" + current.getPluginPath();
+        }
+
+        String platformBlocker = dynamicUpgradeBlockerReason(
+            asyncPostReconfigurationClassloaderAwaitIsPresent(DynamicPlugins.class.getClassLoader())
+        );
+        if (platformBlocker != null) {
+            throw new IllegalStateException(platformBlocker);
         }
 
         if (isLoaded(current)) {
@@ -651,6 +660,31 @@ public final class JetBrainsPluginUpgradeAction {
         return reason.isEmpty()
             ? DYNAMIC_UNLOAD_REFUSED
             : DYNAMIC_UNLOAD_REFUSED + ": " + reason;
+    }
+
+    /**
+     * Newer JetBrains builds load the replacement before checking whether the outgoing
+     * classloader was actually collected. Their async strategy always returns success to the
+     * reconfiguration caller, then raises a restart notification up to twenty seconds later.
+     * There is therefore no synchronous retirement receipt on which agent-doc can safely swap
+     * the live jars. Detect that strategy before even probing unloadability and stage instead.
+     */
+    static String dynamicUpgradeBlockerReason(boolean asyncPostReconfigurationAwait) {
+        if (!asyncPostReconfigurationAwait) {
+            return null;
+        }
+        return DYNAMIC_UNLOAD_REFUSED
+            + ": this JetBrains build verifies the outgoing classloader only after loading the replacement; "
+            + "agent-doc staged the update before touching the live plugin generation";
+    }
+
+    private static boolean asyncPostReconfigurationClassloaderAwaitIsPresent(ClassLoader platformLoader) {
+        try {
+            Class.forName(ASYNC_CLASSLOADER_AWAIT_STRATEGY, false, platformLoader);
+            return true;
+        } catch (ClassNotFoundException synchronousPlatform) {
+            return false;
+        }
     }
 
     /** Stable prefix the launcher and preflight key on to record a refused dynamic unload. */

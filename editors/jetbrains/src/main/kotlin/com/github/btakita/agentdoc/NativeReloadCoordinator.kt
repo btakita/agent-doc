@@ -162,8 +162,16 @@ internal object NativeReloadCoordinator {
                             log.warn("[native] reload liveness republish failed", error)
                         }
                         try {
-                            val report = CrdtReplicaManager.restartAfterNativeReload(replicaHandoff)
-                            if (report.converged) {
+                            val report = CrdtReplicaManager.restartAfterNativeReload(
+                                replicaHandoff,
+                                surfaceProjects,
+                            )
+                            if (report.expected == 0) {
+                                log.warn(
+                                    "[native] replica restart observed no open markdown documents " +
+                                        "attached=0/0 live_projects=${report.liveProjects}",
+                                )
+                            } else if (report.converged) {
                                 log.info(
                                     "[native] replica restart converged " +
                                         "attached=${report.attached}/${report.expected}",

@@ -38,9 +38,9 @@ class DynamicPluginUpgradeReattachTest {
             ),
         )
         assertEquals(
-            "documents=0/0",
+            "documents=0/0:state=no-open-documents:live_projects=1",
             dynamicLoadReattachReceipt(
-                nativeReloadReplicaRestartReport(emptyList(), emptyList()),
+                nativeReloadReplicaRestartReport(emptyList(), emptyList(), liveProjects = 1),
             ),
         )
     }
@@ -94,7 +94,7 @@ class DynamicPluginUpgradeReattachTest {
         assertEquals(listOf("/b/y.md"), merged.failedPaths)
         assertFalse(merged.converged)
         assertEquals("documents=2/3:pending=/b/y.md", dynamicLoadReattachReceipt(merged))
-        assertTrue(mergeReplicaRestartReports(emptyList()).converged)
+        assertFalse(mergeReplicaRestartReports(emptyList()).converged)
     }
 
     /**
@@ -127,12 +127,13 @@ class DynamicPluginUpgradeReattachTest {
         )
         assertTrue(
             "one project that cannot produce a receipt must not erase the others'",
-            lifecycle.contains("nativeReloadReplicaRestartReport(listOf(label), emptyList())"),
+            lifecycle.contains("nativeReloadReplicaRestartReport(") &&
+                lifecycle.contains("liveProjects = 1"),
         )
         assertTrue(
             "nor may it read as a converged reattach",
             lifecycle.indexOf("} catch (failure: Exception) {") <
-                lifecycle.indexOf("nativeReloadReplicaRestartReport(listOf(label), emptyList())"),
+                lifecycle.indexOf("nativeReloadReplicaRestartReport("),
         )
 
         val action = source("java/com/github/btakita/agentdoc/JetBrainsPluginUpgradeAction.java")

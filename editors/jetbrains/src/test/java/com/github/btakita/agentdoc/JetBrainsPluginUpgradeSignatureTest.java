@@ -5,6 +5,7 @@ import org.junit.Test;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -122,6 +123,15 @@ public class JetBrainsPluginUpgradeSignatureTest {
             "plugin cannot unload dynamically: extension point is not dynamic",
             JetBrainsPluginUpgradeAction.unloadBlockerReason("extension point is not dynamic")
         );
+    }
+
+    @Test
+    public void asynchronousClassloaderRetirementStagesBeforeTouchingTheLiveGeneration() {
+        assertNull(JetBrainsPluginUpgradeAction.dynamicUpgradeBlockerReason(false));
+        String blocker = JetBrainsPluginUpgradeAction.dynamicUpgradeBlockerReason(true);
+        assertTrue(blocker, blocker.startsWith("plugin cannot unload dynamically:"));
+        assertTrue(blocker, blocker.contains("only after loading the replacement"));
+        assertTrue(blocker, blocker.contains("before touching the live plugin generation"));
     }
 
     @Test

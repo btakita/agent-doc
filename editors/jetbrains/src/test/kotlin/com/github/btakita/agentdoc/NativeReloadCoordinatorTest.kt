@@ -52,6 +52,13 @@ class NativeReloadCoordinatorTest {
                 attachedPaths = listOf("/project/a.md"),
             ).converged,
         )
+        val empty = nativeReloadReplicaRestartReport(
+            expectedPaths = emptyList(),
+            attachedPaths = emptyList(),
+            liveProjects = 3,
+        )
+        assertFalse("0/0 is an observed empty state, not convergence", empty.converged)
+        assertEquals(3, empty.liveProjects)
     }
 
     @Test
@@ -80,6 +87,11 @@ class NativeReloadCoordinatorTest {
             .substringBefore("fun requestRemoteDrain(")
         assertTrue("native restart must wait for each registration", restart.contains("await = true"))
         assertTrue("native restart must report exact per-document failures", restart.contains("nativeReloadReplicaRestartReport"))
+        assertTrue(
+            "native restart must rediscover every live project's open agent-doc documents",
+            restart.contains("handoff.projectDocuments.keys + liveProjects") &&
+                restart.contains("isAgentDocDocumentTextUtil(document.text)"),
+        )
         assertTrue(
             "the coordinator must inspect convergence before releasing the reload gate",
             coordinator.contains("if (report.converged)") &&

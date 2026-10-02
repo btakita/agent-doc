@@ -67,9 +67,10 @@ internal data class NativeReloadReplicaRestartReport(
     val expected: Int,
     val attached: Int,
     val failedPaths: List<String>,
+    val liveProjects: Int,
 ) {
     val converged: Boolean
-        get() = expected == attached && failedPaths.isEmpty()
+        get() = expected > 0 && expected == attached && failedPaths.isEmpty()
 }
 
 internal data class NativeReloadReplicaHandoff(
@@ -80,6 +81,7 @@ internal data class NativeReloadReplicaHandoff(
 internal fun nativeReloadReplicaRestartReport(
     expectedPaths: Collection<String>,
     attachedPaths: Collection<String>,
+    liveProjects: Int = 0,
 ): NativeReloadReplicaRestartReport {
     val expected = expectedPaths.toSortedSet()
     val attached = attachedPaths.toSet()
@@ -88,6 +90,7 @@ internal fun nativeReloadReplicaRestartReport(
         expected = expected.size,
         attached = expected.count(attached::contains),
         failedPaths = failed,
+        liveProjects = liveProjects,
     )
 }
 
@@ -104,6 +107,7 @@ internal fun mergeReplicaRestartReports(
         expected = reports.sumOf { it.expected },
         attached = reports.sumOf { it.attached },
         failedPaths = reports.flatMap { it.failedPaths },
+        liveProjects = reports.sumOf { it.liveProjects },
     )
 
 /**
@@ -116,6 +120,9 @@ internal fun mergeReplicaRestartReports(
  */
 internal fun dynamicLoadReattachReceipt(report: NativeReloadReplicaRestartReport): String {
     val documents = "documents=${report.attached}/${report.expected}"
+    if (report.expected == 0) {
+        return "$documents:state=no-open-documents:live_projects=${report.liveProjects}"
+    }
     if (report.failedPaths.isEmpty()) return documents
     val pending = report.failedPaths.joinToString(",") { path ->
         path.replace('\n', ' ').replace('\r', ' ')
@@ -4049,10 +4056,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         internal fun restartAfterNativeReload(
             handoff: NativeReloadReplicaHandoff,
+            liveProjects: Collection<Project> = emptyList(),
         ): NativeReloadReplicaRestartReport {
             val targets = mutableListOf<Triple<CrdtReplicaManager, String, Document>>()
             val collectTargets = {
-                handoff.projectDocuments.keys
+                (handoff.projectDocuments.keys + liveProjects)
+                    .distinct()
                     .filterNot { it.isDisposed }
                     .forEach { project ->
                         val manager = getInstance(project)
@@ -4061,7 +4070,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             .asSequence()
                             .filter { it.name.endsWith(".md") }
                             .forEach { file ->
-                                fileDocumentManager.getDocument(file)?.let { document ->
+                                val document = fileDocumentManager.getDocument(file) ?: return@forEach
+                                if (isAgentDocDocumentTextUtil(document.text)) {
                                     targets.add(Triple(manager, file.path, document))
                                 }
                             }
@@ -4090,7 +4100,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     attachedPaths.add(filePath)
                 }
             }
-            return nativeReloadReplicaRestartReport(expectedPaths, attachedPaths)
+            return nativeReloadReplicaRestartReport(
+                expectedPaths,
+                attachedPaths,
+                liveProjects = (handoff.projectDocuments.keys + liveProjects)
+                    .distinct()
+                    .count { !it.isDisposed },
+            )
         }
 
         fun requestRemoteDrain(project: Project, filePath: String? = null, reason: String = "event") {
@@ -4354,7 +4370,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     attachedPaths.add(filePath)
                 }
             }
-            return nativeReloadReplicaRestartReport(targets.map { it.first }, attachedPaths)
+            return nativeReloadReplicaRestartReport(
+                targets.map { it.first },
+                attachedPaths,
+                liveProjects = if (project.isDisposed) 0 else 1,
+            )
         }
 
         fun ensureOpenDocumentReplica(project: Project, filePath: String, reason: String) {

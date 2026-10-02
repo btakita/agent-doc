@@ -129,6 +129,11 @@ class PluginLifecycleListenerTest {
         assertTrue(upgradeAction.contains("documents="))
         // GH #80: the unload shape comes from DynamicPlugins' own signatures.
         assertTrue(upgradeAction.contains("resolveUpdateUnload(DynamicPlugins.class"))
+        val retirementPolicy = upgradeAction.indexOf("dynamicUpgradeBlockerReason(")
+        val unloadProbe = upgradeAction.indexOf("checkCanUnloadWithoutRestart")
+        assertTrue("classloader retirement policy must run before any unload probe", retirementPolicy >= 0)
+        assertTrue("an async-retirement platform must be staged before the probe", unloadProbe > retirementPolicy)
+        assertTrue(upgradeAction.contains("AwaitClassloaderUnloadAsyncPostReconfiguration"))
         assertTrue(upgradeAction.contains("\"withDisable\", boolean.class).invoke(value, false)"))
         assertTrue(upgradeAction.contains("\"withUpdate\", boolean.class).invoke(value, true)"))
         assertFalse(upgradeAction.contains("unloadPlugin(current)"))

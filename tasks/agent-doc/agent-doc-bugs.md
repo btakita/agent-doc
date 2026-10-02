@@ -811,6 +811,38 @@ The exchange is about 740 lines; noting the size only.
   - The Stop-hook ordering bug in `sdk.md`: it ran the commit before projecting the capture. The response landed about 15s later through the keyed retry.
   - The `CrdtReplicaManager` read-action threading exception
   - The #94 controller-side asks: `reload-lib` exit status, and prevalidation reads
+
+### Re: parallel drain — GH #80/#87/#93/#94, IDEA background, Stop hook, read-action — opus-5.5 · 2026-10-02T01:40-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/80
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/87
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/93
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/94
+
+> **Queue prompt:** The Idea Plugin formatting is not active. The element content should have a background. It's gone now.
+
+**All of it shipped in v0.35.433 and v0.35.434 (plugin 0.2.470), is installed, and GH #80, #87, #93 and #94 are closed.** Seven subagents worked in parallel, each in its own worktree. I cherry-picked each branch onto main. One full `make check` passed on the combined tree (10,401 tests), and 10,403 passed for the 0.35.434 release.
+
+- **IDEA element background:** since plugin 0.2.344 (`f5bf2ad73`), the element tint has been set to the editor's own background colour, so it was invisible. Element bodies now get a theme-aware grey.
+- **GH #80:** IU-263 removed `DynamicPlugins$UnloadPluginOptions`. The upgrader now picks the unload overload by its signature.
+- **GH #94:**
+  - The plugin tore down the replica transport *before* the step that failed. It now releases only once the unload can actually be called, and rebuilds the replicas on any later abort.
+  - `admin reload-lib` exits nonzero for an unreachable editor endpoint and names it.
+  - Prevalidation checks the response against a read-only disk view instead of dead-ending.
+- **GH #87:** a staged install's version is now read from the package, not the temp filename.
+- **GH #93:** a backticked marker prefix is prose to the lint gate too. The gate also refuses findings the write can't repair *before* anything is written.
+- **Stop hook (`sdk.md`):** structural cleanup returned before the reopened capture was replayed, so the commit guard refused. Repair now replays the capture in the same pass, and a refusal for a capture that a durable owner already holds is treated as a deferral, not a block.
+- **`Read access is allowed from inside read-action only`:** `withEditorCaptureCut` looked up the Document outside the read action. It now does that lookup inside one, on every thread path. Verified live: 0.2.470 is loaded and the log shows no further errors.
+
+**Follow-ups found and fixed while shipping:**
+- An attached agent jar joins the IDE's system class path once per JVM. So the new upgrade action's nested classes loaded from the *first* jar ever attached, which threw `IllegalAccessError` and staged every upgrade. The action now compiles to a single class file, pinned by a test. **Verified live:** 0.2.467 was upgraded to 0.2.470 in place, with no restart.
+- A staged `--local` install no longer fails verification with "built N, installed N-1".
+- The install summary no longer says "no restart required" right after it staged a restart.
+
+**Not verified:** the restart-free upgrade on an IU-263 Remote Dev backend (GH #80). The closing comment asks the reporter to reopen if it fails there.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

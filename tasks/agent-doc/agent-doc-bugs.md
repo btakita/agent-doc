@@ -3,7 +3,7 @@ agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
   codex: 01a0fd09-a13c-75b1-aa00-0e20ce0bd034
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -98,6 +98,12 @@ The added production causes are also fixed rather than merely cleared:
 - The Haiven replay/API and FPE work was a separate delegated session, not a substitution for this `agent-doc-bugs.md` session; its owner-pane responses were persisted independently.
 
 Released and published [v0.35.440](https://github.com/btakita/agent-doc/releases/tag/v0.35.440) at `b7d4607bafffbd1fe9dd344d0ed50892e1281d5f`: core 0.35.440, JetBrains 0.2.480, and VS Code 0.2.78. The full gate passed 10,434 Rust tests plus editor, native, docs, parity, private-name, and TLA checks. GitHub Release, PyPI clean pinned install, main CI including tmux-ci, Book, and Pages are terminal successful; all eight release assets passed both checksum manifests.
+
+### Re: session agent switched to claude — opus-5 · 2026-10-02T19:52-04:00
+
+Noted the frontmatter change `agent: codex` → `agent: claude`; this session is now running under Claude Code (pane %2). No new prompt or queue head was present, so no repo work this cycle.
+
+Advisory from preflight: 1 legacy gated item is still in `agent:backlog` — `agent-doc migrate tasks/agent-doc/agent-doc-bugs.md` would move it into `agent:review`.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 

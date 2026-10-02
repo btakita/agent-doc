@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.431
+
+- **A component marker quoted in backticks is prose (GH #90).** Marker detection now hides backtick
+  spans paired within one line, which covers contexts where the Markdown parser does not see inline
+  code (after `<details>`, an unterminated comment, an unmatched backtick). One shared scanner
+  serves the replay guard and the structural target check. A response is checked for landability
+  before it is captured, so it can no longer be captured and then refused forever. Native-save
+  retries drop dead editor pids before the plugin-generation gate and report the real structural
+  reason. An unlandable capture stops retrying and names its recovery:
+  `agent-doc repair <FILE> --requote-unlandable-capture`. A raw marker line outside code in a
+  response is now refused at write time.
+- **JetBrains plugin 0.2.467: operator text survives a library reload.** Keystrokes typed while
+  the plugin re-publishes a buffer are kept instead of fenced away, and a replica stuck behind the
+  visible editor rolls the operator's text forward without a controller restart. A whole-document
+  replacement is refused when it would overwrite operator edits the controller never accepted,
+  even after Run Agent Doc saves the document.
+- **A codex `/clear` into a one-row stash pane is proven from scrollback.** When the visible
+  frame is blank, the clear proof reads the pane history for a fresh Codex chat; a clear that
+  never ran still fails closed, and no duplicate `/clear` is sent.
+- **Stop hook.** A background-task notification no longer hides an already scheduled
+  `/loop agent-doc <FILE>` re-entry, so notification turns stop re-blocking.
+
 ## 0.35.430
 
 - **Editor writes no longer stall behind a superseded IPC listener.** A listener left behind by an

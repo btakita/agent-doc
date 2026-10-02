@@ -58,7 +58,18 @@ Fixed, closed, and released (`fix then closerelease`). Selection focus now keys 
 Release v0.35.437 completed successfully: full CI (`make check` and `tmux-ci`) passed, all eight GitHub artifacts matched their checksum manifests, PyPI 0.35.437 is live, and JetBrains plugin 0.2.475 contains the fix. GH #102 was closed with that evidence. The local installed stack has subsequently advanced through the GH #103 verification install to CLI 0.35.437, JetBrains 0.2.476, and VS Code 0.2.77.
 
 GH #103 was also completed in the requested background queue work and will be reconciled by the next queue closeout; the auto-upgrade implementation is active in an isolated worker branch.
-<!-- agent:boundary:e58c9589 -->
+❯ Because each new “also fix” uncovered a separate production defect, and every agent-doc code change requires the full 10k+ test gate before release. I’ve also held v0.35.439 instead of publishing while a known hook-recovery bug remained.
+
+❯ Completed: GH #102–104, auto-upgrade, pane mismatch, Roseshield restart, empty queue item, IDEA thread leak, Haiven replay, and FPE login-cycle recovery.
+
+❯ Remaining:
+
+1. Finish the two-file retained-capture regression/fix.
+2. Rebase the already-prepared v0.35.439 release.
+3. Run final verification and watch GitHub Release/PyPI to terminal success.
+
+❯ The current patch also briefly produced repo-wide formatting noise; that was removed without touching intended work. Realistically, terminal publication still needs roughly another 45–75 minutes, mostly mandatory test and release pipelines.
+<!-- agent:boundary:06c4c1b0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -67,8 +78,10 @@ GH #103 was also completed in the requested background queue work and will be re
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/102
-- #gh-fix https://github.com/btakita/agent-doc/issues/103
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/102~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/103~~
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/104
+- Bring back the Clear Session Context to a numbered item on the first page of the Agent Doc editor prompt menu. Number 9 would be ideal.
 - Create an auto-upgrade flag, where the gh releases are watched and automatically upgrade the agent-doc binary + plugins.
 - release + publish
 <!-- /agent:queue -->

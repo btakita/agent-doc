@@ -660,6 +660,31 @@ After installing, the IDE reloaded cleanly, with no refusals or mismatches.
 **Verification:** `make check` passed (10346 tests). Everything is installed and pushed.
 
 **Next:** as you asked, the remaining heads run in parallel, each in its own git worktree with its own build: `#sdkingressstall` and the "active while Idea is Analyzing project" item. I'll merge them, run one full check and install, then do `release + publish` last, because it ships what they produce.
+
+### Re: do [#sdkingressstall], the IDE-indexing menu block, and the Stop-hook "error" — opus-5.5 · 2026-10-01T21:31-04:00
+
+> **Queue prompt:**
+>
+> do [#sdkingressstall]
+
+
+> **Queue prompt:** agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
+
+I ran these two in parallel, each in its own git worktree, then merged them onto `main`, ran one full check (`make check`, 10351 tests passed), installed and pushed.
+
+**`#sdkingressstall` — done** (`0cb2d9655`). The new lock-timing log fired 16 times in haiven-dev's ops.log, every time while the controller was writing a state event. The hold times cluster on SQLite's own retry intervals (about 1.0, 1.1, 1.4 and 1.5 s). So the controller was holding its state-event lock while it waited for another connection's write lock on `state.db`. That other connection was the cleanup pass that trims old state events, which every new process runs on its first open of `state.db`. Each pass scanned for rows inside a single DELETE statement, so it held the write lock for the whole scan: up to 0.46 s on haiven-dev, even with nothing to delete. The slow lines cluster at install fan-outs, when several supervisors restart at once.
+- **Fix:** the three cleanup passes now find their rows with a plain read and take the write lock only to delete them.
+- **The 305 MB `reliable_sync_liveness_journal`:** it was append-only. Every editor heartbeat added a row, so it held 497,353 rows for 1,037 distinct facts. The controller now compacts it in the background, after startup and then every 2,048 appends. A row is dropped only once every fact in it has a newer replacement. On a copy of haiven-dev's database: 497,353 rows became 2,664, a cold reload went from 3.5 s to 19 ms, and the rebuilt state is identical.
+- **Still unproven:** what held the lock in the original 22:20Z stall, because that window predates the new logging.
+- **Tests:** each new test fails with its fix reverted.
+
+**The IDE-indexing menu block — fixed** (`4372a2a4c`, plugin 0.2.465). Every agent-doc action was a plain IntelliJ action, and IntelliJ disables those while it indexes. That covered the Alt+Space popup, the Tools, editor and project-view menus, and every shortcut. The slash autocomplete and the turn banner were affected the same way. None of them use IntelliJ's indexes, so all 22 actions, the two popup groups, the autocomplete and the banner now stay available while the IDE indexes. A new test fails if any agent-doc action or group can't run during indexing. I haven't watched it in a live IDE yet, so an `[operator-verify]` check is worth doing during the next "Analyzing project...".
+
+**The Stop-hook "error" — fixed** (`e669d79a6`). Claude Code labels every Stop-hook block "Stop hook error", whatever its text says. The hook now lets the turn end when a live, current supervisor will continue the queue and no earlier handoff to it is still waiting. If not, it still blocks and asks for the scheduled `/loop` re-entry. That case is now uncommon, so the queue no longer prints an error after every item.
+
+**Next:** `release + publish`.
+
+The exchange is 630+ lines; I'm continuing the queue rather than stopping to compact.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -689,14 +714,13 @@ After installing, the IDE reloaded cleanly, with no refusals or mismatches.
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/89~~
 - ~~do [#staleeditorregprune]~~
 - ~~do [#midinstallreloadstall]~~
-- do [#sdkingressstall]
+- ~~do [#sdkingressstall]~~
 - release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue --> 
 
 
 <!-- agent:backlog priority -->
-- [ ] [#sdkingressstall] haiven-dev sdk.md: find what held the controller's state-event ingress lock on 2026-10-01 22:20:43-22:21:44Z, when every state-event RPC (including the IDE route's route_document_prep) timed out after 5.0s. The window matched a retained editor save that the IDE kept refusing (persist_current visible_length_mismatch, then document_lane_timeout) and a 974 KB full replica bootstrap of a 12 KB document. 80d82d4ad now logs state_event_ingress_slow site=… fact=… wait_ms=… hold_ms= at 1s or more. Unblocked by the next occurrence: grep haiven-dev ops.log for state_event_ingress_slow, then fix that holder. Also check why reliable_sync_liveness_journal is 305 MB in haiven-dev state.db.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

@@ -124,6 +124,9 @@ internal fun dynamicLoadReattachReceipt(report: NativeReloadReplicaRestartReport
 }
 private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
+private const val EDITOR_CAPTURE_CUT_ATTEMPTS = 20
+private const val EDITOR_CAPTURE_CUT_RETRY_MS = 5L
+private const val UNFORWARDED_OPERATOR_TEXT_CONFIRM_MS = 1_000L
 private const val DYNAMIC_PLUGIN_ATTACH_RECEIPT_TIMEOUT_MS = 15_000L
 private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
 private const val CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS = 5_000L
@@ -572,6 +575,104 @@ internal fun currentEpochCapturedEditsUtil(
     currentEpoch: Long,
 ): List<CapturedLocalEditorEdit> = edits.filter { it.projectionEpoch == currentEpoch }
 
+/**
+ * The captured splices a whole-buffer publication did NOT subsume.
+ *
+ * `retainedtargetdropsedit` (live 2026-10-01, a session document): a re-register
+ * published the operator buffer `S` (shadow + one typed newline). While the
+ * 322 KB publication delta was in flight the operator pasted a 99-byte queue
+ * line. The fence then advanced the projection epoch, retiring EVERY captured
+ * splice — the paste too, although `S` never contained it. The very next splice
+ * (deleting the paste's trailing newline, offset 7482) was forwarded from the
+ * shadow `S`; `S[7482]` also happened to be a newline (the blank line before
+ * `## Review`), so its range check passed and the replica deleted the wrong
+ * line. Canonical, replica and every later retained persistence target became
+ * `468b48…` (no paste, one blank line missing) while the editor showed
+ * `8849a8…`; the editor refused every exact-target save until a controller
+ * restart.
+ *
+ * Answer exactly the suffix of [captured] typed after the [published] cut, by
+ * undoing captured splices from the newest backwards from [visible] (an atomic
+ * snapshot with [captured]) until the text equals [published]. Every kept splice
+ * is re-stamped to [epoch]. When the walk cannot prove a cut, a single splice
+ * `published -> visible` stands in for the raced edits; it is exact text, only
+ * less granular. Never null: the operator's visible text is always owed.
+ */
+internal fun capturedEditsOwedAfterPublishedCutUtil(
+    published: String,
+    visible: String,
+    captured: List<CapturedLocalEditorEdit>,
+    epoch: Long,
+): List<CapturedLocalEditorEdit> {
+    var text = visible
+    var undone = 0
+    while (true) {
+        if (text == published) {
+            val owed = captured.takeLast(undone).map { it.copy(projectionEpoch = epoch) }
+            if (owed.isEmpty() || prepareLocalEditorEditsUtil(published, owed)?.resultingText == visible) {
+                return owed
+            }
+            break
+        }
+        if (undone == captured.size) break
+        text = reconstructLocalEditorBaseTextUtil(text, captured[captured.size - 1 - undone]) ?: break
+        undone++
+    }
+    return listOfNotNull(singleSpliceCapturedEditUtil(published, visible, epoch))
+}
+
+/**
+ * One UTF-16 splice turning [before] into [after] (common prefix/suffix), never
+ * splitting a surrogate pair; null when they are equal.
+ */
+internal fun singleSpliceCapturedEditUtil(
+    before: String,
+    after: String,
+    epoch: Long,
+): CapturedLocalEditorEdit? {
+    if (before == after) return null
+    var prefix = 0
+    val maxPrefix = minOf(before.length, after.length)
+    while (prefix < maxPrefix && before[prefix] == after[prefix]) prefix++
+    if (prefix > 0 && Character.isHighSurrogate(before[prefix - 1])) prefix--
+    var suffix = 0
+    while (
+        suffix < before.length - prefix &&
+        suffix < after.length - prefix &&
+        before[before.length - 1 - suffix] == after[after.length - 1 - suffix]
+    ) {
+        suffix++
+    }
+    if (suffix > 0 && Character.isLowSurrogate(before[before.length - suffix])) suffix--
+    return CapturedLocalEditorEdit(
+        offsetUtf16 = prefix,
+        oldFragment = before.substring(prefix, before.length - suffix),
+        newFragment = after.substring(prefix, after.length - suffix),
+        projectionEpoch = epoch,
+    )
+}
+
+/**
+ * `retainedtargetdropsedit` self-heal: the replica is missing operator text when
+ * the shadow is exactly the replica, no captured splice is outstanding, and the
+ * visible buffer still differs from the shadow. That is a lost splice: nothing
+ * else moves the visible buffer without either a captured splice or a remote
+ * apply, which callers exclude. Answer the splice that rolls the visible text
+ * forward onto the replica (editor text is the base), or null when the capture
+ * chain is intact.
+ */
+internal fun unforwardedOperatorTextSpliceUtil(
+    shadow: String?,
+    replica: String?,
+    visible: String?,
+    captured: List<CapturedLocalEditorEdit>,
+    epoch: Long,
+): CapturedLocalEditorEdit? {
+    if (shadow == null || replica == null || visible == null) return null
+    if (shadow != replica || captured.isNotEmpty()) return null
+    return singleSpliceCapturedEditUtil(shadow, visible, epoch)
+}
+
 internal fun pullDeliveryRequestsReplicaRefreshUtil(delivery: ReplicaPullDelivery): Boolean =
     delivery is ReplicaPullDelivery.Unavailable
 
@@ -682,6 +783,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         KeyedCoalescingRelay<String, PendingRemoteEditorApply>(REMOTE_EDITOR_APPLY_MERGE)
     private val remoteEditorApplyScheduled = AtomicBoolean(false)
     private val remoteEditorApplyPaths = ConcurrentHashMap.newKeySet<String>()
+    private val unforwardedOperatorTextObservations = ConcurrentHashMap<String, String>()
     private val retainedCanonicalProjectionPaths = ConcurrentHashMap.newKeySet<String>()
     private val retainedProjectionHoldPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryPaths = ConcurrentHashMap.newKeySet<String>()
@@ -743,6 +845,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         fileContentReloadingPaths.clear()
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
+        unforwardedOperatorTextObservations.clear()
         retainedCanonicalProjectionPaths.clear()
         retainedProjectionHoldPaths.clear()
         remoteEditorEffectGenerations.clear()
@@ -1193,6 +1296,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 registerRetryTasks.remove(oldPath)?.cancel(false)
                 projectionRecoveryReregisterStartedAtMs.remove(oldPath)
                 remoteEditorApplyPaths.remove(oldPath)
+                unforwardedOperatorTextObservations.remove(oldPath)
                 retainedCanonicalProjectionPaths.remove(oldPath)
                 templateGuardRecoveryPaths.remove(oldPath)
                 templateGuardRecoveryRetryPaths.remove(oldPath)
@@ -1254,6 +1358,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             hasPendingLocal(filePath) ||
             shadows[filePath] != publishedEditorCut
         ) {
+            if (publishedEditorCut != null && !hasPendingLocal(filePath)) {
+                scheduleUnforwardedOperatorTextRecovery(filePath, "post-register-replay-replica-raced")
+            }
             scheduleDeferredWriteReplayRetry(
                 filePath,
                 document,
@@ -2385,6 +2492,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val replicaHash = replicaText?.let { contentHash(it) } ?: "missing"
         if (visibleLen != expectedContentLen) {
             requestUrgentRemoteDrain(filePath, "persist-current-visible-length-mismatch")
+            scheduleUnforwardedOperatorTextRecovery(filePath, "persist-current-rejected-visible-length-mismatch")
             return reject(
                 "visible_length_mismatch",
                 " visible_hash=$visibleHash visible_len=$visibleLen replica_hash=$replicaHash",
@@ -2392,6 +2500,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         if (!visibleHash.equals(expectedContentHash, ignoreCase = true)) {
             requestUrgentRemoteDrain(filePath, "persist-current-visible-hash-mismatch")
+            scheduleUnforwardedOperatorTextRecovery(filePath, "persist-current-rejected-visible-hash-mismatch")
             return reject(
                 "visible_hash_mismatch",
                 " visible_hash=$visibleHash visible_len=$visibleLen replica_hash=$replicaHash",
@@ -2399,6 +2508,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         if (replicaText != visibleText) {
             requestUrgentRemoteDrain(filePath, "persist-current-visible-mismatch")
+            scheduleUnforwardedOperatorTextRecovery(filePath, "persist-current-rejected-visible-mismatch")
             return reject(
                 "replica_visible_mismatch",
                 " visible_hash=$visibleHash visible_len=$visibleLen replica_hash=$replicaHash",
@@ -3246,7 +3356,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         false
                     } else {
                         shadows[filePath] = bufferText
-                        fenceCapturedEditsSubsumedByPublishedBuffer(filePath, "publish-operator-buffer")
+                        fenceCapturedEditsSubsumedByPublishedBuffer(
+                            filePath,
+                            bufferText,
+                            "publish-operator-buffer",
+                        )
                         retainedCanonicalProjectionPaths.remove(filePath)
                     if (!projectSettledVisibleState(filePath, forwarder, bufferText)) {
                         requestRemoteDrain(filePath, "registration-operator-buffer-projection-retry")
@@ -3288,7 +3402,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                     false
                 } else {
-                    fenceCapturedEditsSubsumedByPublishedBuffer(filePath, "registration-merge-forward")
+                    fenceEveryCapturedEdit(filePath, "registration-merge-forward")
                     retainedCanonicalProjectionPaths.remove(filePath)
                     // The replica now holds the merge and has published it; project
                     // it into the buffer through the generation-fenced apply, which
@@ -3500,18 +3614,208 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     /**
      * A whole buffer was just published from the exact captured cut, so every
-     * splice captured before it is already in the replica. Advancing the
-     * projection epoch retires those batches instead of replaying them
-     * (`#subsumedsplicereplay`); a keystroke that raced the publication is
-     * recovered like any other fenced batch, by the next buffer-from-shadow
-     * registration.
+     * splice captured before it is already in the replica and must not replay
+     * (`#subsumedsplicereplay`). A splice typed WHILE the publication was in
+     * flight is not in it, though, and retiring it too (the old blanket epoch
+     * advance) dropped the operator's text and let the next splice validate
+     * against a shadow that lacked it (`retainedtargetdropsedit`).
+     *
+     * Under one read action — no DocumentEvent can interleave, because they are
+     * delivered inside write actions — keep exactly the captured suffix the
+     * published cut does not contain, re-stamped to the current epoch. Edits are
+     * then forwarded from the published buffer like any other batch.
      */
-    private fun fenceCapturedEditsSubsumedByPublishedBuffer(filePath: String, reason: String) {
+    private fun fenceCapturedEditsSubsumedByPublishedBuffer(
+        filePath: String,
+        publishedText: String,
+        reason: String,
+    ) {
+        var owedCount = -1
+        val fenced =
+            withEditorCaptureCut(filePath) { visible ->
+                val epoch = nonOperatorMutationEpoch(filePath)
+                pendingLocalEditorEdits.compute(filePath) { _, existing ->
+                    val owed =
+                        capturedEditsOwedAfterPublishedCutUtil(
+                            published = publishedText,
+                            visible = visible,
+                            captured = existing.orEmpty(),
+                            epoch = epoch,
+                        )
+                    owedCount = owed.size
+                    owed.takeIf { it.isNotEmpty() }?.toMutableList()
+                }
+                true
+            } == true
+        if (!fenced) {
+            // No consistent cut was readable (a write action kept the read lock
+            // busy). Fall back to retiring every captured splice; the
+            // unforwarded-text self-heal rolls any raced keystroke forward from
+            // the editor once the buffer is observable again.
+            val epoch = advanceNonOperatorMutationEpoch(filePath)
+            log.warn(
+                "[crdt-replica] fenced every captured splice for ${File(filePath).name} without a " +
+                    "consistent editor cut; epoch=$epoch reason=$reason recovery=unforwarded-operator-text",
+            )
+            scheduleUnforwardedOperatorTextRecovery(filePath, "publication-fence-without-cut")
+            return
+        }
+        if (owedCount > 0) {
+            log.warn(
+                "[crdt-replica] kept $owedCount splice(s) typed during the buffer publication for " +
+                    "${File(filePath).name}; published_hash=${contentHash(publishedText)} reason=$reason",
+            )
+            scheduleLocalEditorFlush(filePath)
+        } else {
+            log.info(
+                "[crdt-replica] fenced splices subsumed by the published buffer for ${File(filePath).name}; " +
+                    "reason=$reason",
+            )
+        }
+    }
+
+    /**
+     * Merge-forward publishes `merge(shadow, buffer, canonical)`, not the buffer,
+     * and projects it back through the generation-fenced remote apply, which
+     * refuses if the operator typed since the captured buffer. Raced splices are
+     * relative to that buffer, not to the replica, so they cannot be forwarded
+     * here; retire them all and let the refused apply re-register from the buffer.
+     */
+    private fun fenceEveryCapturedEdit(filePath: String, reason: String) {
         val epoch = advanceNonOperatorMutationEpoch(filePath)
         log.info(
             "[crdt-replica] fenced splices subsumed by the published buffer for ${File(filePath).name}; " +
                 "epoch=$epoch reason=$reason",
         )
+    }
+
+    /**
+     * Run [block] with the live editor text under a read action, so the text and
+     * [pendingLocalEditorEdits] form one consistent cut. Non-blocking attempts
+     * only: a worker must never wait on the read lock while the EDT may be
+     * waiting on this worker.
+     */
+    private fun <T> withEditorCaptureCut(filePath: String, block: (String) -> T): T? {
+        val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return null
+        val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return null
+        val application = ApplicationManager.getApplication()
+        if (application.isReadAccessAllowed) return block(document.text)
+        if (SwingUtilities.isEventDispatchThread()) {
+            return ReadAction.compute<T, RuntimeException> { block(document.text) }
+        }
+        val applicationEx = application as? ApplicationEx ?: return null
+        val result = AtomicReference<T?>()
+        repeat(EDITOR_CAPTURE_CUT_ATTEMPTS) { attempt ->
+            if (applicationEx.tryRunReadAction { result.set(block(document.text)) }) {
+                return result.get()
+            }
+            if (attempt + 1 < EDITOR_CAPTURE_CUT_ATTEMPTS) {
+                try {
+                    Thread.sleep(EDITOR_CAPTURE_CUT_RETRY_MS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return null
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * `retainedtargetdropsedit` self-heal. A replica that lost an operator splice
+     * never converges by itself: the controller keeps asking the editor to save
+     * the replica's text, the editor rightly refuses because its visible buffer
+     * holds more, and nothing reconciles until a controller restart reseeds from
+     * the editor. When the capture chain is provably broken (shadow == replica,
+     * no splice outstanding, no remote apply in flight, buffer != shadow) and the
+     * same divergence is observed twice, roll the visible text forward onto the
+     * replica as a local splice — operator-visible text is authoritative.
+     */
+    private fun scheduleUnforwardedOperatorTextRecovery(filePath: String, reason: String) {
+        try {
+            documentWorkers.forDocument(filePath).execute {
+                if (!disposed.get()) recoverUnforwardedOperatorText(filePath, reason)
+            }
+        } catch (error: RejectedExecutionException) {
+            if (!disposed.get()) {
+                log.warn("[crdt-replica] unforwarded-text recovery scheduling rejected for $filePath", error)
+            }
+        }
+    }
+
+    private fun recoverUnforwardedOperatorText(filePath: String, reason: String) {
+        val forwarder = forwarders[filePath]
+        if (
+            forwarder == null ||
+            !forwarder.attached ||
+            hasPendingLocal(filePath) ||
+            isApplyingRemote(filePath) ||
+            remoteEditorApplyPaths.contains(filePath) ||
+            retainedCanonicalProjectionPaths.contains(filePath) ||
+            retainedProjectionHoldPaths.contains(filePath)
+        ) {
+            unforwardedOperatorTextObservations.remove(filePath)
+            return
+        }
+        val shadow = shadows[filePath]
+        val replica = forwarder.replicaText()
+        var recovered: CapturedLocalEditorEdit? = null
+        withEditorCaptureCut(filePath) { visible ->
+            val epoch = nonOperatorMutationEpoch(filePath)
+            val splice =
+                unforwardedOperatorTextSpliceUtil(
+                    shadow = shadow,
+                    replica = replica,
+                    visible = visible,
+                    captured = pendingLocalEditorEdits[filePath].orEmpty(),
+                    epoch = epoch,
+                )
+            if (splice == null) {
+                unforwardedOperatorTextObservations.remove(filePath)
+                return@withEditorCaptureCut
+            }
+            val observation = "${contentHash(shadow!!)}:${contentHash(visible)}:$epoch"
+            if (unforwardedOperatorTextObservations.put(filePath, observation) != observation) {
+                // First sighting: a remote apply or registration may still be
+                // settling. Look again shortly; act only on a stable divergence.
+                return@withEditorCaptureCut
+            }
+            unforwardedOperatorTextObservations.remove(filePath)
+            pendingLocalEditorEdits.compute(filePath) { _, existing ->
+                (existing ?: mutableListOf()).also { it.add(splice) }
+            }
+            recovered = splice
+        }
+        val splice = recovered
+        if (splice == null) {
+            if (unforwardedOperatorTextObservations.containsKey(filePath)) {
+                scheduleUnforwardedOperatorTextRecoveryAfter(filePath, reason)
+            }
+            return
+        }
+        log.warn(
+            "[crdt-replica] rolled unforwarded operator text forward onto the replica for " +
+                "${File(filePath).name}; replica_hash=${contentHash(replica!!)} " +
+                "removed_chars=${splice.oldFragment.length} inserted_chars=${splice.newFragment.length} " +
+                "reason=$reason recovery=editor-text-authoritative",
+        )
+        scheduleLocalEditorFlush(filePath)
+    }
+
+    private fun scheduleUnforwardedOperatorTextRecoveryAfter(filePath: String, reason: String) {
+        try {
+            documentWorkers.forDocument(filePath).schedule(
+                Runnable {
+                    if (!disposed.get()) recoverUnforwardedOperatorText(filePath, reason)
+                },
+                UNFORWARDED_OPERATOR_TEXT_CONFIRM_MS,
+                TimeUnit.MILLISECONDS,
+            )
+        } catch (error: RejectedExecutionException) {
+            if (!disposed.get()) {
+                log.warn("[crdt-replica] unforwarded-text recovery confirm rejected for $filePath", error)
+            }
+        }
     }
 
     private fun markLocalPending(filePath: String) {

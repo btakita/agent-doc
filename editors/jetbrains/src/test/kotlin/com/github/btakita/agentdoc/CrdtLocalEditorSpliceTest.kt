@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -124,5 +125,148 @@ class CrdtLocalEditorSpliceTest {
         // Splices typed after the publication still forward.
         val later = CapturedLocalEditorEdit(0, "", "x", 5)
         assertEquals(listOf(later), currentEpochCapturedEditsUtil(edits + later, 5))
+    }
+
+    // `retainedtargetdropsedit`: the live shape. A re-register published the buffer
+    // (shadow + one typed newline) while the operator pasted a queue line; the
+    // paste's trailing newline was then deleted. The paste was retired by the
+    // publication fence, and the delete validated against a blank line further
+    // down the shadow, so the replica lost the paste AND a blank line.
+    private val queueShadow =
+        "# Queue\n\n<!-- agent:queue priority -->\n<!-- /agent:queue -->\n\n# Backlog\n\n" +
+            "<!-- agent:backlog priority queue -->\n<!-- /agent:backlog -->\n\n## Review\n"
+    // Sized so the paste's trailing newline sits, in the published buffer, on the
+    // blank line before `## Review` — the coincidence that let the stale delete
+    // validate live.
+    private val pastedLine =
+        "- \uD83D\uDEA7 Make the rest of the sample-app/pull/22 stack ready to review and rebase it onto main first."
+
+    private data class LiveRace(
+        val published: String,
+        val visibleAtFence: String,
+        val finalVisible: String,
+        val capturedAtFence: List<CapturedLocalEditorEdit>,
+        val deleteAfterFence: CapturedLocalEditorEdit,
+    )
+
+    private fun liveRace(): LiveRace {
+        val markerEnd = queueShadow.indexOf("<!-- agent:queue priority -->") + "<!-- agent:queue priority -->".length
+        val typedNewline = CapturedLocalEditorEdit(markerEnd, "", "\n", 0)
+        val published = prepareLocalEditorEditsUtil(queueShadow, listOf(typedNewline))!!.resultingText
+        val paste = CapturedLocalEditorEdit(markerEnd + 1, "", "$pastedLine\n", 0)
+        val visibleAtFence = prepareLocalEditorEditsUtil(published, listOf(paste))!!.resultingText
+        val trailingNewline = markerEnd + 1 + pastedLine.length
+        val deleteTrailingNewline = CapturedLocalEditorEdit(trailingNewline, "\n", "", 0)
+        val finalVisible = prepareLocalEditorEditsUtil(visibleAtFence, listOf(deleteTrailingNewline))!!.resultingText
+        return LiveRace(published, visibleAtFence, finalVisible, listOf(typedNewline, paste), deleteTrailingNewline)
+    }
+
+    @Test
+    fun `publication fence keeps the splice typed while the buffer was in flight`() {
+        val race = liveRace()
+        assertEquals(
+            queueShadow.replace("priority -->\n", "priority -->\n$pastedLine\n"),
+            race.finalVisible,
+        )
+
+        val owed =
+            capturedEditsOwedAfterPublishedCutUtil(
+                published = race.published,
+                visible = race.visibleAtFence,
+                captured = race.capturedAtFence,
+                epoch = 1,
+            )
+
+        // Only the paste is owed; the typed newline is inside the published buffer.
+        assertEquals(listOf(race.capturedAtFence[1].copy(projectionEpoch = 1)), owed)
+        // The delete typed after the fence joins the same epoch and the batch,
+        // forwarded from the published buffer, lands exactly on the editor text.
+        val forwarded =
+            prepareLocalEditorEditsUtil(
+                race.published,
+                currentEpochCapturedEditsUtil(owed + race.deleteAfterFence.copy(projectionEpoch = 1), 1),
+            )
+        assertEquals(race.finalVisible, forwarded!!.resultingText)
+    }
+
+    @Test
+    fun `retiring every captured splice reproduces the live replica loss`() {
+        // The pre-fix fence advanced the epoch, retiring the paste with the
+        // subsumed newline. This pins WHY the owed suffix matters: the lone
+        // delete still validates (the shadow has a blank line at that offset)
+        // and deletes the wrong line.
+        val race = liveRace()
+        val survivors =
+            currentEpochCapturedEditsUtil(
+                race.capturedAtFence + race.deleteAfterFence.copy(projectionEpoch = 1),
+                1,
+            )
+        val replica = prepareLocalEditorEditsUtil(race.published, survivors)!!.resultingText
+
+        assertEquals(race.published.replace("-->\n\n## Review", "-->\n## Review"), replica)
+        assertFalse(replica.contains(pastedLine))
+    }
+
+    @Test
+    fun `publication fence owes nothing when the buffer did not move`() {
+        // `#subsumedsplicereplay` stays fixed: every captured splice is subsumed.
+        val race = liveRace()
+        assertEquals(
+            emptyList<CapturedLocalEditorEdit>(),
+            capturedEditsOwedAfterPublishedCutUtil(
+                race.published,
+                race.published,
+                race.capturedAtFence.take(1),
+                3,
+            ),
+        )
+    }
+
+    @Test
+    fun `publication fence falls back to one exact splice when the cut is unprovable`() {
+        val race = liveRace()
+        // No captured history explains the visible text (e.g. the list was lost).
+        val owed = capturedEditsOwedAfterPublishedCutUtil(race.published, race.finalVisible, emptyList(), 2)
+
+        assertEquals(1, owed.size)
+        assertEquals(2L, owed.single().projectionEpoch)
+        assertEquals(race.finalVisible, prepareLocalEditorEditsUtil(race.published, owed)!!.resultingText)
+    }
+
+    @Test
+    fun `stuck replica rolls the visible operator text forward`() {
+        // The wedged state: shadow == replica == the lossy text, nothing captured,
+        // the editor shows the operator's paste. Recovery owes exactly the editor text.
+        val race = liveRace()
+        val lossy = race.published.replace("-->\n\n## Review", "-->\n## Review")
+
+        val splice = unforwardedOperatorTextSpliceUtil(lossy, lossy, race.finalVisible, emptyList(), 4)
+
+        assertNotNull(splice)
+        assertEquals(race.finalVisible, prepareLocalEditorEditsUtil(lossy, listOf(splice!!))!!.resultingText)
+    }
+
+    @Test
+    fun `stuck replica recovery waits for captured splices and remote projections`() {
+        val race = liveRace()
+        val lossy = race.published
+        // Typing in flight: the ordinary splice flush owns it.
+        assertNull(
+            unforwardedOperatorTextSpliceUtil(lossy, lossy, race.finalVisible, race.capturedAtFence, 0),
+        )
+        // Replica ahead of the shadow: a remote delivery is still projecting.
+        assertNull(unforwardedOperatorTextSpliceUtil(lossy, race.finalVisible, lossy, emptyList(), 0))
+        // Converged.
+        assertNull(unforwardedOperatorTextSpliceUtil(lossy, lossy, lossy, emptyList(), 0))
+    }
+
+    @Test
+    fun `single splice never splits a surrogate pair`() {
+        val splice = singleSpliceCapturedEditUtil("a\uD83D\uDE00z", "a\uD83D\uDE01z", 0)!!
+
+        assertEquals(1, splice.offsetUtf16)
+        assertEquals("\uD83D\uDE00", splice.oldFragment)
+        assertEquals("\uD83D\uDE01", splice.newFragment)
+        assertNull(singleSpliceCapturedEditUtil("same", "same", 0))
     }
 }

@@ -918,25 +918,16 @@ selectionPath = "/repo/tasks/left.md",
 activeWindowPath = "/repo/tasks/fpe.md",
 ),
 )
-// GH #88: a Remote Dev backend exposes no editor windows, so currentWindow is null for
-// every selection; the selection itself must own focus there.
-assertEquals(
-EditorTabSyncListener.SelectionFocusAuthority.ActiveEditorSplit,
-EditorTabSyncListener.SelectionFocusAuthority.decide(
-selectionPath = "/repo/tasks/left.md",
-activeWindowPath = null,
-editorWindowsAvailable = false,
-),
-)
-// With windows present, a null current window stays unknown (the settled probe owns it).
-assertEquals(
-EditorTabSyncListener.SelectionFocusAuthority.BackgroundOrUnknownSplit,
-EditorTabSyncListener.SelectionFocusAuthority.decide(
-selectionPath = "/repo/tasks/left.md",
-activeWindowPath = null,
-),
-)
-// GH #88: with no editor windows the per-split selections come from selectedFiles.
+        // GH #88 / #102: a Remote Dev backend can enumerate editor windows while currentWindow
+        // remains null. The selection itself must own focus regardless of the window count.
+        assertEquals(
+            EditorTabSyncListener.SelectionFocusAuthority.ActiveEditorSplit,
+            EditorTabSyncListener.SelectionFocusAuthority.decide(
+                selectionPath = "/repo/tasks/left.md",
+                activeWindowPath = null,
+            ),
+        )
+        // GH #88: with no editor windows the per-split selections come from selectedFiles.
 assertEquals(
 listOf<String?>("/repo/a.md", "/repo/b.md"),
 EditorTabSyncListener.SurfaceReport.splitSelections(emptyList(), listOf("/repo/a.md", "/repo/b.md")),
@@ -945,15 +936,7 @@ assertEquals(
 listOf<String?>("/repo/a.md"),
 EditorTabSyncListener.SurfaceReport.splitSelections(listOf("/repo/a.md"), listOf("/repo/a.md", "/repo/b.md")),
 )
-assertEquals(
-EditorTabSyncListener.SelectionFocusAuthority.BackgroundOrUnknownSplit,
-EditorTabSyncListener.SelectionFocusAuthority.decide(
-selectionPath = "/repo/tasks/fpe.md",
-activeWindowPath = null,
-),
-)
-
-// IDEA may emit selectionChanged before currentWindow advances from old to new. The event still
+        // IDEA may emit selectionChanged before currentWindow advances from old to new. The event still
 // belongs to the active split when the active window reports the event's previous selection.
 assertEquals(
 EditorTabSyncListener.SelectionFocusAuthority.ActiveEditorSplit,

@@ -578,12 +578,17 @@ where
             ),
             Err(err) => IpcResponse::err(err),
         },
-        IpcMethod::Clear { bytes: _ } if state.actor_waiting_input() => {
+        // At either idle prompt boundary, replace the child through the supervised
+        // fresh-restart path instead of typing `/clear`. Codex exits successfully
+        // after consuming `/clear`; in a route-owned pane that clean exit can race
+        // the completion watcher and tear down the supervisor before a replacement
+        // child is launched (#clear-ready-restart).
+        IpcMethod::Clear { bytes: _ } if state.actor_waiting_input() || state.actor_ready() => {
             match request_supervisor_restart(state, "fresh".to_string()) {
                 Ok(()) => IpcResponse::ok(serde_json::json!({
                     "n": 0,
                     "restart_fresh": true,
-                    "reason": "supervisor_waiting_input"
+                    "reason": "supervisor_idle_prompt"
                 })),
                 Err(err) => IpcResponse::err(err),
             }

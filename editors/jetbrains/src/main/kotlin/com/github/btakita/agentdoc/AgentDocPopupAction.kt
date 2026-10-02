@@ -27,8 +27,6 @@ class AgentDocPopupAction : AnAction(), DumbAware {
             "AgentDoc.RestartSupervisorProcess",
             "AgentDoc.RestartAgent",
             "AgentDoc.CancelTurn",
-            "AgentDoc.ClearSessionContext",
-            "AgentDoc.InterruptClearSessionContext",
             "AgentDoc.CopySessionDiagnostics",
             "AgentDoc.SyncLayout",
             "AgentDoc.LoadTmuxWindow",
@@ -38,6 +36,10 @@ class AgentDocPopupAction : AnAction(), DumbAware {
         internal val OVERFLOW_ACTION_IDS = listOf(
             "AgentDoc.RunWithJunie",
             "AgentDoc.ForceClaim",
+            // Destructive context controls live behind More Actions so numbered
+            // primary-menu changes cannot turn a familiar Claim selection into a clear.
+            "AgentDoc.ClearSessionContext",
+            "AgentDoc.InterruptClearSessionContext",
             "AgentDoc.ResyncFixSessions",
             "AgentDoc.GcStaleSessions",
         )

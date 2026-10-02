@@ -629,6 +629,36 @@ mod tests {
         // no spurious CR added when the control text has none.
         assert_eq!(written.lock().as_slice(), b"/clear");
     }
+
+    #[test]
+    fn handle_ipc_clear_at_ready_prompt_arms_fresh_restart_without_typing_clear() {
+        // A live route-owned session showed Codex consume `/clear`, exit 0, and let
+        // the completion path stop the supervisor. Ready is an idle prompt boundary
+        // too, so clear must use the same supervised fresh restart as waiting-input
+        // rather than writing control text to the child.
+        let shared = Arc::new(SupervisorShared::new("codex", "test-instance".to_string()));
+        *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Ready);
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
+
+        let clear = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
+            IpcMethod::Clear {
+                bytes: "/clear".to_string(),
+            },
+            shared.as_ref(),
+        );
+
+        assert!(clear.ok, "ready clear must arm a fresh restart: {clear:?}");
+        assert_eq!(
+            clear.data.as_ref().and_then(|data| data["restart_fresh"].as_bool()),
+            Some(true),
+        );
+        assert!(shared.restart_requested.load(Ordering::Relaxed));
+        assert_eq!(*shared.restart_mode.lock(), "fresh");
+        assert!(written.lock().is_empty(), "must not type /clear into Codex");
+    }
     #[test]
     fn handle_ipc_stop_bypasses_failed_capability_proof() {
         // Stopping a session is recovery, not dispatch: it must succeed even

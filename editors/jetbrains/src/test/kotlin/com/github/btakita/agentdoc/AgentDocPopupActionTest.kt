@@ -7,14 +7,27 @@ import org.junit.Test
 
 class AgentDocPopupActionTest {
     @Test
-    fun `primary popup actions keep compact exchange and supervisor restart numbered`() {
-        assertTrue(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.CompactExchange"))
-        assertTrue(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.InitSession"))
-        assertTrue(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.RestartSupervisorProcess"))
-        val supervisorIndex = AgentDocPopupAction.PRIMARY_ACTION_IDS.indexOf("AgentDoc.RestartSupervisorProcess")
-        assertEquals("AgentDoc.RestartAgent", AgentDocPopupAction.PRIMARY_ACTION_IDS[supervisorIndex + 1])
-        assertTrue(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.CancelTurn"))
-        assertTrue(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.InterruptClearSessionContext"))
+    fun `primary popup keeps claim numbered fourth and destructive clears out of line`() {
+        assertEquals(
+            listOf(
+                "AgentDoc.Submit",
+                "AgentDoc.InitSession",
+                "AgentDoc.FixDocument",
+                "AgentDoc.Claim",
+                "AgentDoc.CompactExchange",
+                "AgentDoc.ShowSessionStatus",
+                "AgentDoc.RestartSupervisorProcess",
+                "AgentDoc.RestartAgent",
+                "AgentDoc.CancelTurn",
+                "AgentDoc.CopySessionDiagnostics",
+                "AgentDoc.SyncLayout",
+                "AgentDoc.LoadTmuxWindow",
+                "AgentDoc.RefreshEnvironment",
+            ),
+            AgentDocPopupAction.PRIMARY_ACTION_IDS,
+        )
+        assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.ClearSessionContext"))
+        assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.InterruptClearSessionContext"))
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.RunWithJunie"))
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.ForceClaim"))
     }
@@ -25,6 +38,8 @@ class AgentDocPopupActionTest {
             listOf(
                 "AgentDoc.RunWithJunie",
                 "AgentDoc.ForceClaim",
+                "AgentDoc.ClearSessionContext",
+                "AgentDoc.InterruptClearSessionContext",
                 // #plugin-cleanup-menu-command: operator session-hygiene commands
                 // live in the overflow group (occasional, project-scoped cleanup).
                 "AgentDoc.ResyncFixSessions",

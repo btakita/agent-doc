@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.437
+
+- **Remote Dev selections keep pane focus after editor-window enumeration starts (GH #102).**
+  JetBrains now keys selection focus authority on whether `currentWindow` resolves an active file,
+  rather than using the enumerated window count as a proxy. A null active-window path therefore
+  continues to treat the selection event as the only available focus signal, while mismatched
+  resolved windows still reject background-split events.
+- **Clearing an idle Codex session keeps its tmux pane alive.** The supervisor now turns a clear at
+  either idle-prompt state into a supervised fresh restart instead of typing `/clear` and allowing
+  Codex's successful exit to tear down a route-owned session. JetBrains keeps Claim as numbered
+  action 4 and moves both destructive clear actions under More Actions. JetBrains plugin 0.2.475.
+
 ## 0.35.436
 
 - **Stranded `write_applied` cycles have a terminal repair path (GH #99).** `cancel` now exits

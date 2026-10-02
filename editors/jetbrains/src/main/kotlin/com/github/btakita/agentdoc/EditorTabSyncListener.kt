@@ -237,22 +237,21 @@ ActiveEditorSplit,
 BackgroundOrUnknownSplit;
 
 companion object {
-/**
- * GH #88: [editorWindowsAvailable] is false on a JetBrains Remote Dev backend, whose editor
- * UI lives in the thin client: it exposes no `EditorWindow`, so `currentWindow` is always
- * null and no split can ever match. A selection event is then the only focus signal there
- * is, so it owns focus; the old gate dropped every selection and the pane never followed.
- */
-fun decide(
-selectionPath: String,
-activeWindowPath: String?,
-previousSelectionPath: String? = null,
-editorWindowsAvailable: Boolean = true,
-): SelectionFocusAuthority =
-if (
-    !editorWindowsAvailable ||
-    activeWindowPath == selectionPath ||
-        (previousSelectionPath != null && activeWindowPath == previousSelectionPath)
+        /**
+         * GH #88 / #102: a JetBrains Remote Dev backend can enumerate editor windows while still
+         * exposing no `currentWindow`, because the editor UI lives in the thin client. With no
+         * active window path to match, a selection event is the only focus signal there is, so it
+         * owns focus; gating this on the window count drops every selection once enumeration works.
+         */
+        fun decide(
+            selectionPath: String,
+            activeWindowPath: String?,
+            previousSelectionPath: String? = null,
+        ): SelectionFocusAuthority =
+            if (
+                activeWindowPath == null ||
+                activeWindowPath == selectionPath ||
+                    (previousSelectionPath != null && activeWindowPath == previousSelectionPath)
 ) {
     ActiveEditorSplit
 } else {
@@ -1247,11 +1246,10 @@ val selectionWindowCount = selectionManagerEx.windows.size
 val selectionActiveWindowPath = selectionManagerEx.currentWindow?.selectedFile?.path
 val selectionFocusAuthority =
 SelectionFocusAuthority.decide(
-selectionPath = file.path,
-activeWindowPath = selectionActiveWindowPath,
-previousSelectionPath = event.oldFile?.path,
-editorWindowsAvailable = selectionWindowCount > 0,
-)
+                selectionPath = file.path,
+                activeWindowPath = selectionActiveWindowPath,
+                previousSelectionPath = event.oldFile?.path,
+            )
 val selectionOwnsFocus =
 selectionFocusAuthority == SelectionFocusAuthority.ActiveEditorSplit
 // GH #88: an arriving selection is observable at INFO, so "never ran" and

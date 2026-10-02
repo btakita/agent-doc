@@ -3737,19 +3737,28 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * [pendingLocalEditorEdits] form one consistent cut. Non-blocking attempts
      * only: a worker must never wait on the read lock while the EDT may be
      * waiting on this worker.
+     *
+     * `#capturecutreadaction`: the Document lookup itself
+     * (`FileDocumentManager.getDocument`) is a model read that asserts read
+     * access, so it belongs INSIDE the read action together with the text read.
+     * Resolving it before the read action threw `Read access is allowed from
+     * inside read-action only` on the replica executor (registration →
+     * `finalizeRegistrationProjection` → `fenceCapturedEditsSubsumedByPublishedBuffer`).
      */
     private fun <T> withEditorCaptureCut(filePath: String, block: (String) -> T): T? {
         val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return null
-        val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return null
+        val readCut: () -> T? = {
+            FileDocumentManager.getInstance().getDocument(targetFile)?.let { document -> block(document.text) }
+        }
         val application = ApplicationManager.getApplication()
-        if (application.isReadAccessAllowed) return block(document.text)
+        if (application.isReadAccessAllowed) return readCut()
         if (SwingUtilities.isEventDispatchThread()) {
-            return ReadAction.compute<T, RuntimeException> { block(document.text) }
+            return ReadAction.compute<T?, RuntimeException> { readCut() }
         }
         val applicationEx = application as? ApplicationEx ?: return null
         val result = AtomicReference<T?>()
         repeat(EDITOR_CAPTURE_CUT_ATTEMPTS) { attempt ->
-            if (applicationEx.tryRunReadAction { result.set(block(document.text)) }) {
+            if (applicationEx.tryRunReadAction { result.set(readCut()) }) {
                 return result.get()
             }
             if (attempt + 1 < EDITOR_CAPTURE_CUT_ATTEMPTS) {

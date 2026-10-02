@@ -56,6 +56,49 @@ class CrdtReplicaReadActionTest {
         )
     }
 
+    @Test
+    fun `worker-reachable editor reads resolve the Document inside the read action`() {
+        val sourcePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val source = Files.readString(sourcePath)
+
+        // `#capturecutreadaction`: registration on the replica executor reaches
+        // withEditorCaptureCut via fenceCapturedEditsSubsumedByPublishedBuffer.
+        // FileDocumentManager.getDocument asserts read access, so it must run
+        // inside the guarded read, never before the read-access dispatch.
+        val captureCut = source.substringAfter("private fun <T> withEditorCaptureCut(")
+            .substringBefore("\n    }\n")
+        val readCut = captureCut.substringAfter("val readCut").substringBefore("val application")
+        val beforeReadCut = captureCut.substringBefore("val readCut")
+        val afterReadCut = captureCut.substringAfter("val application")
+        assertTrue(
+            "withEditorCaptureCut must look up the Document inside its read-cut lambda",
+            readCut.contains("getDocument(targetFile)") && readCut.contains("document.text"),
+        )
+        assertTrue(
+            "withEditorCaptureCut must not resolve the Document outside a read action",
+            !beforeReadCut.contains("getDocument(") && !afterReadCut.contains("getDocument("),
+        )
+        assertTrue(
+            "every withEditorCaptureCut branch must route through the read-cut lambda",
+            afterReadCut.contains("isReadAccessAllowed) return readCut()") &&
+                afterReadCut.contains("ReadAction.compute<T?, RuntimeException> { readCut() }") &&
+                afterReadCut.contains("tryRunReadAction { result.set(readCut()) }") &&
+                !afterReadCut.contains("document.text"),
+        )
+
+        // The sibling worker-reachable reader keeps the same shape: no
+        // getDocument before the read-access dispatch.
+        val bufferText = source.substringAfter("private fun editorBufferText(filePath: String): String? {")
+            .substringBefore("\n    }\n")
+        assertTrue(
+            "editorBufferText must not resolve the Document before the read-access dispatch",
+            !bufferText.substringBefore("isReadAccessAllowed").contains("getDocument("),
+        )
+    }
+
     private fun assertEdtCapturePrecedesDocumentLookup(body: String, label: String) {
         val edtCaptureIndex = body.indexOf("runOnEdtNonBlocking")
         val documentLookupIndex = body.indexOf("getDocument(file)")

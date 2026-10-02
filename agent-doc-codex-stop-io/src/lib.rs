@@ -622,8 +622,15 @@ fn claude_transcript_arms_loop_reentry(transcript: &Path, file: &Path) -> bool {
         .is_some_and(|tail| transcript_tail_arms_loop_reentry(&tail, file))
 }
 
+/// Harness-authored records inside a turn: Stop-hook feedback, and
+/// `<task-notification>` wake-ups from background tasks (`#stoplooparmednotify`).
+/// Neither is an operator prompt, so neither ends the search for an armed
+/// `/loop` re-entry. Treating a task notification as a new prompt hid a wake-up
+/// scheduled one turn earlier and re-blocked every notification turn with a
+/// "Stop hook error".
 fn is_stop_hook_feedback(text: &str) -> bool {
-    text.trim_start().starts_with("Stop hook feedback:")
+    let text = text.trim_start();
+    text.starts_with("Stop hook feedback:") || text.starts_with("<task-notification>")
 }
 
 /// `#stoploopalreadyarmed`: true when, after the operator prompt that started
@@ -5939,6 +5946,19 @@ Reviewed the gated items.\n\
         );
         let superseded = [schedule_wakeup(loop_prompt), tool_result.clone(), operator].join("\n");
         assert!(!transcript_tail_arms_loop_reentry(&superseded, file));
+
+        // `#stoplooparmednotify`: a background-task notification wakes the
+        // session without being an operator prompt, so a wake-up armed in the
+        // previous turn still covers this one.
+        let notification = transcript_record(
+            "user",
+            serde_json::json!(
+                "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>"
+            ),
+        );
+        let across_notification =
+            [schedule_wakeup(loop_prompt), tool_result.clone(), notification].join("\n");
+        assert!(transcript_tail_arms_loop_reentry(&across_notification, file));
 
         // A wake-up for another document, or a non-loop prompt, arms nothing.
         let other = [

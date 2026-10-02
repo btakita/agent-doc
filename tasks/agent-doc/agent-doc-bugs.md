@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -119,6 +119,23 @@ Verification passed:
 - `make install`: binary and library installed; supervisors/controllers received idle-boundary recycle markers; editor packages were already byte-identical
 
 Pushed `d66599441` (`fix: keep diagnostics out of managed composers`) to `origin/main`. CI was observed once immediately after push; no run had appeared yet, and it was not awaited.
+
+### Re: release + publish — gpt-5 · 2026-10-02 03:57 EDT
+
+> **Queue prompt:** release + publish
+
+Released agent-doc `0.35.435` from commit `a8d207073` and pushed tag `v0.35.435`.
+
+The release includes every change since `0.35.434`: consecutive singular queue echoes consume every answered free-text head; asynchronous JetBrains upgrades stage safely and replica recovery rediscovers live projects; missing optional queues project empty; Remote Dev layout fallback enumerates one remote client's split set; and foreground diagnostics no longer contaminate managed composers. `VERSIONS.md` and the editor parity matrix record the release, including JetBrains plugin 0.2.472 and VS Code extension 0.2.76.
+
+Verification and installation completed:
+
+- release projection synchronized across 144 manifests and 1,623 internal constraints
+- full `make check`: 10,410 Rust tests passed, 260 skipped; VS Code/editor parity, cross-editor simulation, bootstrap, and TLA+ model/non-vacuity checks passed
+- `make release` repeated the release gate successfully, pushed the tag, and completed the sole full-profile fat-LTO install
+- installed `agent-doc 0.35.435`, its shared library, and converged both editor packages; no JetBrains restart was required
+
+The single post-tag external observation showed GitHub Release workflow [36980699635](https://github.com/btakita/agent-doc/actions/runs/36980699635) and PyPI workflow [36980699489](https://github.com/btakita/agent-doc/actions/runs/36980699489) both `in_progress`; main CI was also `in_progress`, while Book and Pages had succeeded. The GitHub Release did not exist yet at that observation. Per the repository's no-wait policy, I did not poll or invoke the local PyPI fallback while tag-driven publication was active.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -128,11 +145,6 @@ Pushed `d66599441` (`fix: keep diagnostics out of managed composers`) to `origin
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/95~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/96~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/97~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/98~~
-- release + publish
 <!-- /agent:queue --> 
 
 

@@ -14970,6 +14970,105 @@ fn hydrate_reliable_sync_liveness(
     Ok(Some(dead_open_pids))
 }
 
+/// Journal appends between background compactions of the reliable-sync
+/// liveness journal (`#sdkingressstall`). Heartbeats append one row per editor
+/// document every few seconds, so this keeps the journal within a few thousand
+/// rows without compacting on every append.
+const LIVENESS_JOURNAL_COMPACTION_APPEND_INTERVAL: u64 = 2_048;
+
+static LIVENESS_JOURNAL_APPENDS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+static LIVENESS_JOURNAL_COMPACTION_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Count one durable liveness append and, every
+/// [`LIVENESS_JOURNAL_COMPACTION_APPEND_INTERVAL`] appends, compact the journal
+/// on a single-flight background thread — never on the RPC thread that
+/// appended, which may be serving an editor or holding ingress.
+fn note_liveness_journal_append(project_root: &Path) {
+    let appended = LIVENESS_JOURNAL_APPENDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    if !appended.is_multiple_of(LIVENESS_JOURNAL_COMPACTION_APPEND_INTERVAL) {
+        return;
+    }
+    let root = project_root.to_path_buf();
+    std::thread::spawn(move || compact_reliable_sync_liveness_journal(&root, "append_interval"));
+}
+
+/// One unconditional compaction pass; [`compact_reliable_sync_liveness_journal`]
+/// adds the single-flight guard and the ops-log receipt.
+fn compact_reliable_sync_liveness_journal_now(
+    project_root: &Path,
+) -> Result<agent_doc_sqlite::reliable_sync_inbox::LivenessJournalCompaction> {
+    agent_doc_sqlite::reliable_sync_inbox::compact_liveness_journal(
+        &agent_doc_sqlite::state_store::state_db_path(project_root),
+        |records, pinned| {
+            let batches = records
+                .iter()
+                .map(|record| {
+                    serde_json::from_str::<Vec<agent_doc_reliable_sync_io::liveness::LivenessOp>>(
+                        &record.ops_json,
+                    )
+                    .with_context(|| {
+                        format!(
+                            "decode durable reliable-sync liveness source={} epoch={}",
+                            record.source_key, record.epoch
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(agent_doc_reliable_sync_io::liveness::superseded_liveness_batches(&batches, pinned))
+        },
+    )
+}
+
+/// Drop liveness-journal rows whose every op is dominated by a retained write
+/// (`#sdkingressstall`). The journal was append-only: `haiven-dev` reached
+/// 497,353 rows / 305 MB carrying 1,037 live cells, and every cold hydration
+/// (controller start, and each untracked-document liveness read) re-decoded all
+/// of it. Replaying the retained rows folds to the identical projection
+/// ([`agent_doc_reliable_sync_io::liveness::superseded_liveness_batches`]).
+///
+/// The plan is read from a WAL snapshot and rows are deleted in short bounded
+/// transactions, so this never holds the `state.db` write lock across the scan
+/// that state-event ingress waits on.
+pub(crate) fn compact_reliable_sync_liveness_journal(project_root: &Path, trigger: &str) {
+    if LIVENESS_JOURNAL_COMPACTION_RUNNING
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        return;
+    }
+    let started = Instant::now();
+    let outcome = compact_reliable_sync_liveness_journal_now(project_root);
+    LIVENESS_JOURNAL_COMPACTION_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    match outcome {
+        Ok(report) => {
+            if report.rows_removed > 0 {
+                agent_doc_ops_log_io::log_op(
+                    project_root,
+                    &format!(
+                        "reliable_sync_liveness_journal_compacted trigger={trigger} rows_before={} rows_removed={} elapsed_ms={}",
+                        report.rows_before,
+                        report.rows_removed,
+                        started.elapsed().as_millis(),
+                    ),
+                );
+            }
+        }
+        Err(error) => agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "reliable_sync_liveness_journal_compaction_failed trigger={trigger} error={error:#}"
+            ),
+        ),
+    }
+}
+
 /// Project the recovery effects the durable fold discovered.
 ///
 /// The fold is the readiness boundary. These effects can contact every retained
@@ -15001,6 +15100,10 @@ fn spawn_reliable_sync_recovery_effects(
                 "controller_restart_editor_replica_rebuild_deferred reason=handoff_not_public",
             );
         }
+        // `#sdkingressstall`: bound the journal this process just replayed. It
+        // runs last, after the recovery effects, and only once the listener is
+        // accepting — never between bind and accept.
+        compact_reliable_sync_liveness_journal(&recovery_root, "controller_start");
     });
 }
 
@@ -15567,6 +15670,7 @@ pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
         );
         return;
     }
+    note_liveness_journal_append(project_root);
     // `#ghostrelaymember`: the durable plane now says this pid is dead, so the
     // live relay must agree. `RelayHub` liveness is keyed by opaque CRDT client
     // id and otherwise only sheds a dead editor's member on the NEXT
@@ -15823,6 +15927,9 @@ fn handle_reliable_sync(
         liveness_ops_json.as_deref(),
     )?;
     let folded_liveness = liveness_ops.is_some();
+    if folded_liveness {
+        note_liveness_journal_append(project_root);
+    }
     {
         let mut plane = controller_liveness_plane().lock();
         if let Some(ops) = &liveness_ops {
@@ -35287,6 +35394,81 @@ body
         assert_eq!(recycled.ack_cursor(document_hash), 12);
         assert!(recycled.projection().tracks_document(document_hash));
         assert!(recycled.projection().live_docs().contains(document_hash));
+    }
+
+    /// `#sdkingressstall`: editor heartbeats re-journal the same liveness cells,
+    /// so the journal grew without bound (497,353 rows / 305 MB on `haiven-dev`).
+    /// Compaction must shrink it to the winning writes while a cold replay of
+    /// what remains still folds to the identical projection and cursors.
+    #[test]
+    fn liveness_journal_compaction_bounds_heartbeats_and_preserves_the_replay() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_db = agent_doc_sqlite::state_store::state_db_path(dir.path());
+        let document_hash = "docwire-heartbeat-compaction";
+        let open = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+            document_hash: document_hash.into(),
+            pid: 4242,
+            tag: "open-1".into(),
+        }];
+        agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+            &state_db,
+            document_hash,
+            1,
+            Some(&serde_json::to_string(&open).unwrap()),
+        )
+        .unwrap();
+        for epoch in 2..=400u64 {
+            let heartbeat = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+                agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                    document_hash: document_hash.into(),
+                    pid: 4242,
+                    path: "/tmp/heartbeat.md".into(),
+                    editor_id: "jetbrains-4242".into(),
+                    editor_kind: "jetbrains".into(),
+                    editor_version: "0.2.464".into(),
+                    capabilities: Vec::new(),
+                    timestamp_ms: epoch,
+                },
+            )];
+            agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+                &state_db,
+                document_hash,
+                epoch,
+                Some(&serde_json::to_string(&heartbeat).unwrap()),
+            )
+            .unwrap();
+        }
+        let replay = || {
+            let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(&state_db).unwrap();
+            let mut plane = agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::recycle();
+            for record in &snapshot.liveness {
+                let ops: Vec<agent_doc_reliable_sync_io::liveness::LivenessOp> =
+                    serde_json::from_str(&record.ops_json).unwrap();
+                plane.restore_liveness(&ops);
+            }
+            for cursor in &snapshot.cursors {
+                plane.restore_cursor(&cursor.document_hash, cursor.ack_through);
+            }
+            (snapshot.liveness.len(), plane)
+        };
+        let (rows_before, before) = replay();
+        assert_eq!(rows_before, 400);
+
+        let report = compact_reliable_sync_liveness_journal_now(dir.path()).unwrap();
+        assert_eq!(report.rows_before, 400);
+        assert_eq!(report.rows_removed, 398);
+
+        let (rows_after, after) = replay();
+        assert_eq!(
+            rows_after, 2,
+            "the open tag plus the newest heartbeat survive"
+        );
+        assert_eq!(after.projection(), before.projection());
+        assert_eq!(after.ack_cursor(document_hash), 400);
+        assert_eq!(
+            after.projection().live_registrations(document_hash)[0].timestamp_ms,
+            400
+        );
     }
 
     #[test]

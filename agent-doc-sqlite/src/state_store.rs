@@ -1176,31 +1176,77 @@ fn prune_superseding_fact_to(
     //
     // Bounded batches so a one-time cleanup of a legacy backlog cannot balloon a
     // single WAL frame or hold the write lock for the whole scan.
+    delete_state_events_planned_by_read(
+        conn,
+        r#"
+        SELECT e.rowid FROM state_events e
+        WHERE e.fact_type = ?1
+          AND (
+            SELECT COUNT(*) FROM state_events n
+            WHERE n.fact_type = ?1
+              AND n.document_hash = e.document_hash
+              AND n.id > e.id
+          ) >= ?2
+        LIMIT 2000
+        "#,
+        params![fact_type, keep_per_document],
+    )
+    .with_context(|| format!("failed to prune superseded {fact_type} events"))?;
+    Ok(())
+}
+
+/// Delete the `state_events` rows a read-only `select_rowids` query names,
+/// batch by batch, until it names none (`#sdkingressstall`).
+///
+/// Retention used to run `DELETE ... WHERE rowid IN (<scan>)`. SQLite takes the
+/// WAL write lock when such a statement STARTS, so the whole correlated scan —
+/// measured at 0.33-0.46s for `visible_write_commit_candidate_observed` on the
+/// 630 MB `haiven-dev` `state.db`, and deleting nothing — ran under the write
+/// lock. Every process's first `open_state_db` runs retention, so an install
+/// fan-out that re-execs a dozen supervisors queued a dozen such scans in front
+/// of the controller's state-event append, which waits for the lock while
+/// holding the controller's state-event ingress lock. That is the
+/// `state_event_ingress_slow ... hold_ms=1046|1143|1443|1540` signature: the
+/// SQLite busy handler's 328 ms + N*100 ms sleep schedule plus the append.
+///
+/// The plan is now a plain read (WAL readers never block writers), and the
+/// write lock is held only to delete the rows already named. Each predicate this
+/// serves is monotone — a row superseded now stays superseded, because newer
+/// rows only add supersession and retention never removes a row's superseder —
+/// so deleting a planned row after a concurrent append is still correct.
+fn delete_state_events_planned_by_read(
+    conn: &Connection,
+    select_rowids: &str,
+    params: impl rusqlite::Params + Clone,
+) -> Result<usize> {
+    let mut deleted = 0usize;
     loop {
-        let deleted = conn
-            .execute(
-                r#"
-                DELETE FROM state_events
-                WHERE rowid IN (
-                    SELECT e.rowid FROM state_events e
-                    WHERE e.fact_type = ?1
-                      AND (
-                        SELECT COUNT(*) FROM state_events n
-                        WHERE n.fact_type = ?1
-                          AND n.document_hash = e.document_hash
-                          AND n.id > e.id
-                      ) >= ?2
-                    LIMIT 2000
-                )
-                "#,
-                params![fact_type, keep_per_document],
-            )
-            .with_context(|| format!("failed to prune superseded {fact_type} events"))?;
-        if deleted == 0 {
-            break;
+        let rowids = {
+            let mut statement = conn.prepare_cached(select_rowids)?;
+            statement
+                .query_map(params.clone(), |row| row.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if rowids.is_empty() {
+            return Ok(deleted);
+        }
+        let tx = conn.unchecked_transaction()?;
+        let mut removed_this_batch = 0usize;
+        {
+            let mut statement = tx.prepare_cached("DELETE FROM state_events WHERE rowid = ?1")?;
+            for rowid in &rowids {
+                removed_this_batch += statement.execute([rowid])?;
+            }
+        }
+        tx.commit()?;
+        deleted += removed_this_batch;
+        if removed_this_batch == 0 {
+            // Every planned row was already gone (a concurrent pruner won).
+            // Re-planning would name the same rows only if the read is stale,
+            // which a committed delete rules out; stop rather than spin.
+            return Ok(deleted);
         }
     }
-    Ok(())
 }
 
 /// Retention cap for `document_authority_observed` rows in `state_events`
@@ -1369,14 +1415,11 @@ const TURN_INTENT_CHECKPOINTS_KEPT_PER_DOCUMENT: i64 = 2;
 /// `#turnintentretention` were in force — each row embeds a full
 /// `commit_candidate_content` image.
 fn prune_superseded_visible_write_commit_candidates(conn: &Connection) -> Result<()> {
-    // Bounded batches so a one-time cleanup of a legacy backlog cannot balloon a
-    // single WAL frame or hold the write lock for the whole scan.
-    loop {
-        let deleted = conn
-            .execute(
-                r#"
-                DELETE FROM state_events
-                WHERE rowid IN (
+    // Bounded batches planned by a read (`#sdkingressstall`), so neither a
+    // legacy backlog nor the scan itself holds the write lock.
+    delete_state_events_planned_by_read(
+        conn,
+        r#"
                     SELECT e.rowid FROM state_events e
                     WHERE e.fact_type = 'visible_write_commit_candidate_observed'
                       AND EXISTS (
@@ -1396,15 +1439,10 @@ fn prune_superseded_visible_write_commit_candidates(conn: &Connection) -> Result
                           )
                       )
                     LIMIT 2000
-                )
-                "#,
-                [],
-            )
-            .context("failed to prune superseded visible write commit candidates")?;
-        if deleted == 0 {
-            break;
-        }
-    }
+        "#,
+        [],
+    )
+    .context("failed to prune superseded visible write commit candidates")?;
     Ok(())
 }
 
@@ -1438,14 +1476,11 @@ const EXTERNAL_DISK_DEFERRAL_REASON: &str = "pending_user_decision_external_disk
 ///   (`pending_external_disk`, which must "never replace or clear" the other)
 ///   and are excluded from the drain window on both sides.
 fn prune_converged_document_write_intents(conn: &Connection) -> Result<()> {
-    // Bounded batches so a one-time cleanup of a legacy backlog cannot balloon a
-    // single WAL frame or hold the write lock for the whole scan.
-    loop {
-        let deleted = conn
-            .execute(
-                r#"
-                DELETE FROM state_events
-                WHERE rowid IN (
+    // Bounded batches planned by a read (`#sdkingressstall`), so neither a
+    // legacy backlog nor the scan itself holds the write lock.
+    delete_state_events_planned_by_read(
+        conn,
+        r#"
                     SELECT d.rowid FROM state_events d
                     WHERE d.fact_type = 'document_write_deferred'
                       AND json_extract(d.payload_json, '$.fact.reason') IS NOT ?1
@@ -1466,15 +1501,10 @@ fn prune_converged_document_write_intents(conn: &Connection) -> Result<()> {
                           )
                       )
                     LIMIT 2000
-                )
-                "#,
-                [EXTERNAL_DISK_DEFERRAL_REASON],
-            )
-            .context("failed to prune converged document write intents")?;
-        if deleted == 0 {
-            break;
-        }
-    }
+        "#,
+        [EXTERNAL_DISK_DEFERRAL_REASON],
+    )
+    .context("failed to prune converged document write intents")?;
     Ok(())
 }
 
@@ -6636,6 +6666,51 @@ mod tests {
             ],
             "one row survives per (document, commit_candidate_hash): highest revision, last on a tie"
         );
+        Ok(())
+    }
+
+    /// `#sdkingressstall`: a retention pass with nothing to prune must not need
+    /// the `state.db` write lock. The old `DELETE ... WHERE rowid IN (<scan>)`
+    /// took the lock when the statement started, so every process's first-open
+    /// retention serialized its whole correlated scan in front of the
+    /// controller's state-event append (which waits holding the ingress lock).
+    /// Proven deterministically: another connection holds the write lock and the
+    /// pruning connection has no busy timeout, so needing the lock is an error.
+    #[test]
+    fn retention_planning_never_takes_the_write_lock_when_nothing_is_prunable() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let insert = |event_id: &str, fact_type: &str, payload: &str| {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'docA', 'document', ?2, ?3, 0)",
+                rusqlite::params![event_id, fact_type, payload],
+            )
+        };
+        insert(
+            "candidate",
+            "visible_write_commit_candidate_observed",
+            r#"{"fact":{"commit_candidate_hash":"c1","model_revision":1}}"#,
+        )?;
+        insert("checkpoint", "crdt_recovery_projection_checkpointed", "{}")?;
+        insert(
+            "deferred",
+            "document_write_deferred",
+            r#"{"fact":{"reason":"r","intent_id":"i1","target_hash":"t1"}}"#,
+        )?;
+
+        let writer = Connection::open(state_db_path(dir.path()))?;
+        writer.execute_batch("BEGIN IMMEDIATE")?;
+        conn.busy_timeout(Duration::ZERO)?;
+
+        prune_superseded_visible_write_commit_candidates(&conn)?;
+        prune_superseding_fact_to(&conn, "crdt_recovery_projection_checkpointed", 1)?;
+        prune_converged_document_write_intents(&conn)?;
+
+        writer.execute_batch("ROLLBACK")?;
+        let rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM state_events", [], |row| row.get(0))?;
+        assert_eq!(rows, 3, "nothing was prunable, so nothing was deleted");
         Ok(())
     }
 

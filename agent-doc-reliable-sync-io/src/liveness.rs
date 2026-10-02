@@ -128,7 +128,7 @@ pub enum LivenessOp {
 /// Fold [`LivenessOp`]s in via [`apply`](Self::apply) (idempotent + order-independent —
 /// re-delivery is a no-op), then read the derived authority: [`is_open`](Self::is_open),
 /// [`pid_alive`](Self::pid_alive), [`open_docs`](Self::open_docs), [`live_docs`](Self::live_docs).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct LivenessProjection {
     /// `(document_hash, pid)` → observed-remove membership set.
     open_set: BTreeMap<(String, Pid), OrSet>,
@@ -441,6 +441,118 @@ fn decode_liveness_ops(ops: &[&CrdtOp]) -> Result<Vec<LivenessOp>> {
         out.extend(batch);
     }
     Ok(out)
+}
+
+/// The LWW cell an op writes, or `None` for an OR-set op (`Open` / `Close`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum LwwCell<'a> {
+    Alive(Pid),
+    Sync(&'a str, Pid),
+    Register(&'a str, Pid),
+}
+
+/// The candidate that currently wins one LWW cell during a journal replay.
+enum LwwWinner<'a> {
+    Stamped(WireStamp),
+    Registration(&'a EditorRegistration),
+}
+
+impl LwwWinner<'_> {
+    /// Exactly [`LivenessProjection::apply`]'s replacement rule: a stamped
+    /// register adopts only a strictly higher stamp, and a registration adopts a
+    /// strictly greater `(timestamp_ms, value)`. Ties keep the earlier write.
+    fn replaced_by(&self, other: &LwwWinner<'_>) -> bool {
+        match (self, other) {
+            (Self::Stamped(current), LwwWinner::Stamped(next)) => next > current,
+            (Self::Registration(current), LwwWinner::Registration(next)) => {
+                next.timestamp_ms > current.timestamp_ms
+                    || (next.timestamp_ms == current.timestamp_ms && *next > *current)
+            }
+            // Cells are keyed by op kind, so the two shapes never share a cell.
+            _ => false,
+        }
+    }
+}
+
+fn lww_cell(op: &LivenessOp) -> Option<(LwwCell<'_>, LwwWinner<'_>)> {
+    match op {
+        LivenessOp::Open { .. } | LivenessOp::Close { .. } => None,
+        LivenessOp::Alive { pid, stamp, .. } => {
+            Some((LwwCell::Alive(*pid), LwwWinner::Stamped(*stamp)))
+        }
+        LivenessOp::Sync {
+            document_hash,
+            pid,
+            stamp,
+            ..
+        } => Some((
+            LwwCell::Sync(document_hash, *pid),
+            LwwWinner::Stamped(*stamp),
+        )),
+        LivenessOp::Register(registration) => Some((
+            LwwCell::Register(&registration.document_hash, registration.pid),
+            LwwWinner::Registration(registration),
+        )),
+    }
+}
+
+/// Indexes of journal batches whose every op is already dominated by a write in
+/// another retained batch (`#sdkingressstall`).
+///
+/// The durable liveness journal is replayed batch-by-batch, in order, into a
+/// [`LivenessProjection`]. Editor heartbeats re-send `Register` (and `Alive` /
+/// `Sync`) for the same cell every few seconds, so without compaction the
+/// journal grows without bound — 497,353 rows / 305 MB on `haiven-dev`, of which
+/// 1,037 cells carried the whole projection — and every cold replay decodes all
+/// of it.
+///
+/// A batch is removable only when **all** of these hold, which makes replaying
+/// the retained batches (in their original order) fold to exactly the same
+/// projection as replaying every batch:
+///
+/// - it is not `pinned` (the caller pins each source's newest frame so a
+///   redelivered frame still meets its stored payload);
+/// - it carries no OR-set op (`Open`/`Close` tags accumulate; every tag counts);
+/// - none of its LWW ops is the *winning* write of its cell, where the winner is
+///   the first write, in replay order, that no later write replaces under
+///   [`LivenessProjection::apply`]'s own rule.
+pub fn superseded_liveness_batches(
+    batches: &[Vec<LivenessOp>],
+    pinned: &BTreeSet<usize>,
+) -> BTreeSet<usize> {
+    let mut winners: BTreeMap<LwwCell<'_>, (LwwWinner<'_>, usize)> = BTreeMap::new();
+    for (index, batch) in batches.iter().enumerate() {
+        for op in batch {
+            let Some((cell, candidate)) = lww_cell(op) else {
+                continue;
+            };
+            match winners.get_mut(&cell) {
+                Some((current, holder)) => {
+                    if current.replaced_by(&candidate) {
+                        *current = candidate;
+                        *holder = index;
+                    }
+                }
+                None => {
+                    winners.insert(cell, (candidate, index));
+                }
+            }
+        }
+    }
+    let winning_batches = winners
+        .values()
+        .map(|(_, holder)| *holder)
+        .collect::<BTreeSet<_>>();
+    batches
+        .iter()
+        .enumerate()
+        .filter(|(index, batch)| {
+            !pinned.contains(index)
+                && !winning_batches.contains(index)
+                && batch.iter().all(|op| lww_cell(op).is_some())
+        })
+        .map(|(index, _)| index)
+        .collect()
 }
 
 #[cfg(test)]
@@ -1035,5 +1147,110 @@ mod tests {
             p.open_docs(),
             ["docA", "docB"].map(String::from).into_iter().collect()
         );
+    }
+
+    fn registration(document_hash: &str, pid: Pid, editor_id: &str, ts: u64) -> EditorRegistration {
+        EditorRegistration {
+            document_hash: document_hash.into(),
+            pid,
+            path: format!("/tmp/{document_hash}.md"),
+            editor_id: editor_id.into(),
+            editor_kind: "jetbrains".into(),
+            editor_version: "0.2.464".into(),
+            capabilities: Vec::new(),
+            timestamp_ms: ts,
+        }
+    }
+
+    fn fold(batches: &[Vec<LivenessOp>]) -> LivenessProjection {
+        let mut projection = LivenessProjection::new();
+        for batch in batches {
+            projection.apply_batch(batch);
+        }
+        projection
+    }
+
+    /// `#sdkingressstall`: the heartbeat-shaped journal compacts to its winning
+    /// writes, and replaying only the retained batches folds to the identical
+    /// projection — including ties, where `apply` keeps the EARLIER write.
+    #[test]
+    fn superseded_liveness_batches_preserve_the_folded_projection() {
+        let mut batches: Vec<Vec<LivenessOp>> = vec![vec![LivenessOp::Open {
+            document_hash: "docA".into(),
+            pid: 7,
+            tag: "open-1".into(),
+        }]];
+        for ts in 1..=200 {
+            batches.push(vec![LivenessOp::Register(registration(
+                "docA", 7, "ed", ts,
+            ))]);
+            batches.push(vec![LivenessOp::Sync {
+                document_hash: "docA".into(),
+                pid: 7,
+                edit_epoch: ts,
+                synced_epoch: ts - 1,
+                stamp: stamp(ts, 0),
+            }]);
+        }
+        // Equal-stamp Alive writes with different values: the first one applied wins.
+        batches.push(vec![LivenessOp::Alive {
+            pid: 9,
+            value: false,
+            stamp: stamp(50, 1),
+        }]);
+        batches.push(vec![LivenessOp::Alive {
+            pid: 9,
+            value: true,
+            stamp: stamp(50, 1),
+        }]);
+        // An older registration arriving late, and an equal-timestamp one that
+        // wins only by value order.
+        batches.push(vec![LivenessOp::Register(registration("docA", 7, "ed", 3))]);
+        batches.push(vec![LivenessOp::Register(registration(
+            "docA", 7, "zz", 200,
+        ))]);
+        batches.push(vec![LivenessOp::Close {
+            document_hash: "docA".into(),
+            pid: 7,
+            observed_tags: vec!["open-1".into()],
+        }]);
+        // A mixed batch whose LWW op is stale is still kept for its OR-set op.
+        batches.push(vec![
+            LivenessOp::Register(registration("docA", 7, "ed", 4)),
+            LivenessOp::Open {
+                document_hash: "docA".into(),
+                pid: 7,
+                tag: "open-2".into(),
+            },
+        ]);
+        let pinned = BTreeSet::from([5]);
+
+        let removable = superseded_liveness_batches(&batches, &pinned);
+        let retained = batches
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !removable.contains(index))
+            .map(|(_, batch)| batch.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(fold(&retained), fold(&batches));
+        assert!(!removable.contains(&5), "a pinned batch is never removed");
+        assert!(!removable.contains(&0), "OR-set batches are never removed");
+        assert!(
+            retained.len() <= 8,
+            "heartbeats must compact to their winning writes, kept {}",
+            retained.len()
+        );
+        let mut alive_true_first = batches.clone();
+        let len = alive_true_first.len();
+        alive_true_first.swap(len - 6, len - 5);
+        let removable = superseded_liveness_batches(&alive_true_first, &BTreeSet::new());
+        let retained = alive_true_first
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !removable.contains(index))
+            .map(|(_, batch)| batch.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(fold(&retained), fold(&alive_true_first));
     }
 }

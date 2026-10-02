@@ -3,7 +3,7 @@ agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
   codex: 01a0fa46-ac02-7680-9541-ac8de07305db
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -133,6 +133,10 @@ I returned `#lzmacosrunner` to the actionable queue with the new 18-release evid
 Changed paths before closeout: none. Verification: `make review-gate-status` self-test passed and the aggregate intentionally exited nonzero for exactly the newly stale macOS gate; `cargo search`, GitHub Releases, `git describe`, repository status, and submodule status supplied the remaining evidence. No tag, release, credential, or publisher was invoked.
 
 Confidence: high. Escalation: operator selection of the intended repository/version set plus the existing external gates.
+
+### Re: harness switch to claude — opus-5.5 · TIMESTAMP
+
+Saw the frontmatter change `agent: codex` → `agent: claude`. This session is now running on Claude Code (opus). No other prompt changed and the queue is not active, so there's nothing else to do. Add a prompt when you want the next lazily task started.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  

@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
-  codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
+  codex: 01a0fb46-9936-7893-86be-7777f41da86e
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -61,6 +61,24 @@ Verification:
 - Latest pre-push CI observation was green for `v0.35.434`; the new push was not awaited.
 
 No imperative derived-state calls were added or duplicated, and no operator-only verification is required for this safety policy: unsupported asynchronous platforms deterministically stage before touching the live generation.
+
+### Re: #gh-fix issue 96 — gpt-5 · 2026-10-02 02:57 EDT
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/96
+
+Fixed and closed [agent-doc issue #96](https://github.com/btakita/agent-doc/issues/96).
+
+The queue policy now treats a missing optional `agent:queue` component as an empty answered-free-text projection. It still propagates every other AST/mutation error, so malformed queue state remains visible instead of being silently swallowed. A regression covers a normal exchange/backlog document with no queue component.
+
+Verification passed:
+
+- focused no-queue projection regression
+- full `agent-doc-queue` test suite
+- reactive controller projection regression
+- full `make check`
+- `make install`
+
+Pushed `ff33358bc` (`fix(queue): ignore absent queue in free-text projection`). The repository gate also exposed generation debt from issue #95's VS Code test change, so `b2832879c` bumped and installed VS Code extension 0.2.76 before the full check.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -71,7 +89,7 @@ No imperative derived-state calls were added or duplicated, and no operator-only
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/95~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/96
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/96~~
 - release + publish
 <!-- /agent:queue --> 
 

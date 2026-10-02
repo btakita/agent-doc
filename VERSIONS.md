@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.440
+
+- **Unknown editor layouts are structurally inert (GH #105).** An editor observation that cannot
+  establish a unique split set no longer publishes a synthetic one-column layout or changes the
+  tmux pane count. Layout accounting excludes stashed and stale-supervisor panes, while diagnostics
+  record the observed authority and resulting pane action next to the effect.
+- **Repeated manual layout sync requests remain fresh.** Operator-invoked Sync Layout retries receive
+  a new projection generation instead of coalescing behind an earlier successful command; automatic
+  and passive observations retain their bounded coalescing behavior.
+- **Clear Session Context is restored to the numbered editor menu.** JetBrains and VS Code-family
+  popup menus again expose the non-destructive clear action as item 9 while keeping destructive
+  clear variants in the overflow menu. JetBrains plugin 0.2.480 and VS Code extension 0.2.78.
+
 ## 0.35.439
 
 - **Queue marker projection preserves every queue row (GH #104).** Applying the visible `🚧`

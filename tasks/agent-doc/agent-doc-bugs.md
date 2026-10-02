@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -106,15 +106,7 @@ Released and published [v0.35.440](https://github.com/btakita/agent-doc/releases
 
 ## Pending / Not Buil
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/102~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/103~~
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/104
-- Bring back the Clear Session Context to a numbered item on the first page of the Agent Doc editor prompt menu. The `9` hotkey would be ideal.
-- #gh-fix https://github.com/btakita/agent-doc/issues/105
-- #gh-fix https://github.com/btakita/agent-doc/issues/106
-- Create an auto-upgrade flag, where the gh releases are watched and automatically upgrade the agent-doc binary + plugins.
-- release + publish
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

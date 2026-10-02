@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -50,6 +50,14 @@ Completed all three `#gh-fix` queue heads in isolated subagent worktrees, integr
 Released and pushed `v0.35.436` at `4b7be5868`, with JetBrains plugin `0.2.473` and VS Code extension `0.2.77`. The local binary, native library, and both editor packages installed successfully. Full `make check` passed, including 10,418/10,418 Rust tests, 181/181 VS Code tests, JetBrains verification, cross-editor SimWorld, parity audit, and formal model checks.
 
 GitHub Actions publication is the remaining external step: [run 37025686687](https://github.com/btakita/agent-doc/actions/runs/37025686687) is in progress, so the GitHub Release/PyPI artifacts are not yet visible. The tag and source are published; CI owns artifact publication and is being observed rather than awaited.
+
+### Re: GH #102 — gpt-5 · 2026-10-02T13:11-04:00
+
+Fixed, closed, and released (`fix then closerelease`). Selection focus now keys the Remote Dev escape hatch on whether `activeWindowPath` is resolvable, not on the enumerated editor-window count. The regression proves a null active-window path remains `ActiveEditorSplit`, and the audit confirms `selectionWindowCount` is logging-only.
+
+Release v0.35.437 completed successfully: full CI (`make check` and `tmux-ci`) passed, all eight GitHub artifacts matched their checksum manifests, PyPI 0.35.437 is live, and JetBrains plugin 0.2.475 contains the fix. GH #102 was closed with that evidence. The local installed stack has subsequently advanced through the GH #103 verification install to CLI 0.35.437, JetBrains 0.2.476, and VS Code 0.2.77.
+
+GH #103 was also completed in the requested background queue work and will be reconciled by the next queue closeout; the auto-upgrade implementation is active in an isolated worker branch.
 <!-- agent:boundary:e58c9589 -->
 <!-- /agent:exchange -->
 
@@ -60,8 +68,9 @@ GitHub Actions publication is the remaining external step: [run 37025686687](htt
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/102
-- release + publish
+- #gh-fix https://github.com/btakita/agent-doc/issues/103
 - Create an auto-upgrade flag, where the gh releases are watched and automatically upgrade the agent-doc binary + plugins.
+- release + publish
 <!-- /agent:queue -->
 
 

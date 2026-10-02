@@ -1441,6 +1441,25 @@ fn protected_prompt_draft_preview_from_candidate(candidate: &str) -> Option<Stri
     }
 }
 
+/// Return an agent-doc diagnostic that was accidentally rendered inside the
+/// harness composer. The prompt prefix proves this is current composer text;
+/// the `[agent-doc] ` prefix proves its producer. It is therefore neither an
+/// empty composer nor operator-owned draft text.
+fn agent_owned_notice_from_prompt_candidate(
+    candidate: &str,
+    harness: &HarnessConfig,
+) -> Option<String> {
+    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(candidate);
+    let trimmed = stripped.trim();
+    harness.prompt_patterns.iter().find_map(|prompt| {
+        trimmed
+            .strip_prefix(prompt)
+            .map(str::trim_start)
+            .filter(|suffix| suffix.starts_with("[agent-doc] "))
+            .map(ToOwned::to_owned)
+    })
+}
+
 pub fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) -> Option<String> {
     let candidate = harness.last_prompt_candidate(content)?;
     protected_prompt_draft_preview_from_candidate(&candidate)
@@ -1582,6 +1601,7 @@ pub fn project_pane_composer(content: &str, harness: &HarnessConfig) -> PaneComp
         && harness.is_prompt_line(candidate)
         && !harness.is_dispatch_ready_prompt_line(candidate)
         && !latest_prompt_is_dim_placeholder
+        && agent_owned_notice_from_prompt_candidate(candidate, harness).is_none()
         && let Some(preview) = protected_prompt_draft_preview_from_candidate(candidate)
     {
         return PaneComposerProjection::OperatorDraft { preview };
@@ -1680,6 +1700,22 @@ pub fn project_pane_composer_at_cursor(
 ) -> PaneComposerProjection {
     let scoped = cursor_scoped_prompt_content(content, harness, cursor_y);
     project_pane_composer(&scoped, harness)
+}
+
+/// Return agent-doc-owned composer residue from the cursor-scoped pane.
+/// Callers may clear this text automatically; it must never be presented as an
+/// operator draft that the operator needs to submit or remove.
+pub fn agent_owned_composer_notice_at_cursor(
+    harness: &HarnessConfig,
+    content: &str,
+    cursor_y: Option<usize>,
+) -> Option<String> {
+    let scoped = cursor_scoped_prompt_content(content, harness, cursor_y);
+    let candidate = harness.last_prompt_candidate(&scoped)?;
+    harness
+        .is_prompt_line(&candidate)
+        .then(|| agent_owned_notice_from_prompt_candidate(&candidate, harness))
+        .flatten()
 }
 
 /// Cursor-aware counterpart to [`pane_composer_draft`]. For Claude and Codex,
@@ -3332,6 +3368,30 @@ mod tests {
             pane_composer_draft_at_cursor(&h, pane, Some(1)).as_deref(),
             Some("❯\u{a0}do #haivenask")
         );
+    }
+
+    /// GH #98: foreground supervisor stderr once landed in Claude's composer.
+    /// Agent-owned residue is blocking until cleared, but is never an operator
+    /// draft and must not trigger the "submit or clear your draft" refusal.
+    #[test]
+    fn cursor_scoped_agent_doc_notice_is_owned_residue_not_operator_draft() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "completed response\n",
+            "❯\u{a0}[agent-doc] idle-queue watch: reconciled stale busy actor to ready\n",
+            "custom model and context status\n",
+        );
+
+        assert_eq!(
+            agent_owned_composer_notice_at_cursor(&h, pane, Some(1)).as_deref(),
+            Some("[agent-doc] idle-queue watch: reconciled stale busy actor to ready")
+        );
+        assert_eq!(
+            project_pane_composer_at_cursor(pane, &h, Some(1)),
+            PaneComposerProjection::Absent,
+            "owned residue must remain non-ready until route clears it"
+        );
+        assert_eq!(pane_composer_draft_at_cursor(&h, pane, Some(1)), None);
     }
 
     #[test]

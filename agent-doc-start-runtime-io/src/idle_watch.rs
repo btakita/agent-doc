@@ -2325,9 +2325,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             STALE_BUSY_RECONCILE_TICKS
                         ),
                     );
-                    eprintln!(
-                        "[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)"
-                    );
                 } else if stale_busy_reconcile_due {
                     idle_busy_ticks = 0;
                 }
@@ -5194,6 +5191,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GH #98: foreground start owns the managed pane's tty. Diagnostics from
+    /// idle watch belong in the structured event log, never that stderr stream.
+    #[test]
+    fn stale_busy_reconcile_diagnostic_never_targets_foreground_stderr() {
+        let source = include_str!("idle_watch.rs");
+        let foreground_notice = [
+            "[agent-doc] idle-queue watch:",
+            " reconciled stale busy actor",
+        ]
+        .concat();
+        assert!(source.contains("idle_queue_watch_stale_busy_reconciled harness="));
+        assert!(
+            !source.contains(&foreground_notice),
+            "the diagnostic would be typed into the managed pane composer"
+        );
+    }
 
     #[test]
     fn agent_change_frontmatter_refresh_is_revision_gated_across_safety_reconciles() {

@@ -683,6 +683,71 @@ fn observe_pre_dispatch_stranded_draft(
     })
 }
 
+/// GH #98: a foreground supervisor diagnostic can be echoed into the managed
+/// pane's composer when stderr shares that tty. This residue is agent-owned, so
+/// clear it before draft classification instead of asking the operator to
+/// submit or remove text they did not type.
+fn clear_agent_owned_composer_notice(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+) -> Result<()> {
+    let Ok(capture) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) else {
+        return Ok(());
+    };
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
+    if agent_doc_harness::agent_owned_composer_notice_at_cursor(
+        harness, &capture, cursor_y,
+    )
+    .is_none()
+    {
+        return Ok(());
+    }
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_agent_owned_composer_notice file={} pane={} harness={} action=clear",
+            file.display(),
+            pane,
+            harness.binary,
+        ),
+    );
+    agent_doc_tmux_io::send_key_logged(
+        tmux,
+        pane,
+        "C-u",
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(
+            Some(file),
+            agent_doc_ops_log_io::log_op,
+        ),
+        "route.clear_agent_owned_composer_notice",
+    )
+    .context("clear agent-doc-owned composer diagnostic")?;
+
+    let deadline = Instant::now() + Duration::from_millis(500);
+    loop {
+        std::thread::sleep(Duration::from_millis(25));
+        if let Ok(capture) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
+            let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
+            if agent_doc_harness::agent_owned_composer_notice_at_cursor(
+                harness, &capture, cursor_y,
+            )
+            .is_none()
+            {
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "pane {pane} still contains an agent-doc-owned composer diagnostic after \
+                 automatic clear; route refused to append another command"
+            );
+        }
+    }
+}
+
 /// (`#strandeddraftresubmit`) Submit a trigger already stranded in the composer
 /// instead of appending a second one to it.
 ///
@@ -700,6 +765,7 @@ fn try_pre_dispatch_stranded_draft_submit(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<Option<RoutedDispatchStartProof>> {
+    clear_agent_owned_composer_notice(tmux, file, pane, harness)?;
     let trigger = harness.trigger_command(file_path);
     let action = observe_pre_dispatch_stranded_draft(tmux, pane, harness, &trigger);
     if action == PreDispatchStrandedDraftAction::DeferForeignDraft {

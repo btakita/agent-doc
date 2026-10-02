@@ -3,7 +3,7 @@ agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
   codex: 01a0db52-4c0d-72d3-b2c9-0ac89aff42a0
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -37,6 +37,30 @@ queue: stop
 Compacted content:
 - Archived 34 response topic(s): #gh-fix GH #77 (tmux shows 1 pane while the editor shows 2 documents); #gh-fix GH #78 (preflight overrun refusal had no measured cause); Can we make the "genuinely wedged run" never happen?; 31 more
 - Prior summary/context: prior compacted content: Archived 9 response topic(s): do [#refusalsteeringverbatim] + the lazily.md Stop-hook failur...
+
+### Re: #gh-fix issue 95 — gpt-5 · 2026-10-02T02:41-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/95
+
+Fixed, installed, pushed, and closed [agent-doc issue #95](https://github.com/btakita/agent-doc/issues/95).
+
+The root cause is in the newer JetBrains platform contract: its asynchronous classloader-retirement strategy returns success from dynamic reconfiguration before the outgoing classloader is collected, then waits in the background and may advise a restart later. `JetBrainsPluginUpgradeAction` now owns the invariant that a restart-free upgrade may proceed only when retirement is synchronously observable. On an asynchronous-retirement build it stages the package before any unload probe, preserving the live jars; synchronous builds retain the restart-free path. Refusal, failed unload, retained generation, and successful fresh-generation rows remain distinct.
+
+The replica restart path now rediscovers open agent-doc documents across every live project instead of trusting only the pre-reload handoff map. A `0/0` observation is no longer convergence: it is emitted as `state=no-open-documents` with `live_projects=N`, while partial and complete attachment states remain explicit.
+
+Architecture closeout: the policy owner is the one-shot JetBrains upgrade action; JetBrains platform state is the boundary ingress and the action emits one install receipt. This boundary has no long-lived agent-doc lifecycle graph to join, so the direct platform call remains the justified one-shot exception. The continuing replica lifecycle remains in the existing process-scoped coordinator; no new poller or parallel policy owner was introduced.
+
+Changed surfaces: the JetBrains upgrade action, replica/reload reporting, focused JetBrains tests, and the cross-editor source-contract test. Commits `766d00b9b` and `9d4dcce69` are on `origin/main`; the latter projects JetBrains plugin `0.2.471`, matching the installed artifact.
+
+Verification:
+
+- Focused JetBrains regression suite: 19 tests passed.
+- `make dev-harness-test`: passed after updating the cross-editor contract assertion.
+- `make check`: passed from the top, exit 0, zero failure signals.
+- `make install`: passed; binary/cdylib and editor packages installed, including JetBrains `0.2.471`.
+- Latest pre-push CI observation was green for `v0.35.434`; the new push was not awaited.
+
+No imperative derived-state calls were added or duplicated, and no operator-only verification is required for this safety policy: unsupported asynchronous platforms deterministically stage before touching the live generation.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -46,6 +70,9 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/95~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/96
+- release + publish
 <!-- /agent:queue --> 
 
 

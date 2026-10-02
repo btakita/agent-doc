@@ -561,33 +561,42 @@ fn log_three_way_merge_steering_observation(file: &Path) {
 /// committed response was relayed as "5 concurrent operator steering
 /// directives". Text already in `committed` (HEAD) is not unanswered operator
 /// steering, so it is filtered out; with no HEAD the old behaviour stands.
+///
+/// `#retainedsteeringecho`: the same echo happens one step earlier, while the
+/// response is captured and delivered to the editor but NOT yet committed —
+/// HEAD does not carry it, so the HEAD filter alone let it through. Observed
+/// 2026-10-01 on `tasks/agent-doc/agent-doc-bugs.md` after a mid-turn install
+/// left the native save pending: four paragraphs of the agent's own retained
+/// response were relayed as "4 concurrent operator steering directives", an
+/// instruction to answer its own reply. So `binary_authored` carries every
+/// text the binary itself wrote — HEAD and the active capture's response —
+/// and a directive contained in any of them is not operator steering. An
+/// empty slice keeps the old unfiltered behaviour.
 pub fn unmerged_editor_steering_note(
     authority_content: &str,
     disk_content: &str,
-    committed: Option<&str>,
+    binary_authored: &[&str],
 ) -> String {
     let steering = agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(
         disk_content,
         authority_content,
     )
     .realtime_steering_all();
-    let steering = match committed {
-        Some(committed) => {
-            agent_doc_document_realtime::baseline_comparison::RealtimeSteeringSet::new(
-                steering
-                    .directives()
-                    .iter()
-                    .filter(|directive| {
-                        directive
-                            .verbatim()
-                            .map(str::trim)
-                            .is_none_or(|body| body.is_empty() || !committed.contains(body))
+    let steering = if binary_authored.is_empty() {
+        steering
+    } else {
+        agent_doc_document_realtime::baseline_comparison::RealtimeSteeringSet::new(
+            steering
+                .directives()
+                .iter()
+                .filter(|directive| {
+                    directive.verbatim().map(str::trim).is_none_or(|body| {
+                        body.is_empty() || !binary_authored.iter().any(|text| text.contains(body))
                     })
-                    .cloned()
-                    .collect(),
-            )
-        }
-        None => steering,
+                })
+                .cloned()
+                .collect(),
+        )
     };
     steering
         .verbatim_aggregate()
@@ -597,6 +606,30 @@ pub fn unmerged_editor_steering_note(
         )
     })
     .unwrap_or_default()
+}
+
+/// `#retainedsteeringecho`: text the binary itself wrote to `file` — committed
+/// HEAD plus the active capture's response — so the unmerged-save steering scan
+/// never relays the binary's own words as operator steering.
+fn binary_authored_texts(file: &Path) -> Vec<String> {
+    let mut texts = Vec::new();
+    match agent_doc_git_io::revision::show_head(file) {
+        Ok(Some(head)) => texts.push(head),
+        Ok(None) => {}
+        Err(err) => eprintln!(
+            "[session-check] could not read HEAD for {} to filter steering: {err:#}",
+            file.display()
+        ),
+    }
+    match agent_doc_capture_io::load_active(file) {
+        Ok(Some(capture)) => texts.push(capture.response_body),
+        Ok(None) => {}
+        Err(err) => eprintln!(
+            "[session-check] could not load the active capture for {} to filter steering: {err:#}",
+            file.display()
+        ),
+    }
+    texts
 }
 
 pub fn supervisor_drain_outcome_kind(
@@ -781,7 +814,7 @@ fn ensure_terminal_authority_disk_convergence(
         unmerged_editor_steering_note(
             authority_content,
             disk_content,
-            agent_doc_git_io::revision::show_head(file).ok().flatten().as_deref(),
+            &binary_authored_texts(file).iter().map(String::as_str).collect::<Vec<_>>(),
         ),
     );
 }
@@ -1411,7 +1444,7 @@ fn run_with_options_inner(
             unmerged_editor_steering_note(
                 &authority_content,
                 &disk_content,
-                agent_doc_git_io::revision::show_head(file).ok().flatten().as_deref(),
+                &binary_authored_texts(file).iter().map(String::as_str).collect::<Vec<_>>(),
             ),
         );
         if retained_closeout_resume.should_resume() {

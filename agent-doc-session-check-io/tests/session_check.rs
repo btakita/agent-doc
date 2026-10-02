@@ -7652,14 +7652,14 @@ Body\n\
         let authority = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n\
 ### Re: earlier\nanswer\n\nWhy does the release keep skipping? Please check the carried skip set.\n\
 <!-- /agent:exchange -->\n";
-        let note = unmerged_editor_steering_note(authority, disk, Some(disk));
+        let note = unmerged_editor_steering_note(authority, disk, &[disk]);
         assert!(
             note.contains("Why does the release keep skipping? Please check the carried skip set."),
             "authority-only operator prompt must be relayed verbatim: {note:?}"
         );
         assert!(note.contains("unmerged editor save"), "{note:?}");
         assert!(
-            unmerged_editor_steering_note(disk, disk, None).is_empty(),
+            unmerged_editor_steering_note(disk, disk, &[]).is_empty(),
             "no divergence ⇒ no steering note"
         );
     }
@@ -7677,23 +7677,58 @@ Body\n\
 **GH #80: closed.** Both fixes shipped.\n\n\
 The exchange is now 461 lines; this queue does not auto-compact.\n<!-- /agent:exchange -->\n";
         assert!(
-            unmerged_editor_steering_note(committed, disk, Some(committed)).is_empty(),
+            unmerged_editor_steering_note(committed, disk, &[committed]).is_empty(),
             "a committed response lagging on disk is not steering"
         );
         assert!(
-            !unmerged_editor_steering_note(committed, disk, None).is_empty(),
+            !unmerged_editor_steering_note(committed, disk, &[]).is_empty(),
             "the fixture must reproduce the misclassification without HEAD"
         );
         let authority = committed.replace(
             "<!-- /agent:exchange -->",
             "\nPlease also fix the remaining GH #86 issues.\n<!-- /agent:exchange -->",
         );
-        let note = unmerged_editor_steering_note(&authority, disk, Some(committed));
+        let note = unmerged_editor_steering_note(&authority, disk, &[committed]);
         assert!(
             note.contains("Please also fix the remaining GH #86 issues."),
             "{note:?}"
         );
         assert!(!note.contains("GH #80: closed"), "{note:?}");
+    }
+
+    /// `#retainedsteeringecho`: a response that is captured and delivered to the
+    /// editor but NOT committed is absent from HEAD, so the HEAD filter alone
+    /// relayed its paragraphs as operator steering. The active capture's
+    /// response body is binary-authored text too; an operator edit beside it is
+    /// still relayed.
+    #[test]
+    fn unmerged_editor_steering_note_ignores_retained_uncommitted_response() {
+        let disk = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n\
+### Re: earlier\nanswer\n<!-- /agent:exchange -->\n";
+        let response = "<!-- patch:exchange -->\n### Re: GH #89 — opus-5.5\n\n\
+**GH #89: fixed and closed.** The registry binding now outranks argv.\n\n\
+The exchange is 590+ lines; I'm continuing the queue.\n<!-- /patch:exchange -->\n";
+        let delivered = disk.replace(
+            "<!-- /agent:exchange -->",
+            "\n### Re: GH #89 — opus-5.5\n\n\
+**GH #89: fixed and closed.** The registry binding now outranks argv.\n\n\
+The exchange is 590+ lines; I'm continuing the queue.\n<!-- /agent:exchange -->",
+        );
+        assert!(
+            !unmerged_editor_steering_note(&delivered, disk, &[disk]).is_empty(),
+            "the fixture must reproduce the echo with HEAD alone"
+        );
+        assert!(
+            unmerged_editor_steering_note(&delivered, disk, &[disk, response]).is_empty(),
+            "a retained, uncommitted response is not operator steering"
+        );
+        let with_operator = delivered.replace(
+            "<!-- /agent:exchange -->",
+            "\nAlso check the stale editor ids.\n<!-- /agent:exchange -->",
+        );
+        let note = unmerged_editor_steering_note(&with_operator, disk, &[disk, response]);
+        assert!(note.contains("Also check the stale editor ids."), "{note:?}");
+        assert!(!note.contains("GH #89: fixed"), "{note:?}");
     }
 
     /// `#supdrainlive`: with no controller state at all the readiness probe must

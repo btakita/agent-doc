@@ -1032,6 +1032,51 @@ interface AgentDocLib : Library {
                 return true
             }
 
+            /**
+             * Dynamic plugin unload may run on the EDT, where native calls are forbidden. Retire
+             * on a short-lived daemon instead: quiesce native listeners, reject/drain calls, and
+             * always stop this classloader's four worker threads. If quiesce or drain cannot be
+             * proven, retain the JNA mapping rather than closing a possibly active native handle.
+             */
+            fun retireForPluginUnload(timeoutMs: Long) {
+                Thread(
+                    {
+                        val quiesced =
+                            try {
+                                proxy.agent_doc_quiesce_for_reload(timeoutMs) == 1
+                            } catch (error: Throwable) {
+                                LOG.warn("[native] plugin-unload quiesce failed: ${error.message}")
+                                false
+                            }
+                        val drained = stopAcceptingAndAwait(timeoutMs)
+                        executor.shutdownNow()
+                        val terminated =
+                            try {
+                                executor.awaitTermination(timeoutMs, TimeUnit.MILLISECONDS)
+                            } catch (_: InterruptedException) {
+                                Thread.currentThread().interrupt()
+                                false
+                            }
+                        if (quiesced && drained && terminated) {
+                            try {
+                                handler.nativeLibrary.close()
+                            } catch (error: Throwable) {
+                                LOG.warn("[native] plugin-unload handle close failed: ${error.message}")
+                            }
+                        } else {
+                            LOG.warn(
+                                "[native] plugin-unload retained mapping after cleanup " +
+                                    "(quiesced=$quiesced drained=$drained terminated=$terminated)",
+                            )
+                        }
+                    },
+                    "agent-doc-native-generation-retirement",
+                ).apply {
+                    isDaemon = true
+                    start()
+                }
+            }
+
             fun requireReloadAbi() {
                 listOf(
                         "agent_doc_version",
@@ -1154,7 +1199,7 @@ interface AgentDocLib : Library {
         @Volatile private var loadedMtime: Long = 0L
         @Volatile private var failedReloadMtime: Long = 0L
         @Volatile private var currentLockFile: File? = null
-        private var shutdownHookRegistered = false
+        @Volatile private var shutdownHook: Thread? = null
         private const val NATIVE_QUIESCE_TIMEOUT_MS = 7_000L
         private const val NATIVE_CALL_TIMEOUT_MS = 10_000L
         private const val NATIVE_GENERATION_WORKER_COUNT = 4
@@ -1162,6 +1207,7 @@ interface AgentDocLib : Library {
 
         @Synchronized
         fun get(): AgentDocLib? {
+            if (PluginGeneration.resourcesClosed) return null
             val current = instance
             val path = loadedPath
 
@@ -1368,6 +1414,22 @@ interface AgentDocLib : Library {
             initialLoadRetryAtNanos = 0L
             removePidLock()
             writePidLock(path)
+            PluginGeneration.registerResource("native-generation") {
+                retireForPluginUnload()
+            }
+        }
+
+        /** Stop the native generation and release every JVM root owned by this classloader. */
+        @Synchronized
+        internal fun retireForPluginUnload() {
+            val generation = loadedGeneration
+            loadedGeneration = null
+            instance = null
+            loadError = "plugin generation retired"
+            initialLoadBlock = NativeInitialLoadBlock.RestartRequired
+            removePidLock()
+            unregisterShutdownHook()
+            generation?.retireForPluginUnload(NATIVE_QUIESCE_TIMEOUT_MS)
         }
 
         private fun markRestartRequired(reason: String): NativeReloadOutcome.RestartRequired {
@@ -1504,17 +1566,28 @@ interface AgentDocLib : Library {
         }
 
         private fun registerShutdownHook() {
-            if (shutdownHookRegistered) return
-            shutdownHookRegistered = true
-            Runtime.getRuntime()
-                .addShutdownHook(
-                    Thread {
-                        removePidLock()
-                        try {
-                            nativeCacheRoot().deleteRecursively()
-                        } catch (_: Exception) {}
-                    }
-                )
+            if (shutdownHook != null) return
+            val hook =
+                Thread {
+                    removePidLock()
+                    try {
+                        nativeCacheRoot().deleteRecursively()
+                    } catch (_: Exception) {}
+                }
+            Runtime.getRuntime().addShutdownHook(hook)
+            shutdownHook = hook
+        }
+
+        private fun unregisterShutdownHook() {
+            val hook = shutdownHook ?: return
+            shutdownHook = null
+            try {
+                Runtime.getRuntime().removeShutdownHook(hook)
+            } catch (_: IllegalStateException) {
+                // The JVM is already shutting down and owns hook execution now.
+            } catch (error: SecurityException) {
+                LOG.warn("[native] could not remove plugin-generation shutdown hook", error)
+            }
         }
 
         private fun resolveLibPath(): String? {

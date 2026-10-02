@@ -54,6 +54,16 @@ subscriptions, and releases the project's static manager registries. No
 listener may use the longer-lived project itself as its disposable parent. An
 application service additionally cleans every still-open project during plugin
 unload.
+Application-global workers and JVM hooks are generation resources, not project
+resources. Each such owner registers an idempotent closer when it is first
+created. After the generation is fenced and every project is disposed, unload
+closes those resources in reverse creation order. In particular it cancels the
+current-document reporter, controller-socket watchdog, and route-attempt ledger;
+quiesces, drains, and terminates the four native-call workers off the EDT; closes
+the native handle only when quiesce and drain are proven; and removes the JVM
+shutdown hook that would otherwise root the outgoing classloader. Once this
+registry is closed, late work may neither create another worker nor reload the
+native library. Repeated unload cleanup is a no-op.
 Generation-owned projections that must be looked up from extension callbacks
 use plugin-static per-project registries, not IntelliJ light-service lookup:
 project containers can retain a light-service adapter by implementation class

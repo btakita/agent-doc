@@ -20,8 +20,14 @@ internal object RunAgentDocAttemptLedger {
     /// A SINGLE worker, not a pool: the ledger is an append-ordered event log, so
     /// concurrent writers would interleave events and corrupt the ordering the
     /// diagnostics exist to show. Daemon so it never holds IDE shutdown.
-    private val ledgerWriter = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "agent-doc-run-attempt-ledger").apply { isDaemon = true }
+    private val ledgerWriter by lazy {
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "agent-doc-run-attempt-ledger").apply { isDaemon = true }
+        }.also { executor ->
+            PluginGeneration.registerResource("run-attempt-ledger") {
+                executor.shutdownNow()
+            }
+        }
     }
     private val active = mutableMapOf<String, Attempt>()
 

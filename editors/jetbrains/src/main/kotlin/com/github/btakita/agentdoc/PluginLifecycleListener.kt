@@ -14,6 +14,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.IdeFrame
 import com.intellij.openapi.util.Disposer
+import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -332,6 +333,13 @@ class PluginUnloadCleanupService : Disposable {
         }
         // `#staleturnbanner`: strips outlive their unregistered provider, so remove them here.
         TurnStateBannerProvider.retireStrips()
+        // `#jbclassloaderthreads`: application-global Kotlin objects belong to this plugin
+        // classloader, not to a project. Dynamic unload used to leave their executors and the
+        // native-library shutdown hook alive forever: after eleven upgrades IDEA owned 44 native
+        // workers plus eleven current-document and socket-watchdog workers. Close only resources
+        // that this generation actually created, and do it after project teardown has used them
+        // for its final deregistration.
+        PluginGeneration.closeResources()
     }
 }
 
@@ -347,6 +355,13 @@ class PluginUnloadCleanupService : Disposable {
  * replicas or reloads native code again.
  */
 internal object PluginGeneration {
+    private val resourceLock = Any()
+    private val resources = LinkedHashMap<String, () -> Unit>()
+
+    @Volatile
+    var resourcesClosed: Boolean = false
+        private set
+
     @Volatile
     var retired: Boolean = false
         private set
@@ -355,8 +370,42 @@ internal object PluginGeneration {
         retired = true
     }
 
+    /** Register one application-global resource owned by this plugin classloader. */
+    fun registerResource(name: String, close: () -> Unit) {
+        val closeImmediately =
+            synchronized(resourceLock) {
+                if (resourcesClosed) {
+                    true
+                } else {
+                    resources.putIfAbsent(name, close)
+                    false
+                }
+            }
+        if (closeImmediately) {
+            close()
+        }
+    }
+
+    /** Close in reverse creation order; every closer must be idempotent and non-throwing. */
+    fun closeResources() {
+        val closers = synchronized(resourceLock) {
+            resourcesClosed = true
+            resources.values.toList().asReversed().also { resources.clear() }
+        }
+        closers.forEach { close ->
+            try {
+                close()
+            } catch (error: Throwable) {
+                com.intellij.openapi.diagnostic.Logger
+                    .getInstance(PluginGeneration::class.java)
+                    .warn("[plugin-lifecycle] generation resource cleanup failed", error)
+            }
+        }
+    }
+
     /** Tests share one classloader; production never un-retires a generation. */
     internal fun resetForTest() {
         retired = false
+        resourcesClosed = false
     }
 }

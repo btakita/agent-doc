@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import java.nio.file.Files
 import java.nio.file.Paths
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +48,21 @@ class PluginGenerationRetirementTest {
     }
 
     @Test
+    fun `generation resources close once in reverse creation order`() {
+        val closed = mutableListOf<String>()
+        PluginGeneration.registerResource("first") { closed += "first" }
+        PluginGeneration.registerResource("second") { closed += "second" }
+        PluginGeneration.registerResource("second") { closed += "duplicate" }
+
+        PluginGeneration.closeResources()
+        PluginGeneration.closeResources()
+        PluginGeneration.registerResource("late") { closed += "late" }
+
+        assertEquals(listOf("second", "first", "late"), closed)
+        assertTrue(PluginGeneration.resourcesClosed)
+    }
+
+    @Test
     fun `unload retires before disposing and every rebuild path checks the latch`() {
         val lifecycle = source("PluginLifecycleListener.kt")
         val cleanup = lifecycle.substringAfter("class PluginUnloadCleanupService")
@@ -54,6 +70,8 @@ class PluginGenerationRetirementTest {
         val dispose = cleanup.indexOf("disposeProjectResources(project)")
         assertTrue("unload must retire the generation", retire >= 0)
         assertTrue("retire must precede disposal", dispose > retire)
+        val closeResources = cleanup.indexOf("PluginGeneration.closeResources()")
+        assertTrue("global resources close only after project teardown", closeResources > dispose)
 
         val getInstance = source("CrdtReplicaManager.kt")
             .substringAfter("fun getInstance(project: Project): CrdtReplicaManager")
@@ -63,5 +81,28 @@ class PluginGenerationRetirementTest {
         val reload = source("NativeReloadCoordinator.kt")
             .substringAfter("fun requestReload(")
         assertTrue(reload.indexOf("PluginGeneration.retired") in 0 until reload.indexOf("reloadGate.begin()"))
+    }
+
+    @Test
+    fun `every classloader global worker has an unload owner`() {
+        val lifecycle = source("PluginLifecycleListener.kt")
+        assertTrue(lifecycle.contains("resources.values.toList().asReversed()"))
+
+        val owners =
+            mapOf(
+                "NativeLib.kt" to "registerResource(\"native-generation\")",
+                "TypingTracker.kt" to "registerResource(\"current-document-reporter\")",
+                "CpRouteClient.kt" to "registerResource(\"cp-socket-watchdog\")",
+                "RunAgentDocAttemptLedger.kt" to "registerResource(\"run-attempt-ledger\")",
+            )
+        owners.forEach { (file, registration) ->
+            assertTrue("$file must register its classloader-owned worker", source(file).contains(registration))
+        }
+
+        val native = source("NativeLib.kt")
+        assertTrue(native.contains("Runtime.getRuntime().removeShutdownHook(hook)"))
+        assertTrue(native.contains("executor.shutdownNow()"))
+        val get = native.substringAfter("fun get(): AgentDocLib?")
+        assertTrue(get.indexOf("PluginGeneration.resourcesClosed") in 0 until get.indexOf("val current = instance"))
     }
 }

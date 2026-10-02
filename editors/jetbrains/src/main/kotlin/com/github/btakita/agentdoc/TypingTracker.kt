@@ -282,8 +282,14 @@ object TypingTracker : DocumentListener {
 
     private const val CONTENT_REPORT_DELAY_MS = 75L
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TypingTracker::class.java)
-    private val contentReportExecutor = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "agent-doc-current-document-report").apply { isDaemon = true }
+    private val contentReportExecutor by lazy {
+        Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "agent-doc-current-document-report").apply { isDaemon = true }
+        }.also { executor ->
+            PluginGeneration.registerResource("current-document-reporter") {
+                executor.shutdownNow()
+            }
+        }
     }
     /**
      * Per-document lazily rate-shape state. The compute core owns latest-value

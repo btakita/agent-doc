@@ -1159,8 +1159,14 @@ private const val TURN_AUTHORITY_STREAM_TIMEOUT_MS = 120_000L
 private const val TURN_AUTHORITY_RECONNECT_MIN_MS = 250L
 private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
 
-    private val socketWatchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }
+    private val socketWatchdog by lazy {
+        Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }
+        }.also { executor ->
+            PluginGeneration.registerResource("cp-socket-watchdog") {
+                executor.shutdownNow()
+            }
+        }
     }
 
     /// `#rebootselfheal`: a connect failure that proves nothing is listening.

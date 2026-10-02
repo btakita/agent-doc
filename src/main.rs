@@ -3031,7 +3031,18 @@ enum Commands {
         action: JobsAction,
     },
     /// Check for updates and upgrade to the latest version.
-    Upgrade,
+    Upgrade {
+        /// Watch stable GitHub releases and keep the binary and installed plugins current
+        #[arg(long)]
+        auto: bool,
+        /// Poll interval for --auto (minimum 60 seconds; default 900)
+        #[arg(
+            long,
+            requires = "auto",
+            value_parser = clap::value_parser!(u64).range(upgrade::MIN_AUTO_INTERVAL_SECS..)
+        )]
+        interval_seconds: Option<u64>,
+    },
     /// Generate content-source annotation sidecar for a document
     Annotate {
         /// Path to the session document
@@ -4505,7 +4516,7 @@ fn try_main() -> anyhow::Result<()> {
 
     // `lib-path` is a machine-only bootstrap query. Neither stream may carry
     // an unrelated upgrade notice (including when called by an older editor).
-    if !matches!(cli.command, Commands::Upgrade | Commands::LibPath) {
+    if !matches!(cli.command, Commands::Upgrade { .. } | Commands::LibPath) {
         upgrade::warn_if_outdated();
     }
 
@@ -5707,7 +5718,10 @@ fn try_main() -> anyhow::Result<()> {
                 skill::install_turn_status_hooks(dir.as_deref(), user, tmux)
             }
         },
-        Commands::Upgrade => upgrade::run(),
+        Commands::Upgrade {
+            auto,
+            interval_seconds,
+        } => upgrade::run(auto, interval_seconds),
         Commands::LibPath => {
             // Print the path to the shared library built alongside this binary.
             // The cdylib is in the same target directory as the binary.
@@ -6964,6 +6978,27 @@ mod recycle_force_tests {
             .expect("spawn parse thread")
             .join()
             .expect("parse thread")
+    }
+
+    #[test]
+    fn upgrade_auto_flags_parse_as_a_foreground_watcher() {
+        let cmd = parse(&[
+            "agent-doc",
+            "upgrade",
+            "--auto",
+            "--interval-seconds",
+            "120",
+        ]);
+        match cmd {
+            Commands::Upgrade {
+                auto,
+                interval_seconds,
+            } => {
+                assert!(auto);
+                assert_eq!(interval_seconds, Some(120));
+            }
+            _ => panic!("expected upgrade subcommand"),
+        }
     }
 
     #[test]

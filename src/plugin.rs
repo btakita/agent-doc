@@ -4,7 +4,8 @@
 //! - Manages editor plugin lifecycle (install, update, list) for JetBrains IDEs and VS Code-family editors (VS Code, VSCodium, Cursor).
 //! - `install(editor)` — fetches the latest GitHub Release for `btakita/agent-doc`, selects the appropriate asset (signed variant preferred), downloads it, and installs it.
 //! - `install_local(editor)` — installs from a locally built artifact found by walking up from CWD to locate an `editors/` directory.
-//! - `update(editor)` — for JetBrains, skips re-install if the installed plugin.xml version matches the latest release tag; for VS Code, always reinstalls (handled idempotently by the CLI).
+//! - `update(editor)` — for JetBrains, skips re-install if the installed plugin version matches the latest package asset; for VS Code, reinstalls through the editor CLI.
+//! - `update_all_installed()` — release-watcher entry point that updates every existing agent-doc JetBrains/VS Code installation without installing into a new editor.
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
@@ -15,6 +16,7 @@
 //! - `install(editor)` — returns `Err` on network failure, missing asset, or CLI install failure.
 //! - `install_local(editor)` — returns `Err` if no `editors/` directory is found or no artifact exists.
 //! - `update(editor)` — returns `Ok(())` early (no-op) when the JetBrains plugin is already at the latest version.
+//! - `update_all_installed()` attempts editor families independently and reports all failures after the remaining installed targets have been attempted.
 //! - `list()` — always returns `Ok(())`; emits a stderr message when no plugins are found.
 //! - Unrecognized `editor` strings return `Err` with a list of supported values.
 //! - Byte-identical local JetBrains packages are true no-ops: the installed tree is not
@@ -48,6 +50,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const GITHUB_REPO: &str = "btakita/agent-doc";
+const VSCODE_EXTENSION_ID: &str = "btakita.agent-doc";
 
 fn build_agent() -> ureq::Agent {
     ureq::Agent::config_builder()
@@ -539,13 +542,19 @@ fn install_jetbrains(release: &Value, plugins_dir: Option<&Path>) -> Result<()> 
 /// a binary known to be missing — surfacing as a bare `No such file or
 /// directory (os error 2)` that reads like the *vsix* is missing.
 fn detect_code_cmd() -> Option<&'static str> {
-    // Check for cursor first, then codium, then code
-    ["cursor", "codium", "code"].into_iter().find(|cmd| {
-        std::process::Command::new(cmd)
-            .arg("--version")
-            .output()
-            .is_ok_and(|o| o.status.success())
-    })
+    available_code_cmds().into_iter().next()
+}
+
+fn available_code_cmds() -> Vec<&'static str> {
+    ["cursor", "codium", "code"]
+        .into_iter()
+        .filter(|cmd| {
+            std::process::Command::new(cmd)
+                .arg("--version")
+                .output()
+                .is_ok_and(|o| o.status.success())
+        })
+        .collect()
 }
 
 fn missing_code_cli_message() -> &'static str {
@@ -557,15 +566,54 @@ fn require_code_cmd() -> Result<&'static str> {
     detect_code_cmd().context(missing_code_cli_message())
 }
 
+fn vscode_extension_version_from_output(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let (id, version) = line.trim().split_once('@')?;
+        (id.eq_ignore_ascii_case(VSCODE_EXTENSION_ID) && !version.is_empty())
+            .then(|| version.to_owned())
+    })
+}
+
+fn installed_vscode_extensions() -> (Vec<(&'static str, String)>, Vec<String>) {
+    let mut installed = Vec::new();
+    let mut errors = Vec::new();
+    for code in available_code_cmds() {
+        match std::process::Command::new(code)
+            .args(["--list-extensions", "--show-versions"])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(version) = vscode_extension_version_from_output(&stdout) {
+                    installed.push((code, version));
+                }
+            }
+            Ok(output) => errors.push(format!(
+                "`{code} --list-extensions --show-versions` exited with {}",
+                output.status
+            )),
+            Err(error) => errors.push(format!(
+                "Failed to run `{code} --list-extensions --show-versions`: {error}"
+            )),
+        }
+    }
+    (installed, errors)
+}
+
+fn packaged_plugin_version(name: &str, prefix: &str, extension: &str) -> Option<String> {
+    let base = name.strip_prefix(prefix)?.strip_suffix(extension)?;
+    let version = base.strip_suffix("-signed").unwrap_or(base);
+    numeric_dot_version(version).map(|_| version.to_owned())
+}
+
 fn install_vscode(release: &Value) -> Result<()> {
+    let code = require_code_cmd()?;
+    install_vscode_with_cmd(release, code)
+}
+
+fn install_vscode_with_cmd(release: &Value, code: &str) -> Result<()> {
     let asset = find_asset(release, "agent-doc", "vsix")?;
     eprintln!("Found asset: {}", asset.name);
-
-    // Resolve the prerequisite BEFORE paying for the download (GH #57): a
-    // machine with no `code` CLI used to fetch the whole vsix only to fail on
-    // something knowable up front.
-    let code = require_code_cmd()?;
-
     let tmp = download_to_temp(asset.url)?;
     verify_editor_package(release, &asset, tmp.path())?;
 
@@ -1643,11 +1691,12 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
             let dirs = jetbrains_plugin_dirs();
             let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
             let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
-            let version = release_version(&release);
-            if installed_jetbrains_plugin_version(&target_dir).as_deref()
-                == Some(version.trim_start_matches('v'))
+            let asset = find_asset(&release, "agent-doc-jetbrains", "zip")?;
+            let version = packaged_plugin_version(asset.name, "agent-doc-jetbrains-", ".zip")
+                .context("JetBrains release asset has no valid package version")?;
+            if installed_jetbrains_plugin_version(&target_dir).as_deref() == Some(version.as_str())
             {
-                eprintln!("JetBrains plugin is already at {version}.");
+                eprintln!("JetBrains plugin is already at v{version}.");
                 return Ok(());
             }
             install_jetbrains_into(&release, &target_dir)
@@ -1661,6 +1710,87 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
             install_vscode(&release)
         }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
+    }
+}
+
+/// Update every already-installed editor plugin without installing into a new IDE.
+///
+/// Used by the release watcher. Each editor family is attempted independently so
+/// one broken target cannot prevent the others from converging.
+pub fn update_all_installed() -> Result<usize> {
+    let jetbrains_targets = existing_jetbrains_agent_doc_dirs(&jetbrains_plugin_dirs());
+    let (vscode_targets, mut errors) = installed_vscode_extensions();
+    if jetbrains_targets.is_empty() && vscode_targets.is_empty() && errors.is_empty() {
+        return Ok(0);
+    }
+
+    let mut updated = 0usize;
+    if !jetbrains_targets.is_empty() {
+        match fetch_release_for_asset("agent-doc-jetbrains", "zip") {
+            Ok(release) => {
+                match find_asset(&release, "agent-doc-jetbrains", "zip").and_then(|asset| {
+                    packaged_plugin_version(asset.name, "agent-doc-jetbrains-", ".zip")
+                        .context("JetBrains release asset has no valid package version")
+                }) {
+                    Ok(version) => {
+                        for target in jetbrains_targets {
+                            if let Some(installed) = installed_jetbrains_plugin_version(&target) {
+                                match jetbrains_version_cmp(&installed, &version) {
+                                    Ok(CmpOrdering::Equal | CmpOrdering::Greater) => continue,
+                                    Ok(CmpOrdering::Less) => {}
+                                    Err(error) => {
+                                        errors.push(format!("{}: {error:#}", target.display()));
+                                        continue;
+                                    }
+                                }
+                            }
+                            match install_jetbrains_into(&release, &target) {
+                                Ok(()) => updated += 1,
+                                Err(error) => {
+                                    errors.push(format!("{}: {error:#}", target.display()))
+                                }
+                            }
+                        }
+                    }
+                    Err(error) => errors.push(format!("JetBrains: {error:#}")),
+                }
+            }
+            Err(error) => errors.push(format!("JetBrains: {error:#}")),
+        }
+    }
+
+    for (code, installed_version) in vscode_targets {
+        match fetch_release_for_asset("agent-doc", "vsix") {
+            Ok(release) => match find_asset(&release, "agent-doc", "vsix").and_then(|asset| {
+                packaged_plugin_version(asset.name, "agent-doc-", ".vsix")
+                    .context("VS Code release asset has no valid package version")
+            }) {
+                Ok(version) => match (
+                    numeric_dot_version(&installed_version),
+                    numeric_dot_version(&version),
+                ) {
+                    (Some(installed), Some(available)) if installed >= available => {}
+                    (Some(_), Some(_)) => match install_vscode_with_cmd(&release, code) {
+                        Ok(()) => updated += 1,
+                        Err(error) => errors.push(format!("{code}: {error:#}")),
+                    },
+                    _ => errors.push(format!(
+                        "{code}: invalid installed or packaged version ({installed_version:?}, {version:?})"
+                    )),
+                },
+                Err(error) => errors.push(format!("{code}: {error:#}")),
+            },
+            Err(error) => errors.push(format!("{code}: {error:#}")),
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(updated)
+    } else {
+        bail!(
+            "one or more installed plugins failed to update:\n{}",
+            errors.join("\n")
+        )
     }
 }
 
@@ -1682,7 +1812,8 @@ mod tests {
         jetbrains_local_zip_matches_installation, jetbrains_plugin_dirs_in_roots,
         jetbrains_upgrade_launcher_has_main_manifest, jetbrains_upgrade_reattach_warning,
         jetbrains_version_cmp, local_jetbrains_zip_in, local_jetbrains_zip_version,
-        release_version, releases_page_url, verify_local_install_version,
+        packaged_plugin_version, release_version, releases_page_url, verify_local_install_version,
+        vscode_extension_version_from_output,
     };
     use super::{install_jetbrains_package_bytes, java_candidates_for_ide, resolve_java_for_ide};
     use serde_json::json;
@@ -1709,6 +1840,40 @@ mod tests {
             .unwrap();
         archive.write_all(b"dependency").unwrap();
         archive.finish().unwrap();
+    }
+
+    #[test]
+    fn installed_vscode_parser_matches_only_the_agent_doc_extension() {
+        let output = "unrelated.agent-doc-helper@9.9.9\nbtakita.agent-doc@0.2.475\n";
+        assert_eq!(
+            vscode_extension_version_from_output(output).as_deref(),
+            Some("0.2.475")
+        );
+        assert_eq!(
+            vscode_extension_version_from_output("other.extension@1.0.0"),
+            None
+        );
+    }
+
+    #[test]
+    fn packaged_plugin_versions_handle_signed_and_unsigned_assets() {
+        assert_eq!(
+            packaged_plugin_version(
+                "agent-doc-jetbrains-0.2.475-signed.zip",
+                "agent-doc-jetbrains-",
+                ".zip"
+            )
+            .as_deref(),
+            Some("0.2.475")
+        );
+        assert_eq!(
+            packaged_plugin_version("agent-doc-0.2.77.vsix", "agent-doc-", ".vsix").as_deref(),
+            Some("0.2.77")
+        );
+        assert_eq!(
+            packaged_plugin_version("agent-doc-latest.vsix", "agent-doc-", ".vsix"),
+            None
+        );
     }
 
     /// `#pluginassetpaging`: a release with no assets at all.

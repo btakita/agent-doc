@@ -319,7 +319,20 @@ release with no timestamp, so an unorderable release cannot hide a dropped
 deliverable. Neither macOS gate is a `check` dependency: clearing them requires
 Mac hardware, and blocking the build on hardware would redden unrelated changes.
 
-`agent-doc upgrade` checks GitHub Releases for a newer version and upgrades through the prebuilt GitHub binary / `pip` cascade. The agent-doc Rust workspace is private and is not a crates.io upgrade source.
+`agent-doc upgrade` checks GitHub Releases for a newer stable version and upgrades
+through the prebuilt GitHub binary / `pip` cascade. A prebuilt archive is installed
+only after its bytes match the release's `SHA256SUMS` entry. The agent-doc Rust
+workspace is private and is not a crates.io upgrade source.
+
+`agent-doc upgrade --auto [--interval-seconds N]` is a foreground release watcher.
+It checks immediately and then polls every 900 seconds by default; the interval
+floor is 60 seconds. One recoverable per-user PID lock prevents concurrent
+watchers. When a new release appears, it upgrades the binary and reconciles every
+already-installed JetBrains and VS Code-family plugin, but never installs a plugin
+into a newly discovered IDE. Binary and plugin failures are independent and retry
+on the next poll. The watcher records the effective binary and reconciled release
+in memory so the old process that replaced its own executable does not reinstall
+the same release forever.
 
 PyPI publishing is cadence-gated (`#pypicadence`): milestone tags (`vX.Y.0`)
 publish automatically and any other tag publishes on demand with

@@ -209,9 +209,19 @@ Index and search session memory from `agent:backlog`, `agent:review`, `agent:don
 
 ```
 agent-doc upgrade
+agent-doc upgrade --auto
+agent-doc upgrade --auto --interval-seconds 300
 ```
 
-Check GitHub Releases for the latest version and upgrade. Tries the prebuilt GitHub binary first, then `pip install --upgrade`.
+Check GitHub Releases for the latest stable version and upgrade. The prebuilt
+archive must match the release checksum; `pip install --upgrade` is the fallback.
+
+`--auto` stays in the foreground, checks immediately, and then watches every 15
+minutes (or the requested interval, minimum 60 seconds). It keeps the binary and
+only already-installed JetBrains/VS Code-family plugins current. It never installs
+a plugin into a new IDE. Transient failures retry on the next poll, and a single
+per-user watcher lock prevents duplicate upgraders. Stop it with Ctrl-C; use your
+service manager if you want it to run persistently.
 
 ## Global flags
 

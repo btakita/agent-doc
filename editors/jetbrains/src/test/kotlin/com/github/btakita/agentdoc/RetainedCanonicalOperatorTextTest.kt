@@ -390,4 +390,85 @@ class RetainedCanonicalOperatorTextTest {
             ),
         )
     }
+
+    // lazily.md 2026-10-01 21:42:17: a reload_library generation handoff left the
+    // operator's queue edits quarantined by the controller (projected=false, the
+    // settled shadow stayed at the pre-edit canonical). The controller redelivered
+    // that pre-edit canonical as a REPLACE; the plugin retained it while the buffer
+    // was unsaved, and Run Agent Doc's save made the buffer "clean", so the REPLACE
+    // was installed over the edited queue.
+    private val settledQueue =
+        "# lazily\n\n<!-- agent:queue -->\n- old item\n<!-- /agent:queue -->\n"
+    private val editedQueue =
+        "# lazily\n\n<!-- agent:queue -->\n- rewritten item\n- new item\n<!-- /agent:queue -->\n"
+
+    @Test
+    fun `replace delivery of the settled canonical never clobbers unaccepted operator queue edits`() {
+        assertTrue(
+            replaceDeliveryWouldClobberUnsettledOperatorTextUtil(
+                settledShadow = settledQueue,
+                bufferText = editedQueue,
+                canonicalText = settledQueue,
+            ),
+        )
+        // The re-register that replaces the REPLACE publishes the buffer: canonical
+        // is exactly the settled shadow the operator edited from.
+        assertEquals(
+            RetainedRegistrationProjectionAction.PublishOperatorBuffer,
+            retainedRegistrationProjectionActionForAttachUtil(
+                deferCanonicalProjectionForPendingLocal = false,
+                canonicalProjectionRetained = false,
+                publishedShadow = settledQueue,
+                bufferText = editedQueue,
+                canonicalText = settledQueue,
+            ),
+        )
+    }
+
+    @Test
+    fun `replace delivery still installs when the operator has no unaccepted text`() {
+        val compacted = "# lazily\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+        // Buffer is the accepted projection: an out-of-band deletion may replace it.
+        assertFalse(
+            replaceDeliveryWouldClobberUnsettledOperatorTextUtil(settledQueue, settledQueue, compacted),
+        )
+        // Already converged.
+        assertFalse(
+            replaceDeliveryWouldClobberUnsettledOperatorTextUtil(settledQueue, editedQueue, editedQueue),
+        )
+        // Restarted IDE: no settled frontier, historical semantics stand.
+        assertFalse(replaceDeliveryWouldClobberUnsettledOperatorTextUtil(null, editedQueue, settledQueue))
+        assertFalse(replaceDeliveryWouldClobberUnsettledOperatorTextUtil(settledQueue, null, compacted))
+        // Canonical advanced AND the operator typed: still refused; registration
+        // decides (containment proof, merge forward, or hold), never this REPLACE.
+        assertTrue(replaceDeliveryWouldClobberUnsettledOperatorTextUtil(settledQueue, editedQueue, compacted))
+    }
+
+    @Test
+    fun `replace delivery checks the live buffer against the settled shadow before any save gate`() {
+        val source =
+            Files.readString(
+                listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                    Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                ).first { Files.exists(it) },
+            )
+        val replace =
+            source.substringAfter("    private fun applyReplaceDelivery(")
+                .substringBefore("    private fun queueRemoteTextApply(")
+        val guard = replace.indexOf("replaceDeliveryWouldClobberUnsettledOperatorTextUtil(")
+        assertTrue("REPLACE must consult the settled-shadow guard", guard >= 0)
+        assertTrue(replace.substring(guard, guard + 200).contains("settledShadows[filePath]"))
+        // Before the clean/unsaved gate: Run Agent Doc's save must not open a path around it.
+        assertTrue(guard < replace.indexOf("refreshCleanDocumentBeforeRemoteApply("))
+        assertTrue(guard < replace.indexOf("applyMinimalDocumentEditUtil("))
+        // The refusal re-registers from the buffer and never retains the canonical
+        // for a lazy projection over the operator text.
+        val refusal =
+            replace.substringAfter("unsettledOperatorBuffer?.let")
+                .substringBefore("deferredEditorText?.let")
+        assertTrue(refusal.contains("refreshReplicaAfterTransportLoss("))
+        assertFalse(refusal.contains("retainedCanonicalProjectionPaths.add("))
+        assertTrue(refusal.contains("return false"))
+    }
 }

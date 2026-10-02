@@ -1915,6 +1915,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val started = System.nanoTime()
         var installed = false
         var deferredEditorText: String? = null
+        var unsettledOperatorBuffer: String? = null
         val replicaText = forwarder.replicaText()
         if (!prepareNonOperatorEditorMutationOnWorker(filePath)) {
             log.warn("[crdt-replica] replace delivery retained because native op-capture fencing failed for $filePath")
@@ -1927,6 +1928,24 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 try {
                     val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
                     val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return@invokeAndWait
+                    // The REPLACE analogue of the re-register operator-text hold:
+                    // decide on the live buffer BEFORE the clean/unsaved gate. Run
+                    // Agent Doc saves the document first, so a REPLACE retained while
+                    // the buffer was unsaved used to pass every later gate (shadow ==
+                    // buffer == local replica, because the operator's keystrokes are
+                    // local CRDT ops) and wipe text the controller never accepted
+                    // (lazily.md 2026-10-01 21:42:17: queue edits reverted on Run).
+                    val liveBuffer = document.text
+                    if (
+                        replaceDeliveryWouldClobberUnsettledOperatorTextUtil(
+                            settledShadow = settledShadows[filePath] ?: nativeReloadSettledShadows[filePath],
+                            bufferText = liveBuffer,
+                            canonicalText = canonical,
+                        )
+                    ) {
+                        unsettledOperatorBuffer = liveBuffer
+                        return@invokeAndWait
+                    }
                     if (!refreshCleanDocumentBeforeRemoteApply(filePath, targetFile, document)) {
                         deferredEditorText = document.text
                         return@invokeAndWait
@@ -1993,6 +2012,30 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
         } finally {
             logSlow("replace-apply-total", filePath, started, details = "target_chars=${canonical.length} installed=$installed deferred=${deferredEditorText != null}")
+        }
+        unsettledOperatorBuffer?.let { bufferText ->
+            // The canonical in a REPLACE wholesale-replaces the local replica, so
+            // the operator ops it lacks would be destroyed, not merged. Re-register
+            // from the live buffer instead: registration decides causally from
+            // (settled shadow, buffer, canonical) — publish the buffer when
+            // canonical is still the settled shadow, adopt canonical only when it
+            // provably contains the operator edits, merge forward or hold
+            // otherwise. Never retain this canonical for a lazy projection.
+            log.warn(
+                "[crdt-replica] REPLACE refused: the live buffer holds operator text the controller never " +
+                    "accepted for $filePath; re-registering from the buffer instead of projecting canonical over it. " +
+                    "buffer_hash=${contentHash(bufferText)} " +
+                    "settled_hash=${(settledShadows[filePath] ?: nativeReloadSettledShadows[filePath])?.let(::contentHash) ?: "missing"} " +
+                    "canonical_hash=${contentHash(canonical)}",
+            )
+            retainedCanonicalProjectionPaths.remove(filePath)
+            refreshReplicaAfterTransportLoss(
+                filePath,
+                forwarder,
+                bufferText,
+                "replace-delivery-unsettled-operator-text",
+            )
+            return false
         }
         deferredEditorText?.let { editorText ->
             log.warn(
@@ -4951,6 +4994,29 @@ internal fun remoteCrdtDiskCanPersistUtil(
     targetText: String,
     diskText: String?,
 ): Boolean = diskText == expectedText || diskText == targetText
+
+/**
+ * A REPLACE delivery installs [canonicalText] wholesale and re-bootstraps the
+ * local replica, so any operator text the canonical lacks is destroyed rather
+ * than merged. The incremental editing shadow cannot detect this: an operator
+ * keystroke is a local CRDT op, so shadow, buffer and local replica all agree
+ * on text the controller may have quarantined. Only the settled shadow (the
+ * last projection the controller acknowledged) separates operator text the
+ * controller has seen from text it never accepted.
+ *
+ * True when the live buffer moved past its settled shadow and the canonical is
+ * not that buffer. Without a settled shadow (a restarted IDE) this is false and
+ * the historical replace semantics stand.
+ */
+internal fun replaceDeliveryWouldClobberUnsettledOperatorTextUtil(
+    settledShadow: String?,
+    bufferText: String?,
+    canonicalText: String,
+): Boolean =
+    settledShadow != null &&
+        bufferText != null &&
+        bufferText != settledShadow &&
+        bufferText != canonicalText
 
 internal fun remoteCrdtReplaceStillCurrentUtil(
     expectedText: String,

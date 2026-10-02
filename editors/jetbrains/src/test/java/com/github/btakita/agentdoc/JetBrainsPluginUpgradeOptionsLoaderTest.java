@@ -85,7 +85,7 @@ public class JetBrainsPluginUpgradeOptionsLoaderTest {
             .getConstructor().newInstance();
         assertSame(isolated, owner.getClassLoader());
 
-        Object unloaded = JetBrainsPluginUpgradeAction.resolveUpdateUnload(owner, platform, descriptor).invoke();
+        Object unloaded = JetBrainsPluginUpgradeAction.resolveUpdateUnload(owner, platform, descriptor).get();
 
         assertEquals(Boolean.TRUE, unloaded);
         Object options = owner.getField("lastOptions").get(platform);
@@ -105,7 +105,7 @@ public class JetBrainsPluginUpgradeOptionsLoaderTest {
 
         Object unloaded = JetBrainsPluginUpgradeAction.resolveUpdateUnload(
             ReconfiguringDynamicPlugins.class, platform, new Descriptor()
-        ).invoke();
+        ).get();
 
         assertEquals(Boolean.TRUE, unloaded);
         assertEquals(1, platform.unloads);

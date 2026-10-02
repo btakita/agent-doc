@@ -118,9 +118,9 @@ class PluginLifecycleListenerTest {
         assertTrue(upgradeAction.contains("disposeProjectResources$"))
         // GH #94: outgoing document listeners stop before IntelliJ unloads their descriptor, but
         // only after the unload is known to be callable; an abort after the release restores.
-        val resolve = upgradeAction.indexOf("UnloadCall unload = generation.resolveUnload();")
-        val release = upgradeAction.indexOf("generation.releaseOpenProjects()")
-        val unload = upgradeAction.indexOf("unload.invoke()")
+        val resolve = upgradeAction.indexOf("Supplier<Object> unload = resolveUnload.get();")
+        val release = upgradeAction.indexOf("releaseOpenProjects.getAsInt()")
+        val unload = upgradeAction.indexOf("unload.get()")
         assertTrue(resolve >= 0)
         assertTrue("the release must follow unload resolution", release > resolve)
         assertTrue("outgoing document listeners must stop before the unload", unload > release)

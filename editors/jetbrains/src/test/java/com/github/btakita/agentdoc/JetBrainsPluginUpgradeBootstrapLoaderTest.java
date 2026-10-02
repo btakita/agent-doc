@@ -19,7 +19,7 @@ public class JetBrainsPluginUpgradeBootstrapLoaderTest {
     public void theActionAndEveryNestedClassLoadChildFirst() {
         assertTrue(JetBrainsPluginUpgradeBootstrap.isActionClass(ACTION));
         assertTrue(JetBrainsPluginUpgradeBootstrap.isActionClass(ACTION + "$1"));
-        assertTrue(JetBrainsPluginUpgradeBootstrap.isActionClass(ACTION + "$UnloadCall"));
+        assertTrue(JetBrainsPluginUpgradeBootstrap.isActionClass(ACTION + "$Nested"));
     }
 
     @Test

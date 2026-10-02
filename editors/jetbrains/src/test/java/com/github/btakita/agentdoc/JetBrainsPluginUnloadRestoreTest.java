@@ -17,20 +17,18 @@ import static org.junit.Assert.fail;
  */
 public class JetBrainsPluginUnloadRestoreTest {
     /** Records the order the upgrade drives the outgoing generation in. */
-    private static final class RecordingGeneration implements JetBrainsPluginUpgradeAction.OutgoingGeneration {
+    private static final class RecordingGeneration {
         final List<String> calls = new ArrayList<>();
         Object verdict = Boolean.TRUE;
         RuntimeException resolveFailure;
         Object unloadResult = Boolean.TRUE;
 
-        @Override
-        public Object unloadVerdict() {
+        Object unloadVerdict() {
             calls.add("verdict");
             return verdict;
         }
 
-        @Override
-        public JetBrainsPluginUpgradeAction.UnloadCall resolveUnload() {
+        java.util.function.Supplier<Object> resolveUnload() {
             calls.add("resolve");
             if (resolveFailure != null) {
                 throw resolveFailure;
@@ -41,11 +39,16 @@ public class JetBrainsPluginUnloadRestoreTest {
             };
         }
 
-        @Override
-        public int releaseOpenProjects() {
+        int releaseOpenProjects() {
             calls.add("release");
             return 2;
         }
+    }
+
+    private static int unload(RecordingGeneration generation) {
+        return JetBrainsPluginUpgradeAction.unloadOutgoingGeneration(
+            generation::unloadVerdict, generation::resolveUnload, generation::releaseOpenProjects
+        );
     }
 
     @Test
@@ -56,7 +59,7 @@ public class JetBrainsPluginUnloadRestoreTest {
             JetBrainsPluginUpgradeAction.UPGRADER_FAILED + ": no unloadPlugin"
         );
         try {
-            JetBrainsPluginUpgradeAction.unloadOutgoingGeneration(generation);
+            unload(generation);
             fail("an unresolvable unload must abort the upgrade");
         } catch (IllegalStateException expected) {
             assertTrue(expected.getMessage().startsWith(JetBrainsPluginUpgradeAction.UPGRADER_FAILED));
@@ -69,7 +72,7 @@ public class JetBrainsPluginUnloadRestoreTest {
         RecordingGeneration generation = new RecordingGeneration();
         generation.verdict = Boolean.FALSE;
         try {
-            JetBrainsPluginUpgradeAction.unloadOutgoingGeneration(generation);
+            unload(generation);
             fail("a blocker must abort the upgrade");
         } catch (IllegalStateException expected) {
             assertTrue(expected.getMessage().startsWith(JetBrainsPluginUpgradeAction.DYNAMIC_UNLOAD_REFUSED));
@@ -81,7 +84,7 @@ public class JetBrainsPluginUnloadRestoreTest {
     public void theReleaseRunsAfterResolutionAndBeforeTheUnload() {
         RecordingGeneration generation = new RecordingGeneration();
 
-        assertEquals(2, JetBrainsPluginUpgradeAction.unloadOutgoingGeneration(generation));
+        assertEquals(2, unload(generation));
         assertEquals(List.of("verdict", "resolve", "release", "unload"), generation.calls);
     }
 
@@ -90,7 +93,7 @@ public class JetBrainsPluginUnloadRestoreTest {
         RecordingGeneration generation = new RecordingGeneration();
         generation.unloadResult = Boolean.FALSE;
         try {
-            JetBrainsPluginUpgradeAction.unloadOutgoingGeneration(generation);
+            unload(generation);
             fail("a refused unload must abort the upgrade");
         } catch (IllegalStateException expected) {
             assertTrue(expected.getMessage().startsWith(JetBrainsPluginUpgradeAction.DYNAMIC_UNLOAD_REFUSED));

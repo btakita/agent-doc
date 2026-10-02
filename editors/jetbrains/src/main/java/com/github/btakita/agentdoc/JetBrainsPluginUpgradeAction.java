@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 /** Freshly loaded implementation of one JetBrains plugin package replacement. */
 public final class JetBrainsPluginUpgradeAction {
@@ -127,25 +129,16 @@ public final class JetBrainsPluginUpgradeAction {
         }
 
         if (isLoaded(current)) {
-            unloadOutgoingGeneration(new OutgoingGeneration() {
-                @Override
-                public Object unloadVerdict() {
-                    return invokeDescriptorMethod(
-                        DynamicPlugins.class, DynamicPlugins.INSTANCE, "checkCanUnloadWithoutRestart", current
-                    );
-                }
-
-                @Override
-                public UnloadCall resolveUnload() {
-                    return resolveUpdateUnload(DynamicPlugins.class, DynamicPlugins.INSTANCE, current);
-                }
-
-                @Override
-                public int releaseOpenProjects() {
+            unloadOutgoingGeneration(
+                () -> invokeDescriptorMethod(
+                    DynamicPlugins.class, DynamicPlugins.INSTANCE, "checkCanUnloadWithoutRestart", current
+                ),
+                () -> resolveUpdateUnload(DynamicPlugins.class, DynamicPlugins.INSTANCE, current),
+                () -> {
                     released.set(current);
                     return cleanupOutgoingGeneration(current);
                 }
-            });
+            );
         }
 
         IdeaPluginDescriptor residualDescriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
@@ -367,22 +360,14 @@ public final class JetBrainsPluginUpgradeAction {
         return UPGRADER_FAILED + ": " + failure.getClass().getName() + ": " + singleLine(failure);
     }
 
-    /** The platform calls one outgoing-generation unload needs, in the order they must run. */
-    interface OutgoingGeneration {
-        /** {@code checkCanUnloadWithoutRestart}'s raw verdict; computes a state, disposes nothing. */
-        Object unloadVerdict();
-
-        /** Resolve -- without running -- the update-mode unload; throws if it cannot be called. */
-        UnloadCall resolveUnload();
-
-        /** Stop this generation's per-project listeners and replica transport. */
-        int releaseOpenProjects();
-    }
-
-    /** A resolved {@code DynamicPlugins.unloadPlugin} call, ready to run. */
-    interface UnloadCall {
-        Object invoke();
-    }
+    /*
+     * No nested, inner, or anonymous classes in this file -- only lambdas, which compile into
+     * this class. An attached agent jar is appended to the IDE system class path once per JVM,
+     * so a nested class of this action resolves from the FIRST jar ever attached, whatever the
+     * bootstrap's child-first loader does; a nested class from an older plugin then fails with
+     * IllegalAccessError and every restart-free upgrade stages instead. Callbacks are JDK
+     * functional types for the same reason. JetBrainsPluginUpgradeActionShapeTest pins it.
+     */
 
     /**
      * Unload the outgoing generation, releasing its projects only once the unload is known to be
@@ -395,14 +380,18 @@ public final class JetBrainsPluginUpgradeAction {
      * replica transport and then aborted, leaving a live plugin serving no replica. A failure
      * after the release is the caller's to repair via {@link #recoverAbortedUnload}.
      */
-    static int unloadOutgoingGeneration(OutgoingGeneration generation) {
-        String unloadBlocker = unloadBlockerReason(generation.unloadVerdict());
+    static int unloadOutgoingGeneration(
+        Supplier<Object> unloadVerdict,
+        Supplier<Supplier<Object>> resolveUnload,
+        IntSupplier releaseOpenProjects
+    ) {
+        String unloadBlocker = unloadBlockerReason(unloadVerdict.get());
         if (unloadBlocker != null) {
             throw new IllegalStateException(unloadBlocker);
         }
-        UnloadCall unload = generation.resolveUnload();
-        int cleanedProjects = generation.releaseOpenProjects();
-        if (!Boolean.TRUE.equals(unload.invoke())) {
+        Supplier<Object> unload = resolveUnload.get();
+        int cleanedProjects = releaseOpenProjects.getAsInt();
+        if (!Boolean.TRUE.equals(unload.get())) {
             throw new IllegalStateException(
                 DYNAMIC_UNLOAD_REFUSED + ": JetBrains refused to unload the current plugin generation after cleaning "
                     + cleanedProjects + " open project(s)"
@@ -424,7 +413,7 @@ public final class JetBrainsPluginUpgradeAction {
      * is what every upgrade on IU-263.6259.32 hit. The options overload is preferred whenever it
      * exists, because an older build's one-argument default disables the plugin.
      */
-    static UnloadCall resolveUpdateUnload(Class<?> owner, Object receiver, Object descriptor) {
+    static Supplier<Object> resolveUpdateUnload(Class<?> owner, Object receiver, Object descriptor) {
         Method withOptions = null;
         Method descriptorOnly = null;
         for (Method candidate : owner.getMethods()) {

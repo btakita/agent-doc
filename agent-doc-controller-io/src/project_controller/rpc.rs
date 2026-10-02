@@ -19995,6 +19995,13 @@ fn handle_editor_surface_observe(
     // pane back to the structural layout owner, so the editor's own visible
     // columns must outlive the fold's move of the observation.
     let surface_columns = observation.surface.columns.clone();
+    let surface_layout_authority = if observation.surface.focus_only {
+        "focus_only"
+    } else if surface_columns.is_empty() {
+        "unknown"
+    } else {
+        "observed"
+    };
     let diagnostic_focused = observation.surface.focused.clone();
     let diagnostic_visible = observation.surface.visible.clone();
     // `#tmuxautosyncreactive`: fold against the RETAINED tmux observation rather
@@ -20018,7 +20025,7 @@ fn handle_editor_surface_observe(
     // Consecutive no-op repeats are coalesced. Recording every ingress literally
     // meant one line every ~2s per attached editor forever — measured on
     // agent-loop 2026-09-27 as a steady 30 lines/min of
-    // `accepted=true intent=idle` at an unchanging generation, ~43k lines/day and
+    // `accepted=true pane_action=none` at an unchanging generation, ~43k lines/day and
     // the bulk of an 11.5MB ops.log. That buried the very evidence this log exists
     // to preserve: finding the five-document replica strand in the same file meant
     // filtering thousands of identical heartbeats first. Suppressing a repeat is
@@ -20041,22 +20048,28 @@ fn handle_editor_surface_observe(
         },
     );
     let surface_observation_key = format!(
-        "{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}",
         projection_identity.0,
         projection_identity.1,
         accepted,
         surface_intent_label(&receipt.intent),
+        surface_layout_authority,
     );
     if let Some(repeats) = fold_repeated_surface_observation(&surface_observation_key) {
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "controller_editor_surface_observed client={} generation={} sequence={} accepted={} intent={}{}",
+                "controller_editor_surface_observed client={} generation={} sequence={} accepted={} layout={} pane_action={}{}",
                 projection_identity.0,
                 projection_identity.1,
                 projection_identity.2,
                 accepted,
-                surface_intent_label(&receipt.intent),
+                surface_layout_authority,
+                match &receipt.intent {
+                    SurfaceIntent::Idle => "none",
+                    SurfaceIntent::Focus { .. } => "focus_only",
+                    SurfaceIntent::Sync { .. } => "structural_sync",
+                },
                 if repeats > 0 {
                     format!(" repeats={repeats}")
                 } else {
@@ -27046,6 +27059,12 @@ mod tests {
                 .iter()
                 .all(|line| line.contains("client=idea:ingress") && line.contains("sequence=")),
             "the receipt must identify the publishing client and sequence: {receipts:?}"
+        );
+        assert!(
+            receipts.iter().all(|line| {
+                line.contains("layout=observed") && line.contains("pane_action=")
+            }),
+            "the same line must join layout authority to its pane action: {receipts:?}"
         );
         let accepted_values = receipts
             .iter()

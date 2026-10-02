@@ -76,8 +76,9 @@ pub struct EditorSurface {
     /// use it to choose which controller projections to subscribe to.
     #[serde(default)]
     pub open: Vec<String>,
-    /// The split layout. Empty means "layout not detected"; the signature then
-    /// falls back to the sorted visible set.
+    /// The split layout. Empty means "layout not detected" and carries no
+    /// structural authority. The focused document may still imply a focus
+    /// effect, but it must not change tmux pane membership or count.
     #[serde(default)]
     pub columns: Vec<SurfaceColumn>,
     /// The operator asked for a reconcile explicitly, so skip the unchanged-
@@ -217,7 +218,7 @@ impl EditorSurface {
     ///
     /// Derived from the columns when the layout was detected, because column
     /// membership is what tmux mirrors; otherwise from the sorted, de-duplicated
-    /// visible set, which is all the caller knows.
+    /// visible set, which is useful only as a non-structural observation identity.
     pub fn visible_signature(&self) -> String {
         if !self.columns.is_empty() {
             return column_signature(&self.columns);
@@ -236,32 +237,13 @@ impl EditorSurface {
             .join(&COLUMN_SEPARATOR.to_string())
     }
 
-    /// The columns a `Sync` should lay out (GH #81).
+    /// The columns a `Sync` should lay out.
     ///
-    /// The detected layout when there is one. Otherwise each visible document
-    /// is its own column, in observed order, which is the same reading
-    /// [`Self::visible_signature`] already gives an undetected layout. Every
-    /// visible document is some editor window's selected tab, so two of them
-    /// are two splits. Handing the controller an empty layout instead refused
-    /// the sync (`desired pane layout is empty`), and the only layout that
-    /// reached tmux was the route's single joined column, which keeps one
-    /// document and strands the sibling's pane in the stash window.
+    /// Empty columns are an explicit lack of structural authority, never a
+    /// request to synthesize one column per visible document. Adapters that can
+    /// prove a headless/remote split must publish those detected columns.
     pub fn sync_columns(&self) -> Vec<SurfaceColumn> {
-        if !self.columns.is_empty() {
-            return self.columns.clone();
-        }
-        let mut columns: Vec<SurfaceColumn> = Vec::new();
-        for file in self.visible.iter().filter(|file| !file.is_empty()) {
-            if !columns
-                .iter()
-                .any(|column| column.files.first() == Some(file))
-            {
-                columns.push(SurfaceColumn {
-                    files: vec![file.clone()],
-                });
-            }
-        }
-        columns
+        self.columns.clone()
     }
 
     /// An observation with nothing visible cannot imply any tmux consequence.
@@ -370,7 +352,7 @@ impl SurfaceTracking {
     /// decision. Repeated layouts still probe so controller-observed drift can
     /// turn an otherwise-idle/focus observation into a reconcile.
     pub fn requires_tmux_probe(&self, surface: &EditorSurface) -> bool {
-        if surface.force_reconcile || surface.is_inert() {
+        if surface.force_reconcile || surface.is_inert() || surface.columns.is_empty() {
             return false;
         }
         let signature = surface.visible_signature();
@@ -398,6 +380,25 @@ impl SurfaceTracking {
             preserve_focus || self.focused_document.as_deref() == Some(surface.focused.as_str());
         if surface.focus_only {
             if !surface.force_reconcile && same_focus {
+                return (self.clone(), SurfaceIntent::Idle);
+            }
+            return (
+                Self {
+                    reconciled_signature: self.reconciled_signature.clone(),
+                    focused_document: Some(surface.focused.clone()),
+                },
+                SurfaceIntent::Focus {
+                    document: surface.focused.clone(),
+                },
+            );
+        }
+
+        // GH #105: `columns=[]` means the editor could not determine the
+        // layout. It is not a one-column declaration. Preserve structural
+        // tracking and limit the consequence to focus, so an `unknown`
+        // observation cannot add, stash, or reorder panes.
+        if surface.columns.is_empty() {
+            if preserve_focus || (!surface.force_reconcile && same_focus) {
                 return (self.clone(), SurfaceIntent::Idle);
             }
             return (
@@ -504,9 +505,9 @@ mod tests {
     }
 
     #[test]
-    fn an_undetected_layout_syncs_each_visible_document_as_its_own_column() {
-        // GH #81: two visible documents with no detected layout are two splits.
-        // An empty Sync layout was refused, leaving tmux on one pane.
+    fn an_undetected_layout_never_changes_pane_membership() {
+        // GH #105: visible files are not structural authority. Remote Dev can
+        // report one focused file while hiding any number of frontend splits.
         let undetected = EditorSurface {
             focused: "/b.md".to_string(),
             visible: vec![
@@ -520,13 +521,35 @@ mod tests {
             focus_only: false,
             preserve_focus: false,
         };
-        let (_, intent) = SurfaceTracking::default().advance(&undetected, None);
-        let SurfaceIntent::Sync { columns, .. } = intent else {
-            panic!("expected Sync, got {intent:?}");
-        };
+        let (tracking, intent) = SurfaceTracking::default().advance(&undetected, None);
         assert_eq!(
-            columns,
-            vec![SurfaceColumn::new(["/b.md"]), SurfaceColumn::new(["/a.md"]),]
+            intent,
+            SurfaceIntent::Focus {
+                document: "/b.md".to_string()
+            }
+        );
+        assert_eq!(tracking.reconciled_signature, None);
+        assert!(!tracking.requires_tmux_probe(&undetected));
+
+        let (same, idle) = tracking.advance(&undetected, Some(false));
+        assert_eq!(
+            idle,
+            SurfaceIntent::Idle,
+            "even reported drift has no layout authority"
+        );
+        assert_eq!(same, tracking);
+
+        let preserve_unknown = EditorSurface {
+            force_reconcile: true,
+            preserve_focus: true,
+            focused: "/a.md".to_string(),
+            ..undetected.clone()
+        };
+        let (preserved, preserve_intent) = tracking.advance(&preserve_unknown, Some(false));
+        assert_eq!(preserve_intent, SurfaceIntent::Idle);
+        assert_eq!(
+            preserved, tracking,
+            "preserve-focus forbids the only remaining effect"
         );
 
         // A detected layout is still mirrored as-is.

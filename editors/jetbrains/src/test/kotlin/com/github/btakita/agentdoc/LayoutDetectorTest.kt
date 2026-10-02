@@ -154,6 +154,19 @@ class LayoutDetectorTest {
     }
 
     @Test
+    fun `one local editor window is known while one remote selection stays unknown`() {
+        assertEquals(
+            EditorLayout(listOf(LayoutColumn(listOf("tasks/local.md")))),
+            LayoutDetector.knownSingleWindowLayout("tasks/local.md"),
+        )
+        assertEquals(null, LayoutDetector.knownSingleWindowLayout(null))
+        assertEquals(
+            null,
+            LayoutDetector.uniqueRemoteSplitSelection(listOf(listOf("tasks/remote.md"))),
+        )
+    }
+
+    @Test
     fun `an unchanged layout observation is re-logged on a heartbeat`() {
         // GH #88: a single deduplicated line could not tell "never ran" from "stuck".
         assertTrue(LayoutDetector.shouldLogObservedLayout(changed = true, observation = 7))

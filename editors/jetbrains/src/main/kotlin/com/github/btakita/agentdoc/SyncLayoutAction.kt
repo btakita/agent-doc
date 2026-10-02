@@ -562,7 +562,8 @@ object LayoutDetector {
 
     /**
      * Detect the editor layout as a list of columns, each containing stacked files.
-     * Returns null if detection fails or there's only one editor window.
+     * Returns null only when detection fails. A proven single local editor window
+     * returns one column so consumers can distinguish it from an unknown layout.
      */
     fun detectEditorLayout(
         project: com.intellij.openapi.project.Project,
@@ -594,13 +595,22 @@ object LayoutDetector {
                 return EditorLayout(columns)
             }
             if (windows.size < 2) {
-                LOG.debug("[layout-detect] single editor window (count=${windows.size}); no split layout to mirror")
+                val selectedFile = windows.singleOrNull()?.selectedFile
+                val selectedSessionFile = selectedFile?.takeIf { file ->
+                    val path = file.path
+                    sessionDocumentPaths?.contains(path)
+                        ?: AgentDocSessionFiles.isSessionDocument(file)
+                }
+                val selectedSessionPath = selectedSessionFile?.let { TerminalUtil.relativePath(project, it) }
+                val layout = knownSingleWindowLayout(selectedSessionPath)
+                val columns = layout?.columns.orEmpty()
+                LOG.debug("[layout-detect] single editor window (count=${windows.size}); columns=${columns.size}")
                 logObservedLayout(
                     windows.size,
-                    windows.map { LayoutWindowSnapshot(0, 0, it.selectedFile?.path) },
-                    emptyList(),
+                    windows.map { LayoutWindowSnapshot(0, 0, selectedSessionPath) },
+                    columns,
                 )
-                return null
+                return layout
             }
 
             val splitters = managerEx.splitters
@@ -711,6 +721,10 @@ object LayoutDetector {
      */
     internal fun headlessSelectionSnapshots(selectedSessionFiles: List<String>): List<LayoutWindowSnapshot> =
         selectedSessionFiles.distinct().map { LayoutWindowSnapshot(x = 0, y = 0, file = it) }
+
+    /** A local one-window observation is known structure, unlike headless remote ambiguity. */
+    internal fun knownSingleWindowLayout(selectedSessionPath: String?): EditorLayout? =
+        selectedSessionPath?.let { EditorLayout(listOf(LayoutColumn(listOf(it)))) }
 
     /**
      * A Remote Dev frontend owns one [ClientFileEditorManager]. Its selected-file

@@ -27,6 +27,10 @@
         "title": "Agent Doc: Run (Submit)"
       },
       {
+        "command": "agentDoc.initSession",
+        "title": "Agent Doc: Initialize Session"
+      },
+      {
         "command": "agentDoc.claim",
         "title": "Agent Doc: Claim"
       },
@@ -128,6 +132,10 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "agentDoc.initSession",
+          "when": "editorLangId == markdown"
+        },
+        {
           "command": "agentDoc.fixDocument",
           "when": "editorLangId == markdown"
         },
@@ -169,6 +177,11 @@
         }
       ],
       "editor/context": [
+        {
+          "command": "agentDoc.initSession",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@0"
+        },
         {
           "command": "agentDoc.fixDocument",
           "when": "editorLangId == markdown",
@@ -218,6 +231,13 @@
           "command": "agentDoc.copySessionDiagnostics",
           "when": "editorLangId == markdown",
           "group": "agentDoc@9"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "agentDoc.initSession",
+          "when": "resourceExtname == .md",
+          "group": "agentDoc@0"
         }
       ]
     }

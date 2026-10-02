@@ -70,6 +70,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Scaffold a new session document",
     ));
     cmds.push(cmd(
+        "/agent-doc init-session",
+        "<FILE>",
+        "Initialize and start a markdown session, or claim an existing one",
+    ));
+    cmds.push(cmd(
         "/agent-doc diff",
         "<FILE>",
         "Preview the diff that would be sent",

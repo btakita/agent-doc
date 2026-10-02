@@ -19,6 +19,11 @@ Common behavior required of all `agent-doc` editor plugins.
 - **Behavior:** Detect which editor split the file is in (left/right/top/bottom), call `agent-doc claim <relative-path> --position <pos>`. Falls back to no `--position` if split is not detected. If that target is already owned by another document, the binary provisions a distinct pane instead of replacing it. On a cross-session reject, both editors offer **New Pane in This Session**, which invokes `agent-doc claim <relative-path> --new-pane` without positional/force flags; the binary owns authoritative-session selection and pane allocation.
 - **Feedback:** Inline hint near cursor. After a successful claim, trigger a layout sync (silent). A failed claim must leave the active editor document selected: do not run a layout sync after the failure, and do not let reverse tmux-to-editor focus mirroring reopen the previously focused tmux document as a side effect of the failed claim.
 
+## 2a. Initialize Session
+
+- **Availability:** Active-editor and project/explorer context menus for `.md` files.
+- **Behavior:** Save the selected file and run `agent-doc init-session <relative-path>`. The binary initializes a plain file as a template session using a filename-derived title, preserves existing markdown in the exchange, and starts it. If the file already has a session ID, the binary claims it instead of scaffolding it again.
+
 ## 3. Sync Tmux Layout
 
 - **Trigger:** `Ctrl+Shift+Alt+L` (configurable)

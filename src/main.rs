@@ -2204,6 +2204,18 @@ enum Commands {
         #[arg(long)]
         mode: Option<String>,
     },
+    /// Initialize an existing markdown file as a template session, then start it
+    #[command(name = "init-session")]
+    InitSession {
+        /// Existing markdown file to initialize or claim
+        file: PathBuf,
+        /// Session title (defaults to the file name)
+        #[arg(long)]
+        title: Option<String>,
+        /// Editor split position used when claiming an existing session
+        #[arg(long)]
+        position: Option<String>,
+    },
     /// System-level setup: check prerequisites, install editor plugins
     Install {
         /// Editor to install plugin for (jetbrains or vscode; auto-detected if omitted)
@@ -4595,6 +4607,55 @@ fn try_main() -> anyhow::Result<()> {
             mode.as_deref(),
             &config,
         ),
+        Commands::InitSession {
+            file,
+            title,
+            position,
+        } => match init::prepare_editor_session(
+            &file,
+            title.as_deref(),
+            None,
+            &config,
+        )? {
+            init::SessionPreparation::Existing => agent_doc_claim_io::run(
+                &file,
+                ClaimOptions {
+                    position: position.as_deref(),
+                    ..ClaimOptions::default()
+                },
+                &CliClaimRuntimeEffects,
+            ),
+            init::SessionPreparation::Initialized => {
+                let resume = Some(agent_doc_harness::ResumeRequest::Latest);
+                let reap_policy =
+                    agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto;
+                let purpose =
+                    agent_doc_supervisor::route_owned::RouteOwnedStartPurpose::Dispatch;
+                if agent_doc_start_io::bootstrap_start_inside_tmux_if_needed_with_purpose(
+                    &file,
+                    false,
+                    false,
+                    reap_policy,
+                    purpose,
+                    resume.as_ref(),
+                    None,
+                )?
+                .is_some()
+                {
+                    Ok(())
+                } else {
+                    agent_doc_start_runtime_io::run_with_reap_policy_resume_and_harness(
+                        &file,
+                        false,
+                        false,
+                        reap_policy,
+                        resume,
+                        None,
+                        purpose,
+                    )
+                }
+            }
+        },
         Commands::Install {
             editor,
             skip_prereqs,
@@ -6897,6 +6958,29 @@ mod recycle_force_tests {
                 assert!(target.is_none());
             }
             _ => panic!("expected admin recycle subcommand"),
+        }
+    }
+
+    #[test]
+    fn init_session_parses_editor_context_options() {
+        let cmd = parse(&[
+            "agent-doc",
+            "init-session",
+            "tasks/new.md",
+            "--position",
+            "right",
+        ]);
+        match cmd {
+            Commands::InitSession {
+                file,
+                title,
+                position,
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/new.md"));
+                assert_eq!(title, None);
+                assert_eq!(position.as_deref(), Some("right"));
+            }
+            _ => panic!("expected init-session subcommand"),
         }
     }
 

@@ -1791,6 +1791,40 @@ async function interruptClearSessionContextAction(): Promise<void> {
 // Feature 2: Claim
 // ---------------------------------------------------------------------------
 
+async function initSessionAction(resource?: vscode.Uri): Promise<void> {
+    const activeEditor = vscode.window.activeTextEditor;
+    const uri = resource ?? activeEditor?.document.uri;
+    if (!uri || path.extname(uri.fsPath).toLowerCase() !== '.md') return;
+
+    const root = getWorkspaceRoot(uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+
+    const document = vscode.workspace.textDocuments.find(
+        candidate => candidate.uri.fsPath === uri.fsPath,
+    );
+    if (document?.isDirty && !(await document.save())) {
+        showError('Save the document before initializing a session');
+        return;
+    }
+
+    const { cwd, relativePath: rel } = resolveProject(root, uri.fsPath);
+    const args = ['init-session', rel];
+    if (activeEditor?.document.uri.fsPath === uri.fsPath) {
+        const split = detectSplit(activeEditor);
+        if (split.position) args.push('--position', split.position);
+    }
+
+    try {
+        const output = await runCli(args, cwd);
+        showHint(output || `Initialized session for ${rel}`);
+    } catch (err: any) {
+        showError(`init session failed: ${err.message}`);
+    }
+}
+
 async function claimAction(): Promise<void> {
     await claimActionInternal(false);
 }
@@ -2202,6 +2236,9 @@ async function popupMenuAction(): Promise<void> {
     switch (selected.id) {
         case 'submit':
             await submitAction();
+            break;
+        case 'initSession':
+            await initSessionAction();
             break;
         case 'claim':
             await claimAction();
@@ -3397,6 +3434,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Feature 2: Claim
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.claim', claimAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.initSession', initSessionAction)
     );
 
     context.subscriptions.push(

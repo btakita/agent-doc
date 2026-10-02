@@ -19,6 +19,7 @@ class AgentDocPopupAction : AnAction(), DumbAware {
     companion object {
         internal val PRIMARY_ACTION_IDS = listOf(
             "AgentDoc.Submit",
+            "AgentDoc.InitSession",
             "AgentDoc.FixDocument",
             "AgentDoc.Claim",
             "AgentDoc.CompactExchange",

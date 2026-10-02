@@ -1,5 +1,6 @@
 export type PopupMenuActionId =
     | 'submit'
+    | 'initSession'
     | 'claim'
     | 'fixDocument'
     | 'compactExchange'
@@ -28,17 +29,18 @@ export interface PopupMenuItem {
 export function buildPrimaryPopupMenuItems(): PopupMenuItem[] {
     return [
         { label: '[1] $(play) Run (Submit)', id: 'submit' },
-        { label: '[2] $(link) Claim', id: 'claim' },
-        { label: '[3] $(tools) Fix Document', id: 'fixDocument' },
-        { label: '[4] $(archive) Compact Exchange', id: 'compactExchange' },
-        { label: '[5] $(layout) Sync Layout', id: 'syncLayout' },
-        { label: '[6] $(window) Load Tmux Window', id: 'loadTmuxWindow' },
-        { label: '[7] $(pulse) Show Session Status', id: 'status' },
-        { label: '[8] $(debug-restart) Recycle Supervisor', id: 'restartSupervisor' },
-        { label: '[9] $(debug-restart) Restart Agent', id: 'restartAgent' },
-        { label: '[10] $(clear-all) Clear Session Context', id: 'clear' },
-        { label: '[11] $(warning) Interrupt and Clear Session Context', id: 'interruptClear' },
-        { label: '[12] $(copy) Copy Session Diagnostics', id: 'doctor' },
+        { label: '[2] $(new-file) Initialize Session', id: 'initSession' },
+        { label: '[3] $(link) Claim', id: 'claim' },
+        { label: '[4] $(tools) Fix Document', id: 'fixDocument' },
+        { label: '[5] $(archive) Compact Exchange', id: 'compactExchange' },
+        { label: '[6] $(layout) Sync Layout', id: 'syncLayout' },
+        { label: '[7] $(window) Load Tmux Window', id: 'loadTmuxWindow' },
+        { label: '[8] $(pulse) Show Session Status', id: 'status' },
+        { label: '[9] $(debug-restart) Recycle Supervisor', id: 'restartSupervisor' },
+        { label: '[10] $(debug-restart) Restart Agent', id: 'restartAgent' },
+        { label: '[11] $(clear-all) Clear Session Context', id: 'clear' },
+        { label: '[12] $(warning) Interrupt and Clear Session Context', id: 'interruptClear' },
+        { label: '[13] $(copy) Copy Session Diagnostics', id: 'doctor' },
         { label: '$(kebab-horizontal) More Actions', id: 'more' },
     ];
 }

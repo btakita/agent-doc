@@ -18,6 +18,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 
 ## Session Operator Actions
 
+- `Initialize Session` is available from the active editor, command palette, and Explorer context menu and delegates the initialize-or-claim branch to `agent-doc init-session`.
 - `Show Session Status` runs `agent-doc session status <relative-path>` and surfaces the exact output in the Agent Doc Session output channel.
 - `Fix Document` runs `agent-doc fix <relative-path>` from the nearest agent-doc project root.
 - `Load Tmux Window` runs the explicit autostart layout sync path through Project Controller `sync_tmux_layout` with `no_autostart=false`, equivalent to full `agent-doc sync ...`, for the current visible markdown projection.

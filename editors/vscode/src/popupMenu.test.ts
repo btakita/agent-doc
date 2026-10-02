@@ -6,8 +6,9 @@ describe('popupMenu', () => {
     it('keeps editor parity actions in the primary numbered menu', () => {
         const primary = buildPrimaryPopupMenuItems();
         const ids = primary.map(item => item.id);
-        assert.deepStrictEqual(ids.slice(0, 12), [
+        assert.deepStrictEqual(ids.slice(0, 13), [
             'submit',
+            'initSession',
             'claim',
             'fixDocument',
             'compactExchange',
@@ -21,6 +22,7 @@ describe('popupMenu', () => {
             'doctor',
         ]);
         assert(primary.some(item => item.id === 'compactExchange'));
+        assert(primary.some(item => item.id === 'initSession'));
         assert(primary.some(item => item.id === 'restartSupervisor'));
         assert.deepStrictEqual(
             ids.slice(ids.indexOf('restartSupervisor'), ids.indexOf('restartSupervisor') + 2),

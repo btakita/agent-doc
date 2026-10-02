@@ -59,6 +59,14 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.InitSession"
+                class="com.github.btakita.agentdoc.InitSessionAction"
+                text="Initialize Session"
+                description="Initialize the selected markdown file as a template session and start it; claim existing sessions">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.FixDocument"
                 class="com.github.btakita.agentdoc.FixDocumentAction"
                 text="Fix Document"

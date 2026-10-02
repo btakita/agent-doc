@@ -34,6 +34,60 @@ use uuid::Uuid;
 
 use agent_doc_config::Config;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionPreparation {
+    Existing,
+    Initialized,
+}
+
+pub fn title_from_path(file: &Path) -> String {
+    let stem = file
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Untitled Session");
+    let title = stem.replace(['-', '_'], " ");
+    let mut chars = title.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => "Untitled Session".to_string(),
+    }
+}
+
+pub fn prepare_editor_session(
+    file: &Path,
+    title: Option<&str>,
+    agent: Option<&str>,
+    config: &Config,
+) -> Result<SessionPreparation> {
+    let existing = std::fs::read_to_string(file)?;
+    if agent_doc_frontmatter::session_id_from_content(&existing).is_some() {
+        return Ok(SessionPreparation::Existing);
+    }
+
+    if !Path::new(".agent-doc").exists() {
+        init_project()?;
+    }
+    let title = title
+        .map(str::to_owned)
+        .unwrap_or_else(|| title_from_path(file));
+    let agent = agent
+        .or(config.default_agent.as_deref())
+        .unwrap_or("claude");
+    let session_id = Uuid::new_v4();
+    let initial = existing.trim_end();
+    let initial = if initial.is_empty() {
+        String::new()
+    } else {
+        format!("{initial}\n")
+    };
+    let content = format!(
+        "---\nagent_doc_session: {session_id}\nagent: {agent}\nagent_doc_format: template\nagent_doc_write: crdt\nenable_tool_search: true\n---\n\n# {title}\n\n## Exchange\n\n<!-- agent:exchange -->\n{initial}<!-- /agent:exchange -->\n"
+    );
+    std::fs::write(file, content)?;
+    eprintln!("Initialized {}", file.display());
+    Ok(SessionPreparation::Initialized)
+}
+
 /// Initialize a project (no file given): check prereqs, create .agent-doc/, install skill.
 fn init_project() -> Result<()> {
     // Check prerequisites
@@ -114,5 +168,39 @@ pub fn run(
     match file {
         None => init_project(),
         Some(path) => init_file(path, title, agent, mode, config),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editor_session_uses_filename_title_and_preserves_plain_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("release-notes.md");
+        std::fs::write(&file, "Keep this prompt.\n").unwrap();
+
+        let outcome =
+            prepare_editor_session(&file, None, Some("codex"), &Config::default()).unwrap();
+        let content = std::fs::read_to_string(&file).unwrap();
+
+        assert_eq!(outcome, SessionPreparation::Initialized);
+        assert!(content.contains("# Release notes"));
+        assert!(content.contains("agent_doc_format: template"));
+        assert!(content.contains("<!-- agent:exchange -->\nKeep this prompt.\n"));
+    }
+
+    #[test]
+    fn editor_session_leaves_existing_session_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("existing.md");
+        let content = "---\nagent_doc_session: existing\n---\nBody\n";
+        std::fs::write(&file, content).unwrap();
+
+        let outcome = prepare_editor_session(&file, None, None, &Config::default()).unwrap();
+
+        assert_eq!(outcome, SessionPreparation::Existing);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), content);
     }
 }

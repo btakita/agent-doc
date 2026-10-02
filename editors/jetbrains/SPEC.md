@@ -336,6 +336,7 @@ Binary auto-start forensics also land in `/tmp/agent-doc-sync.log` and the per-d
 | Action | Default Shortcut |
 |--------|-----------------|
 | Run | `Ctrl+Shift+Alt+A` |
+| Initialize Session | none |
 | Fix Document | none |
 | Claim | `Ctrl+Shift+Alt+C` |
 | Sync Layout | `Ctrl+Shift+Alt+L` |
@@ -346,7 +347,7 @@ Binary auto-start forensics also land in `/tmp/agent-doc-sync.log` and the per-d
 
 ## Context Menu
 
-Run, Fix Document, Claim, Compact Exchange, Sync Layout, Show Session Status, Recycle Supervisor, Restart Agent, Stop Agent, Clear Session Context, Interrupt and Clear Session Context, and Copy Session Diagnostics are available in:
+Run, Initialize Session, Fix Document, Claim, Compact Exchange, Sync Layout, Show Session Status, Recycle Supervisor, Restart Agent, Stop Agent, Clear Session Context, Interrupt and Clear Session Context, and Copy Session Diagnostics are available in:
 - Tools menu
 - Editor right-click context menu
-- Project view right-click context menu (Run, Fix Document, Claim, and session operator actions)
+- Project view right-click context menu (Run, Initialize Session, Fix Document, Claim, and session operator actions)

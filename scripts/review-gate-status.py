@@ -57,6 +57,17 @@ MACOS_INCOMPLETE_PAIR_BASELINE: tuple[str, ...] = (
     "v0.35.406",
     "v0.35.417",
     "v0.35.418",
+    "v0.35.419",
+    "v0.35.420",
+    "v0.35.421",
+    "v0.35.422",
+    "v0.35.423",
+    "v0.35.424",
+    "v0.35.425",
+    "v0.35.426",
+    "v0.35.427",
+    "v0.35.428",
+    "v0.35.429",
 )
 
 DEFAULT_EXPIRY_WARN_HOURS = 24
@@ -716,10 +727,10 @@ def self_test() -> int:
         assert closed_window["evidence"]["weekly_window"] == "closed"
 
         widened = probe_macos_gap(
-            _macos_runner(_coverage_result([*baseline, "v0.35.420"])), root, baseline
+            _macos_runner(_coverage_result([*baseline, "v0.35.430"])), root, baseline
         )
         assert widened["status"] == EVIDENCE_STALE, widened
-        assert widened["evidence"]["added"] == ["v0.35.420"], widened
+        assert widened["evidence"]["added"] == ["v0.35.430"], widened
 
         narrowed = probe_macos_gap(_macos_runner(_coverage_result(baseline[:-1])), root, baseline)
         assert narrowed["status"] == EVIDENCE_STALE, narrowed

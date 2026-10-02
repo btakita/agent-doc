@@ -685,6 +685,19 @@ I ran these two in parallel, each in its own git worktree, then merged them onto
 **Next:** `release + publish`.
 
 The exchange is 630+ lines; I'm continuing the queue rather than stopping to compact.
+
+### Re: release + publish — opus-5.5 · 2026-10-01T22:08-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.430 released.** The tag is pushed, and the GitHub Release and PyPI workflows are running; I'm not waiting on them. `make release` ran the full check (10351 tests passed), tagged, pushed, and ran the one-time `install-full`. The first attempt stopped before tagging because the editor-parity gate needs one `editors/release-parity.tsv` row per release. I added the 0.35.430 row and amended the unpushed release commit. `VERSIONS.md` covers everything since 0.35.429. Highlights: the superseded IPC listener takeover, the cross-document stale editor-id prune, state.db retention scans no longer holding the write lock plus liveness-journal compaction, the IDE-indexing menu fix (plugin 0.2.465), the Stop-hook and queue fixes, and GH #89.
+
+**haiven-dev `sdk.md` (your mid-turn report).** It has recovered: the held write settled and a new cycle is running in its Codex pane. The cause is a new defect, and it isn't fixed yet:
+- After a library reload re-registered the editor, the editor published 99 bytes of your unpublished text. The controller then moved to the agent write's target, which did not contain that insert.
+- Your editor kept the text and correctly refused to save the target over it (14 refusals), so every cycle was refused until a controller restart reseeded from the editor.
+- Your text was never lost.
+
+I filed it as `#retainedtargetdropsedit` and it's being fixed now in a parallel worktree. I'll merge, check and install it when it reports back.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -715,12 +728,15 @@ The exchange is 630+ lines; I'm continuing the queue rather than stopping to com
 - ~~do [#staleeditorregprune]~~
 - ~~do [#midinstallreloadstall]~~
 - ~~do [#sdkingressstall]~~
-- release + publish
-- ~~agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish~~
+- ~~agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.~~
+- Editing lazily.md `agent:queue` then Run Agent Doc: the queue reverted to the previous state. Then the edits came back as I was rewriting the queue items.
+- Diagnose + fix agent-doc command failed (exit 1): Error: session_clear codex command `/clear` for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md was not proven submitted in pane %51 after supervisor_ipc_acceptance (result=pane_not_rendered, command_visible=false); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_pane_render unblocker=wait_for_pane_render. The codex pane stayed blank while awaiting its repaint. No duplicate clear was sent; wait for the prompt to render and check its context
 <!-- /agent:queue --> 
 
 
 <!-- agent:backlog priority -->
+- [ ] [#retainedtargetdropsedit] haiven-dev sdk.md, 2026-10-02 01:49:58-01:55:36Z: after a native reload re-registered the editor, the editor published 99 bytes of unpublished operator text (buffer 9ff424), but the controller canonical moved to a retained agent-write target (468b48) that lacks that insert. The editor correctly refused 14 exact-target persists (visible_length_mismatch, visible 8849a8 = target + 99 bytes), its deferred replay failed post-register-replay-replica-raced every 30s, and every cycle was refused (disk_projection_pending) until a controller restart reseeded from the editor. Keep the concurrent operator edit when a retained write replays, and self-heal without a restart. Being fixed in worktree branch fix/retained-target-drops-operator-edit.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

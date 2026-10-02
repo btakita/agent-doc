@@ -389,6 +389,21 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
         );
         return Ok(None);
     }
+    // `#stopnoresponserun`: a closed cycle that never captured a response
+    // answered nothing, so it cannot have drained a head. The stale-lock repair
+    // closes an abandoned `PreflightStarted` cycle exactly this way, and the next
+    // trigger is then refused admission. Observed 2026-10-01 on
+    // tasks/agent-doc/agent-doc-bugs.md: the repair committed
+    // `cycle-1790898286195` with no response, the operator's trigger was refused,
+    // and this hook still forbade the final answer and ordered a `/loop` that
+    // could only hit the same refusal. The operator must hear the refusal.
+    if cycle.as_ref().is_some_and(|cycle| cycle.response_sha256.is_none()) {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            "claude_stop_queue_continuation_skipped reason=run_captured_no_response action=allow_final_answer",
+        );
+        return Ok(None);
+    }
     // The run this stop is deciding about: the cycle that has just closed. A
     // continuation request is a request that THIS run be followed by another,
     // so it is the run, not the document text, that the repeat guard below
@@ -505,11 +520,7 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
     );
     Ok(Some(ClaudeStopBlock {
         decision: "block",
-        reason: claude_stop_continuation_reason(
-            &file.display().to_string(),
-            &prompt,
-            loop_reentry_for_transcript(input.transcript_path.as_deref()),
-        ),
+        reason: claude_stop_continuation_reason(&file.display().to_string(), &prompt),
     }))
 }
 
@@ -556,69 +567,6 @@ fn claude_transcript_tail(transcript: &Path) -> Option<String> {
 fn claude_transcript_arms_loop_reentry(transcript: &Path, file: &Path) -> bool {
     claude_transcript_tail(transcript)
         .is_some_and(|tail| transcript_tail_arms_loop_reentry(&tail, file))
-}
-
-/// `#loopreentrynoop` / GH #85: which re-entry the continuation leads with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoopReentry {
-    /// `/loop` is not loaded in this session yet, so a `loop` Skill call
-    /// loads it and admits the next cycle with no wake-up delay.
-    InvokeLoopSkill,
-    /// `/loop` is already loaded, so a Skill call is a known no-op and only a
-    /// scheduled wake-up that submits `/loop agent-doc <FILE>` re-enters.
-    ScheduleSubmittedLoop,
-}
-
-fn loop_reentry_for_transcript(transcript: Option<&str>) -> LoopReentry {
-    let loaded = transcript
-        .and_then(|path| claude_transcript_tail(Path::new(path)))
-        .is_some_and(|tail| transcript_tail_loaded_loop_skill(&tail));
-    if loaded {
-        LoopReentry::ScheduleSubmittedLoop
-    } else {
-        LoopReentry::InvokeLoopSkill
-    }
-}
-
-fn text_invokes_loop_command(text: &str) -> bool {
-    text.contains("<command-name>/loop</command-name>")
-}
-
-/// GH #85: true when the transcript tail shows `/loop` already loaded in this
-/// session -- an operator-typed `/loop` command or a `loop` Skill tool call.
-/// After that, another `loop` Skill call answers `already loaded ...
-/// instructions unchanged` and seals no cycle contract.
-pub fn transcript_tail_loaded_loop_skill(tail: &str) -> bool {
-    tail.lines().any(|line| {
-        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
-            return false;
-        };
-        let Some(content) = record.pointer("/message/content") else {
-            return false;
-        };
-        match record.get("type").and_then(serde_json::Value::as_str) {
-            Some("assistant") => content.as_array().into_iter().flatten().any(|block| {
-                block.get("type").and_then(serde_json::Value::as_str) == Some("tool_use")
-                    && block.get("name").and_then(serde_json::Value::as_str) == Some("Skill")
-                    && block
-                        .pointer("/input/skill")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|skill| skill.trim_start_matches('/') == "loop")
-            }),
-            Some("user") => match content {
-                serde_json::Value::String(text) => text_invokes_loop_command(text),
-                serde_json::Value::Array(blocks) => blocks.iter().any(|block| {
-                    block.get("type").and_then(serde_json::Value::as_str) == Some("text")
-                        && block
-                            .get("text")
-                            .and_then(serde_json::Value::as_str)
-                            .is_some_and(text_invokes_loop_command)
-                }),
-                _ => false,
-            },
-            _ => false,
-        }
-    })
 }
 
 fn is_stop_hook_feedback(text: &str) -> bool {
@@ -683,46 +631,29 @@ pub fn transcript_tail_arms_loop_reentry(tail: &str, file: &Path) -> bool {
     false
 }
 
-/// GH #85: lead with the re-entry that works for this session. The original
-/// text ordered a `loop` Skill call first on every iteration and only then, in
-/// the caveat explaining why that call is a no-op after iteration 1, named the
-/// `ScheduleWakeup` re-entry that actually works. It also opened like a report,
-/// while Claude Code renders a blocking Stop reason as `Stop hook error:`, so
-/// the first clause now says this is a continuation, not an error.
-pub fn claude_stop_continuation_reason(
-    file_display: &str,
-    prompt: &str,
-    reentry: LoopReentry,
-) -> String {
-    let lead = format!(
+/// GH #85 / `#loopskillnoadmit`: name the one re-entry that admits a cycle.
+///
+/// A `loop` Skill call never admits one, on the first iteration or any later
+/// one: a Skill call is not a submitted prompt, so `UserPromptSubmit` never
+/// runs binary preflight or claims the drain-owner lease. The first-iteration
+/// branch that led with "Invoke the `loop` skill now" was verified a no-op on
+/// 2026-10-01 (tasks/agent-doc/agent-doc-bugs.md: no preflight and no lease
+/// followed the call); the drain only resumed because the loop skill's own
+/// dynamic mode then scheduled a wake-up. So lead with that wake-up directly.
+/// Claude Code renders a blocking Stop reason as an error, so the first clause
+/// still says nothing failed.
+pub fn claude_stop_continuation_reason(file_display: &str, prompt: &str) -> String {
+    format!(
         "Queue continuation, not an error: agent-doc's Stop hook kept the active queue moving \
          for {file_display}. The completed cycle durably proved another drainable head: \
-         {prompt:?}. Do not send the final answer."
-    );
-    let schedule = format!(
-        "schedule a wake-up that SUBMITS `/loop agent-doc {file_display}` as a real prompt \
-         (Claude Code: `ScheduleWakeup` with that exact prompt)"
-    );
-    let forbidden = format!(
-        "Do NOT shell-run `agent-doc {file_display}` from the owner pane, and a missing cycle \
-         contract is NOT a reason to shell `agent-doc preflight`. A scheduled re-entry is a \
-         continuation, not a stall. (`#loopreentrynoop`)"
-    );
-    match reentry {
-        LoopReentry::ScheduleSubmittedLoop => format!(
-            "{lead} Re-enter now: {schedule}. Do not invoke the `loop` skill again: it is \
-             already loaded in this session, so the Skill tool answers `already loaded ... \
-             instructions unchanged` and seals NO cycle contract (a Skill call is not a \
-             submitted prompt, so binary preflight never runs). {forbidden}"
-        ),
-        LoopReentry::InvokeLoopSkill => format!(
-            "{lead} Invoke the `loop` skill now with args `agent-doc {file_display}`; its \
-             `/loop` admission claims the drain-owner lease before preflight. If that Skill call \
-             answers `already loaded ... instructions unchanged`, it sealed NO cycle contract (a \
-             Skill call is not a submitted prompt, so binary preflight never runs): {schedule} \
-             instead. {forbidden}"
-        ),
-    }
+         {prompt:?}. Do not send the final answer. Re-enter now: schedule a wake-up that \
+         SUBMITS `/loop agent-doc {file_display}` as a real prompt (Claude Code: \
+         `ScheduleWakeup` with that exact prompt). Do not call the `loop` skill instead: a \
+         Skill call is not a submitted prompt, so binary preflight never runs and it seals NO \
+         cycle contract. Do NOT shell-run `agent-doc {file_display}` from the owner pane, and a \
+         missing cycle contract is NOT a reason to shell `agent-doc preflight`. A scheduled \
+         re-entry is a continuation, not a stall. (`#loopreentrynoop`)"
+    )
 }
 
 fn apply_stop_within_budget(input: StopInput, budget: std::time::Duration) -> Result<StopHookRun> {
@@ -2398,108 +2329,38 @@ mod tests {
     /// literally had no legal way to continue.
     #[test]
     fn continuation_reason_names_the_noop_case_and_a_working_reentry() {
-        for reentry in [
-            LoopReentry::InvokeLoopSkill,
-            LoopReentry::ScheduleSubmittedLoop,
+        let reason = claude_stop_continuation_reason("/p/doc.md", "do [#x]");
+        // GH #85: Claude Code labels a blocking reason as an error, so the
+        // first clause must say nothing failed.
+        assert!(
+            reason.starts_with("Queue continuation, not an error:"),
+            "{reason}"
+        );
+        for needle in [
+            "ScheduleWakeup",
+            "SUBMITS `/loop agent-doc /p/doc.md`",
+            "loop` skill",
+            "seals NO cycle contract",
+            "continuation, not a stall",
+            "Do NOT shell-run",
+            "NOT a reason to shell `agent-doc preflight`",
+            "do [#x]",
         ] {
-            let reason = claude_stop_continuation_reason("/p/doc.md", "do [#x]", reentry);
-            // GH #85: Claude Code labels a blocking reason `Stop hook error:`,
-            // so the first clause must say nothing failed.
-            assert!(
-                reason.starts_with("Queue continuation, not an error:"),
-                "{reentry:?}: {reason}"
-            );
-            for needle in [
-                "loop` skill",
-                "already loaded",
-                "ScheduleWakeup",
-                "SUBMITS",
-                "continuation, not a stall",
-                "Do NOT shell-run",
-                "NOT a reason to shell `agent-doc preflight`",
-                "/p/doc.md",
-                "do [#x]",
-            ] {
-                assert!(
-                    reason.contains(needle),
-                    "{reentry:?} lost `{needle}`: {reason}"
-                );
-            }
+            assert!(reason.contains(needle), "lost `{needle}`: {reason}");
         }
     }
 
-    /// GH #85: once `/loop` is loaded, the imperative must be the scheduled
-    /// submitted re-entry, not the Skill call the same text calls a no-op.
+    /// `#loopskillnoadmit`: a `loop` Skill call admits no cycle on ANY
+    /// iteration, so the instruction must never order one — it leads with the
+    /// scheduled submitted re-entry and only names the Skill call to rule it out.
     #[test]
-    fn loaded_loop_continuation_leads_with_the_scheduled_reentry() {
-        let loaded = claude_stop_continuation_reason(
-            "/p/doc.md",
-            "do [#x]",
-            LoopReentry::ScheduleSubmittedLoop,
-        );
-        let wake = loaded.find("ScheduleWakeup").unwrap();
-        let skill = loaded.find("loop` skill").unwrap();
-        assert!(
-            wake < skill,
-            "the working re-entry must come first: {loaded}"
-        );
-        assert!(loaded.contains("Re-enter now:"), "{loaded}");
-        assert!(!loaded.contains("Invoke the `loop` skill now"), "{loaded}");
-
-        let first =
-            claude_stop_continuation_reason("/p/doc.md", "do [#x]", LoopReentry::InvokeLoopSkill);
-        assert!(first.contains("Invoke the `loop` skill now"), "{first}");
-    }
-
-    #[test]
-    fn transcript_detects_an_already_loaded_loop_skill() {
-        let typed = transcript_record(
-            "user",
-            serde_json::json!(
-                "<command-message>loop</command-message>\n<command-name>/loop</command-name>"
-            ),
-        );
-        let typed_blocks = transcript_record(
-            "user",
-            serde_json::json!([{"type": "text", "text": "<command-name>/loop</command-name>"}]),
-        );
-        let skill_call = transcript_record(
-            "assistant",
-            serde_json::json!([{"type": "tool_use", "name": "Skill",
-                "input": {"skill": "loop", "args": "agent-doc /p/doc.md"}}]),
-        );
-        let other_skill = transcript_record(
-            "assistant",
-            serde_json::json!([{"type": "tool_use", "name": "Skill",
-                "input": {"skill": "agent-doc", "args": "/p/doc.md"}}]),
-        );
-        let quoted = transcript_record(
-            "assistant",
-            serde_json::json!([{"type": "text", "text": "<command-name>/loop</command-name>"}]),
-        );
-        assert!(transcript_tail_loaded_loop_skill(&typed));
-        assert!(transcript_tail_loaded_loop_skill(&typed_blocks));
-        assert!(transcript_tail_loaded_loop_skill(&skill_call));
-        assert!(!transcript_tail_loaded_loop_skill(&other_skill));
-        assert!(!transcript_tail_loaded_loop_skill(&quoted));
-        assert!(!transcript_tail_loaded_loop_skill(""));
-
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("t.jsonl");
-        std::fs::write(&path, [other_skill.clone(), skill_call].join("\n")).unwrap();
-        assert_eq!(
-            loop_reentry_for_transcript(path.to_str()),
-            LoopReentry::ScheduleSubmittedLoop
-        );
-        std::fs::write(&path, other_skill).unwrap();
-        assert_eq!(
-            loop_reentry_for_transcript(path.to_str()),
-            LoopReentry::InvokeLoopSkill
-        );
-        assert_eq!(
-            loop_reentry_for_transcript(None),
-            LoopReentry::InvokeLoopSkill
-        );
+    fn continuation_never_orders_a_loop_skill_call() {
+        let reason = claude_stop_continuation_reason("/p/doc.md", "do [#x]");
+        assert!(reason.contains("Re-enter now:"), "{reason}");
+        assert!(!reason.contains("Invoke the `loop` skill"), "{reason}");
+        let wake = reason.find("ScheduleWakeup").unwrap();
+        let skill = reason.find("loop` skill").unwrap();
+        assert!(wake < skill, "the working re-entry must come first: {reason}");
     }
 
     #[test]
@@ -4438,6 +4299,15 @@ Reviewed the gated items.\n\
     fn complete_run(doc: &std::path::Path) -> String {
         let content = std::fs::read_to_string(doc).unwrap();
         agent_doc_cycle_state_io::start_preflight(doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            doc,
+            "response_captured",
+            Some(&content),
+            Some(&content),
+            "response-sha",
+            None,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::mark_committed(
             doc,
             "commit_success",
@@ -4446,6 +4316,44 @@ Reviewed the gated items.\n\
         )
         .unwrap()
         .cycle_id
+    }
+
+    /// `#stopnoresponserun`: the stale-lock repair closes an abandoned
+    /// `PreflightStarted` cycle with no captured response, and the next trigger
+    /// is refused admission. That closed run drained nothing, so the hook must let
+    /// the agent report the refusal instead of ordering a `/loop` that hits it again.
+    #[test]
+    fn claude_stop_does_not_loop_a_closed_run_that_captured_no_response() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+        let content = std::fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&content),
+            Some(&content),
+        )
+        .unwrap();
+
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+        };
+        assert!(
+            apply_claude_stop(&input).unwrap().is_none(),
+            "a run that answered nothing must not be continued"
+        );
+
+        // The same closed state with a captured response is a real drain step.
+        complete_run(&doc);
+        assert!(apply_claude_stop(&input).unwrap().is_some());
     }
 
     /// `#stopneedsclosedcycle`, second half: one continuation request per run.

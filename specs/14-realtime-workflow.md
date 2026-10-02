@@ -417,6 +417,15 @@ lifecycle code consumes the selected-head projection. `agent-doc-orchestration`
 may temporarily adapt existing parser and IO surfaces, but it must not be the
 long-term owner of `🚧` semantics.
 
+A queue lifecycle-marker projection is structurally cosmetic. It replaces only
+the canonical source ranges of rows whose marker changed, preserves trailing
+whitespace and every neighbouring row byte-for-byte, and must parse back to the
+same item count with each tracked `[#id]` in the same independent row. Any
+cardinality or tracked-id ownership mismatch fails closed before publication.
+When the editor authority advances while preflight is computing a marker-only
+change, the marker is re-projected over the newest queue rows; the queue
+component is not accepted from a whole-component CRDT merge.
+
 | Operator edit | Realtime queue effect | Current turn effect |
 |---|---|---|
 | Edit, insert, delete, or reorder a non-selected queue head | Update the in-memory queue projection and backup/audit state. | Does not change the active turn when the selected head identity is unchanged. |

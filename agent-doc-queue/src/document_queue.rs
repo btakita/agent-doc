@@ -1304,6 +1304,127 @@ pub fn set_prompts_in_progress(
     changed.then_some(out)
 }
 
+fn tracked_prompt_ids_by_entry(entries: &[QueueEntry]) -> Vec<Option<String>> {
+    entries
+        .iter()
+        .map(|entry| match entry {
+            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+                do_prompt_id(&prompt.text)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn validate_in_progress_marker_projection(
+    before: &[QueueEntry],
+    after: &[QueueEntry],
+) -> Result<()> {
+    anyhow::ensure!(
+        before.len() == after.len(),
+        "queue in-progress marker projection changed item count (before={}, after={})",
+        before.len(),
+        after.len()
+    );
+    anyhow::ensure!(
+        tracked_prompt_ids_by_entry(before) == tracked_prompt_ids_by_entry(after),
+        "queue in-progress marker projection moved or buried a tracked [#id] row"
+    );
+    Ok(())
+}
+
+/// Project the active-head marker by replacing only rows whose marker changes.
+///
+/// The source ranges come from the canonical queue parser. Unchanged neighbours
+/// are copied byte-for-byte, so a cosmetic marker update cannot re-render or
+/// concatenate another item. The post-projection parse is an explicit fail-closed
+/// guard for row cardinality and tracked `[#id]` ownership.
+pub fn project_prompts_in_progress(
+    body: &str,
+    target_texts: &[String],
+) -> Result<Option<(String, Vec<QueueEntry>)>> {
+    let spans = parse_spans(body)?;
+    let entries = spans
+        .iter()
+        .map(|(entry, _)| entry.clone())
+        .collect::<Vec<_>>();
+    let Some(marked_entries) = set_prompts_in_progress(&entries, target_texts) else {
+        return Ok(None);
+    };
+    validate_in_progress_marker_projection(&entries, &marked_entries)?;
+
+    let mut projected = body.to_string();
+    for ((before, range), after) in spans.iter().zip(&marked_entries).rev() {
+        if before != after {
+            projected.replace_range(range.clone(), &render(std::slice::from_ref(after)));
+        }
+    }
+
+    let reparsed = parse(&projected)?;
+    validate_in_progress_marker_projection(&entries, &reparsed)?;
+    anyhow::ensure!(
+        reparsed == marked_entries,
+        "queue in-progress marker projection changed non-marker row structure"
+    );
+    Ok(Some((projected, reparsed)))
+}
+
+fn without_lifecycle_marker(entry: &QueueEntry) -> QueueEntry {
+    let mut normalized = entry.clone();
+    match &mut normalized {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+            if let Some(stripped) = strip_in_progress_marker_for_display(&prompt.text) {
+                prompt.text = stripped;
+            }
+        }
+        _ => {}
+    }
+    normalized
+}
+
+/// Return the active marker targets when `after_body` differs from `before_body`
+/// only by queue lifecycle markers. Structural queue maintenance returns `None`.
+pub fn in_progress_marker_only_targets(
+    before_body: &str,
+    after_body: &str,
+) -> Result<Option<Vec<String>>> {
+    let before = parse(before_body)?;
+    let after = parse(after_body)?;
+    let carries_skip_marker = before.iter().chain(&after).any(|entry| match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+            agent_doc_document::queue_projection::has_skip_marker(&prompt.text)
+        }
+        _ => false,
+    });
+    // The skip projection has its own id-backed target set. Do not reinterpret a
+    // mixed `🚧`/`⏭️` update as an in-progress-only projection during rebase.
+    if before.len() != after.len()
+        || carries_skip_marker
+        || before
+            .iter()
+            .map(without_lifecycle_marker)
+            .ne(after.iter().map(without_lifecycle_marker))
+    {
+        return Ok(None);
+    }
+    validate_in_progress_marker_projection(&before, &after)?;
+    Ok(Some(
+        after
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt)
+                    if agent_doc_document::queue_projection::has_in_progress_marker(
+                        &prompt.text,
+                    ) =>
+                {
+                    Some(strip_in_progress_marker(&prompt.text))
+                }
+                _ => None,
+            })
+            .collect(),
+    ))
+}
+
 /// `#queueskip`: stamp the visible `⏭️` skip marker on every live prompt whose
 /// `#id` is in `skipped_ids`, and remove a stale `⏭️` from any prompt no longer
 /// skipped. Run AFTER [`set_prompts_in_progress`] (which stamps `🚧` on the
@@ -1833,8 +1954,7 @@ pub fn sort_prompts_by_dag_with_operator_authored(
         entry_priority_tier(&prompts[idx]) == 0
             || entry_is_operator_authored(&prompts[idx], operator_authored)
             || is_free_text_prompt(&prompts[idx])
-            || (!on_edge[idx]
-                && entry_has_no_priority_rank(&prompts[idx], rank, backlog_sourced))
+            || (!on_edge[idx] && entry_has_no_priority_rank(&prompts[idx], rank, backlog_sourced))
     };
 
     // Plain priority-weighted topological order over ALL prompts (Kahn). Used for
@@ -3599,6 +3719,42 @@ mod tests {
     }
 
     #[test]
+    fn marker_projection_preserves_trailing_space_and_following_tracked_row() {
+        let body = "- #upgrade\n- I'm seeing \n- do [#issuesneedreopened]\n";
+        let targets = vec!["I'm seeing ".to_string()];
+
+        let (projected, entries) = project_prompts_in_progress(body, &targets)
+            .unwrap()
+            .expect("the free-text head should gain the marker");
+
+        assert_eq!(
+            projected,
+            "- #upgrade\n- 🚧 I'm seeing \n- do [#issuesneedreopened]\n"
+        );
+        assert_eq!(entries.len(), 3);
+        assert_eq!(
+            tracked_prompt_ids_by_entry(&entries),
+            vec![
+                Some("upgrade".to_string()),
+                None,
+                Some("issuesneedreopened".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn marker_projection_rejects_a_join_that_buries_a_tracked_row() {
+        let before = parse("- I'm seeing \n- do [#issuesneedreopened]\n").unwrap();
+        let joined = parse("- 🚧 I'm seeing- do [#issuesneedreopened]\n").unwrap();
+
+        let err = validate_in_progress_marker_projection(&before, &joined).unwrap_err();
+        assert!(
+            err.to_string().contains("changed item count"),
+            "unexpected invariant error: {err:#}"
+        );
+    }
+
+    #[test]
     fn in_progress_marker_detection_allows_priority_prefix() {
         assert!(has_in_progress_marker(":round_pushpin: 🚧 do [#alpha]"));
         assert_eq!(
@@ -3737,26 +3893,30 @@ mod tests {
     fn annotate_operator_priority_reorders_moving_a_line_down_pins_nothing() {
         // #queuemovepinneighbors: parking one line at the tail shifts every line
         // beneath it up a slot; none of them moved, so none is pinned.
-        let snapshot =
-            parse("- #release\n- do [#qsr]\n- do [#rsc]\n- do [#g76]\n").unwrap();
-        let current =
-            parse("- do [#qsr]\n- do [#rsc]\n- do [#g76]\n- #release\n").unwrap();
-        assert_eq!(annotate_operator_priority_reorders(&snapshot, &current), None);
+        let snapshot = parse("- #release\n- do [#qsr]\n- do [#rsc]\n- do [#g76]\n").unwrap();
+        let current = parse("- do [#qsr]\n- do [#rsc]\n- do [#g76]\n- #release\n").unwrap();
+        assert_eq!(
+            annotate_operator_priority_reorders(&snapshot, &current),
+            None
+        );
     }
 
     #[test]
     fn annotate_operator_priority_reorders_deleting_a_line_pins_nothing() {
         let snapshot = parse("- do [#a]\n- do [#b]\n- do [#c]\n").unwrap();
         let current = parse("- do [#b]\n- do [#c]\n").unwrap();
-        assert_eq!(annotate_operator_priority_reorders(&snapshot, &current), None);
+        assert_eq!(
+            annotate_operator_priority_reorders(&snapshot, &current),
+            None
+        );
     }
 
     #[test]
     fn annotate_operator_priority_reorders_pins_only_the_line_moved_up_mid_queue() {
         let snapshot = parse("- do [#a]\n- do [#b]\n- do [#c]\n- do [#d]\n").unwrap();
         let current = parse("- do [#a]\n- do [#d]\n- do [#b]\n- do [#c]\n").unwrap();
-        let marked = annotate_operator_priority_reorders(&snapshot, &current)
-            .expect("the raised line pins");
+        let marked =
+            annotate_operator_priority_reorders(&snapshot, &current).expect("the raised line pins");
         assert_eq!(
             render(&marked),
             "- do [#a]\n- 📌 do [#d]\n- do [#b]\n- do [#c]\n"
@@ -6619,7 +6779,11 @@ mod tests {
             p("#gh-fix https://x/issues/69"),
             p("#gh-fix https://x/issues/70"),
         ];
-        assert_eq!(converge(&fresh, &[]), fresh, "unstruck siblings survive too");
+        assert_eq!(
+            converge(&fresh, &[]),
+            fresh,
+            "unstruck siblings survive too"
+        );
     }
 
     /// `#qdedupsync` / `#pushpinaccum`: a pinned `do [#id]` accumulated alongside

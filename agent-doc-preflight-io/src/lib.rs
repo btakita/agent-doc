@@ -5046,11 +5046,18 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         .iter()
         .filter_map(|text| agent_doc_queue::queue_response::queue_prompt_done_id(text))
         .collect::<std::collections::HashSet<_>>();
-    if let Some(marked_entries) = agent_doc_queue::document_queue::set_prompts_in_progress(
-        &activation.entries_after,
-        &active_queue_prompt_texts,
-    ) {
-        let new_body = agent_doc_queue::document_queue::render(&marked_entries);
+    let marker_body = agent_doc_element::element::parse(&current_content)?
+        .iter()
+        .find(|component| component.name == "queue")
+        .context("queue maintenance: queue component vanished before in-progress marker")?
+        .content(&current_content)
+        .to_string();
+    if let Some((new_body, marked_entries)) =
+        agent_doc_queue::document_queue::project_prompts_in_progress(
+            &marker_body,
+            &active_queue_prompt_texts,
+        )?
+    {
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
             let q = comps
@@ -5733,6 +5740,8 @@ fn rebase_queue_maintenance_target(
         .with_context(|| {
             format!("{source}: failed to rebase queue maintenance over the live Lazily head")
         })?;
+    let rebased =
+        reproject_marker_only_queue_over_live_head(expected_current, content, current, &rebased)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -5748,6 +5757,48 @@ fn rebase_queue_maintenance_target(
         ),
     );
     Ok(rebased)
+}
+
+fn queue_component_body(content: &str) -> Result<Option<&str>> {
+    let components = agent_doc_element::element::parse(content)?;
+    Ok(components
+        .iter()
+        .find(|component| component.name == "queue")
+        .map(|component| component.content(content)))
+}
+
+fn reproject_marker_only_queue_over_live_head(
+    expected_current: &str,
+    content: &str,
+    current: &str,
+    rebased: &str,
+) -> Result<String> {
+    let (Some(expected_body), Some(content_body), Some(current_body)) = (
+        queue_component_body(expected_current)?,
+        queue_component_body(content)?,
+        queue_component_body(current)?,
+    ) else {
+        return Ok(rebased.to_string());
+    };
+    let Some(targets) = agent_doc_queue::document_queue::in_progress_marker_only_targets(
+        expected_body,
+        content_body,
+    )?
+    else {
+        return Ok(rebased.to_string());
+    };
+    let projected_live_body =
+        match agent_doc_queue::document_queue::project_prompts_in_progress(current_body, &targets)?
+        {
+            Some((body, _)) => body,
+            None => current_body.to_string(),
+        };
+    let components = agent_doc_element::element::parse(rebased)?;
+    let queue = components
+        .iter()
+        .find(|component| component.name == "queue")
+        .context("marker-only queue rebase lost the queue component")?;
+    Ok(queue.replace_content(rebased, &projected_live_body))
 }
 
 /// `#ensurereplicagen` — drive the model-ensure transition through whichever
@@ -5850,7 +5901,12 @@ fn load_projected_in_progress_queue_heads(file: &Path) -> std::collections::Hash
     agent_doc_cycle_state_io::load(file)
         .ok()
         .flatten()
-        .map(|state| state.projected_in_progress_queue_heads.into_iter().collect())
+        .map(|state| {
+            state
+                .projected_in_progress_queue_heads
+                .into_iter()
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -8083,6 +8139,69 @@ mod tests {
     }
 
     #[test]
+    fn marker_only_rebase_projects_one_row_without_joining_its_tracked_neighbor() {
+        let expected = concat!(
+            "<!-- agent:exchange -->\nold\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue priority go -->\n",
+            "- #upgrade\n",
+            "- I'm seeing \n",
+            "- do [#issuesneedreopened]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let target = expected.replace("- I'm seeing \n", "- 🚧 I'm seeing \n");
+        let live = expected.replace("old\n", "operator kept typing\n");
+
+        let rebased = rebase_queue_maintenance_target(
+            Path::new("session.md"),
+            "test",
+            expected,
+            &target,
+            &live,
+        )
+        .unwrap();
+
+        assert!(rebased.contains("operator kept typing\n"));
+        assert!(rebased.contains("- 🚧 I'm seeing \n- do [#issuesneedreopened]\n"));
+        assert_eq!(rebased.matches("[#issuesneedreopened]").count(), 1);
+        let body = queue_component_body(&rebased).unwrap().unwrap();
+        assert_eq!(
+            agent_doc_queue::document_queue::parse(body).unwrap().len(),
+            3
+        );
+    }
+
+    #[test]
+    fn marker_only_rebase_preserves_a_concurrently_extended_free_text_row() {
+        let expected = concat!(
+            "<!-- agent:queue priority go -->\n",
+            "- #upgrade\n",
+            "- I'm seeing \n",
+            "- do [#issuesneedreopened]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let target = expected.replace("- I'm seeing \n", "- 🚧 I'm seeing \n");
+        let live = expected.replace("- I'm seeing \n", "- I'm seeing a second symptom\n");
+
+        let rebased = rebase_queue_maintenance_target(
+            Path::new("session.md"),
+            "test",
+            expected,
+            &target,
+            &live,
+        )
+        .unwrap();
+
+        assert!(rebased.contains("- I'm seeing a second symptom\n"));
+        assert!(!rebased.contains("🚧 I'm seeing \n"));
+        assert!(rebased.contains("\n- do [#issuesneedreopened]\n"));
+        let body = queue_component_body(&rebased).unwrap().unwrap();
+        assert_eq!(
+            agent_doc_queue::document_queue::parse(body).unwrap().len(),
+            3
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_adopts_live_buffer_queue_duplicate_delete() {
         // #qeditdelete: the operator deletes one duplicate queue row in the live
         // editor while disk still has both copies. Queue maintenance must start
@@ -9337,7 +9456,11 @@ mod tests {
 
         // Idle: a second pass over the empty, control-less queue writes nothing.
         let idle = run_queue_maintenance(&doc, None).unwrap();
-        assert_ne!(idle.queue_active, Some(true), "an empty queue with no control is idle");
+        assert_ne!(
+            idle.queue_active,
+            Some(true),
+            "an empty queue with no control is idle"
+        );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), drained);
 
         // The operator adds a head: it runs in the default `go`.
@@ -9347,7 +9470,11 @@ mod tests {
         );
         std::fs::write(&doc, &with_head).unwrap();
         let state = run_queue_maintenance(&doc, None).unwrap();
-        assert_eq!(state.queue_active, Some(true), "an added head runs with no stale stop");
+        assert_eq!(
+            state.queue_active,
+            Some(true),
+            "an added head runs with no stale stop"
+        );
         let rearmed = std::fs::read_to_string(&doc).unwrap();
         assert!(rearmed.contains("queue: go"), "{rearmed}");
     }

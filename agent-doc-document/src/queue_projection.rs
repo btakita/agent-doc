@@ -111,14 +111,27 @@ pub fn strip_in_progress_marker(text: &str) -> String {
 }
 
 pub fn apply_in_progress_marker(text: &str) -> String {
-    format!("{IN_PROGRESS_MARKER} {}", strip_in_progress_marker(text))
+    let (content, trailing) = split_trailing_whitespace(text);
+    format!(
+        "{IN_PROGRESS_MARKER} {}{trailing}",
+        strip_in_progress_marker(content)
+    )
 }
 
 /// Prepend the skip projection marker (`⏭️`) to a queue head, preserving pins and
 /// dropping any existing in-progress/skip marker so exactly one lifecycle marker
 /// leads the line.
 pub fn apply_skip_marker(text: &str) -> String {
-    format!("{SKIP_MARKER} {}", strip_in_progress_marker(text))
+    let (content, trailing) = split_trailing_whitespace(text);
+    format!(
+        "{SKIP_MARKER} {}{trailing}",
+        strip_in_progress_marker(content)
+    )
+}
+
+fn split_trailing_whitespace(text: &str) -> (&str, &str) {
+    let content = text.trim_end();
+    (&text[..content.len()], &text[content.len()..])
 }
 
 pub fn has_in_progress_marker(text: &str) -> bool {
@@ -149,8 +162,13 @@ fn has_leading_lifecycle_marker(text: &str, marker: &str) -> bool {
 }
 
 pub fn strip_in_progress_marker_for_display(text: &str) -> Option<String> {
-    let stripped = strip_in_progress_marker(text);
-    (stripped != text.trim()).then_some(stripped)
+    if !has_in_progress_marker(text) && !has_skip_marker(text) {
+        return None;
+    }
+    let (content, trailing) = split_trailing_whitespace(text);
+    let mut stripped = strip_in_progress_marker(content);
+    stripped.push_str(trailing);
+    Some(stripped)
 }
 
 pub fn set_in_progress_work_item_markers(
@@ -246,8 +264,7 @@ pub fn in_progress_marker_retarget_requested(
     binary_projected: &HashSet<String>,
 ) -> bool {
     if !rows.iter().any(|row| {
-        row.marked_in_progress()
-            && !binary_projected.contains(&strip_priority_markers(&row.text))
+        row.marked_in_progress() && !binary_projected.contains(&strip_priority_markers(&row.text))
     }) {
         return false;
     }
@@ -653,7 +670,9 @@ mod tests {
         let diff = Some("-- release + publish\n+- 🚧 release + publish");
         let projected: HashSet<String> = ["release + publish".to_string()].into_iter().collect();
 
-        assert!(!in_progress_marker_retarget_requested(diff, &rows, &projected));
+        assert!(!in_progress_marker_retarget_requested(
+            diff, &rows, &projected
+        ));
         let projection = project_active_queue_prompts(
             &rows,
             &HashMap::new(),

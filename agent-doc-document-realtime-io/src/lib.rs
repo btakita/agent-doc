@@ -3557,7 +3557,8 @@ pub fn apply_canonical_replace_if_attached(
                                 file,
                                 &intent_id,
                                 format!(
-                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but the live editor delivery worker heartbeat is stale; disk was not written; recycle_status={recycle_status}",
+                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but the live editor delivery worker heartbeat is stale; disk was not written; recycle_status={recycle_status}. No live editor registration covers this document, so delivery cannot converge on its own. If the response is already visible, run `agent-doc repair {}` to finish the terminal commit; otherwise open the document in an editor so its replica registers",
+                                    file.display(),
                                     file.display(),
                                 ),
                             ));
@@ -7149,6 +7150,16 @@ pub fn live_editor_endpoint_attached_for_file(file: &std::path::Path) -> bool {
     // projection and replays its durable receiver journal / retained sender suffix
     // on a cold process. No plugin-owner lease or live-buffer scan is on this path.
     agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(file)
+}
+
+/// Whether a live document-scoped editor registration can receive a write now.
+/// Unlike the reliable-sync latch above, this becomes false when the project has
+/// live editors but none covers this document.
+pub fn live_editor_registration_attached_for_file(file: &std::path::Path) -> bool {
+    agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 /// Resolve the authoritative current document when the caller already has a
@@ -11705,6 +11716,14 @@ mod tests {
         assert!(
             message.contains("delivery worker heartbeat is stale"),
             "{message}"
+        );
+        assert!(
+            message.contains("delivery cannot converge on its own"),
+            "an uncovered document must not advertise an automatic terminal path: {message}"
+        );
+        assert!(
+            message.contains("agent-doc repair"),
+            "an already-materialized response needs an actionable terminal path: {message}"
         );
         assert!(
             err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()

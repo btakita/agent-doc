@@ -891,11 +891,19 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         eprintln!(
             "[repair] Response already present in document; skipping apply and retiring retained intent"
         );
-        let repaired_doc = repair_template_doc_if_needed(
-            effects.repair_io_effects,
+        let repaired_doc = settle_materialized_response_normalization(
             file,
             &doc_content,
-            Some(&response),
+            || {
+                repair_template_doc_if_needed(
+                    effects.repair_io_effects,
+                    file,
+                    &doc_content,
+                    Some(&response),
+                )
+            },
+            agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file),
+            agent_doc_document_realtime_io::live_editor_registration_attached_for_file(file),
         )?;
         let state_is_open = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
             .map(|state| state.is_open())
@@ -1062,6 +1070,36 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             force_disk_override,
         },
     )
+}
+
+/// Once the exact response is already materialized, optional template cleanup
+/// must not strand the terminal commit behind a document that has no live
+/// editor replica. The original bytes remain authoritative and the ordinary
+/// repair closeout can checkpoint and commit them. Reachable normalization
+/// still runs normally and any failure from it remains fail-closed.
+fn settle_materialized_response_normalization(
+    file: &Path,
+    current: &str,
+    normalization: impl FnOnce() -> Result<String>,
+    editor_authority_live: bool,
+    document_registration_live: bool,
+) -> Result<String> {
+    if editor_authority_live && !document_registration_live {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "repair_materialized_response_skip_unreachable_normalization file={} recovery=terminal_commit",
+                file.display()
+            ),
+        );
+        eprintln!(
+            "[repair] response is already materialized and no live editor covers {}; skipped optional template normalization and continuing to the terminal commit",
+            file.display()
+        );
+        return Ok(current.to_string());
+    }
+
+    normalization()
 }
 
 struct RepairCurrentDocument {
@@ -3558,6 +3596,47 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn materialized_response_bypasses_unreachable_editor_normalization_only() {
+        let file = Path::new("sample.md");
+        let unreachable_called = Cell::new(false);
+        assert_eq!(
+            settle_materialized_response_normalization(
+                file,
+                "already visible",
+                || {
+                    unreachable_called.set(true);
+                    Ok("normalized".to_string())
+                },
+                true,
+                false,
+            )
+            .unwrap(),
+            "already visible",
+        );
+        assert!(!unreachable_called.get());
+
+        let live_editor_error = settle_materialized_response_normalization(
+            file,
+            "already visible",
+            || Err(anyhow::anyhow!("normalization refused")),
+            true,
+            true,
+        )
+        .unwrap_err();
+        assert_eq!(format!("{live_editor_error:#}"), "normalization refused");
+
+        let detached_normalized = settle_materialized_response_normalization(
+            file,
+            "already visible",
+            || Ok("normalized on disk".to_string()),
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(detached_normalized, "normalized on disk");
+    }
 
     fn structural_history_fixture(
         novel_line: Option<&str>,

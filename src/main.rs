@@ -4851,9 +4851,36 @@ fn try_main() -> anyhow::Result<()> {
                     println!("[cancel] no open cycle to reclaim");
                 }
                 agent_doc_turn::repair::CancelOutcome::Protected => {
-                    println!(
-                        "[cancel] open cycle may still belong to a generating run (or owns captured work); cancel the harness run first; left intact"
-                    );
+                    let state = agent_doc_cycle_state_io::load_with_closeout_projection(&file)?;
+                    let reason = match state.as_ref() {
+                        Some(state)
+                            if state.phase != agent_doc_turn::CyclePhase::PreflightStarted =>
+                        {
+                            format!(
+                                "cycle `{}` is `{}` and is outside cancel's empty `preflight_started` scope; use `agent-doc repair {}` or `agent-doc session-check {}` for captured-response closeout",
+                                state.cycle_id,
+                                state.phase.as_str(),
+                                file.display(),
+                                file.display(),
+                            )
+                        }
+                        Some(state)
+                            if state.capture_id.is_some() || state.response_sha256.is_some() =>
+                        {
+                            format!(
+                                "cycle `{}` owns a captured response and is outside cancel's empty `preflight_started` scope; use `agent-doc repair {}` or `agent-doc session-check {}`",
+                                state.cycle_id,
+                                file.display(),
+                                file.display(),
+                            )
+                        }
+                        Some(state) => format!(
+                            "empty `preflight_started` cycle `{}` remains protected because this command did not prove that its harness run stopped; cancel the harness run first",
+                            state.cycle_id,
+                        ),
+                        None => "the protected cycle projection could not be reloaded".to_string(),
+                    };
+                    anyhow::bail!("[cancel] declined: {reason}; cycle left intact");
                 }
             }
             Ok(())

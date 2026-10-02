@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -852,12 +852,6 @@ The exchange is about 740 lines; noting the size only.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/92~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/80
-- #gh-fix https://github.com/btakita/agent-doc/issues/87
-- #gh-fix https://github.com/btakita/agent-doc/issues/93
-- #gh-fix https://github.com/btakita/agent-doc/issues/94
-- The Idea Plugin formatting is not active. The element content should have a background. It's gone now.
 <!-- /agent:queue --> 
 
 

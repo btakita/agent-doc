@@ -703,6 +703,7 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
     let zip_path = local_jetbrains_zip()?;
     let mut installed = 0usize;
     let mut unchanged = 0usize;
+    let mut restart_pending = 0usize;
     for target_dir in &targets {
         match install_jetbrains_local_zip_into(&zip_path, target_dir)? {
             JetbrainsLocalInstallOutcome::Installed => {
@@ -718,10 +719,12 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
             }
             JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
                 installed += 1;
+                restart_pending += 1;
                 eprintln!("WARNING: {}", restart_required_message(target_dir, &reason));
             }
             JetbrainsLocalInstallOutcome::StagedForRestart { reason } => {
                 installed += 1;
+                restart_pending += 1;
                 eprintln!(
                     "WARNING: {}",
                     staged_for_restart_message(target_dir, &reason)
@@ -740,14 +743,27 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
         "JetBrains package convergence: {installed} updated, {unchanged} already current across {} existing IDE installation(s).",
         targets.len(),
     );
-    if installed > 0 {
-        eprintln!(
-            "Changed live JetBrains packages were dynamically replaced; no IDE restart is required."
-        );
-    } else {
-        eprintln!("No JetBrains restart is required; no installed plugin bytes changed.");
-    }
+    eprintln!(
+        "{}",
+        jetbrains_convergence_restart_summary(installed, restart_pending)
+    );
     Ok(())
+}
+
+/// The closing line of a local JetBrains convergence. It used to say "no IDE
+/// restart is required" whenever anything changed, including right after a
+/// WARNING that the upgrade was staged for the next IDE start.
+fn jetbrains_convergence_restart_summary(installed: usize, restart_pending: usize) -> String {
+    if restart_pending > 0 {
+        format!(
+            "{restart_pending} JetBrains installation(s) still run the previous plugin generation; restart those IDEs to load the new plugin."
+        )
+    } else if installed > 0 {
+        "Changed live JetBrains packages were dynamically replaced; no IDE restart is required."
+            .to_string()
+    } else {
+        "No JetBrains restart is required; no installed plugin bytes changed.".to_string()
+    }
 }
 
 fn existing_jetbrains_agent_doc_dirs(dirs: &[PathBuf]) -> Vec<PathBuf> {
@@ -2751,6 +2767,21 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 "0.2.468"
             )
             .is_ok()
+        );
+    }
+
+    /// A staged or restart-required install must not close with "no IDE restart
+    /// is required".
+    #[test]
+    fn convergence_summary_names_a_pending_restart() {
+        assert!(super::jetbrains_convergence_restart_summary(1, 1).contains("restart those IDEs"));
+        assert!(
+            super::jetbrains_convergence_restart_summary(2, 0)
+                .contains("no IDE restart is required")
+        );
+        assert!(
+            super::jetbrains_convergence_restart_summary(0, 0)
+                .contains("no installed plugin bytes changed")
         );
     }
 }

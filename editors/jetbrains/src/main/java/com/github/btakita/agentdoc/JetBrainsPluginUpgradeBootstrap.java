@@ -107,6 +107,10 @@ public final class JetBrainsPluginUpgradeBootstrap {
         }
     }
 
+    static boolean isActionClass(String name) {
+        return ACTION_CLASS.equals(name) || name.startsWith(ACTION_CLASS + "$");
+    }
+
     private static final class ActionClassLoader extends URLClassLoader {
         private ActionClassLoader(URL agentJar) {
             super(new URL[] {agentJar}, ClassLoader.getSystemClassLoader());
@@ -114,7 +118,12 @@ public final class JetBrainsPluginUpgradeBootstrap {
 
         @Override
         protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-            if (!ACTION_CLASS.equals(name)) {
+            // The action AND its nested classes (anonymous `$1`, lambdas' holders,
+            // records) must come from the new jar. Loading only the outer class
+            // child-first left `JetBrainsPluginUpgradeAction$1` to the parent
+            // (the live plugin's loader), and the cross-loader package-private
+            // access threw IllegalAccessError, staging every upgrade.
+            if (!isActionClass(name)) {
                 return super.loadClass(name, resolve);
             }
             synchronized (getClassLoadingLock(name)) {

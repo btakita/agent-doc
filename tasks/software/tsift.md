@@ -37,97 +37,17 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260922-180951.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20261002-042733.md`*
 
 Compacted content:
-- Archived 16 response topic(s): fpe.md runaway tsift task; agent-doc commit and push check; team-friendly tsift instructions; 13 more
-- Prior summary/context: prior compacted content: Archived 8 response topic(s): Session resumed; Issue #25 fixed and v0.1.97 published; tsift ...
-
-### Re: #ciwalflakeregress — regression coverage for the search lock-hook readiness bound — opus-5 · 2026-09-22T14:18-04:00
-
-> **Queue prompt:**
->
-> do [#ciwalflakeregress]
-
-
-Done. `src/tsift` `bc00a7e`, superproject `69ffb6e20`.
-
-**The /tmp blocker was real but misattributed.** It was not cargo needing space — it was 148 `/tmp/agent-doc-native-<pid>` directories, 51G, the leaked agent-doc test-fixture roots orphaned to PID 1. 147 had dead PIDs; removing those took /tmp from 99% to 45% (52G free). The one live PID was left alone. Nothing else in /tmp was touched — the large `fpe-*` / `haiven-*` trees are other sessions' worktrees.
-
-**What the commit adds.** `SearchPostPrecheckLockHook` now carries a `setup_delay` that the holder thread sleeps *before* opening SQLite, so the latency lands inside the readiness window — the same place a contended runner loses its time, not merely somewhere adjacent to it. Existing installers pass `Duration::ZERO` and are unchanged. The new `search_cmd_wal_fallback_survives_setup_latency_past_the_old_readiness_cap` installs the WAL hook with 1.5s of that latency and asserts, *before* running the search, that the delay is both above the pre-fix 1s cap and below the 30s bound; without those two assertions the test could keep passing while having quietly stopped reproducing anything.
-
-**Verified by mutation, not by argument.** Reverting only the readiness wait to `Duration::from_secs(1)` — the exact pre-2171338 state — reddens the new test:
-
-```
-WAL snapshot fallback failed under 1.5s of injected setup latency:
-waiting for search post-precheck lock hook
-Caused by: timed out waiting on channel
-```
-
-Under that same mutation the pre-existing `search_cmd_uses_wal_snapshot_fallback_when_lock_appears_after_precheck` **stays green**. That gap is precisely the coverage this adds: the original test never held the bound, which is why hand-editing was the only way to check it. Restoring the bound returns both to green. The mutation was applied and restored from a scratch copy with `touch` after each swap, so no run read a stale build.
-
-`make check`: exit 0, 67 suites, **1876 passed, 0 failed** (1875 before — the delta is this test). `cargo build --release` + `cargo install --path .` done, `tsift 0.1.100` installed.
-
-**CI is queued, not green yet** — run `35766280628` was 4s old at push time. The preceding run on `2171338` is green. Local evidence above is what this closeout rests on.
-
-**One thing worth knowing for future sessions:** `lint::tests::ambient_tsift_state_dir_is_not_a_workspace_root` fails if `TMPDIR` points anywhere under `$HOME`. The test builds a fake home in a tempdir and declares only that tempdir ambient, so the ancestor walk continues past it and finds the real `~/.tsift`, resolving the root to `/home/brian`. That is arguably correct behavior rather than a bug — `$HOME` genuinely is `.tsift`-marked and was not declared ambient — but it means a `TMPDIR` override is not a safe way to work around a full `/tmp` for this suite. The full run above used the default `/tmp` after the reclaim.
-
-### Re: Response
-
-This pane is the failed `tsift.md` launch itself: it never received agent-doc’s required preflight contract, so the workflow must fail closed.
-
-The original API session is actively implementing the systemic route-layout fix. No changes were made from this pane. Once that session lands and installs the fix, rerun **Run Agent Doc** on `tsift.md`.
-
-### Re: release + publish — gpt-5 · 2026-09-22T16:03-04:00
-
-> **Queue prompt:**
->
-> release + publish
-
-Prepared and fully verified `tsift` **v0.1.101** at commit `e47c34870` with local tag `v0.1.101`. The tag will be pushed immediately after this binary-owned document closeout; that push triggers the repository's trusted-publishing workflow for the Rust workspace crates, the `opencode-tsift` npm package, and GitHub release assets.
-
-This release includes the post-0.1.100 harness-skill linking and version-drift work, plus a release-blocking concurrency fix discovered by the gate: managed skill and runbook refreshes now replace files atomically, so parallel `status --fix` / `init` processes cannot expose a truncated marker block. The regression proves an update replaces the inode rather than truncating in place and preserves existing permissions.
-
-Verification completed against the exact 50-path release candidate:
-
-- focused atomic-update regression: passed;
-- previously failing `status_fix_refreshes_stale_index_before_reporting_json`: passed;
-- full `make check`: exit 0, zero failure groups;
-- `cargo build --release`: passed;
-- `cargo install --path . --locked`: passed; installed `tsift 0.1.101`;
-- `tsift status`: fresh index and current `v0.1.101` instructions;
-- added-line private-name and whitespace checks: clean;
-- latest pre-release CI on `main` (`35766280628`): green.
-
-Separate operator warning: IntelliJ still has superseded agent-doc plugin bytes mapped. Restart IntelliJ or reopen the document tab to load the installed jar.
-
-### Re: tsift thrash guard — gpt-5 · 2026-09-25 10:05 EDT
-> **Queue prompt:**
->
-> tsift has been thrashing for hours. Make a guard so this does not happen again.
-
-Implemented and verified a fail-fast guard for unbounded federated graph refreshes.
-
-The runaway process was `tsift graph-db --path /home/brian/work/btakita/agent-loop refresh --rebuild --json` (PID 1883513). It had held one core near 100% for roughly nine hours, peaked around 8.2 GB resident memory, and accumulated about 8.1 GB of swap. The workspace exposed 336 scoped index databases and about 1,018,901 total symbols; root graph materialization retains the federated graph in memory, which explains the swap thrash. I terminated that process after diagnosis and confirmed no replacement refresh remained.
-
-The guard is committed in tsift as `7b18e0a fix(graph): bound federated refresh work`. Unscoped federated refreshes now fail before watermark calculation or graph materialization when projected work exceeds either 64 scopes or 250,000 symbols. Scoped refreshes remain available, and the diagnostic directs users to `tsift graph-db --scope <scope> refresh --rebuild --json` or to disable federation. A second guard at the graph builder boundary protects other materialization entrypoints.
-
-Verification completed:
-
-- Replayed the exact command against this workspace with the installed v0.1.101 binary: it rejected the 337 projected scopes in effectively under 1 ms with exit 1.
-- Added boundary tests for 64 allowed scopes, 65 rejected scopes, 250,000 allowed symbols, 250,001 rejected symbols, and the filesystem preflight path.
-- `cargo build --release`, `cargo install --path . --locked`, the focused regression test, and the full `make check` all passed.
-- `git diff --check` and the public-source private-name scan passed.
-- Moved the still-local, unpublished `v0.1.101` tag from the release-only commit to `7b18e0a`, so the release includes the guard. Main and tag publication follows this document closeout; the latest pre-push GitHub CI on origin/main is green.
-
-One environment warning remains: the live IntelliJ process has older agent-doc plugin bytes loaded (0.2.397 versus installed 0.2.398). Restart IntelliJ, or close and reopen the affected editor tab, to clear the stale plugin state.
+- Archived 4 response topic(s): #ciwalflakeregress; Response; release + publish; 1 more
+- Prior summary/context: prior compacted content: Archived 16 response topic(s): fpe.md runaway tsift task; agent-doc commit and push check; t...
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- tsift has been thrashing for hours. Make a guard so this does not happen again.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

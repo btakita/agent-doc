@@ -10879,7 +10879,7 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
 }
 
 /// Result of a typed reload-library fan-out to live editor registrations.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReloadLibraryFanoutReport {
     pub projects: usize,
     pub endpoints: usize,
@@ -10890,6 +10890,76 @@ pub struct ReloadLibraryFanoutReport {
     /// open cycle. Their reload is recorded as pending and published by the
     /// owning supervisor's idle watch once that cycle closes.
     pub deferred_cycle_open: usize,
+    /// GH #94 — one entry per `failed` count, naming the endpoint and why the
+    /// intent did not land. `failed` alone let `admin reload-lib` print
+    /// `1 unavailable` and exit 0, so the attached-editor refusal's "run
+    /// reload-lib, then retry" read as an unperformed step rather than an
+    /// impossible one.
+    pub failures: Vec<ReloadLibraryEndpointFailure>,
+}
+
+impl ReloadLibraryFanoutReport {
+    fn record_failure(&mut self, failure: ReloadLibraryEndpointFailure) {
+        self.failed += 1;
+        self.failures.push(failure);
+    }
+}
+
+/// Why a reload-library intent did not reach an editor endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReloadLibraryFailureReason {
+    /// The project controller's reliable-sync status could not be read, so its
+    /// registrations were never enumerated.
+    StatusUnavailable { error: String },
+    /// No project socket of the editor process accepted a connection: the
+    /// endpoint that would perform the reload is itself gone.
+    EndpointUnavailable { project_endpoints: usize },
+    /// The endpoint was reachable but refused or failed the intent.
+    Refused { error: String },
+}
+
+impl std::fmt::Display for ReloadLibraryFailureReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StatusUnavailable { error } => {
+                write!(f, "controller reliable-sync status unavailable ({error})")
+            }
+            Self::EndpointUnavailable { project_endpoints } => write!(
+                f,
+                "endpoint unavailable: none of its {project_endpoints} project socket(s) accepted a connection"
+            ),
+            Self::Refused { error } => write!(f, "endpoint refused the reload intent ({error})"),
+        }
+    }
+}
+
+/// One endpoint the reload-library fan-out could not reach (GH #94).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReloadLibraryEndpointFailure {
+    pub project_root: PathBuf,
+    /// The editor process, when the failure is scoped to one (`None` for a
+    /// project whose controller status could not be read).
+    pub editor_pid: Option<u64>,
+    pub reason: ReloadLibraryFailureReason,
+}
+
+impl std::fmt::Display for ReloadLibraryEndpointFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.editor_pid {
+            Some(pid) => write!(
+                f,
+                "editor pid {pid} ({}): {}",
+                self.project_root.display(),
+                self.reason
+            ),
+            None => write!(
+                f,
+                "project {}: {}",
+                self.project_root.display(),
+                self.reason
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10989,7 +11059,13 @@ fn reload_library_process_scope(
                 }
             }
             Err(error) => {
-                report.failed += 1;
+                report.record_failure(ReloadLibraryEndpointFailure {
+                    project_root: project_root.clone(),
+                    editor_pid: None,
+                    reason: ReloadLibraryFailureReason::StatusUnavailable {
+                        error: format!("{error:#}").replace('\n', " "),
+                    },
+                });
                 agent_doc_ops_log_io::log_op(
                     &project_root,
                     &format!(
@@ -11038,6 +11114,34 @@ fn reload_library_process_scope(
         }
     }
 
+    reload_library_processes(
+        report,
+        processes,
+        lib_version,
+        agent_doc_ipc_io::is_listener_active_for_pid,
+        |endpoint, pid| {
+            agent_doc_ipc_io::send_reload_library_to_editor(
+                &endpoint.project_root,
+                pid,
+                &endpoint.editor_id,
+                lib_version,
+            )
+        },
+    )
+}
+
+/// Decide and deliver one native-generation reload per editor process.
+///
+/// Listener probing and intent delivery are injected so the per-process
+/// outcome — including the GH #94 failure attribution — is testable without a
+/// live editor.
+fn reload_library_processes(
+    mut report: ReloadLibraryFanoutReport,
+    processes: BTreeMap<u64, EditorNativeReloadProcess>,
+    lib_version: &str,
+    is_listener_active: impl Fn(&Path, u64) -> bool,
+    send_reload: impl Fn(&EditorNativeReloadEndpoint, u64) -> Result<bool>,
+) -> ReloadLibraryFanoutReport {
     // `endpoints` deliberately counts native generations, not project sockets:
     // the effect is PID-scoped and must be emitted at most once per process.
     report.endpoints = processes.len();
@@ -11045,14 +11149,18 @@ fn reload_library_process_scope(
         let active_endpoints = process
             .endpoints
             .iter()
-            .filter(|endpoint| {
-                agent_doc_ipc_io::is_listener_active_for_pid(&endpoint.project_root, pid)
-            })
+            .filter(|endpoint| is_listener_active(&endpoint.project_root, pid))
             .cloned()
             .collect::<Vec<_>>();
         let Some(first_active) = active_endpoints.first() else {
-            report.failed += 1;
             if let Some(endpoint) = process.endpoints.first() {
+                report.record_failure(ReloadLibraryEndpointFailure {
+                    project_root: endpoint.project_root.clone(),
+                    editor_pid: Some(pid),
+                    reason: ReloadLibraryFailureReason::EndpointUnavailable {
+                        project_endpoints: process.endpoints.len(),
+                    },
+                });
                 agent_doc_ops_log_io::log_op(
                     &endpoint.project_root,
                     &format!(
@@ -11062,6 +11170,9 @@ fn reload_library_process_scope(
                         process.endpoints.len(),
                     ),
                 );
+            } else {
+                // A process known only through its documents: still a failure.
+                report.failed += 1;
             }
             continue;
         };
@@ -11114,14 +11225,27 @@ fn reload_library_process_scope(
                         ),
                     );
                 }
-                match agent_doc_ipc_io::send_reload_library_to_editor(
-                    &endpoint.project_root,
-                    pid,
-                    &endpoint.editor_id,
-                    lib_version,
-                ) {
+                match send_reload(endpoint, pid) {
                     Ok(true) => report.delivered += 1,
-                    Ok(false) | Err(_) => report.failed += 1,
+                    outcome => {
+                        let error = match outcome {
+                            Err(error) => format!("{error:#}").replace('\n', " "),
+                            _ => "intent not acknowledged".to_string(),
+                        };
+                        agent_doc_ops_log_io::log_op(
+                            &endpoint.project_root,
+                            &format!(
+                                "reload_library_process_endpoint_refused editor_pid={pid} \
+                                 lib_version={lib_version} error={} (#reloadgateperprocess)",
+                                agent_doc_secret_redact::redact(&error),
+                            ),
+                        );
+                        report.record_failure(ReloadLibraryEndpointFailure {
+                            project_root: endpoint.project_root.clone(),
+                            editor_pid: Some(pid),
+                            reason: ReloadLibraryFailureReason::Refused { error },
+                        });
+                    }
                 }
             }
         }
@@ -36224,5 +36348,106 @@ body
             }))
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod reload_library_failure_attribution_tests {
+    use super::*;
+
+    fn process_with_endpoint(project_root: &Path, pid: u64) -> EditorNativeReloadProcess {
+        let mut process = EditorNativeReloadProcess::default();
+        process.endpoints.insert(EditorNativeReloadEndpoint {
+            project_root: project_root.to_path_buf(),
+            pid,
+            editor_id: "jetbrains-test".to_string(),
+            capabilities: vec!["native_hot_reload_generation_v1".to_string()],
+        });
+        process
+    }
+
+    /// GH #94 — the editor process whose replica transport was torn down still
+    /// held a registration, but none of its project sockets accepted a
+    /// connection. The fan-out counted it as `failed` and nothing named it, so
+    /// `admin reload-lib` exited 0 on an impossible remedy.
+    #[test]
+    fn unreachable_endpoint_is_recorded_with_pid_and_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let mut processes = BTreeMap::new();
+        processes.insert(836968, process_with_endpoint(&root, 836968));
+
+        let report = reload_library_processes(
+            ReloadLibraryFanoutReport::default(),
+            processes,
+            "0.0.0-test",
+            |_, _| false,
+            |_, _| panic!("an unreachable endpoint must never be sent an intent"),
+        );
+
+        assert_eq!(report.delivered, 0);
+        assert_eq!(report.failed, 1);
+        assert_eq!(
+            report.failures,
+            vec![ReloadLibraryEndpointFailure {
+                project_root: root.clone(),
+                editor_pid: Some(836968),
+                reason: ReloadLibraryFailureReason::EndpointUnavailable {
+                    project_endpoints: 1
+                },
+            }]
+        );
+        let rendered = report.failures[0].to_string();
+        assert!(
+            rendered.contains("editor pid 836968") && rendered.contains("endpoint unavailable"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn refused_intent_is_recorded_with_the_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let root = dir.path().to_path_buf();
+        let mut processes = BTreeMap::new();
+        processes.insert(41, process_with_endpoint(&root, 41));
+
+        let report = reload_library_processes(
+            ReloadLibraryFanoutReport::default(),
+            processes,
+            "0.0.0-test",
+            |_, _| true,
+            |_, _| Err(anyhow::anyhow!("connection refused")),
+        );
+
+        assert_eq!(report.failed, 1);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].editor_pid, Some(41));
+        assert!(matches!(
+            &report.failures[0].reason,
+            ReloadLibraryFailureReason::Refused { error } if error.contains("connection refused")
+        ));
+    }
+
+    #[test]
+    fn acknowledged_endpoints_record_no_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let mut processes = BTreeMap::new();
+        processes.insert(7, process_with_endpoint(&root, 7));
+        processes.insert(8, process_with_endpoint(&root, 8));
+
+        let report = reload_library_processes(
+            ReloadLibraryFanoutReport::default(),
+            processes,
+            "0.0.0-test",
+            |_, _| true,
+            |_, _| Ok(true),
+        );
+
+        assert_eq!(report.endpoints, 2);
+        assert_eq!(report.delivered, 2);
+        assert_eq!(report.failed, 0);
+        assert!(report.failures.is_empty());
     }
 }

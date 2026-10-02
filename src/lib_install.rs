@@ -362,6 +362,8 @@ pub struct ReloadLibReport {
     /// `#installstrandsreplica` — endpoints that kept the previous generation
     /// because an attached document was mid-cycle.
     pub deferred_cycle_open: usize,
+    /// GH #94 — the endpoints behind `failed`, each with its reason.
+    pub failures: Vec<agent_doc_controller_io::project_controller::ReloadLibraryEndpointFailure>,
 }
 
 /// Send a typed `reload_library` intent to safe hot-reload editor members.
@@ -376,7 +378,56 @@ pub fn reload_lib() -> Result<ReloadLibReport> {
         restart_required: fanout.restart_required,
         failed: fanout.failed,
         deferred_cycle_open: fanout.deferred_cycle_open,
+        failures: fanout.failures,
     })
+}
+
+/// GH #94 — the exit verdict of `admin reload-lib`.
+///
+/// Success means every live endpoint acknowledged (or was deliberately
+/// deferred / reported as restart-only). An endpoint that was unreachable or
+/// refused the intent did NOT reload, so reporting `1 unavailable` with exit 0
+/// let the attached-editor refusal's "run reload-lib, then retry" read as a
+/// performed step. Name each endpoint and say plainly that the remedy is an
+/// editor restart: reload-lib needs the very endpoint that is gone.
+pub fn reload_lib_verdict(report: &ReloadLibReport) -> Result<()> {
+    if report.failed == 0 {
+        return Ok(());
+    }
+    let mut named = report
+        .failures
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let unnamed = report.failed.saturating_sub(named.len());
+    if unnamed > 0 {
+        named.push(format!("{unnamed} endpoint(s) without attribution"));
+    }
+    let editor_unreachable = report.failures.iter().any(|f| f.editor_pid.is_some()) || unnamed > 0;
+    let controller_unreachable = report.failures.iter().any(|f| f.editor_pid.is_none());
+    let mut remedies = Vec::new();
+    if editor_unreachable {
+        remedies.push(
+            "reload-lib cannot be the remedy for an editor endpoint it cannot reach — restart \
+             that editor (it holds the document but no longer serves its replica transport), \
+             then retry the refused command",
+        );
+    }
+    if controller_unreachable {
+        remedies.push(
+            "a project controller did not answer its reliable-sync status, so its editor \
+             registrations were never enumerated — run `agent-doc admin recycle <FILE>` for \
+             that project, then rerun reload-lib",
+        );
+    }
+    anyhow::bail!(
+        "[admin] reload-lib: cdylib v{} did not reach {} of {} editor endpoint(s): {}. {} (GH #94).",
+        report.lib_version,
+        report.failed,
+        report.editor_endpoints,
+        named.join("; "),
+        remedies.join("; "),
+    );
 }
 
 fn normalized_profile(profile: &str) -> &str {
@@ -615,6 +666,85 @@ pub(crate) fn missing_library_remedy(exe: &Path, lib_name: &str) -> Vec<String> 
 mod tests {
     use super::*;
     use std::fs;
+
+    fn reload_report(
+        delivered: usize,
+        failures: Vec<agent_doc_controller_io::project_controller::ReloadLibraryEndpointFailure>,
+    ) -> ReloadLibReport {
+        ReloadLibReport {
+            lib_version: "0.35.431".to_string(),
+            editor_projects: 5,
+            editor_endpoints: delivered + failures.len(),
+            delivered,
+            restart_required: 0,
+            failed: failures.len(),
+            deferred_cycle_open: 0,
+            failures,
+        }
+    }
+
+    /// GH #94: `reload-lib` reported `1 unavailable` and exited 0, so the
+    /// attached-editor refusal's "run reload-lib, then retry" looked performed.
+    #[test]
+    fn reload_lib_verdict_fails_and_names_an_unreachable_endpoint() {
+        use agent_doc_controller_io::project_controller::{
+            ReloadLibraryEndpointFailure, ReloadLibraryFailureReason,
+        };
+        let report = reload_report(
+            0,
+            vec![ReloadLibraryEndpointFailure {
+                project_root: PathBuf::from("/work/project"),
+                editor_pid: Some(836968),
+                reason: ReloadLibraryFailureReason::EndpointUnavailable {
+                    project_endpoints: 1,
+                },
+            }],
+        );
+        let err = reload_lib_verdict(&report).expect_err("an unreachable endpoint must fail");
+        let message = format!("{err:#}");
+        assert!(message.contains("editor pid 836968"), "{message}");
+        assert!(message.contains("endpoint unavailable"), "{message}");
+        assert!(message.contains("restart that editor"), "{message}");
+        assert!(message.contains("1 of 1"), "{message}");
+        assert!(!message.contains("admin recycle"), "{message}");
+    }
+
+    #[test]
+    fn reload_lib_verdict_fails_on_a_refused_endpoint() {
+        use agent_doc_controller_io::project_controller::{
+            ReloadLibraryEndpointFailure, ReloadLibraryFailureReason,
+        };
+        let report = reload_report(
+            1,
+            vec![ReloadLibraryEndpointFailure {
+                project_root: PathBuf::from("/work/project"),
+                editor_pid: Some(42),
+                reason: ReloadLibraryFailureReason::Refused {
+                    error: "connection refused".to_string(),
+                },
+            }],
+        );
+        let message = format!("{:#}", reload_lib_verdict(&report).unwrap_err());
+        assert!(
+            message.contains("editor pid 42") && message.contains("connection refused"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn reload_lib_verdict_succeeds_when_every_live_endpoint_acknowledged() {
+        assert!(reload_lib_verdict(&reload_report(2, Vec::new())).is_ok());
+        let mut idle = reload_report(0, Vec::new());
+        idle.editor_endpoints = 0;
+        assert!(
+            reload_lib_verdict(&idle).is_ok(),
+            "no editors is not a failure"
+        );
+        let mut deferred = reload_report(0, Vec::new());
+        deferred.editor_endpoints = 1;
+        deferred.deferred_cycle_open = 1;
+        assert!(reload_lib_verdict(&deferred).is_ok());
+    }
 
     #[test]
     fn cargo_build_tree_keeps_the_source_checkout_remedy() {

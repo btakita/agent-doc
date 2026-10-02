@@ -852,6 +852,65 @@ fn validate_template_response_shape_before_tracked_work(
     Ok(())
 }
 
+/// GH #94 — the text response-shape prevalidation checks against.
+///
+/// Prevalidation only parses the frontmatter mode and dry-runs the response
+/// envelope against the document's component structure; nothing it computes is
+/// written anywhere. When an attached editor holds the document but its
+/// replica transport is gone, current-text resolution refuses (correctly: no
+/// caller may adopt disk as authority over a live editor). Failing
+/// prevalidation on that refusal meant the turn could not even reach the write
+/// path that captures the response and reports the block, so every
+/// `respond` / `write --commit` dead-ended before saying why.
+///
+/// For exactly that typed refusal, read the disk plane WITHOUT claiming disk
+/// authority ([`peek_disk_document_content`]) and validate against it. The
+/// write itself still resolves through the editor authority and keeps
+/// refusing until the replica returns — this is a read for a shape check, not
+/// a disk write, so the "never force-disk over a live editor" invariant holds.
+/// Any other resolution failure still fails prevalidation.
+///
+/// [`peek_disk_document_content`]: agent_doc_document_realtime_io::peek_disk_document_content
+fn resolve_prevalidation_document_content(
+    file: &Path,
+    resolved: Result<String>,
+    peek_disk: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    let err = match resolved {
+        Ok(content) => return Ok(content),
+        Err(err) => err,
+    };
+    let Some(refusal) = agent_doc_document_realtime_io::attached_editor_disk_read_refusal(&err)
+    else {
+        return Err(err);
+    };
+    let reason = refusal.reason.clone();
+    let content = peek_disk().with_context(|| {
+        format!(
+            "prevalidate_tracked_work_response: attached-editor refusal ({reason}) and the \
+             observation-only disk read also failed for {}; original refusal: {err:#}",
+            file.display()
+        )
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "prevalidate_tracked_work_response_disk_observation file={} reason={reason} \
+             scope=shape_validation_only authority_claimed=false disk_len={} (GH #94)",
+            file.display(),
+            content.len(),
+        ),
+    );
+    eprintln!(
+        "[write] editor holds {} but is not serving its replica ({reason}); validated the \
+         response shape against the saved disk text (read-only, no authority claimed). The \
+         write still requires the editor: {}",
+        file.display(),
+        refusal.remedy,
+    );
+    Ok(content)
+}
+
 /// A strict response and its tracked-work flags form one transaction. Validate
 /// the response envelope before the tracked-work dry run so a malformed patch
 /// cannot emit successful-looking virtual mutation diagnostics such as
@@ -870,7 +929,17 @@ fn prevalidate_template_response_before_tracked_work(
     let current_content = if options.force_disk {
         resolve_force_disk_document(file, "prevalidate_tracked_work_response")?.into_content()
     } else {
-        resolve_current_document(file, "prevalidate_tracked_work_response")?.into_content()
+        resolve_prevalidation_document_content(
+            file,
+            resolve_current_document(file, "prevalidate_tracked_work_response")
+                .map(agent_doc_document_realtime::CurrentDocument::into_content),
+            || {
+                agent_doc_document_realtime_io::peek_disk_document_content(
+                    file,
+                    "prevalidate_tracked_work_response",
+                )
+            },
+        )?
     };
     let (fm, _) = frontmatter::parse(&current_content)?;
     if !fm.resolve_mode().is_template() && !options.is_template {
@@ -3850,6 +3919,91 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+
+    fn seed_reliable_sync_open_for_prevalidation(file: &Path, tag: &str) {
+        let document_hash = agent_doc_hash::document_id_for_path(file);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: tag.to_string(),
+            }]);
+    }
+
+    /// GH #94 — an editor that holds the document but no longer serves its
+    /// replica made current-text resolution refuse, and prevalidation failed
+    /// on that refusal, so no `respond` / `write --commit` could even reach the
+    /// write path. Prevalidation is a shape check: it must validate against an
+    /// observation-only disk read, claim no authority, and leave disk untouched.
+    #[test]
+    fn prevalidation_reads_disk_without_authority_when_attached_editor_refuses() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let disk = "---\nagent_doc_mode: template\n---\n\nbody\n";
+        std::fs::write(&file, disk).unwrap();
+        agent_doc_crdt_relay_io::register_embedded_relay_route_for_file(&file).unwrap();
+        let file = file.canonicalize().unwrap();
+        seed_reliable_sync_open_for_prevalidation(&file, "gh94-prevalidation-test");
+
+        let resolved = resolve_current_document(&file, "prevalidate_tracked_work_response")
+            .map(agent_doc_document_realtime::CurrentDocument::into_content);
+        let resolved_err = resolved
+            .as_ref()
+            .expect_err("test setup: the attached editor must refuse current-text resolution");
+        assert!(
+            agent_doc_document_realtime_io::attached_editor_disk_read_refusal(resolved_err)
+                .is_some(),
+            "the refusal must be typed: {resolved_err:#}"
+        );
+
+        let content = resolve_prevalidation_document_content(&file, resolved, || {
+            agent_doc_document_realtime_io::peek_disk_document_content(
+                &file,
+                "prevalidate_tracked_work_response",
+            )
+        })
+        .expect("prevalidation must observe disk while the replica transport is gone");
+        assert_eq!(content, disk);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), disk);
+
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("prevalidate_tracked_work_response_disk_observation")
+                && log.contains("authority_claimed=false"),
+            "{log}"
+        );
+        assert!(
+            !log.contains("realtime_doc_resolve_disk_read_fallback"),
+            "prevalidation must not descend current-text resolution to disk:\n{log}"
+        );
+        // The write path's own resolution still refuses: the fallback is
+        // scoped to prevalidation and never turns disk into authority.
+        assert!(
+            resolve_current_document(&file, "write_after_prevalidation").is_err(),
+            "the write must still require the editor"
+        );
+    }
+
+    #[test]
+    fn prevalidation_fallback_is_scoped_to_the_attached_editor_refusal() {
+        let file = Path::new("/nonexistent/session.md");
+        let ok =
+            resolve_prevalidation_document_content(file, Ok("editor text".to_string()), || {
+                panic!("resolved text must not be replaced by disk")
+            })
+            .unwrap();
+        assert_eq!(ok, "editor text");
+
+        let err = resolve_prevalidation_document_content(
+            file,
+            Err(anyhow::anyhow!("unrelated resolution failure")),
+            || panic!("an unrelated failure must not fall back to disk"),
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("unrelated resolution failure"));
+    }
 
     /// `#queuetypingsteer`: the api.md intent from 2026-09-29 was created at
     /// 1790707734s, inside the open cycle, so it is the turn's own attempt.

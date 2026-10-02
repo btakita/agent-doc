@@ -7916,13 +7916,64 @@ fn attached_editor_refusal_remedy(file: &std::path::Path) -> String {
                 .count(),
         ),
     );
-    attached_editor_refusal_remedy_from(&superseded, &editors)
+    // GH #94: `admin reload-lib` is only a remedy for an editor whose IPC
+    // endpoint still accepts connections. When the endpoint is gone, the
+    // fan-out reports it `unavailable` and reload-lib cannot help, so name the
+    // restart immediately instead of after a futile reload-lib + retry.
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(file);
+    let unreachable = editors
+        .iter()
+        .map(|(_, pid)| *pid)
+        .filter(|pid| !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, u64::from(*pid)))
+        .collect::<Vec<_>>();
+    attached_editor_refusal_remedy_from(&superseded, &editors, &unreachable)
+}
+
+/// The attached-editor refusal: the editor still holds the document but its
+/// replica is not answering, so current text cannot be resolved and disk is
+/// not adopted as authority.
+///
+/// Typed so an observation-only caller (response-shape prevalidation, GH #94)
+/// can recognise exactly this refusal and fall back to a non-authoritative
+/// read, without matching prose and without widening the fallback to any other
+/// resolution failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachedEditorDiskReadRefused {
+    pub file: std::path::PathBuf,
+    /// The exhausted observation family (`missing_replica`, `sync_pending`).
+    pub reason: String,
+    pub remedy: String,
+}
+
+impl std::fmt::Display for AttachedEditorDiskReadRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "editor is still attached for {}; {} recovery exhausted and disk read authority is refused. {}",
+            self.file.display(),
+            self.reason,
+            self.remedy
+        )
+    }
+}
+
+impl std::error::Error for AttachedEditorDiskReadRefused {}
+
+/// The [`AttachedEditorDiskReadRefused`] anywhere in `err`'s chain, if any.
+pub fn attached_editor_disk_read_refusal(
+    err: &anyhow::Error,
+) -> Option<&AttachedEditorDiskReadRefused> {
+    err.chain()
+        .find_map(|cause| cause.downcast_ref::<AttachedEditorDiskReadRefused>())
 }
 
 /// Pure core of [`attached_editor_refusal_remedy`].
+///
+/// `unreachable` names the editor pids whose IPC endpoint refused a connection.
 fn attached_editor_refusal_remedy_from(
     superseded: &[agent_doc_fs::plugin_jar::SupersededEditor],
     editors: &[(String, u32)],
+    unreachable: &[u32],
 ) -> String {
     if let Some(editor) = superseded.first() {
         return format!(
@@ -7945,6 +7996,15 @@ fn attached_editor_refusal_remedy_from(
     } else {
         pids.join(", ")
     };
+    if !editors.is_empty() && editors.iter().all(|(_, pid)| unreachable.contains(pid)) {
+        return format!(
+            "Remedy: {holder} holds the document but its agent-doc IPC endpoint no longer \
+             accepts connections, so `agent-doc admin reload-lib` cannot reach it (it reports \
+             the endpoint unavailable and fails). Restart that editor so it re-registers its \
+             replica, then retry the same command; a captured response is re-delivered, not \
+             lost (#84, GH #94)."
+        );
+    }
     format!(
         "Remedy: {holder} holds the document but is not serving its replica, and no plugin \
          byte replacement explains it. Run `agent-doc admin reload-lib` so the editor \
@@ -8236,10 +8296,11 @@ fn resolve_editor_unavailable_disk_read_fallback(
             ),
         );
         let remedy = attached_editor_refusal_remedy(file);
-        anyhow::bail!(
-            "editor is still attached for {}; {reason} recovery exhausted and disk read authority is refused. {remedy}",
-            file.display()
-        );
+        return Err(anyhow::Error::new(AttachedEditorDiskReadRefused {
+            file: file.to_path_buf(),
+            reason: reason.to_string(),
+            remedy,
+        }));
     }
     debug_assert_eq!(
         descent_decision,
@@ -8958,6 +9019,7 @@ mod tests {
         let remedy = attached_editor_refusal_remedy_from(
             std::slice::from_ref(&editor),
             &[("jetbrains".into(), 4242)],
+            &[],
         );
         assert!(remedy.starts_with("plugin_bytes_superseded"), "{remedy}");
         assert!(remedy.contains("pid 4242"), "{remedy}");
@@ -8985,7 +9047,7 @@ mod tests {
             detail: "jar unlinked".into(),
             restart_verdict: Some("dynamic upgrade unavailable: plugin cannot unload".into()),
         };
-        let remedy = attached_editor_refusal_remedy_from(&[editor], &[]);
+        let remedy = attached_editor_refusal_remedy_from(&[editor], &[], &[]);
         assert!(
             remedy.contains("Restart the editor to load them"),
             "{remedy}"
@@ -8997,11 +9059,57 @@ mod tests {
     /// the holding editor instead of only the mechanism.
     #[test]
     fn attached_editor_refusal_names_a_remedy_without_superseded_bytes() {
-        let remedy = attached_editor_refusal_remedy_from(&[], &[("jetbrains".into(), 7)]);
+        let remedy = attached_editor_refusal_remedy_from(&[], &[("jetbrains".into(), 7)], &[]);
         assert!(remedy.contains("jetbrains pid 7"), "{remedy}");
         assert!(remedy.contains("agent-doc admin reload-lib"), "{remedy}");
-        let unnamed = attached_editor_refusal_remedy_from(&[], &[]);
+        let unnamed = attached_editor_refusal_remedy_from(&[], &[], &[]);
         assert!(unnamed.contains("the attached editor"), "{unnamed}");
+    }
+
+    /// GH #94: when the holding editor's IPC endpoint is gone, reload-lib
+    /// cannot reach it, so the refusal names the restart immediately instead
+    /// of prescribing a reload-lib that reports `1 unavailable`.
+    /// GH #94: the refusal is typed and survives caller context, so an
+    /// observation-only caller can recognise it without matching prose.
+    #[test]
+    fn current_resolve_refusal_is_typed_through_context() {
+        let disk = "plain disk body\n";
+        let (_dir, file, _canonical) = temp_doc(disk);
+        seed_reliable_sync_open(&file, "test-typed-refusal");
+
+        let err = try_resolve_current_document_with_source(&file, "test")
+            .map(|_| ())
+            .context("caller context")
+            .expect_err("an attached editor must block disk read authority");
+        let refusal = attached_editor_disk_read_refusal(&err)
+            .unwrap_or_else(|| panic!("refusal must be typed: {err:#}"));
+        assert_eq!(refusal.reason, "missing_replica");
+        assert!(format!("{err:#}").contains("disk read authority is refused"));
+        assert!(attached_editor_disk_read_refusal(&anyhow::anyhow!("unrelated")).is_none());
+    }
+
+    #[test]
+    fn attached_editor_refusal_names_restart_when_endpoint_is_unreachable() {
+        let remedy =
+            attached_editor_refusal_remedy_from(&[], &[("jetbrains".into(), 836968)], &[836968]);
+        assert!(remedy.contains("jetbrains pid 836968"), "{remedy}");
+        assert!(remedy.contains("Restart that editor"), "{remedy}");
+        assert!(remedy.contains("cannot reach it"), "{remedy}");
+        assert!(
+            !remedy.contains("Run `agent-doc admin reload-lib`"),
+            "an unreachable endpoint must not be prescribed reload-lib: {remedy}"
+        );
+
+        // One reachable holder keeps reload-lib as the first rung.
+        let mixed = attached_editor_refusal_remedy_from(
+            &[],
+            &[("jetbrains".into(), 1), ("vscode".into(), 2)],
+            &[1],
+        );
+        assert!(
+            mixed.contains("Run `agent-doc admin reload-lib`"),
+            "{mixed}"
+        );
     }
 
     #[test]

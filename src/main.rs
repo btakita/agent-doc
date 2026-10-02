@@ -5990,6 +5990,11 @@ fn try_main() -> anyhow::Result<()> {
                             "restart_required": report.restart_required,
                             "deferred_cycle_open": report.deferred_cycle_open,
                             "failed": report.failed,
+                            "failures": report.failures.iter().map(|failure| serde_json::json!({
+                                "project_root": failure.project_root.display().to_string(),
+                                "editor_pid": failure.editor_pid,
+                                "reason": failure.reason.to_string(),
+                            })).collect::<Vec<_>>(),
                                 })
                         );
                     } else {
@@ -6004,7 +6009,7 @@ fn try_main() -> anyhow::Result<()> {
                             report.failed,
                         );
                     }
-                    Ok(())
+                    lib_install::reload_lib_verdict(&report)
                 }
                 AdminAction::KillSupervisor {
                     document,

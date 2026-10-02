@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.439
+
+- **Queue marker projection preserves every queue row (GH #104).** Applying the visible `🚧`
+  marker now edits only the selected row's canonical source range, preserves trailing whitespace
+  and neighbouring bytes, and fails closed if item cardinality or tracked `[#id]` ownership changes.
+  Concurrent editor advances re-project the marker over the newest queue instead of accepting a
+  whole-component merge that could join lines.
+- **Empty editor list placeholders never become queue work.** Bare `-` rows and payload-free ordered
+  markers are discarded before queue-node creation, so Run Agent Doc cannot leave a stray dash
+  beside an admitted `do [#id]` head; constructed freeform entries have the same render guard.
+- **Retained editor delivery owns admission until its original intent settles.** Stop-hook auto-queue
+  dispatch cannot advance behind a pending binary-owned editor projection, and a proven-empty stale
+  child is reconciled metadata-only without recapture or document mutation. Stable intent keys are
+  preserved through retry and terminal convergence.
+- **Restart-free JetBrains upgrades complete native handoff safely.** Plugin disposal waits for its
+  serialized stop off the UI thread, replacement classloaders receive unique native shadow paths,
+  and generation workers retire on unload. This prevents a replacement from inheriting a retiring
+  native generation's quiescing mapping while preserving replicas and socket ownership. JetBrains
+  plugin 0.2.479.
+- **Agent restarts and editor routing preserve their authority boundaries.** Supervisor handoff waits
+  for a safe idle boundary, cross-document commands preserve the invoking editor surface, and the
+  automatic release watcher can adopt newer agent-doc versions.
+
 ## 0.35.438
 
 - **Closing a JetBrains document cannot abandon its final editor cut (GH #103).** The plugin now

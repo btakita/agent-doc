@@ -2126,6 +2126,7 @@ dependencies = [
  "agent-doc-state-scope",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
+ "agent-doc-template",
  "agent-doc-test-support",
  "agent-doc-turn",
  "agent-doc-workflow",

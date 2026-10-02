@@ -7,7 +7,9 @@
 //! - `classify_replay_payload(message)` trims the candidate payload and
 //!   classifies it as empty, replayable, or blocked.
 //! - Block transcript/full-document shaped payloads that should never be
-//!   replayed automatically: agent component dumps, transcript prompt lines,
+//!   replayed automatically: agent component dumps (a line-anchored component
+//!   marker outside code and quoted prose — a marker named inside inline
+//!   backticks or a fence is prose, GH 90), transcript prompt lines,
 //!   `## User` / `## Assistant` headings, multiple `### Re:` headings, or
 //!   malformed patch payloads.
 //! - Patch-bearing payloads are replayable only when `template::parse_patches`
@@ -31,6 +33,8 @@
 //! - `classify_multiple_clean_patches_as_replayable`
 //! - `classify_blocks_agent_component_dump`
 //! - `classify_blocks_prompt_lines`
+//! - `classify_allows_a_marker_named_inside_inline_backticks`
+//! - `classify_still_blocks_a_standalone_marker_outside_code`
 //! - `classify_allows_several_distinct_response_headings`
 //! - `classify_blocks_a_heading_repeated_within_one_payload`
 //! - `classify_blocks_a_heading_already_committed_in_the_document`
@@ -102,6 +106,28 @@ fn unmatched_is_only_replay_guard_markers(unmatched: &str) -> bool {
     saw_marker
 }
 
+/// GH 90 — the component-marker half of the replay guard, shared with the
+/// write-time landability check so a payload is refused (or accepted) by the
+/// same rule before and after durable capture.
+///
+/// This used to be a bare substring test: ANY `<!-- agent:` in the payload
+/// blocked it as "a full document component dump", including a response that
+/// merely named a marker inside inline backticks while explaining a repair. A
+/// component dump carries markers as STRUCTURE — each on its own line, outside
+/// code. So only a line-anchored marker outside code and quoted prose
+/// ([`agent_doc_element::element::structural_marker_occurrences`]) blocks. An
+/// inline, unquoted marker in prose is not a dump; the write path escapes it
+/// (`sanitize::sanitize_component_tags`) before it can reach the document.
+pub fn component_marker_dump_refusal(payload: &str) -> Option<String> {
+    let anchored = agent_doc_element::element::structural_marker_occurrences(payload)
+        .into_iter()
+        .find(|occurrence| occurrence.line_anchored)?;
+    Some(format!(
+        "it contained agent component markers from a full document component dump (standalone marker outside code on payload line {}; quote marker text in backticks)",
+        anchored.line
+    ))
+}
+
 /// Classify a replay payload with no document to compare against.
 ///
 /// Callers that HAVE the document should prefer
@@ -124,10 +150,8 @@ pub fn classify_replay_payload_against_document<'a>(
         return ReplayPayloadClassification::Empty;
     }
 
-    if trimmed.contains("<!-- agent:") || trimmed.contains("<!-- /agent:") {
-        return ReplayPayloadClassification::Blocked(
-            "it contained agent component markers from a full document component dump".to_string(),
-        );
+    if let Some(reason) = component_marker_dump_refusal(trimmed) {
+        return ReplayPayloadClassification::Blocked(reason);
     }
 
     let prompt_lines = trimmed
@@ -362,6 +386,32 @@ mod tests {
         assert_blocked(
             "<!-- agent:exchange patch=append -->\n❯ hi\n### Re: topic — gpt-5\n<!-- /agent:exchange -->\n",
             "component",
+        );
+    }
+
+    /// GH 90 — the 2552-byte laptop.md capture: one inline code span naming
+    /// a marker, inside prose about repairing it. It is not a dump, and it
+    /// must replay. The surrounding `<details>` line is a context in which the
+    /// CommonMark AST does not parse inline code at all.
+    #[test]
+    fn classify_allows_a_marker_named_inside_inline_backticks() {
+        assert_replayable(
+            "### Re: queue marker — claude\n\nThe errant keystroke left\n`i<!-- /agent:queue -->`. Fixed: marker restored, zero stray characters left, and `tmp/caret-probe-client.md` is gone.\n",
+        );
+        assert_replayable(
+            "### Re: queue marker — claude\n\n<details>\n`i<!-- /agent:queue -->`. Fixed.\n</details>\n",
+        );
+        assert_replayable(
+            "### Re: queue marker — claude\n\n```markdown\n<!-- /agent:queue -->\n```\n",
+        );
+    }
+
+    /// GH 90 — line-anchored markers outside code are still a dump.
+    #[test]
+    fn classify_still_blocks_a_standalone_marker_outside_code() {
+        assert_blocked(
+            "### Re: topic — claude\n\nBody `ok`\n  <!-- /agent:queue -->\n",
+            "full document component dump",
         );
     }
 

@@ -1128,6 +1128,25 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                     );
                 }
             }
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Unlandable {
+                reason,
+                recovery,
+            } => {
+                // GH 90: deterministic refusal; retrying inside the Stop hook
+                // cannot change it. Surface the reason and the recovery once.
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_captured_finalize_resume_unlandable cycle_id={} capture_id={} response_sha256={} reason_bytes={} action=stop_retrying recovery=\"{recovery}\"",
+                        key.cycle_id,
+                        key.capture_id,
+                        key.response_sha256,
+                        reason.len(),
+                    ),
+                );
+                eprintln!("[agent-doc] {reason}");
+                return false;
+            }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::NeedsOperator {
                 reason,
             } => {

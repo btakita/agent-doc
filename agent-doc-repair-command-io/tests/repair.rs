@@ -2016,6 +2016,194 @@ mod tests {
         ));
     }
 
+    fn gh90_append_doc(dir: &TempDir) -> (std::path::PathBuf, &'static str) {
+        let doc = dir.path().join("test.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        (doc, content)
+    }
+
+    const GH90_UNLANDABLE: &str =
+        "Repaired the queue.\n<!-- agent:queue -->\n- leaked item\n<!-- /agent:queue -->\n";
+
+    /// GH 90 ask 2: the write path classifies the response bytes BEFORE
+    /// durable capture, so an unlandable response is refused up front with the
+    /// structural reason and nothing is captured, retained, or written.
+    #[test]
+    fn gh90_unlandable_response_is_refused_before_durable_capture() {
+        let dir = setup_project();
+        let (doc, content) = gh90_append_doc(&dir);
+
+        let err = agent_doc_write_runtime_io::run_command_with_response(
+            agent_doc_write_command_io::CommandOptions::repair_replay(
+                &doc,
+                false,
+                false,
+                false,
+                &[],
+            ),
+            agent_doc_write_command_io::CommitMode::Required,
+            GH90_UNLANDABLE.to_string(),
+        )
+        .expect_err("an unlandable response must be refused");
+        let message = format!("{err:#}");
+        assert!(message.contains("can never land"), "{message}");
+        assert!(message.contains("full document component dump"), "{message}");
+        assert!(message.contains("Nothing was captured"), "{message}");
+
+        assert_eq!(
+            agent_doc_repair_command_io::captured_finalize_resume_key(&doc).unwrap(),
+            None,
+            "a refused response must never become a durable capture"
+        );
+        assert!(
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert!(matches!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("cycle state")
+                .phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        ));
+    }
+
+    /// GH 90 asks 4 + 5: a capture made before the write-time gate existed
+    /// (or by another path) whose bytes can never land. Every retry surface
+    /// must report the structural reason and the exact recovery, stop
+    /// retrying, and the recovery must land the requoted response atomically.
+    #[test]
+    fn gh90_unlandable_capture_stops_retrying_and_requote_recovery_lands_it() {
+        let dir = setup_project();
+        let (doc, content) = gh90_append_doc(&dir);
+        agent_doc_capture_io::capture_response(&doc, GH90_UNLANDABLE).unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("captured response exposes a resume key");
+
+        // Ask 4: the resume loop sees the structural reason, not an effect
+        // failure, and is told to stop retrying with an exact command.
+        for _ in 0..2 {
+            match agent_doc_repair_command_io::resume_captured_finalize(&doc, &key) {
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Unlandable {
+                    reason,
+                    recovery,
+                } => {
+                    assert!(reason.contains("full document component dump"), "{reason}");
+                    assert!(reason.contains("captured_response_unlandable"), "{reason}");
+                    assert_eq!(
+                        recovery,
+                        format!(
+                            "agent-doc repair {} --requote-unlandable-capture",
+                            doc.display()
+                        )
+                    );
+                }
+                other => panic!("expected Unlandable, got {other:?}"),
+            }
+        }
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            content,
+            "classifying an unlandable capture must not mutate the document"
+        );
+        let unlandable = agent_doc_session_check_io::current_unlandable_capture(&doc)
+            .unwrap()
+            .expect("session-check sees the same verdict");
+        assert_eq!(unlandable.response_sha256, key.response_sha256);
+        // `run_session_check` exits the process on INTERRUPTED; inspect the
+        // same read-only status it prints.
+        let session_check = match agent_doc_session_check_io::inspect_read_only(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => message,
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
+                panic!("session-check must report the unlandable capture, got Ok: {message}")
+            }
+        };
+        assert!(session_check.contains("can never land"), "{session_check}");
+        assert!(
+            session_check.contains("full document component dump"),
+            "session-check must surface the structural reason: {session_check}"
+        );
+        assert!(
+            session_check.contains("--requote-unlandable-capture"),
+            "{session_check}"
+        );
+        assert!(
+            !session_check.contains("Retry only"),
+            "a deterministic refusal must not prescribe a retry: {session_check}"
+        );
+
+        // Ask 5: the escape hatch re-captures with only marker bytes escaped
+        // and lands it through the normal closeout, exactly once.
+        let outcome = agent_doc_repair_command_io::requote_unlandable_capture(&doc).unwrap();
+        assert!(
+            matches!(
+                outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "{outcome:?}"
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result.matches("Repaired the queue.").count(), 1, "{result}");
+        assert!(
+            result.contains("&lt;!-- agent:queue --&gt;\n- leaked item\n&lt;!-- /agent:queue --&gt;"),
+            "{result}"
+        );
+        assert!(
+            agent_doc_element::element::structural_corruption_reason(&result).is_none(),
+            "{result}"
+        );
+        assert!(matches!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("cycle state")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        ));
+        assert_eq!(
+            agent_doc_session_check_io::current_unlandable_capture(&doc).unwrap(),
+            None
+        );
+    }
+
+    /// GH 90 ask 5: the escape hatch never rewrites a landable capture.
+    #[test]
+    fn gh90_requote_refuses_a_landable_capture_and_changes_nothing() {
+        let dir = setup_project();
+        let (doc, content) = gh90_append_doc(&dir);
+        let landable = "Explained `i<!-- /agent:queue -->` in backticks.\n";
+        agent_doc_capture_io::capture_response(&doc, landable).unwrap();
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("capture");
+
+        let err = agent_doc_repair_command_io::requote_unlandable_capture(&doc)
+            .expect_err("a landable capture must not be rewritten");
+        assert!(format!("{err:#}").contains("is landable"), "{err:#}");
+        assert_eq!(
+            agent_doc_repair_command_io::captured_finalize_resume_key(&doc).unwrap(),
+            Some(key),
+            "the original capture must be retained unchanged"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
     /// `#writeappliedcontinuation` — regression for the backend.md closeout
     /// captured by cycle-1787933898735. The response cell and its mutation plan
     /// were already materialized, then the supervisor replayed the whole

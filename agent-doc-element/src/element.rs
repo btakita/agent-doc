@@ -7,7 +7,10 @@
 //!   stack-based nesting model, and returns all `Component` values sorted by `open_start`.
 //! - Markers that appear inside fenced code blocks (backtick or tilde) or inline code spans are
 //!   skipped; `find_code_ranges(doc)` uses the `pulldown-cmark` AST (CommonMark-compliant) to
-//!   locate these regions.
+//!   locate these regions, plus same-line backtick spans (`find_line_local_code_spans`) that the
+//!   AST does not report inside HTML blocks or after an unmatched backtick (GH 90).
+//!   `structural_marker_occurrences(text)` is the shared "marker outside prose" scanner used by
+//!   the replay guard and the write-time landability check.
 //! - `is_agent_marker(comment_text)` classifies whether the inner text of a comment is an
 //!   agent open/close marker vs. an ordinary HTML comment.
 //! - Component names must match `[a-zA-Z0-9][a-zA-Z0-9-]*`; invalid names, unmatched opens,
@@ -1001,11 +1004,142 @@ pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
             _ => {}
         }
     }
+    // GH 90: the CommonMark AST answers "is this inline code?" only where the
+    // surrounding block admits inline parsing. Inside an HTML block (a line
+    // after `<details>`, `<div>`, `<br>`, an unterminated `<!-- note`, ...) or
+    // after an unmatched backtick earlier in the same paragraph, a
+    // backtick-quoted `` `i<!-- /agent:queue -->` `` is not a code span to
+    // pulldown-cmark, so the marker parser read prose about a marker as a real
+    // close and refused the whole document as
+    // `non_standalone_component_marker`. Whether those bytes are a component
+    // marker must not depend on what an unrelated earlier line looked like:
+    // a same-line backtick pair always quotes what it encloses.
+    for span in find_line_local_code_spans(doc) {
+        let covered = ranges
+            .iter()
+            .any(|&(start, end)| span.0 >= start && span.1 <= end);
+        if !covered {
+            ranges.push(span);
+        }
+    }
+    ranges.sort_unstable();
     let elapsed = t.elapsed().as_millis();
     if elapsed > 0 {
         eprintln!("[perf] find_code_ranges: {}ms", elapsed);
     }
     ranges
+}
+
+/// Byte ranges of inline code spans found by pairing backtick runs within a
+/// single line, independent of the enclosing Markdown block context
+/// (GH 90).
+///
+/// A run of `n` backticks opens a span that closes at the next run of exactly
+/// `n` backticks on the same line (the CommonMark pairing rule, restricted to
+/// one line). An unmatched run is literal text. Because the pairing never
+/// crosses a newline, it can never mask a marker that stands alone on its own
+/// line: such a line has no backtick before its `<!--`.
+pub fn find_line_local_code_spans(doc: &str) -> Vec<(usize, usize)> {
+    let bytes = doc.as_bytes();
+    let mut spans = Vec::new();
+    let mut offset = 0usize;
+    for raw_line in doc.split_inclusive('\n') {
+        let line_start = offset;
+        let line_end = line_start + raw_line.len();
+        offset = line_end;
+        if !raw_line.contains('`') {
+            continue;
+        }
+        let run_len = |at: usize| bytes[at..line_end].iter().take_while(|b| **b == b'`').count();
+        let mut i = line_start;
+        while i < line_end {
+            if bytes[i] != b'`' {
+                i += 1;
+                continue;
+            }
+            let open_len = run_len(i);
+            let mut j = i + open_len;
+            let mut close = None;
+            while j < line_end {
+                if bytes[j] != b'`' {
+                    j += 1;
+                    continue;
+                }
+                let len = run_len(j);
+                if len == open_len {
+                    close = Some(j + len);
+                    break;
+                }
+                j += len;
+            }
+            match close {
+                Some(end) => {
+                    spans.push((i, end));
+                    i = end;
+                }
+                None => i += open_len,
+            }
+        }
+    }
+    spans
+}
+
+/// Byte ranges in which marker-shaped text is prose rather than structure:
+/// code (fenced blocks, AST inline spans, and same-line backtick spans) plus
+/// same-line double-quoted spans. This is the one masking rule shared by the
+/// component parser, the structural-corruption gate, and the replay/write
+/// payload classifiers (GH 90), so they cannot disagree about whether a
+/// quoted marker is a marker.
+pub fn find_marker_prose_ranges(doc: &str) -> Vec<(usize, usize)> {
+    let mut ranges = find_code_ranges(doc);
+    ranges.extend(find_quoted_ranges(doc));
+    ranges
+}
+
+/// One component-marker occurrence that is NOT masked as prose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralMarkerOccurrence {
+    /// Byte offset of the marker's `<!--`.
+    pub start: usize,
+    /// 1-based line number.
+    pub line: usize,
+    /// Whether the marker leads its own line (only whitespace before `<!--`).
+    pub line_anchored: bool,
+}
+
+/// Every `<!-- agent:` / `<!-- /agent:` occurrence outside code and quoted
+/// prose, in document order (GH 90).
+///
+/// Unterminated markers are included — a `<!-- /agent:queue` with no `-->` is
+/// still marker-shaped structure, and the structural gate fails closed on it.
+/// Exchange-boundary markers are excluded; they are binary scaffolding with
+/// their own duplicate check.
+pub fn structural_marker_occurrences(text: &str) -> Vec<StructuralMarkerOccurrence> {
+    let masked = find_marker_prose_ranges(text);
+    let mut out = Vec::new();
+    let mut search_from = 0usize;
+    while let Some(relative) = text[search_from..].find("<!--") {
+        let start = search_from + relative;
+        search_from = start + "<!--".len();
+        let inner = text[search_from..].trim_start_matches([' ', '\t']);
+        if !(inner.starts_with("agent:") || inner.starts_with("/agent:")) {
+            continue;
+        }
+        let inner_end = inner.find("-->").unwrap_or(inner.len());
+        if is_agent_boundary_marker(&inner[..inner_end]) {
+            continue;
+        }
+        if byte_in_ranges(start, &masked) {
+            continue;
+        }
+        let line_start = text[..start].rfind('\n').map_or(0, |pos| pos + 1);
+        out.push(StructuralMarkerOccurrence {
+            start,
+            line: text[..start].bytes().filter(|byte| *byte == b'\n').count() + 1,
+            line_anchored: text[line_start..start].trim().is_empty(),
+        });
+    }
+    out
 }
 
 /// Find byte ranges of same-line double-quoted spans (`"..."`) — `#0kjc`/`#mdastquote`.
@@ -1577,6 +1711,17 @@ fn standalone_orphan_comment_terminator_reason(
         .count()
         + 1;
     Some(format!("orphan_html_comment_terminator:line{line}"))
+}
+
+/// Line ranges (including the trailing newline) of standalone orphan `-->`
+/// terminator lines outside code and quoted prose — the lines
+/// [`structural_corruption_reason`] reports as
+/// `orphan_html_comment_terminator`. Exposed so a recovery can ESCAPE those
+/// bytes in agent-authored text instead of deleting them (GH 90).
+pub fn standalone_orphan_comment_terminator_lines(doc: &str) -> Vec<(usize, usize)> {
+    let code_ranges = find_code_ranges(doc);
+    let quoted_ranges = find_quoted_ranges(doc);
+    standalone_orphan_comment_terminator_ranges(doc, &code_ranges, &quoted_ranges)
 }
 
 fn standalone_orphan_comment_terminator_ranges(
@@ -3739,6 +3884,94 @@ Fix applied to skip non-agent <!-- sequences.
                 .count(),
             1,
             "prefixed synthesized patch must not duplicate the already-typed prompt:\n{result}"
+        );
+    }
+
+    // --- GH 90: marker prose inside backticks is not structure ---
+
+    /// Contexts in which pulldown-cmark does NOT parse inline code, so the
+    /// AST alone left a backtick-quoted marker exposed to the marker parser.
+    const GH90_EXPOSING_CONTEXTS: &[&str] = &[
+        "<details>\n",
+        "<div>\n",
+        "<br>\n",
+        "<!-- note\nstill open\n",
+        "see `unclosed\n",
+    ];
+    const GH90_PROSE_LINE: &str =
+        "`i<!-- /agent:queue -->`. Fixed: marker restored, zero stray characters left.\n";
+
+    #[test]
+    fn gh90_backticked_marker_is_prose_in_every_block_context() {
+        for context in GH90_EXPOSING_CONTEXTS {
+            for doc in [
+                format!(
+                    "<!-- agent:exchange -->\n### Re: fix\n\n{context}{GH90_PROSE_LINE}<!-- /agent:exchange -->\n<!-- agent:queue -->\n- next\n<!-- /agent:queue -->\n"
+                ),
+                format!(
+                    "<!-- agent:queue -->\n- next\n{context}{GH90_PROSE_LINE}<!-- /agent:queue -->\n"
+                ),
+            ] {
+                assert_eq!(
+                    structural_corruption_reason(&doc),
+                    None,
+                    "a marker inside same-line backticks is prose, context {context:?}:\n{doc}"
+                );
+                let components = parse(&doc).expect("prose marker must not unbalance the parse");
+                assert!(
+                    components.iter().all(|c| doc[c.close_start..].starts_with("<!-- /agent:")
+                        && doc[..c.close_start].ends_with('\n')),
+                    "only the real, standalone close markers may be parsed: {doc}"
+                );
+                assert!(
+                    structural_marker_occurrences(&doc)
+                        .iter()
+                        .all(|occurrence| occurrence.line_anchored),
+                    "the quoted marker must not be reported as structure: {doc}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gh90_unquoted_welded_marker_still_fails_closed() {
+        // The corruption the backtick exemption must NOT excuse: an errant
+        // keystroke welded onto a real close marker, no code span anywhere.
+        let doc = "<!-- agent:queue -->\n- next\ni<!-- /agent:queue -->\n";
+        let reason = structural_corruption_reason(doc).expect("welded marker must be refused");
+        assert!(
+            reason.starts_with("non_standalone_component_marker:queue:close"),
+            "reason was: {reason}"
+        );
+        // A backtick pair on an EARLIER line does not reach across the newline.
+        let doc = "<!-- agent:queue -->\n- `a` and `b`\ni<!-- /agent:queue -->\n";
+        assert!(
+            structural_corruption_reason(doc)
+                .is_some_and(|reason| reason.starts_with("non_standalone_component_marker")),
+            "a backtick span never masks a marker on another line"
+        );
+    }
+
+    #[test]
+    fn gh90_line_local_code_spans_pair_equal_runs_on_one_line() {
+        let doc = "a `x` b ``y ` z`` c `open\nnext` d\n";
+        let spans: Vec<&str> = find_line_local_code_spans(doc)
+            .into_iter()
+            .map(|(start, end)| &doc[start..end])
+            .collect();
+        assert_eq!(spans, vec!["`x`", "``y ` z``"]);
+    }
+
+    #[test]
+    fn gh90_structural_marker_occurrences_classify_anchoring() {
+        let text = "<!-- agent:queue -->\nsee `<!-- /agent:queue -->` and \"<!-- agent:x -->\"\ntext <!-- /agent:queue -->\n<!-- agent:boundary:abc -->\n```\n<!-- agent:y -->\n```\n";
+        let found = structural_marker_occurrences(text);
+        assert_eq!(
+            found
+                .iter()
+                .map(|occurrence| (occurrence.line, occurrence.line_anchored))
+                .collect::<Vec<_>>(),
+            vec![(1, true), (3, false)],
         );
     }
 

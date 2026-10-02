@@ -264,6 +264,11 @@ struct CapturedFinalizeResumeRetry {
     retry_at: std::time::Instant,
     needs_operator: bool,
     trigger_published: bool,
+    /// GH 90: the captured bytes are deterministically refused. Unlike
+    /// `needs_operator`, no document-state edge retires this: only a different
+    /// operation key (the requoted re-capture, or a superseding cycle) does,
+    /// because `resume_retry` is reset whenever the key changes.
+    unlandable: bool,
 }
 
 /// Publish new document evidence to captured-finalize recovery, retire any
@@ -1863,6 +1868,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         retry_at: now + delay,
                         needs_operator: false,
                         trigger_published: false,
+                        unlandable: false,
                     });
                     let event = format!(
                         "captured_finalize_resume_lease_retry_scheduled file={} cycle_id={} capture_id={} response_sha256={} retry_at_secs={} delay_ms={} reason_bytes={} reason_sha256={} authority=editor_crdt no_force_disk=true",
@@ -1892,6 +1898,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         retry_at: now + delay,
                         needs_operator: false,
                         trigger_published: false,
+                        unlandable: false,
                             });
                             let event = format!(
                                 "captured_finalize_resume_retry_scheduled file={} cycle_id={} capture_id={} response_sha256={} attempt={} delay_ms={} reason_bytes={} reason_sha256={} authority=editor_crdt no_force_disk=true",
@@ -1906,6 +1913,43 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             );
                             log_event(&mut session_log, &event);
                             agent_doc_ops_log_io::log_op(&path, &event);
+                        }
+                        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Unlandable {
+                            reason,
+                            recovery,
+                        } => {
+                    // GH 90: the captured bytes can never land. Stop retrying
+                    // this key — a state edge cannot change the verdict — and
+                    // say exactly what unblocks it, once.
+                    let already_reported = resume_retry
+                        .as_ref()
+                        .is_some_and(|retry| retry.key == key && retry.unlandable);
+                    resume_retry = Some(CapturedFinalizeResumeRetry {
+                        key: key.clone(),
+                        attempts: 1,
+                        retry_at: now,
+                        needs_operator: false,
+                        trigger_published: true,
+                        unlandable: true,
+                    });
+                    let reason_head =
+                        agent_doc_supervisor::idle_watch::captured_finalize_resume_reason_head(
+                            &reason,
+                        );
+                    let event = format!(
+                        "captured_finalize_resume_unlandable file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=stop_retrying recovery=\"{recovery}\" reason_head=\"{reason_head}\"",
+                        path.display(),
+                        key.cycle_id,
+                        key.capture_id,
+                        key.response_sha256,
+                        reason.len(),
+                        agent_doc_hash::content_hash(&reason),
+                    );
+                    log_event(&mut session_log, &event);
+                    agent_doc_ops_log_io::log_op(&path, &event);
+                    if !already_reported {
+                        eprintln!("[agent-doc] {reason}");
+                    }
                         }
                         agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::NeedsOperator {
                             reason,
@@ -1925,6 +1969,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // already-pending state edge does. Neither wants a
                         // backoff edge published on top of it.
                         trigger_published: true,
+                        unlandable: false,
                     });
                     // `#needsoperatorstateedge`: carry a bounded, redacted head
                     // of the reason. A `reason_sha256` alone identifies the
@@ -2034,6 +2079,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 .as_ref()
                                 .filter(|retry| retry.key == key)
                                 .is_none_or(|retry| now >= retry.retry_at);
+                            // GH 90: a deterministically unlandable capture
+                            // is never re-attempted under the same key.
+                            let unlandable = resume_retry
+                                .as_ref()
+                                .filter(|retry| retry.key == key)
+                                .is_some_and(|retry| retry.unlandable);
                 let facts = CapturedFinalizeResumeFacts {
                     captured_operation_present: true,
                     // Diagnostic only: a captured finalize owns its closeout
@@ -2044,7 +2095,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 ipc_inflight: agent_doc_ipc_io::inflight_connection_handlers(),
                                 worker_in_flight: resume_worker.is_some(),
                                 retry_cooldown_elapsed: retry_cooldown_elapsed
-                                    && !needs_operator,
+                                    && !needs_operator
+                                    && !unlandable,
                                 controller_pressure_cooldown: agent_doc_controller_io::project_controller::controller_model_pressure_cooldown_active_for_doc(&path),
                         // A stale recycle is deferred while this capture's cycle
                         // is open. Blocking captured-finalize on that deferred
@@ -2090,6 +2142,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         + captured_finalize_resume_retry_delay(attempts),
                                     needs_operator: false,
                                     trigger_published: false,
+                                    unlandable: false,
                                 });
                                         eprintln!(
                                             "[agent-doc] warning: failed to spawn captured finalize resume worker: {err}"
@@ -5182,6 +5235,7 @@ mod tests {
             retry_at: now + std::time::Duration::from_secs(30),
             needs_operator: true,
             trigger_published: false,
+            unlandable: false,
         });
 
         assert!(observe_captured_finalize_document_edge(
@@ -5192,6 +5246,48 @@ mod tests {
         assert!(!retry.needs_operator);
         assert_eq!(retry.retry_at, now);
         assert!(retry.trigger_published);
+    }
+
+    /// GH 90: a deterministically unlandable capture is not retired by a
+    /// document-state edge (unlike `needs_operator`), and the start gate
+    /// refuses to re-attempt it under the same key.
+    #[test]
+    fn gh90_unlandable_capture_survives_state_edges_and_blocks_reattempts() {
+        let triggers = CapturedFinalizeResumeTriggers::new();
+        let key = agent_doc_repair_command_io::CapturedFinalizeResumeKey {
+            cycle_id: "cycle-a".to_string(),
+            capture_id: "capture-a".to_string(),
+            response_sha256: "response-a".to_string(),
+        };
+        triggers.observe_operation(Some("cycle-a:capture-a:response-a".to_string()));
+        triggers.consume_attempt();
+        let now = std::time::Instant::now();
+        let mut retry = Some(CapturedFinalizeResumeRetry {
+            key,
+            attempts: 1,
+            retry_at: now,
+            needs_operator: false,
+            trigger_published: true,
+            unlandable: true,
+        });
+        assert!(
+            !observe_captured_finalize_document_edge(&triggers, &mut retry, now),
+            "an unlandable verdict is not an operator gate a state edge clears"
+        );
+        assert!(retry.as_ref().is_some_and(|retry| retry.unlandable));
+
+        let source = include_str!("idle_watch.rs");
+        for needle in [
+            ["CapturedFinalizeResumeOutcome::", "Unlandable {"].concat(),
+            ["unlandable: ", "true,"].concat(),
+            ["&& !needs_operator\n", "                                    && !unlandable,"].concat(),
+            ["action=stop_retrying recovery=", "\\\"{recovery}\\\""].concat(),
+        ] {
+            assert!(
+                source.contains(needle.as_str()),
+                "idle watch lost the GH 90 unlandable wiring: missing `{needle}`"
+            );
+        }
     }
 
     #[test]
@@ -5211,6 +5307,7 @@ mod tests {
             retry_at: now + std::time::Duration::from_secs(300),
             needs_operator: false,
             trigger_published: false,
+            unlandable: false,
         });
 
         assert!(

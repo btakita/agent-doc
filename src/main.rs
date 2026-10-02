@@ -2653,6 +2653,14 @@ enum Commands {
         /// response, and never a disk-authority fallback.
         #[arg(long, conflicts_with = "apply_recovery")]
         resume_capture: bool,
+        /// Re-capture a retained response that can never land (GH 90) — its
+        /// bytes are refused by the replay guard or the structural gate, so
+        /// every resume fails identically — with ONLY its component-marker
+        /// text escaped, then land it through the normal closeout. Refuses,
+        /// changing nothing, when the capture is landable or the escape would
+        /// not make it landable.
+        #[arg(long, conflicts_with_all = ["apply_recovery", "resume_capture"])]
+        requote_unlandable_capture: bool,
     },
     /// Admit a live agent request by opening a lightweight response-cycle checkpoint
     Admit {
@@ -4232,7 +4240,17 @@ fn run_resume_capture(file: &Path) -> anyhow::Result<()> {
         key.cycle_id,
         key.capture_id,
     );
-    match agent_doc_repair_command_io::resume_captured_finalize(file, &key) {
+    report_resume_capture_outcome(
+        file,
+        agent_doc_repair_command_io::resume_captured_finalize(file, &key),
+    )
+}
+
+fn report_resume_capture_outcome(
+    file: &Path,
+    outcome: agent_doc_repair_command_io::CapturedFinalizeResumeOutcome,
+) -> anyhow::Result<()> {
+    match outcome {
         agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed {
             repair_outcome,
         } => {
@@ -4280,7 +4298,24 @@ fn run_resume_capture(file: &Path) -> anyhow::Result<()> {
                 file.display()
             )
         }
+        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Unlandable {
+            reason,
+            recovery,
+        } => {
+            anyhow::bail!("{reason} Recovery: `{recovery}`")
+        }
     }
+}
+
+/// GH 90: re-capture a deterministically unlandable response with its
+/// component-marker text escaped, then land it through the normal closeout.
+fn run_requote_unlandable_capture(file: &Path) -> anyhow::Result<()> {
+    eprintln!(
+        "[repair] re-capturing the unlandable captured response for {} with its component-marker text escaped",
+        file.display()
+    );
+    let outcome = agent_doc_repair_command_io::requote_unlandable_capture(file)?;
+    report_resume_capture_outcome(file, outcome)
 }
 
 fn init_tracing() {
@@ -5150,7 +5185,11 @@ fn try_main() -> anyhow::Result<()> {
             file,
             apply_recovery,
             resume_capture,
+            requote_unlandable_capture,
         } => {
+            if requote_unlandable_capture {
+                return run_requote_unlandable_capture(&file);
+            }
             if resume_capture {
                 return run_resume_capture(&file);
             }

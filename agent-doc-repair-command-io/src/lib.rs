@@ -38,6 +38,15 @@ pub enum CapturedFinalizeResumeOutcome {
     NeedsOperator {
         reason: String,
     },
+    /// GH 90: the captured response BYTES are refused by the landability
+    /// validators (`response_landability_refusal`). No controller, editor, or
+    /// document state edge can change that, so every retry surface must stop
+    /// retrying this capture and surface `recovery` — the exact command that
+    /// re-captures it with its marker text escaped.
+    Unlandable {
+        reason: String,
+        recovery: String,
+    },
 }
 
 pub fn run_write_command_with_empty_response_recovery(
@@ -293,6 +302,40 @@ pub fn resume_captured_finalize(
     };
     if current.as_ref() != Some(expected) {
         return CapturedFinalizeResumeOutcome::Superseded;
+    }
+
+    // GH 90: classify the captured bytes before any effect. A deterministic
+    // structural refusal used to surface only after the attempt reached some
+    // unrelated effect first (a native-save request to a dead editor pid), so
+    // the loop reported that effect's failure and retried forever.
+    match agent_doc_session_check_io::current_unlandable_capture(file) {
+        Ok(Some(unlandable))
+            if unlandable.capture_id == expected.capture_id
+                && unlandable.response_sha256 == expected.response_sha256 =>
+        {
+            let recovery = agent_doc_session_check_io::UnlandableCapture::recovery_command(file);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "captured_finalize_resume_{} file={} cycle_id={} capture_id={} response_sha256={} action=stop_retrying recovery=\"{recovery}\"",
+                    agent_doc_session_check_io::UNLANDABLE_CAPTURE_TOKEN,
+                    file.display(),
+                    expected.cycle_id,
+                    expected.capture_id,
+                    expected.response_sha256,
+                ),
+            );
+            return CapturedFinalizeResumeOutcome::Unlandable {
+                reason: unlandable.operator_report(file),
+                recovery,
+            };
+        }
+        Ok(_) => {}
+        Err(err) => {
+            return classify_captured_finalize_resume_error(&format!(
+                "captured response landability check failed: {err:#}"
+            ));
+        }
     }
 
     // `#writeappliedcontinuation`: the response command owns capture and
@@ -767,6 +810,131 @@ fn resume_captured_finalize_intent(
     )
 }
 
+/// The `refusing structurally invalid canonical target for <file> (<reason>)`
+/// clause of an error chain, if one is present (GH 90).
+fn structural_target_refusal_clause(reason: &str) -> Option<&str> {
+    const NEEDLE: &str = "refusing structurally invalid canonical target";
+    let start = reason.find(NEEDLE)?;
+    let clause = &reason[start..];
+    let end = clause.find("; ").unwrap_or(clause.len());
+    Some(&clause[..end])
+}
+
+/// GH 90 escape hatch: re-capture a deterministically unlandable response with
+/// its marker text escaped, then land it through the normal strict closeout.
+///
+/// Fails closed, mutating nothing, unless every precondition is proven:
+/// - there is a captured response a resume would replay, and its bytes are
+///   refused by `response_landability_refusal` (a landable capture is never
+///   rewritten — that is `--resume-capture`'s job);
+/// - escaping ONLY the marker-shaped bytes (`requote_unlandable_marker_text`)
+///   makes the same validator accept it;
+/// - the cycle can still accept a re-capture (`preflight_started` /
+///   `response_captured`), and every retained document-write intent is itself
+///   a structurally invalid target, so discarding it can never discard
+///   landable text. Operator text lives in the editor authority, not in those
+///   targets, and is untouched.
+///
+/// After the re-capture the operation is the ordinary captured-finalize resume
+/// of the new capture, so closeout stays one atomic response/mutation/commit
+/// transaction; if that resume is deferred, the new — landable — capture is
+/// what the loop retries.
+pub fn requote_unlandable_capture(file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
+    let capture = agent_doc_session_check_io::current_replayable_capture(file)?.with_context(|| {
+        format!(
+            "{} has no unmaterialized captured response to re-capture",
+            file.display()
+        )
+    })?;
+    let Some(unlandable) = agent_doc_session_check_io::unlandable_capture_reason(&capture) else {
+        anyhow::bail!(
+            "captured response {} for {} is landable; refusing to rewrite it. Resume it unchanged with `agent-doc repair {} --resume-capture`.",
+            capture.capture_id,
+            file.display(),
+            file.display(),
+        );
+    };
+    let body = agent_doc_session_check_io::captured_replay_body(&capture);
+    let requoted =
+        agent_doc_template::response_materialization::requote_unlandable_marker_text(body);
+    if let Some(still) =
+        agent_doc_template::response_materialization::response_landability_refusal(&requoted)
+    {
+        anyhow::bail!(
+            "escaping the component-marker text of captured response {} for {} did not make it landable ({still}); the capture is retained unchanged. Original refusal: {}",
+            capture.capture_id,
+            file.display(),
+            unlandable.reason,
+        );
+    }
+    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
+        anyhow::ensure!(
+            matches!(
+                state.phase,
+                agent_doc_turn::CyclePhase::PreflightStarted
+                    | agent_doc_turn::CyclePhase::ResponseCaptured
+            ),
+            "cycle {} for {} is `{:?}` and cannot accept a re-capture; the capture is retained unchanged",
+            state.cycle_id,
+            file.display(),
+            state.phase,
+        );
+    }
+    let journal = agent_doc_document_realtime_io::pending_document_write_journal(file);
+    for intent in &journal {
+        anyhow::ensure!(
+            agent_doc_element::element::structural_corruption_reason(&intent.target_content)
+                .is_some(),
+            "retained document write {} for {} is a structurally valid target; refusing to discard it while re-capturing. The capture is retained unchanged.",
+            intent.intent_id,
+            file.display(),
+        );
+    }
+    if !journal.is_empty() {
+        agent_doc_document_realtime_io::clear_all_deferred_document_write_intents(
+            file,
+            "repair_requote_unlandable_capture",
+        )?;
+    }
+    let baseline = match capture.baseline_content.clone() {
+        Some(baseline) => baseline,
+        None => agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "repair_requote_unlandable_capture",
+        )?,
+    };
+    agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+        file,
+        &requoted,
+        &baseline,
+        Some(&requoted),
+        capture.mutation_plan_json.as_deref(),
+    )?;
+    let requoted_sha256 = agent_doc_hash::content_hash(&requoted);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "captured_response_requoted file={} cycle_id={} capture_id={} old_response_sha256={} new_response_sha256={} cleared_retained_intents={} reason_bytes={}",
+            file.display(),
+            capture.cycle_id,
+            capture.capture_id,
+            capture.response_sha256,
+            requoted_sha256,
+            journal.len(),
+            unlandable.reason.len(),
+        ),
+    );
+    let key = captured_finalize_resume_key(file)?
+        .filter(|key| key.response_sha256 == requoted_sha256)
+        .with_context(|| {
+            format!(
+                "re-captured the requoted response for {} but no resume key names it",
+                file.display()
+            )
+        })?;
+    Ok(resume_captured_finalize(file, &key))
+}
+
 fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResumeOutcome {
     if let Some(retry_at_secs) = reason
         .split_once(agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER)
@@ -784,6 +952,15 @@ fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResu
         };
     }
     let lower = reason.to_ascii_lowercase();
+    // GH 90: a structurally invalid canonical target is the TRUE blocker even
+    // when a native-save verdict is also in the error chain. Lead with it, so
+    // the bounded `reason_head` the loop prints names the structural reason
+    // instead of a (possibly stale) editor-endpoint diagnosis.
+    if let Some(structural) = structural_target_refusal_clause(reason) {
+        return CapturedFinalizeResumeOutcome::NeedsOperator {
+            reason: format!("{structural} [structural_target_refusal]; full error: {reason}"),
+        };
+    }
     // An operator-required native-save verdict can be wrapped by the generic
     // editor-convergence context below. Classify its structural token first so
     // that context cannot demote a permanent plugin/binary generation fence
@@ -869,6 +1046,32 @@ mod captured_finalize_resume_tests {
             classify_captured_finalize_resume_error(&reason),
             CapturedFinalizeResumeOutcome::NeedsOperator { .. }
         ));
+    }
+
+    /// GH 90 ask 4: when the error chain carries a structural target refusal
+    /// AND a native-save verdict, the operator-visible reason leads with the
+    /// structural refusal, so the bounded `reason_head` the loop prints names
+    /// the true blocker instead of an editor-endpoint diagnosis.
+    #[test]
+    fn gh90_structural_target_refusal_leads_the_operator_reason() {
+        let reason = format!(
+            "native editor save for tasks/laptop/laptop.md requires operator inspection: diagnosis=plugin_generation_mismatch:1 [{}]: session_check_capture_without_retained_intent_native_save: refusing structurally invalid canonical target for tasks/laptop/laptop.md (non_standalone_component_marker:queue:close:line1740); current Lazily/editor authority is unchanged and pending intents remain retained",
+            agent_doc_document_realtime_io::EDITOR_NATIVE_SAVE_NEEDS_OPERATOR_TOKEN,
+        );
+        match classify_captured_finalize_resume_error(&reason) {
+            CapturedFinalizeResumeOutcome::NeedsOperator { reason } => {
+                assert!(
+                    reason.starts_with(
+                        "refusing structurally invalid canonical target for tasks/laptop/laptop.md (non_standalone_component_marker:queue:close:line1740) [structural_target_refusal]"
+                    ),
+                    "{reason}"
+                );
+                // The loop prints a bounded head of this reason.
+                let head: String = reason.chars().take(160).collect();
+                assert!(head.contains("non_standalone_component_marker"), "{head}");
+            }
+            other => panic!("expected NeedsOperator, got {other:?}"),
+        }
     }
 
     #[test]

@@ -4935,6 +4935,22 @@ fn native_save_capable_editor_kind(editor_kind: &str) -> bool {
     )
 }
 
+/// Split liveness-plane registrations into those whose editor process is live
+/// and those whose process has exited (GH 90). Pure apart from `is_live`.
+fn partition_live_editor_registrations(
+    registrations: Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>,
+    is_live: impl Fn(u32) -> bool,
+) -> (
+    Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>,
+    Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>,
+) {
+    registrations.into_iter().partition(|registration| {
+        u32::try_from(registration.pid)
+            .ok()
+            .is_some_and(&is_live)
+    })
+}
+
 fn generation_fenced_native_save_routes(
     registrations: Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>,
 ) -> (Vec<ReplicaSignalRoute>, Vec<NativeSaveGenerationMismatch>) {
@@ -4993,10 +5009,34 @@ pub fn request_native_save_for_current_projection(
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let _ = reliable_sync_editor_live_for_file(&canonical);
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-    let registrations = agent_doc_reliable_sync_io::global_liveness_plane()
-        .lock()
-        .projection()
-        .live_registrations(&document_hash);
+    // GH 90: re-resolved on every attempt, and filtered on pid liveness BEFORE
+    // the generation fence. A long-lived process's liveness projection can
+    // still hold a registration whose editor process exited (nothing publishes
+    // editor death into that plane), and the fence used to report that dead
+    // pid's old plugin version as the blocker — "align the installed editor
+    // plugin" against a plugin that was already aligned in the only live
+    // editor. `live_replica_signal_routes` already filters the same way.
+    let (registrations, dead_registrations) = partition_live_editor_registrations(
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .projection()
+            .live_registrations(&document_hash),
+        agent_doc_reliable_sync_io::process_pid_is_live,
+    );
+    for dead in &dead_registrations {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "native_editor_save_dead_registration_skipped file={} editor_pid={} editor_id={} editor_kind={} running={} content_hash={} reason=editor_process_not_live",
+                canonical.display(),
+                dead.pid,
+                dead.editor_id,
+                dead.editor_kind,
+                dead.editor_version,
+                expected_content_hash,
+            ),
+        );
+    }
     let (routes, generation_mismatches) = generation_fenced_native_save_routes(registrations);
 
     let found = routes.len() + generation_mismatches.len();
@@ -6112,6 +6152,86 @@ mod tests {
         assert_eq!(mismatches.len(), 1);
         assert_eq!(mismatches[0].route.editor_id, "jb-stale");
         assert_eq!(mismatches[0].expected, expected_jetbrains);
+    }
+
+    /// GH 90 — `tasks/laptop/laptop.md`: the native-save fence deferred
+    /// against `editor_pid=420330 running=0.2.455`, an editor two backend
+    /// restarts dead, while the only live registration (pid 836968) ran the
+    /// expected plugin. A dead pid must never reach the generation fence.
+    #[test]
+    fn gh90_dead_editor_registration_never_reaches_the_generation_fence() {
+        let expected_jetbrains =
+            agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("jetbrains")
+                .expect("JetBrains package generation baked by workspace build");
+        let registration = |pid, id: &str, version: &str| {
+            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: "doc".into(),
+                pid,
+                path: "/tmp/laptop.md".into(),
+                editor_id: id.into(),
+                editor_kind: "jetbrains".into(),
+                editor_version: version.into(),
+                capabilities: Vec::new(),
+                timestamp_ms: pid,
+            }
+        };
+        let (live, dead) = partition_live_editor_registrations(
+            vec![
+                registration(420330, "jetbrains-420330-dead", "0.0.1-dead"),
+                registration(836968, "jetbrains-836968-live", expected_jetbrains),
+            ],
+            |pid| pid == 836968,
+        );
+        assert_eq!(dead.len(), 1);
+        assert_eq!(dead[0].pid, 420330);
+        let (routes, mismatches) = generation_fenced_native_save_routes(live);
+        assert!(
+            mismatches.is_empty(),
+            "a dead editor's plugin version must not be reported as the blocker: {mismatches:?}"
+        );
+        assert_eq!(
+            routes
+                .iter()
+                .map(|route| route.editor_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["jetbrains-836968-live"]
+        );
+
+        // Every registration dead: nothing is live, so the outcome is
+        // `no_live_registration`, never a generation mismatch.
+        let (live, _) = partition_live_editor_registrations(
+            vec![registration(420330, "jetbrains-420330-dead", "0.0.1-dead")],
+            |_| false,
+        );
+        let (routes, mismatches) = generation_fenced_native_save_routes(live);
+        let outcome = ReplicaSignalOutcome {
+            found: routes.len() + mismatches.len(),
+            notified: 0,
+            build_mismatches: Vec::new(),
+            generation_mismatches: mismatches.len(),
+            definitive_refusals: 0,
+        };
+        assert_eq!(outcome.diagnosis(), "no_live_registration");
+
+        // The production effect must apply the liveness filter before the
+        // fence, on every attempt (the plane is re-read per call).
+        let source = include_str!("lib.rs");
+        let start = source
+            .find(&["pub fn request_native_save_for_", "current_projection("].concat())
+            .expect("native save effect exists");
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").expect("bounded body")];
+        let filter = body
+            .find(&["partition_live_editor_", "registrations("].concat())
+            .expect("native save must filter registrations on pid liveness");
+        let fence = body
+            .find(&["generation_fenced_native_", "save_routes(registrations)"].concat())
+            .expect("native save keeps its generation fence");
+        assert!(filter < fence, "liveness filter must precede the generation fence");
+        assert!(
+            body.contains("process_pid_is_live"),
+            "the production filter must use real pid liveness"
+        );
     }
 
     #[test]

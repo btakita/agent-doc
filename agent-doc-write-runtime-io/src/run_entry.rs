@@ -541,6 +541,35 @@ fn try_add_response_cell_via_realtime_backbone(
 ///
 /// `baseline` is the document content at the time the response was generated.
 /// If omitted, the current document content is used (no merge needed).
+/// GH 90 — refuse a response that can never land BEFORE anything captures it.
+///
+/// The same bytes used to be captured durably first and only then refused by
+/// the replay guard and the structural target gate, on every retry, forever:
+/// a capture nothing could land. `response_landability_refusal` runs those
+/// validators on the response bytes here, ahead of `save_pending*` and the
+/// strict-stream capture, so the caller gets the structural reason while it
+/// can still re-send a corrected response.
+pub(crate) fn refuse_unlandable_response_before_capture(file: &Path, response: &str) -> Result<()> {
+    let Some(reason) =
+        agent_doc_template::response_materialization::response_landability_refusal(response)
+    else {
+        return Ok(());
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "write_refused_unlandable_response_before_capture file={} response_sha256={} reason_bytes={} captured=false",
+            file.display(),
+            agent_doc_hash::content_hash(response),
+            reason.len(),
+        ),
+    );
+    anyhow::bail!(
+        "refusing to capture a response for {} that can never land: {reason}. Nothing was captured or written. Quote component-marker text in inline backticks or a fenced code block, then re-send the response.",
+        file.display(),
+    )
+}
+
 pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -588,6 +617,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
     let mut response = agent_doc_turn::response_text::strip_assistant_heading(&response);
+    refuse_unlandable_response_before_capture(file, &response)?;
     encode_no_pending_capture_intent(file, &mut response, flags.no_pending_capture);
     let pending_flags = super::pending_write_flags(&flags);
     agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
@@ -807,6 +837,7 @@ pub(crate) fn run_template(
         "template write",
     );
     sanitize_template_patchback_response(&mut response)?;
+    refuse_unlandable_response_before_capture(file, &response)?;
     enforce_imperative_response_contract_with_mutation_evidence(
         file,
         baseline,
@@ -1178,6 +1209,7 @@ pub(crate) fn run_stream(
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
     sanitize_template_patchback_response(&mut response)?;
+    refuse_unlandable_response_before_capture(file, &response)?;
 
     let preflight_application_base = capture_preflight_application_base_witness(file, baseline)?;
 
@@ -2218,6 +2250,7 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         "IPC write",
     );
     sanitize_template_patchback_response(&mut response)?;
+    refuse_unlandable_response_before_capture(file, &response)?;
     enforce_imperative_response_contract_with_mutation_evidence(
         file,
         baseline,
@@ -2365,6 +2398,7 @@ pub(crate) fn retain_ipc_patch_for_editor_authority_retry(
 ) -> Result<()> {
     let mut retained_response = response.to_string();
     sanitize_template_patchback_response(&mut retained_response)?;
+    refuse_unlandable_response_before_capture(file, &retained_response)?;
     let parsed = agent_doc_template_io::parse_template_patchback(
         file,
         &retained_response,

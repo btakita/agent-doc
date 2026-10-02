@@ -2772,6 +2772,28 @@ fn inspect_core_profiled(
             )
         })
     {
+        // GH 90: a capture whose bytes no validator will ever accept is not
+        // "pending" — resuming it is guaranteed to fail identically, and the
+        // resume path would report whatever unrelated effect failed first.
+        // Report the structural reason and the one command that clears it.
+        if let Some(unlandable) = crate::unlandable_capture::current_unlandable_capture(file)? {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "session_check_{} file={} cycle_id={} capture_id={} response_sha256={} action=stop_retrying recovery=\"{}\"",
+                    crate::unlandable_capture::UNLANDABLE_CAPTURE_TOKEN,
+                    file.display(),
+                    unlandable.cycle_id,
+                    unlandable.capture_id,
+                    unlandable.response_sha256,
+                    crate::unlandable_capture::UnlandableCapture::recovery_command(file),
+                ),
+            );
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: {}",
+                unlandable.operator_report(file).replace('\n', " ")
+            )));
+        }
         match effects.resume_captured_finalize(file)? {
             CapturedFinalizeResumeOutcome::Committed
             | CapturedFinalizeResumeOutcome::Superseded => {

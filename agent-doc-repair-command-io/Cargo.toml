@@ -12,9 +12,11 @@ name = "agent_doc_repair_command_io"
 
 [dependencies]
 agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.430" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.430" }
 agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.430" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.430" }
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.430" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.430" }
 agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.35.430" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.430" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.430" }

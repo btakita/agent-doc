@@ -822,6 +822,10 @@ fn validate_template_response_shape_before_tracked_work(
     agent_doc_template::response_materialization::sanitize_template_patchback_response(
         &mut response,
     )?;
+    // GH 90: tracked-work mutations dry-run next; an unlandable response must
+    // be refused before them, exactly as the write path refuses it before
+    // capture.
+    run_entry::refuse_unlandable_response_before_capture(file, &response)?;
     let parsed = agent_doc_template_io::parse_template_patchback(
         file,
         &response,

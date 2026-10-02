@@ -498,6 +498,97 @@ pub fn reject_marker_response_with_zero_patches(
     Ok(())
 }
 
+/// GH 90 — decide, from the response bytes alone, whether a response can EVER
+/// land, so the write path refuses it before durable capture instead of
+/// capturing it and then refusing the same bytes on every retry forever.
+///
+/// Two validators decide landability after capture, and this runs both on the
+/// same bytes the capture would hold:
+///
+/// 1. the replay guard's component-marker rule
+///    ([`crate::replay_guard::component_marker_dump_refusal`]) — what
+///    `agent-doc repair` applies to a captured payload;
+/// 2. the structural-corruption gate
+///    ([`agent_doc_element::element::structural_corruption_reason`]) — what
+///    every canonical document target must pass. Each response segment is
+///    sanitized exactly as the write path sanitizes it and placed alone inside
+///    a component. A segment that breaks that minimal document (an
+///    unterminated `<!-- /agent:queue`, an orphan `-->` line, an unclosed
+///    fence that swallows the component close) breaks every document it is
+///    written into, so no retry can land it.
+///
+/// Returns `None` for a landable response. Patch-shape problems are left to the
+/// strict patch validators, which already run before capture.
+pub fn response_landability_refusal(response: &str) -> Option<String> {
+    let trimmed = response.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(reason) = crate::replay_guard::component_marker_dump_refusal(trimmed) {
+        return Some(reason);
+    }
+    let Ok((mut patches, mut unmatched)) = crate::parse_patches(response) else {
+        return None;
+    };
+    crate::sanitize::sanitize_patches(&mut patches);
+    crate::sanitize::sanitize_unmatched(&mut unmatched);
+    let segments = patches
+        .iter()
+        .map(|patch| (patch.name.as_str(), patch.content.as_str()))
+        .chain(std::iter::once(("unmatched", unmatched.as_str())));
+    for (name, content) in segments {
+        let body = content.trim_matches(|c| c == '\n' || c == '\r');
+        if body.trim().is_empty() {
+            continue;
+        }
+        let probe = format!(
+            "<!-- agent:landability-probe -->\n{body}\n<!-- /agent:landability-probe -->\n"
+        );
+        if let Some(reason) = agent_doc_element::element::structural_corruption_reason(&probe) {
+            return Some(format!(
+                "its `{name}` body makes any document it is written into structurally invalid ({reason}; line numbers count the enclosing component marker as line 1)"
+            ));
+        }
+    }
+    None
+}
+
+/// GH 90 escape hatch — rewrite ONLY the marker-shaped bytes that make a
+/// response unlandable, so the same response can be re-captured and landed.
+///
+/// Every component-marker occurrence outside code and quoted prose
+/// ([`agent_doc_element::element::structural_marker_occurrences`]) has its
+/// `<` (and its same-line `-->`, when present) HTML-escaped — the exact
+/// transformation [`crate::sanitize::sanitize_component_tags`] already applies
+/// on every write — and every standalone orphan `-->` line has its `>`
+/// escaped. Nothing is deleted and no other byte changes; text inside code
+/// spans and fences is untouched. The caller must re-run
+/// [`response_landability_refusal`] on the result: this function does not
+/// claim success, it only performs the escape.
+pub fn requote_unlandable_marker_text(response: &str) -> String {
+    let mut out = response.to_string();
+    let occurrences = agent_doc_element::element::structural_marker_occurrences(&out);
+    for occurrence in occurrences.iter().rev() {
+        let start = occurrence.start;
+        let line_end = out[start..]
+            .find('\n')
+            .map_or(out.len(), |relative| start + relative);
+        if let Some(terminator) = out[start..line_end].find("-->") {
+            let terminator = start + terminator;
+            out.replace_range(terminator..terminator + "-->".len(), "--&gt;");
+        }
+        out.replace_range(start..start + 1, "&lt;");
+    }
+    let orphans = agent_doc_element::element::standalone_orphan_comment_terminator_lines(&out);
+    for (line_start, line_end) in orphans.into_iter().rev() {
+        if let Some(relative) = out[line_start..line_end].find("-->") {
+            let terminator = line_start + relative;
+            out.replace_range(terminator..terminator + "-->".len(), "--&gt;");
+        }
+    }
+    out
+}
+
 pub fn sanitize_template_patchback_response(response: &mut String) -> Result<()> {
     let Ok((patches, unmatched)) = crate::parse_patches(response) else {
         return Ok(());
@@ -528,6 +619,68 @@ pub fn sanitize_template_patchback_response(response: &mut String) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    /// GH 90 — the laptop.md payload names a marker inside backticks; it is
+    /// landable and must not be refused at write time.
+    #[test]
+    fn gh90_landability_accepts_marker_prose_in_backticks() {
+        for response in [
+            "### Re: marker — claude\n\n`i<!-- /agent:queue -->`. Fixed: marker restored.\n",
+            "<!-- patch:exchange -->\n### Re: marker — claude\n\n<details>\n`i<!-- /agent:queue -->`. Fixed.\n</details>\n<!-- /patch:exchange -->\n",
+            "### Re: marker — claude\n\nInline prose <!-- /agent:queue --> gets escaped on write.\n",
+        ] {
+            assert_eq!(response_landability_refusal(response), None, "{response}");
+        }
+    }
+
+    /// GH 90 — the escape hatch makes each unlandable shape landable, changes
+    /// nothing else, and leaves code spans verbatim.
+    #[test]
+    fn gh90_requote_makes_unlandable_bodies_landable_without_touching_code() {
+        for response in [
+            "### Re: x — claude\n\n<!-- agent:queue -->\n- leaked\n<!-- /agent:queue -->\nkeep `<!-- agent:status -->` verbatim\n",
+            "### Re: x — claude\n\nThe marker was <!-- /agent:queue\n",
+            "<!-- patch:exchange -->\n### Re: x — claude\n\nBody\n-->\n<!-- /patch:exchange -->\n",
+        ] {
+            assert!(response_landability_refusal(response).is_some(), "{response}");
+            let requoted = requote_unlandable_marker_text(response);
+            assert_eq!(
+                response_landability_refusal(&requoted),
+                None,
+                "requoted body must land:\n{requoted}"
+            );
+            assert_eq!(
+                requoted.replace("&lt;", "<").replace("&gt;", ">"),
+                response,
+                "only marker bytes may change"
+            );
+        }
+        let requoted = requote_unlandable_marker_text(
+            "### Re: x — claude\n\n<!-- agent:queue -->\nkeep `<!-- agent:status -->` verbatim\n",
+        );
+        assert!(requoted.contains("`<!-- agent:status -->`"), "{requoted}");
+        assert!(requoted.contains("&lt;!-- agent:queue --&gt;"), "{requoted}");
+    }
+
+    /// GH 90 — shapes no retry can ever land are refused from the bytes alone.
+    #[test]
+    fn gh90_landability_refuses_deterministically_unlandable_bodies() {
+        let dump = "### Re: x — claude\n\n<!-- agent:queue -->\n- a\n<!-- /agent:queue -->\n";
+        assert!(
+            response_landability_refusal(dump)
+                .is_some_and(|reason| reason.contains("full document component dump")),
+        );
+        let unterminated = "### Re: x — claude\n\nThe marker was <!-- /agent:queue\n";
+        let reason = response_landability_refusal(unterminated)
+            .expect("an unterminated marker can never land");
+        assert!(reason.contains("structurally invalid"), "{reason}");
+        let orphan = "<!-- patch:exchange -->\n### Re: x — claude\n\nBody\n-->\n<!-- /patch:exchange -->\n";
+        assert!(
+            response_landability_refusal(orphan)
+                .is_some_and(|reason| reason.contains("orphan_html_comment_terminator")),
+        );
+    }
 
     #[test]
     fn template_response_write_proof_rejects_empty_response_shells() {

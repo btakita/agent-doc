@@ -161,31 +161,33 @@ fn message_file_paths(segment: &str) -> Vec<String> {
 
 /// The `;`/`&&`/`|`/newline-separated segment that is a `git commit`, if any.
 fn commit_segment(command: &str) -> Option<&str> {
-    command.split(['\n', ';', '&', '|']).find(|segment| -> bool {
-        let mut words = segment.split_whitespace().skip_while(|word| {
-            matches!(*word, "sudo" | "env" | "rtk" | "proxy") || word.contains('=')
-        });
-        if words.next() != Some("git") {
-            return false;
-        }
-        // Global flags may take a VALUE (`git -C /repo commit`); consuming only
-        // the flag would mistake that value for the subcommand.
-        let mut rest = words.peekable();
-        while let Some(word) = rest.peek() {
-            if !word.starts_with('-') {
-                break;
+    command
+        .split(['\n', ';', '&', '|'])
+        .find(|segment| -> bool {
+            let mut words = segment.split_whitespace().skip_while(|word| {
+                matches!(*word, "sudo" | "env" | "rtk" | "proxy") || word.contains('=')
+            });
+            if words.next() != Some("git") {
+                return false;
             }
-            let takes_value = matches!(
-                *word,
-                "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--exec-path"
-            );
-            rest.next();
-            if takes_value {
+            // Global flags may take a VALUE (`git -C /repo commit`); consuming only
+            // the flag would mistake that value for the subcommand.
+            let mut rest = words.peekable();
+            while let Some(word) = rest.peek() {
+                if !word.starts_with('-') {
+                    break;
+                }
+                let takes_value = matches!(
+                    *word,
+                    "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--exec-path"
+                );
                 rest.next();
+                if takes_value {
+                    rest.next();
+                }
             }
-        }
-        rest.next() == Some("commit")
-    })
+            rest.next() == Some("commit")
+        })
 }
 
 /// Decide whether a tool call may proceed.
@@ -226,21 +228,20 @@ pub fn pretooluse_decision(
     if coined.is_empty() {
         return PreToolUseDecision::Allow;
     }
-    // Second pass, deliberately lazy (`#hookhashanchortags`). An anchor like
-    // `#preflightinbinary` or `#drain-no-defer` names a documented invariant in
-    // AGENTS.md, a SKILL, a runbook, or a spec — that is tracked work, and
-    // quoting it by name is the correct thing to do, so blocking it is pure
-    // noise. But those files are hundreds of kilobytes and this runs on every
-    // Edit, so they are read ONLY once something is already about to be
-    // blocked. The overwhelmingly common call carries no id at all and returned
-    // above without touching the disk.
+    // Second pass, deliberately lazy (`#hookhashanchortags`, GH 92). An anchor
+    // like `#preflightinbinary` names a documented invariant (AGENTS.md, a
+    // SKILL, a runbook, a spec, or agent-doc's own Rust comments), and an id
+    // tracked in a SIBLING session document is a citation of a decision that
+    // document owns. Quoting either is correct, so blocking it is pure noise.
+    // Those reads cost a project walk, so they happen ONLY once something is
+    // already about to be blocked. The overwhelmingly common call carries no id
+    // at all and returned above without touching the disk.
     let coined = match project_root {
         Some(root) => {
-            let anchors = agent_doc_fs::instruction_surface_anchors(root);
-            coined
-                .into_iter()
-                .filter(|tag| !anchors.contains(tag))
-                .collect::<Vec<_>>()
+            if is_outside_project_or_ignored(tool_name, tool_input, root) {
+                return PreToolUseDecision::Allow;
+            }
+            agent_doc_element_backlog_io::cross_document::unresolved_in_project(root, coined)
         }
         None => coined,
     };
@@ -277,12 +278,57 @@ pub fn pretooluse_decision(
     PreToolUseDecision::Deny {
         reason: format!(
             "[agent-doc] blocked: this {tool_name} would write coined id(s) {names} into {target}, \
-             but they are not tracked in agent:backlog, agent:queue, agent:done, or agent:review. \
-             An id in source or a commit message with no tracked item resolves to nothing later. \
-             File one first (`agent-doc write --commit <FILE> --backlog-add \"#<id> ...\"`), reuse \
+             but they are not tracked in agent:backlog, agent:queue, agent:done, or agent:review \
+             of this document or any other session document in the project, and no instruction \
+             or source anchor defines them. An id in source or a commit message with no tracked \
+             item resolves to nothing later. File one first (`agent-doc write --commit <FILE> --backlog-add \"#<id> ...\"`), reuse \
              an existing id, or drop the tag from the text."
         ),
     }
+}
+
+/// A file write the project's history can never see is none of this guard's
+/// business (GH 92): a target outside the project root, or one git ignores
+/// (an issue draft under an ignored `tmp/`). The guard exists because a tag in
+/// source or a commit message becomes durable; a scratch file does not. Commit
+/// messages always count. Runs only on the deny path, so the `git` spawn never
+/// touches the common call, and any failure to decide falls back to guarding.
+fn is_outside_project_or_ignored(
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+    root: &Path,
+) -> bool {
+    if tool_name == "Bash" {
+        return false;
+    }
+    let Some(target) = tool_input
+        .get("file_path")
+        .or_else(|| tool_input.get("notebook_path"))
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from)
+    else {
+        return false;
+    };
+    let target = if target.is_absolute() {
+        target
+    } else {
+        root.join(target)
+    };
+    if !target.starts_with(root) {
+        return true;
+    }
+    let Some(parent) = target.parent().filter(|parent| parent.is_dir()) else {
+        return false;
+    };
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(parent)
+        .args(["check-ignore", "-q", "--no-index", "--"])
+        .arg(&target)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn coined_id_scan_text<'a>(
@@ -568,7 +614,10 @@ mod tests {
     /// A command with no commit records nothing, however much it mentions one.
     #[test]
     fn a_command_that_records_no_message_is_not_scanned() {
-        assert_eq!(commit_scan_text("git add -A && echo 'about to commit'"), None);
+        assert_eq!(
+            commit_scan_text("git add -A && echo 'about to commit'"),
+            None
+        );
         assert_eq!(commit_scan_text("grep -r 'git commit' ."), None);
     }
 
@@ -781,8 +830,9 @@ mod tests {
         )
         .unwrap();
 
+        let target = dir.path().join("src/notes.md");
         let input = json!({
-            "file_path": "/repo/src/notes.md",
+            "file_path": target.to_str().unwrap(),
             "content": "Followed #ci-no-closeout-wait, #preflightinbinary and #drain-no-defer.\n"
         });
 
@@ -816,8 +866,9 @@ mod tests {
         )
         .unwrap();
 
+        let target = dir.path().join("src/notes.md");
         let input = json!({
-            "file_path": "/repo/src/notes.md",
+            "file_path": target.to_str().unwrap(),
             "content": "Per #preflightinbinary, and also #inventedrightnow.\n"
         });
 
@@ -840,8 +891,9 @@ mod tests {
     #[test]
     fn a_project_without_instruction_surfaces_is_unchanged() {
         let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("src/notes.md");
         let input = json!({
-            "file_path": "/repo/src/notes.md",
+            "file_path": target.to_str().unwrap(),
             "content": "Coined #inventedrightnow here.\n"
         });
 
@@ -1111,5 +1163,97 @@ mod tests {
             known_ids_for_document(Path::new("/nonexistent/definitely/not/here.md")),
             Err("reading the document: No such file or directory (os error 2)".to_string())
         );
+    }
+
+    /// GH 92: a decision tracked in a SIBLING session document is a citation.
+    /// Writing it into project source is allowed; an id tracked nowhere still
+    /// blocks, and the deny names only that id.
+    #[test]
+    fn an_id_tracked_in_a_sibling_session_document_is_a_citation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/pmt2")).unwrap();
+        std::fs::write(
+            root.join("tasks/pmt2/offline-mode.md"),
+            "---\nagent_doc_session: s1\n---\n\n<!-- agent:review -->\n- [/] [#pushurl] push. What is the url?\n<!-- /agent:review -->\n",
+        )
+        .unwrap();
+        let target = root.join("src/notes.md");
+        let input = json!({
+            "file_path": target.to_str().unwrap(),
+            "content": "Blocked on #pushurl, tracked elsewhere.\n"
+        });
+        assert_eq!(
+            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[])), Some(root)),
+            PreToolUseDecision::Allow
+        );
+
+        let input = json!({
+            "file_path": target.to_str().unwrap(),
+            "content": "Blocked on #pushurl and #inventedrightnow.\n"
+        });
+        match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[])), Some(root)) {
+            PreToolUseDecision::Deny { reason } => {
+                assert!(reason.contains("#inventedrightnow"), "{reason}");
+                assert!(!reason.contains("#pushurl"), "{reason}");
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    /// GH 92: a write the project's history can never see is not guarded — a
+    /// target outside the project root, or one git ignores. A commit message is
+    /// always guarded, and a tracked path in the same repo still blocks.
+    #[test]
+    fn writes_outside_the_project_or_git_ignored_are_not_guarded() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"]);
+        std::fs::write(root.join(".gitignore"), "tmp/\n").unwrap();
+        std::fs::create_dir_all(root.join("tmp/agent-doc-issues")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let ids = DocumentIds::Known(known(&[]));
+        let write = |path: std::path::PathBuf| json!({"file_path": path.to_str().unwrap(), "content": "About #inventedrightnow.\n"});
+
+        assert_eq!(
+            pretooluse_decision(
+                "Write",
+                &write(root.join("tmp/agent-doc-issues/18.md")),
+                &ids,
+                Some(root)
+            ),
+            PreToolUseDecision::Allow
+        );
+        assert_eq!(
+            pretooluse_decision(
+                "Write",
+                &write(std::path::PathBuf::from("/elsewhere/draft.md")),
+                &ids,
+                Some(root)
+            ),
+            PreToolUseDecision::Allow
+        );
+        assert!(matches!(
+            pretooluse_decision("Write", &write(root.join("src/notes.md")), &ids, Some(root)),
+            PreToolUseDecision::Deny { .. }
+        ));
+        assert!(matches!(
+            pretooluse_decision(
+                "Bash",
+                &json!({"command": "git commit -m 'fix #inventedrightnow'"}),
+                &ids,
+                Some(root)
+            ),
+            PreToolUseDecision::Deny { .. }
+        ));
     }
 }

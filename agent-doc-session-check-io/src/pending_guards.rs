@@ -151,6 +151,28 @@ fn known_ids_for_coined_guard(file: &Path, content: &str) -> Result<BTreeSet<Str
     Ok(known)
 }
 
+/// GH 92: the coined ids the document's CURRENT `exchange` still carries.
+///
+/// The guard reads the committed capture, which a later node-safe repair
+/// (`exchange remove` + `add-response`) or an operator edit does not rewrite.
+/// Re-deriving from live content is what lets removing the citation clear the
+/// warn. An unparseable document keeps every id: this filter may only drop a
+/// report whose evidence is provably gone.
+fn still_cited_in_live_exchange(content: &str, coined: Vec<String>) -> Vec<String> {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return coined;
+    };
+    let live: BTreeSet<String> = components
+        .iter()
+        .filter(|component| component.name == "exchange")
+        .flat_map(|component| agent_doc_turn::coined_ids::extract_tags(component.content(content)))
+        .collect();
+    coined
+        .into_iter()
+        .filter(|tag| live.contains(tag))
+        .collect()
+}
+
 /// `#coinedid` — the response invented `#id` tags that no tracked item records.
 ///
 /// The known universe is every component EXCEPT `exchange`: after commit the
@@ -184,22 +206,23 @@ pub fn check_coined_ids_guard(file: &Path, _rc: &CycleContext) -> Result<GuardRe
         return Ok(GuardResult::None);
     };
     let coined = agent_doc_turn::coined_ids::coined_ids(&response_text, &known);
-    // Second pass, lazy on purpose (`#hookhashanchortags`). An anchor such as
-    // `#ci-no-closeout-wait` names a documented invariant in AGENTS.md, a SKILL,
-    // a runbook, or a spec; a response that cites the rule by name is doing the
-    // right thing, and warning about it trains the reader to ignore this guard.
-    // Reading those files costs hundreds of kilobytes, so it happens only when
-    // something is already about to be reported. Same file set as the
-    // `PreToolUse` guard, from the same place, so the two cannot drift.
+    // GH 92: re-derive from CURRENT content. The captured body is what the
+    // cycle committed, but an operator or a node-safe repair (`exchange remove`
+    // + `add-response`) may since have rewritten the citation away. A warn that
+    // survives its own remedy trains the reader to ignore it, so an id the live
+    // exchange no longer carries is not reported.
+    let coined = still_cited_in_live_exchange(&content, coined);
+    // Widening passes, lazy on purpose (`#hookhashanchortags`, GH 92): an
+    // instruction or source anchor names a documented invariant, and an id
+    // tracked in a sibling session document is a citation of the decision that
+    // document owns. Both cost a project read, so they run only when something
+    // is already about to be reported — through the same predicate the
+    // `PreToolUse` guard reads, so the two cannot drift.
     let coined = match agent_doc_fs::find_project_root(file) {
-        Some(root) if !coined.is_empty() => {
-            let anchors = agent_doc_fs::instruction_surface_anchors(&root);
-            coined
-                .into_iter()
-                .filter(|tag| !anchors.contains(tag))
-                .collect::<Vec<_>>()
+        Some(root) => {
+            agent_doc_element_backlog_io::cross_document::unresolved_in_project(&root, coined)
         }
-        _ => coined,
+        None => coined,
     };
     Ok(agent_doc_workflow::session_check::coined_ids_guard_result(
         &coined,
@@ -321,6 +344,23 @@ mod tests {
             agent_doc_turn::coined_ids::coined_ids("#actionable-review and #inventedhere", &known),
             vec!["inventedhere".to_string()],
             "an unregistered id must still coin"
+        );
+    }
+}
+
+#[cfg(test)]
+mod coined_live_exchange_tests {
+    use super::still_cited_in_live_exchange;
+
+    /// GH 92: removing a citation from the live exchange clears its warn, while
+    /// an id the exchange still carries keeps it.
+    #[test]
+    fn a_citation_rewritten_out_of_the_live_exchange_is_not_reported() {
+        let content = "---\nagent_doc_session: s\n---\n\n<!-- agent:exchange -->\n### Re: x\nStill cites #keptid; the other was rewritten as prose.\n<!-- /agent:exchange -->\n";
+        let coined = vec!["keptid".to_string(), "pushurl".to_string()];
+        assert_eq!(
+            still_cited_in_live_exchange(content, coined),
+            vec!["keptid".to_string()]
         );
     }
 }

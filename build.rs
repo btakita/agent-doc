@@ -43,4 +43,76 @@ fn main() {
     }
 
     println!("cargo:rustc-env=AGENT_DOC_BUILD_ID={build_id}");
+
+    write_source_anchors(&root, &inputs);
+}
+
+/// GH 92: the `#anchor` tokens agent-doc's own Rust comments define, written to
+/// `$OUT_DIR/source_anchors.txt` for `agent_doc_fs::register_source_anchors`.
+///
+/// Taken over the same enumeration as the build identity, so it is re-derived
+/// exactly when the sources are. Deliberately loose — only `//` comment text,
+/// only `#` not glued to a preceding word — because the runtime re-parses the
+/// tokens through `extract_tags`, the single tag grammar; this only has to avoid
+/// shipping string-literal and code noise.
+fn write_source_anchors(root: &std::path::Path, inputs: &[PathBuf]) {
+    let mut tokens = std::collections::BTreeSet::new();
+    for relative in inputs {
+        if relative.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(root.join(relative)) else {
+            continue;
+        };
+        for line in content.lines() {
+            let Some(comment) = comment_text(line) else {
+                continue;
+            };
+            let chars: Vec<char> = comment.chars().collect();
+            for (index, ch) in chars.iter().enumerate() {
+                if *ch != '#' {
+                    continue;
+                }
+                if index > 0
+                    && (chars[index - 1].is_alphanumeric()
+                        || chars[index - 1] == '_'
+                        || chars[index - 1] == '-')
+                {
+                    continue;
+                }
+                let token: String = chars[index + 1..]
+                    .iter()
+                    .take_while(|c| {
+                        c.is_ascii_lowercase() || c.is_ascii_digit() || **c == '-' || **c == '_'
+                    })
+                    .collect();
+                if token.len() >= 2 {
+                    tokens.insert(token);
+                }
+            }
+        }
+    }
+    let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR is set by cargo"));
+    let body = tokens
+        .iter()
+        .map(|token| format!("#{token}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(out.join("source_anchors.txt"), body)
+        .unwrap_or_else(|error| panic!("failed to write source anchors: {error}"));
+}
+
+/// The comment portion of a source line: a whole-line `//` comment, or a
+/// trailing ` // ` comment outside any string literal (even quote count).
+fn comment_text(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("//") {
+        return Some(rest);
+    }
+    let index = line.find(" // ")?;
+    line[..index]
+        .matches('"')
+        .count()
+        .is_multiple_of(2)
+        .then(|| &line[index + 4..])
 }

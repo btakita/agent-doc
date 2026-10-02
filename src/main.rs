@@ -4378,6 +4378,12 @@ fn init_tracing() {
 }
 
 fn main() -> ExitCode {
+    // GH 92: anchors defined in agent-doc's own Rust comments vouch for a cited
+    // id in both coined-id guards (`agent_doc_fs::instruction_surface_anchors`).
+    agent_doc_fs::register_source_anchors(include_str!(concat!(
+        env!("OUT_DIR"),
+        "/source_anchors.txt"
+    )));
     match try_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

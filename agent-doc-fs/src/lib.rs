@@ -1199,7 +1199,7 @@ fn submodule_instruction_files(root: &Path) -> Vec<PathBuf> {
 /// never a missed one. It is the mirror image of `known_ids_for_document`,
 /// which fails closed because it is the primary ledger.
 pub fn instruction_surface_anchors(root: &Path) -> BTreeSet<String> {
-    let mut anchors = BTreeSet::new();
+    let mut anchors = source_anchors();
     for file in instruction_surface_files(root) {
         if let Ok(content) = std::fs::read_to_string(&file) {
             anchors.extend(agent_doc_turn::coined_ids::extract_tags(&content));
@@ -1207,9 +1207,160 @@ pub fn instruction_surface_anchors(root: &Path) -> BTreeSet<String> {
     }
     anchors
 }
+
+static SOURCE_ANCHORS: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// Register the anchors agent-doc's OWN Rust comments define (GH 92).
+///
+/// A large share of the project's vocabulary is defined in `///`/`//!` doc
+/// comments (`#coinedguardledgerasymmetry` lives in `done_archive.rs`), and the
+/// markdown surfaces above never see it — so citing the codebase's own anchor
+/// was reported as coining one, in every project, including ones that do not
+/// carry agent-doc's source at all. The binary's build script extracts those
+/// tokens from the same source set its build identity hashes and the binary
+/// registers them here once at startup. Unregistered (unit tests, the cdylib)
+/// means "no source anchors", which only ever narrows what is allowed.
+pub fn register_source_anchors(tokens: &'static str) {
+    let _ = SOURCE_ANCHORS.set(tokens);
+}
+
+/// Anchors registered via [`register_source_anchors`], parsed through the one
+/// tag grammar (`extract_tags`) so the build script cannot define a looser one.
+pub fn source_anchors() -> BTreeSet<String> {
+    SOURCE_ANCHORS
+        .get()
+        .map(|tokens| agent_doc_turn::coined_ids::extract_tags(tokens))
+        .unwrap_or_default()
+}
+
+/// Every markdown file in the project's own tracked-work namespace.
+///
+/// The one walk shared by the cross-document guards (transfer evidence and
+/// coined-id citation): hidden dirs, `node_modules`, and `target` are skipped,
+/// and a nested directory with its own `.agent-doc/` or `.git` is a different
+/// project whose ledger is not this one's.
+pub fn project_markdown_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with('.') || name == "node_modules" || name == "target" {
+                    continue;
+                }
+                if path.join(".agent-doc").is_dir() || path.join(".git").exists() {
+                    continue;
+                }
+                dirs.push(path);
+            } else if file_type.is_file()
+                && path.extension().and_then(|extension| extension.to_str()) == Some("md")
+            {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// Session documents under `root`: project markdown whose frontmatter declares
+/// `agent_doc_session:` (GH 92).
+///
+/// An id tracked in a SIBLING session document is a reference, not invented
+/// work — one blocker is routinely reached from several documents, and the
+/// standing rule is to track a decision once. Only the first few KiB of each
+/// file are read to test the frontmatter, so a tree of thousands of plain
+/// markdown files costs a directory walk, not a content read. Callers run this
+/// lazily, only once something is already about to be reported.
+pub fn project_session_documents(root: &Path) -> Vec<PathBuf> {
+    use std::io::Read;
+    const FRONTMATTER_PROBE_BYTES: usize = 4096;
+    project_markdown_files(root)
+        .into_iter()
+        .filter(|path| {
+            let Ok(file) = std::fs::File::open(path) else {
+                return false;
+            };
+            let mut head = Vec::with_capacity(FRONTMATTER_PROBE_BYTES);
+            if file
+                .take(FRONTMATTER_PROBE_BYTES as u64)
+                .read_to_end(&mut head)
+                .is_err()
+            {
+                return false;
+            }
+            is_session_frontmatter(&String::from_utf8_lossy(&head))
+        })
+        .collect()
+}
+
+fn is_session_frontmatter(head: &str) -> bool {
+    let Some(body) = head
+        .strip_prefix("---\n")
+        .or_else(|| head.strip_prefix("---\r\n"))
+    else {
+        return false;
+    };
+    for line in body.lines() {
+        if line.trim_end() == "---" {
+            return false;
+        }
+        if line.starts_with("agent_doc_session:") {
+            return true;
+        }
+    }
+    false
+}
 #[cfg(test)]
 mod instruction_surface_tests {
     use super::*;
+
+    /// GH 92: sibling session documents are found by frontmatter, a nested
+    /// project and hidden/build dirs are not walked, and a plain markdown file
+    /// that merely mentions the key in its body is not a session document.
+    #[test]
+    fn project_session_documents_finds_siblings_by_frontmatter_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let session = "---\nagent_doc_session: abc\n---\n\nbody\n";
+        std::fs::create_dir_all(root.join("tasks/pmt2")).unwrap();
+        std::fs::write(root.join("tasks/pmt2/offline-mode.md"), session).unwrap();
+        std::fs::write(root.join("tasks/a.md"), session).unwrap();
+        std::fs::write(
+            root.join("tasks/notes.md"),
+            "# notes\nagent_doc_session: not frontmatter\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/other-front.md"),
+            "---\ntitle: x\n---\nagent_doc_session: after fence\n",
+        )
+        .unwrap();
+        for skipped in ["node_modules", "target", ".hidden", "nested", "submodule"] {
+            std::fs::create_dir_all(root.join(skipped)).unwrap();
+            std::fs::write(root.join(skipped).join("doc.md"), session).unwrap();
+        }
+        std::fs::create_dir_all(root.join("nested/.agent-doc")).unwrap();
+        std::fs::write(root.join("submodule/.git"), "gitdir: ../.git/modules/x\n").unwrap();
+
+        let found = project_session_documents(root);
+        assert_eq!(
+            found,
+            vec![
+                root.join("tasks/a.md"),
+                root.join("tasks/pmt2/offline-mode.md")
+            ]
+        );
+    }
 
     #[test]
     fn anchors_come_from_every_instruction_surface() {

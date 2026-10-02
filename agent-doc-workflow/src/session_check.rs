@@ -154,7 +154,7 @@ pub fn coined_ids_guard_result(coined: &[String]) -> GuardResult {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        "[session-check] hint: file a backlog item for each coined id (`--backlog-add \"#<id> ...\"`) or reuse an existing id — an id in a commit message or code comment with no tracked item resolves to nothing later"
+        "[session-check] hint: these ids are tracked in no session document of this project and no instruction or source anchor defines them — file a backlog item for each (`--backlog-add \"#<id> ...\"`), reuse an existing id, or drop the tag; an id in a commit message or code comment with no tracked item resolves to nothing later"
             .to_string(),
     ])
 }

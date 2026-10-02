@@ -619,6 +619,24 @@ The exchange is over 500 lines; I'm still draining the queue rather than stoppin
 **Verification:** 618 Kotlin tests pass; `make check` passed (10,335 tests); installed and hot-swapped with no restart needed; pushed.
 
 The exchange is now 569 lines; I'm continuing the queue rather than stopping to compact.
+
+### Re: #gh-fix GH #89, the stale 🚧, and the Stop-hook block — opus-5.5 · 2026-10-01T20:18-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/89
+
+**GH #89: fixed and closed** (`d00b412c9`). After a rename, the route refused the one pane the registry binds the renamed document to. The pane's supervisor argv still named the old path, and argv is fixed when the process starts. The occupant check now treats that argv document as a stale spawn-time name when two things hold: the registry binds the routed document to the pane, and no entry still binds the argv document to it. The pane then reads as free, logged as `pane_occupant_stale_argv_identity`. A pane that is still bound to another document keeps the cross-document guard. The fix sits in `pane_occupant_for_document`, so route, the controller's orphan drain and sync's layout reuse all get it. Unit tests cover the rename case, a pane still bound to the argv document, and a pane with no binding.
+
+**Two fixes from the earlier turns.** Neither of those turns reached this document, so they are recorded here.
+
+- **Stale `- 🚧 release + publish`** (`b90676808`). Queue maintenance put `🚧` on "release + publish" while it was the only live head. You then queued two heads above it. A baseline rebuilt from HEAD lost the marker, so preflight saw the binary's own `🚧` as newly added and treated it as you choosing that head. Selection stayed stuck on it. Cycle state now records the heads the binary marked itself (`projected_in_progress_queue_heads`), and a marker on one of those is never read as your choice. Moving the marker yourself is still honored. This cycle selected #89 correctly. The visible `🚧` should move on the next queue pass; if it doesn't, deleting it by hand is safe.
+- **Stop-hook block** (`81034a801`). Two causes:
+  - The stale-lock repair closed my abandoned cycle with no response, and your next trigger was refused. The Stop hook still blocked the final answer and ordered a `/loop` that could only hit the same refusal. A closed run with no captured response now lets the final answer through (`#stopnoresponserun`), so you see the refusal.
+  - The hook's message said "Invoke the `loop` skill now". A Skill call never runs `UserPromptSubmit`, so it admits nothing on any iteration; I confirmed that on this run. The hook message, the `SKILL.md` auto-loop section and the harness runbook now give the re-entry that works: `ScheduleWakeup` submitting `/loop agent-doc <FILE>` (`#loopskillnoadmit`).
+- **My mistake behind the first block:** I ended a turn while `make check` was still running in the background, which left its cycle open. I now wait for builds inside the turn.
+
+**Verification:** `make check` passed after each fix (10341 tests on the last run). `make install` is done and everything is pushed. CI for these pushes is still running. Release stays with the queued `release + publish` head. Next head: `do [#staleeditorregprune]`.
+
+The exchange is 590+ lines; I'm continuing the queue rather than stopping to compact.
 <!-- agent:boundary:9acd1e79 -->
 <!-- /agent:exchange -->
 
@@ -645,9 +663,10 @@ The exchange is now 569 lines; I'm continuing the queue rather than stopping to 
 - ~~do [#jbrejectlog]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/87~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/88~~
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/89
 - do [#staleeditorregprune]
 - do [#sdkingressstall]
-- 🚧 release + publish
+- release + publish
 - agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
 <!-- /agent:queue --> 
 

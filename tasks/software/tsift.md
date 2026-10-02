@@ -42,6 +42,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): #ciwalflakeregress; Response; release + publish; 1 more
 - Prior summary/context: prior compacted content: Archived 16 response topic(s): fpe.md runaway tsift task; agent-doc commit and push check; t...
+
+### Re: recovered response
+
+Published successfully.
+
+- `main` and `v0.1.101` point to `7b18e0a`.
+- [Release workflow](https://github.com/btakita/tsift/actions/runs/36965897098): passed.
+- [GitHub release](https://github.com/btakita/tsift/releases/tag/v0.1.101): published with Linux, Windows, and macOS assets.
+- crates.io `tsift-cli`: `0.1.101`.
+- npm `opencode-tsift`: `0.1.101`.
+- [Main CI](https://github.com/btakita/tsift/actions/runs/36965891592): passed.
+- The graph-refresh guard rejects oversized federated work before materialization.
+
+I preserved an unstaged local edit in [VERSIONS.md](/home/brian/work/btakita/agent-loop/src/tsift/VERSIONS.md) that moves the guard note under “Unreleased”; it was not included in the release.
+
+Agent-doc’s response is committed, although its post-compaction `session-check` still falsely interprets the generated “Prior summary/context” line as an unanswered prompt. No force-write or duplicate response was used.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 

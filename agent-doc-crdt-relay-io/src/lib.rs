@@ -5763,8 +5763,8 @@ mod tests {
     fn an_exhausted_build_mismatch_is_a_definitive_answer() {
         let handshake =
             anyhow::Error::new(agent_doc_ipc_protocol::IpcHandshakeError::BuildMismatch {
-                expected: "0.35.418+1790545416".to_string(),
-                received: "0.35.418+1790563363".to_string(),
+                listener: "0.35.418+1790563363".to_string(),
+                client: "0.35.418+1790545416".to_string(),
             });
         let exhausted = handshake.context(
             "IPC build mismatch recovery failed to deliver reload_library: \

@@ -377,7 +377,25 @@ fn try_connect_with_timeout_for_pid(
 /// rejects our build still accepted the connection and read from it, which is
 /// the property being tested. Silence within the deadline is the negative, and
 /// covers both a saturated backlog and a listener parked mid-request.
+#[cfg(test)]
 fn endpoint_answers(path: &Path) -> bool {
+    !matches!(probe_endpoint(path), EndpointProbe::Unresponsive)
+}
+
+/// What a live-peer probe learned about the listener bound at a socket path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EndpointProbe {
+    /// Nothing answered; the socket file is stale.
+    Unresponsive,
+    /// A listener answered with this process's own build.
+    SameBuild,
+    /// A listener answered with a different build (`#ipcsupersededlistener`).
+    OtherBuild(String),
+    /// A listener answered, but not with a recognizable handshake.
+    Answered,
+}
+
+fn probe_endpoint(path: &Path) -> EndpointProbe {
     let path_for_thread = path.to_path_buf();
     let probe_timeout = Duration::from_secs(IPC_CONNECT_TIMEOUT_SECS);
     let Ok(stream) = run_connect_with_timeout(path, probe_timeout, move || {
@@ -387,7 +405,7 @@ fn endpoint_answers(path: &Path) -> bool {
             .connect_sync()
             .context("failed to connect to IPC socket")
     }) else {
-        return false;
+        return EndpointProbe::Unresponsive;
     };
 
     if stream.set_send_timeout(Some(probe_timeout)).is_err()
@@ -395,20 +413,30 @@ fn endpoint_answers(path: &Path) -> bool {
     {
         // Without a deadline this probe could park the listener start forever;
         // treat an unenforceable timeout as no answer rather than risk that.
-        return false;
+        return EndpointProbe::Unresponsive;
     }
 
     let (reader_half, mut writer_half) = stream.split();
-    let Ok(mut hello) = serde_json::to_string(&ipc_hello_message(&local_ipc_identity())) else {
-        return false;
+    let local = local_ipc_identity();
+    let Ok(mut hello) = serde_json::to_string(&ipc_hello_message(&local)) else {
+        return EndpointProbe::Unresponsive;
     };
     hello.push('\n');
     if writer_half.write_all(hello.as_bytes()).is_err() || writer_half.flush().is_err() {
-        return false;
+        return EndpointProbe::Unresponsive;
     }
 
     let mut reply = String::new();
-    matches!(BufReader::new(reader_half).read_line(&mut reply), Ok(n) if n > 0)
+    match BufReader::new(reader_half).read_line(&mut reply) {
+        Ok(n) if n > 0 => match validate_ipc_hello_ack(reply.trim(), &local) {
+            Ok(()) => EndpointProbe::SameBuild,
+            Err(IpcHandshakeError::BuildMismatch { listener, .. }) => {
+                EndpointProbe::OtherBuild(listener)
+            }
+            Err(_) => EndpointProbe::Answered,
+        },
+        _ => EndpointProbe::Unresponsive,
+    }
 }
 
 fn run_connect_with_timeout<T, F>(path: &Path, connect_timeout: Duration, connect: F) -> Result<T>
@@ -879,17 +907,17 @@ fn send_terminal_protocol_stable_message_with_listener_build_retry(
     let receipt = match send(&local_ipc_identity()) {
         Ok(receipt) => receipt,
         Err(error) => {
-            let Some(IpcHandshakeError::BuildMismatch { received, .. }) =
+            let Some(IpcHandshakeError::BuildMismatch { listener, .. }) =
                 error.downcast_ref::<IpcHandshakeError>()
             else {
                 return Err(error);
             };
             eprintln!(
-                "[ipc-socket] {operation} build compatibility retry: listener_build={received}"
+                "[ipc-socket] {operation} build compatibility retry: listener_build={listener}"
             );
             send(&IpcPeerIdentity::new(
                 IPC_PROTOCOL_VERSION,
-                received.clone(),
+                listener.clone(),
             ))
             .with_context(|| {
                 format!(
@@ -1186,7 +1214,7 @@ fn ipc_build_mismatch_listener_build(error: &anyhow::Error) -> Option<String> {
     error
         .chain()
         .find_map(|cause| match cause.downcast_ref::<IpcHandshakeError>() {
-            Some(IpcHandshakeError::BuildMismatch { expected, .. }) => Some(expected.clone()),
+            Some(IpcHandshakeError::BuildMismatch { listener, .. }) => Some(listener.clone()),
             _ => None,
         })
 }
@@ -1334,8 +1362,40 @@ where
     // So only an endpoint that cannot answer is evicted. A genuinely stale
     // socket (dead process, or a file nothing is bound to) is still removed
     // exactly as before; a live peer makes this start fail closed and say so.
+    //
+    // `#ipcsupersededlistener`: refusing every live peer had the opposite
+    // failure. The path is keyed by THIS process's pid, so a live listener there
+    // is in-process, and one that answers with a DIFFERENT build is a superseded
+    // native generation whose quiesce let its listener escape. Deferring to it
+    // stranded the endpoint for good: it rejects every newer client on build
+    // mismatch, including the `reload_library` that would replace it, so only an
+    // IDE restart recovered. Observed 2026-10-01 on agent-loop: an IDE kept a
+    // `c32820c7` listener for ~50 minutes while four hot reloads each logged
+    // `ipc_listener_bind_refused_live_peer`, and every editor write was retained.
+    // The current generation takes the name; the superseded listener keeps an
+    // orphaned inode no client can reach. A same-build peer is still refused.
     if sock_path.exists() {
-        if endpoint_answers(&sock_path) {
+        let probe = probe_endpoint(&sock_path);
+        if let EndpointProbe::OtherBuild(peer_build) = &probe {
+            ops_logger(
+                project_root,
+                &format!(
+                    "ipc_listener_evicted_superseded_generation path={} pid={} \
+                     peer_build={peer_build} own_build={}",
+                    sock_path.display(),
+                    std::process::id(),
+                    listener_identity.build_id,
+                ),
+            );
+            if let Err(error) = std::fs::remove_file(&sock_path)
+                && error.kind() != ErrorKind::NotFound
+            {
+                return Err(anyhow::anyhow!(
+                    "failed to evict the superseded IPC listener socket {}: {error}",
+                    sock_path.display()
+                ));
+            }
+        } else if probe != EndpointProbe::Unresponsive {
             ops_logger(
                 project_root,
                 &format!(
@@ -1352,22 +1412,23 @@ where
                  listener; stealing the socket name strands both peers.",
                 sock_path.display()
             ));
-        }
-        ops_logger(
-            project_root,
-            &format!(
-                "ipc_listener_evicted_unresponsive_endpoint path={} pid={}",
-                sock_path.display(),
-                std::process::id()
-            ),
-        );
-        if let Err(error) = std::fs::remove_file(&sock_path)
-            && error.kind() != ErrorKind::NotFound
-        {
-            eprintln!(
-                "[ipc-socket] warning: failed to remove unresponsive listener socket {}: {error}",
-                sock_path.display()
+        } else {
+            ops_logger(
+                project_root,
+                &format!(
+                    "ipc_listener_evicted_unresponsive_endpoint path={} pid={}",
+                    sock_path.display(),
+                    std::process::id()
+                ),
             );
+            if let Err(error) = std::fs::remove_file(&sock_path)
+                && error.kind() != ErrorKind::NotFound
+            {
+                eprintln!(
+                    "[ipc-socket] warning: failed to remove unresponsive listener socket {}: {error}",
+                    sock_path.display()
+                );
+            }
         }
     }
 
@@ -1812,6 +1873,66 @@ mod tests {
         shutdown.store(true, Ordering::SeqCst);
         let _ = wake_listener(&root);
         let _ = listener.join();
+    }
+
+    /// `#ipcsupersededlistener`: a live listener answering with a DIFFERENT build
+    /// on this process's own socket is a superseded native generation. Deferring
+    /// to it stranded the endpoint (it rejects every newer client, including the
+    /// `reload_library` that would replace it), so the current generation takes
+    /// the name and the endpoint then answers with the current build.
+    #[test]
+    fn a_superseded_generation_listener_is_taken_over_by_the_current_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let sock_path = socket_path(&root);
+
+        let old_shutdown = Arc::new(AtomicBool::new(false));
+        let old_root = root.clone();
+        let old_token = Arc::clone(&old_shutdown);
+        let old = thread::spawn(move || {
+            let _ = start_listener_with_logger_and_read_timeout(
+                &old_root,
+                |_| None,
+                noop_ops_logger,
+                Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
+                Some(old_token),
+                IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.0.0+superseded-generation"),
+            );
+        });
+        assert!(await_endpoint(&sock_path), "the superseded listener never came up");
+        assert_eq!(
+            probe_endpoint(&sock_path),
+            EndpointProbe::OtherBuild("0.0.0+superseded-generation".to_string()),
+        );
+
+        let new_shutdown = Arc::new(AtomicBool::new(false));
+        let new_root = root.clone();
+        let new_token = Arc::clone(&new_shutdown);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let current = thread::spawn(move || {
+            let outcome =
+                start_listener_with_logger_until(&new_root, |_| None, noop_ops_logger, new_token);
+            let _ = tx.send(outcome.err().map(|e| format!("{e:#}")));
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while probe_endpoint(&sock_path) != EndpointProbe::SameBuild && Instant::now() < deadline {
+            if let Ok(refused) = rx.try_recv() {
+                panic!("the current generation refused to take over: {refused:?}");
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            probe_endpoint(&sock_path),
+            EndpointProbe::SameBuild,
+            "the endpoint must answer with the current build after takeover"
+        );
+
+        new_shutdown.store(true, Ordering::SeqCst);
+        old_shutdown.store(true, Ordering::SeqCst);
+        let _ = wake_listener(&root);
+        let _ = current.join();
+        let _ = old.join();
     }
 
     /// `#ipcstopneedsnowake`: a listener must terminate on its shutdown token
@@ -2274,8 +2395,8 @@ mod tests {
     #[test]
     fn listener_build_is_read_from_the_typed_mismatch() {
         let error = anyhow::Error::new(IpcHandshakeError::BuildMismatch {
-            expected: "0.1.0+listener".to_string(),
-            received: "0.1.0+client".to_string(),
+            listener: "0.1.0+listener".to_string(),
+            client: "0.1.0+client".to_string(),
         })
         .context("outer");
         assert_eq!(

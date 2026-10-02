@@ -86,9 +86,15 @@ pub enum IpcHandshakeError {
         expected: u32,
         received: u32,
     },
+    /// `#ipcmismatchlabels`: named by ROLE, not by which side detected it. The
+    /// fields used to be `expected`/`received` (the validator's own build, then
+    /// the peer's), and `Display` printed them as `listener=`/`client=`. That is
+    /// only true on the listener side: on the client side it swapped them, so a
+    /// stale editor listener read as a stale controller and the reload dedup
+    /// keyed on the sender's own build.
     BuildMismatch {
-        expected: String,
-        received: String,
+        listener: String,
+        client: String,
     },
 }
 
@@ -120,11 +126,8 @@ impl fmt::Display for IpcHandshakeError {
                 f,
                 "IPC protocol mismatch: listener={expected}, client={received}"
             ),
-            Self::BuildMismatch { expected, received } => {
-                write!(
-                    f,
-                    "IPC build mismatch: listener={expected}, client={received}"
-                )
+            Self::BuildMismatch { listener, client } => {
+                write!(f, "IPC build mismatch: listener={listener}, client={client}")
             }
         }
     }
@@ -185,8 +188,8 @@ pub fn validate_ipc_hello_ack(
                     value.get("build_id").and_then(serde_json::Value::as_str)
                 {
                     return Err(IpcHandshakeError::BuildMismatch {
-                        expected: client_identity.build_id.clone(),
-                        received: listener_build.to_string(),
+                        listener: listener_build.to_string(),
+                        client: client_identity.build_id.clone(),
                     });
                 }
             }
@@ -194,6 +197,20 @@ pub fn validate_ipc_hello_ack(
         }
     }
     validate_ipc_identity_message(line, "ipc_hello_ack", client_identity)
+        .map_err(swap_build_mismatch_roles)
+}
+
+/// [`validate_ipc_identity_message`] reports a build mismatch from the
+/// validator's point of view (own build as `listener`). On the client side the
+/// validator IS the client, so the roles swap (`#ipcmismatchlabels`).
+fn swap_build_mismatch_roles(error: IpcHandshakeError) -> IpcHandshakeError {
+    match error {
+        IpcHandshakeError::BuildMismatch { listener, client } => IpcHandshakeError::BuildMismatch {
+            listener: client,
+            client: listener,
+        },
+        other => other,
+    }
 }
 
 fn validate_ipc_identity_message(
@@ -230,9 +247,10 @@ fn validate_ipc_identity_message(
         .filter(|build_id| !build_id.is_empty())
         .ok_or(IpcHandshakeError::Malformed { expected_type })?;
     if build_id != expected_identity.build_id {
+        // Validator's own build in `listener`; the client path swaps the roles.
         return Err(IpcHandshakeError::BuildMismatch {
-            expected: expected_identity.build_id.clone(),
-            received: build_id.to_string(),
+            listener: expected_identity.build_id.clone(),
+            client: build_id.to_string(),
         });
     }
     Ok(())
@@ -1262,9 +1280,36 @@ mod tests {
         assert_eq!(
             validate_ipc_hello(&ipc_hello_message(&old_build).to_string(), &listener),
             Err(IpcHandshakeError::BuildMismatch {
-                expected: "0.35.58+build-b".to_string(),
-                received: "0.35.57+build-a".to_string(),
+                listener: "0.35.58+build-b".to_string(),
+                client: "0.35.57+build-a".to_string(),
             })
+        );
+    }
+
+    /// `#ipcmismatchlabels`: the client side must name the LISTENER's build as
+    /// `listener`. It used to print its own build there, which on 2026-10-01 made
+    /// a stale editor listener read as a stale controller for 50 minutes.
+    #[test]
+    fn client_side_build_mismatch_names_the_listener_build_as_listener() {
+        let client = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.35.429+new-client");
+        let listener = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.35.429+old-listener");
+        let expected = Err(IpcHandshakeError::BuildMismatch {
+            listener: "0.35.429+old-listener".to_string(),
+            client: "0.35.429+new-client".to_string(),
+        });
+        let ack = ipc_hello_ack_message(&listener).to_string();
+        assert_eq!(validate_ipc_hello_ack(&ack, &client), expected);
+        let rejection = serde_json::json!({
+            "type": "receipt",
+            "status": "rejected",
+            "reason": "ipc_build_mismatch",
+            "build_id": "0.35.429+old-listener",
+        })
+        .to_string();
+        assert_eq!(validate_ipc_hello_ack(&rejection, &client), expected);
+        assert_eq!(
+            expected.unwrap_err().to_string(),
+            "IPC build mismatch: listener=0.35.429+old-listener, client=0.35.429+new-client"
         );
     }
 

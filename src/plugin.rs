@@ -1230,6 +1230,7 @@ fn install_jetbrains_zip_into(
     let outcome = install_jetbrains_package_bytes(
         zip_path,
         target_dir,
+        expected_version,
         dynamic_upgrade_enabled(),
         || try_hot_upgrade_jetbrains(zip_path, target_dir, expected_version),
         live_jetbrains_ide_pids,
@@ -1257,6 +1258,7 @@ fn install_jetbrains_zip_into(
 fn install_jetbrains_package_bytes(
     zip_path: &Path,
     target_dir: &Path,
+    expected_version: &str,
     dynamic: bool,
     hot_upgrade: impl FnOnce() -> Result<Option<JetbrainsHotUpgrade>>,
     live_pids: impl FnOnce() -> Result<Vec<u32>>,
@@ -1282,12 +1284,11 @@ fn install_jetbrains_package_bytes(
                 );
                 let reason = format!("dynamic upgrade unavailable, staged for restart: {reason}");
                 // GH #87: name the staged version so preflight can tell a staged
-                // install (restart is the remedy) from a plain stale one.
-                record_restart_required_marker(
-                    &restart_marker,
-                    &reason,
-                    jetbrains_zip_version(zip_path).as_deref(),
-                );
+                // install (restart is the remedy) from a plain stale one. Use the
+                // version the caller already read from the package; never re-derive
+                // it from `zip_path`'s filename -- release installs pass a
+                // `NamedTempFile` (`.tmpXXXXXX`) whose name carries no version.
+                record_restart_required_marker(&restart_marker, &reason, Some(expected_version));
                 return Ok(JetbrainsLocalInstallOutcome::StagedForRestart { reason });
             }
             Ok(None) => None,
@@ -1341,16 +1342,6 @@ fn dynamic_upgrade_fallback_warning(reason: &str) -> &'static str {
     } else {
         "the restart-free upgrade failed before the IDE could accept or refuse it; replacing the plugin files instead."
     }
-}
-
-/// Version named by an `agent-doc-jetbrains-<version>.zip` package filename.
-fn jetbrains_zip_version(zip_path: &Path) -> Option<String> {
-    zip_path
-        .file_name()?
-        .to_str()?
-        .strip_prefix("agent-doc-jetbrains-")?
-        .strip_suffix(".zip")
-        .map(|version| version.trim_end_matches("-signed").to_string())
 }
 
 /// The first line is the refusal reason; a staged install adds a
@@ -2493,6 +2484,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let outcome = install_jetbrains_package_bytes(
             &zip,
             &target,
+            "0.2.448",
             true,
             || anyhow::bail!("checkCanUnloadWithoutRestart signature mismatch"),
             || panic!("the dynamic path does not enumerate pids"),
@@ -2522,6 +2514,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         install_jetbrains_package_bytes(
             &zip,
             &target,
+            "0.2.448",
             true,
             || Ok(Some(super::JetbrainsHotUpgrade::Upgraded { processes: 1 })),
             || panic!("the dynamic path does not enumerate pids"),
@@ -2557,6 +2550,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let live = install_jetbrains_package_bytes(
             &zip,
             &target,
+            "0.2.448",
             false,
             || panic!("--no-dynamic must not attach"),
             || Ok(vec![1506046]),
@@ -2570,6 +2564,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let idle = install_jetbrains_package_bytes(
             &zip,
             &target,
+            "0.2.448",
             false,
             || panic!("--no-dynamic must not attach"),
             || Ok(Vec::new()),
@@ -2599,6 +2594,7 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         let outcome = install_jetbrains_package_bytes(
             &zip,
             &target,
+            "0.2.456",
             true,
             || {
                 Ok(Some(super::JetbrainsHotUpgrade::StagedForRestart {
@@ -2632,6 +2628,51 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             agent_doc_fs::jetbrains_install::staged_version_from_restart_marker(&recorded)
                 .as_deref(),
             Some("0.2.456"),
+            "{recorded}"
+        );
+    }
+
+    #[test]
+    fn staged_release_install_records_expected_version_from_a_temp_named_package() {
+        // GH #87 (reopened): `plugin update jetbrains` downloads the release asset to
+        // a `NamedTempFile` (`.tmpXXXXXX`), so the staged version must come from the
+        // version the caller read out of the package, never from the filename.
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        fs::create_dir_all(target.join("agent-doc-jetbrains/lib")).unwrap();
+        let download = tempfile::NamedTempFile::new_in(tmp.path()).unwrap();
+        let name = download.path().file_name().unwrap().to_str().unwrap();
+        assert!(!name.starts_with("agent-doc-jetbrains-"), "{name}");
+        assert!(!name.ends_with(".zip"), "{name}");
+        write_test_jetbrains_zip(download.path(), "0.2.467", b"new");
+
+        let outcome = install_jetbrains_package_bytes(
+            download.path(),
+            &target,
+            "0.2.467",
+            true,
+            || {
+                Ok(Some(super::JetbrainsHotUpgrade::StagedForRestart {
+                    reason: "pid 9: plugin cannot unload dynamically".to_string(),
+                }))
+            },
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                outcome,
+                JetbrainsLocalInstallOutcome::StagedForRestart { .. }
+            ),
+            "{outcome:?}"
+        );
+
+        let marker = target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
+        let recorded = fs::read_to_string(&marker).unwrap();
+        assert_eq!(
+            agent_doc_fs::jetbrains_install::staged_version_from_restart_marker(&recorded)
+                .as_deref(),
+            Some("0.2.467"),
             "{recorded}"
         );
     }

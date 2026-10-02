@@ -146,7 +146,12 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
     }
 
     fn set_restart_requested(&self, requested: bool) {
-        self.restart_requested.store(requested, Ordering::Relaxed);
+        self.restart_requested.store(requested, Ordering::Release);
+    }
+
+    fn set_restart_deferred_until_boundary(&self, deferred: bool) {
+        self.restart_deferred_until_boundary
+            .store(deferred, Ordering::Relaxed);
     }
 
     fn binary_stale(&self) -> bool {

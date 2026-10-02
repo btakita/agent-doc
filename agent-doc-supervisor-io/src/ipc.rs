@@ -285,6 +285,9 @@ pub trait SupervisorIpcLifecycleState {
     fn transition_actor_waiting_input(&self, caller: &str, reason: &str);
     fn set_restart_mode(&self, mode: String);
     fn set_restart_requested(&self, requested: bool);
+    /// Keep an accepted child-replacement request armed without killing the
+    /// current child until its durable cycle and prompt boundary are both safe.
+    fn set_restart_deferred_until_boundary(&self, _deferred: bool) {}
     fn binary_stale(&self) -> bool;
     fn set_restart_reexec(&self, reexec: bool);
     fn set_stop_requested(&self, requested: bool);
@@ -388,22 +391,26 @@ where
             ReadyRestartPreflight::Protected => true,
         };
     }
-    // `#haivendupsession`: refuse to spawn a replacement while the current child
-    // still owns an open cycle. The recycle path has always deferred here; the
-    // restart path did not, and with a keep-alive reap policy the un-reaped old
-    // child kept rendering through the same pane's PTY proxy underneath the new
-    // one. Fail loudly rather than silently dropping the operator's request —
-    // a silent no-op is the failure mode this whole area keeps reproducing.
+    // `#haivendupsession`: accept and retain the replacement intent while the
+    // current child owns an open cycle, but do not kill it yet. The supervisor
+    // host releases this latch only after durable cycle closure and a real Ready
+    // prompt. This preserves the operator request without ever spawning two
+    // children on the pane.
     if !preserve_live_child
         && agent_doc_supervisor::lifecycle::supervisor_restart_admission(cycle_open, child_alive)
             == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::DeferCycleOpen
     {
-        return Err(
-            "supervisor restart deferred: a document cycle is open and the current harness \
-             child still owns it, so spawning now would leave two children on this pane. \
-             Retry once the turn reaches its boundary (#haivendupsession)"
-                .to_string(),
-        );
+        state.set_restart_mode(if restart_agent {
+            format!("{RESTART_AGENT_MODE_PREFIX}{mode}")
+        } else {
+            mode
+        });
+        state.set_restart_reexec(false);
+        state.set_restart_deferred_until_boundary(true);
+        // Publish the request last. Production uses a release/acquire pair so
+        // the host can never observe the request before its deferral latch.
+        state.set_restart_requested(true);
+        return Ok(());
     }
     let waiting_input = state.actor_waiting_input();
     state.transition_actor_busy("supervisor", "ipc_restart_requested");
@@ -417,6 +424,7 @@ where
     } else {
         mode
     });
+    state.set_restart_deferred_until_boundary(false);
     state.set_restart_requested(true);
     // A controller-only continue recycle preserves the live harness child across
     // an in-place re-exec. An explicit Restart Agent or fresh replacement may
@@ -428,6 +436,7 @@ where
     }
     if waiting_input && let Err(err) = state.wake_restart_prompt() {
         state.set_restart_requested(false);
+        state.set_restart_deferred_until_boundary(false);
         state.set_restart_reexec(false);
         state.transition_actor_waiting_input("supervisor", "ipc_restart_prompt_wake_failed");
         return Err(err);
@@ -1002,6 +1011,7 @@ mod tests {
         waiting_input: bool,
         binary_stale: bool,
         restart_requested: AtomicBool,
+        restart_deferred: AtomicBool,
         restart_reexec: AtomicBool,
         child_killed: AtomicBool,
         prompt_woken: AtomicBool,
@@ -1014,38 +1024,28 @@ mod tests {
     }
 
     /// `#haivendupsession`: an operator `session_restart` arriving while the
-    /// current child still owns an open cycle must be refused, not spawned. The
-    /// controller logs `ipc_accepted_deferred reason=live_supervisor_owns_drain`
-    /// for this case, but that only means the CONTROLLER declined to escalate —
-    /// the request had already been accepted here, and this path spawned anyway,
-    /// leaving two children on one pane under a keep-alive reap policy.
+    /// current child still owns an open cycle is accepted and latched, but the
+    /// child remains untouched until the supervisor observes the safe boundary.
     #[test]
-    fn restart_agent_over_a_live_child_mid_cycle_is_refused_not_spawned() {
+    fn restart_agent_over_a_live_child_mid_cycle_is_latched_not_spawned() {
         let state = RestartLifecycleState {
             cycle_open: true,
             child_alive: true,
             waiting_input: false,
             binary_stale: false,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
         };
-        let result = request_supervisor_restart(&state, "agent:continue".to_string());
-        assert!(
-            result.is_err(),
-            "an open cycle over a live child must refuse"
-        );
-        let message = result.unwrap_err();
-        assert!(
-            message.contains("two children"),
-            "the refusal must say why, not just decline: {message}"
-        );
-        // Nothing may be armed — a half-applied restart is how the second child
-        // appeared in the first place.
-        assert!(!state.restart_requested.load(Ordering::Relaxed));
+        request_supervisor_restart(&state, "agent:continue".to_string())
+            .expect("the live supervisor must retain the deferred restart");
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(state.restart_deferred.load(Ordering::Relaxed));
         assert!(!state.child_killed.load(Ordering::Relaxed));
+        assert_eq!(*state.restart_mode.lock().unwrap(), "agent:continue");
     }
 
     /// The same request with the child already gone must still spawn, otherwise
@@ -1058,6 +1058,7 @@ mod tests {
             waiting_input: false,
             binary_stale: false,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
@@ -1089,6 +1090,9 @@ mod tests {
         fn set_restart_requested(&self, requested: bool) {
             self.restart_requested.store(requested, Ordering::Relaxed);
         }
+        fn set_restart_deferred_until_boundary(&self, deferred: bool) {
+            self.restart_deferred.store(deferred, Ordering::Relaxed);
+        }
         fn binary_stale(&self) -> bool {
             self.binary_stale
         }
@@ -1109,6 +1113,7 @@ mod tests {
     struct ReadyRestartLifecycleState {
         reclaim: ReadyRestartPreflight,
         restart_requested: AtomicBool,
+        restart_deferred: AtomicBool,
         child_killed: AtomicBool,
     }
 
@@ -1139,6 +1144,9 @@ mod tests {
         fn set_restart_requested(&self, requested: bool) {
             self.restart_requested.store(requested, Ordering::Relaxed);
         }
+        fn set_restart_deferred_until_boundary(&self, deferred: bool) {
+            self.restart_deferred.store(deferred, Ordering::Relaxed);
+        }
         fn binary_stale(&self) -> bool {
             false
         }
@@ -1161,6 +1169,7 @@ mod tests {
         let state = ReadyRestartLifecycleState {
             reclaim: ReadyRestartPreflight::Abandoned,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
         };
 
@@ -1172,17 +1181,18 @@ mod tests {
     }
 
     #[test]
-    fn restart_agent_at_ready_boundary_still_protects_captured_cycle() {
+    fn restart_agent_at_ready_boundary_latches_captured_cycle_until_closeout() {
         let state = ReadyRestartLifecycleState {
             reclaim: ReadyRestartPreflight::Protected,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
         };
 
-        let result = request_supervisor_restart(&state, "agent:continue".to_string());
-
-        assert!(result.is_err());
-        assert!(!state.restart_requested.load(Ordering::Relaxed));
+        request_supervisor_restart(&state, "agent:continue".to_string())
+            .expect("captured closeout must retain the restart for its boundary");
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(state.restart_deferred.load(Ordering::Relaxed));
         assert!(!state.child_killed.load(Ordering::Relaxed));
     }
 
@@ -1194,6 +1204,7 @@ mod tests {
             waiting_input: true,
             binary_stale: false,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
@@ -1214,6 +1225,7 @@ mod tests {
             waiting_input: false,
             binary_stale: true,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
@@ -1236,6 +1248,7 @@ mod tests {
             waiting_input: false,
             binary_stale: true,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
@@ -1256,6 +1269,7 @@ mod tests {
             waiting_input: false,
             binary_stale: false,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
@@ -1278,6 +1292,7 @@ mod tests {
             waiting_input: false,
             binary_stale: false,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),
@@ -1300,6 +1315,7 @@ mod tests {
             waiting_input: false,
             binary_stale: true,
             restart_requested: AtomicBool::new(false),
+            restart_deferred: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
             child_killed: AtomicBool::new(false),
             prompt_woken: AtomicBool::new(false),

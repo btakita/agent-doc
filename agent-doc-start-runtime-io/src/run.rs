@@ -11,6 +11,7 @@ use agent_doc_supervisor::{
     run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
     session_lineage::HarnessSessionLineage,
 };
+use agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState;
 use agent_doc_supervisor_process::{
     REEXEC_CAPABILITY_PROOF_CONTRACT_ENV, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV,
     REEXEC_ROUTE_OWNED_DISPATCH_PROMOTED_ENV, ReexecState,
@@ -24,6 +25,14 @@ use agent_doc_supervisor_process_io::{
 use agent_doc_supervisor_process_io::{
     supervisor_stderr_log_path, supervisor_stderr_redirect_needed,
 };
+
+fn deferred_restart_ready_to_replace_child(
+    deferred_until_boundary: bool,
+    cycle_open: bool,
+    actor_ready: bool,
+) -> bool {
+    !deferred_until_boundary || (!cycle_open && actor_ready)
+}
 
 pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
@@ -1748,6 +1757,9 @@ pub fn run_with_reap_policy_resume_and_harness(
         shared.running.store(true, Ordering::Relaxed);
         shared.restart_count.store(restart_count, Ordering::Relaxed);
         shared.restart_requested.store(false, Ordering::Relaxed);
+        shared
+            .restart_deferred_until_boundary
+            .store(false, Ordering::Relaxed);
         shared.restart_reexec.store(false, Ordering::Relaxed);
         shared.stop_requested.store(false, Ordering::Relaxed);
         shared.stop_agent_requested.store(false, Ordering::Relaxed);
@@ -1886,6 +1898,19 @@ pub fn run_with_reap_policy_resume_and_harness(
             // host path is killed via the IPC handler's `libc::kill` by PID).
             let mut kill_requested = false;
             let exit_code = loop {
+                // The request is the release/acquire publication edge for its
+                // deferral latch. Read it first, then inspect the latch.
+                let restart_requested = shared.restart_requested.load(Ordering::Acquire);
+                let restart_deferred = restart_requested
+                    && shared
+                        .restart_deferred_until_boundary
+                        .load(Ordering::Relaxed);
+                let deferred_restart_ready = !restart_deferred
+                    || deferred_restart_ready_to_replace_child(
+                        true,
+                        shared.agent_doc_cycle_open(),
+                        shared.actor_ready(),
+                    );
                 // `#supkill-bg` — a stale restart routed to the idle-watch in-place
                 // reexec (`restart_reexec`) must NOT have its child killed here: the
                 // reexec preserves the live child across `execve`, so the host loop
@@ -1894,8 +1919,9 @@ pub fn run_with_reap_policy_resume_and_harness(
                 if !kill_requested
                     && (shared.stop_requested.load(Ordering::Relaxed)
                         || shared.stop_agent_requested.load(Ordering::Relaxed)
-                        || (shared.restart_requested.load(Ordering::Relaxed)
-                            && !shared.restart_reexec.load(Ordering::Relaxed))
+                        || (restart_requested
+                            && !shared.restart_reexec.load(Ordering::Relaxed)
+                            && deferred_restart_ready)
                         || route_owned_completion.load(Ordering::Relaxed))
                 {
                     kill_requested = true;
@@ -2562,6 +2588,15 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
+
+    #[test]
+    fn deferred_restart_releases_only_after_cycle_close_and_ready_prompt() {
+        assert!(!deferred_restart_ready_to_replace_child(true, true, false));
+        assert!(!deferred_restart_ready_to_replace_child(true, true, true));
+        assert!(!deferred_restart_ready_to_replace_child(true, false, false));
+        assert!(deferred_restart_ready_to_replace_child(true, false, true));
+        assert!(deferred_restart_ready_to_replace_child(false, true, false));
+    }
 
     /// `#resumestale`: a resume request for an id with a verified-missing
     /// transcript must degrade to fresh — verified live against the real CLI,

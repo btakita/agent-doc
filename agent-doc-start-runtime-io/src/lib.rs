@@ -2102,6 +2102,10 @@ pub(crate) struct SupervisorShared {
     master_fd: AtomicI32,
     /// Flag: IPC requested a restart.
     restart_requested: AtomicBool,
+    /// A child-replacement restart accepted during an open document cycle. The
+    /// host loop keeps the current child alive until the cycle is closed and the
+    /// actor reaches a real Ready prompt, then performs the requested relaunch.
+    restart_deferred_until_boundary: AtomicBool,
     /// `#supkill-bg` — flag: the pending restart should be served by an in-place
     /// `execve` re-exec at the next turn boundary (drain-and-supersede onto the fresh
     /// binary), NOT by the immediate kill-child → relaunch path. Stamped by the IPC
@@ -2201,6 +2205,7 @@ impl SupervisorShared {
             child_pid: AtomicU32::new(0),
             master_fd: AtomicI32::new(-1),
             restart_requested: AtomicBool::new(false),
+            restart_deferred_until_boundary: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
             _process_scope: process_scope,
             binary_freshness,

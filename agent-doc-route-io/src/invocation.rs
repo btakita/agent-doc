@@ -2,7 +2,7 @@
 
 use crate::command::{self, RouteCommandEffects, RouteMode};
 use anyhow::Result;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tmux_router::Tmux;
@@ -28,6 +28,26 @@ static BACKGROUND_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
 /// focus-neutral until tmux-router has placed every pane. Standalone route
 /// startup leaves this false and retains its immediate-focus behavior.
 static DEFER_STARTUP_FOCUS_TO_LAYOUT: Cell<bool> = const { Cell::new(false) };
+/// GH 91: a route that returned `Ok` without dispatching — its prompt or the
+/// existing queue head is waiting behind an open closeout — records the
+/// operator-facing outcome here so the controller's editor route reports it
+/// instead of "dispatched".
+static ROUTE_DEFERRAL: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Exit code for an editor route that completed without dispatching
+/// (`EX_TEMPFAIL`): the work is deferred behind an open closeout. Non-zero so
+/// the controller never settles it as `applied=true`.
+pub const ROUTE_DEFERRED_EXIT_CODE: i32 = 75;
+
+/// Record that this route invocation deferred instead of dispatching.
+pub fn record_route_deferral(outcome: String) {
+    ROUTE_DEFERRAL.with(|cell| *cell.borrow_mut() = Some(outcome));
+}
+
+/// Take (and clear) the deferral recorded by this thread's route invocation.
+pub fn take_route_deferral() -> Option<String> {
+    ROUTE_DEFERRAL.with(|cell| cell.borrow_mut().take())
 }
 
 pub fn wait_for_ready_override() -> Option<Duration> {

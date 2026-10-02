@@ -35,6 +35,9 @@ pub struct RouteCloseoutDrainEffects {
     pub inspect_session: fn(&Path) -> Result<SessionCheckStatus>,
     pub await_closeout_projection: AwaitCloseoutProjectionFn,
     pub decide_closeout_recovery: DecideRouteCloseoutRecoveryFn,
+    /// GH 91: operator report for the open cycle's capture when its bytes can
+    /// never land (GH 90's deterministic refusal), else `None`.
+    pub unlandable_capture_report: fn(&Path) -> Result<Option<String>>,
 }
 
 enum CloseoutRecoveryAttempt {
@@ -111,6 +114,24 @@ pub fn drain_open_closeout_before_routed_dispatch(
                 agent_doc_secret_redact::redact(&error.to_string())
             ),
         );
+    }
+
+    // GH 91: a deterministic refusal is not a transient wait. Every retry of
+    // an unlandable capture fails identically, so neither repair, the
+    // projection wait, nor retained-write recovery can clear it — and repair
+    // must never replay those bytes. Fail closed before any recovery with the
+    // structural reason and the one command that changes the outcome.
+    if let Some(report) = (effects.unlandable_capture_report)(file)? {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_drain_closeout_unlandable file={} cycle_id={} blocker={}",
+                file.display(),
+                state.cycle_id,
+                agent_doc_secret_redact::redact(&report)
+            ),
+        );
+        return Ok(RouteCloseoutDrainOutcome::Unlandable(report));
     }
 
     let first_reason = match project_closeout_recovery_effects(file, effects)? {
@@ -278,6 +299,7 @@ mod tests {
             // Anything but `QueuePromptForAfterCloseout`, so the queue-head branch
             // under test is the one that runs.
             decide_closeout_recovery: |_, _| CloseoutRecoveryDecision::AlreadyCommitted,
+            unlandable_capture_report: |_| Ok(None),
         }
     }
 

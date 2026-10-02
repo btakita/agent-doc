@@ -73,6 +73,7 @@ tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 tracing = "0.1"
 
 [dev-dependencies]
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.431" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.431" }
 agent-doc-repair-command-io = { path = "../agent-doc-repair-command-io", version = "0.35.431" }
 agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.431" }

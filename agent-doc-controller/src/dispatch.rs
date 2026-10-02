@@ -3404,6 +3404,11 @@ pub enum RouteCloseoutDrainOutcome {
     NoOpenCycle,
     Recovered(String),
     Blocked(String),
+    /// GH 91: the open cycle's durable capture is deterministically
+    /// unlandable (GH 90's structural/marker refusal). No retained-write or
+    /// commit recovery can clear it, so the route fails closed with the
+    /// operator report instead of waiting behind it.
+    Unlandable(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

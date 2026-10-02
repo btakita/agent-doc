@@ -1216,17 +1216,28 @@ pub fn save_blocked_repair_payload(file: &Path, response: &str, reason: &str) ->
     let dir = root.join(".agent-doc/repair-blocked");
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("create blocked repair dir {}", dir.display()))?;
+    let payload_sha256 = agent_doc_hash::content_hash(response);
+    // GH 91: one record per (document, payload). A deterministic refusal is
+    // re-hit on every retry with byte-identical bytes; a timestamped name wrote
+    // the same payload again each time (17 identical records for one capture).
+    // Re-hits only refresh the mtime so `gc`'s age cutoff tracks the latest one.
     let filename = format!(
         "{}-{}.json",
         agent_doc_hash::content_hash(canonical.to_string_lossy().as_ref()),
-        now_millis()
+        payload_sha256
     );
     let path = dir.join(filename);
+    if path.is_file() {
+        if let Ok(existing) = std::fs::File::options().append(true).open(&path) {
+            let _ = existing.set_modified(std::time::SystemTime::now());
+        }
+        return Ok(path);
+    }
     let record = BlockedRepairPayloadRecord {
         captured_at: now_secs(),
         file: canonical.display().to_string(),
         reason,
-        payload_sha256: agent_doc_hash::content_hash(response),
+        payload_sha256,
         response_body: response,
     };
     let json = serde_json::to_string_pretty(&record)?;
@@ -3494,13 +3505,6 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-fn now_millis() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3953,6 +3957,37 @@ mod tests {
         assert!(json.contains("\"reason\": \"agent markers\""));
         assert!(json.contains("\"response_body\": \"response body\""));
         assert!(json.contains("\"payload_sha256\""));
+    }
+
+    #[test]
+    fn repeated_blocked_replay_of_one_payload_keeps_one_record() {
+        // GH 91: every retry of a deterministic refusal re-hit this with the
+        // byte-identical payload and wrote a new timestamped record (17 for one
+        // laptop.md capture). One (document, payload) is one record.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("task.md");
+        std::fs::write(&doc, "---\n---\n").unwrap();
+
+        let first = save_blocked_repair_payload(&doc, "same body", "agent markers").unwrap();
+        let first_json = std::fs::read_to_string(&first).unwrap();
+        for _ in 0..5 {
+            let again = save_blocked_repair_payload(&doc, "same body", "agent markers").unwrap();
+            assert_eq!(again, first);
+        }
+        let other = save_blocked_repair_payload(&doc, "other body", "agent markers").unwrap();
+        assert_ne!(other, first, "a different payload is new information");
+
+        let records = std::fs::read_dir(root.join(".agent-doc/repair-blocked"))
+            .unwrap()
+            .count();
+        assert_eq!(records, 2);
+        assert_eq!(
+            std::fs::read_to_string(&first).unwrap(),
+            first_json,
+            "a re-hit must not rewrite the record"
+        );
     }
 
     #[test]

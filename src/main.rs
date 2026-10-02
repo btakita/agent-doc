@@ -285,6 +285,8 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             agent_doc_route_io::invocation::BackgroundExistingPaneOnlyGuard::set(
                 invocation.background_existing_pane_only,
             );
+        // GH 91: clear any deferral a previous route on this worker left behind.
+        let _ = agent_doc_route_io::invocation::take_route_deferral();
         match agent_doc_route_io::invocation::run_with_force_disk_and_prune(
             &invocation.file,
             invocation.pane.as_deref(),
@@ -297,13 +299,25 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             invocation.prune_before_lookup,
             agent_doc_route_io::runtime_effects::route_command_effects(route_repair_closeout),
         ) {
+            // GH 91: a route that deferred behind an open closeout returned
+            // `Ok` without dispatching. Report its outcome, never "dispatched".
             Ok(()) => Ok(
-                agent_doc_controller_io::project_controller::ControllerEditorRouteRuntimeResult {
-                    exit_code: 0,
-                    output: format!(
-                        "[route] dispatched via controller editor_route for {}",
-                        invocation.relative_path
-                    ),
+                match agent_doc_route_io::invocation::take_route_deferral() {
+                    Some(deferral) => {
+                        agent_doc_controller_io::project_controller::ControllerEditorRouteRuntimeResult {
+                            exit_code: agent_doc_route_io::invocation::ROUTE_DEFERRED_EXIT_CODE,
+                            output: deferral,
+                        }
+                    }
+                    None => {
+                        agent_doc_controller_io::project_controller::ControllerEditorRouteRuntimeResult {
+                            exit_code: 0,
+                            output: format!(
+                                "[route] dispatched via controller editor_route for {}",
+                                invocation.relative_path
+                            ),
+                        }
+                    }
                 },
             ),
             Err(err) => Ok(

@@ -10006,6 +10006,23 @@ where
     Ok(())
 }
 
+const EDITOR_ROUTE_TERMINAL_REASON_MAX_CHARS: usize = 400;
+
+fn editor_route_terminal_reason(command: &str, result: &ControllerEditorRouteResult) -> String {
+    let detail = result
+        .output
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty());
+    match detail {
+        Some(line) => {
+            let line: String = line.chars().take(EDITOR_ROUTE_TERMINAL_REASON_MAX_CHARS).collect();
+            format!("{command} exit_code={}: {line}", result.exit_code)
+        }
+        None => format!("{command} exit_code={}", result.exit_code),
+    }
+}
+
 struct CommandSubmitDispatchResult {
     exit_code: i32,
     output: String,
@@ -10130,8 +10147,10 @@ fn dispatch_command_submit_payload(
             match handle_editor_route_rpc(bootstrap, runtime, route_request) {
                 Ok(result) => {
                     let terminal_applied = result.exit_code == 0;
+                    // GH 91: carry the route's own first line so a blocked or
+                    // deferred route names its blocker in the terminal receipt.
                     let terminal_reason = (!terminal_applied)
-                        .then(|| format!("{command} exit_code={}", result.exit_code));
+                        .then(|| editor_route_terminal_reason(command, &result));
                     CommandSubmitDispatchResult {
                         exit_code: result.exit_code,
                         output: result.output.clone(),
@@ -25568,6 +25587,28 @@ mod tests {
     #![allow(unused_imports)]
 
     use super::*;
+
+    #[test]
+    fn editor_route_terminal_reason_carries_the_route_blocker() {
+        // GH 91: a refused or deferred route settled with the bare
+        // `editor_route exit_code=N`, so the receipt never named why.
+        let result = ControllerEditorRouteResult {
+            exit_code: 75,
+            output: "\n[route] active closeout for a.md could not be drained before reroute; nothing was dispatched\nmore".to_string(),
+        };
+        assert_eq!(
+            editor_route_terminal_reason("editor_route", &result),
+            "editor_route exit_code=75: [route] active closeout for a.md could not be drained before reroute; nothing was dispatched"
+        );
+        let silent = ControllerEditorRouteResult {
+            exit_code: 1,
+            output: String::new(),
+        };
+        assert_eq!(
+            editor_route_terminal_reason("editor_route", &silent),
+            "editor_route exit_code=1"
+        );
+    }
 
     fn handoff_refusal() -> anyhow::Error {
         anyhow::anyhow!(

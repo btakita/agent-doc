@@ -1862,6 +1862,7 @@ name = "agent-doc-route-io"
 version = "0.35.431"
 dependencies = [
  "agent-doc-agent-io",
+ "agent-doc-capture-io",
  "agent-doc-closeout-runtime-io",
  "agent-doc-codex-hook-io",
  "agent-doc-config",

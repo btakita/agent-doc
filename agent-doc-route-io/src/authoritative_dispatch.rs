@@ -229,6 +229,18 @@ pub fn route_via_authoritative_actor(
                 }
             }
         }
+        RouteCloseoutDrainOutcome::Unlandable(report) => {
+            let recovery_command =
+                agent_doc_session_check_io::unlandable_capture::UnlandableCapture::recovery_command(
+                    file,
+                );
+            anyhow::bail!(
+                "route refused for {}: the open closeout can never drain, so nothing was dispatched. {} {}",
+                file.display(),
+                report,
+                route_closeout_user_outcome_fields(Some(&recovery_command))
+            );
+        }
         RouteCloseoutDrainOutcome::Blocked(reason) => {
             let (decision, dispatch_decision) = classify_route_closeout_block(
                 file,
@@ -257,7 +269,7 @@ pub fn route_via_authoritative_actor(
                             effects.queue_effects,
                         )?,
                     };
-                    eprintln!(
+                    let deferral = format!(
                         "[route] active closeout for {} could not be drained before reroute; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) {}",
                         file.display(),
                         queued.prompt_text,
@@ -268,6 +280,8 @@ pub fn route_via_authoritative_actor(
                             blocked_closeout_recovery_command(&decision).as_deref(),
                         )
                     );
+                    eprintln!("{deferral}");
+                    crate::invocation::record_route_deferral(deferral);
                     return Ok(dispatch_pane);
                 }
                 CloseoutBlockDispatchDecision::WaitForActiveQueueHead { head } => {
@@ -281,14 +295,17 @@ pub fn route_via_authoritative_actor(
                             agent_doc_secret_redact::redact(&blocker)
                         ),
                     );
-                    eprintln!(
-                        "[route] active closeout for {} could not be drained before reroute; existing queue head {:?} remains queued behind the closeout {}",
+                    let deferral = format!(
+                        "[route] active closeout for {} could not be drained before reroute; nothing was dispatched and existing queue head {:?} remains queued behind the closeout (blocker: {}) {}",
                         file.display(),
                         head,
+                        agent_doc_secret_redact::redact(&blocker),
                         route_closeout_user_outcome_fields(
                             blocked_closeout_recovery_command(&decision).as_deref(),
                         )
                     );
+                    eprintln!("{deferral}");
+                    crate::invocation::record_route_deferral(deferral);
                     return Ok(dispatch_pane);
                 }
                 CloseoutBlockDispatchDecision::FailClosed => {

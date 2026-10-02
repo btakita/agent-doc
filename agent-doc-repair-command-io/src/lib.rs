@@ -199,6 +199,16 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
 }
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
+    // GH 91: classify the captured bytes before replaying them. Ordinary repair
+    // replayed a GH 90 unlandable capture straight into an append-format
+    // document (the template replay guard only covers template documents), and
+    // every other retry surface already refuses those bytes.
+    // A missing file keeps repair's own "file not found" refusal.
+    if file.is_file()
+        && let Some(unlandable) = agent_doc_session_check_io::current_unlandable_capture(file)?
+    {
+        anyhow::bail!("{}", unlandable.operator_report(file));
+    }
     agent_doc_repair_io::repair(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
             &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,

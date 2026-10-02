@@ -2079,6 +2079,30 @@ mod tests {
         ));
     }
 
+    /// GH 91: ordinary `repair` (the route closeout drain's recovery step)
+    /// replayed an unlandable capture into an append-format document — the
+    /// template replay guard does not cover append documents. It must refuse
+    /// with the structural report and leave the document and capture intact.
+    #[test]
+    fn gh91_plain_repair_refuses_an_unlandable_capture() {
+        let dir = setup_project();
+        let (doc, content) = gh90_append_doc(&dir);
+        agent_doc_capture_io::capture_response(&doc, GH90_UNLANDABLE).unwrap();
+
+        let err = agent_doc_repair_command_io::repair(&doc)
+            .expect_err("repair must not replay an unlandable capture");
+        let message = format!("{err:#}");
+        assert!(message.contains("captured_response_unlandable"), "{message}");
+        assert!(message.contains("--requote-unlandable-capture"), "{message}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert!(
+            agent_doc_session_check_io::current_unlandable_capture(&doc)
+                .unwrap()
+                .is_some(),
+            "the capture is retained for the requote recovery"
+        );
+    }
+
     /// GH 90 asks 4 + 5: a capture made before the write-time gate existed
     /// (or by another path) whose bytes can never land. Every retry surface
     /// must report the structural reason and the exact recovery, stop

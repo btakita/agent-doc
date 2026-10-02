@@ -184,6 +184,13 @@ fn route_decide_closeout_recovery(
     )
 }
 
+fn route_unlandable_capture_report(file: &Path) -> Result<Option<String>> {
+    Ok(
+        agent_doc_session_check_io::unlandable_capture::current_unlandable_capture(file)?
+            .map(|capture| capture.operator_report(file)),
+    )
+}
+
 pub fn route_closeout_drain_effects(
     repair_closeout: fn(&Path) -> Result<String>,
 ) -> RouteCloseoutDrainEffects {
@@ -197,6 +204,7 @@ pub fn route_closeout_drain_effects(
         inspect_session: route_inspect_session,
         await_closeout_projection: route_await_closeout_projection,
         decide_closeout_recovery: route_decide_closeout_recovery,
+        unlandable_capture_report: route_unlandable_capture_report,
     }
 }
 

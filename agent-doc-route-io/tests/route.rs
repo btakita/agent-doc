@@ -2493,6 +2493,52 @@ mod tests {
     }
 
     #[test]
+    fn drain_fails_closed_on_an_unlandable_capture_without_waiting() {
+        // GH 91: an open cycle whose durable capture can never land (GH 90's
+        // structural/marker refusal) was treated as a transient wait — the
+        // route awaited the closeout projection, logged
+        // `route_dispatch_drain_closeout_wait_existing_queue`, and settled the
+        // editor route as `exit_code=0 applied=true` with nothing dispatched.
+        // A deterministic refusal must short-circuit to `Unlandable` with the
+        // exact recovery command, before any projection wait.
+        use agent_doc_controller::dispatch::RouteCloseoutDrainOutcome as DrainOutcome;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("unlandable.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(
+            &doc,
+            "Repaired the queue.\n<!-- agent:queue -->\n- leaked item\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+
+        let mut effects = super::route_closeout_drain_effects(super::route_repair_closeout);
+        effects.await_closeout_projection = |_, _, _| {
+            panic!("an unlandable capture must not wait on the closeout projection")
+        };
+        let outcome = super::drain_open_closeout_before_routed_dispatch(&doc, effects).unwrap();
+
+        let DrainOutcome::Unlandable(report) = outcome else {
+            panic!("expected Unlandable, got {outcome:?}");
+        };
+        assert!(report.contains("captured_response_unlandable"), "{report}");
+        assert!(
+            report.contains("--requote-unlandable-capture"),
+            "the report must name the escape hatch: {report}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
     fn closeout_block_decision_queues_prompt_context_before_failing_closed() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("route-block.md");

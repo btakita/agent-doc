@@ -764,7 +764,7 @@ The codex `/clear` head is tracked the same way, as `#codexclearnotproven` (bran
 - ~~release + publish~~
 - ~~agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/90~~
-- 🚧 Editing lazily.md `agent:queue` then Run Agent Doc: the queue reverted to the previous state. Then the edits came back as I was rewriting the queue items.
+- ~~Editing lazily.md `agent:queue` then Run Agent Doc: the queue reverted to the previous state. Then the edits came back as I was rewriting the queue items.~~
 - Diagnose + fix agent-doc command failed (exit 1): Error: session_clear codex command `/clear` for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md was not proven submitted in pane %51 after supervisor_ipc_acceptance (result=pane_not_rendered, command_visible=false); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_pane_render unblocker=wait_for_pane_render. The codex pane stayed blank while awaiting its repaint. No duplicate clear was sent; wait for the prompt to render and check its context
 <!-- /agent:queue --> 
 

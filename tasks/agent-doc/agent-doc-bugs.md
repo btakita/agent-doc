@@ -61,6 +61,7 @@ GitHub Actions publication is the remaining external step: [run 37025686687](htt
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/102
 - release + publish
+- Create an auto-upgrade flag, where the gh releases are watched and automatically upgrade the agent-doc binary + plugins.
 <!-- /agent:queue -->
 
 

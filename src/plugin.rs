@@ -1450,15 +1450,34 @@ fn install_jetbrains_local_zip_into(
             target_dir.display()
         )
     })?;
-    if installed_version != expected_version {
-        bail!(
-            "JetBrains package verification failed in {}: built {}, installed {}",
-            target_dir.display(),
-            expected_version,
-            installed_version
-        );
-    }
+    verify_local_install_version(&outcome, target_dir, &expected_version, &installed_version)?;
     Ok(outcome)
+}
+
+/// A staged package is applied by the IDE at its next start, so the plugin tree
+/// still holds the LIVE generation's jar by design (`#jbstageonfail`), the same
+/// exemption `install_jetbrains_zip_into` makes for its byte comparison. Without
+/// it, every staged `--local` install reported "built N, installed N-1" and
+/// failed `make install-full` after the staging had in fact succeeded.
+fn verify_local_install_version(
+    outcome: &JetbrainsLocalInstallOutcome,
+    target_dir: &Path,
+    expected_version: &str,
+    installed_version: &str,
+) -> Result<()> {
+    if matches!(
+        outcome,
+        JetbrainsLocalInstallOutcome::StagedForRestart { .. }
+    ) || installed_version == expected_version
+    {
+        return Ok(());
+    }
+    bail!(
+        "JetBrains package verification failed in {}: built {}, installed {}",
+        target_dir.display(),
+        expected_version,
+        installed_version
+    );
 }
 
 fn install_vscode_local() -> Result<()> {
@@ -1647,7 +1666,7 @@ mod tests {
         jetbrains_local_zip_matches_installation, jetbrains_plugin_dirs_in_roots,
         jetbrains_upgrade_launcher_has_main_manifest, jetbrains_upgrade_reattach_warning,
         jetbrains_version_cmp, local_jetbrains_zip_in, local_jetbrains_zip_version,
-        release_version, releases_page_url,
+        release_version, releases_page_url, verify_local_install_version,
     };
     use super::{install_jetbrains_package_bytes, java_candidates_for_ide, resolve_java_for_ide};
     use serde_json::json;
@@ -2701,6 +2720,38 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             })
         );
         assert_eq!(super::jetbrains_hot_upgrade_verdict(0, None), None);
+    }
+
+    /// A staged `--local` install leaves the live generation's jar in place, so
+    /// "built N, installed N-1" is the expected state, not a verification failure.
+    /// Any other outcome still requires the installed version to match.
+    #[test]
+    fn staged_local_install_accepts_the_live_generation_jar() {
+        let dir = std::path::Path::new("/plugins");
+        let staged = JetbrainsLocalInstallOutcome::StagedForRestart {
+            reason: "dynamic upgrade failed".to_string(),
+        };
+        assert!(verify_local_install_version(&staged, dir, "0.2.468", "0.2.467").is_ok());
+        let err = verify_local_install_version(
+            &JetbrainsLocalInstallOutcome::Installed,
+            dir,
+            "0.2.468",
+            "0.2.467",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("built 0.2.468, installed 0.2.467"),
+            "{err}"
+        );
+        assert!(
+            verify_local_install_version(
+                &JetbrainsLocalInstallOutcome::Installed,
+                dir,
+                "0.2.468",
+                "0.2.468"
+            )
+            .is_ok()
+        );
     }
 }
 

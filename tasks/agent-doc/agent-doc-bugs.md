@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
-  codex: 01a0fb46-9936-7893-86be-7777f41da86e
+  codex: 01a0fd09-a13c-75b1-aa00-0e20ce0bd034
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -37,7 +37,20 @@ queue: stop
 Compacted content:
 - Archived 5 response topic(s): #gh-fix issue 95; #gh-fix issue 96; #gh-fix issue 97; 2 more
 - Prior summary/context: prior compacted content: Archived 34 response topic(s): #gh-fix GH #77 (tmux shows 1 pane while the editor shows 2 do...
-<!-- agent:boundary:1956bca7:agent-doc-bugs -->
+> **Queue prompt:** release + publish
+
+### Re: GH #99, #100, #101 and release — gpt-5 · 2026-10-02T11:24-04:00
+
+Completed all three `#gh-fix` queue heads in isolated subagent worktrees, integrated their commits, and closed the GitHub issues. For each preset head, the requested result is complete: fix then closerelease.
+
+- [GH #99](https://github.com/btakita/agent-doc/issues/99): stranded `write_applied` cycles now have a terminal repair path; `cancel` declines out-of-scope captured cycles with a nonzero exit and accurate guidance, and already-materialized responses can bypass an unreachable optional normalization step.
+- [GH #100](https://github.com/btakita/agent-doc/issues/100): retained the canonical, composable `#preset` syntax. Bracketed heads, trailing context such as `#gh-fix URL`, and multiple preset references now validate and strike against every resolved expansion without requiring a literal `[#preset]` echo. Ordinary free-text heads still require their exact queue-prompt quote. A new `+` prefix is unnecessary.
+- [GH #101](https://github.com/btakita/agent-doc/issues/101): added shared `agent-doc init-session` behavior and actions in both editors. Plain Markdown is preserved and scaffolded, filename-derived title is used, then the session starts; an existing session is claimed. JetBrains exposes it from editor/project/Tools/popup surfaces, and VS Code from active editor/Explorer/command palette/popup surfaces.
+
+Released and pushed `v0.35.436` at `4b7be5868`, with JetBrains plugin `0.2.473` and VS Code extension `0.2.77`. The local binary, native library, and both editor packages installed successfully. Full `make check` passed, including 10,418/10,418 Rust tests, 181/181 VS Code tests, JetBrains verification, cross-editor SimWorld, parity audit, and formal model checks.
+
+GitHub Actions publication is the remaining external step: [run 37025686687](https://github.com/btakita/agent-doc/actions/runs/37025686687) is in progress, so the GitHub Release/PyPI artifacts are not yet visible. The tag and source are published; CI owns artifact publication and is being observed rather than awaited.
+<!-- agent:boundary:e58c9589 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -45,8 +58,8 @@ Compacted content:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-<!-- /agent:queue --> 
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->

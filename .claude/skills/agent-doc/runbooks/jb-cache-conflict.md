@@ -21,6 +21,8 @@ Any filesystem change observed while at least one editor buffer is open is a pen
 - A stale opening buffer, failed ACK, or reconnect never publishes whole editor text.
 - Disk candidates remain pending until detached authority is proven or an explicit operator action resolves the conflict.
 - Closing one of several editors does not demote controller authority.
+- Closing the final editor publishes its exact cut on the background replica worker and waits for that serialized resolver before deregistration; a fixed short timeout must not abandon the only convergence path for a large document.
+- If a legacy close already lost its registration but the captured response is exactly visible on disk, `repair` adopts that disk-visible response for terminal closeout without re-sending it. This escape hatch never outranks a live document registration.
 
 ## Quiescent CRDT Delivery
 

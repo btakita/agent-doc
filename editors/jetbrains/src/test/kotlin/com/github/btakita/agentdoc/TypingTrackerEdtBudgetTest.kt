@@ -123,8 +123,13 @@ class TypingTrackerEdtBudgetTest {
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
         ).first { Files.exists(it) }
+        val replicaPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
         val tracker = Files.readString(trackerPath)
         val lifecycle = Files.readString(lifecyclePath)
+        val replica = Files.readString(replicaPath)
 
         assertTrue(
             "project startup must seed already-open markdown buffers with a Lazily registration",
@@ -163,6 +168,17 @@ class TypingTrackerEdtBudgetTest {
             "a failed final publish must retain editor authority instead of emitting a lossy close",
             clearBody.contains("retaining editor authority instead of emitting a lossy close") &&
                 clearBody.contains("return@execute"),
+        )
+        val closePublishBody = replica.substringAfter("private fun publishClosingDocumentCut")
+            .substringBefore("private fun forwardLocalEditsFromShadow")
+        assertTrue(
+            "closing the last replica must wait for its serialized cut to finish",
+            closePublishBody.contains("}.get()"),
+        )
+        assertFalse(
+            "closing-cut resolution must not abandon a large publish on the ordinary two-second budget",
+            closePublishBody.contains("CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS") ||
+                closePublishBody.contains("TimeoutException"),
         )
         assertTrue(
             "open-document reporting should reuse the current coalesced full-content reporter",

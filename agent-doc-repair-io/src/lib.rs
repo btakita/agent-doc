@@ -878,9 +878,39 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     // This prevents double-apply when retained intent outlived a successful
     // IPC write (e.g., IPC timeout path exits with code 75 without calling clear_pending,
     // but the plugin already applied the content via the IPC patch file).
-    let response_already_present =
-        response_replay::response_materialized_in_exchange_response_cell(&response, &doc_content);
-    if response_already_present {
+    let document_registration_live =
+        agent_doc_document_realtime_io::live_editor_registration_attached_for_file(file);
+    let disk_content = if !document_registration_live
+        && !response_replay::response_materialized_in_exchange_response_cell(
+            &response,
+            &doc_content,
+        ) {
+        Some(
+            std::fs::read_to_string(&canonical).with_context(|| {
+                format!("repair: failed to read {} from disk", canonical.display())
+            })?,
+        )
+    } else {
+        None
+    };
+    let materialized_response_content = select_materialized_response_content(
+        &doc_content,
+        disk_content.as_deref(),
+        &response,
+        document_registration_live,
+    )
+    .map(str::to_owned);
+    if let Some(materialized_content) = materialized_response_content {
+        if materialized_content != doc_content {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "repair_adopt_disk_visible_response_without_registration file={} recovery=terminal_commit",
+                    canonical.display(),
+                ),
+            );
+            doc_content = materialized_content;
+        }
         if let Some(ref capture) = capture {
             agent_doc_capture_io::validate_replay_with_current_content(
                 &canonical,
@@ -903,7 +933,7 @@ pub fn run_with_queue_completion_ids_and_force_disk<
                 )
             },
             agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file),
-            agent_doc_document_realtime_io::live_editor_registration_attached_for_file(file),
+            document_registration_live,
         )?;
         let state_is_open = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
             .map(|state| state.is_open())
@@ -1100,6 +1130,27 @@ fn settle_materialized_response_normalization(
     }
 
     normalization()
+}
+
+/// A vanished replica must not hide an exact response that its closing cut
+/// already persisted. The live authority remains preferred whenever it carries
+/// the response, and disk is consulted only after registration is gone; this
+/// avoids choosing a stale disk projection while an editor can still deliver.
+fn select_materialized_response_content<'a>(
+    authoritative: &'a str,
+    disk: Option<&'a str>,
+    response: &str,
+    document_registration_live: bool,
+) -> Option<&'a str> {
+    if response_replay::response_materialized_in_exchange_response_cell(response, authoritative) {
+        return Some(authoritative);
+    }
+    if document_registration_live {
+        return None;
+    }
+    disk.filter(|content| {
+        response_replay::response_materialized_in_exchange_response_cell(response, content)
+    })
 }
 
 struct RepairCurrentDocument {
@@ -3596,6 +3647,29 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn missing_replica_adopts_an_exact_disk_visible_response() {
+        let response = "### Re: closeout - model\n\nDone.\n";
+        let authority = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let disk =
+            format!("<!-- agent:exchange patch=append -->\n{response}<!-- /agent:exchange -->\n");
+
+        assert_eq!(
+            select_materialized_response_content(authority, Some(&disk), response, false),
+            Some(disk.as_str()),
+        );
+        assert_eq!(
+            select_materialized_response_content(authority, Some(&disk), response, true),
+            None,
+            "a registered editor remains authoritative over disk",
+        );
+        assert_eq!(
+            select_materialized_response_content(&disk, Some(authority), response, true),
+            Some(disk.as_str()),
+            "an exact authoritative response always wins",
+        );
+    }
 
     #[test]
     fn materialized_response_bypasses_unreachable_editor_normalization_only() {

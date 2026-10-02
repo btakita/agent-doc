@@ -1450,12 +1450,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 templateValidation.remove(filePath)
                 fileCacheConflicts.remove(filePath)
                 true
-            }.get(CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        } catch (e: TimeoutException) {
-            log.warn(
-                "[crdt-replica] closing editor cut publish timed out for $filePath after ${CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS}ms",
-            )
-            false
+            // Closing the editor removes the only replica that can settle this
+            // cut. Do not apply the ordinary short RPC budget here: a large
+            // document can legitimately spend several seconds broadcasting
+            // its final update, and returning early would let this queued task
+            // deregister the replica after the caller had retained authority.
+            // This runs on the content-report worker, never the EDT, so wait for
+            // the serialized resolver to finish before emitting the close fact.
+            }.get()
         } catch (e: Exception) {
             log.warn("[crdt-replica] closing editor cut publish failed for $filePath: ${e.message}")
             false

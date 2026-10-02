@@ -3693,6 +3693,67 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             );
         }
     }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn cross_document_route_keeps_stashed_target_out_of_two_pane_editor_surface() {
+        use agent_doc_route_io::invocation::CrossDocumentExistingPaneOnlyGuard;
+        use agent_doc_route_io::pane_resolution::rescue_from_stash;
+
+        let iso = IsolatedTmux::new("route-test-cross-document-layout-preserved");
+        let session = "test";
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("api.md");
+        std::fs::write(&file, "# api\n").unwrap();
+
+        let left = iso.auto_start(session, &cwd).unwrap();
+        let _ = iso
+            .cmd()
+            .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
+            .status();
+        let right = iso.auto_start(session, &cwd).unwrap();
+        agent_doc_tmux_io::join_pane_guarded(&iso, &right, &left, session, "-dh").unwrap();
+
+        let stashed = iso.auto_start(session, &cwd).unwrap();
+        iso.stash_pane(&stashed, session).unwrap();
+        let agent_doc_window = format!("{}:agent-doc", session);
+        let visible_before = iso.list_window_panes(&agent_doc_window).unwrap();
+        let stash_before = iso.pane_window(&stashed).unwrap();
+        assert_eq!(
+            visible_before.len(),
+            2,
+            "fixture must model two editor panes"
+        );
+
+        let rescued = {
+            let _guard = CrossDocumentExistingPaneOnlyGuard::set(true);
+            rescue_from_stash(
+                &iso,
+                &stashed,
+                "api-session",
+                file.to_str().unwrap(),
+                session,
+                false,
+            )
+        };
+
+        assert!(
+            !rescued,
+            "cross-document child route must not rejoin its pane"
+        );
+        assert_eq!(
+            iso.list_window_panes(&agent_doc_window).unwrap(),
+            visible_before,
+            "the exact two-pane editor surface must remain unchanged"
+        );
+        assert_eq!(
+            iso.pane_window(&stashed).unwrap(),
+            stash_before,
+            "the existing target stays alive in stash"
+        );
+        assert!(iso.pane_alive(&stashed));
+    }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn join_pane_rescue_places_left_of_target_when_requested() {

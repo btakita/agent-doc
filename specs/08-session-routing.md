@@ -138,6 +138,18 @@ the observation/effect receipt for that intent so a prior terminal
 `operator_owned` projection cannot wedge repeated Run actions; automatic editor
 surface observations still coalesce identical values.
 
+**Cross-document child-route boundary:** A route with no layout columns that is
+invoked from explicit live tmux process context inside a pane owned by another
+document is background work, not a new editor-surface intent. It may reuse and
+dispatch to the target document's already-proven actor or registry pane, but it
+must preserve the caller's visible layout and focus: no stash rescue, pane
+selection, opportunistic lazy claim, or cold start is allowed. If no existing
+target can be proven, the child route fails closed. Ambient tmux active-pane
+state is not enough to select this policy, because IDE/plugin routes do not
+carry pane-local process identity. This keeps an automatic cross-document
+closeout/queue continuation from additively rejoining a hidden target after a
+two-pane editor projection has already converged.
+
 Claude artifact UI must be distinguished by stable shape rather than session-owned text. A bare `⧉ <label>` chip is an attachment on an otherwise idle composer and is skipped while locating the real dispatch-ready prompt; the label is arbitrary. The active picker is blocked only when `Enter to open` and a `claude.ai/code/artifact/...` URL are both visible.
 
 **Owned ready/busy conflict:** When a managed owned pane reaches an internally ready state (`actor=ready`, supervisor runtime actor ready, controller lease ready) but the pane probe still reports `alive-busy` / `prompt_ready=false` from a recoverable stale queued-draft cue, route-owned completion and supervisor idle-queue dispatch must treat that as a bounded ready/busy conflict rather than an unbounded keep-alive. After the same four-poll debounce used by stale-busy idle repair, they emit `owned_pane_ready_busy_conflict` and continue route-owned reap/liveness or queue dispatch as appropriate. Active turn cues, permission prompts, hook-review prompts, shell-search prompts, help screens, and clean-exit prompts remain hard blockers. `agent-doc session status` prints this conflict with a bounded reconcile/clear hint so the operator does not have to infer it from raw ready/busy fields.

@@ -220,6 +220,23 @@ pub fn fail_if_recent_session_loss_window(file: &Path, session_id: &str) -> Resu
     );
 }
 
+fn fail_if_cross_document_route_needs_new_pane(file: &Path) -> Result<()> {
+    if !crate::invocation::cross_document_existing_pane_only() {
+        return Ok(());
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_existing_pane_only_guard file={} policy=cross_document outcome=blocked reason=existing_target_unavailable focus_effect=preserved pane_effect=none",
+            file.display(),
+        ),
+    );
+    anyhow::bail!(
+        "cross-document route for {} has no proven existing target; auto-start is forbidden and tmux focus was preserved",
+        file.display(),
+    );
+}
+
 /// Returns true if the pane is running an agent process for the given harness.
 /// Returns true on query failure so route does not skip panes it cannot inspect.
 pub fn is_agent_process(tmux: &Tmux, pane_id: &str, harness: &HarnessConfig) -> bool {
@@ -435,6 +452,8 @@ pub fn resolve_or_create_pane_dispatch_only(
     };
 
     let background_existing_pane_only = crate::invocation::background_existing_pane_only();
+    let cross_document_existing_pane_only = crate::invocation::cross_document_existing_pane_only();
+    let preserve_route_layout = crate::invocation::preserve_route_layout();
     if background_existing_pane_only {
         let explicit_pane_alive = pane.is_some_and(|pane| tmux.pane_alive(pane));
         let explicit_pane_runs_other_document = pane.is_some_and(|pane| {
@@ -509,7 +528,7 @@ pub fn resolve_or_create_pane_dispatch_only(
     );
 
     let rescue_target = |pane_id: &str| {
-        if background_existing_pane_only {
+        if preserve_route_layout {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -598,8 +617,8 @@ pub fn resolve_or_create_pane_dispatch_only(
                 pending_prompt_context
                     .as_ref()
                     .map(|context| context.prompt_text.as_str()),
-                !background_existing_pane_only,
-                !background_existing_pane_only,
+                !preserve_route_layout,
+                !preserve_route_layout,
                 false,
                 dispatch_pane.as_str(),
                 DispatchOnlyReopenDelivery::DirectPaneSubmit,
@@ -688,8 +707,8 @@ pub fn resolve_or_create_pane_dispatch_only(
             pending_prompt_context
                 .as_ref()
                 .map(|context| context.prompt_text.as_str()),
-            !background_existing_pane_only,
-            !background_existing_pane_only,
+            !preserve_route_layout,
+            !preserve_route_layout,
             false,
             dispatch_pane,
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
@@ -803,7 +822,7 @@ pub fn resolve_or_create_pane_dispatch_only(
         .filter(|entry| tmux.pane_alive(&entry.pane))
         .map(|entry| entry.pane.clone())
         .collect();
-    if !background_existing_pane_only
+    if !preserve_route_layout
         && registered.is_some()
         && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)
         && is_agent_process(tmux, &new_pane, harness)
@@ -835,18 +854,23 @@ pub fn resolve_or_create_pane_dispatch_only(
         );
     }
 
-    if background_existing_pane_only {
+    if preserve_route_layout {
         let requested_pane = pane.unwrap_or("none");
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_background_existing_pane_guard file={} pane={} outcome=blocked reason=existing_target_unavailable focus_effect=preserved pane_effect=none",
+                "route_existing_pane_only_guard file={} pane={} policy={} outcome=blocked reason=existing_target_unavailable focus_effect=preserved pane_effect=none",
                 file.display(),
                 requested_pane,
+                if cross_document_existing_pane_only {
+                    "cross_document"
+                } else {
+                    "background"
+                },
             ),
         );
         anyhow::bail!(
-            "background recovery for {} cannot use its existing pane {}; auto-start is forbidden and tmux focus was preserved",
+            "existing-pane-only route for {} cannot use its existing pane {}; auto-start is forbidden and tmux focus was preserved",
             file.display(),
             requested_pane,
         );
@@ -1059,6 +1083,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
         if startup_miss_requires_fresh_start(startup_facts)
             || startup_miss_should_restart_live_owner(startup_facts)
         {
+            fail_if_cross_document_route_needs_new_pane(file)?;
             eprintln!(
                 "[route] registered pane {} has an unresolved startup-miss marker from {} for {} — deregistering and starting fresh",
                 registered_pane, miss_ts, file_path
@@ -1193,7 +1218,9 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                             ),
                         );
                         if restart_via_supervisor(file, session_id) {
-                            if let Err(e) = tmux.select_pane(registered_pane) {
+                            if !crate::invocation::preserve_route_layout()
+                                && let Err(e) = tmux.select_pane(registered_pane)
+                            {
                                 eprintln!(
                                     "[route] warning: failed to focus restarted pane {}: {}",
                                     registered_pane, e
@@ -1444,7 +1471,8 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
             redundant
         ));
     }
-    if registered.is_some()
+    if !crate::invocation::cross_document_existing_pane_only()
+        && registered.is_some()
         && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)
         && is_agent_process(tmux, &new_pane, harness)
     {
@@ -1576,6 +1604,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
         ));
     }
 
+    fail_if_cross_document_route_needs_new_pane(file)?;
     eprintln!("[route] No active pane found, auto-starting...");
     if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");
@@ -1702,6 +1731,16 @@ pub fn rescue_from_stash(
     target_session: &str,
     split_before: bool,
 ) -> bool {
+    if crate::invocation::preserve_route_layout() {
+        agent_doc_ops_log_io::log_op(
+            Path::new(file_path),
+            &format!(
+                "route_existing_pane_only_guard file={} pane={} outcome=allowed action=skip_stash_rescue focus_effect=preserved pane_effect=none",
+                file_path, pane_id,
+            ),
+        );
+        return false;
+    }
     let pane_session = agent_doc_tmux_io::target_session_name(tmux, pane_id).unwrap_or_default();
     if pane_session != target_session {
         eprintln!(

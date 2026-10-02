@@ -21,7 +21,12 @@ thread_local! {
     /// It must never rescue a stashed pane into the visible layout, select an
     /// alternate pane, or cold-start a replacement. Foreground editor routes
     /// leave this false and retain the normal routing behavior.
-static BACKGROUND_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
+    static BACKGROUND_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
+    /// A no-layout route invoked from a pane that owns another document may
+    /// reuse an already-proven target, but must not change tmux topology or
+    /// focus. This is the automatic child-route counterpart to controller
+    /// background recovery.
+    static CROSS_DOCUMENT_EXISTING_PANE_ONLY: Cell<bool> = const { Cell::new(false) };
 /// Layout reconciliation owns the final visible pane and focus projection.
 ///
 /// Pane provisioning performed inside that transaction must remain
@@ -63,6 +68,15 @@ pub fn force_disk_route_writes() -> bool {
 
 pub fn background_existing_pane_only() -> bool {
     BACKGROUND_EXISTING_PANE_ONLY.with(Cell::get)
+}
+
+pub fn cross_document_existing_pane_only() -> bool {
+    CROSS_DOCUMENT_EXISTING_PANE_ONLY.with(Cell::get)
+}
+
+/// Whether this route must preserve the caller's visible tmux surface.
+pub fn preserve_route_layout() -> bool {
+    background_existing_pane_only() || cross_document_existing_pane_only()
 }
 
 pub fn defer_startup_focus_to_layout() -> bool {
@@ -121,6 +135,31 @@ impl Drop for BackgroundExistingPaneOnlyGuard {
     fn drop(&mut self) {
         BACKGROUND_EXISTING_PANE_ONLY.with(|cell| cell.set(self.previous));
     }
+}
+
+pub struct CrossDocumentExistingPaneOnlyGuard {
+    previous: bool,
+}
+
+impl CrossDocumentExistingPaneOnlyGuard {
+    pub fn set(value: bool) -> Self {
+        let previous = CROSS_DOCUMENT_EXISTING_PANE_ONLY.with(|cell| cell.replace(value));
+        Self { previous }
+    }
+}
+
+impl Drop for CrossDocumentExistingPaneOnlyGuard {
+    fn drop(&mut self) {
+        CROSS_DOCUMENT_EXISTING_PANE_ONLY.with(|cell| cell.set(self.previous));
+    }
+}
+
+fn automatic_cross_document_route(
+    has_layout_columns: bool,
+    explicit_background_route: bool,
+    foreign_owner: Option<&str>,
+) -> bool {
+    !has_layout_columns && !explicit_background_route && foreign_owner.is_some()
 }
 
 pub struct DeferStartupFocusToLayoutGuard {
@@ -264,6 +303,31 @@ pub fn run_with_tmux_with_options(
 ) -> Result<()> {
     let _wait_for_ready_guard = WaitForReadyOverrideGuard::set(wait_for_ready);
     let _force_disk_guard = ForceDiskRouteWritesGuard::set(force_disk);
+    // Only explicit process-context pane evidence is accepted here. Falling
+    // back to tmux's ambient active pane would misclassify IDE/plugin routes as
+    // cross-document whenever an unrelated managed pane happened to be active.
+    let current_pane = agent_doc_tmux_io::current_live_pane_id_from_env_or_override(tmux);
+    let foreign_owner = current_pane.as_deref().and_then(|current_pane| {
+        agent_doc_sync_io::sync::pane_owned_document_other_than(tmux, current_pane, file)
+    });
+    let cross_document_existing_pane_only = automatic_cross_document_route(
+        !col_args.is_empty(),
+        background_existing_pane_only(),
+        foreign_owner.as_deref(),
+    );
+    let _cross_document_guard =
+        CrossDocumentExistingPaneOnlyGuard::set(cross_document_existing_pane_only);
+    if cross_document_existing_pane_only {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_cross_document_existing_pane_only file={} current_pane={} pane_owns={} focus_effect=preserved pane_effect=none",
+                file.display(),
+                current_pane.as_deref().unwrap_or("none"),
+                foreign_owner.as_deref().unwrap_or("none"),
+            ),
+        );
+    }
     command::run_with_tmux_with_options(
         file,
         tmux,
@@ -275,4 +339,29 @@ pub fn run_with_tmux_with_options(
         prune_before_lookup,
         effects,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::automatic_cross_document_route;
+
+    #[test]
+    fn automatic_cross_document_route_requires_foreign_owner_without_layout_columns() {
+        assert!(automatic_cross_document_route(
+            false,
+            false,
+            Some("other.md")
+        ));
+        assert!(!automatic_cross_document_route(
+            true,
+            false,
+            Some("other.md")
+        ));
+        assert!(!automatic_cross_document_route(
+            false,
+            true,
+            Some("other.md")
+        ));
+        assert!(!automatic_cross_document_route(false, false, None));
+    }
 }

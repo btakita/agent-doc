@@ -9,7 +9,9 @@ use agent_doc_controller::dispatch::{
     fresh_route_admission_timeout, is_codex_shell_search_blocker,
 };
 use agent_doc_harness::HarnessConfig;
-use agent_doc_harness::{CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER, CODEX_UPDATE_AVAILABLE_BLOCKER};
+use agent_doc_harness::{
+    CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER, CODEX_UPDATE_AVAILABLE_BLOCKER,
+};
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
 use agent_doc_supervisor::route_runtime::SupervisorHealth;
 #[cfg(test)]
@@ -554,7 +556,9 @@ pub fn ensure_existing_pane_ready_for_dispatch(
                 provenance
             ),
         );
-        if let Err(e) = tmux.select_pane(pane) {
+        if !crate::invocation::preserve_route_layout()
+            && let Err(e) = tmux.select_pane(pane)
+        {
             eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
         }
         eprintln!(

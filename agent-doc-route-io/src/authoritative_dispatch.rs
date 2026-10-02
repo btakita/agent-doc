@@ -103,7 +103,9 @@ fn accept_pending_harness_switch(
     pending: &PendingHarnessSwitch,
 ) -> Result<String> {
     let dispatch_pane = actor.record.pane_id.clone();
-    if let Err(err) = tmux.select_pane(&dispatch_pane) {
+    if !crate::invocation::preserve_route_layout()
+        && let Err(err) = tmux.select_pane(&dispatch_pane)
+    {
         eprintln!(
             "[route] warning: failed to focus pending harness handoff pane {}: {}",
             dispatch_pane, err
@@ -559,7 +561,9 @@ pub fn route_via_authoritative_actor(
             dispatch_pane = actor.record.pane_id.clone();
             actor_state = actor.actor_state();
         } else {
-            if let Err(e) = tmux.select_pane(&dispatch_pane) {
+            if !crate::invocation::preserve_route_layout()
+                && let Err(e) = tmux.select_pane(&dispatch_pane)
+            {
                 eprintln!(
                     "[route] warning: failed to focus pane {}: {}",
                     dispatch_pane, e
@@ -842,7 +846,8 @@ pub fn route_via_authoritative_actor(
             intent: dispatch_intent,
         });
 
-    if actor_dispatch_blocker_reason(actor_dispatch_state).is_some()
+    if !crate::invocation::preserve_route_layout()
+        && actor_dispatch_blocker_reason(actor_dispatch_state).is_some()
         && let Err(e) = tmux.select_pane(&dispatch_pane)
     {
         eprintln!(

@@ -11,7 +11,7 @@ use agent_doc_document::queue_projection::{
 };
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
-use agent_doc_markdown_ast::mutations::{MutationNodePatch, MutationNodePatchOp};
+use agent_doc_markdown_ast::mutations::{MutationError, MutationNodePatch, MutationNodePatchOp};
 use anyhow::{Context, Result};
 
 use crate::{
@@ -679,9 +679,22 @@ pub fn answered_free_text_head_node_keys(
     if response_body.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
-        anyhow::anyhow!("free-text strike: failed to derive queue node keys: {err}")
-    })?;
+    let nodes = match agent_doc_markdown_ast::mutations::item_nodes(content, "queue") {
+        Ok(nodes) => nodes,
+        // `#ftstrike-noqueue`: queue is an optional document component. An
+        // answered response in a document without one has no queue lifecycle
+        // state to project; absence is therefore an empty projection, not a
+        // failed mutation. Preserve every other AST/mutation error so malformed
+        // queue state remains visible to the operator.
+        Err(MutationError::ComponentNotFound(component)) if component == "queue" => {
+            return Ok(Vec::new());
+        }
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "free-text strike: failed to derive queue node keys: {err}"
+            ));
+        }
+    };
     // `#ftstrikeonce` (live, agent-doc-bugs.md 2026-09-30): queue consume and
     // this answered-head projection both act on the same answer. When consume
     // had already struck the answered copy this cycle, the "first unstruck
@@ -2440,6 +2453,34 @@ Old.
                 .unwrap()
                 .is_none(),
             "the projection must disappear once its target is authoritative"
+        );
+    }
+
+    #[test]
+    fn answered_free_text_projection_without_queue_component_is_a_noop() {
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: queue-optional\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: document-only prompt — gpt-5\n\n",
+            "> **Queue prompt:** document-only prompt\n\n",
+            "Answered without queue scheduling.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] unrelated backlog item [#unrelated]\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let response = concat!(
+            "### Re: document-only prompt — gpt-5\n\n",
+            "> **Queue prompt:** document-only prompt\n\n",
+            "Answered without queue scheduling.\n",
+        );
+
+        assert_eq!(
+            project_answered_free_text_strike(document, response, Some(document)).unwrap(),
+            None,
+            "a missing optional queue component has no lifecycle state to project"
         );
     }
 

@@ -69,19 +69,50 @@ GH #103 was also completed in the requested background queue work and will be re
 3. Run final verification and watch GitHub Release/PyPI to terminal success.
 
 ❯ The current patch also briefly produced repo-wide formatting noise; that was removed without touching intended work. Realistically, terminal publication still needs roughly another 45–75 minutes, mostly mandatory test and release pipelines.
-<!-- agent:boundary:06c4c1b0:agent-doc-bugs -->
+
+### Re: GH #104–105, queue fixes, retained delivery, tmux sync, and v0.35.440 — gpt-5 · 2026-10-02T19:29-04:00
+
+> **Queue prompt:** Bring back the Clear Session Context to a numbered item on the first page of the Agent Doc editor prompt menu. The `9` hotkey would be ideal.
+
+> **Queue prompt:** Create an auto-upgrade flag, where the gh releases are watched and automatically upgrade the agent-doc binary + plugins.
+
+> **Queue prompt:** release + publish
+
+Completed the selected GH #104 preset expansion: **fix then closerelease**. GH #104 is fixed by `3a36608c37d279296b4b07f4c095168c2d09452f`, closed, integrated, and released. Queue marker projection now replaces only the tracked source range, preserves neighboring rows and trailing whitespace, rejects joined/buried tracked rows, and safely rebases marker-only changes over concurrent editor edits. Its exact CI passed `make check` and `make tmux-ci`.
+
+Completed GH #105 as **fix then closerelease**. Commit `f3b72c53a3456d6dfbf08975e2fe940939e8a630` makes unknown Remote Dev `columns=[]` observations structurally inert instead of synthesizing pane membership, while proven local one-window layouts remain explicit. The issue is closed and the fix is released in v0.35.440.
+
+Completed the remaining queue items:
+
+- `Clear Session Context` is restored exactly once as first-page item 9 in JetBrains and VS Code by `15b29abdda0b3c9747201d00a118185ad14be23f`; the existing clear behavior remains the owner.
+- Auto-upgrade is implemented by `173af6af6f93ac48dd43cbca716a1d127d91f2ec` as `agent-doc upgrade --auto [--interval-seconds N]`, with a 900-second default, 60-second minimum, singleton locking, stable-release polling, checksum verification, retry/deduplication, pip fallback, and updates limited to already-installed editor packages.
+- Manual `Sync Tmux Pane` now uses a fresh foreground intent while passive auto-sync remains coalesced (`ab6d70120a889477a11285177cdee45ded0544d9`). Live proof: unchanged auto-sync produced no structural generation; identical manual actions converged as fresh generations 2 and 3, both applied to exactly panes `%2/%51`.
+
+The added production causes are also fixed rather than merely cleared:
+
+- Cross-document routing no longer stashes a valid pane; the two-editor-pane invariant was restored without killing panes.
+- Deferred Roseshield supervisor replacement waits for a durable cycle close and Ready state instead of attempting a destructive cold start.
+- Empty `- ` queue placeholders are discarded during parse/render without removing real neighboring prompts.
+- JetBrains dynamic plugin generations retire their global executors/listeners, retry notification registration, and load native shadows per classloader identity, eliminating the IDEA leak and stale `QUIESCING` socket ownership.
+- Retained closeout recovery accepts a stricter same-capture evidence replacement, preserves stable retry keys, gates auto-queue selection before prompt observation, and safely handles provably empty stale child cycles. FPE `b19f…` converged exactly once; SDK `2078…` and `7c684…` each projected exactly once after hot reload, with no force-disk, recapture, controller kill, recycle, or IDEA restart.
+- The Haiven replay/API and FPE work was a separate delegated session, not a substitution for this `agent-doc-bugs.md` session; its owner-pane responses were persisted independently.
+
+Released and published [v0.35.440](https://github.com/btakita/agent-doc/releases/tag/v0.35.440) at `b7d4607bafffbd1fe9dd344d0ed50892e1281d5f`: core 0.35.440, JetBrains 0.2.480, and VS Code 0.2.78. The full gate passed 10,434 Rust tests plus editor, native, docs, parity, private-name, and TLA checks. GitHub Release, PyPI clean pinned install, main CI including tmux-ci, Book, and Pages are terminal successful; all eight release assets passed both checksum manifests.
+<!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
-## Pending / Not Built
+## Pending / Not Buil
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/102~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/103~~
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/104
-- Bring back the Clear Session Context to a numbered item on the first page of the Agent Doc editor prompt menu. Number 9 would be ideal.
+- Bring back the Clear Session Context to a numbered item on the first page of the Agent Doc editor prompt menu. The `9` hotkey would be ideal.
+- #gh-fix https://github.com/btakita/agent-doc/issues/105
+- #gh-fix https://github.com/btakita/agent-doc/issues/106
 - Create an auto-upgrade flag, where the gh releases are watched and automatically upgrade the agent-doc binary + plugins.
 - release + publish
 <!-- /agent:queue -->

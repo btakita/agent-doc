@@ -99,21 +99,58 @@ class LayoutDetectorTest {
     }
 
     @Test
-    fun `a backend with no editor windows mirrors each selected session document as a column`() {
-        // GH #88: Remote Dev backend, two documents side by side, `windows=0`.
-        val snapshots = LayoutDetector.headlessSelectionSnapshots(
-            listOf("tasks/laptop.md", "tasks/1099.md", "tasks/laptop.md"),
+    fun `a backend with no editor windows accepts one remote client's split set`() {
+        // GH #97: the backend-local selection is only the focused file. A
+        // client-scoped manager may prove the visible split set, but separate
+        // clients' focused files must never be combined into one layout.
+        val selected = LayoutDetector.uniqueRemoteSplitSelection(
+            listOf(listOf("tasks/laptop.md", "tasks/1099.md", "tasks/laptop.md")),
+        )
+        assertEquals(
+            listOf("tasks/laptop.md", "tasks/1099.md"),
+            selected,
         )
         assertEquals(
             listOf(LayoutColumn(listOf("tasks/laptop.md")), LayoutColumn(listOf("tasks/1099.md"))),
-            LayoutDetector.buildColumnsFromSnapshots(snapshots),
-        )
-        assertEquals(
-            listOf(LayoutColumn(listOf("tasks/laptop.md"))),
             LayoutDetector.buildColumnsFromSnapshots(
-                LayoutDetector.headlessSelectionSnapshots(listOf("tasks/laptop.md")),
+                LayoutDetector.headlessSelectionSnapshots(selected!!),
             ),
         )
+    }
+
+    @Test
+    fun `a focused file without client split evidence is unknown`() {
+        assertEquals(
+            null,
+            LayoutDetector.uniqueRemoteSplitSelection(listOf(listOf("tasks/laptop.md"))),
+        )
+        assertEquals(
+            null,
+            LayoutDetector.uniqueRemoteSplitSelection(
+                listOf(listOf("tasks/laptop.md"), listOf("tasks/1099.md")),
+            ),
+        )
+        assertEquals(
+            null,
+            LayoutDetector.uniqueRemoteSplitSelection(
+                listOf(
+                    listOf("tasks/laptop.md", "tasks/1099.md"),
+                    listOf("tasks/guest-left.md", "tasks/guest-right.md"),
+                ),
+            ),
+        )
+
+        val line = LayoutDetector.unknownRemoteLayoutLine(
+            focusedSessionFiles = listOf("tasks/laptop.md"),
+            remoteSelections = listOf(listOf("tasks/laptop.md")),
+        )
+        assertEquals(
+            "[layout-detect] unknown windows=0 source=remote_client_selected_files " +
+                "focused=[tasks/laptop.md] remote_clients=1 selections=[0:[tasks/laptop.md]] " +
+                "reason=no_unique_client_split_set",
+            line,
+        )
+        assertFalse(line.contains("columns=1"))
     }
 
     @Test

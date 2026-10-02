@@ -356,6 +356,36 @@ fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
 }
 
 fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>> {
+    apply_claude_stop_with_drain_readiness(
+        input,
+        agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc,
+    )
+}
+
+/// Whether a previous queue handoff to the supervisor is still undrained.
+fn supervisor_handoff_overdue(file: &Path) -> bool {
+    match current_document_content(file, "claude_stop_supervisor_handoff_check") {
+        Ok(content) => {
+            agent_doc_controller_io::project_controller::undrained_supervisor_drain_handoff_age(
+                file, &content,
+            )
+            .is_some()
+        }
+        Err(error) => {
+            eprintln!(
+                "[agent-doc] Claude Stop hook could not read {} to check the supervisor handoff: {error}",
+                file.display()
+            );
+            true
+        }
+    }
+}
+
+/// [`apply_claude_stop`] with the supervisor drain-readiness probe injected.
+fn apply_claude_stop_with_drain_readiness(
+    input: &ClaudeStopInput,
+    drain_readiness: impl Fn(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
+) -> Result<Option<ClaudeStopBlock>> {
     let cwd = PathBuf::from(&input.cwd);
     let Some((_loaded_root, state)) = load_bound_session_for_stop(&cwd, &input.session_id)? else {
         return Ok(None);
@@ -474,6 +504,29 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
             &file,
             &format!(
                 "claude_stop_queue_continuation_already_armed head_bytes={} source=transcript_schedule_wakeup action=allow_final_answer",
+                prompt.len(),
+            ),
+        );
+        return Ok(None);
+    }
+
+    // `#stopblocksupervisorowned`: Claude Code renders EVERY Stop-hook block as
+    // "Stop hook error", whatever its reason says, so a block on each drained
+    // item reads as an error on each drained item. It is only needed when no one
+    // else will continue the queue. A live, fresh supervisor's idle-queue watch
+    // submits the next `agent-doc <FILE>` trigger into this pane once the turn
+    // ends — a real submitted prompt that seals its own cycle contract — so the
+    // block adds nothing but the error line. Block only when that supervisor is
+    // missing, stale, or running a stale binary — or when an earlier handoff to
+    // it is still undrained (`#supdrainyieldfalsifiable`): a supervisor that has
+    // not kept its last promise does not get this one.
+    let readiness = drain_readiness(&file);
+    if readiness.is_ready() && !supervisor_handoff_overdue(&file) {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "claude_stop_queue_continuation_supervisor_owned head_bytes={} \
+                 action=allow_final_answer reason=supervisor_idle_watch_drains",
                 prompt.len(),
             ),
         );
@@ -4316,6 +4369,44 @@ Reviewed the gated items.\n\
         )
         .unwrap()
         .cycle_id
+    }
+
+    /// `#stopblocksupervisorowned`: with a live, fresh supervisor the idle-queue
+    /// watch continues the queue, so the hook must not raise a block (Claude
+    /// Code shows every block as "Stop hook error"). Without one it still blocks.
+    #[test]
+    fn claude_stop_leaves_continuation_to_a_ready_supervisor() {
+        use agent_doc_controller::status::SupervisorDrainReadiness;
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+        complete_run(&doc);
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+        };
+
+        assert!(
+            apply_claude_stop_with_drain_readiness(&input, |_| SupervisorDrainReadiness::Ready {
+                supervisor_pid: 7
+            })
+            .unwrap()
+            .is_none(),
+            "a ready supervisor owns the continuation"
+        );
+        assert!(
+            apply_claude_stop_with_drain_readiness(&input, |_| {
+                SupervisorDrainReadiness::NoLiveSupervisor
+            })
+            .unwrap()
+            .is_some(),
+            "with no live supervisor the hook must still block"
+        );
     }
 
     /// `#stopnoresponserun`: the stale-lock repair closes an abandoned

@@ -79,6 +79,25 @@ Verification passed:
 - `make install`
 
 Pushed `ff33358bc` (`fix(queue): ignore absent queue in free-text projection`). The repository gate also exposed generation debt from issue #95's VS Code test change, so `b2832879c` bumped and installed VS Code extension 0.2.76 before the full check.
+
+### Re: #gh-fix issue 97 — gpt-5 · 2026-10-02 03:14 EDT
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/97
+
+Fixed and closed [agent-doc issue #97](https://github.com/btakita/agent-doc/issues/97).
+
+The Remote Dev fallback no longer treats backend-local `FileEditorManager.selectedFiles` as split enumeration. It now follows [JetBrains' own remote-manager boundary](https://github.com/JetBrains/intellij-community/blob/master/platform/platform-impl/src/com/intellij/openapi/fileEditor/impl/FileEditorManagerImpl.kt): enumerate `ClientFileEditorManager` services under `ClientKind.REMOTE`, accept a multi-file split set only when one client reports it, and refuse to combine focused files from separate clients.
+
+When no unique client split set exists, the plugin returns no layout and logs an explicit `unknown windows=0 ... reason=no_unique_client_split_set` observation. It never publishes the misleading `columns=1 source=selected_files` fact.
+
+Verification passed:
+
+- focused `LayoutDetectorTest`
+- complete JetBrains test suite
+- full `make check`
+- `make install`
+
+Pushed `c0c3356fd` plus JetBrains generation `f34849c0e`; plugin 0.2.472 dynamically upgraded in the live IDE without restart. The current live surface reports the ordinary `windows=2, columns=2` path, so the exact headless branch is regression-covered rather than presently reproducible. CI was observed once in progress.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -90,6 +109,8 @@ Pushed `ff33358bc` (`fix(queue): ignore absent queue in free-text projection`). 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/95~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/96~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/97~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/98
 - release + publish
 <!-- /agent:queue --> 
 

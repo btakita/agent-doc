@@ -6074,8 +6074,178 @@ pub fn pane_occupant_for_document(tmux: &Tmux, pane_id: &str, claimed_file: &Pat
         &pane_pid,
         claimed_file,
     ) {
+        Some(other) if argv_owner_is_stale_for_claimed_binding(pane_id, claimed_file, &other) => {
+            agent_doc_ops_log_io::log_op(
+                claimed_file,
+                &format!(
+                    "pane_occupant_stale_argv_identity file={} pane={} argv_document={} \
+                     registry_binds_claimed=true action=treat_as_free (GH #89)",
+                    claimed_file.display(),
+                    pane_id,
+                    other,
+                ),
+            );
+            PaneOccupant::Free
+        }
         Some(other) => PaneOccupant::OtherDocument(other),
         None => PaneOccupant::Free,
+    }
+}
+
+/// GH #89: the registry binding for `claimed_file` outranks a pane's frozen argv.
+fn argv_owner_is_stale_for_claimed_binding(
+    pane_id: &str,
+    claimed_file: &Path,
+    argv_document: &str,
+) -> bool {
+    let base_dir = agent_doc_session_registry_io::dispatch_registry::registry_base_dir_for_dispatch(
+        &claimed_file.to_string_lossy(),
+    );
+    match agent_doc_session_registry_io::dispatch_registry::load_registry_in(&base_dir) {
+        Ok(registry) => argv_owner_is_stale_spawn_identity(
+            &registry,
+            pane_id,
+            claimed_file,
+            argv_document,
+            &base_dir,
+        ),
+        Err(err) => {
+            eprintln!(
+                "[sync] could not load the registry to check pane {pane_id}'s argv identity \
+                 for {}: {err:#}",
+                claimed_file.display()
+            );
+            false
+        }
+    }
+}
+
+/// GH #89: a pane's process argv is fixed when its supervisor starts, so a
+/// document rename leaves it naming the OLD path forever, while rename
+/// reconciliation moves the registry binding to the new one. Comparing the
+/// mutable binding against the immutable argv refused, permanently, the one
+/// pane the registry binds the renamed document to.
+///
+/// The argv document is a stale spawn-time identity only when the registry
+/// binds `claimed_file` to `pane` AND no registry entry still binds the argv
+/// document to that pane. A pane genuinely running another bound document keeps
+/// the cross-document guard.
+pub fn argv_owner_is_stale_spawn_identity(
+    registry: &tmux_router::Registry,
+    pane: &str,
+    claimed_file: &Path,
+    argv_document: &str,
+    root: &Path,
+) -> bool {
+    use agent_doc_session_registry_io::dispatch_registry::{
+        canonical_dispatch_file, canonical_registered_file,
+    };
+    let claimed = canonical_dispatch_file(claimed_file);
+    let argv_path = Path::new(argv_document);
+    let argv_abs = if argv_path.is_absolute() {
+        argv_path.to_path_buf()
+    } else {
+        root.join(argv_path)
+    };
+    let argv = std::fs::canonicalize(&argv_abs).unwrap_or(argv_abs);
+    let mut binds_claimed = false;
+    for entry in registry.values().filter(|entry| entry.pane == pane) {
+        let bound = canonical_registered_file(entry);
+        if bound == argv || entry.file == argv_document {
+            return false;
+        }
+        if bound == claimed {
+            binds_claimed = true;
+        }
+    }
+    binds_claimed
+}
+
+#[cfg(test)]
+mod stale_argv_identity_tests {
+    use super::argv_owner_is_stale_spawn_identity;
+
+    fn entry(pane: &str, cwd: &std::path::Path, file: &str) -> tmux_router::RegistryEntry {
+        tmux_router::RegistryEntry {
+            pane: pane.to_string(),
+            pid: 1,
+            cwd: cwd.display().to_string(),
+            started: String::new(),
+            session_id: format!("s-{file}"),
+            file: file.to_string(),
+            window: String::new(),
+            supervisor_instance_id: String::new(),
+        }
+    }
+
+    /// GH #89: after `agent-doc.md` -> `agent-doc.ad.md`, the registry binds the
+    /// new path to %31 while %31's supervisor argv still names the old path.
+    #[test]
+    fn renamed_document_registry_binding_outranks_frozen_argv() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(root.join("tasks/agent-doc.ad.md"), "x").unwrap();
+        let claimed = root.join("tasks/agent-doc.ad.md");
+        let registry = std::collections::HashMap::from([(
+            "s".to_string(),
+            entry("%31", root, "tasks/agent-doc.ad.md"),
+        )]);
+
+        assert!(argv_owner_is_stale_spawn_identity(
+            &registry,
+            "%31",
+            &claimed,
+            "tasks/agent-doc.md",
+            root,
+        ));
+    }
+
+    /// The cross-document guard survives: a pane still bound to the argv
+    /// document is that document's pane, whatever else claims it.
+    #[test]
+    fn pane_still_bound_to_argv_document_is_not_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(root.join("tasks/a.md"), "x").unwrap();
+        std::fs::write(root.join("tasks/b.md"), "x").unwrap();
+        let claimed = root.join("tasks/b.md");
+        let both = std::collections::HashMap::from([
+            ("a".to_string(), entry("%31", root, "tasks/a.md")),
+            ("b".to_string(), entry("%31", root, "tasks/b.md")),
+        ]);
+        assert!(!argv_owner_is_stale_spawn_identity(
+            &both,
+            "%31",
+            &claimed,
+            "tasks/a.md",
+            root,
+        ));
+
+        // No binding of the claimed document to the pane: the argv owner stands.
+        let other_only = std::collections::HashMap::from([(
+            "a".to_string(),
+            entry("%31", root, "tasks/a.md"),
+        )]);
+        assert!(!argv_owner_is_stale_spawn_identity(
+            &other_only,
+            "%31",
+            &claimed,
+            "tasks/a.md",
+            root,
+        ));
+        let elsewhere = std::collections::HashMap::from([(
+            "b".to_string(),
+            entry("%7", root, "tasks/b.md"),
+        )]);
+        assert!(!argv_owner_is_stale_spawn_identity(
+            &elsewhere,
+            "%31",
+            &claimed,
+            "tasks/a.md",
+            root,
+        ));
     }
 }
 

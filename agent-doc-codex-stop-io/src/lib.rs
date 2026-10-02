@@ -128,6 +128,12 @@ enum StopCloseAttempt {
     StillOpen {
         note: String,
     },
+    /// Repair retained the exact write under the binary's keyed retry. This is
+    /// still an open closeout, but it is not an instruction for the agent to
+    /// repair, recapture, or reopen the cycle.
+    RepairDeferredToDurableOwner {
+        note: String,
+    },
     /// The commit boundary refused only because the captured response was not
     /// yet projected, while a durable owner (retained capture / keyed worker)
     /// holds the intent and commits it on its own delivery edge. Not an agent
@@ -1003,6 +1009,13 @@ fn apply_bound_stop(
                     StopCloseAttempt::DeferredToDurableOwner => {
                         return Ok(StopResponse::Continue { continue_: true });
                     }
+                    StopCloseAttempt::RepairDeferredToDurableOwner { note } => {
+                        return Ok(durable_owner_repair_deferral_response(
+                            file,
+                            &note,
+                            input.stop_hook_active,
+                        ));
+                    }
                     StopCloseAttempt::StillOpen { note } => {
                         return Ok(StopResponse::Block {
                             decision: "block",
@@ -1265,6 +1278,13 @@ fn active_session_prompt_requires_writeback(
                     "codex_stop_post_commit_prompt_closeout_deferred owner=durable_retained_capture",
                 );
                 return Ok(Some(StopResponse::Continue { continue_: true }));
+            }
+            StopCloseAttempt::RepairDeferredToDurableOwner { note } => {
+                return Ok(Some(durable_owner_repair_deferral_response(
+                    file,
+                    &note,
+                    input.stop_hook_active,
+                )));
             }
             StopCloseAttempt::StillOpen { note } => {
                 return Ok(Some(StopResponse::Block {
@@ -1706,6 +1726,79 @@ fn auto_queue_continuation_response(
     state: &SessionState,
     input: &StopInput,
 ) -> Result<Option<StopResponse>> {
+    // A response cycle may become `committed` before the editor-native save of
+    // that exact retained projection is visible. Queue selection is a later
+    // operation: advancing it here lets a recursive Stop capture the next head
+    // while the prior keyed write still owns editor authority. Gate before even
+    // reading the active head, and leave the session binding untouched so the
+    // same owner pane continues only after delivery becomes terminal.
+    if agent_doc_document_realtime_io::retained_write_blocks_session_closeout(
+        file,
+        "codex_stop_auto_queue_continuation_gate",
+    ) {
+        let pending = agent_doc_document_realtime_io::pending_document_write(file);
+        let retry_key = pending
+            .as_ref()
+            .map(|intent| intent.intent_id.clone())
+            .unwrap_or_else(|| "unobserved-retained-intent".to_string());
+        if let (Some(cycle), Some(pending)) = (
+            agent_doc_cycle_state_io::load_with_closeout_projection(file)?,
+            pending.as_ref(),
+        ) && should_quarantine_retained_queue_child(
+            cycle.phase,
+            cycle.capture_id.is_some(),
+            cycle.response_sha256.is_some(),
+            &cycle.cycle_id,
+            pending
+                .continuation
+                .as_ref()
+                .map(|continuation| continuation.cycle_id.as_str()),
+            state.last_auto_queue_head.as_deref(),
+            cycle
+                .prompt_targets
+                .iter()
+                .chain(&cycle.active_queue_heads)
+                .chain(&cycle.active_free_text_queue_heads)
+                .chain(&cycle.selected_free_text_queue_heads)
+                .map(String::as_str),
+        ) {
+            agent_doc_cycle_state_io::mark_abandoned(
+                file,
+                "codex_stop_retained_predecessor_queue_child_quarantined",
+                None,
+                None,
+            )?;
+            let mut repaired_state = state.clone();
+            repaired_state.last_auto_queue_head = None;
+            repaired_state.updated_at = now_secs();
+            save_state_across_roots(cleanup_roots, loaded_root, &repaired_state)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_stop_retained_predecessor_queue_child_quarantined cycle_id={} predecessor_cycle_id={} intent_id={} content_mutated=false capture_created=false session_queue_selection_rolled_back=true",
+                    cycle.cycle_id,
+                    pending
+                        .continuation
+                        .as_ref()
+                        .map(|continuation| continuation.cycle_id.as_str())
+                        .unwrap_or("none"),
+                    retry_key,
+                ),
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_auto_queue_continuation_deferred intent_id={} action=await_retained_write_terminal queue_advanced=false capture_created=false",
+                retry_key,
+            ),
+        );
+        return Ok(Some(retained_write_queue_deferral_response(
+            file,
+            &retry_key,
+            input.stop_hook_active,
+        )));
+    }
     let Some(prompt) = active_auto_queue_prompt(file)? else {
         return Ok(None);
     };
@@ -1782,6 +1875,50 @@ fn auto_queue_continuation_response(
     }))
 }
 
+fn should_quarantine_retained_queue_child<'a>(
+    phase: agent_doc_turn::CyclePhase,
+    has_capture: bool,
+    has_response_hash: bool,
+    current_cycle_id: &str,
+    retained_predecessor_cycle_id: Option<&str>,
+    last_auto_queue_head: Option<&str>,
+    mut cycle_prompts: impl Iterator<Item = &'a str>,
+) -> bool {
+    let Some(predecessor) = retained_predecessor_cycle_id else {
+        return false;
+    };
+    let Some(last_head) = last_auto_queue_head.map(str::trim).filter(|head| !head.is_empty()) else {
+        return false;
+    };
+    phase == agent_doc_turn::CyclePhase::PreflightStarted
+        && !has_capture
+        && !has_response_hash
+        && predecessor != current_cycle_id
+        && cycle_prompts.any(|prompt| prompt.trim() == last_head)
+}
+
+fn retained_write_queue_deferral_response(
+    file: &Path,
+    retry_key: &str,
+    stop_hook_active: bool,
+) -> StopResponse {
+    let message = format!(
+        "agent-doc Stop hook kept `agent:queue auto` paused for {} because the prior binary-owned editor write is still converging (intent_id={retry_key}). The same owner pane continues only after that retained delivery and its terminal closeout settle. The hook did not select a new prompt or create another capture. Do not resend, recapture, rerun finalize/write/repair, force disk, or recycle; wait for the existing controller state edge unless it explicitly reports `needs_operator`. Do not send the final answer yet.",
+        file.display(),
+    );
+    if stop_hook_active {
+        StopResponse::Stop {
+            continue_: false,
+            stop_reason: message,
+        }
+    } else {
+        StopResponse::Block {
+            decision: "block",
+            reason: message,
+        }
+    }
+}
+
 fn log_slow_stop_closeout_phase(file: &Path, phase: &str, started: &mut std::time::Instant) {
     let elapsed = started.elapsed();
     if elapsed >= std::time::Duration::from_millis(250) {
@@ -1810,6 +1947,28 @@ fn closeout_repair_retained_note(
             &file.display().to_string()
         ),
     )
+}
+
+fn durable_owner_repair_deferral_response(
+    file: &Path,
+    note: &str,
+    stop_hook_active: bool,
+) -> StopResponse {
+    let display = file.display();
+    let message = format!(
+        "agent-doc Stop hook retained the exact closeout for {display} under its durable keyed retry.{note} The controller owns delivery, the editor-native save receipt, and the terminal commit. Do not reopen or recapture the cycle, rerun finalize/write/repair, force disk, recycle the supervisor, or resend the response. Wait for the existing controller state edge unless it explicitly reports `needs_operator`; do not send the final answer yet."
+    );
+    if stop_hook_active {
+        StopResponse::Stop {
+            continue_: false,
+            stop_reason: message,
+        }
+    } else {
+        StopResponse::Block {
+            decision: "block",
+            reason: message,
+        }
+    }
 }
 
 fn attempt_stop_closeout(
@@ -1902,7 +2061,7 @@ fn attempt_stop_closeout(
                 materialized_cycle_capture_supersedes(file, response.as_ref())?
             {
                 note.push_str(&format!(
-                    " The cycle's captured response `{capture_id}` is already in the document, so the closing chat message was not recaptured over it."
+                    " The cycle's retained response `{capture_id}` already owns this closeout, so an insufficient or duplicate closing chat message was not recaptured over it."
                 ));
             } else {
                 agent_doc_repair_io::pending::save_pending(file, response.as_ref())?;
@@ -1938,15 +2097,26 @@ fn attempt_stop_closeout(
         Ok(outcome) => outcome,
         Err(err) => {
             let ownership = agent_doc_capture_io::retained_write_ownership(file);
+            let rendered = format!("{err:#}").replace('\n', " ");
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "codex_stop_closeout_repair_retained verdict={:?} err={}",
                     ownership.verdict(),
-                    format!("{err:#}").replace('\n', " "),
+                    rendered,
                 ),
             );
             note.push_str(&closeout_repair_retained_note(&err, ownership, file));
+            if repair_failure_is_binary_owned_deferral(&rendered, ownership.verdict()) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_closeout_repair_deferred verdict={} owner=durable_keyed_retry action=await_controller_state_edge",
+                        ownership.verdict().as_str(),
+                    ),
+                );
+                return Ok(StopCloseAttempt::RepairDeferredToDurableOwner { note });
+            }
             return Ok(StopCloseAttempt::StillOpen { note });
         }
     };
@@ -2053,6 +2223,17 @@ fn closeout_failure_is_binary_owned_deferral(
     ) && verdict == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred
 }
 
+/// Whether repair has already handed the exact write to the controller-owned
+/// retained-intent retry. Validation, parse, and evidence failures are excluded:
+/// those need a corrected owner response and cannot converge from a state edge.
+fn repair_failure_is_binary_owned_deferral(
+    rendered_error: &str,
+    verdict: agent_doc_turn::write_ownership::RetainedWriteVerdict,
+) -> bool {
+    verdict == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred
+        && agent_doc_turn::write_ownership::is_retained_write_refusal(rendered_error)
+}
+
 fn reopen_terminal_cycle_before_stop_capture(
     file: &Path,
     payload: &agent_doc_template::replay_guard::ReplayPayloadClassification<'_>,
@@ -2136,7 +2317,65 @@ fn materialized_cycle_capture_supersedes(file: &Path, message: &str) -> Result<O
     );
     let message_visible =
         agent_doc_turn::response_replay::response_materialized_in_content(message, &current);
-    if !existing_visible || message_visible {
+    if message_visible {
+        return Ok(None);
+    }
+    if !existing_visible {
+        let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+            .filter(|cycle| cycle.cycle_id == capture.cycle_id)
+        else {
+            return Ok(None);
+        };
+        let baseline = capture.baseline_content.as_deref();
+        // The durable "free-text" selection also includes prompt-preset
+        // invocations. The shared closeout validator therefore accepts either
+        // an exact queue quote or every resolved preset expansion, exactly as
+        // the later pre-write gate does.
+        let missing_before = agent_doc_queue::queue_closeout_guard::selected_free_text_prompts_missing_response_evidence_for_closeout(
+            baseline,
+            &current,
+            &capture.response_body,
+            &cycle.selected_free_text_queue_heads,
+            false,
+        )?;
+        if !missing_before.is_empty() {
+            let missing_after = agent_doc_queue::queue_closeout_guard::selected_free_text_prompts_missing_response_evidence_for_closeout(
+                baseline,
+                &current,
+                message,
+                &cycle.selected_free_text_queue_heads,
+                false,
+            )?;
+            if !missing_after.is_empty() {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_recapture_skipped file={} cycle_id={} capture_id={} reason=retained_capture_still_missing_selected_queue_response_evidence missing_before={} missing_after={}",
+                        file.display(),
+                        capture.cycle_id,
+                        capture.capture_id,
+                        missing_before.len(),
+                        missing_after.len(),
+                    ),
+                );
+                return Ok(Some(capture.capture_id));
+            }
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "codex_stop_retained_capture_owner_repair file={} cycle_id={} capture_id={} old_response_sha256={} new_response_sha256={} repaired_selected_queue_response_evidence={} action=replace_same_capture_id authority=current_document",
+                    file.display(),
+                    capture.cycle_id,
+                    capture.capture_id,
+                    capture.response_sha256,
+                    agent_doc_hash::content_hash(message),
+                    missing_before.len(),
+                ),
+            );
+            return Ok(None);
+        }
+    }
+    if !existing_visible {
         return Ok(None);
     }
     agent_doc_ops_log_io::log_op(
@@ -2163,7 +2402,7 @@ fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) 
             match materialized_cycle_capture_supersedes(file, response.as_ref()) {
                 Ok(Some(capture_id)) => {
                     return format!(
-                        " The cycle's captured response `{capture_id}` is already in the document, so the closing chat message was not recaptured over it."
+                        " The cycle's retained response `{capture_id}` already owns this closeout, so an insufficient or duplicate closing chat message was not recaptured over it."
                     );
                 }
                 Ok(None) => {}
@@ -3051,6 +3290,202 @@ Done.\n\
         );
     }
 
+    /// `#retainedevidencerepair`: a response capture that reached the durable
+    /// ledger without its selected free-text quote must be replaceable by the
+    /// authoritative owner's corrected response. Another incomplete closing
+    /// restatement must not churn the capture hash and wake duplicate replays.
+    #[test]
+    fn owner_quote_repair_replaces_retained_capture_and_fences_stale_resume() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let original = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue -->\n",
+            "- 🚧 I cannot login.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(
+            &doc,
+            &["I cannot login.".to_string()],
+        )
+        .unwrap();
+
+        let incomplete = "### Re: Hello — gpt-5\n\nI fixed the login flow.\n";
+        agent_doc_repair_io::pending::save_pending(&doc, incomplete).unwrap();
+        let old_key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            materialized_cycle_capture_supersedes(
+                &doc,
+                "### Re: Hello — gpt-5\n\nThe login flow is fixed.\n",
+            )
+            .unwrap(),
+            Some(old_key.capture_id.clone()),
+            "another response missing the selected queue quote must not churn the retained capture",
+        );
+
+        // Model the live incident: disk still has the pre-write projection,
+        // while the editor owns a newer cut. The predicate and replacement
+        // baseline must both use that authoritative cut without forcing disk.
+        let authoritative = original.replace(
+            "<!-- /agent:queue -->\n",
+            "<!-- /agent:queue -->\n\nOperator draft stays authoritative.\n",
+        );
+        invalidate_stop_document_cache();
+        STOP_DOCUMENT_CACHE.with(|cache| {
+            cache
+                .borrow_mut()
+                .insert(doc.clone(), authoritative.clone());
+        });
+        let corrected = concat!(
+            "### Re: Hello — gpt-5\n\n",
+            "> **Queue prompt:** I cannot login.\n\n",
+            "I fixed the login flow.\n",
+        );
+        assert_eq!(
+            materialized_cycle_capture_supersedes(&doc, corrected).unwrap(),
+            None,
+            "the owner's exact queue quote must authorize same-cycle repair",
+        );
+        agent_doc_repair_io::pending::save_pending_with_current_content(
+            &doc,
+            corrected,
+            &authoritative,
+        )
+        .unwrap();
+
+        let repaired = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
+        let repaired_key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired.capture_id, old_key.capture_id);
+        assert_eq!(repaired.cycle_id, old_key.cycle_id);
+        assert_ne!(repaired.response_sha256, old_key.response_sha256);
+        assert!(
+            repaired
+                .response_body
+                .contains("> **Queue prompt:** I cannot login.")
+        );
+        assert_eq!(
+            repaired.baseline_content.as_deref(),
+            Some(authoritative.as_str())
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            original,
+            "capture repair must preserve editor/disk authority until normal replay",
+        );
+        assert_eq!(
+            agent_doc_repair_command_io::resume_captured_finalize(&doc, &old_key),
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded,
+            "the old response hash must fence a stale replay worker",
+        );
+        assert_eq!(
+            repaired_key.capture_id, old_key.capture_id,
+            "repair replaces the response under the exact same capture operation",
+        );
+        assert_ne!(repaired_key.response_sha256, old_key.response_sha256);
+        invalidate_stop_document_cache();
+    }
+
+    /// Prompt-preset heads use the same retained-repair contract, but their
+    /// mandatory evidence is the resolved expansion rather than only a literal
+    /// head echo (`#presetretainedevidencerepair`).
+    #[test]
+    fn owner_preset_expansion_repair_replaces_retained_capture() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let head = "#gh-fix https://github.com/btakita/agent-doc/issues/104";
+        let original = format!(
+            concat!(
+                "---\nsession: sid\nagent_doc_format: template\n",
+                "prompt_presets:\n  '#gh-fix': fix then closerelease\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ Why is this taking so long?\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Queue\n\n",
+                "<!-- agent:queue -->\n",
+                "- 🚧 {}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            head,
+        );
+        fs::write(&doc, &original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(&doc, &[head.to_string()])
+            .unwrap();
+
+        let incomplete = "### Re: timing — gpt-5\n\nThe work is still running.\n";
+        agent_doc_repair_io::pending::save_pending(&doc, incomplete).unwrap();
+        let old_key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            materialized_cycle_capture_supersedes(
+                &doc,
+                "### Re: timing — gpt-5\n\nThe release is almost ready.\n",
+            )
+            .unwrap(),
+            Some(old_key.capture_id.clone()),
+            "another answer missing the resolved preset expansion must not churn the capture",
+        );
+
+        let corrected = format!(
+            concat!(
+                "### Re: GH #104 — gpt-5\n\n",
+                "> **Queue prompt:** {}\n\n",
+                "fix then closerelease\n\n",
+                "GH #104 is fixed, fully tested, installed, and ready to close and release.\n",
+            ),
+            head,
+        );
+        assert_eq!(
+            materialized_cycle_capture_supersedes(&doc, &corrected).unwrap(),
+            None,
+            "resolved preset evidence from the owner must authorize same-cycle repair",
+        );
+        agent_doc_repair_io::pending::save_pending(&doc, &corrected).unwrap();
+
+        let repaired = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
+        let repaired_key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired.capture_id, old_key.capture_id);
+        assert_eq!(repaired.cycle_id, old_key.cycle_id);
+        assert_ne!(repaired.response_sha256, old_key.response_sha256);
+        assert!(repaired.response_body.contains(head));
+        assert!(repaired.response_body.contains("fix then closerelease"));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), original);
+        assert_eq!(
+            agent_doc_repair_command_io::resume_captured_finalize(&doc, &old_key),
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded,
+        );
+        assert_eq!(repaired_key.capture_id, old_key.capture_id);
+        assert_ne!(repaired_key.response_sha256, old_key.response_sha256);
+    }
+
     #[test]
     fn both_stop_capture_sites_consult_the_existing_capture_first() {
         let source = include_str!("lib.rs");
@@ -3068,6 +3503,8 @@ Done.\n\
             "attempt_stop_closeout must not propagate a repair error with `?`"
         );
         assert!(closeout.contains("closeout_repair_retained_note(&err, ownership, file)"));
+        assert!(closeout.contains("repair_failure_is_binary_owned_deferral("));
+        assert!(closeout.contains("StopCloseAttempt::RepairDeferredToDurableOwner"));
 
         for anchor in ["fn attempt_stop_closeout(", "fn capture_assistant_text("] {
             let body = source.split(anchor).nth(1).unwrap();
@@ -3137,6 +3574,250 @@ Done.\n\
             .expect("unowned failures stay still-open");
         assert!(deferral < still_open);
         assert!(commit.contains("StopCloseAttempt::DeferredToDurableOwner"));
+    }
+
+    #[test]
+    fn retained_repair_refusal_with_durable_owner_is_a_distinct_deferral() {
+        use agent_doc_turn::write_ownership::{
+            AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN, RetainedWriteOwnership, RetainedWriteVerdict,
+        };
+        let retry_key = "1790972821780862047-1-b19f206141461c9678dcc6f01db3826c43654fdd137ef7b7fcb00ecaa416e667";
+        let refusal = format!(
+            "serialized_atomic_write: retained editor-owned write while its native save receipt converges (intent_id={retry_key}) [{AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN}]"
+        );
+        let owned = RetainedWriteOwnership::new_with_phase(true, true, false)
+            .with_retained_projection(true);
+        assert_eq!(owned.verdict(), RetainedWriteVerdict::Deferred);
+        assert!(repair_failure_is_binary_owned_deferral(
+            &refusal,
+            owned.verdict(),
+        ));
+
+        assert!(!repair_failure_is_binary_owned_deferral(
+            "pre-write validation rejected missing queue prompt evidence",
+            RetainedWriteVerdict::Deferred,
+        ));
+        assert!(!repair_failure_is_binary_owned_deferral(
+            &refusal,
+            RetainedWriteVerdict::CaptureResumeUnowned,
+        ));
+
+        let err = anyhow::anyhow!(refusal);
+        let note = closeout_repair_retained_note(&err, owned, Path::new("/p/fpe.md"));
+        let first =
+            durable_owner_repair_deferral_response(Path::new("/p/fpe.md"), &note, false);
+        assert!(matches!(first, StopResponse::Block { .. }));
+        let recursive =
+            durable_owner_repair_deferral_response(Path::new("/p/fpe.md"), &note, true);
+        assert!(matches!(recursive, StopResponse::Stop { .. }));
+        let rendered = serde_json::to_string(&recursive).unwrap();
+        assert!(rendered.contains(retry_key), "stable retry key preserved: {rendered}");
+        assert!(rendered.contains("Do not reopen or recapture the cycle"));
+        assert!(rendered.contains("Wait for the existing controller state edge"));
+        assert!(rendered.contains("needs_operator"));
+        assert!(!rendered.contains("run `agent-doc repair"));
+    }
+
+    /// fpe.md (2026-10-02): the response cycle committed while its exact
+    /// editor-native save remained retained, and recursive Stop selected the
+    /// next auto-queue prompt. The retained write must gate before queue-head
+    /// observation or session-state advancement.
+    #[test]
+    fn retained_editor_delivery_pauses_auto_queue_before_prompt_selection() {
+        let source = include_str!("lib.rs");
+        let continuation = source
+            .split("fn auto_queue_continuation_response(")
+            .nth(1)
+            .unwrap();
+        let continuation = &continuation[..continuation.find("\nfn ").unwrap()];
+        let retained_gate = continuation
+            .find("retained_write_blocks_session_closeout(")
+            .expect("auto queue must inspect retained editor delivery");
+        let prompt_selection = continuation
+            .find("active_auto_queue_prompt(file)")
+            .expect("auto queue selects a prompt");
+        let state_advance = continuation
+            .find("save_state_across_roots(")
+            .expect("auto queue records its selected head");
+        assert!(retained_gate < prompt_selection);
+        assert!(retained_gate < state_advance);
+        assert!(continuation.contains("queue_advanced=false capture_created=false"));
+        assert!(continuation.contains("codex_stop_retained_predecessor_queue_child_quarantined"));
+        assert!(continuation.contains("repaired_state.last_auto_queue_head = None"));
+
+        let prompts = ["I want to demo chatting and triggering the FPE then it showing up in the dashboard."];
+        assert!(should_quarantine_retained_queue_child(
+            agent_doc_turn::CyclePhase::PreflightStarted,
+            false,
+            false,
+            "cycle-1790973209870",
+            Some("cycle-1790972278134"),
+            Some(prompts[0]),
+            prompts.iter().copied(),
+        ));
+        for unsafe_shape in [
+            should_quarantine_retained_queue_child(
+                agent_doc_turn::CyclePhase::ResponseCaptured,
+                true,
+                true,
+                "child",
+                Some("parent"),
+                Some(prompts[0]),
+                prompts.iter().copied(),
+            ),
+            should_quarantine_retained_queue_child(
+                agent_doc_turn::CyclePhase::PreflightStarted,
+                false,
+                false,
+                "same-cycle",
+                Some("same-cycle"),
+                Some(prompts[0]),
+                prompts.iter().copied(),
+            ),
+            should_quarantine_retained_queue_child(
+                agent_doc_turn::CyclePhase::PreflightStarted,
+                false,
+                false,
+                "child",
+                Some("parent"),
+                Some("a different queue head"),
+                prompts.iter().copied(),
+            ),
+        ] {
+            assert!(!unsafe_shape, "only the proven empty auto-queue child is disposable");
+        }
+
+        let retry_key = "1790972821780862047-1-b19f206141461c9678dcc6f01db3826c43654fdd137ef7b7fcb00ecaa416e667";
+        for stop_hook_active in [false, true] {
+            let response = retained_write_queue_deferral_response(
+                Path::new("/p/fpe.md"),
+                retry_key,
+                stop_hook_active,
+            );
+            assert_eq!(
+                matches!(&response, StopResponse::Stop { .. }),
+                stop_hook_active,
+            );
+            let rendered = serde_json::to_string(&response).unwrap();
+            assert!(rendered.contains(retry_key));
+            assert!(rendered.contains("did not select a new prompt or create another capture"));
+            assert!(rendered.contains("same owner pane continues only after"));
+            assert!(rendered.contains("needs_operator"));
+        }
+    }
+
+    #[test]
+    fn retained_predecessor_quarantines_already_created_empty_queue_child_metadata_only() {
+        let dir = setup_project();
+        let prompt = "I want to demo chatting and triggering the FPE then it showing up in the dashboard.";
+        let doc = write_auto_queue_doc(&dir, &[prompt]);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+
+        let parent = agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::save_pending(
+            &doc,
+            "### Re: prior retained response — gpt-5\n\nCompleted once.\n",
+        )
+        .unwrap();
+        let retained_target = original.replace("Done.\n", "Done.\n\nCompleted once.\n");
+        let intent_id = agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &doc,
+            &original,
+            &retained_target,
+            "serialized_atomic_write",
+            agent_doc_document_realtime_io::DocumentWriteDeferredReason::EditorProjectionPending,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+
+        let child = agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        assert_ne!(child.cycle_id, parent.cycle_id);
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(
+            &doc,
+            &[prompt.to_string()],
+        )
+        .unwrap();
+
+        let root = project_root_for(dir.path()).unwrap();
+        let state = SessionState {
+            identity_origin: Default::default(),
+            session_id: "codex-session".to_string(),
+            doc_path: doc.display().to_string(),
+            last_turn_id: "turn-child".to_string(),
+            last_prompt: format!("agent-doc {}", doc.display()),
+            last_auto_queue_head: Some(prompt.to_string()),
+            last_context_clear_at: None,
+            last_prompt_cycle: None,
+            preflight_admitted: None,
+            updated_at: 20,
+        };
+        save_state(&root, &state).unwrap();
+        let roots = tracking_roots(dir.path(), Some(&doc));
+        let response = auto_queue_continuation_response(
+            &doc,
+            &roots,
+            &root,
+            &state,
+            &StopInput {
+                session_id: "codex-session".to_string(),
+                turn_id: "turn-child".to_string(),
+                cwd: dir.path().display().to_string(),
+                last_assistant_message: "prior closeout status".to_string(),
+                stop_hook_active: true,
+            },
+        )
+        .unwrap()
+        .expect("retained predecessor blocks queue continuation");
+        let rendered = serde_json::to_string(&response).unwrap();
+        assert!(rendered.contains(&intent_id), "{rendered}");
+        assert!(rendered.contains("did not select a new prompt or create another capture"));
+
+        let quarantined = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(quarantined.cycle_id, child.cycle_id);
+        assert_eq!(quarantined.phase, agent_doc_turn::CyclePhase::Abandoned);
+        assert_eq!(
+            quarantined.last_event,
+            "codex_stop_retained_predecessor_queue_child_quarantined",
+        );
+        let pending = agent_doc_document_realtime_io::pending_document_write(&doc)
+            .expect("quarantine preserves the predecessor retained write");
+        assert_eq!(pending.intent_id, intent_id);
+        assert_eq!(
+            pending.continuation.as_ref().map(|it| it.cycle_id.as_str()),
+            Some(parent.cycle_id.as_str()),
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), original);
+        assert_eq!(
+            load_state(&root, "codex-session")
+                .unwrap()
+                .unwrap()
+                .last_auto_queue_head,
+            None,
+        );
     }
 
     #[test]

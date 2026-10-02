@@ -15,10 +15,18 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.Alarm
 import java.io.File
-import java.time.Instant
 import java.security.MessageDigest
+import java.time.Instant
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
+
+internal fun socketListenerRetryDelayMsUtil(failureCount: Int): Long {
+    val exponent = (failureCount.coerceAtLeast(1) - 1).coerceAtMost(16)
+    return (250L shl exponent).coerceAtMost(30_000L)
+}
 
 /** Cross-language editor intent names; mirrored by Rust and VS Code. */
 private enum class EditorIntent(val token: String) {
@@ -62,6 +70,8 @@ class PatchWatcher(private val project: Project) : Disposable {
         val root: String,
         @Volatile var ipcCallback: AgentDocLib.IpcMessageCallback? = null,
         @Volatile var ipcCallbackV2: AgentDocLib.IpcMessageCallbackV2? = null,
+        val listenerRetryScheduled: AtomicBoolean = AtomicBoolean(false),
+        val listenerFailureCount: AtomicInteger = AtomicInteger(0),
     )
 
     /** Registered roots, keyed by absolute path. Written through [registerRoot]. */
@@ -107,6 +117,7 @@ class PatchWatcher(private val project: Project) : Disposable {
     )
 
     @Volatile private var running = false
+    @Volatile private var nativeEndpointsQuiesced = false
 
     private val APPLIED_PATCH_TTL_MS = 60_000L // 60s TTL
 
@@ -226,22 +237,25 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     internal fun quiesceNativeEndpointsForReload(): Boolean {
+        nativeEndpointsQuiesced = true
         val lib = AgentDocLib.get()
         var allStopped = true
         for (state in rootStates.values) {
-            val stopped = try {
-                state.ipcCallback == null && state.ipcCallbackV2 == null ||
-                    lib?.agent_doc_stop_ipc_listener(state.root) == 1
-            } catch (error: Throwable) {
-                LOG.warn("[native] failed to stop listener for ${state.root}", error)
-                false
-            }
-            if (stopped) {
-                state.ipcCallback = null
-                state.ipcCallbackV2 = null
-            } else {
-                allStopped = false
-                LOG.warn("[native] listener did not quiesce for ${state.root}; retaining its callback")
+            synchronized(state) {
+                val stopped = try {
+                    state.ipcCallback == null && state.ipcCallbackV2 == null ||
+                        lib?.agent_doc_stop_ipc_listener(state.root) == 1
+                } catch (error: Throwable) {
+                    LOG.warn("[native] failed to stop listener for ${state.root}", error)
+                    false
+                }
+                if (stopped) {
+                    state.ipcCallback = null
+                    state.ipcCallbackV2 = null
+                } else {
+                    allStopped = false
+                    LOG.warn("[native] listener did not quiesce for ${state.root}; retaining its callback")
+                }
             }
         }
         return allStopped
@@ -249,6 +263,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     internal fun restartNativeEndpointsAfterReload() {
         if (!running) return
+        nativeEndpointsQuiesced = false
         for (state in rootStates.values) {
             if (state.ipcCallback == null && state.ipcCallbackV2 == null) {
                 startSocketListenerViaFfi(state)
@@ -278,58 +293,125 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Keeps a strong reference to the callback (in [state]) to prevent GC.
      */
     private fun startSocketListenerViaFfi(state: RootState) {
-        val lib = AgentDocLib.get()
-        if (lib == null) {
-            LOG.info("[socket] FFI unavailable, socket listener not started for ${state.root} (file-based IPC only)")
-            return
-        }
+        if (!socketListenerCanStart(state)) return
+        synchronized(state) {
+            if (!socketListenerCanStart(state)) return
+            if (state.ipcCallback != null || state.ipcCallbackV2 != null) return
+            val lib = AgentDocLib.get()
+            if (lib == null) {
+                LOG.info("[socket] FFI unavailable, deferring socket listener start for ${state.root}")
+                scheduleSocketListenerRetry(state, "ffi_unavailable")
+                return
+            }
 
-        // Prefer the v2 listener so we can emit `already_applied` acks. Older
-        // binaries do not export v2 — fall back to v1 silently.
-        // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
-        // `#ipcpluginalready`.
-        val callbackV2 = object : AgentDocLib.IpcMessageCallbackV2 {
-            override fun invoke(message: Pointer): Int {
-                return try {
-                    val json = message.getString(0)
-                    dispatchSocketMessage(json)
-                } catch (e: Exception) {
-                    LOG.warn("[socket] callback error", e)
-                    0
+            // Prefer the v2 listener so we can emit `already_applied` acks. Older
+            // binaries do not export v2 — fall back to v1 silently.
+            // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
+            // `#ipcpluginalready`.
+            val callbackV2 = object : AgentDocLib.IpcMessageCallbackV2 {
+                override fun invoke(message: Pointer): Int {
+                    return try {
+                        val json = message.getString(0)
+                        dispatchSocketMessage(json)
+                    } catch (e: Exception) {
+                        LOG.warn("[socket] callback error", e)
+                        0
+                    }
                 }
             }
-        }
-        val v2Started = try {
-            lib.agent_doc_start_ipc_listener_v2(state.root, callbackV2)
-        } catch (_: UnsatisfiedLinkError) {
-            false
-        } catch (_: NoSuchMethodError) {
-            false
-        }
-        if (v2Started) {
-            state.ipcCallbackV2 = callbackV2
-            LOG.info("[socket] IPC listener v2 started via FFI for ${state.root}")
-            return
-        }
+            val v2Started = try {
+                lib.agent_doc_start_ipc_listener_v2(state.root, callbackV2)
+            } catch (_: UnsatisfiedLinkError) {
+                false
+            } catch (_: NoSuchMethodError) {
+                false
+            } catch (error: Throwable) {
+                LOG.warn("[socket] IPC listener v2 start failed for ${state.root}", error)
+                false
+            }
+            if (v2Started) {
+                state.ipcCallbackV2 = callbackV2
+                socketListenerStarted(state)
+                LOG.info("[socket] IPC listener v2 started via FFI for ${state.root}")
+                return
+            }
 
-        val callback = object : AgentDocLib.IpcMessageCallback {
-            override fun invoke(message: Pointer): Boolean {
-                return try {
-                    val json = message.getString(0)
-                    dispatchSocketMessage(json) == 1
-                } catch (e: Exception) {
-                    LOG.warn("[socket] callback error", e)
-                    false
+            val callback = object : AgentDocLib.IpcMessageCallback {
+                override fun invoke(message: Pointer): Boolean {
+                    return try {
+                        val json = message.getString(0)
+                        dispatchSocketMessage(json) == 1
+                    } catch (e: Exception) {
+                        LOG.warn("[socket] callback error", e)
+                        false
+                    }
                 }
             }
-        }
-        state.ipcCallback = callback
 
-        val started = lib.agent_doc_start_ipc_listener(state.root, callback)
-        if (started) {
-            LOG.info("[socket] IPC listener v1 started via FFI for ${state.root} (binary lacks v2)")
-        } else {
-            LOG.warn("[socket] Failed to start IPC listener via FFI for ${state.root}")
+            val started = try {
+                lib.agent_doc_start_ipc_listener(state.root, callback)
+            } catch (error: Throwable) {
+                LOG.warn("[socket] IPC listener v1 start failed for ${state.root}", error)
+                false
+            }
+            if (started) {
+                // Store only a callback that owns a live listener. Keeping a failed
+                // callback here used to make reload restart treat the root as healthy.
+                state.ipcCallback = callback
+                socketListenerStarted(state)
+                LOG.info("[socket] IPC listener v1 started via FFI for ${state.root} (binary lacks v2)")
+            } else {
+                state.ipcCallback = null
+                LOG.warn("[socket] Failed to start IPC listener via FFI for ${state.root}; retrying")
+                scheduleSocketListenerRetry(state, "bind_failed")
+            }
+        }
+    }
+
+    private fun socketListenerCanStart(state: RootState): Boolean =
+        running &&
+            !project.isDisposed &&
+            !PluginGeneration.retired &&
+            !nativeEndpointsQuiesced &&
+            rootStates[state.root] === state
+
+    private fun socketListenerStarted(state: RootState) {
+        state.listenerFailureCount.set(0)
+        state.listenerRetryScheduled.set(false)
+    }
+
+    /**
+     * A same-version dynamic upgrade can construct its replacement watcher before
+     * the retiring generation releases the PID-scoped socket. Treat that bind
+     * failure as a transient handoff edge: one retry per root, capped backoff,
+     * and lifecycle fences so retired/quiesced generations never resurrect.
+     */
+    private fun scheduleSocketListenerRetry(state: RootState, reason: String) {
+        if (!socketListenerCanStart(state)) return
+        if (!state.listenerRetryScheduled.compareAndSet(false, true)) return
+        val failureCount = state.listenerFailureCount.incrementAndGet()
+        val delayMs = socketListenerRetryDelayMsUtil(failureCount)
+        LOG.info(
+            "[socket] IPC listener retry scheduled for ${state.root} " +
+                "reason=$reason failure_count=$failureCount delay_ms=$delayMs",
+        )
+        try {
+            com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService().schedule(
+                {
+                    state.listenerRetryScheduled.set(false)
+                    if (socketListenerCanStart(state) &&
+                        state.ipcCallback == null &&
+                        state.ipcCallbackV2 == null
+                    ) {
+                        startSocketListenerViaFfi(state)
+                    }
+                },
+                delayMs,
+                TimeUnit.MILLISECONDS,
+            )
+        } catch (error: Throwable) {
+            state.listenerRetryScheduled.set(false)
+            LOG.warn("[socket] failed to schedule IPC listener retry for ${state.root}", error)
         }
     }
 
@@ -1637,6 +1719,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     override fun dispose() {
         running = false
+        nativeEndpointsQuiesced = true
         val states = rootStates.values.toList()
         rootStates.clear()
         runNativeSideEffectOffEdt {

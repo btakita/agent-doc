@@ -7138,7 +7138,7 @@ mod tests {
         );
         let content = snapshot_content.replace(
             "- do [#existing]\n",
-            "- do [#existing]\n- Implement active queue addition\n",
+            "- do [#existing]\n- Implement active queue addition\n- \n",
         );
         std::fs::write(&doc, &content).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
@@ -7160,6 +7160,10 @@ mod tests {
         assert!(
             !queue.contains("Implement active queue addition"),
             "admitted free-text source line should be removed from the active queue:\n{updated}"
+        );
+        assert!(
+            !queue.lines().any(|line| line.trim() == "-"),
+            "the editor's trailing empty list placeholder must not be projected as a bare dash:\n{updated}"
         );
         assert!(
             !queue.contains("--- start"),

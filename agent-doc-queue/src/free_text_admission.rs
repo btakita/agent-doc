@@ -729,6 +729,54 @@ mod tests {
     }
 
     #[test]
+    fn queue_execution_discards_trailing_empty_editor_placeholder() {
+        let prompt = "Can you run this on localhost so I can demo this?";
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- Can you run this on localhost so I can demo this?\n",
+            "- \n",
+            "<!-- /agent:queue -->\n",
+            "\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#neighbor] Preserve neighboring work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        assert_eq!(entries.len(), 1, "the empty marker is not a queue node");
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+        let id = prepared.unique_ids[0].clone();
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let components = agent_doc_element::element::parse(&admission.content).unwrap();
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue_body = queue.content(&admission.content);
+
+        assert_eq!(queue_body, format!("- do [#{id}]\n"));
+        assert!(admission.content.contains(prompt));
+        assert!(
+            admission
+                .content
+                .contains("- [ ] [#neighbor] Preserve neighboring work")
+        );
+        assert!(
+            !queue_body.lines().any(|line| line.trim() == "-"),
+            "Run Agent Doc must not project the editor placeholder as a bare dash"
+        );
+    }
+
+    #[test]
     fn prepare_and_finish_goal_execution_reuses_existing_backlog_id() {
         let content = concat!(
             "<!-- agent:backlog -->\n",

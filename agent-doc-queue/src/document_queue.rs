@@ -305,6 +305,19 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
             continue;
         }
 
+        // Empty Markdown list markers are editor placeholders, not queue
+        // content. In particular, pressing Enter after a `- prompt` commonly
+        // leaves a trailing `- ` row. If that row survives parsing as
+        // `Freeform`, the next queue-maintenance render normalizes it to a
+        // visible bare `-`, making Run Agent Doc appear to have injected an
+        // empty queue item. Drop the placeholder before it can become a queue
+        // node; real neighboring entries retain their original order and
+        // source shape.
+        if line_is_empty_list_placeholder(line) {
+            i += 1;
+            continue;
+        }
+
         // A recovered prose + fenced-evidence task can follow already-completed
         // queue rows. Re-run the narrow recovery against the remaining suffix
         // before parsing any list-looking lines inside the evidence fence.
@@ -614,7 +627,13 @@ fn recover_unwrapped_fenced_prompt(lines: &[&str]) -> Option<(usize, usize, Stri
 }
 
 fn line_is_empty_list_placeholder(line: &str) -> bool {
-    split_list_item(line).is_some_and(|(_, _, rest)| rest.trim().is_empty())
+    let trimmed = line.trim();
+    if trimmed == "-" {
+        return true;
+    }
+    trimmed.strip_suffix('.').is_some_and(|digits| {
+        !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+    })
 }
 
 fn markdown_code_fence_marker(line: &str) -> Option<&'static str> {
@@ -763,6 +782,12 @@ pub fn render(entries: &[QueueEntry]) -> String {
                 out.push_str("--- stop\n");
             }
             QueueEntry::Freeform(line) => {
+                // Defense in depth for callers that construct entries without
+                // going through `parse`: an empty list marker is never a queue
+                // node and must never be projected into the document.
+                if line_is_empty_list_placeholder(line) {
+                    continue;
+                }
                 out.push_str(line);
                 out.push('\n');
             }
@@ -5270,7 +5295,8 @@ mod tests {
     /// Regression for the live `backend.md` closeout report: completed rows may
     /// precede a request whose evidence contains list-looking console text, and
     /// an editor may leave a trailing empty list placeholder. The report is one
-    /// head; neither the evidence bullets nor the placeholder are runnable.
+    /// head; neither the evidence bullets nor the placeholder are runnable, and
+    /// the placeholder is not retained as an inert queue node.
     #[test]
     fn parse_recovers_prefixed_request_after_completed_rows_without_dispatching_fenced_bullets() {
         let task = concat!(
@@ -5289,7 +5315,7 @@ mod tests {
         assert_eq!(parsed_prompts[0].text, task);
         assert!(parsed_prompts[0].multiline);
         assert!(matches!(entries.first(), Some(QueueEntry::Completed(_))));
-        assert!(matches!(entries.last(), Some(QueueEntry::Freeform(line)) if line == "- "));
+        assert_eq!(entries.len(), 2);
     }
 
     #[test]
@@ -5643,6 +5669,32 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert!(matches!(entries[0], QueueEntry::Freeform(_)));
         assert!(prompts(&entries).is_empty());
+    }
+
+    #[test]
+    fn empty_list_placeholders_never_become_queue_nodes_or_rendered_rows() {
+        let body = concat!(
+            "- first real item\n",
+            "- \n",
+            "- second real item\n",
+            "  -\n",
+            "1.\n",
+        );
+
+        let entries = parse(body).unwrap();
+
+        assert_eq!(prompts(&entries).len(), 2);
+        assert_eq!(render(&entries), "- first real item\n- second real item\n");
+        assert_eq!(parse_spans(body).unwrap().len(), 2);
+        assert_eq!(
+            render(&[
+                QueueEntry::Freeform("-".to_string()),
+                QueueEntry::Freeform("1.".to_string()),
+                QueueEntry::Freeform("neighboring note".to_string()),
+            ]),
+            "neighboring note\n",
+            "directly constructed placeholders must not bypass the parser guard"
+        );
     }
 
     #[test]

@@ -2331,8 +2331,14 @@ fn upgrade_unobserved_clear_from_pane_history(
     // fresh chat's `Context 0% used` footer, or the new-chat banner beside the
     // previous chat's `codex resume` exit summary.
     let fresh_chat_visible = harness == "codex"
-        && agent_doc_tmux_io::capture_pane(tmux, pane)
-            .is_ok_and(|viewport| codex_viewport_shows_fresh_chat(&viewport));
+        && (agent_doc_tmux_io::capture_pane(tmux, pane)
+            .is_ok_and(|viewport| codex_viewport_shows_fresh_chat(&viewport))
+            || agent_doc_turn_executor_tmux::context_clear::context_clear_codex_history_shows_fresh_chat(
+                &history,
+                command,
+                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+                |line| harness_config.is_dispatch_ready_prompt_line(line),
+            ));
     let proven = fresh_chat_visible
         || (live_pane_prompt_ready_at_cursor(&harness_config, &history, None)
             && context_clear_history_proves_cleared_state(
@@ -2363,6 +2369,45 @@ fn upgrade_unobserved_clear_from_pane_history(
     } else {
         ContextClearSubmitStatus::Unobserved
     }
+}
+
+/// Resolve a blank-viewport (`Unrendered`) clear window against the pane's
+/// scrollback. Returns [`ContextClearSubmitStatus::AcceptedClearedState`] only
+/// when the history positively proves a fresh Codex chat; a capture error or
+/// any retained conversation keeps `Unrendered`, which never resends.
+fn upgrade_unrendered_clear_from_pane_history(
+    tmux: &Tmux,
+    pane: &str,
+    file: &Path,
+    harness: &str,
+    command: &str,
+    phase: &str,
+) -> ContextClearSubmitStatus {
+    let harness_config = agent_doc_harness::HarnessConfig::from_agent_name(harness);
+    let history = agent_doc_tmux_io::capture_pane_history(tmux, pane);
+    let capture_ok = history.is_ok();
+    let status =
+        agent_doc_turn_executor_tmux::context_clear::context_clear_unrendered_window_status(
+            harness,
+            history.as_deref().ok(),
+            command,
+            |line| harness_config.is_dispatch_ready_prompt_line(line),
+        );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} phase={phase} trigger=blank_viewport result={}",
+            file.display(),
+            if !capture_ok {
+                "capture_failed"
+            } else if status.is_accepted() {
+                "fresh_chat_in_history"
+            } else {
+                "not_proven"
+            }
+        ),
+    );
+    status
 }
 
 /// `#clearfreshchatproof`: true when a Codex viewport shows a freshly started
@@ -2487,10 +2532,19 @@ fn poll_context_clear_submit_acceptance(
     // `#clearunrenderedlabel`: `Unrendered` now comes from the last frame
     // itself being blank, not from `observation_budget` equalling the render
     // window — the supervisor settle window has the same length.
-    let status = if status == ContextClearSubmitStatus::Unobserved {
-        upgrade_unobserved_clear_from_pane_history(tmux, pane, file, harness, command, phase)
-    } else {
-        status
+    // A blank last frame is not proof the clear failed either. A pane resized
+    // to a single row (a layout projection stashing it mid-window) scrolls the
+    // whole post-clear repaint into history, so the viewport stays blank while
+    // the scrollback shows the fresh chat. Only a positive cleared-state proof
+    // upgrades it; otherwise it stays `Unrendered` and never earns a resend.
+    let status = match status {
+        ContextClearSubmitStatus::Unobserved => {
+            upgrade_unobserved_clear_from_pane_history(tmux, pane, file, harness, command, phase)
+        }
+        ContextClearSubmitStatus::Unrendered => {
+            upgrade_unrendered_clear_from_pane_history(tmux, pane, file, harness, command, phase)
+        }
+        other => other,
     };
     let observation = ContextClearSubmitObservation {
         status,

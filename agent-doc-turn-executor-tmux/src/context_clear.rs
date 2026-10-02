@@ -210,6 +210,122 @@ pub fn context_clear_history_proves_cleared_state(
         .any(|line| is_dispatch_ready_prompt_line(line.trim()))
 }
 
+/// Does the pane's full scrollback prove the CURRENT Codex chat is a fresh one
+/// — i.e. the state `/clear` exists to produce?
+///
+/// Codex's `/clear` starts a new chat by printing a new `>_ OpenAI Codex`
+/// banner. The chat that follows the LAST banner in the scrollback is the
+/// chat the pane holds now. It is fresh when nothing has happened in it yet:
+///
+/// - the tail after that banner is short (banner, logo, composer — tens of
+///   lines, never a conversation);
+/// - it carries no agent output (`•` bullets, `└` details, `■` interrupt
+///   notices), no `›` input line other than a dispatch-ready composer, and no
+///   status footer reporting non-zero context use;
+/// - a dispatch-ready composer is drawn, and the command is not sitting
+///   unconsumed in it.
+///
+/// Live 2026-10-02 on `src/haiven-dev/tasks/fpe.md`, pane `%51`: one second
+/// after the supervisor delivered `/clear`, a layout projection moved the pane
+/// into a stash window where it is ONE row tall. Codex ran the clear
+/// (`Context 26% used` -> a new banner and `Context 0% used`), but its whole
+/// repaint scrolled into history, so every visible capture for the 10s
+/// acceptance window was a single blank row (`capture_len=1`) and the clear was
+/// reported `pane_not_rendered`. The scrollback held the proof the viewport
+/// could not.
+///
+/// This cannot pass a clear that was lost: then the last banner is the one
+/// that began the retained conversation, and the tail after it holds that
+/// conversation's prompts, output and footers. When the latest chat really is
+/// still empty, the cleared state already holds — the same idempotent-state
+/// argument as [`context_clear_history_proves_cleared_state`].
+pub fn context_clear_codex_history_shows_fresh_chat(
+    history: &str,
+    command: &str,
+    max_tail_lines: usize,
+    is_dispatch_ready_prompt_line: impl Fn(&str) -> bool + Copy,
+) -> bool {
+    if context_clear_command_visible_in_active_input(
+        history,
+        command,
+        is_dispatch_ready_prompt_line,
+    ) {
+        return false;
+    }
+    let lines: Vec<String> = history
+        .lines()
+        .map(|line| crate::prompt::strip_ansi(line).trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+    let Some(banner) = lines
+        .iter()
+        .rposition(|line| line.starts_with(">_ OpenAI Codex"))
+    else {
+        return false;
+    };
+    let tail = &lines[banner + 1..];
+    if tail.len() > max_tail_lines {
+        return false;
+    }
+    let mut saw_ready_prompt = false;
+    for line in tail {
+        if line.starts_with('•') || line.starts_with('■') || line.starts_with('└') {
+            return false;
+        }
+        if codex_footer_reports_nonzero_context(line) {
+            return false;
+        }
+        if line.starts_with('›') || line.starts_with('❯') {
+            if is_dispatch_ready_prompt_line(line) {
+                saw_ready_prompt = true;
+            } else {
+                return false;
+            }
+        }
+    }
+    saw_ready_prompt
+}
+
+/// A Codex status footer (`model · cwd · Context N% used`) with `N > 0`, or
+/// one whose percentage cannot be read (fail closed).
+fn codex_footer_reports_nonzero_context(line: &str) -> bool {
+    let Some(idx) = line.find("Context ") else {
+        return false;
+    };
+    let rest = &line[idx + "Context ".len()..];
+    let Some((percent, _)) = rest.split_once("% used") else {
+        return false;
+    };
+    percent.trim().parse::<u32>().map_or(true, |n| n > 0)
+}
+
+/// Resolve an acceptance window whose last capture was blank. A blank viewport
+/// is absence of evidence, so `Unrendered` stays the verdict unless the
+/// scrollback positively proves the cleared state. It never becomes
+/// `Unobserved`: that label can earn a full-command resend, and a blank
+/// viewport cannot show that the first `/clear` was lost.
+pub fn context_clear_unrendered_window_status(
+    harness: &str,
+    history: Option<&str>,
+    command: &str,
+    is_dispatch_ready_prompt_line: impl Fn(&str) -> bool + Copy,
+) -> ContextClearSubmitStatus {
+    let proven = harness.trim().eq_ignore_ascii_case("codex")
+        && history.is_some_and(|history| {
+            context_clear_codex_history_shows_fresh_chat(
+                history,
+                command,
+                CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+                is_dispatch_ready_prompt_line,
+            )
+        });
+    if proven {
+        ContextClearSubmitStatus::AcceptedClearedState
+    } else {
+        ContextClearSubmitStatus::Unrendered
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ContextClearSubmitObservation {
     pub status: ContextClearSubmitStatus,
@@ -813,6 +929,144 @@ mod tests {
             context_clear_submit_retry_action(facts),
             Some(ContextClearSubmitRetryAction::SubmitKey)
         );
+    }
+
+    const ONE_ROW_PANE_HISTORY: &str =
+        include_str!("fixtures/codex_clear_one_row_pane_history.txt");
+
+    fn codex_ready(line: &str) -> bool {
+        is_dispatch_ready_prompt_line(line)
+            || crate::prompt::is_codex_idle_placeholder_prompt(line.trim())
+    }
+
+    /// A pre-clear Codex chat: banner, a real conversation, idle composer.
+    fn retained_codex_conversation() -> String {
+        let before_clear: String = ONE_ROW_PANE_HISTORY
+            .lines()
+            .take_while(|line| !line.starts_with("\u{203a} /clear"))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        format!(
+            ">_ OpenAI Codex (v0.159.0)\n   ~/work/btakita/agent-loop/src/haiven-dev\n\n\
+             \u{203a} agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md\n\n\
+             \u{2022} Ran tsift --version && tsift status\n  \u{2514} recommendations\n\n\
+             {before_clear}\
+             \u{203a} Ask Codex to do anything\n\n  \
+             GPT-5.6-Sol high \u{b7} ~/work/btakita/agent-loop/src/haiven-dev \u{b7} Context 26% used\n"
+        )
+    }
+
+    #[test]
+    fn one_row_pane_blank_viewport_is_proven_cleared_from_scrollback() {
+        // Live 2026-10-02, `src/haiven-dev/tasks/fpe.md` pane `%51`: a layout
+        // projection stashed the pane into a ONE-row slot a second after
+        // `/clear` was delivered. Every visible capture was `"\n"`
+        // (`capture_len=1`), so the window expired as `pane_not_rendered` even
+        // though Codex had started a fresh chat (`Context 26%` -> `Context 0%`,
+        // new banner) — all of it in scrollback. The fixture is that scrollback.
+        let viewport = "\n";
+        let expired = context_clear_expired_window_status(
+            Some(ContextClearLastFrame {
+                command_visible: false,
+                blank: context_clear_capture_is_blank(viewport),
+            }),
+            false,
+        );
+        assert_eq!(expired, ContextClearSubmitStatus::Unrendered);
+        assert!(context_clear_codex_history_shows_fresh_chat(
+            ONE_ROW_PANE_HISTORY,
+            "/clear",
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            codex_ready,
+        ));
+        let resolved = context_clear_unrendered_window_status(
+            "codex",
+            Some(ONE_ROW_PANE_HISTORY),
+            "/clear",
+            codex_ready,
+        );
+        assert_eq!(resolved, ContextClearSubmitStatus::AcceptedClearedState);
+        assert!(resolved.is_accepted());
+    }
+
+    #[test]
+    fn blank_viewport_over_a_retained_conversation_stays_unrendered() {
+        // The clear never ran: the latest chat is still the conversation. A
+        // blank viewport must not be upgraded, and must not become
+        // `Unobserved` either — that label can earn a duplicate `/clear`.
+        let history = retained_codex_conversation();
+        assert!(!context_clear_codex_history_shows_fresh_chat(
+            &history,
+            "/clear",
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            codex_ready,
+        ));
+        let status =
+            context_clear_unrendered_window_status("codex", Some(&history), "/clear", codex_ready);
+        assert_eq!(status, ContextClearSubmitStatus::Unrendered);
+        let observation = ContextClearSubmitObservation {
+            status,
+            elapsed: Duration::from_millis(10_140),
+            command_visible: false,
+            content_changed_since_delivery: false,
+        };
+        assert_eq!(
+            context_clear_submit_retry_action(ContextClearSubmitRetryFacts {
+                observation,
+                pending_draft_enter_resubmit: true,
+                attempts_sent: 0,
+                max_attempts: 1,
+            }),
+            None,
+            "a blank viewport never earns a resend"
+        );
+    }
+
+    #[test]
+    fn fresh_chat_proof_fails_closed_on_unconsumed_command_capture_failure_or_other_harness() {
+        let unconsumed = format!("{ONE_ROW_PANE_HISTORY}\u{203a} /clear\n");
+        assert!(!context_clear_codex_history_shows_fresh_chat(
+            &unconsumed,
+            "/clear",
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            codex_ready,
+        ));
+        // A turn started in the fresh chat is no longer a cleared state.
+        let used = format!(
+            "{ONE_ROW_PANE_HISTORY}\u{203a} agent-doc tasks/fpe.md\n\u{2022} Working\n\u{203a} Ask Codex to do anything\n"
+        );
+        assert!(!context_clear_codex_history_shows_fresh_chat(
+            &used,
+            "/clear",
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            codex_ready,
+        ));
+        // No banner at all, no history capture, or a non-Codex harness.
+        assert!(!context_clear_codex_history_shows_fresh_chat(
+            "\u{203a} Ask Codex to do anything\n",
+            "/clear",
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            codex_ready,
+        ));
+        assert_eq!(
+            context_clear_unrendered_window_status("codex", None, "/clear", codex_ready),
+            ContextClearSubmitStatus::Unrendered
+        );
+        assert_eq!(
+            context_clear_unrendered_window_status(
+                "claude",
+                Some(ONE_ROW_PANE_HISTORY),
+                "/clear",
+                codex_ready
+            ),
+            ContextClearSubmitStatus::Unrendered
+        );
+        assert!(!codex_footer_reports_nonzero_context(
+            "GPT-5.6-Sol high \u{b7} ~/x \u{b7} Context 0% used"
+        ));
+        assert!(codex_footer_reports_nonzero_context(
+            "GPT-5.6-Sol high \u{b7} ~/x \u{b7} Context 26% used"
+        ));
     }
 
     #[test]

@@ -2,6 +2,38 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.430
+
+- **Editor writes no longer stall behind a superseded IPC listener.** A listener left behind by an
+  older native-library generation could keep the IDE's socket after a hot reload. Every later
+  generation deferred to it, and it turned away each newer client (including the `reload_library`
+  that would replace it), so responses stayed retained until an IDE restart. A listener that answers
+  with a different build on the process's own socket is now taken over; a same-build peer is still
+  refused. Build-mismatch errors now label `listener` and `client` correctly on the client side.
+- **A plugin reload prunes its old editor id from every document.** Registering under a new editor id
+  now retires that IDE process's older-id memberships on other documents too, so reloads stop
+  fanning out to dead ids that the plugin rejects as `editor_id_mismatch`.
+- **State-event ingress stalls and journal growth.** Retention passes find their rows with a plain
+  read and take the `state.db` write lock only to delete, so they no longer hold it through a scan
+  while the controller waits. `reliable_sync_liveness_journal` is compacted in the background
+  (497k rows to 2.6k on a real project; cold reload 3.5 s to 19 ms). Slow ingress waits and holds
+  are logged as `state_event_ingress_slow`.
+- **JetBrains plugin 0.2.465: agent-doc stays usable while the IDE indexes.** All actions, menu
+  groups, slash completion and the turn banner work during "Analyzing project...". Also: splits
+  and selection on a Remote Dev backend (GH #88), socket messages routed to the owning project,
+  a stable editor id across dynamic plugin reloads, and logged reasons for rejected deliveries.
+- **Queue and Stop-hook fixes.** A stale binary-projected 🚧 no longer pins queue selection. The
+  Claude Stop hook no longer blocks after a run that captured no response, leaves continuation to
+  a ready supervisor instead of raising a "Stop hook error" on every drained item, and names only
+  the re-entry that works (a scheduled `/loop agent-doc <FILE>`, never a `loop` Skill call).
+- **Session documents.** A renamed document's registry binding now outranks its pane's frozen argv,
+  so routing no longer refuses the renamed document's own pane (GH #89). `session-check` no longer
+  relays the binary's own committed or retained response as operator steering. A refused editor save
+  no longer wedges preflight. A backlog row that only mentions `### Re:` is not treated as a weld.
+- **Relay.** A pull from a dropped replica is refused so it re-registers, and the response-cell
+  target is guarded against tracked components. A staged JetBrains install is reported as
+  restart-only.
+
 ## 0.35.429
 
 - **A response welded into a backlog item no longer strands the cycle (GH #86).** When a response

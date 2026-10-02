@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0f8ed-0c9a-7561-894d-b9761a26742b
+  codex: 01a0fa46-ac02-7680-9541-ac8de07305db
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -16,7 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -85,26 +85,48 @@ The evidence-only change is committed as `6e57996f3` (`docs: refresh ambient cre
 `#lzambienttokenresolve` is re-gated on the remaining operator-only quiet-window patch application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification described in the plan. No additional actionable backlog follow-up is needed because those remaining steps require operator action and are retained in this review gate.
 
 Confidence: high. Escalation: operator action only; no agent-side escalation occurred.
+
+### Re: #lzmacosrunner — gpt-5 · 2026-10-01T22:06-04:00
+
+> **Queue prompt:**
+>
+> do [#lzmacosrunner]
+
+
+Refreshed the macOS release-gap evidence to the live measurement without building or uploading any Darwin artifact:
+
+- Extended `MACOS_INCOMPLETE_PAIR_BASELINE` from 6 to 17 releases by adding `v0.35.419` through `v0.35.429`.
+- Advanced the self-test's synthetic widening release from the now-baselined `v0.35.420` to `v0.35.430`, preserving the negative control that proves a newly incomplete release makes the gate stale.
+- `make review-gate-self-test` exits 0.
+- `make review-gate-status` exits 0 and reports `#lzmacosrunner` as `blocked_fresh`: the measured list exactly matches all 17 pinned releases, the weekly window is open, and the gap is not widening. The aggregate reports no stale gate evidence.
+- The first full `make check` run exposed one `corky-core` library-test failure without a captured failing assertion. The exact 14-test target passed with the required CUDA feature and one test thread; a complete root `make check` rerun then exited 0 with zero failures. No Corky file was changed.
+- `git diff --check` passed. This superproject has no GitHub Actions workflow named `CI`, so there was no CI run to inspect.
+
+Changed path: `scripts/review-gate-status.py` only. Commit: `a5bd438c1` (`test: refresh macOS release gap evidence`). Per the session-document commit boundary, the ordinary repository push follows this agent-doc closeout and will be verified immediately afterward.
+
+`#lzmacosrunner` is returned to review, blocked solely on the unchanged operator choice: run `make release-macos-assets TAG=<tag>` on a Mac or supply a Mac build host. No additional actionable backlog follow-up is needed because the remaining step requires operator Mac access.
+
+The exchange is at the session-accretion warning threshold; the active queue was not stalled for compaction.
+
+Confidence: high. Escalation: operator Mac access only.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzambienttokenresolve]~~
-- do [#lzmacosrunner]
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh the stale macOS coverage evidence: update MACOS_INCOMPLETE_PAIR_BASELINE in scripts/review-gate-status.py and the recorded review list from 6 to the currently measured 16 incomplete-pair releases by adding v0.35.419 through v0.35.428; run make review-gate-self-test and make review-gate-status, confirm #lzmacosrunner reports blocked_fresh, commit and push the evidence refresh, then return it to review blocked on the unchanged Mac-only release or SSH operator decision.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] 🚧 [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
+- [/] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Evidence refreshed 2026-10-01: MACOS_INCOMPLETE_PAIR_BASELINE pins the 17 measured incomplete Darwin-pair releases v0.35.399, v0.35.400, v0.35.401, v0.35.406, and v0.35.417 through v0.35.429; make review-gate-self-test, make review-gate-status, and the full root make check pass. Blocked solely on operator Mac access: run make release-macos-assets TAG=<tag> on a Mac, or supply a build host. No agent-executable slice remains.
+- [/] [#lzambienttokenresolve] Refresh the point-of-use credential plan's stale evidence for src/agent-doc/Makefile: update the recorded preimage SHA-256 and hunk offsets by hand, then rerun make publish-credential-proof and make review-gate-status until #lzambienttokenresolve is blocked_fresh. Do not resolve or print credential values, apply the prepared patches, or invoke a real publisher. After evidence is fresh, re-gate on the remaining operator-only quiet-window application, Cargo/npm/PyPI credential rotations, and real interactive-shell name-only verification in tasks/software/plan-ambient-publish-token-point-of-use.md.
 - [/] [#lzreleasepins] After the other superproject sessions settle, update only the Lazily gitlinks to released commits, rerun the exact-revision interop gate, and push the intended pin commit without unrelated workspace changes.
 - [/] [#lzrustpublish] [operator-decision] Configure crates.io Trusted Publishing for lazily-hub/lazily-rs workflow release.yml; then tag and publish the prepared v0.59.0 commit ea2910d and verify crates.io. Blocked solely on the missing publisher configuration.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.

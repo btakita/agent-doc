@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.432
+
+- **A cited id resolves across the project, not just the active document (GH #92).** Both coined-id
+  guards (the `PreToolUse` hook and `session-check`) now treat an id tracked in any sibling session
+  document (open, gated, done, or archived) as a citation, not invented work. They also accept
+  anchors defined in agent-doc's own Rust comments, which the build embeds in the binary. Both
+  guards share one predicate, and it reads the project only when something would otherwise be
+  reported. `session-check` re-derives the warning from the live exchange, so rewriting a citation
+  out of a response clears it. The hook no longer guards writes outside the project root or to
+  git-ignored paths. Commit messages are always guarded.
+
 ## 0.35.431
 
 - **A component marker quoted in backticks is prose (GH #90).** Marker detection now hides backtick

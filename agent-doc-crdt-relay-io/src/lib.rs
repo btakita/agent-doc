@@ -2052,6 +2052,115 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
     precondition: ReplicaRegistrationPrecondition<'_>,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<Option<ReplicaRegistration>> {
+    let provisional = precondition.provisional_replacement;
+    let registration = register_replica_for_file_incremental_locked(
+        file,
+        identity,
+        retained_state_vector,
+        force_full_bootstrap,
+        registering_editor_pid,
+        precondition,
+        is_pid_live,
+    )?;
+    if registration.is_some() && !provisional {
+        retire_superseded_editor_endpoint_elsewhere(file, identity);
+    }
+    Ok(registration)
+}
+
+/// `#staleeditorregprune`: memberships on OTHER documents that the registering
+/// editor process still holds under an older editor id.
+///
+/// A plugin reload mints a new editor id for the same IDE pid. Registration
+/// already retires that pid's older generations for the document being
+/// registered ([`superseded_editor_process_replica_ids`]), but documents the new
+/// endpoint never re-registers kept the dead id. On 2026-10-01 IDE pid 2960722
+/// still held 0.2.455-era ids for api.md, contracts.md and agent-loop.md hours
+/// later, and every plugin reload fanned out to them and was rejected as
+/// `editor_id_mismatch`. Only the same pid with a different editor id is
+/// selected: other processes are independent collaborators.
+fn superseded_endpoint_members_elsewhere(
+    registry: &HashMap<String, HashMap<u64, String>>,
+    current_document: &str,
+    route: &ReplicaSignalRoute,
+) -> Vec<(String, u64, String)> {
+    let mut members = registry
+        .iter()
+        .filter(|(document_hash, _)| document_hash.as_str() != current_document)
+        .flat_map(|(document_hash, members)| {
+            members.iter().filter_map(move |(client_id, identity)| {
+                let member = editor_route_from_replica_identity(identity)?;
+                (member.editor_pid == route.editor_pid && member.editor_id != route.editor_id)
+                    .then(|| (document_hash.clone(), *client_id, identity.clone()))
+            })
+        })
+        .collect::<Vec<_>>();
+    members.sort();
+    members
+}
+
+/// Retire [`superseded_endpoint_members_elsewhere`]. Runs after the registering
+/// document's lock is released and takes each other document's registration
+/// lock on its own, so two concurrent registrations cannot deadlock.
+fn retire_superseded_editor_endpoint_elsewhere(file: &Path, identity: &str) {
+    let Some(route) = editor_route_from_replica_identity(identity) else {
+        return;
+    };
+    let Ok(current_document) = agent_doc_fs::document_state_hash(file) else {
+        return;
+    };
+    let stale = superseded_endpoint_members_elsewhere(
+        &replica_identity_registry().lock(),
+        &current_document,
+        &route,
+    );
+    for (document_hash, client_id, stale_identity) in stale {
+        let lock = match replica_registration_lock(&document_hash) {
+            Ok(lock) => lock,
+            Err(error) => {
+                eprintln!("[crdt-relay] could not lock {document_hash} to prune a stale editor id: {error:#}");
+                continue;
+            }
+        };
+        let _guard = lock.lock();
+        let still_registered = replica_identity_registry()
+            .lock()
+            .get(&document_hash)
+            .and_then(|members| members.get(&client_id))
+            == Some(&stale_identity);
+        if !still_registered {
+            continue;
+        }
+        let removed = hub_handle(&document_hash).is_some_and(|handle| {
+            let mut hub = handle.lock();
+            let removed = hub.deregister(client_id);
+            retained_canonical_projections().retain(&document_hash, hub.retained_canonical_projection());
+            removed
+        });
+        if let Err(error) = forget_replica_identity(&document_hash, client_id) {
+            eprintln!("[crdt-relay] could not forget stale editor id {client_id}: {error:#}");
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_superseded_endpoint_pruned document_hash={document_hash} \
+                 client_id={client_id} editor_pid={} stale_identity={stale_identity} \
+                 current_editor_id={} hub_removed={removed} (#staleeditorregprune)",
+                route.editor_pid, route.editor_id,
+            ),
+        );
+    }
+}
+
+fn register_replica_for_file_incremental_locked(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+    force_full_bootstrap: bool,
+    registering_editor_pid: Option<u32>,
+    precondition: ReplicaRegistrationPrecondition<'_>,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> Result<Option<ReplicaRegistration>> {
     let ReplicaRegistrationPrecondition {
         expected_canonical_hash,
         provisional_replacement,
@@ -7534,6 +7643,86 @@ mod tests {
         assert!(
             agent_doc_document_realtime::editor_attach::editor_attach().is_attached(&file_str),
             "the late callback must preserve the current same-PID attachment"
+        );
+    }
+
+    /// `#staleeditorregprune`: a new plugin classloader that registers ONE
+    /// document must also prune its process's old-classloader membership on
+    /// documents it never re-registers, or every later reload fans out to the
+    /// dead id and is rejected as `editor_id_mismatch`.
+    #[test]
+    fn new_classloader_prunes_its_old_editor_id_from_other_documents() {
+        #[derive(Default)]
+        struct NoopWatcher;
+        impl agent_doc_document_realtime::editor_attach::ProcessExitWatcher for NoopWatcher {
+            fn watch(&self, _pid: u32) {}
+        }
+
+        let (_dir_a, doc_a) = temp_doc("stale-endpoint-registered.md");
+        let (_dir_b, doc_b) = temp_doc("stale-endpoint-never-reopened.md");
+        // The parent pid is live and used by no other test: the prune is
+        // process-wide, so sharing `std::process::id()` with the other
+        // classloader tests would prune their memberships under `cargo test`.
+        let pid = std::os::unix::process::parent_id();
+        seed_live_reliable_sync_open(&doc_a.display().to_string());
+        seed_live_reliable_sync_open(&doc_b.display().to_string());
+        agent_doc_document_realtime::editor_attach::editor_attach()
+            .install_watcher(std::sync::Arc::new(NoopWatcher));
+        let old_a = format!("jetbrains-{pid}-old-classloader:{}", doc_a.display());
+        let old_b = format!("jetbrains-{pid}-old-classloader:{}", doc_b.display());
+        let new_a = format!("jetbrains-{pid}-new-classloader:{}", doc_a.display());
+
+        register_editor_replica_for_file_incremental(&doc_a, &old_a, None, pid)
+            .unwrap()
+            .expect("old classloader attaches doc A");
+        let stale_b = register_editor_replica_for_file_incremental(&doc_b, &old_b, None, pid)
+            .unwrap()
+            .expect("old classloader attaches doc B");
+        register_editor_replica_for_file_incremental(&doc_a, &new_a, None, pid)
+            .unwrap()
+            .expect("new classloader re-registers doc A only");
+
+        with_hub(&doc_b, |hub| {
+            assert!(
+                !hub.is_registered(stale_b.client_id),
+                "doc B must not keep the old classloader's membership"
+            );
+        })
+        .unwrap();
+        let hash_b = agent_doc_fs::document_state_hash(&doc_b).unwrap();
+        assert!(
+            replica_identity_registry()
+                .lock()
+                .get(&hash_b)
+                .is_none_or(|members| !members.values().any(|identity| identity == &old_b)),
+            "the stale identity must leave the identity registry too"
+        );
+    }
+
+    #[test]
+    fn superseded_endpoint_selection_spares_other_processes_and_the_current_document() {
+        let registry = HashMap::from([
+            (
+                "current".to_string(),
+                HashMap::from([(1, "jetbrains-7-old:/a.md".to_string())]),
+            ),
+            (
+                "other".to_string(),
+                HashMap::from([
+                    (2, "jetbrains-7-old:/b.md".to_string()),
+                    (3, "jetbrains-7-new:/b.md".to_string()),
+                    (4, "jetbrains-8-old:/b.md".to_string()),
+                    (5, "headless-replica".to_string()),
+                ]),
+            ),
+        ]);
+        let route = ReplicaSignalRoute {
+            editor_id: "jetbrains-7-new".to_string(),
+            editor_pid: 7,
+        };
+        assert_eq!(
+            superseded_endpoint_members_elsewhere(&registry, "current", &route),
+            vec![("other".to_string(), 2, "jetbrains-7-old:/b.md".to_string())],
         );
     }
 

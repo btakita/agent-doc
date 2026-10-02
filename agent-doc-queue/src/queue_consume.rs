@@ -739,9 +739,15 @@ pub fn answered_free_text_head_node_keys(
         }
         // `#bugautostruck`: the in-progress marker proves only which queue head
         // was selected for this cycle. It is not evidence that the response
-        // addressed that head. Require the same exact quoted-prompt proof for
-        // marked and unmarked free-text heads.
-        if !crate::queue_response::free_text_head_answered_by_response(response_body, text) {
+        // addressed that head. Require exact quoted-prompt proof for ordinary
+        // free text, or resolved-expansion proof for a prompt-preset head.
+        if !crate::queue_response::free_text_head_answered_by_response(response_body, text)
+            && !crate::queue_response::prompt_preset_head_answered_by_response(
+                content,
+                response_body,
+                text,
+            )
+        {
             continue;
         }
         // `#ftstrikedefer`: the quoted echo is the responding agent's assertion
@@ -2645,6 +2651,33 @@ Old.
         .unwrap()
         .expect("quoted heads should project a strike");
         assert_all_five_heads_struck(&projected);
+    }
+
+    #[test]
+    fn preset_expansion_evidence_strikes_without_literal_head_echo() {
+        let document = concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc and verify the current issues.\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- [#upgrade]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: upgrade\n\n",
+            "Upgrade agent-doc and verify the current issues. Completed and tested."
+        );
+
+        let projected = project_answered_free_text_strike(document, response, Some(document))
+            .unwrap()
+            .expect("resolved expansion evidence should strike the preset head");
+        assert_eq!(projected.node_keys.len(), 1);
+        assert!(
+            !projected.target_content.contains("[#upgrade]"),
+            "the sole consumed head is losslessly cleared with the queue body:\n{}",
+            projected.target_content
+        );
     }
 
     /// The live respond auto-reopened a fresh cycle whose baseline was refreshed

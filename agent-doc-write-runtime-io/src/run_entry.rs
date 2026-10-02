@@ -72,6 +72,19 @@ fn enforce_selected_queue_response_contract(
         )
     });
     if !missing.is_empty() {
+        let preset_heads = missing
+            .iter()
+            .filter(|head| {
+                !agent_doc_queue::queue_response::queue_prompt_preset_expansions(current, head)
+                    .is_empty()
+            })
+            .count();
+        if preset_heads == missing.len() {
+            anyhow::bail!(
+                "[finalize] pre-write gate: selected prompt-preset queue head lacks response evidence: {}. Address every resolved preset expansion in the response; a literal `#preset` queue-head quote is optional. No response has been captured.",
+                missing.join("; ")
+            );
+        }
         anyhow::bail!(
             "[finalize] pre-write gate: selected free-text queue prompt lacks response evidence: {}. Include its exact `> **Queue prompt:**` quote and the completed result or concrete deferral before retrying. No response has been captured.",
             missing.join("; ")
@@ -3179,6 +3192,45 @@ mod tests {
                 .is_none()
         );
         assert_eq!(fs::read_to_string(&doc).unwrap(), selected);
+    }
+
+    #[test]
+    fn prompt_preset_gate_uses_expansion_evidence_and_names_missing_presets() {
+        let current = concat!(
+            "---\nprompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc and verify the current issues.\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 [#upgrade]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let flags = WriteFlags {
+            strict_closeout: true,
+            commit_requested: true,
+            ..Default::default()
+        };
+        let error = enforce_selected_queue_response_contract(
+            None,
+            Some(current),
+            current,
+            "### Re: unrelated\n\nCompleted unrelated work.",
+            &flags,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("selected prompt-preset queue head lacks response evidence")
+        );
+
+        enforce_selected_queue_response_contract(
+            None,
+            Some(current),
+            current,
+            "### Re: upgrade\n\nUpgrade agent-doc and verify the current issues. Completed.",
+            &flags,
+        )
+        .unwrap();
     }
 
     #[test]

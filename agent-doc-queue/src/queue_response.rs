@@ -148,6 +148,45 @@ pub fn head_id_is_registered_preset(content: &str, head_id: &str) -> bool {
         .is_some()
 }
 
+/// Resolve every prompt preset referenced by a queue head.
+pub fn queue_prompt_preset_expansions(content: &str, text: &str) -> Vec<(String, String)> {
+    let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(content) else {
+        return Vec::new();
+    };
+    let text = strip_priority_markers(text);
+    let referenced = text
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
+        .filter(|token| token.starts_with('#'))
+        .collect::<Vec<_>>();
+    fm.prompt_presets
+        .iter()
+        .filter(|(name, _)| {
+            referenced
+                .iter()
+                .any(|token| token.eq_ignore_ascii_case(name))
+        })
+        .map(|(name, body)| (name.clone(), body.clone()))
+        .collect()
+}
+
+/// True when the response contains evidence for every resolved preset expansion
+/// requested by this queue head. A compact preset reference is not itself evidence.
+pub fn prompt_preset_head_answered_by_response(
+    content: &str,
+    response_body: &str,
+    head_text: &str,
+) -> bool {
+    let expansions = queue_prompt_preset_expansions(content, head_text);
+    if expansions.is_empty() {
+        return false;
+    }
+    let response = normalize_for_answer_match(response_body);
+    expansions.into_iter().all(|(_, body)| {
+        let body = normalize_for_answer_match(&body);
+        !body.is_empty() && response.contains(&body)
+    })
+}
+
 /// True when the active queue head is exactly the registered prompt preset id.
 pub fn active_queue_head_is_registered_preset(content: &str, preset_id: &str) -> Result<bool> {
     let Some(head) = crate::queue_heads::active_queue_head_text(content)? else {
@@ -1135,6 +1174,46 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    #[test]
+    fn prompt_preset_response_evidence_uses_expansions_for_composable_heads() {
+        let content = concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc and verify the current issues.\n",
+            "  '#gh-fix': Fix the referenced GitHub issue and add a regression test.\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- [#upgrade]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: upgrade\n\n",
+            "Upgrade agent-doc and verify the current issues. ",
+            "Fix the referenced GitHub issue and add a regression test."
+        );
+
+        assert!(prompt_preset_head_answered_by_response(
+            content,
+            response,
+            "[#upgrade]"
+        ));
+        assert!(prompt_preset_head_answered_by_response(
+            content,
+            response,
+            "#gh-fix https://github.com/example/sample/issues/100"
+        ));
+        assert!(prompt_preset_head_answered_by_response(
+            content,
+            response,
+            "#upgrade #gh-fix https://github.com/example/sample/issues/100"
+        ));
+        assert!(!prompt_preset_head_answered_by_response(
+            content,
+            "### Re: partial\n\nUpgrade agent-doc and verify the current issues.",
+            "#upgrade #gh-fix https://github.com/example/sample/issues/100"
+        ));
     }
 
     #[test]

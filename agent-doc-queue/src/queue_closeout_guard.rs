@@ -143,6 +143,7 @@ pub fn selected_free_text_prompts_missing_response_evidence_for_closeout(
                 baseline, content, &head,
             )
             || queue_response::free_text_head_answered_by_response(response, &head)
+            || queue_response::prompt_preset_head_answered_by_response(content, response, &head)
         {
             continue;
         }
@@ -596,6 +597,28 @@ mod tests {
                 .is_empty()
             );
         }
+    }
+
+    #[test]
+    fn selected_prompt_preset_head_accepts_expansion_evidence_without_literal_echo() {
+        let content = concat!(
+            "---\nprompt_presets:\n",
+            "  '#upgrade': Upgrade agent-doc and verify the current issues.\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- 🚧 [#upgrade]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: upgrade\n\n",
+            "Upgrade agent-doc and verify the current issues. Completed and tested."
+        );
+
+        assert!(
+            selected_free_text_heads_missing_response_evidence(Some(content), content, response,)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

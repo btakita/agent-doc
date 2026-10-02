@@ -98,6 +98,27 @@ Verification passed:
 - `make install`
 
 Pushed `c0c3356fd` plus JetBrains generation `f34849c0e`; plugin 0.2.472 dynamically upgraded in the live IDE without restart. The current live surface reports the ordinary `windows=2, columns=2` path, so the exact headless branch is regression-covered rather than presently reproducible. CI was observed once in progress.
+
+### Re: #gh-fix issue 98 — gpt-5 · 2026-10-02 03:28 EDT
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/98
+
+Fixed and closed [agent-doc issue #98](https://github.com/btakita/agent-doc/issues/98).
+
+The foreground idle-watch reconciliation no longer writes its informational message to stderr, which shares the managed pane's TTY. The existing structured `idle_queue_watch_stale_busy_reconciled` event remains the single diagnostic sink.
+
+Composer projection now recognizes a prompt-prefixed `[agent-doc] ` line as agent-owned residue rather than `OperatorDraft`. It remains non-ready until removed, and route dispatch clears proven agent-owned residue with `C-u`, waits up to 500 ms for the cursor-scoped pane snapshot to confirm removal, and fails closed without telling the operator to submit or clear it. Genuine operator drafts retain the existing refusal.
+
+Regression coverage includes the exact Claude `❯` + non-breaking-space + `[agent-doc]` notice shape and a source guard preventing this idle-watch diagnostic from returning to foreground stderr.
+
+Verification passed:
+
+- focused harness and idle-watch regressions
+- complete `agent-doc-route-io` test suite
+- full `make check`: 10,410 Rust tests, VS Code/editor parity tests, cross-editor simulation, bootstrap checks, and TLA+ models/non-vacuity checks
+- `make install`: binary and library installed; supervisors/controllers received idle-boundary recycle markers; editor packages were already byte-identical
+
+Pushed `d66599441` (`fix: keep diagnostics out of managed composers`) to `origin/main`. CI was observed once immediately after push; no run had appeared yet, and it was not awaited.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -110,7 +131,7 @@ Pushed `c0c3356fd` plus JetBrains generation `f34849c0e`; plugin 0.2.472 dynamic
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/95~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/96~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/97~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/98
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/98~~
 - release + publish
 <!-- /agent:queue --> 
 

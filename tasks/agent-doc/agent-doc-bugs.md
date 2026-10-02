@@ -32,110 +32,11 @@ queue: stop
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20261002-062128.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20261002-143418.md`*
 
 Compacted content:
-- Archived 34 response topic(s): #gh-fix GH #77 (tmux shows 1 pane while the editor shows 2 documents); #gh-fix GH #78 (preflight overrun refusal had no measured cause); Can we make the "genuinely wedged run" never happen?; 31 more
-- Prior summary/context: prior compacted content: Archived 9 response topic(s): do [#refusalsteeringverbatim] + the lazily.md Stop-hook failur...
-
-### Re: #gh-fix issue 95 — gpt-5 · 2026-10-02T02:41-04:00
-
-> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/95
-
-Fixed, installed, pushed, and closed [agent-doc issue #95](https://github.com/btakita/agent-doc/issues/95).
-
-The root cause is in the newer JetBrains platform contract: its asynchronous classloader-retirement strategy returns success from dynamic reconfiguration before the outgoing classloader is collected, then waits in the background and may advise a restart later. `JetBrainsPluginUpgradeAction` now owns the invariant that a restart-free upgrade may proceed only when retirement is synchronously observable. On an asynchronous-retirement build it stages the package before any unload probe, preserving the live jars; synchronous builds retain the restart-free path. Refusal, failed unload, retained generation, and successful fresh-generation rows remain distinct.
-
-The replica restart path now rediscovers open agent-doc documents across every live project instead of trusting only the pre-reload handoff map. A `0/0` observation is no longer convergence: it is emitted as `state=no-open-documents` with `live_projects=N`, while partial and complete attachment states remain explicit.
-
-Architecture closeout: the policy owner is the one-shot JetBrains upgrade action; JetBrains platform state is the boundary ingress and the action emits one install receipt. This boundary has no long-lived agent-doc lifecycle graph to join, so the direct platform call remains the justified one-shot exception. The continuing replica lifecycle remains in the existing process-scoped coordinator; no new poller or parallel policy owner was introduced.
-
-Changed surfaces: the JetBrains upgrade action, replica/reload reporting, focused JetBrains tests, and the cross-editor source-contract test. Commits `766d00b9b` and `9d4dcce69` are on `origin/main`; the latter projects JetBrains plugin `0.2.471`, matching the installed artifact.
-
-Verification:
-
-- Focused JetBrains regression suite: 19 tests passed.
-- `make dev-harness-test`: passed after updating the cross-editor contract assertion.
-- `make check`: passed from the top, exit 0, zero failure signals.
-- `make install`: passed; binary/cdylib and editor packages installed, including JetBrains `0.2.471`.
-- Latest pre-push CI observation was green for `v0.35.434`; the new push was not awaited.
-
-No imperative derived-state calls were added or duplicated, and no operator-only verification is required for this safety policy: unsupported asynchronous platforms deterministically stage before touching the live generation.
-
-### Re: #gh-fix issue 96 — gpt-5 · 2026-10-02 02:57 EDT
-
-> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/96
-
-Fixed and closed [agent-doc issue #96](https://github.com/btakita/agent-doc/issues/96).
-
-The queue policy now treats a missing optional `agent:queue` component as an empty answered-free-text projection. It still propagates every other AST/mutation error, so malformed queue state remains visible instead of being silently swallowed. A regression covers a normal exchange/backlog document with no queue component.
-
-Verification passed:
-
-- focused no-queue projection regression
-- full `agent-doc-queue` test suite
-- reactive controller projection regression
-- full `make check`
-- `make install`
-
-Pushed `ff33358bc` (`fix(queue): ignore absent queue in free-text projection`). The repository gate also exposed generation debt from issue #95's VS Code test change, so `b2832879c` bumped and installed VS Code extension 0.2.76 before the full check.
-
-### Re: #gh-fix issue 97 — gpt-5 · 2026-10-02 03:14 EDT
-
-> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/97
-
-Fixed and closed [agent-doc issue #97](https://github.com/btakita/agent-doc/issues/97).
-
-The Remote Dev fallback no longer treats backend-local `FileEditorManager.selectedFiles` as split enumeration. It now follows [JetBrains' own remote-manager boundary](https://github.com/JetBrains/intellij-community/blob/master/platform/platform-impl/src/com/intellij/openapi/fileEditor/impl/FileEditorManagerImpl.kt): enumerate `ClientFileEditorManager` services under `ClientKind.REMOTE`, accept a multi-file split set only when one client reports it, and refuse to combine focused files from separate clients.
-
-When no unique client split set exists, the plugin returns no layout and logs an explicit `unknown windows=0 ... reason=no_unique_client_split_set` observation. It never publishes the misleading `columns=1 source=selected_files` fact.
-
-Verification passed:
-
-- focused `LayoutDetectorTest`
-- complete JetBrains test suite
-- full `make check`
-- `make install`
-
-Pushed `c0c3356fd` plus JetBrains generation `f34849c0e`; plugin 0.2.472 dynamically upgraded in the live IDE without restart. The current live surface reports the ordinary `windows=2, columns=2` path, so the exact headless branch is regression-covered rather than presently reproducible. CI was observed once in progress.
-
-### Re: #gh-fix issue 98 — gpt-5 · 2026-10-02 03:28 EDT
-
-> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/98
-
-Fixed and closed [agent-doc issue #98](https://github.com/btakita/agent-doc/issues/98).
-
-The foreground idle-watch reconciliation no longer writes its informational message to stderr, which shares the managed pane's TTY. The existing structured `idle_queue_watch_stale_busy_reconciled` event remains the single diagnostic sink.
-
-Composer projection now recognizes a prompt-prefixed `[agent-doc] ` line as agent-owned residue rather than `OperatorDraft`. It remains non-ready until removed, and route dispatch clears proven agent-owned residue with `C-u`, waits up to 500 ms for the cursor-scoped pane snapshot to confirm removal, and fails closed without telling the operator to submit or clear it. Genuine operator drafts retain the existing refusal.
-
-Regression coverage includes the exact Claude `❯` + non-breaking-space + `[agent-doc]` notice shape and a source guard preventing this idle-watch diagnostic from returning to foreground stderr.
-
-Verification passed:
-
-- focused harness and idle-watch regressions
-- complete `agent-doc-route-io` test suite
-- full `make check`: 10,410 Rust tests, VS Code/editor parity tests, cross-editor simulation, bootstrap checks, and TLA+ models/non-vacuity checks
-- `make install`: binary and library installed; supervisors/controllers received idle-boundary recycle markers; editor packages were already byte-identical
-
-Pushed `d66599441` (`fix: keep diagnostics out of managed composers`) to `origin/main`. CI was observed once immediately after push; no run had appeared yet, and it was not awaited.
-
-### Re: release + publish — gpt-5 · 2026-10-02 03:57 EDT
-
-> **Queue prompt:** release + publish
-
-Released agent-doc `0.35.435` from commit `a8d207073` and pushed tag `v0.35.435`.
-
-The release includes every change since `0.35.434`: consecutive singular queue echoes consume every answered free-text head; asynchronous JetBrains upgrades stage safely and replica recovery rediscovers live projects; missing optional queues project empty; Remote Dev layout fallback enumerates one remote client's split set; and foreground diagnostics no longer contaminate managed composers. `VERSIONS.md` and the editor parity matrix record the release, including JetBrains plugin 0.2.472 and VS Code extension 0.2.76.
-
-Verification and installation completed:
-
-- release projection synchronized across 144 manifests and 1,623 internal constraints
-- full `make check`: 10,410 Rust tests passed, 260 skipped; VS Code/editor parity, cross-editor simulation, bootstrap, and TLA+ model/non-vacuity checks passed
-- `make release` repeated the release gate successfully, pushed the tag, and completed the sole full-profile fat-LTO install
-- installed `agent-doc 0.35.435`, its shared library, and converged both editor packages; no JetBrains restart was required
-
-The single post-tag external observation showed GitHub Release workflow [36980699635](https://github.com/btakita/agent-doc/actions/runs/36980699635) and PyPI workflow [36980699489](https://github.com/btakita/agent-doc/actions/runs/36980699489) both `in_progress`; main CI was also `in_progress`, while Book and Pages had succeeded. The GitHub Release did not exist yet at that observation. Per the repository's no-wait policy, I did not poll or invoke the local PyPI fallback while tag-driven publication was active.
+- Archived 5 response topic(s): #gh-fix issue 95; #gh-fix issue 96; #gh-fix issue 97; 2 more
+- Prior summary/context: prior compacted content: Archived 34 response topic(s): #gh-fix GH #77 (tmux shows 1 pane while the editor shows 2 do...
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

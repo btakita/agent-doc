@@ -125,7 +125,14 @@ enum StopResponse {
 
 enum StopCloseAttempt {
     Closed,
-    StillOpen { note: String },
+    StillOpen {
+        note: String,
+    },
+    /// The commit boundary refused only because the captured response was not
+    /// yet projected, while a durable owner (retained capture / keyed worker)
+    /// holds the intent and commits it on its own delivery edge. Not an agent
+    /// action item: the Stop hook continues instead of blocking.
+    DeferredToDurableOwner,
     NotPossible,
 }
 
@@ -993,6 +1000,9 @@ fn apply_bound_stop(
                         settle_session_binding(file, cleanup_roots, loaded_root, state)?;
                         return Ok(StopResponse::Continue { continue_: true });
                     }
+                    StopCloseAttempt::DeferredToDurableOwner => {
+                        return Ok(StopResponse::Continue { continue_: true });
+                    }
                     StopCloseAttempt::StillOpen { note } => {
                         return Ok(StopResponse::Block {
                             decision: "block",
@@ -1246,6 +1256,13 @@ fn active_session_prompt_requires_writeback(
                 agent_doc_ops_log_io::log_op(
                     file,
                     "codex_stop_post_commit_prompt_auto_closed source=exact_thread_prompt_debt",
+                );
+                return Ok(Some(StopResponse::Continue { continue_: true }));
+            }
+            StopCloseAttempt::DeferredToDurableOwner => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    "codex_stop_post_commit_prompt_closeout_deferred owner=durable_retained_capture",
                 );
                 return Ok(Some(StopResponse::Continue { continue_: true }));
             }
@@ -1994,6 +2011,18 @@ fn attempt_stop_closeout(
         }
         Ok(false) => {}
         Err(err) => {
+            let ownership = agent_doc_capture_io::retained_write_ownership(file);
+            let rendered = format!("{err:#}").replace('\n', " ");
+            if closeout_failure_is_binary_owned_deferral(&rendered, ownership.verdict()) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_auto_close_closeout_deferred verdict={} reason=captured_response_not_materialized owner=durable_retained_capture err={rendered}",
+                        ownership.verdict().as_str(),
+                    ),
+                );
+                return Ok(StopCloseAttempt::DeferredToDurableOwner);
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!("codex_stop_auto_close_closeout_failed err={err}"),
@@ -2006,6 +2035,22 @@ fn attempt_stop_closeout(
     }
     agent_doc_ops_log_io::log_op(file, "codex_stop_auto_close_success");
     Ok(StopCloseAttempt::Closed)
+}
+
+/// Whether a failed commit boundary is a deferral the binary already owns.
+///
+/// Only the missing-captured-response refusal qualifies, and only while the
+/// shared ownership predicate says something durable holds the intent
+/// (`Deferred`): the retained capture's keyed worker projects the body and
+/// commits on the next delivery edge. Every other verdict, including a durable
+/// but unowned capture, stays fail-closed so the agent is told to act.
+fn closeout_failure_is_binary_owned_deferral(
+    rendered_error: &str,
+    verdict: agent_doc_turn::write_ownership::RetainedWriteVerdict,
+) -> bool {
+    agent_doc_git_io::capture_materialization_guard::is_missing_captured_response_refusal(
+        rendered_error,
+    ) && verdict == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred
 }
 
 fn reopen_terminal_cycle_before_stop_capture(
@@ -3036,6 +3081,62 @@ Done.\n\
                 "{anchor} must check the existing capture before save_pending"
             );
         }
+    }
+
+    /// haiven-dev cycle-1790914570041 (2026-10-02): the post-commit closeout
+    /// committed before the retained capture was projected, the commit refused
+    /// with the missing-captured-response guard, and the hook surfaced a hard
+    /// block for a state the keyed retry committed on its own 15s later.
+    #[test]
+    fn missing_captured_response_refusal_with_durable_owner_is_a_deferral() {
+        use agent_doc_turn::write_ownership::{RetainedWriteOwnership, RetainedWriteVerdict};
+        let refusal = format!(
+            "captured response body is not present in the staged snapshot for /p/sdk.md even though the snapshot already matches HEAD; refusing already-committed closeout ({}). The retained capture or projection is already durable.",
+            agent_doc_git_io::capture_materialization_guard::MISSING_CAPTURED_RESPONSE_REFUSAL_TOKEN,
+        );
+        let owned = RetainedWriteOwnership::new_with_phase(true, true, false);
+        assert_eq!(owned.verdict(), RetainedWriteVerdict::Deferred);
+        assert!(closeout_failure_is_binary_owned_deferral(
+            &refusal,
+            owned.verdict()
+        ));
+
+        // Fail closed whenever nothing durable owns the intent.
+        for verdict in [
+            RetainedWriteVerdict::Stranded,
+            RetainedWriteVerdict::CaptureResumeUnowned,
+            RetainedWriteVerdict::AwaitingTerminalCommit,
+            RetainedWriteVerdict::UnansweredEditPending,
+        ] {
+            assert!(
+                !closeout_failure_is_binary_owned_deferral(&refusal, verdict),
+                "{verdict:?} must stay fail-closed"
+            );
+        }
+        // Any other commit failure stays fail-closed even with a durable owner.
+        assert!(!closeout_failure_is_binary_owned_deferral(
+            "git commit failed: index.lock exists",
+            RetainedWriteVerdict::Deferred
+        ));
+    }
+
+    #[test]
+    fn stop_closeout_classifies_commit_failure_before_reporting_still_open() {
+        let source = include_str!("lib.rs");
+        let closeout = source.split("fn attempt_stop_closeout(").nth(1).unwrap();
+        let closeout = &closeout[..closeout.find("\nfn ").unwrap()];
+        let commit = closeout
+            .split("complete_required_closeout(file, false)")
+            .nth(1)
+            .expect("closeout crosses the commit boundary");
+        let deferral = commit
+            .find("closeout_failure_is_binary_owned_deferral(")
+            .expect("commit failure must consult the durable-owner deferral");
+        let still_open = commit
+            .find("StopCloseAttempt::StillOpen")
+            .expect("unowned failures stay still-open");
+        assert!(deferral < still_open);
+        assert!(commit.contains("StopCloseAttempt::DeferredToDurableOwner"));
     }
 
     #[test]

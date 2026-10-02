@@ -1592,6 +1592,66 @@ mod tests {
         );
     }
 
+    /// A structural replay-debris cleanup must not stand in for replaying the
+    /// retained capture. The Codex Stop hook's post-commit closeout captures
+    /// into a fresh cycle, runs repair, then commits; when repair returned
+    /// `TemplateNormalized` after the cleanup, the captured body never reached
+    /// the document and the commit refused the closeout.
+    #[test]
+    fn repair_replays_retained_capture_after_structural_projection_cleanup() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "### Re: retained topic — gpt-5\n\nRetained response.\n\n",
+            "### Re: intervening topic — gpt-5\n\nIntervening response.\n\n",
+            "### Re: retained topic — gpt-5\n\n",
+            "### Re: latest topic — gpt-5\n\nLatest response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let normalized =
+            agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(
+                duplicated,
+            )
+            .expect("fixture must be a losslessly repairable replay");
+        std::fs::write(&doc, duplicated).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            duplicated,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(duplicated), Some(duplicated))
+            .unwrap();
+        agent_doc_repair_io::pending::save_pending(
+            &doc,
+            "<!-- patch:exchange -->\n### Re: post-commit prompt — gpt-5\n\nFresh captured answer.\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(
+            recovered,
+            RepairOutcome::ReplayedResponse,
+            "structural cleanup must continue into the retained capture replay"
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("Fresh captured answer."),
+            "captured response must be projected before any commit boundary:\n{result}"
+        );
+        assert_eq!(
+            result.matches("### Re: retained topic — gpt-5").count(),
+            normalized.matches("### Re: retained topic — gpt-5").count(),
+            "structural replay debris must still be removed:\n{result}"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("repair_structural_projection_continue_to_replay"));
+    }
+
     #[test]
     fn repair_replay_preserves_response_leading_code_fence_after_prompt_fence() {
         let dir = setup_project();

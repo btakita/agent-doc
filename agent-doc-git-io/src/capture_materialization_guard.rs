@@ -2,6 +2,23 @@ use agent_doc_turn::op_log::OpsLogEvent;
 use anyhow::Result;
 use std::path::Path;
 
+/// Structural marker stamped on the missing-captured-response refusal below.
+///
+/// Callers on the far side of a process or crate boundary (the Codex Stop
+/// hook classifies the rendered closeout error) must recognize this refusal
+/// without matching its prose, the same reason the retained-write refusal
+/// carries `AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN`. The refusal itself does
+/// not decide who owns the capture; pair it with
+/// `agent_doc_capture_io::retained_write_ownership` before treating it as a
+/// deferral.
+pub const MISSING_CAPTURED_RESPONSE_REFUSAL_TOKEN: &str =
+    "refusal=captured_response_not_materialized";
+
+/// Whether a rendered error is the missing-captured-response commit refusal.
+pub fn is_missing_captured_response_refusal(message: &str) -> bool {
+    message.contains(MISSING_CAPTURED_RESPONSE_REFUSAL_TOKEN)
+}
+
 pub struct ActiveCaptureMaterialization {
     pub capture_id: String,
     pub response_sha256: String,
@@ -135,8 +152,9 @@ pub fn ensure_active_capture_materialized_for_commit(
         &file.display().to_string(),
     );
     anyhow::bail!(
-        "captured response body is not present in the staged snapshot for {} even though the snapshot already matches HEAD; refusing already-committed closeout. {remedy}.",
-        file.display()
+        "captured response body is not present in the staged snapshot for {} even though the snapshot already matches HEAD; refusing already-committed closeout ({}). {remedy}.",
+        file.display(),
+        MISSING_CAPTURED_RESPONSE_REFUSAL_TOKEN,
     );
 }
 
@@ -236,5 +254,22 @@ mod tests {
             "the loaded capture must retain recovery ownership: {err}"
         );
         assert!(err.contains("captured response body is not present"));
+    }
+
+    /// The refusal is classified structurally by callers across a crate or
+    /// process boundary (the Codex Stop hook), so it must carry its token.
+    #[test]
+    fn missing_captured_response_refusal_carries_structural_token() {
+        let err = blocked_error(RetainedWriteOwnership::new_with_phase(true, true, false));
+        assert!(
+            is_missing_captured_response_refusal(&err),
+            "refusal must be recognizable without prose matching: {err}"
+        );
+        assert!(!is_missing_captured_response_refusal(
+            "captured response body is not present in the staged snapshot"
+        ));
+        assert!(!is_missing_captured_response_refusal(
+            "recovery=await_editor_replica_no_disk_write"
+        ));
     }
 }

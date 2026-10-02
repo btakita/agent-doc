@@ -495,7 +495,56 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             &doc_content,
         )?;
         if structurally_repaired_doc != doc_content {
-            return Ok(RepairOutcome::TemplateNormalized);
+            // Structural debris cleanup is a precondition for replay, not a
+            // substitute for it. With a retained response intent, returning
+            // `TemplateNormalized` here left the capture unprojected while
+            // callers that only check `repaired()` (the Codex Stop hook's
+            // post-commit closeout) went straight to the commit boundary,
+            // which then refused the already-committed closeout because the
+            // captured body was absent (haiven-dev cycle-1790914570041,
+            // 2026-10-02). Continue on the exact settled cut so the same pass
+            // replays the captured response.
+            if !has_pending_response && capture.is_none() {
+                return Ok(RepairOutcome::TemplateNormalized);
+            }
+            // The cleanup is a proven lossless normalization of the exact cut
+            // the capture was taken against, so carry the capture baseline
+            // forward with it (as the structural-history path below does);
+            // otherwise replay validation reads the removed debris as drift.
+            let prior_file_hash = agent_doc_capture_io::replay_file_hash(&doc_content);
+            let mut baseline_projected = false;
+            if let Some(record) = capture.as_mut()
+                && record.file_hash.as_deref() == Some(prior_file_hash.as_str())
+            {
+                let snapshot_hash = record
+                    .snapshot_hash
+                    .clone()
+                    .unwrap_or_else(|| agent_doc_hash::content_hash(&structurally_repaired_doc));
+                baseline_projected = agent_doc_capture_io::project_structural_recovery_baseline(
+                    &canonical,
+                    record,
+                    Some(prior_file_hash.as_str()),
+                    &structurally_repaired_doc,
+                    &snapshot_hash,
+                )?;
+                if baseline_projected {
+                    record.file_hash = Some(agent_doc_capture_io::replay_file_hash(
+                        &structurally_repaired_doc,
+                    ));
+                    record.snapshot_hash = Some(snapshot_hash);
+                    record.baseline_content = Some(structurally_repaired_doc.clone());
+                }
+            }
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "repair_structural_projection_continue_to_replay file={} repaired_hash={} capture_baseline_projected={}",
+                    canonical.display(),
+                    agent_doc_hash::content_hash(&structurally_repaired_doc),
+                    baseline_projected,
+                ),
+            );
+            doc_content = structurally_repaired_doc;
         }
     }
     let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;

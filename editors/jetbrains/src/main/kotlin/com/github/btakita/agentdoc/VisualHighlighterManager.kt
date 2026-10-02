@@ -272,9 +272,16 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
         return when (kind) {
             "component_body" -> baseAttrs(null).apply {
+                // The element body must read as a distinct block. Inheriting
+                // the raw editor background (0.2.344) painted an invisible
+                // highlighter; tint toward the theme foreground instead so the
+                // wash stays neutral (no theme-green accent) yet visible.
                 backgroundColor = MarkdownStyleSettings.backgroundFor(
                     kind,
-                    editor.colorsScheme.defaultBackground,
+                    componentBodyBackground(
+                        editor.colorsScheme.defaultBackground,
+                        editor.colorsScheme.defaultForeground,
+                    ),
                 )
                 fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.PLAIN)
             }
@@ -350,16 +357,6 @@ class VisualHighlighterManager private constructor(private val project: Project)
         return blend(base, accent ?: base, 0.10f)
     }
 
-    private fun blend(base: Color, accent: Color, accentRatio: Float): Color {
-        val clamped = accentRatio.coerceIn(0f, 1f)
-        val baseRatio = 1f - clamped
-        return Color(
-            (base.red * baseRatio + accent.red * clamped).toInt().coerceIn(0, 255),
-            (base.green * baseRatio + accent.green * clamped).toInt().coerceIn(0, 255),
-            (base.blue * baseRatio + accent.blue * clamped).toInt().coerceIn(0, 255),
-        )
-    }
-
     override fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
         synchronized(refreshLifecycleLock) {
@@ -375,6 +372,27 @@ class VisualHighlighterManager private constructor(private val project: Project)
     companion object {
         private val HIGHLIGHTER_KEY = Key.create<Boolean>("agent-doc.visual.highlighter")
         private val INSTANCES = ConcurrentHashMap<Project, VisualHighlighterManager>()
+
+        /** Share of the theme foreground mixed into a component body's background. */
+        internal const val COMPONENT_BODY_TINT = 0.08f
+
+        /**
+         * Default (non-overridden) background for `component_body` highlighters:
+         * the editor background tinted toward the editor foreground, so element
+         * content is visibly distinct in both light and dark schemes.
+         */
+        internal fun componentBodyBackground(background: Color, foreground: Color): Color =
+            blend(background, foreground, COMPONENT_BODY_TINT)
+
+        internal fun blend(base: Color, accent: Color, accentRatio: Float): Color {
+            val clamped = accentRatio.coerceIn(0f, 1f)
+            val baseRatio = 1f - clamped
+            return Color(
+                (base.red * baseRatio + accent.red * clamped).toInt().coerceIn(0, 255),
+                (base.green * baseRatio + accent.green * clamped).toInt().coerceIn(0, 255),
+                (base.blue * baseRatio + accent.blue * clamped).toInt().coerceIn(0, 255),
+            )
+        }
 
         fun getInstance(project: Project): VisualHighlighterManager {
             return INSTANCES.computeIfAbsent(project) { VisualHighlighterManager(it) }

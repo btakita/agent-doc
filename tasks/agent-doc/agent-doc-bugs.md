@@ -698,6 +698,31 @@ The exchange is 630+ lines; I'm continuing the queue rather than stopping to com
 - Your text was never lost.
 
 I filed it as `#retainedtargetdropsedit` and it's being fixed now in a parallel worktree. I'll merge, check and install it when it reports back.
+
+### Re: #gh-fix GH #90 and the re-queued release — opus-5.5 · 2026-10-01T22:25-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/90
+
+**Deferred to a running subagent, tracked as `#gh90markercodespan`.** GH #90 is being fixed in its own worktree (branch `fix/gh90-marker-in-code-span`). It covers all five asks:
+1. Marker detection that treats a marker inside inline backticks or a fenced block as prose, in both the replay guard and the structural target check.
+2. Validating the response at write time, before it's captured.
+3. Filtering editor registrations on whether their process is still alive before the plugin-version gate, so a dead pid is never named as the blocker.
+4. Showing the real structural reason in the retry loop's report.
+5. A recovery command for a captured response that can never land.
+
+When the branch reports back I'll merge it, run one full check, install, and close the issue. I stopped a redundant #89 audit I had started from the earlier chat message, since #90 was the issue meant.
+
+**Running in parallel**, each in its own worktree:
+- `#retainedtargetdropsedit`
+- the `lazily.md` queue revert
+- the codex `/clear` report for `fpe.md`
+- GH #90
+
+The head `release + publish` stays queued until they land: it ships 0.35.431 with all of them.
+
+**Also landed on `main` since 0.35.430** (`e2a36608d`): a background-task notification no longer hides a `/loop` re-entry the session already scheduled. That had been making notification turns re-block with a "Stop hook error".
+
+The exchange is 670 lines; I'm continuing the queue rather than stopping to compact.
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -730,12 +755,14 @@ I filed it as `#retainedtargetdropsedit` and it's being fixed now in a parallel 
 - ~~do [#sdkingressstall]~~
 - ~~release + publish~~
 - ~~agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/90~~
 - Editing lazily.md `agent:queue` then Run Agent Doc: the queue reverted to the previous state. Then the edits came back as I was rewriting the queue items.
 - Diagnose + fix agent-doc command failed (exit 1): Error: session_clear codex command `/clear` for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md was not proven submitted in pane %51 after supervisor_ipc_acceptance (result=pane_not_rendered, command_visible=false); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_pane_render unblocker=wait_for_pane_render. The codex pane stayed blank while awaiting its repaint. No duplicate clear was sent; wait for the prompt to render and check its context
 <!-- /agent:queue --> 
 
 
 <!-- agent:backlog priority -->
+- [ ] [#gh90markercodespan] GH 90 (btakita/agent-doc#90): a response quoting a component marker inside inline backticks is captured, then refused forever (replay_guard substring test + structural_corruption_reason), while the retry loop blames a dead editor pid plugin_generation_mismatch. Being fixed in worktree branch fix/gh90-marker-in-code-span (all five asks); merge, check, install, close the issue, then release.
 - [ ] [#retainedtargetdropsedit] haiven-dev sdk.md, 2026-10-02 01:49:58-01:55:36Z: after a native reload re-registered the editor, the editor published 99 bytes of unpublished operator text (buffer 9ff424), but the controller canonical moved to a retained agent-write target (468b48) that lacks that insert. The editor correctly refused 14 exact-target persists (visible_length_mismatch, visible 8849a8 = target + 99 bytes), its deferred replay failed post-register-replay-replica-raced every 30s, and every cycle was refused (disk_projection_pending) until a controller restart reseeded from the editor. Keep the concurrent operator edit when a retained write replays, and self-heal without a restart. Being fixed in worktree branch fix/retained-target-drops-operator-edit.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and

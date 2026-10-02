@@ -21109,12 +21109,13 @@ fn pane_layout_desired_projection_worker(
 
         let result = pane_layout_invocation_from_state_frame(&frame).and_then(|invocation| {
             let bootstrap = runtime.bootstrap_snapshot()?;
+            let publication = pane_layout_publication_for_invocation(&invocation);
             publish_pane_layout_desired_invocation(
                 &bootstrap,
                 &runtime,
                 invocation,
                 Some(frame.plane_version),
-                PaneLayoutPublication::CoalesceIdentical,
+                publication,
             )?;
             Ok(bootstrap)
         });
@@ -23278,9 +23279,9 @@ fn publish_pane_layout_desired(
     publish_pane_layout_desired_invocation(
         bootstrap,
         runtime,
-        invocation,
+        invocation.clone(),
         None,
-        PaneLayoutPublication::CoalesceIdentical,
+        pane_layout_publication_for_invocation(&invocation),
     )
 }
 
@@ -23532,6 +23533,24 @@ fn pane_layout_invocation_awaits_projection(
     invocation.caller_kind != "automatic" && !invocation.no_autostart
 }
 
+/// Preserve foreground/manual sync semantics across every ingress transport.
+///
+/// Editor state-plane updates are normally coalescible facts. The explicit
+/// `Sync Tmux Pane` action is different: pressing it again is a fresh operator
+/// intent even when the requested columns are byte-identical. Without a fresh
+/// generation, a prior terminal/refused projection permanently turns the
+/// manual retry into a successful-looking no-op. Passive and automatic editor
+/// observations remain coalesced so event storms do not manufacture effects.
+fn pane_layout_publication_for_invocation(
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+) -> PaneLayoutPublication {
+    if pane_layout_invocation_awaits_projection(invocation) {
+        PaneLayoutPublication::FreshIntent
+    } else {
+        PaneLayoutPublication::CoalesceIdentical
+    }
+}
+
 /// A generation-specific layout command was replaced before it converged, or an
 /// editor route's semantic wait observed a newer layout that no longer contains
 /// the routed document.
@@ -23619,6 +23638,22 @@ mod pane_layout_projection_dispatch_tests {
         assert!(pane_layout_invocation_awaits_projection(&invocation(
             "manual", false,
         )));
+    }
+
+    #[test]
+    fn manual_layout_retry_is_fresh_while_automatic_and_passive_updates_coalesce() {
+        assert_eq!(
+            pane_layout_publication_for_invocation(&invocation("manual", false)),
+            PaneLayoutPublication::FreshIntent,
+        );
+        assert_eq!(
+            pane_layout_publication_for_invocation(&invocation("automatic", false)),
+            PaneLayoutPublication::CoalesceIdentical,
+        );
+        assert_eq!(
+            pane_layout_publication_for_invocation(&invocation("manual", true)),
+            PaneLayoutPublication::CoalesceIdentical,
+        );
     }
 
     #[test]

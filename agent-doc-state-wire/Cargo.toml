@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-state-wire"
-version = "0.35.434"
+version = "0.35.435"
 edition = "2024"
 description = "Lazily-spec snapshot and delta wire format for agent-doc state projections"
 license = "MIT"
@@ -14,8 +14,8 @@ test-support = []
 name = "agent_doc_state_wire"
 
 [dependencies]
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.434" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.434" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.435" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.435" }
 anyhow = "1"
 base64 = "0.22"
 interprocess = { version = "2", default-features = false }

@@ -2,6 +2,26 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.435
+
+- **Queued prompt closeout is complete across consecutive singular echoes.** When one response
+  quotes several live queue heads in separate `Queue prompt` blocks and then answers them together,
+  every quoted free-text head is consumed. Id-backed directives retain their id-aware reap path.
+- **JetBrains upgrades fail safe and recover replicas.** Platforms that cannot synchronously prove
+  old-classloader retirement stage the new plugin without unloading the live generation. Reload
+  recovery rediscovers open agent-doc files across live projects instead of trusting only the old
+  handoff map. JetBrains plugin 0.2.471.
+- **Documents without an `agent:queue` project as an empty free-text queue.** The optional missing
+  component no longer raises `ComponentNotFound`; malformed queue state still propagates as an
+  error. VS Code extension 0.2.76.
+- **Remote Dev layout fallback uses remote client ownership.** JetBrains now enumerates
+  `ClientFileEditorManager` services for remote clients and accepts a multi-file split only from one
+  client, never by combining unrelated focused files. JetBrains plugin 0.2.472.
+- **Foreground diagnostics stay out of managed composers (GH #98).** Idle-watch reconciliation
+  keeps its structured event and no longer writes to the managed TTY. Prompt-prefixed `[agent-doc]`
+  residue is classified as agent-owned, cleared before route injection, and never produces the
+  unsafe operator-draft unblocker.
+
 ## 0.35.434
 
 - **Restart-free JetBrains upgrades work again.** An attached agent jar is appended to the IDE's

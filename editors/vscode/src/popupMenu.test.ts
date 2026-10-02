@@ -15,12 +15,14 @@ describe('popupMenu', () => {
             'syncLayout',
             'loadTmuxWindow',
             'status',
+            'clear',
             'restartSupervisor',
             'restartAgent',
-            'clear',
             'interruptClear',
             'doctor',
         ]);
+        assert.strictEqual(primary[8]?.label, '[9] $(clear-all) Clear Session Context');
+        assert.strictEqual(ids.filter(id => id === 'clear').length, 1);
         assert(primary.some(item => item.id === 'compactExchange'));
         assert(primary.some(item => item.id === 'initSession'));
         assert(primary.some(item => item.id === 'restartSupervisor'));

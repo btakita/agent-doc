@@ -26,6 +26,9 @@ class AgentDocPopupAction : AnAction(), DumbAware {
             "AgentDoc.ShowSessionStatus",
             "AgentDoc.RestartSupervisorProcess",
             "AgentDoc.RestartAgent",
+            // Keep the routine, non-interrupting context reset on the first
+            // numbered page. Position nine is the last single-key selection.
+            "AgentDoc.ClearSessionContext",
             "AgentDoc.CancelTurn",
             "AgentDoc.CopySessionDiagnostics",
             "AgentDoc.SyncLayout",
@@ -36,9 +39,7 @@ class AgentDocPopupAction : AnAction(), DumbAware {
         internal val OVERFLOW_ACTION_IDS = listOf(
             "AgentDoc.RunWithJunie",
             "AgentDoc.ForceClaim",
-            // Destructive context controls live behind More Actions so numbered
-            // primary-menu changes cannot turn a familiar Claim selection into a clear.
-            "AgentDoc.ClearSessionContext",
+            // The explicit interrupting clear remains behind More Actions.
             "AgentDoc.InterruptClearSessionContext",
             "AgentDoc.ResyncFixSessions",
             "AgentDoc.GcStaleSessions",

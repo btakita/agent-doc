@@ -7,7 +7,7 @@ import org.junit.Test
 
 class AgentDocPopupActionTest {
     @Test
-    fun `primary popup keeps claim numbered fourth and destructive clears out of line`() {
+    fun `primary popup keeps clear session context numbered ninth`() {
         assertEquals(
             listOf(
                 "AgentDoc.Submit",
@@ -18,6 +18,7 @@ class AgentDocPopupActionTest {
                 "AgentDoc.ShowSessionStatus",
                 "AgentDoc.RestartSupervisorProcess",
                 "AgentDoc.RestartAgent",
+                "AgentDoc.ClearSessionContext",
                 "AgentDoc.CancelTurn",
                 "AgentDoc.CopySessionDiagnostics",
                 "AgentDoc.SyncLayout",
@@ -26,7 +27,8 @@ class AgentDocPopupActionTest {
             ),
             AgentDocPopupAction.PRIMARY_ACTION_IDS,
         )
-        assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.ClearSessionContext"))
+        assertEquals("AgentDoc.ClearSessionContext", AgentDocPopupAction.PRIMARY_ACTION_IDS[8])
+        assertEquals(1, AgentDocPopupAction.PRIMARY_ACTION_IDS.count { it == "AgentDoc.ClearSessionContext" })
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.InterruptClearSessionContext"))
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.RunWithJunie"))
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.ForceClaim"))
@@ -38,7 +40,6 @@ class AgentDocPopupActionTest {
             listOf(
                 "AgentDoc.RunWithJunie",
                 "AgentDoc.ForceClaim",
-                "AgentDoc.ClearSessionContext",
                 "AgentDoc.InterruptClearSessionContext",
                 // #plugin-cleanup-menu-command: operator session-hygiene commands
                 // live in the overflow group (occasional, project-scoped cleanup).

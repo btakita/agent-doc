@@ -517,8 +517,14 @@ struct QueuePromptEchoBlock {
     plural: bool,
     /// Normalized quoted entries (the prompt text, one per list item for plural).
     entries: Vec<String>,
-    /// The block is followed directly by another echo block, or by nothing.
-    bare: bool,
+    /// The next non-blank line after the block starts another echo block.
+    followed_by_echo: bool,
+    /// Nothing but blank lines follows the block.
+    trailing: bool,
+    /// One of the quoted entries is an id-backed directive (`do [#id]`,
+    /// `[#id]`, a bare `#id`), whose completion goes through the id-aware reap
+    /// path rather than through this echo.
+    id_backed: bool,
 }
 
 fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
@@ -546,21 +552,45 @@ fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
             if echo_start(lines[i]).is_some() {
                 break;
             }
-            raw.push(lines[i].trim_start().trim_start_matches('>').trim_start().to_string());
+            raw.push(
+                lines[i]
+                    .trim_start()
+                    .trim_start_matches('>')
+                    .trim_start()
+                    .to_string(),
+            );
             i += 1;
         }
         let mut next = i;
         while next < lines.len() && lines[next].trim().is_empty() {
             next += 1;
         }
-        let bare = next >= lines.len() || echo_start(lines[next]).is_some();
-        let entries = raw
+        let trailing = next >= lines.len();
+        let followed_by_echo = !trailing && echo_start(lines[next]).is_some();
+        let presence: Vec<String> = raw
             .iter()
             .map(|line| normalize_prompt_echo_presence_line(line))
             .filter(|line| !line.is_empty())
-            .map(|line| normalize_for_answer_match(&line))
             .collect();
-        blocks.push(QueuePromptEchoBlock { plural, entries, bare });
+        let id_backed = presence.iter().any(|line| {
+            let normalized = normalize_queue_prompt_text(line);
+            crate::queue_directive::topic_resolves_to_only_id_directives(&normalized)
+                .or_else(|| {
+                    crate::queue_directive::explicit_do_directive_with_note_ids(&normalized)
+                })
+                .is_some_and(|ids| !ids.is_empty())
+        });
+        let entries = presence
+            .iter()
+            .map(|line| normalize_for_answer_match(line))
+            .collect();
+        blocks.push(QueuePromptEchoBlock {
+            plural,
+            entries,
+            followed_by_echo,
+            trailing,
+            id_backed,
+        });
     }
     blocks
 }
@@ -573,16 +603,50 @@ fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
 /// the bare echo alone struck the question from the queue, losing it. Grouping
 /// several heads under one answer uses the plural `> **Queue prompts:**` list,
 /// which this rule leaves alone.
+///
+/// `presetquotestrike` (live, agent-doc-bugs.md 2026-10-02): a run of
+/// consecutive singular echoes followed by one combined answer is the same
+/// grouping written one block per head. The response quoted four
+/// `#gh-fix <url>` preset heads and one plain head, each in its own singular
+/// block, then answered all five; only the LAST block (the one directly followed
+/// by prose) struck, and the four preset heads stayed queued with a diagnostic
+/// claiming they were never quoted. What made the fakecloud echo a listing was
+/// that the run went on to quote an id-backed directive, whose answer belongs to
+/// that directive. So a bare singular block is a listing only when the run of
+/// echoes after it ends the response, or goes on to quote an id-backed head.
 fn head_echoed_only_in_bare_singular_blocks(response_body: &str, head_clean: &str) -> bool {
     let head_norm = normalize_for_answer_match(&free_text_head_match_prose(head_clean));
     if head_norm.is_empty() {
         return false;
     }
-    let matching: Vec<QueuePromptEchoBlock> = queue_prompt_echo_blocks(response_body)
-        .into_iter()
-        .filter(|block| block.entries.contains(&head_norm))
+    let blocks = queue_prompt_echo_blocks(response_body);
+    let listed_only = |index: usize| -> bool {
+        let block = &blocks[index];
+        if block.plural {
+            return false;
+        }
+        if block.trailing {
+            return true;
+        }
+        if !block.followed_by_echo {
+            return false;
+        }
+        let mut next = index + 1;
+        while let Some(later) = blocks.get(next) {
+            if later.id_backed || later.trailing {
+                return true;
+            }
+            if !later.followed_by_echo {
+                return false;
+            }
+            next += 1;
+        }
+        true
+    };
+    let matching: Vec<usize> = (0..blocks.len())
+        .filter(|&index| blocks[index].entries.contains(&head_norm))
         .collect();
-    !matching.is_empty() && matching.iter().all(|block| !block.plural && block.bare)
+    !matching.is_empty() && matching.into_iter().all(listed_only)
 }
 
 /// The prose prefix of a free-text queue head used for answer-matching: every
@@ -850,6 +914,40 @@ mod tests {
         assert!(free_text_head_answered_by_response(grouped, head));
     }
 
+    /// `presetquotestrike`: consecutive singular echoes followed by one combined
+    /// answer group their heads the same way the plural list does.
+    #[test]
+    fn consecutive_singular_echoes_followed_by_an_answer_answer_every_head() {
+        let response = concat!(
+            "### Re: parallel drain — opus-5.5\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/80\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/87\n\n",
+            "> **Queue prompt:** The Idea Plugin formatting is not active. It's gone now.\n\n",
+            "All of it shipped.\n",
+        );
+        for head in [
+            "#gh-fix https://github.com/btakita/agent-doc/issues/80",
+            "#gh-fix https://github.com/btakita/agent-doc/issues/87",
+            "The Idea Plugin formatting is not active. It's gone now.",
+        ] {
+            assert!(
+                free_text_head_answered_by_response(response, head),
+                "{head} was quoted and answered"
+            );
+        }
+
+        // A run of echoes that ends the response answered nothing.
+        let trailing = concat!(
+            "### Re: x — opus-5.5\n\nDid other work.\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/80\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/87\n",
+        );
+        assert!(!free_text_head_answered_by_response(
+            trailing,
+            "#gh-fix https://github.com/btakita/agent-doc/issues/80"
+        ));
+    }
+
     #[test]
     fn free_text_head_present_in_baseline_ignores_pin_and_dash_cosmetics() {
         let baseline = concat!(
@@ -947,7 +1045,10 @@ mod tests {
             content,
             "do [#editorauth2]: ensure plugin parity"
         ));
-        assert!(queue_prompt_text_is_free_text(content, "[#editorauth2]: a note"));
+        assert!(queue_prompt_text_is_free_text(
+            content,
+            "[#editorauth2]: a note"
+        ));
     }
 
     #[test]

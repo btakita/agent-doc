@@ -2384,8 +2384,8 @@ Old.
             "Released and published.\n",
         );
 
-        let projected = project_answered_free_text_strike(&consumed, response, Some(&baseline))
-            .unwrap();
+        let projected =
+            project_answered_free_text_strike(&consumed, response, Some(&baseline)).unwrap();
         assert!(
             projected.as_ref().is_none_or(|p| p.node_keys.is_empty()),
             "consume already applied this answer: {:?}",
@@ -2525,6 +2525,126 @@ Old.
                 .unwrap()
                 .is_none(),
             "terminal drain must be idempotent"
+        );
+    }
+
+    /// `presetquotestrike` (live, agent-doc-bugs.md 2026-10-02, agent-doc
+    /// 0.35.434): one response quoted all five live heads, each in its own
+    /// singular `> **Queue prompt:**` block, then answered them together. Only
+    /// the plain head (the last block) struck; the four `#gh-fix <url>` preset
+    /// heads were kept even though each exact text was quoted.
+    const PRESET_QUOTE_STRIKE_RESPONSE: &str = concat!(
+        "### Re: parallel drain — GH #80/#87/#93/#94, IDEA background — opus-5.5\n\n",
+        "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/80\n\n",
+        "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/87\n\n",
+        "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/93\n\n",
+        "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/94\n\n",
+        "> **Queue prompt:** The Idea Plugin formatting is not active. The element content should have a background. It's gone now.\n\n",
+        "**All of it shipped, is installed, and GH #80, #87, #93 and #94 are closed.**\n",
+    );
+
+    fn preset_quote_strike_document() -> String {
+        concat!(
+            "---\n",
+            "agent_doc_session: preset-quote-strike\n",
+            "queue_active: true\n",
+            "prompt_presets:\n",
+            "  '#gh-fix': fix then closerelease\n",
+            "  '#spec-test-build-install-commit-push': spec, test, build, install, commit, push\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#trackedwork] tracked work item\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" priority go -->\n",
+            "- ~~#gh-fix https://github.com/btakita/agent-doc/issues/92~~\n",
+            "- #gh-fix https://github.com/btakita/agent-doc/issues/80\n",
+            "- #gh-fix https://github.com/btakita/agent-doc/issues/87\n",
+            "- #gh-fix https://github.com/btakita/agent-doc/issues/93\n",
+            "- #gh-fix https://github.com/btakita/agent-doc/issues/94\n",
+            "- The Idea Plugin formatting is not active. The element content should have a background. It's gone now.\n",
+            "- release + publish\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
+    }
+
+    fn assert_all_five_heads_struck(projected: &AnsweredFreeTextStrikeProjection) {
+        assert_eq!(
+            projected.node_keys.len(),
+            5,
+            "every quoted head strikes:\n{}",
+            projected.target_content
+        );
+        for issue in [80, 87, 93, 94] {
+            let struck = format!(
+                "- ~~#gh-fix https://github.com/btakita/agent-doc/issues/{issue}~~ — auto-struck: {STRUCK_FREE_TEXT_NOTE}"
+            );
+            assert!(
+                projected.target_content.contains(&struck),
+                "preset head #{issue} must strike:\n{}",
+                projected.target_content
+            );
+        }
+        assert!(projected.target_content.contains("- release + publish\n"));
+        assert!(projected.target_content.contains(
+            "- ~~The Idea Plugin formatting is not active. The element content should have a background. It's gone now.~~"
+        ));
+    }
+
+    #[test]
+    fn quoted_preset_token_heads_strike_alongside_plain_free_text() {
+        let document = preset_quote_strike_document();
+        let projected = project_answered_free_text_strike(
+            &document,
+            PRESET_QUOTE_STRIKE_RESPONSE,
+            Some(&document),
+        )
+        .unwrap()
+        .expect("quoted heads should project a strike");
+        assert_all_five_heads_struck(&projected);
+    }
+
+    /// The live respond auto-reopened a fresh cycle whose baseline was refreshed
+    /// to HEAD and carried no preflight-selected queue prompt. The strike must
+    /// not depend on which head preflight selected.
+    #[test]
+    fn quoted_preset_token_heads_strike_in_an_auto_reopened_cycle() {
+        let document = preset_quote_strike_document();
+        for baseline in [None, Some(document.as_str())] {
+            let projected = project_answered_free_text_strike(
+                &document,
+                PRESET_QUOTE_STRIKE_RESPONSE,
+                baseline,
+            )
+            .unwrap()
+            .expect("quoted heads should project a strike");
+            assert_all_five_heads_struck(&projected);
+        }
+    }
+
+    /// The `#bareechodrop` guard still holds: a free-text head quoted in a bare
+    /// singular block that runs on into an id-backed directive's echo was
+    /// listed, not answered, and the id-backed head is never struck by a quote.
+    #[test]
+    fn quoted_run_ending_in_id_backed_echo_still_strikes_nothing() {
+        let document = preset_quote_strike_document().replace(
+            "- The Idea Plugin",
+            "- do [#trackedwork]\n- The Idea Plugin",
+        );
+        let response = concat!(
+            "### Re: tracked work — opus-5.5\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/80\n\n",
+            "> **Queue prompt:** do [#trackedwork]\n\n",
+            "Did the tracked work only.\n",
+        );
+        let projected =
+            project_answered_free_text_strike(&document, response, Some(&document)).unwrap();
+        assert!(
+            projected.as_ref().is_none_or(|p| p.node_keys.is_empty()),
+            "nothing strikes: {:?}",
+            projected.map(|p| p.target_content)
         );
     }
 }

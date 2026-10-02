@@ -214,18 +214,29 @@ internal sealed interface NativeReloadOutcome {
  * Loading the canonical install path in place does NOT pick up a new build: `dlopen` returns the
  * already-mapped handle for an unchanged path, so the live JVM keeps running stale native code
  * after `make install` / `agent-doc lib-install` until a full IDE restart. Copying to
- * `libagent_doc-<mtime>.<ext>` under [cacheRoot] gives each install a distinct inode, forcing a
- * real load and enabling hot-reload without restarting the IDE. Stale shadow copies are pruned only
+ * `libagent_doc-<mtime>-<generationKey>.<ext>` under [cacheRoot] gives each install and each
+ * dynamically loaded plugin classloader a distinct inode, forcing a real load and enabling
+ * hot-reload without restarting the IDE. The classloader dimension matters even when the package
+ * upgrade does not change the native bytes: the retiring plugin generation quiesces its native
+ * mapping asynchronously, and sharing that mapping makes the replacement observe the old
+ * generation's `quiescing` flag forever. Stale shadow copies are pruned only
  * after their native generation is closed; deleting a still-mapped file would leave a `(deleted)`
  * mapping and make generation ownership impossible to prove. Returns the shadow path, or null on
  * failure so the caller can fall back to the canonical path.
  */
-internal fun nativeShadowCopyPath(canonicalPath: String, mtime: Long, cacheRoot: File): String? {
+internal fun nativeShadowCopyPath(
+    canonicalPath: String,
+    mtime: Long,
+    cacheRoot: File,
+    generationKey: String = "",
+): String? {
     return try {
         val src = File(canonicalPath)
         val ext = src.name.substringAfterLast('.', "so")
         cacheRoot.mkdirs()
-        val dest = File(cacheRoot, "libagent_doc-$mtime.$ext")
+        val safeGenerationKey = generationKey.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        val generationSuffix = safeGenerationKey.takeIf { it.isNotEmpty() }?.let { "-$it" } ?: ""
+        val dest = File(cacheRoot, "libagent_doc-$mtime$generationSuffix.$ext")
         if (!dest.exists() || dest.length() != src.length()) {
             Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
@@ -1203,6 +1214,8 @@ interface AgentDocLib : Library {
         private const val NATIVE_QUIESCE_TIMEOUT_MS = 7_000L
         private const val NATIVE_CALL_TIMEOUT_MS = 10_000L
         private const val NATIVE_GENERATION_WORKER_COUNT = 4
+        private val NATIVE_SHADOW_GENERATION_KEY =
+            Integer.toHexString(System.identityHashCode(AgentDocLib::class.java.classLoader))
         private val INITIAL_LOAD_RETRY_DELAY_NANOS = TimeUnit.SECONDS.toNanos(5)
 
         @Synchronized
@@ -1490,7 +1503,12 @@ interface AgentDocLib : Library {
          */
         private fun shadowCopyForLoad(canonicalPath: String, mtime: Long): String {
             val cacheRoot = nativeCacheRoot()
-            val shadow = nativeShadowCopyPath(canonicalPath, mtime, cacheRoot)
+            val shadow = nativeShadowCopyPath(
+                canonicalPath,
+                mtime,
+                cacheRoot,
+                NATIVE_SHADOW_GENERATION_KEY,
+            )
             if (shadow == null) {
                 LOG.warn(
                     "[native] shadow copy failed; loading canonical path in place (may keep stale native code until restart)"

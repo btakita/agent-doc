@@ -120,6 +120,27 @@ class LibMtimeChangedTest {
     }
 
     @Test
+    fun `shadow copy isolates equal native bytes across dynamic plugin classloaders`() {
+        val src = File.createTempFile("libagent_doc_src", ".so")
+        val cacheRoot = File(System.getProperty("java.io.tmpdir"), "agent-doc-native-test-${System.nanoTime()}")
+        try {
+            src.writeText("same-native-code")
+            val mtime = src.lastModified()
+            val retiring = nativeShadowCopyPath(src.absolutePath, mtime, cacheRoot, "loader-old")
+            val replacement = nativeShadowCopyPath(src.absolutePath, mtime, cacheRoot, "loader-new")
+
+            assertNotNull(retiring)
+            assertNotNull(replacement)
+            assertNotEquals(retiring, replacement)
+            assertEquals("same-native-code", File(retiring!!).readText())
+            assertEquals("same-native-code", File(replacement!!).readText())
+        } finally {
+            cacheRoot.deleteRecursively()
+            src.delete()
+        }
+    }
+
+    @Test
     fun `reload transition table is exhaustive at the publish boundary`() {
         assertEquals(
             NativeReloadTransition.KeepCurrent,

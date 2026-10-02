@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -788,6 +788,29 @@ The exchange is about 740 lines; noting the size only.
 - **The IU-262 discriminator #81 was waiting on** came back in [GH #88](https://github.com/btakita/agent-doc/issues/88): `windows=0`. The Remote Dev backend exposes no `EditorWindow`. Fixed in `fb65d4557` (plugin 0.2.462), shipped in **v0.35.430**: the layout and surface paths fall back to `selectedFiles`, and focus follows the selection.
 - **Local evidence (IU-261 desktop, v0.35.431):** `[layout-detect] observed windows=2 ... columns=2 [agent-doc-bugs.md | sdk.md] source=windows`, and `0:agent-doc` has 2 panes.
 - **Not confirmed on the IU-262 Remote Dev rig itself.** The closing comment asks the reporter to reopen #88 with the `source=selected_files` / `[layout-sync] ... windows=0` lines if it still stays at one pane.
+
+### Re: #gh-fix GH #92 + parallel drain — opus-5.5 · 2026-10-02T00:58-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/92
+
+**[GH #92](https://github.com/btakita/agent-doc/issues/92) is fixed in `53e4c32b0`, released as v0.35.432 and installed. The issue is closed with a comment.**
+
+- **Ids tracked in sibling session documents now resolve.** The `PreToolUse` hook and `session-check` share one predicate (`cross_document::unresolved_in_project`). It runs only when something would otherwise be reported, and reads only each file's frontmatter.
+- **Anchors in agent-doc's own Rust comments now count.** The build script extracts them (1,293 tokens) and the binary embeds them.
+- **`session-check` checks the live exchange.** It re-derives the warning from the current exchange, so a citation that was rewritten out no longer warns.
+- **The hook skips writes outside the project root and git-ignored paths.** Commit messages are always guarded.
+- **Verification:** `make check` passed, 10,380 tests.
+- **Release fix:** the first `make release` stopped at `editor-parity` because the 0.35.432 row was missing from `editors/release-parity.tsv`. I added it to the release commit and re-ran.
+
+**The rest of the queue is running in parallel subagents.** Each has its own worktree under `~/work/btakita/agent-doc-wt/`. Each branch gets merged and verified before a single batch release.
+- **IDEA element background:** done (`fix/idea-element-background`). Since plugin 0.2.344, the element tint has been set to the editor's own background colour, so it's invisible. It's now a theme-aware grey. 641 Gradle tests pass.
+- **GH #80 + #94:** done (`fix/gh80-gh94`). IU-263 removed `DynamicPlugins$UnloadPluginOptions`. On top of that, the upgrader tore down the replica transport before the step that failed, and never restored it. 649 Gradle tests pass.
+- **Still running:**
+  - GH #87, the stale_plugin warning when a plugin is staged in `action.script`
+  - GH #93, the marker-prefix lint gate, which also mutated the document before failing
+  - The Stop-hook ordering bug in `sdk.md`: it ran the commit before projecting the capture. The response landed about 15s later through the keyed retry.
+  - The `CrdtReplicaManager` read-action threading exception
+  - The #94 controller-side asks: `reload-lib` exit status, and prevalidation reads
 <!-- agent:boundary:1956bca7:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -796,7 +819,13 @@ The exchange is about 740 lines; noting the size only.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/92~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/80
+- #gh-fix https://github.com/btakita/agent-doc/issues/87
+- #gh-fix https://github.com/btakita/agent-doc/issues/93
+- #gh-fix https://github.com/btakita/agent-doc/issues/94
+- The Idea Plugin formatting is not active. The element content should have a background. It's gone now.
 <!-- /agent:queue --> 
 
 

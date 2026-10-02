@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.434
+
+- **Restart-free JetBrains upgrades work again.** An attached agent jar is appended to the IDE's
+  system class path once per JVM, so any nested class of the upgrade action resolved from the first
+  jar ever attached. The GH #80/#94 fix had added an anonymous class and two nested interfaces, and
+  every upgrade then failed with `IllegalAccessError` and staged for restart. The action now compiles
+  to a single class file, which a test pins. The bootstrap also loads the action's nested classes
+  child-first. Verified live by upgrading 0.2.467 to 0.2.470 in place on IU-261.
+- **`plugin install jetbrains --local` reports a staged install correctly.** It no longer fails
+  verification with "built N, installed N-1" after a staged install, and it no longer closes with
+  "no IDE restart is required" after staging. It now names the pending restart.
+- **JetBrains plugin 0.2.470.**
+
 ## 0.35.433
 
 - **Codex Stop hook replays a post-commit capture before committing.** Structural cleanup no longer

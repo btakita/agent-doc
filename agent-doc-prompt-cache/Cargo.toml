@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-prompt-cache"
-version = "0.35.433"
+version = "0.35.434"
 edition = "2024"
 description = "Pure prompt-cache boundary and effectiveness policy for agent-doc"
 license = "MIT"

@@ -716,7 +716,7 @@ The exchange is 630+ lines; I'm continuing the queue rather than stopping to com
 - ~~do [#midinstallreloadstall]~~
 - ~~do [#sdkingressstall]~~
 - release + publish
-- agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.
+- ~~agent-doc should be active while Idea is "Analyzing project...". Currently, agent-doc is blocked from showing the menu.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue --> 
 
 

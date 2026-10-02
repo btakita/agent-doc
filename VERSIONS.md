@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.438
+
+- **Closing a JetBrains document cannot abandon its final editor cut (GH #103).** The plugin now
+  waits on its background serialized replica worker until the exact closing text is published and
+  the replica is deregistered, instead of timing out after two seconds while the same queued task
+  later removed the only convergence path. If an older close already lost its registration but the
+  captured response is exactly visible on disk, `repair` adopts that response for terminal closeout;
+  a live document registration remains authoritative and is never overridden. JetBrains plugin
+  0.2.476.
+
 ## 0.35.437
 
 - **Remote Dev selections keep pane focus after editor-window enumeration starts (GH #102).**

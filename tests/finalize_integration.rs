@@ -295,6 +295,79 @@ fn write_commit_requires_git_repo_before_mutating_session_document() {
     );
 }
 
+/// GH #93: a backlog item quoting a component-marker *prefix* in backticks is
+/// prose, so the final lint gate must not report the backlog as unclosed.
+#[test]
+fn write_commit_accepts_backticked_marker_prefix_in_backlog_item() {
+    let (tmp, doc) = setup_session_template_doc();
+    let content = session_template_doc_content().replace(
+        "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        "<!-- agent:backlog -->\n- [ ] [#b] only `<!-- agent:` occurrence inside backticks\n<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: prefix — gpt-5\nok\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("unclosed-component").not());
+
+    let head_blob = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&head_blob.stdout).contains("### Re: prefix — gpt-5"),
+        "the response must commit beside a backticked marker prefix"
+    );
+}
+
+/// GH #93: a blocking lint finding already in the document must refuse the
+/// write before it mutates anything, not after the response is on disk.
+#[test]
+fn write_commit_lint_gate_refuses_before_mutating_document() {
+    let (tmp, doc) = setup_session_template_doc();
+    let content = format!(
+        "{}\n<!-- agent:operator-notes -->\nscratch\n<!-- /agent:operator-notes -->\n",
+        session_template_doc_content()
+    );
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let before = fs::read_to_string(&doc).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: gated — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("INTERRUPTED before write"))
+        .stderr(predicates::str::contains("agent-doc/unknown-component"));
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        before, after,
+        "a lint-gate refusal must leave the document untouched"
+    );
+    let status = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["status", "--porcelain", "--", "session.md"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&status.stdout).trim().is_empty(),
+        "a lint-gate refusal must leave no dirty session document"
+    );
+}
+
 #[test]
 fn finalize_stale_snapshot_does_not_block_response_or_pending_flags() {
     // Snapshots are durable recovery evidence, not hot-path authority. A stale

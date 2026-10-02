@@ -1413,6 +1413,83 @@ fn apply_pending_and_status_mutations(
 
 /// `#prmergeguardpr`: dry-run the same envelope the closeout will apply. Any
 /// rejection surfaces here, before the response write, with nothing mutated.
+/// Run the dialect lint gate against the pre-write document (GH #93).
+///
+/// Only committing writes are gated, matching the final gate. When the current
+/// document cannot be resolved without a disk write (an IPC retry), the check
+/// is left to the final gate rather than inventing a new failure mode here.
+fn prewrite_lint_gate(
+    file: &Path,
+    options: &CommandOptions,
+    commit_mode: CommitMode,
+) -> Result<()> {
+    if commit_mode == CommitMode::None || !file.exists() {
+        return Ok(());
+    }
+    let content = if options.force_disk {
+        resolve_force_disk_document(file, "prewrite_lint_gate")?.into_content()
+    } else {
+        match resolve_current_document(file, "prewrite_lint_gate") {
+            Ok(current) => current.into_content(),
+            Err(err) if error_requests_retry_without_disk(&err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "prewrite_lint_gate_deferred file={} error={} recovery=final_lint_gate",
+                        file.display(),
+                        err
+                    ),
+                );
+                return Ok(());
+            }
+            Err(err) => return Err(err),
+        }
+    };
+    // The response is read only if a blocking finding sits outside every
+    // component the closeout always rewrites, and is re-stashed for the write.
+    let response_targets: std::cell::OnceCell<Option<Vec<String>>> = std::cell::OnceCell::new();
+    let closeout_may_rewrite = |name: &str| {
+        if closeout_always_rewrites_component(name) {
+            return true;
+        }
+        if options.pending_only {
+            return false;
+        }
+        response_targets
+            .get_or_init(peek_response_patch_targets)
+            .as_ref()
+            .is_none_or(|targets| targets.iter().any(|target| target == name))
+    };
+    agent_doc_lint_io::run_prewrite_dialect_gate_on_content_with_logger(
+        file,
+        &content,
+        options.lint_override,
+        &closeout_may_rewrite,
+        agent_doc_ops_log_io::log_op,
+    )
+}
+
+/// Components every committing closeout may rewrite, whatever the response
+/// patches: the exchange (response and boundary), output, the queue (head
+/// consumption), done/status, and tracked work (pending maintenance).
+fn closeout_always_rewrites_component(name: &str) -> bool {
+    matches!(name, "exchange" | "output" | "queue" | "done" | "status")
+        || agent_doc_element::element::is_tracked_work_component(name)
+}
+
+/// Component names the incoming response patches, or `None` when they cannot
+/// be known (unreadable or unparseable response), meaning "any component".
+fn peek_response_patch_targets() -> Option<Vec<String>> {
+    let response = read_response_input().ok()?;
+    let targets = template::parse_patches(&response)
+        .ok()
+        .map(|(patches, _)| patches.into_iter().map(|patch| patch.name).collect());
+    RESPONSE_STDIN_OVERRIDE.with(|slot| {
+        slot.borrow_mut().replace(response);
+    });
+    targets
+}
+
 fn validate_tracked_work_mutations(
     file: &Path,
     options: &CommandOptions,
@@ -2330,6 +2407,13 @@ fn run_command_inner_within_pass(
     }
 
     guard_historical_retained_write_before_new_capture(file, commit_mode, closeout_role)?;
+
+    // GH #93: the dialect lint gate below (Phase 3b.1) judges the final file
+    // state, after the response and tracked-work edits have landed. A blocking
+    // finding already present in the document therefore refused the write only
+    // after it had mutated the document, leaving the response on disk and
+    // uncommitted. Refuse here, before any capture or mutation, instead.
+    prewrite_lint_gate(file, &options, commit_mode)?;
 
     if options.pending_only {
         let mutation_result = apply_pending_and_status_mutations(

@@ -156,13 +156,181 @@ fn run_on_content(
         return Ok(());
     }
 
+    let findings = dialect_findings(file, content);
+
+    classify_and_emit(file, &findings, mode, source, ops_logger)
+}
+
+/// Hide HTML-comment delimiters that agent-doc reads as prose from tagpath's
+/// comment scanner (GH #93).
+///
+/// agent-doc decides whether marker-shaped text is structure with one shared
+/// masking rule, [`agent_doc_element::element::find_marker_prose_ranges`]
+/// (code fences, inline code, same-line backtick pairs, same-line quotes; GH
+/// #90). tagpath's dialect lint pairs `<!--` with the next `-->` without that
+/// rule, so a backticked marker *prefix* (`` `<!-- agent:` ``, no `-->`) opened
+/// a comment that swallowed the component's own close and produced a false
+/// `agent-doc/unclosed-component`. Every `<!--` whose start byte is prose is
+/// rewritten to `<!__`, and its `-->` to `__>` when that closer lies inside the
+/// same prose span. All replacements are single ASCII bytes, so tagpath's
+/// line/column positions are unchanged. A comment opener outside prose is
+/// never touched, so a real unclosed component still reaches the lint.
+fn mask_prose_comment_delimiters(content: &str) -> std::borrow::Cow<'_, str> {
+    const OPEN: &str = "<!--";
+    const CLOSE: &str = "-->";
+    if !content.contains(OPEN) {
+        return std::borrow::Cow::Borrowed(content);
+    }
+    let prose = agent_doc_element::element::find_marker_prose_ranges(content);
+    let mut bytes: Option<Vec<u8>> = None;
+    let mut search_from = 0usize;
+    while let Some(relative) = content[search_from..].find(OPEN) {
+        let start = search_from + relative;
+        search_from = start + OPEN.len();
+        let Some(span_end) = prose
+            .iter()
+            .filter(|&&(span_start, span_end)| start >= span_start && start < span_end)
+            .map(|&(_, span_end)| span_end)
+            .max()
+        else {
+            continue;
+        };
+        let out = bytes.get_or_insert_with(|| content.as_bytes().to_vec());
+        out[start + 2] = b'_';
+        out[start + 3] = b'_';
+        if let Some(close_relative) = content[search_from..span_end].find(CLOSE) {
+            let close = search_from + close_relative;
+            out[close] = b'_';
+            out[close + 1] = b'_';
+            search_from = close + CLOSE.len();
+        }
+    }
+    match bytes {
+        // Only ASCII `-` bytes were replaced with ASCII `_`, so UTF-8 holds.
+        Some(bytes) => std::borrow::Cow::Owned(
+            String::from_utf8(bytes).expect("ASCII-for-ASCII masking preserves UTF-8"),
+        ),
+        None => std::borrow::Cow::Borrowed(content),
+    }
+}
+
+/// Pre-mutation dialect gate (GH #93).
+///
+/// `write --commit` used to run the dialect lint only on the final file state,
+/// after the response had already been applied, so a blocking finding that
+/// was already in the document left the response on disk, uncommitted, behind
+/// an `INTERRUPTED` error. Callers run this against the pre-write document
+/// before any capture or document mutation.
+///
+/// Only a finding the closeout cannot change refuses here: one in the body of
+/// a component that `closeout_may_rewrite` rejects, or outside every component
+/// and outside frontmatter. Such a finding is still in the final file state,
+/// so the final gate would refuse it too; refusing now changes only *when*,
+/// not *whether*. A finding inside a component the closeout rewrites (the
+/// exchange and its boundary, a patched component, tracked work, the queue)
+/// may be repaired by the write itself and is left to the final gate. Warnings
+/// are not printed here (the final gate reports them once), and an `off` mode
+/// is a silent no-op (the final gate logs the skip).
+pub fn run_prewrite_dialect_gate_on_content_with_logger(
+    file: &Path,
+    content: &str,
+    cli: Option<LintCliMode>,
+    closeout_may_rewrite: &dyn Fn(&str) -> bool,
+    ops_logger: OpsLogger,
+) -> Result<()> {
+    let (mode, source) = resolve_mode(file, content, cli);
+    if mode == LintDialectMode::Off {
+        return Ok(());
+    }
+    let errors: Vec<LintFinding> = dialect_findings(file, content)
+        .into_iter()
+        .filter(|finding| is_blocking(finding, mode))
+        .collect();
+    if errors.is_empty() {
+        return Ok(());
+    }
+    let rewritable = closeout_rewritable_spans(content, closeout_may_rewrite);
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(content.match_indices('\n').map(|(at, _)| at + 1))
+        .collect();
+    let errors: Vec<LintFinding> = errors
+        .into_iter()
+        .filter(|finding| {
+            let Some(&offset) = finding.line.checked_sub(1).and_then(|l| line_starts.get(l)) else {
+                // A position past the text cannot be located; leave it to
+                // the final gate rather than refuse on a guess.
+                return false;
+            };
+            !rewritable
+                .iter()
+                .any(|&(start, end)| offset >= start && offset < end)
+        })
+        .collect();
+    if errors.is_empty() {
+        return Ok(());
+    }
+    ops_logger(
+        file,
+        &format!(
+            "lint_gate_blocked_prewrite file={} mode={} source={} errors={} mutated=false",
+            file.display(),
+            dialect_label(mode),
+            source.as_str(),
+            errors.len(),
+        ),
+    );
+    Err(anyhow::anyhow!(
+        "[lint-gate] INTERRUPTED before write: {} blocking lint finding(s) already in {} (mode={}, source={}). \
+         Nothing was captured or written. Fix the directives below, then re-run the same \
+         `agent-doc write --commit` / `agent-doc finalize`, or pass `--lint=off` for this write.\n{}",
+        errors.len(),
+        file.display(),
+        dialect_label(mode),
+        source.as_str(),
+        format_findings_text(&errors)
+    ))
+}
+
+/// Byte spans the closeout may rewrite: frontmatter, plus every component
+/// (markers included) whose name `closeout_may_rewrite` accepts. A document
+/// whose component tree does not parse is treated as wholly rewritable, so the
+/// pre-write gate never refuses on a tree the integrity gate has not vetted.
+fn closeout_rewritable_spans(
+    content: &str,
+    closeout_may_rewrite: &dyn Fn(&str) -> bool,
+) -> Vec<(usize, usize)> {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return vec![(0, content.len())];
+    };
+    let mut spans: Vec<(usize, usize)> = components
+        .iter()
+        .filter(|component| closeout_may_rewrite(&component.name))
+        .map(|component| (component.open_start, component.close_end))
+        .collect();
+    if let Some(rest) = content.strip_prefix("---\n") {
+        let end = rest
+            .find("\n---")
+            .map_or(content.len(), |at| "---\n".len() + at + "\n---".len());
+        spans.push((0, end));
+    }
+    spans
+}
+
+fn dialect_findings(file: &Path, content: &str) -> Vec<LintFinding> {
     let opts = AgentDocOptions {
         fs_checks: false,
         rule_filter: Vec::new(),
     };
-    let findings = reconcile_findings_with_agent_doc_registry(lint_agent_doc(file, content, &opts));
+    // GH #93: tagpath must see the same structure agent-doc's parser sees.
+    let lint_content = mask_prose_comment_delimiters(content);
+    reconcile_findings_with_agent_doc_registry(lint_agent_doc(file, &lint_content, &opts))
+}
 
-    classify_and_emit(file, &findings, mode, source, ops_logger)
+fn is_blocking(finding: &LintFinding, mode: LintDialectMode) -> bool {
+    match finding.severity {
+        LintSeverity::Error => true,
+        LintSeverity::Warning => mode == LintDialectMode::Strict,
+    }
 }
 
 /// Validate invariants that no policy mode may disable.
@@ -378,12 +546,10 @@ fn classify_and_emit(
     let mut errors: Vec<&LintFinding> = Vec::new();
     let mut warnings: Vec<&LintFinding> = Vec::new();
     for f in findings {
-        match f.severity {
-            LintSeverity::Error => errors.push(f),
-            LintSeverity::Warning => match mode {
-                LintDialectMode::Strict => errors.push(f),
-                _ => warnings.push(f),
-            },
+        if is_blocking(f, mode) {
+            errors.push(f);
+        } else {
+            warnings.push(f);
         }
     }
 
@@ -480,6 +646,134 @@ mod tests {
             <!-- /agent:exchange -->\n";
         let file = write_doc(&dir, "stray-fence.md", doc);
         run(&file, None).expect("a mid-line backtick run must not unclose the exchange");
+    }
+
+    /// GH #93: a backlog item quoting a marker *prefix* (`<!-- agent:` with no
+    /// `-->`) in backticks is prose to agent-doc's parser, but tagpath's comment
+    /// scan read the backticked `<!--` as a comment opener, ran on to the
+    /// component's own close, and reported `agent:backlog` as never closed.
+    #[test]
+    fn backticked_marker_prefix_in_backlog_item_is_prose() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_format: template\n---\n\n\
+            ## Exchange\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            \u{276f} hi\n\
+            <!-- /agent:exchange -->\n\n\
+            ## Backlog\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] [#b] only `<!-- agent:` occurrence inside backticks\n\
+            <!-- /agent:backlog -->\n";
+        let file = write_doc(&dir, "prefix.md", doc);
+        run(&file, None).expect("a backticked marker prefix must not unclose the backlog");
+    }
+
+    /// Only openers agent-doc itself reads as prose are hidden from tagpath,
+    /// byte offsets are preserved, and a complete quoted marker loses its
+    /// closer too.
+    #[test]
+    fn prose_masking_hides_only_openers_agent_doc_reads_as_prose() {
+        let doc = "---\nagent_doc_session: test\nagent_doc_lint_dialect: off\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt `<!-- agent:` prose\n\
+            <!-- /agent:exchange -->\n";
+        let masked = mask_prose_comment_delimiters(doc);
+        assert_eq!(
+            masked.len(),
+            doc.len(),
+            "masking must preserve byte offsets"
+        );
+        assert!(
+            !masked.contains("`<!--"),
+            "backticked opener must be hidden: {masked}"
+        );
+        assert_eq!(
+            masked.matches("<!--").count(),
+            doc.matches("<!--").count() - 1,
+            "only the prose opener may be hidden"
+        );
+        let complete = "a `<!-- agent:queue -->` b\n<!-- agent:x -->\n";
+        let masked = mask_prose_comment_delimiters(complete);
+        assert_eq!(masked, "a `<!__ agent:queue __>` b\n<!-- agent:x -->\n");
+    }
+
+    const UNKNOWN_COMPONENT_DOC: &str = "---\nagent_doc_session: test\n---\n\n\
+        <!-- agent:exchange -->\n\
+        prompt\n\
+        <!-- /agent:exchange -->\n\n\
+        <!-- agent:operator-notes -->\n\
+        scratch\n\
+        <!-- /agent:operator-notes -->\n";
+
+    /// GH #93: the pre-write gate refuses a finding the closeout cannot
+    /// change, names that nothing was written, and honours `off`.
+    #[test]
+    fn prewrite_dialect_gate_blocks_finding_outside_rewritten_components() {
+        let dir = TempDir::new().unwrap();
+        let file = write_doc(&dir, "bad.md", UNKNOWN_COMPONENT_DOC);
+        let only_exchange = |name: &str| name == "exchange";
+        let err = run_prewrite_dialect_gate_on_content_with_logger(
+            &file,
+            UNKNOWN_COMPONENT_DOC,
+            None,
+            &only_exchange,
+            noop_ops_logger,
+        )
+        .expect_err("a finding the write cannot repair must refuse before the write");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("INTERRUPTED before write")
+                && msg.contains("Nothing was captured or written")
+                && msg.contains("agent-doc/unknown-component"),
+            "unexpected pre-write gate error: {msg}"
+        );
+        run_prewrite_dialect_gate_on_content_with_logger(
+            &file,
+            UNKNOWN_COMPONENT_DOC,
+            Some(LintCliMode::Off),
+            &only_exchange,
+            noop_ops_logger,
+        )
+        .expect("--lint=off must disable the pre-write dialect gate");
+        run_prewrite_dialect_gate_on_content_with_logger(
+            &file,
+            CLEAN_DOC,
+            None,
+            &only_exchange,
+            noop_ops_logger,
+        )
+        .expect("a clean document must pass the pre-write gate");
+    }
+
+    /// A finding inside a component the closeout rewrites (here a malformed
+    /// boundary the write replaces) is deferred to the final gate.
+    #[test]
+    fn prewrite_dialect_gate_defers_findings_the_write_may_repair() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- agent:boundary:head-boundary -->\n\
+            <!-- /agent:exchange -->\n";
+        let file = write_doc(&dir, "boundary.md", doc);
+        let only_exchange = |name: &str| name == "exchange";
+        run_prewrite_dialect_gate_on_content_with_logger(
+            &file,
+            doc,
+            None,
+            &only_exchange,
+            noop_ops_logger,
+        )
+        .expect("a finding inside the rewritten exchange must be left to the final gate");
+        let nothing = |_: &str| false;
+        run_prewrite_dialect_gate_on_content_with_logger(
+            &file,
+            doc,
+            None,
+            &nothing,
+            noop_ops_logger,
+        )
+        .expect_err("the same finding refuses when no component is rewritten");
     }
 
     #[test]

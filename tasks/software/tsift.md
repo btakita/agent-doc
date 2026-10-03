@@ -114,6 +114,30 @@ Thanks for approving. I claimed this item and started a background subagent on i
 - **Check the release workflow:** confirm `release.yml` publishes this crate before the crates that depend on it. It changes and pushes `release.yml` only if that's wrong.
 
 I'll close the item when it reports back.
+
+### Re: [#jaicratepublish] done — crate published, trusted publisher registered — opus-5-5 · 2026-10-03T17:30-04:00
+
+**tsift-tree-sitter-jai 0.1.102 is on crates.io, and its trusted publisher is registered.** The next tsift release (0.1.103) can publish this crate through OIDC, so the release won't stop at this crate before tsift-graph.
+
+**Publish:**
+- **Where it came from:** published from tsift `origin/main` (`92f6bb1`). The crate was added after the `v0.1.102` tag, so no release tag contains it. The version on `main` is 0.1.102, which matches the latest tag.
+- **Checks before publishing:**
+  - The name was free on crates.io.
+  - The crate has no path dependencies, only `tree-sitter-language` plus `cc` at build time.
+  - The license (MIT-0) and the rest of the crate's metadata are set.
+  - The package is 14 files: the bindings, `parser.c`, `scanner.c`, the headers, LICENSE and README.
+  - It's 1.2 MiB compressed, under the 10 MB crates.io limit.
+  - `--dry-run --locked` passed.
+- **Publish:** the token was used only inside a subshell, and the publish exited 0.
+- **Confirmation:** `cargo info --registry crates-io tsift-tree-sitter-jai@0.1.102` returns version 0.1.102, license MIT-0 and repository `btakita/tsift`.
+
+**Trusted publisher: config id 23418.** I read it back with a GET: owner `btakita`, repository `tsift`, workflow `release.yml`, no environment. It matches tsift-graph's config (id 10872) field for field.
+
+**Browser note:** both existing crates.io tabs hung on every chromium-bridge request. They were probably frozen background tabs. The subagent did the work in a new tab on the same logged-in profile, then closed it. The existence tab was brought to the front.
+
+**release.yml:** no change needed. `tsift-tree-sitter-jai` already comes just before `tsift-graph` in both the file-check list and the publish list.
+
+The subagent's worktree has been removed. Nothing is left for you to do on this item.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -133,7 +157,6 @@ https://github.com/chopratejas/headroom
 ## Review
 
 <!-- agent:review -->
-- [/] [#jaicratepublish] [operator-verify] Before the next tsift release: publish tsift-tree-sitter-jai 0.1.102 to crates.io once by hand with a token (cargo publish -p tsift-tree-sitter-jai, token in passage), then register the btakita/tsift release.yml trusted publisher for the crate on crates.io. The release publish job uses OIDC trusted publishing, which only works for crates that already exist, so without this the next release fails at this crate before tsift-graph. Gated on operator approval of the publish and the crates.io settings change.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

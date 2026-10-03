@@ -185,6 +185,122 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
         .stdout(predicate::str::contains("[session-check] steering pending:"));
 }
 
+/// `#codexsteerinterrupt`: the `#steerinterruptexit` fixture inside a bound
+/// Codex session. `steering` is written to disk after the commit; when
+/// `editor_typed` is set it is also captured as the operator's editor op
+/// against the committed baseline (editor-op provenance).
+fn codex_committed_cycle_with_post_commit_drift(
+    steering: &str,
+    editor_typed: bool,
+) -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let committed = "---\nagent_doc_session: sid\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange patch=append -->\n### Re: done — gpt-5\n\nCompleted.\n<!-- /agent:exchange -->\n";
+    fs::write(&doc, committed).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        committed,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+    agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+    agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+        &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+        &doc,
+        "commit_success",
+        Some(committed),
+        Some(committed),
+    )
+    .unwrap();
+    let close = "<!-- /agent:exchange -->";
+    if editor_typed {
+        agent_doc_op_capture_io::record_editor_op(
+            &doc,
+            &agent_doc_hash::content_hash(committed),
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: committed.find(close).unwrap(),
+                text: steering.to_string(),
+            },
+        )
+        .unwrap();
+    }
+    fs::write(
+        &doc,
+        committed.replacen(close, &format!("{steering}{close}"), 1),
+    )
+    .unwrap();
+    agent_doc_codex_hook_io::record_external_prompt_for_file(
+        &doc,
+        "codex-session",
+        &format!("agent-doc {}", doc.display()),
+    )
+    .unwrap();
+    (tmp, doc)
+}
+
+#[test]
+fn session_check_cli_reports_editor_proven_codex_post_commit_steering_as_pending() {
+    // `#codexsteerinterrupt` (a): with CODEX_THREAD_ID bound to the document,
+    // the active-harness-session drift check reported this operator prompt as
+    // INTERRUPTED (exit 1) before the steering-pending path ran. Editor-op
+    // provenance routes it to `steering pending`: exit 0, and 2 (work owed)
+    // under the Codex final gate.
+    let (tmp, doc) =
+        codex_committed_cycle_with_post_commit_drift("\n❯ Also check the CI run.\n", true);
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("CODEX_THREAD_ID", "codex-session")
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[session-check] steering pending:"))
+        .stdout(predicate::str::contains("❯ Also check the CI run."))
+        .stdout(predicate::str::contains(
+            "queue_continuation_required=false steering_pending=true",
+        ))
+        .stdout(predicate::str::contains("INTERRUPTED").not());
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("CODEX_THREAD_ID", "codex-session")
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap(), "--codex-final-gate"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("[session-check] steering pending:"));
+}
+
+#[test]
+fn session_check_cli_still_interrupts_codex_console_replay_without_editor_provenance() {
+    // `#codexsteerinterrupt` (b): console output replayed into the document as
+    // a fake prompt carries no editor-op provenance, so the active-harness
+    // check still reports INTERRUPTED (exit 1), with or without the final gate.
+    let (tmp, doc) = codex_committed_cycle_with_post_commit_drift(
+        "\n• Ran agent-doc session-check session.md\n  └ [session-check] ok\n",
+        false,
+    );
+    for extra in [None, Some("--codex-final-gate")] {
+        let mut cmd = agent_doc();
+        cmd.current_dir(tmp.path())
+            .env("CODEX_THREAD_ID", "codex-session")
+            .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+            .args(["session-check", doc.to_str().unwrap()]);
+        if let Some(flag) = extra {
+            cmd.arg(flag);
+        }
+        cmd.assert()
+            .code(1)
+            .stdout(predicate::str::contains("steering pending").not())
+            .stdout(predicate::str::contains(
+                "active harness session changed this document",
+            ));
+    }
+}
+
 #[test]
 fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
     // Reproduces the sampleorders shape: a clean template/CRDT Codex

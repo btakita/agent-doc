@@ -207,12 +207,65 @@ pub fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardRe
 /// Timed at the definition so every branch that reaches it is attributed
 /// to one total (`#sessioncheckprofile`).
 pub fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {
+    Ok(
+        classify_active_session_post_commit_drift(file)?.map(|drift| match drift {
+            ActiveSessionPostCommitDrift::Unproven { detail } => detail,
+            ActiveSessionPostCommitDrift::OperatorSteering { detail, .. } => detail,
+        }),
+    )
+}
+
+/// `#codexsteerinterrupt`: who changed a document after its committed
+/// closeout while a harness session (Codex) is bound to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActiveSessionPostCommitDrift {
+    /// Nothing proves the operator authored the drift, so it may be the
+    /// harness writing the document directly (including console output
+    /// replayed into it as fake prompts). Fail-closed: INTERRUPTED.
+    Unproven { detail: String },
+    /// Every byte of the drift is reproduced by replaying the editor's
+    /// captured operator ops onto the committed baseline, and the drift is
+    /// prompt-bearing steering: pending operator steering, not a failure.
+    OperatorSteering { detail: String, marker: String },
+}
+
+/// Classify [`detect_active_session_post_commit_drift`]'s finding by
+/// provenance (`#codexsteerinterrupt`).
+///
+/// Timed at the definition so every branch that reaches it is attributed
+/// to one total (`#sessioncheckprofile`).
+pub fn classify_active_session_post_commit_drift(
+    file: &Path,
+) -> Result<Option<ActiveSessionPostCommitDrift>> {
     crate::profile::timed("detect_active_session_post_commit_drift", || {
         detect_active_session_post_commit_drift_inner(file)
     })
 }
 
-fn detect_active_session_post_commit_drift_inner(file: &Path) -> Result<Option<String>> {
+/// Editor-op provenance for post-commit drift (`#codexsteerinterrupt`).
+///
+/// The harness writes the file directly; the operator types into the editor,
+/// whose keystrokes are captured as ordered ops against the buffer's base
+/// (`agent_doc_op_capture_io`). The drift is operator-authored only when
+/// replaying the newest captured op epoch onto the committed baseline (or
+/// HEAD) reproduces the current document exactly, modulo transient
+/// agent-doc markers. Any byte the ops do not explain — a direct harness
+/// write, console output pasted in by a replay path — leaves the drift
+/// unproven. Unobservable op state is not evidence.
+fn editor_ops_prove_operator_drift(file: &Path, bases: &[&str], current: &str) -> bool {
+    let normalize = agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
+    let current = normalize(current);
+    bases.iter().any(|base| {
+        agent_doc_op_capture_io::last_editor_text_for_base(file, base)
+            .ok()
+            .flatten()
+            .is_some_and(|editor_text| normalize(&editor_text) == current)
+    })
+}
+
+fn detect_active_session_post_commit_drift_inner(
+    file: &Path,
+) -> Result<Option<ActiveSessionPostCommitDrift>> {
     let Some(session) = agent_doc_codex_hook_io::load_active_session_for_current_file(file)? else {
         return Ok(None);
     };
@@ -229,7 +282,8 @@ fn detect_active_session_post_commit_drift_inner(file: &Path) -> Result<Option<S
         return Ok(None);
     }
 
-    let prompt_marker = crate::detect_unstarted_prompt_bearing_diff(file)?;
+    let steering = crate::realtime_steering_set_since_turn_baseline(file)?;
+    let prompt_marker = steering.marker();
     if prompt_marker.is_none()
         && active_session_drift_is_only_exchange_or_backlog_metadata(&snapshot, &current)
     {
@@ -248,17 +302,42 @@ fn detect_active_session_post_commit_drift_inner(file: &Path) -> Result<Option<S
         .unwrap_or("agent-doc session");
     let prompt_preview = prompt_preview.trim();
 
-    let detail = match prompt_marker {
-        Some(marker) => format!(
-            "{}; active_session={} turn={} prompt={}",
-            marker, session.session_id, session.last_turn_id, prompt_preview
-        ),
-        None => format!(
-            "active_session={} turn={} prompt={}",
-            session.session_id, session.last_turn_id, prompt_preview
-        ),
+    let Some(marker) = prompt_marker else {
+        return Ok(Some(ActiveSessionPostCommitDrift::Unproven {
+            detail: format!(
+                "active_session={} turn={} prompt={}",
+                session.session_id, session.last_turn_id, prompt_preview
+            ),
+        }));
     };
-    Ok(Some(detail))
+    let detail = format!(
+        "{}; active_session={} turn={} prompt={}",
+        marker, session.session_id, session.last_turn_id, prompt_preview
+    );
+    let head = agent_doc_git_io::revision::show_head(file)?;
+    let mut bases = vec![snapshot.as_str()];
+    if let Some(head) = head.as_deref()
+        && head != snapshot
+    {
+        bases.push(head);
+    }
+    let operator_proven = editor_ops_prove_operator_drift(file, &bases, &current);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_check_active_session_drift_provenance file={} operator_proven={} directives={} (#codexsteerinterrupt)",
+            file.display(),
+            operator_proven,
+            steering.len(),
+        ),
+    );
+    if operator_proven {
+        return Ok(Some(ActiveSessionPostCommitDrift::OperatorSteering {
+            detail,
+            marker,
+        }));
+    }
+    Ok(Some(ActiveSessionPostCommitDrift::Unproven { detail }))
 }
 
 /// Timed at the definition so every branch that reaches it is attributed

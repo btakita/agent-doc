@@ -3402,14 +3402,23 @@ fn inspect_core_profiled(
                 ),
             ));
         }
-        if let Some(marker) = crate::detect_active_session_post_commit_drift(file)? {
-            return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
-                state.cycle_id,
-                state.phase.as_str(),
-                state.last_event,
-                marker
-            )));
+        match crate::classify_active_session_post_commit_drift(file)? {
+            // `#codexsteerinterrupt`: an editor-op-proven operator prompt added
+            // after the commit is the same pending steering the non-harness
+            // path reports (`#steerinterruptexit`), not harness drift.
+            Some(crate::ActiveSessionPostCommitDrift::OperatorSteering { marker, .. }) => {
+                return Ok(committed_cycle_steering_status(file, &state, None, &marker));
+            }
+            Some(crate::ActiveSessionPostCommitDrift::Unproven { detail }) => {
+                return Ok(SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
+                    state.cycle_id,
+                    state.phase.as_str(),
+                    state.last_event,
+                    detail
+                )));
+            }
+            None => {}
         }
         if let Some(marker) = crate::detect_uncommitted_exchange_drift(file)? {
             if latest_head_response_visible_in_live_buffer {

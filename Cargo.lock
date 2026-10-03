@@ -2118,6 +2118,8 @@ dependencies = [
  "agent-doc-ipc-io",
  "agent-doc-lint-io",
  "agent-doc-markdown-lossless",
+ "agent-doc-merge",
+ "agent-doc-op-capture-io",
  "agent-doc-ops-log-io",
  "agent-doc-project-config-io",
  "agent-doc-prompt-lines",

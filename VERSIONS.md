@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **Codex post-commit operator steering is pending, not INTERRUPTED (`#codexsteerinterrupt`).** In a Codex
+  session (`CODEX_THREAD_ID` bound to the document), the active-harness-session drift check ran before the
+  `#steerinterruptexit` steering-pending path, so an operator prompt added after the commit still exited 1.
+  The check now classifies the drift by editor-op provenance: when replaying the editor's captured operator ops
+  onto the committed baseline reproduces the current document exactly, the prompt is reported as
+  `[session-check] steering pending: …` (exit 0, or 2 under `--codex-final-gate`). Drift the editor ops do not
+  explain, such as console output replayed into the document as a fake prompt, is still INTERRUPTED.
+
 ## 0.35.446
 
 - **Queue-level subagent dispatch (`subagents` / `fan-out` on `agent:queue`).** `<!-- agent:queue subagents -->`

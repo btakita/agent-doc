@@ -2860,6 +2860,192 @@ Body\n\
             other => panic!("expected interrupted status, got {other:?}"),
         }
     }
+    /// `#codexsteerinterrupt` fixture: a committed cycle in a Codex session
+    /// (`CODEX_THREAD_ID` bound to the document), then `current` written to
+    /// disk. `editor_inserted` is the text the operator typed into the editor
+    /// after the commit, captured as an editor op against the committed
+    /// baseline; `None` means no editor op was captured at all.
+    fn codex_committed_cycle_with_post_commit_drift(
+        root: &Path,
+        current_from_committed: impl Fn(&str) -> String,
+        editor_inserted: Option<&str>,
+    ) -> std::path::PathBuf {
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("doc.md");
+        let committed = CODEX_STEER_COMMITTED;
+        fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        if let Some(inserted) = editor_inserted {
+            let offset = committed.find(CODEX_STEER_INSERT_AT).unwrap();
+            agent_doc_op_capture_io::record_editor_op(
+                &doc,
+                &agent_doc_hash::content_hash(committed),
+                agent_doc_merge::crdt::EditorOp::Insert {
+                    offset,
+                    text: inserted.to_string(),
+                },
+            )
+            .unwrap();
+        }
+        fs::write(&doc, current_from_committed(committed)).unwrap();
+        track_active_codex_session(root, &doc, &format!("agent-doc {}", doc.display()));
+        doc
+    }
+    const CODEX_STEER_COMMITTED: &str = concat!(
+        "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: done — gpt-5\n\n",
+        "Completed.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    const CODEX_STEER_INSERT_AT: &str = "<!-- /agent:exchange -->";
+    const CODEX_STEER_PROMPT: &str = "\n❯ Also check the CI run for the release.\n";
+    fn insert_before_exchange_close(committed: &str, text: &str) -> String {
+        committed.replacen(
+            CODEX_STEER_INSERT_AT,
+            &format!("{text}{CODEX_STEER_INSERT_AT}"),
+            1,
+        )
+    }
+
+    /// `#codexsteerinterrupt` (a): with `CODEX_THREAD_ID` set, an operator
+    /// prompt typed into the editor after the commit was reported by the
+    /// active-harness-session drift check as INTERRUPTED (exit 1) before the
+    /// `#steerinterruptexit` steering-pending path could run. Editor-op
+    /// provenance proves it is the operator's, so it is pending steering.
+    #[test]
+    fn session_check_reports_editor_proven_codex_post_commit_prompt_as_steering_pending() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = codex_committed_cycle_with_post_commit_drift(
+            tmp.path(),
+            |committed| insert_before_exchange_close(committed, CODEX_STEER_PROMPT),
+            Some(CODEX_STEER_PROMPT),
+        );
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::SteeringPending(message) => {
+                assert!(
+                    message.starts_with(
+                        agent_doc_turn::response_text::SESSION_CHECK_STEERING_PENDING_PREFIX
+                    ),
+                    "{message}"
+                );
+                assert!(
+                    message.contains("❯ Also check the CI run for the release."),
+                    "{message}"
+                );
+                assert!(!message.contains("INTERRUPTED"), "{message}");
+                assert!(
+                    !message.contains("active harness session changed"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected steering-pending status, got {other:?}"),
+        }
+        let log =
+            fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("session_check_active_session_drift_provenance")
+                && log.contains("operator_proven=true"),
+            "the provenance decision is recorded: {log}"
+        );
+    }
+
+    /// `#codexsteerinterrupt` (b): console output replayed into the document
+    /// as a fake prompt has no editor-op provenance. It stays INTERRUPTED by
+    /// the active-harness-session check, exactly as before.
+    #[test]
+    fn session_check_still_interrupts_codex_console_replay_without_editor_provenance() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let replayed = "\n• Ran agent-doc session-check doc.md\n  └ [session-check] ok\n";
+        let doc = codex_committed_cycle_with_post_commit_drift(
+            tmp.path(),
+            |committed| insert_before_exchange_close(committed, replayed),
+            None,
+        );
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("active harness session changed this document"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    /// `#codexsteerinterrupt` (b): an operator prompt the editor DID type does
+    /// not launder harness output written beside it. Provenance must explain
+    /// every byte of the drift, so the replayed console tail keeps the whole
+    /// drift INTERRUPTED.
+    #[test]
+    fn session_check_still_interrupts_codex_console_replay_beside_an_editor_prompt() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = codex_committed_cycle_with_post_commit_drift(
+            tmp.path(),
+            |committed| {
+                insert_before_exchange_close(
+                    committed,
+                    &format!("{CODEX_STEER_PROMPT}\n• Ran cargo test\n  └ ok\n"),
+                )
+            },
+            Some(CODEX_STEER_PROMPT),
+        );
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("active harness session changed this document"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    /// `#codexsteerinterrupt` (b): a replayed response (a new `### Re:`
+    /// heading) stays INTERRUPTED even when an editor op carried it — the
+    /// bypassed-response-write guard runs before provenance is consulted, so
+    /// editor-op provenance never launders a response patchback.
+    #[test]
+    fn session_check_still_interrupts_codex_replayed_response_heading_even_from_the_editor() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let replayed = "\n### Re: done — gpt-5\n\nCompleted again.\n";
+        let doc = codex_committed_cycle_with_post_commit_drift(
+            tmp.path(),
+            |committed| insert_before_exchange_close(committed, replayed),
+            Some(replayed),
+        );
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("INTERRUPTED"), "{message}");
+            }
+            other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
     #[test]
     fn session_check_ignores_active_session_post_commit_comment_only_drift() {
         let tmp = tempfile::TempDir::new().unwrap();

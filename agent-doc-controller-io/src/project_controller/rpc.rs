@@ -28492,6 +28492,7 @@ mod tests {
             exact_visible: true,
             caller_kind: "editor_route".to_string(),
             actor_bindings: Vec::new(),
+            column_order: Default::default(),
         };
         assert_eq!(editor_route_focus_refusal(&invocation, "/repo/a.md"), None);
         let refusal = editor_route_focus_refusal(&invocation, "/repo/z.md").unwrap();

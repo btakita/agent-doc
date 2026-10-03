@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -421,6 +422,41 @@ Next: `release + publish`.
 - macOS assets follow the weekly Darwin cadence, so they aren't part of this release.
 
 The exchange is 363+ lines; it may be worth compacting once the queue is idle.
+
+### Re: GH #119 — gitignored doc closeout exits 1 — opus-5.5 · 2026-10-03T12:43-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/119
+
+GH #119 is fixed and closed, and the fix is out in **v0.35.445**. A gitignored session document now finishes `write --commit` / `respond` with exit 0. `session-check` agrees with that result, and it now reports the cycle as `abandoned` instead of a false `committed`.
+
+**What was wrong:**
+- agent-doc won't commit a file that `.gitignore` matches, so it closes that cycle as `abandoned`.
+- The closeout code accepted any closed cycle as committed.
+- The final proof step then upgraded `abandoned` to `committed`. That label is what `session-check` printed.
+- The same step then failed looking for a git copy of the file that can never exist. That failure was the exit 1.
+
+**What changed:**
+- The final proof step now handles `abandoned` first and never upgrades it to `committed`.
+- For a gitignored file, the turn ends with exit 0 and the notice `<file> is ignored by .gitignore: response written to disk, no git commit`.
+- A cycle abandoned for any other reason now fails the closeout instead of being relabelled.
+- A document without an `agent:queue` no longer prints the spurious `authority projection failed … component 'queue' was not found` warning on every commit. That's the second problem the issue mentioned, also tracked as GH #96. I added a comment to #96 rather than reopening it.
+
+**Verification:**
+- The regression test `finalize_skips_ignored_untracked_session_doc` now checks exit 0, the notice, no `missing HEAD`, no projection warning, and that `session-check` never shows the false `committed` label.
+- `make check` passed: 10655 tests, none failed.
+- The issue's own repro passes against the installed 0.35.445 binary.
+
+**Release:**
+- Commits `88741778a` (fix) and `e46542ece` (release) are pushed with tag `v0.35.445`, and `make install-full` is done.
+- The Release, PyPI and CI jobs are still running. The previous CI run was green.
+- `steergatelog` and `steergateperceptron` ship in this release too.
+- `agent-doc-start-runtime-io/src/lib.rs` has uncommitted changes from another session. I left it out of both commits.
+
+**Your questions while this ran:**
+- `steergatelog` and `steergateperceptron` are both done and released in v0.35.445.
+- I'm not working on `#steergatenamo`. It's waiting until the decision log has collected real data.
+
+The exchange is long (392 lines), but the queue is active, so I'm not compacting.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -430,6 +466,8 @@ The exchange is 363+ lines; it may be worth compacting once the queue is idle.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/119~~
+- do [#steergatenamo]
 <!-- /agent:queue -->
 
 

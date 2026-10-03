@@ -2,6 +2,52 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.446
+
+- **Queue-level subagent dispatch (`subagents` / `fan-out` on `agent:queue`).** `<!-- agent:queue subagents -->`
+  (or `subagents=N`, `fan-out`, `fan-out=N`) gives every queue line subagent intent, so it combines with a
+  pipeline `preset=` instead of every line needing a `#subagent` tag. `[inline]` and `[operator-verify]` lines
+  opt out. Dispatch is decided from the current queue state: each cycle preflight lists the unclaimed
+  eligible heads up to the cap minus the live claims, so a missed claim is offered again rather than drained
+  inline. Heads that are over the cap, or behind an `after=` predecessor that is still queued, are held and
+  kept out of the in-session loop exactly like claimed heads. The skill and the respond/planning-dispatch
+  runbooks document how the coordinator claims, dispatches and integrates them, for every harness.
+- **`agent-doc queue claim --refresh`.** The owner of a live claim can extend it with
+  `agent-doc queue claim <FILE> --item <ID> --owner <OWNER> --refresh [--ttl-secs N]`, which works as a
+  heartbeat for a long-running subagent. The refresh is refused, with no change to the ledger, when the item is
+  unclaimed, when its claim has expired, or when another owner holds it. Under the queue attribute an expired
+  claim makes its head eligible for dispatch again and never drains it inline.
+- **session-check no longer offers a claimed head for drain.** When nothing could be drained in-session, the
+  supervisor-scope fallback ignored claims. With a stale supervisor heartbeat it then reported
+  `queue_continuation_required=true` naming a head a subagent already held. That fallback and preflight's
+  `queue_supervisor_drainable` both now exclude claimed and held heads.
+- **Stale column panes are excluded before layout selection (GH #121).** The stale-supervisor check now runs
+  before tmux-router picks a column pane, rather than after. A supervisor counts as stale only when its own
+  `/proc/<pid>/exe` is deleted. The agent-written `⚠ STALE SUPERVISOR` title is no longer treated as evidence.
+  A stale recycle request stays live until it is consumed.
+- **An `ensure` route never grows the retained layout (GH #120).** The editor route's merge used to append a
+  column for every routed document not already shown. Since every JetBrains tab switch sends `ensure`, the
+  layout grew 1 → 2 → 3 until `plugin_publication` collapsed it again. Now the document takes over the focus
+  column, or the rightmost free one, and a column is added only when the route itself names more new columns
+  than there are free columns.
+- **Run Agent Doc survives an operator recycle (GH #122).** The async `editor_route` worker re-reads the live
+  controller authority and waits out an in-progress handoff instead of refusing from the frozen `Preparing`
+  bootstrap. The settle budget is now 180s, so it covers the measured 141s handoff.
+- **The pending-done gate accepts `--backlog-gate` and stops misreading denials (GH #123).** When a retained
+  tracked-work write delays the cycle-state record, the pre-commit gate now also counts the invocation's own
+  `--done`, `--review-resolve`, kept-open and `--backlog-gate` ids, and recorded gated or reaped ids. A
+  completion marker negated earlier in the same clause ("cannot be verified") no longer counts as completion.
+  Once the response has been written, the gate only warns, so a cycle that commits no longer exits with a
+  terminal failure.
+- **A live turn is never stashed for a stale focused pane (GH #124).** The GH #121 focused-document exception
+  now applies only when admitting the stale pane would not stash a pane holding a live turn in the target
+  window; otherwise the column is excluded (`admission=excluded_focused_live_turn_protected`) and the recycle is
+  still requested. When every column is excluded, sync keeps the current layout instead of passing tmux-router
+  an empty column set. A busy stale pane's title carries one marker (`⚠ STALE SUPERVISOR: turn in progress`),
+  and refresh repairs older titles that carried two.
+- **Load hardening.** Compact retries the bounded editor-cut clear (3 attempts) before it logs `clear_failed`.
+  Two fail-fast timing tests got bounds that hold under a loaded parallel `make check`.
+
 ## 0.35.445
 
 - **Gitignored session documents close out cleanly (GH #119).** `write --commit` / `respond` on a

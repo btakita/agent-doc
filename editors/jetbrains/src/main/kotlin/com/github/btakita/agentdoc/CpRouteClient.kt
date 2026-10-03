@@ -544,6 +544,7 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
+        layoutMode: String? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         if (commandPlaneEnabled()) {
@@ -555,6 +556,7 @@ internal object CpRouteClient {
                 waitForReadySeconds = waitForReadySeconds,
             attemptId = attemptId,
             routeKey = routeKey,
+                layoutMode = layoutMode,
                 commandId = commandId,
                 controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
             )
@@ -602,6 +604,7 @@ internal object CpRouteClient {
             waitForReadySeconds = waitForReadySeconds,
             attemptId = attemptId,
             routeKey = routeKey,
+            layoutMode = layoutMode,
         )
         return try {
             sendToSocket(socket, request)
@@ -778,12 +781,17 @@ internal object CpRouteClient {
 
     // The `agent-doc.editor_route.v1` payload the controller consumes, shared by
     // the classic `editor_route` request and the command-plane submit.
+    //
+    // GH #111: `layout_mode` says what the `--col` arguments assert — `exact` for a
+    // positive observation of the whole visible layout, `ensure` for "this document
+    // needs a column". Controllers that predate the field ignore it.
     internal fun editorRoutePayload(
         relativePath: String,
         layoutArgs: List<String>,
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
+        layoutMode: String? = null,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("source", "jetbrains_plugin")
@@ -796,6 +804,7 @@ internal object CpRouteClient {
         })
         attemptId?.let { payload.addProperty("attempt_id", it) }
         routeKey?.let { payload.addProperty("route_key", it) }
+        layoutMode?.let { payload.addProperty("layout_mode", it) }
         return payload
     }
 
@@ -806,6 +815,7 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
+        layoutMode: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -813,6 +823,7 @@ internal object CpRouteClient {
             waitForReadySeconds,
             attemptId,
             routeKey,
+            layoutMode,
         )
         val request = JsonObject()
         request.addProperty("command", EditorCommandName.EditorRoute.token)
@@ -843,6 +854,7 @@ internal object CpRouteClient {
         routeKey: String?,
         commandId: String,
         controllerCommand: String = "editor_command_submit",
+        layoutMode: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -850,6 +862,7 @@ internal object CpRouteClient {
             waitForReadySeconds,
             attemptId,
             routeKey,
+            layoutMode,
         )
         return commandSubmitRequest(
             filePath = filePath,

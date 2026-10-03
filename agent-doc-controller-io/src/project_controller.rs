@@ -397,6 +397,67 @@ pub(crate) struct PaneLayoutDesired {
     pub generation: u64,
     pub source_plane_version: Option<u64>,
     pub invocation: ControllerTmuxLayoutSyncInvocation,
+    /// Who published this generation and what it replaced (GH #111).
+    pub provenance: PaneLayoutProvenance,
+}
+
+/// The publisher that produced a desired pane-layout generation (GH #111).
+///
+/// Several independent planes publish the one retained desired layout: an
+/// editor route, the editor state-plane projector, a focus escalation, an
+/// in-process editor-surface `Sync` intent, and an explicit sync command.
+/// `pane_layout_projection` used to carry none of this, so a collapse could
+/// only be attributed by correlating three log shapes by position.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PaneLayoutPublisher {
+    /// `editor_route` (Run Agent Doc / plugin focus route).
+    Route,
+    /// A `pane_layout_desired` state-plane frame published by an editor plugin.
+    PluginPublication,
+    /// `#focusstashescalate` republishing the structural layout for a focus.
+    Escalation,
+    /// An in-process editor-surface `SurfaceIntent::Sync`.
+    EditorSurface,
+    /// An explicit `sync_tmux_layout` command (for example `Sync Tmux Pane`).
+    Command,
+    /// A publication with no recorded publisher (tests, legacy callers).
+    #[default]
+    Unattributed,
+}
+
+impl PaneLayoutPublisher {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Route => "route",
+            Self::PluginPublication => "plugin_publication",
+            Self::Escalation => "escalation",
+            Self::EditorSurface => "editor_surface",
+            Self::Command => "command",
+            Self::Unattributed => "unattributed",
+        }
+    }
+}
+
+/// Provenance captured when a desired pane-layout generation is published.
+///
+/// `retained_columns` and `observed_panes` are measured from the state this
+/// generation *replaced*, inside the same publication step, so the comparison
+/// cannot race a later publisher.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PaneLayoutProvenance {
+    pub publisher: PaneLayoutPublisher,
+    /// Column count of the retained desired layout this generation replaced.
+    pub retained_columns: usize,
+    /// Pane count of the last tmux observation before this generation, when
+    /// one had been recorded.
+    pub observed_panes: Option<usize>,
+}
+
+impl PaneLayoutProvenance {
+    /// True when applying `applied_columns` would narrow the retained layout.
+    pub(crate) fn narrows(&self, applied_columns: usize) -> bool {
+        applied_columns < self.retained_columns
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -935,6 +996,7 @@ struct PaneLayoutRouteLease {
 struct PendingPaneLayoutPublication {
     invocation: ControllerTmuxLayoutSyncInvocation,
     source_plane_version: Option<u64>,
+    publisher: PaneLayoutPublisher,
 }
 
 impl ControllerPaneLayoutGraph {
@@ -1065,6 +1127,7 @@ impl ControllerPaneLayoutGraph {
         }
     }
 
+    #[cfg(test)]
     fn set_desired(
         &self,
         invocation: ControllerTmuxLayoutSyncInvocation,
@@ -1077,6 +1140,7 @@ impl ControllerPaneLayoutGraph {
         )
     }
 
+    #[cfg(test)]
     fn set_fresh_desired(
         &self,
         invocation: ControllerTmuxLayoutSyncInvocation,
@@ -1089,6 +1153,7 @@ impl ControllerPaneLayoutGraph {
         )
     }
 
+    #[cfg(test)]
     fn set_fresh_route_desired(
         &self,
         invocation: ControllerTmuxLayoutSyncInvocation,
@@ -1101,11 +1166,27 @@ impl ControllerPaneLayoutGraph {
         )
     }
 
+    #[cfg(test)]
     fn set_desired_with_publication(
+        &self,
+        invocation: ControllerTmuxLayoutSyncInvocation,
+        source_plane_version: Option<u64>,
+        publication: PaneLayoutPublication,
+    ) -> PaneLayoutDesired {
+        self.set_desired_attributed(
+            invocation,
+            source_plane_version,
+            publication,
+            PaneLayoutPublisher::Unattributed,
+        )
+    }
+
+    fn set_desired_attributed(
         &self,
         mut invocation: ControllerTmuxLayoutSyncInvocation,
         source_plane_version: Option<u64>,
         publication: PaneLayoutPublication,
+        publisher: PaneLayoutPublisher,
     ) -> PaneLayoutDesired {
         if invocation.caller_kind.is_empty() {
             invocation.caller_kind = "projection".to_string();
@@ -1119,6 +1200,7 @@ impl ControllerPaneLayoutGraph {
                     publication_state.pending_passive = Some(PendingPaneLayoutPublication {
                         invocation,
                         source_plane_version,
+                        publisher,
                     });
                     return self
                         .ctx
@@ -1136,7 +1218,8 @@ impl ControllerPaneLayoutGraph {
                 publication_state.pending_passive = None;
             }
         }
-        let desired = self.publish_desired(invocation, source_plane_version, publication);
+        let desired =
+            self.publish_desired(invocation, source_plane_version, publication, publisher);
         if publication == PaneLayoutPublication::FreshRouteIntent
             && let Some(document) = desired.invocation.focus.clone()
         {
@@ -1153,6 +1236,7 @@ impl ControllerPaneLayoutGraph {
         invocation: ControllerTmuxLayoutSyncInvocation,
         source_plane_version: Option<u64>,
         publication: PaneLayoutPublication,
+        publisher: PaneLayoutPublisher,
     ) -> PaneLayoutDesired {
         if publication == PaneLayoutPublication::CoalesceIdentical
             && let Some(mut current) = self.ctx.get(&self.desired)
@@ -1173,10 +1257,25 @@ impl ControllerPaneLayoutGraph {
         // older generation can detect supersession and bail early.
         self.published_generation
             .store(generation, Ordering::SeqCst);
+        // GH #111: measure what this generation replaces in the same step that
+        // replaces it, so the narrowing comparison names the real predecessor.
+        let provenance = PaneLayoutProvenance {
+            publisher,
+            retained_columns: self
+                .ctx
+                .get(&self.desired)
+                .map(|retained| retained.invocation.columns.len())
+                .unwrap_or_default(),
+            observed_panes: self
+                .ctx
+                .get(&self.observed)
+                .map(|observation| observation.report.panes.len()),
+        };
         let desired = PaneLayoutDesired {
             generation,
             source_plane_version,
             invocation,
+            provenance,
         };
         self.ctx.batch(|ctx| {
             ctx.set(&self.observed, None);
@@ -1193,23 +1292,26 @@ impl ControllerPaneLayoutGraph {
         desired
     }
 
-    fn release_route_lease(&self, generation: u64) {
+    /// Release a route lease, returning the deferred passive publication it
+    /// held back, if one was published now.
+    fn release_route_lease(&self, generation: u64) -> Option<PaneLayoutDesired> {
         let mut publication_state = self.publication_state.lock();
         if !publication_state
             .active_route
             .as_ref()
             .is_some_and(|active| active.generation == generation)
         {
-            return;
+            return None;
         }
         publication_state.active_route = None;
-        if let Some(pending) = publication_state.pending_passive.take() {
+        publication_state.pending_passive.take().map(|pending| {
             self.publish_desired(
                 pending.invocation,
                 pending.source_plane_version,
                 PaneLayoutPublication::CoalesceIdentical,
-            );
-        }
+                pending.publisher,
+            )
+        })
     }
 
     fn actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
@@ -6357,18 +6459,14 @@ impl ControllerRuntime {
         invocation: ControllerTmuxLayoutSyncInvocation,
         source_plane_version: Option<u64>,
         publication: PaneLayoutPublication,
+        publisher: PaneLayoutPublisher,
     ) -> PaneLayoutDesired {
-        match publication {
-            PaneLayoutPublication::CoalesceIdentical => self
-                .pane_layout_graph
-                .set_desired(invocation, source_plane_version),
-            PaneLayoutPublication::FreshIntent => self
-                .pane_layout_graph
-                .set_fresh_desired(invocation, source_plane_version),
-            PaneLayoutPublication::FreshRouteIntent => self
-                .pane_layout_graph
-                .set_fresh_route_desired(invocation, source_plane_version),
-        }
+        self.pane_layout_graph.set_desired_attributed(
+            invocation,
+            source_plane_version,
+            publication,
+            publisher,
+        )
     }
 
     fn pane_layout_desired(&self) -> Option<PaneLayoutDesired> {
@@ -6450,8 +6548,8 @@ impl ControllerRuntime {
             .await_route_document(document, timeout)
     }
 
-    fn release_pane_layout_route_lease(&self, generation: u64) {
-        self.pane_layout_graph.release_route_lease(generation);
+    fn release_pane_layout_route_lease(&self, generation: u64) -> Option<PaneLayoutDesired> {
+        self.pane_layout_graph.release_route_lease(generation)
     }
 
     fn try_claim_coordination(&self, scopes: &[String], owner_token: &str, owner_pid: u32) -> bool {
@@ -9264,6 +9362,7 @@ mod tests {
                 caller_kind: "projection".to_string(),
                 actor_bindings: Vec::new(),
             },
+            provenance: PaneLayoutProvenance::default(),
         }
     }
 
@@ -9450,6 +9549,7 @@ mod tests {
                     actor_bindings: Vec::new(),
                 },
                 source_plane_version: None,
+                provenance: PaneLayoutProvenance::default(),
             }),
             &BTreeMap::from([
                 (desired_document.clone(), desired),
@@ -9884,6 +9984,7 @@ mod tests {
             invocation,
             Some(41),
             PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::Command,
         );
         assert_eq!(runs.lock().last().unwrap().generation, desired.generation);
         drop(runtime);
@@ -18528,6 +18629,7 @@ revised operator request
                 actor_bindings: Vec::new(),
             },
             source_plane_version: None,
+            provenance: PaneLayoutProvenance::default(),
         }
     }
 

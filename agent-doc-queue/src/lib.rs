@@ -19,6 +19,7 @@ pub mod queue_consume;
 pub mod queue_continuation;
 pub mod queue_convergence;
 pub mod queue_directive;
+pub mod queue_head_annotation;
 pub mod queue_heads;
 pub mod queue_preemption;
 pub mod queue_projection;

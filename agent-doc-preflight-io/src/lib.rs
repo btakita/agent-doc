@@ -714,6 +714,15 @@ pub struct PreflightOutput {
     /// Realtime-selected active queue prompts for this cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_queue_prompts: Vec<String>,
+    /// `#qheadannotation`: operator text attached to a selected id-backed head
+    /// (`do [#id]: <question>`), separated from the canonical directive. Each
+    /// annotation is an operator directive to answer in this turn alongside the
+    /// backlog item.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_head_annotations: Vec<agent_doc_queue::queue_head_annotation::QueueHeadAnnotation>,
+    /// How to address `queue_head_annotations`; present only when non-empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_head_annotation_guidance: Option<String>,
     /// Whether the queue is currently active (consuming prompts).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_active: Option<bool>,
@@ -6132,6 +6141,49 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
+
+    /// `#qheadannotation`: the cycle contract carries operator annotations on
+    /// selected id heads as a typed field (with guidance), and omits both when
+    /// the selected heads are canonical.
+    #[test]
+    fn cycle_contract_surfaces_queue_head_annotations() {
+        let selected = vec![
+            format!(
+                "{IN_PROGRESS_MARKER} do [#sdkrestemitnative]: can the *.h files be generated from the contract as well?"
+            ),
+            "do [#plain]".to_string(),
+        ];
+        let annotations =
+            agent_doc_queue::queue_head_annotation::queue_head_annotations(&selected);
+        let output = PreflightOutput {
+            queue_head_annotation_guidance:
+                agent_doc_queue::queue_head_annotation::queue_head_annotation_guidance(
+                    &annotations,
+                ),
+            queue_head_annotations: annotations,
+            selected_queue_prompts: selected,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&output).unwrap();
+        let listed = json["queue_head_annotations"].as_array().unwrap();
+        assert_eq!(listed.len(), 1, "{json}");
+        assert_eq!(listed[0]["id"], "sdkrestemitnative");
+        assert_eq!(
+            listed[0]["annotation_verbatim"],
+            "can the *.h files be generated from the contract as well?"
+        );
+        let guidance = json["queue_head_annotation_guidance"].as_str().unwrap();
+        assert!(guidance.contains("> **Operator note:**"), "{guidance}");
+        assert!(guidance.contains("THIS turn"), "{guidance}");
+
+        let canonical = PreflightOutput {
+            selected_queue_prompts: vec!["do [#plain]".to_string()],
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&canonical).unwrap();
+        assert!(json.get("queue_head_annotations").is_none(), "{json}");
+        assert!(json.get("queue_head_annotation_guidance").is_none(), "{json}");
+    }
 
     // `#qdonestrike-durable`: a not-ready Lazily head used to discard the whole
     // queue-maintenance plan, so the auto-strike of heads already in `agent:done`

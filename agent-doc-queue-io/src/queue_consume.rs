@@ -1325,8 +1325,8 @@ pub fn mark_completed_queue_prompts_for_done_ids(
             .find(|component| component.name == "queue")
         {
             Some(queue_component) => {
-                let body = &authority_content
-                    [queue_component.open_end..queue_component.close_start];
+                let body =
+                    &authority_content[queue_component.open_end..queue_component.close_start];
                 let entries = agent_doc_queue::document_queue::parse(body)
                     .context("queue done-id mark: failed to parse document queue")?;
                 mark_entries_completed_by_done_ids(&entries, done_ids).1
@@ -3208,8 +3208,10 @@ mod core_tests {
         assert!(outcome.drained);
 
         let after = std::fs::read_to_string(&file).unwrap();
-        assert!(after.contains("queue: stop"));
-        assert!(after.contains("<!-- agent:queue priority go -->\n<!-- /agent:queue -->"));
+        assert!(
+            !after.contains("queue:"),
+            "a drain clears the control: {after}"
+        );
     }
 
     #[test]

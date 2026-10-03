@@ -4763,7 +4763,7 @@ mod tests {
         assert_eq!(outcome.consumed_count, 1);
         let result = fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("queue: stop") && !result.contains("queue_active: true"),
+            !result.contains("queue:") && !result.contains("queue_active: true"),
             "drained queue consume should clear the active queue flag:\n{result}"
         );
         assert!(

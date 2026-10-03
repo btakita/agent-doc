@@ -664,7 +664,7 @@ fn run_auto_queue_continues_until_drained() {
         "third queue response should be written"
     );
     assert!(
-        content.contains("queue: stop"),
+        !content.contains("\nqueue: "),
         "queue should clear active state after all prompts are consumed"
     );
     assert!(!content.contains("agent:queue auto"));

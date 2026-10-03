@@ -251,9 +251,22 @@ control. It subsumes the deprecated `queue_active:` boolean and the deprecated
 | `queue:` value | meaning | subsumes |
 |----------------|---------|----------|
 | `start` (alias `go`) | activate — drive the queue | `queue_active: true` + marker `auto` |
-| `stop` | deactivate — halt (the binary writes this on drain) | `queue_active: false` |
-| `pause` | operator hold — inactive; never written by the binary (marker spelling: `<!-- agent:queue pause -->`) | — |
-| (absent) | default `go` — a queue with no control on the marker or in `queue:` runs (`#queuegodefault`) | absence of both |
+| `pause` | the one hold — inactive until the operator deletes it or writes `go` (marker spelling: `<!-- agent:queue pause -->`) | — |
+| (absent) | default `go` — a queue with no control on the marker or in `queue:` runs (`#queuegodefault`) | absence of both, `queue_active: false` |
+
+**There is no `stop` (`#queuestopremove`).** A queue is either running (no
+control, `go`, or `start`) or held (`pause`). A drain or halt clears the control
+(`frontmatter::merge_queue_state(.., false)` == `clear_queue_control`), so a
+head added later simply runs; the binary writes `pause` only for a hold it must
+keep across cycles — an operator stop fence it consumed, a wedged owner pane
+(`#recguard-wedge`), an operator command preempting an active drain — through
+`frontmatter::merge_queue_hold`. Legacy spellings are migrated, never honored as
+a hold: a frontmatter `queue: stop` (and a lone `queue_active: false`) reads as
+no control and is dropped on the next write, while a legacy `stop` MARKER token
+is the operator's hold gesture and reads as `pause`. `merge_queue_control`
+refuses `stop`. Before this, the binary wrote `queue: stop` on every halt, and a
+head left behind (or mirrored in later) sat inert under a control the operator
+never wrote.
 
 **`go` is the default (`#queuegodefault`).** With no marker token and no
 `queue:` field, the queue resolves to `go` (`control_binding::resolved_queue_binding`;
@@ -261,9 +274,9 @@ route's inactive-head probe shares the rule through `queue_control_defaults_to_g
 and an activation of a control-less queue persists `queue: go`, never `start`,
 via `merge_queue_state`). Free-text admission keeps its unmanaged-queue scope for
 a control-less queue, so a free-text head already present is still admitted as
-tracked work before the drain takes it. To hold a queue the operator writes `pause` or
-`stop` on either surface; a marker `pause`/`stop` converges into `queue:` like
-the other marker controls. A present but unrecognized `queue:` value (a
+tracked work before the drain takes it. To hold a queue the operator writes `pause`
+on either surface; a marker `pause` converges into `queue:` like the other
+marker controls. A present but unrecognized `queue:` value (a
 half-typed edit) is not "absent" and stays inert, and a legacy
 `queue_active` flag still speaks for itself.
 
@@ -273,14 +286,13 @@ one live queue prompt or preset the baseline did not carry (added or reworded;
 removals, strikes, and progress/pin re-marks alone do not count), and the
 operator did not also change the queue control in that window, preflight arms
 `go` on both the marker and `queue:` (`control_binding::infer_queue_go_from_prompt_edit`,
-ops-log `queue_edit_go_inferred`). This overrides `stop`, since the binary
-writes `stop` on every drain: before this, adding an item after a drain and
-invoking Run Agent Doc left the item inert, or armed only `start`, which never
-continues past the first head. `queue: pause` is the operator's standing hold.
+ops-log `queue_edit_go_inferred`). Before this, adding an item after a drain
+and invoking Run Agent Doc left the item inert, or armed only `start`, which
+never continues past the first head. `queue: pause` is the standing hold.
 It blocks the inference and free-text admission's queue start, and a
 drain/halt (`merge_queue_state(false)`) or a consumed marker token never
 lifts it; only the operator's own edit to `queue:` does. A control gesture made
-beside the prompt edit (for example setting `stop` while adding an item) wins
+beside the prompt edit (for example setting `pause` while adding an item) wins
 over the inference.
 
 - The value is parsed leniently (case- and whitespace-insensitive). An
@@ -291,21 +303,22 @@ over the inference.
   without a separate read path. The canonical key wins over a stale
   `queue_active:` line in the same frontmatter.
 - `queue_active:` and the `auto` marker attribute remain accepted as deprecated
-  input for backward compatibility; new documents should use `queue: start` /
-  `queue: stop`.
+  input for backward compatibility; new documents should use `queue: go` /
+  `queue: pause`, or no control at all.
 
-#### Marker-side control (`start` / `go` / `stop` on `agent:queue`)
+#### Marker-side control (`start` / `go` / `pause` on `agent:queue`)
 
-`start`/`go`/`stop` are also accepted as **marker** control tokens on the
+`start`/`go`/`pause` are also accepted as **marker** control tokens on the
 `<!-- agent:queue ... -->` opening tag — the ephemeral gesture spelling of the
 frontmatter control:
 
 - `<!-- agent:queue go -->` / `<!-- agent:queue start -->` fresh-activates the
   queue, identical to the legacy `auto` attribute (routed through the Auto
   trigger). `go` is an alias for `start`.
-- `<!-- agent:queue stop -->` forces the queue inactive this cycle.
+- `<!-- agent:queue pause -->` (legacy spelling `stop`) holds the queue and
+  converges into `queue: pause`.
 - The control token is stripped from the opening tag once the queue drains or a
-  `stop` halts it, so it never re-triggers on the next cycle.
+  hold is persisted, so it never re-triggers on the next cycle.
 
 These marker tokens are recognized queue-only attributes (no
 `misplaced_component_attr` typo warning).
@@ -320,7 +333,7 @@ document with the stable pre-turn baseline: when exactly one representation
 changed, that operator edit wins and is projected to the other representation.
 An explicit marker token also wins when no baseline is available, so a fresh
 `go`/`start` gesture can activate a document whose durable frontmatter still
-reads `queue: stop`. If both representations changed incompatibly in one
+reads `queue: pause`. If both representations changed incompatibly in one
 window, canonical frontmatter wins deterministically and the conflict is
 logged. A second convergence pass over the synchronized document is a no-op.
 
@@ -328,7 +341,7 @@ The route/dispatch path honors marker-side control identically to preflight: an
 inactive document (no `queue: start` / `queue_active: true`) whose `agent:queue`
 opening tag carries `go`/`start` is recognized as an activatable head, so
 `agent-doc route` (and the JetBrains `Run Agent Doc` action it backs) starts the
-queue even when the frontmatter still reads `queue: stop`. A marker-side `stop`
+queue even when the frontmatter still reads `queue: pause`. A marker-side `pause`
 keeps the queue inert on that path and wins over `auto`/`go`/`start`.
 
 Activation readers that run without a preflight convergence pass first share
@@ -336,7 +349,7 @@ preflight's control predicate (`#qbindingone`, GH #79):
 `control_binding::queue_control_activation`. These are the supervisor/loop
 drainability count (`drainable_head_count`) and the continuation detector
 (`required_continuation`). Before this, they re-derived activation from raw
-frontmatter. A marker `go` beside a stale `queue: stop` was then active for
+frontmatter. A marker `go` beside a stale frontmatter hold was then active for
 preflight but reported `drainable_head_count: 0`, so the idle watch never
 dispatched and the queue never drained. Closeout-time readers (consumption,
 noise pruning) see frontmatter that preflight's `#qactsync` convergence has
@@ -346,20 +359,21 @@ stays inert, matching preflight.
 #### Writer emits canonical `queue:` (phase 4)
 
 Queue-maintenance write paths persist the canonical control directly:
-`frontmatter::merge_queue_state` writes `queue: start` on activation and
-`queue: stop` on a halt, clearing any deprecated `queue_active:` line in the
-same write. A drain (no live head left, `#queuestopretire`) instead removes the
-control from both surfaces with `frontmatter::clear_queue_control`: the queue
-falls back to its default `go` (`#queuegodefault`), is idle while empty, and a
-head added later runs without a stale `stop`. That default `go` drains unattended
+`frontmatter::merge_queue_state` writes `queue: go` (or `start`) on activation
+and clears the control on a drain or halt (`#queuestopretire`,
+`#queuestopremove`), removing any deprecated `queue_active:` line in the same
+write: the queue falls back to its default `go` (`#queuegodefault`), is idle
+while empty, and a head added later runs. A hold the binary must keep is the
+explicit `queue: pause` from `frontmatter::merge_queue_hold`. That default `go` drains unattended
 too (`#queuegodefaultdrain`): the supervisor idle watch's drainability count and
 the continuation detector the Codex Stop hook reads treat a control-less queue
 exactly like an explicit `go`. An operator `pause` survives a
-drain. A drain that held fresh backlog ids out of a non-`go` queue keeps
-`queue: stop`, because with no control the next cycle would mirror and run them. Both fields are normalized away together by the replay-hash /
+drain. A drain that held fresh backlog ids out of the queue also clears the
+control: the backlog opted into mirroring (`queue=append|sync`), so the next
+cycle mirrors and runs them. Both fields are normalized away together by the replay-hash /
 boundary-compare paths (`strip_queue_active_frontmatter`,
 `strip_route_queue_state_for_boundary_compare`), so a legacy `queue_active:` and
-a migrated `queue: start|stop` compare equal and do not regenerate the
+a migrated `queue: start` compare equal and do not regenerate the
 snapshot/HEAD drift loop. Reads continue to resolve through
 `normalize_queue_control` (`queue:` → internal `queue_active`), so the deprecated
 field remains accepted as input for backward compatibility.

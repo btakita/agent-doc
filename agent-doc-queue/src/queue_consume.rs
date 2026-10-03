@@ -2659,7 +2659,9 @@ Old.
             .unwrap()
             .expect("captured response should heal and advance the torn queue projection");
 
-        assert!(projected.target_content.contains("queue: start"));
+        // `#queuestopremove`: the torn legacy inactive flag is no control, so
+        // the live remaining head re-arms the default `go`.
+        assert!(projected.target_content.contains("queue: go"));
         assert!(
             projected
                 .target_content
@@ -2695,8 +2697,8 @@ Old.
             .expect("terminal answered head should project a drained queue");
 
         assert!(
-            projected.target_content.contains("queue: stop"),
-            "{}",
+            !projected.target_content.contains("queue:"),
+            "a terminal drain clears the control (#queuestopremove):\n{}",
             projected.target_content
         );
         assert!(

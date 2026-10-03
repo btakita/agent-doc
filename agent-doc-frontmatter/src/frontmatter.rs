@@ -140,26 +140,30 @@ pub enum TerminalHostPreference {
 ///
 /// The `queue:` frontmatter key subsumes the deprecated `queue_active:` boolean
 /// and the `auto` attribute on the `agent:queue` marker. `start` (alias `go`)
-/// activates the queue; `stop` deactivates it. Parsed leniently (case- and
+/// activates the queue; `pause` holds it. Parsed leniently (case- and
 /// whitespace-insensitive); unknown values resolve to `None` and are ignored so
 /// a typo never silently flips activation.
+///
+/// `#queuestopremove`: there is no `stop`. A queue is either running (no
+/// control, `go`, or `start`) or held (`pause`). A drained or halted queue
+/// clears its control, so a head added later simply runs; a legacy
+/// `queue: stop` reads as no control and disappears on the next write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueControl {
     /// `start` / `go` — activate the queue.
     Start,
-    /// `stop` — deactivate the queue.
-    Stop,
+    /// `pause` — the one visible hold.
+    Pause,
 }
 
 impl QueueControl {
-    /// Parse a raw `queue:` value. `start`/`go` → [`Start`], `stop` → [`Stop`].
-    /// Returns `None` for empty/unknown values.
+    /// Parse a raw `queue:` value. `start`/`go` → [`Start`], `pause` →
+    /// [`Pause`]. Returns `None` for empty/unknown values and for the retired
+    /// `stop` (see [`is_retired_queue_stop`]).
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "start" | "go" => Some(Self::Start),
-            // `pause` is the operator-only hold (`#queueeditgo`): inactive like
-            // `stop`, but never written by the binary.
-            "stop" | "pause" => Some(Self::Stop),
+            "pause" => Some(Self::Pause),
             _ => None,
         }
     }
@@ -1307,9 +1311,26 @@ impl Frontmatter {
 /// `queue_active` untouched. Callers run this immediately after deserializing
 /// frontmatter so every downstream reader of `queue_active` honors `queue:`.
 pub fn normalize_queue_control(fm: &mut Frontmatter) {
+    // `#queuestopremove`: a legacy `queue: stop` (and the lone legacy
+    // `queue_active: false` it was folded from) is no control at all — the
+    // default `go` — so a queue the binary once halted runs again.
+    if fm.queue.as_deref().is_some_and(is_retired_queue_stop) {
+        fm.queue = None;
+        if fm.queue_active == Some(false) {
+            fm.queue_active = None;
+        }
+    }
+    if fm.queue.is_none() && fm.queue_active == Some(false) {
+        fm.queue_active = None;
+    }
     if let Some(control) = fm.queue.as_deref().and_then(QueueControl::parse) {
         fm.queue_active = Some(control.is_active());
     }
+}
+
+/// `#queuestopremove`: whether a raw `queue:` value is the retired `stop`.
+pub fn is_retired_queue_stop(raw: &str) -> bool {
+    raw.trim().eq_ignore_ascii_case("stop")
 }
 
 /// Compare frontmatter values while allowing only the runtime `agent` field to differ.
@@ -1559,15 +1580,9 @@ fn canonical_for_write(fm: &Frontmatter) -> std::borrow::Cow<'_, Frontmatter> {
         return std::borrow::Cow::Borrowed(fm);
     }
     let mut canonical = fm.clone();
-    if canonical.queue.is_none() {
-        canonical.queue = Some(
-            if fm.queue_active == Some(true) {
-                "start"
-            } else {
-                "stop"
-            }
-            .to_string(),
-        );
+    // `#queuestopremove`: an inactive legacy flag writes no control at all.
+    if canonical.queue.is_none() && fm.queue_active == Some(true) {
+        canonical.queue = Some("start".to_string());
     }
     canonical.queue_active = None;
     std::borrow::Cow::Owned(canonical)
@@ -2184,16 +2199,19 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
 
 /// Persist the canonical `queue:` activation control (`#queue-state-unify`
 /// phase 4), clearing the deprecated `queue_active:` line so `queue:` is the
-/// single written source of truth. `active` → `queue: start`, else `queue: stop`.
-/// Reads still resolve correctly because [`normalize_queue_control`] folds
-/// `queue:` back onto `queue_active` on parse.
+/// single written source of truth.
+///
+/// `active` keeps an already-running control, materializes the default `go` on
+/// a queue with none, and lifts a `pause` to `start` (an explicit activation is
+/// the operator's go-ahead). `!active` — a drain or halt — clears the control
+/// (`#queuestopremove`): the binary never writes a `stop`, so a head added
+/// later simply runs. An operator `pause` survives (`#queueeditgo`). A hold
+/// the binary itself must persist goes through [`merge_queue_hold`].
 pub fn merge_queue_state(content: &str, active: bool) -> Result<String> {
+    if !active {
+        return clear_queue_control(content);
+    }
     let (mut fm, body) = parse(content)?;
-    // A drain/halt must not lift an operator `pause` (`#queueeditgo`).
-    let paused = fm
-        .queue
-        .as_deref()
-        .is_some_and(|queue| queue.trim().eq_ignore_ascii_case("pause"));
     // `#queuegodefault`: activating a queue that carries no `queue:` control
     // materializes its default `go`, never `start` — `start` would silently
     // downgrade it to a first-head-only drain.
@@ -2201,43 +2219,49 @@ pub fn merge_queue_state(content: &str, active: bool) -> Result<String> {
     // `#queuegokeep`: activating an already-active control keeps it. Rewriting
     // `go` as `start` downgraded the in-session drain to the supervisor-scoped
     // first-head trigger.
-    let already_active = fm.queue.as_deref().is_some_and(|queue| {
-        let queue = queue.trim();
-        queue.eq_ignore_ascii_case("go") || queue.eq_ignore_ascii_case("start")
-    });
-    if active && already_active {
-        fm.queue_active = None;
-        return write_preserving(content, &fm, body);
-    }
-    if !(paused && !active) {
-        fm.queue = Some(
-            match (active, default_go) {
-                (true, true) => "go",
-                (true, false) => "start",
-                (false, _) => "stop",
-            }
-            .to_string(),
-        );
+    let already_active = fm
+        .queue
+        .as_deref()
+        .and_then(QueueControl::parse)
+        .is_some_and(QueueControl::is_active);
+    if !already_active {
+        fm.queue = Some(if default_go { "go" } else { "start" }.to_string());
     }
     fm.queue_active = None;
     write_preserving(content, &fm, body)
 }
 
-/// `#queuestopretire`: a DRAIN (no live heads left) removes the queue control
-/// instead of writing `queue: stop`. A queue with no control is in its default
-/// `go` mode (`#queuegodefault`), and an empty queue has nothing to run, so the
-/// cleared state is idle until a head is added — and then it simply runs,
-/// without the stale `stop` that wedged GH #79. An operator `pause` is kept
-/// (`#queueeditgo`). A HALT with heads left still uses [`merge_queue_state`].
+/// `#queuestopretire` / `#queuestopremove`: a drain or halt removes the queue
+/// control. A queue with no control is in its default `go` mode
+/// (`#queuegodefault`), and an empty queue has nothing to run, so the cleared
+/// state is idle until a head is added — and then it simply runs. An operator
+/// `pause` is kept (`#queueeditgo`).
 pub fn clear_queue_control(content: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
-    let paused = fm
-        .queue
-        .as_deref()
-        .is_some_and(|queue| queue.trim().eq_ignore_ascii_case("pause"));
-    if paused {
-        return merge_queue_state(content, false);
+    if fm.queue.as_deref().and_then(QueueControl::parse) == Some(QueueControl::Pause) {
+        fm.queue_active = None;
+        return write_preserving(content, &fm, body);
     }
+    fm.queue = None;
+    fm.queue_active = None;
+    write_preserving(content, &fm, body)
+}
+
+/// `#queuestopremove`: persist the one visible hold, `queue: pause`.
+///
+/// Only for a hold the binary must keep across cycles because no later state
+/// edge would otherwise stop the drain: an operator stop fence it consumed, a
+/// wedged owner pane, an operator command preempting an active drain. The
+/// operator lifts it by deleting the line or writing `go`.
+pub fn merge_queue_hold(content: &str) -> Result<String> {
+    merge_queue_control(content, "pause")
+}
+
+/// Lift a hold back to the default `go`: remove the `queue:` control even when
+/// it is `pause`. Only the binary's own [`merge_queue_hold`] owner may call
+/// this (an operator command preemption resuming).
+pub fn lift_queue_hold(content: &str) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
     fm.queue = None;
     fm.queue_active = None;
     write_preserving(content, &fm, body)
@@ -2250,8 +2274,10 @@ pub fn merge_queue_control(content: &str, control: &str) -> Result<String> {
     let normalized = match control.trim().to_ascii_lowercase().as_str() {
         "go" => "go",
         "start" => "start",
-        "stop" => "stop",
         "pause" => "pause",
+        "stop" => anyhow::bail!(
+            "`queue: stop` was removed (#queuestopremove): a drained queue clears its control; hold a queue with `pause`"
+        ),
         other => anyhow::bail!("unsupported queue control `{other}`"),
     };
     let (mut fm, body) = parse(content)?;
@@ -2303,6 +2329,14 @@ fn split_frontmatter(content: &str) -> Result<Option<(&str, &str)>> {
         }
         (marker_start + 4, &content[marker_start + 4..])
     };
+    // An empty block (`---\n---`) is valid: clearing the last key (for
+    // example the queue control, `#queuestopremove`) leaves exactly this.
+    if let Some(body) = rest.strip_prefix("---\n") {
+        return Ok(Some(("", body)));
+    }
+    if rest == "---" {
+        return Ok(Some(("", "")));
+    }
     let (end, closing_len) = rest
         .find("\n---\n")
         .map(|end| (end, 5))
@@ -2989,13 +3023,14 @@ mod tests {
     fn queue_control_parse_aliases() {
         assert_eq!(QueueControl::parse("start"), Some(QueueControl::Start));
         assert_eq!(QueueControl::parse("go"), Some(QueueControl::Start));
-        assert_eq!(QueueControl::parse("STOP"), Some(QueueControl::Stop));
+        // `#queuestopremove`: `stop` is retired, not an alias.
+        assert_eq!(QueueControl::parse("STOP"), None);
         assert_eq!(QueueControl::parse("  Start  "), Some(QueueControl::Start));
-        assert_eq!(QueueControl::parse("pause"), Some(QueueControl::Stop));
+        assert_eq!(QueueControl::parse("pause"), Some(QueueControl::Pause));
         assert_eq!(QueueControl::parse("auto"), None);
         assert_eq!(QueueControl::parse(""), None);
         assert!(QueueControl::Start.is_active());
-        assert!(!QueueControl::Stop.is_active());
+        assert!(!QueueControl::Pause.is_active());
     }
 
     #[test]
@@ -3014,15 +3049,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_queue_stop_deactivates() {
+    fn parse_retired_queue_stop_is_no_control() {
+        // `#queuestopremove`: a legacy `queue: stop` reads as no control (the
+        // default `go`), so a queue the binary once halted runs again.
         let (fm, _) = parse("---\nqueue: stop\n---\n\n").unwrap();
-        assert_eq!(fm.queue_active, Some(false));
+        assert_eq!(fm.queue, None);
+        assert_eq!(fm.queue_active, None);
+        let (fm, _) = parse("---\nqueue_active: false\n---\n\n").unwrap();
+        assert_eq!(
+            fm.queue_active, None,
+            "a lone legacy inactive flag is no control"
+        );
+        let (fm, _) = parse("---\nqueue: pause\n---\n\n").unwrap();
+        assert_eq!(fm.queue_active, Some(false), "pause is the hold");
     }
 
     #[test]
     fn parse_queue_canonical_wins_over_stale_queue_active() {
         // An explicit `queue:` control overrides a stale `queue_active:` line.
-        let (fm, _) = parse("---\nqueue: stop\nqueue_active: true\n---\n\n").unwrap();
+        let (fm, _) = parse("---\nqueue: pause\nqueue_active: true\n---\n\n").unwrap();
         assert_eq!(fm.queue_active, Some(false));
 
         let (fm, _) = parse("---\nqueue: start\nqueue_active: false\n---\n\n").unwrap();
@@ -3168,7 +3213,10 @@ mod tests {
 
         fm.queue_active = Some(false);
         let out = write(&fm, "body\n").unwrap();
-        assert!(out.contains("queue: stop"), "{out}");
+        assert!(
+            !out.contains("queue:"),
+            "an inactive flag writes no control: {out}"
+        );
         assert!(!out.contains("queue_active:"), "{out}");
 
         // A doc parsed from canonical `queue:` (queue_active mirrored on) must
@@ -3198,7 +3246,10 @@ mod tests {
         assert!(!active.contains("queue_active:"), "{active}");
 
         let stopped = merge_queue_state(legacy, false).unwrap();
-        assert!(stopped.contains("queue: stop"), "{stopped}");
+        assert!(
+            !stopped.contains("queue:"),
+            "a drain clears the control: {stopped}"
+        );
 
         // `#queuegodefault`: no control at all activates to `go`, not `start`.
         let bare = "---\nagent_doc_format: template\n---\n\nbody\n";
@@ -3210,7 +3261,39 @@ mod tests {
         let (fm, _) = parse(&active).unwrap();
         assert_eq!(fm.queue_active, Some(true));
         let (fm, _) = parse(&stopped).unwrap();
-        assert_eq!(fm.queue_active, Some(false));
+        assert_eq!(fm.queue_active, None);
+    }
+
+    /// `#queuestopremove`: no writer ever emits `queue: stop`; the only hold is
+    /// `pause`, and `merge_queue_control` refuses `stop`.
+    #[test]
+    fn clearing_the_only_key_leaves_a_parsable_empty_block() {
+        let out = clear_queue_control("---\nqueue: go\n---\n\nbody\n").unwrap();
+        let (fm, body) = parse(&out).unwrap();
+        assert_eq!(fm.queue, None);
+        assert_eq!(body, "\nbody\n");
+        assert_eq!(parse("---\n---").unwrap().1, "");
+    }
+
+    #[test]
+    fn no_writer_emits_queue_stop() {
+        let base = "---\nagent: claude\nqueue: go\n---\nBody\n";
+        for out in [
+            merge_queue_state(base, false).unwrap(),
+            clear_queue_control(base).unwrap(),
+            merge_queue_hold(base).unwrap(),
+            lift_queue_hold(&merge_queue_hold(base).unwrap()).unwrap(),
+        ] {
+            assert!(!out.contains("stop"), "{out}");
+        }
+        assert!(merge_queue_hold(base).unwrap().contains("queue: pause\n"));
+        assert!(merge_queue_control(base, "stop").is_err());
+        let legacy = "---\nagent: claude\nqueue: stop\n---\nBody\n";
+        assert_eq!(
+            merge_queue_state(legacy, false).unwrap(),
+            "---\nagent: claude\n---\nBody\n",
+            "a legacy stop is dropped on the next write"
+        );
     }
 
     #[test]
@@ -4007,12 +4090,12 @@ mod tests {
         assert!(
             merge_queue_state(stopped, true)
                 .unwrap()
-                .contains("queue: start\n")
+                .contains("queue: go\n"),
+            "a legacy stop is no control, so activation materializes the default go"
         );
         assert!(
-            merge_queue_state(go, false)
-                .unwrap()
-                .contains("queue: stop\n")
+            !merge_queue_state(go, false).unwrap().contains("queue:"),
+            "a drain clears the control (#queuestopremove)"
         );
     }
 

@@ -2775,7 +2775,7 @@ mod tests {
             "---\n",
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
-            "queue: stop\n",
+            "queue: pause\n",
             "---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append -->\n",
@@ -3942,7 +3942,7 @@ mod tests {
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
             "agent_doc_write: crdt\n",
-            "queue_active: false\n",
+            "queue: pause\n",
             "---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append -->\n",
@@ -4062,7 +4062,10 @@ mod tests {
         );
         assert!(!updated.contains("[#item-a]"));
         assert!(!updated.contains("[#item-b]"));
-        assert!(updated.contains("queue: stop"));
+        assert!(
+            !updated.contains("queue:"),
+            "a drain clears the control: {updated}"
+        );
     }
     #[test]
     fn preflight_does_not_clear_live_inactive_queue_without_snapshot_proof() {
@@ -4073,7 +4076,7 @@ mod tests {
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
             "agent_doc_write: crdt\n",
-            "queue_active: false\n",
+            "queue: pause\n",
             "---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append -->\n",
@@ -4140,7 +4143,10 @@ mod tests {
         );
         assert!(!updated.contains("dispatch #spec-test-build-install-commit-push"));
         assert!(!updated.contains("[#cspe]"));
-        assert!(updated.contains("queue: stop"));
+        assert!(
+            !updated.contains("queue:"),
+            "a drain clears the control: {updated}"
+        );
 
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
@@ -4148,7 +4154,10 @@ mod tests {
         assert!(snap.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
         assert!(!snap.contains("dispatch #spec-test-build-install-commit-push"));
         assert!(!snap.contains("[#cspe]"));
-        assert!(snap.contains("queue: stop"));
+        assert!(
+            !snap.contains("queue:"),
+            "a drain clears the control: {snap}"
+        );
     }
     #[test]
     fn preflight_does_not_swallow_user_prose_that_mentions_head() {
@@ -4406,7 +4415,7 @@ mod tests {
             "agent_doc_format: template\n",
             // Held queue: this test is about closeout drift, not about the
             // default-`go` activation a bare queue now gets (`#queuegodefault`).
-            "queue: stop\n",
+            "queue: pause\n",
             "---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "❯ hello\n\n",

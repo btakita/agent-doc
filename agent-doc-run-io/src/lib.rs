@@ -504,7 +504,7 @@ pub fn run_once(
                     file,
                     "owner_pane_wedge_stop_queue",
                 )
-                && let Ok(stopped) = frontmatter::merge_queue_state(&content, false)
+                && let Ok(stopped) = frontmatter::merge_queue_hold(&content)
                 && let Err(err) =
                     agent_doc_document_realtime_io::atomic_write_through_authority(file, &stopped)
             {

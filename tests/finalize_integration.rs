@@ -1322,9 +1322,15 @@ fn write_commit_done_queue_consume_does_not_warn_about_expected_missing_snapshot
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(output.status.success(), "closeout should succeed:\n{stderr}");
+    assert!(
+        output.status.success(),
+        "closeout should succeed:\n{stderr}"
+    );
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(!content.contains("- do [#done1]"), "queue head consumed:\n{content}");
+    assert!(
+        !content.contains("- do [#done1]"),
+        "queue head consumed:\n{content}"
+    );
     assert!(
         !stderr.contains("snapshot is missing"),
         "expected missing-snapshot skip must stay off the console:\n{stderr}"
@@ -3291,7 +3297,7 @@ fn finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id(
         "queue head should drain from the queue when the response topic targets its preset id:\n{content}"
     );
     assert!(
-        content.contains("queue: stop"),
+        !content.contains("\nqueue: "),
         "drained queue should clear active state:\n{content}"
     );
     assert!(
@@ -3341,7 +3347,7 @@ fn finalize_echoes_consumed_free_text_queue_prompt_into_response() {
     let content = fs::read_to_string(&doc).unwrap();
     // The free-text head drains from the queue once answered.
     assert!(
-        content.contains("queue: stop"),
+        !content.contains("\nqueue: "),
         "drained free-text queue should clear active state:\n{content}"
     );
     // The consumed prompt is embedded into THIS cycle's response block, after
@@ -3549,7 +3555,7 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
         "drained queue should not retain completed items"
     );
     assert!(
-        content.contains("queue: stop"),
+        !content.contains("\nqueue: "),
         "queue_active should be false when drained"
     );
     assert!(
@@ -3602,7 +3608,7 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
         "drained queue should not retain a struck-through last item"
     );
     assert!(
-        content.contains("queue: stop"),
+        !content.contains("\nqueue: "),
         "queue_active should be false when drained"
     );
 }
@@ -3648,7 +3654,7 @@ fn finalize_consumes_contiguous_queue_items_resolved_by_done_ids() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("queue: stop"),
+        !content.contains("\nqueue: "),
         "queue_active should clear after all done-backed queue items are consumed:\n{content}"
     );
     assert!(
@@ -3714,7 +3720,7 @@ fn finalize_consumes_done_id_queue_items_interspersed_with_priority_prompt() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        !content.contains("queue: stop"),
+        !content.contains("\nqueue: "),
         "queue_active should remain true while the interspersed priority prompt is still live:\n{content}"
     );
     assert!(
@@ -3832,7 +3838,7 @@ fn pending_only_done_and_gate_drain_the_queue_atomically() {
         .stderr(predicates::str::contains("[queue] drained"));
 
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("queue: stop"), "{content}");
+    assert!(!content.contains("\nqueue: "), "{content}");
     assert!(
         content.contains("<!-- agent:queue priority -->\n<!-- /agent:queue -->"),
         "{content}"

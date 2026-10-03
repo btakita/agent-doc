@@ -2185,7 +2185,7 @@ pub fn marker_control(
 ) -> Option<agent_doc_frontmatter::frontmatter::QueueControl> {
     // `pause` is the operator's hold; like `stop` it keeps the queue inactive.
     if attrs.contains_key("stop") || attrs.contains_key("pause") {
-        return Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop);
+        return Some(agent_doc_frontmatter::frontmatter::QueueControl::Pause);
     }
     if attrs.contains_key("start") || attrs.contains_key("go") {
         return Some(agent_doc_frontmatter::frontmatter::QueueControl::Start);
@@ -6112,10 +6112,10 @@ mod tests {
         assert_eq!(marker_control(&attrs), Some(QueueControl::Start));
         attrs.clear();
         attrs.insert("stop".to_string(), String::new());
-        assert_eq!(marker_control(&attrs), Some(QueueControl::Stop));
+        assert_eq!(marker_control(&attrs), Some(QueueControl::Pause));
         // stop wins over start/go if both are present.
         attrs.insert("go".to_string(), String::new());
-        assert_eq!(marker_control(&attrs), Some(QueueControl::Stop));
+        assert_eq!(marker_control(&attrs), Some(QueueControl::Pause));
     }
 
     #[test]
@@ -6144,12 +6144,12 @@ mod tests {
     }
 
     #[test]
-    fn activation_canonical_queue_stop_deactivates() {
+    fn activation_canonical_queue_pause_deactivates() {
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(
-            "---\nqueue: stop\nqueue_active: true\n---\n\n",
+            "---\nqueue: pause\nqueue_active: true\n---\n\n",
         )
         .unwrap();
-        // Canonical `queue: stop` wins over a stale `queue_active: true`.
+        // Canonical `queue: pause` wins over a stale `queue_active: true`.
         assert_eq!(fm.queue_active, Some(false));
         let entries = vec![make_prompt("do #fix1")];
         let act = resolve_activation(&entries, false, false, fm.queue_active.unwrap_or(false));

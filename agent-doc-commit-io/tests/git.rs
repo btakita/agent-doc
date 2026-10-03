@@ -2880,14 +2880,21 @@ Duplicate replay should stay live.
         .unwrap()
         .expect("fixture response must own its free-text queue head")
         .target_content;
-        // Terminal free-text resolution now stops the queue atomically. Model a
-        // real later recurrence by reactivating it as well as restoring the row;
-        // a row under `queue: stop` is intentionally not drainable work.
-        let recurring = struck.replacen("queue: stop", "queue: start", 1).replacen(
-            "<!-- /agent:queue -->",
-            "- finish the plan\n<!-- /agent:queue -->",
-            1,
-        );
+        // Terminal free-text resolution clears the queue control atomically
+        // (`#queuestopremove`). Model a real later recurrence: the operator
+        // re-arms it with an explicit `go` and types the row again.
+        assert!(!struck.contains("queue:"), "{struck}");
+        let recurring = struck
+            .replacen(
+                "agent_doc_format: template\n",
+                "agent_doc_format: template\nqueue: go\n",
+                1,
+            )
+            .replacen(
+                "<!-- /agent:queue -->",
+                "- finish the plan\n<!-- /agent:queue -->",
+                1,
+            );
         fs::write(&doc, &recurring).unwrap();
         commit(&doc).expect_err("a later recurring prompt must break the exact target proof");
 
@@ -3048,7 +3055,10 @@ Duplicate replay should stay live.
         .unwrap()
         .expect("fixture response must own its free-text queue head")
         .target_content;
-        assert!(terminal.contains("queue: stop"));
+        assert!(
+            !terminal.contains("queue:"),
+            "a drain clears the control: {terminal}"
+        );
         assert!(!terminal.contains("- finish the plan"));
         fs::write(&doc, &terminal).unwrap();
 
@@ -3056,7 +3066,10 @@ Duplicate replay should stay live.
         let landed = agent_doc_git_io::revision::show_head(&doc)
             .unwrap()
             .expect("committed document");
-        assert!(landed.contains("queue: stop"));
+        assert!(
+            !landed.contains("queue:"),
+            "a drain clears the control: {landed}"
+        );
         assert!(!landed.contains("- finish the plan"));
         assert!(landed.contains("Finished and verified."));
     }
@@ -3112,7 +3125,10 @@ Duplicate replay should stay live.
             .unwrap()
             .expect("committed document");
         assert!(landed.contains("Earlier work.\n### Re: finish the plan"));
-        assert!(landed.contains("queue: stop"));
+        assert!(
+            !landed.contains("queue:"),
+            "a drain clears the control: {landed}"
+        );
         assert!(!landed.contains("- finish the plan"));
     }
 

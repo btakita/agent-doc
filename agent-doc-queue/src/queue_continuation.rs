@@ -71,7 +71,7 @@ pub fn continuation_guidance(pause_reason: Option<&str>) -> String {
                 format!("recorded pause reason: {reason}")
             };
             format!(
-                "queue_paused is set but is NOT a contradiction with queue_continuation_required — an accepted `admin queue pause` suppresses ONLY the unattended supervisor idle-watch auto-injection (the flood guard); the attended in-session loop remains the legitimate single-owner drain and must keep draining proven-closeout work. Do not stop the loop on the pause; to actually stop the in-session loop use `queue: stop` frontmatter or a `--- stop` fence, not pause ({reason_clause}). {CONTINUATION_NO_STALL_GUIDANCE}"
+                "queue_paused is set but is NOT a contradiction with queue_continuation_required — an accepted `admin queue pause` suppresses ONLY the unattended supervisor idle-watch auto-injection (the flood guard); the attended in-session loop remains the legitimate single-owner drain and must keep draining proven-closeout work. Do not stop the loop on the pause; to actually hold the in-session loop use `queue: pause` frontmatter or a `--- stop` fence, not the admin pause ({reason_clause}). {CONTINUATION_NO_STALL_GUIDANCE}"
             )
         }
     }
@@ -2445,13 +2445,7 @@ mod tests {
             )
         };
         for (frontmatter, marker, expected, why) in [
-            ("queue: stop\n", "", 0, "a bare `queue: stop` halts"),
-            (
-                "queue: go\n",
-                " stop",
-                0,
-                "a marker `stop` halts a `queue: go`",
-            ),
+            ("queue: pause\n", "", 0, "a bare `queue: pause` holds"),
             (
                 "queue: go\n",
                 " pause",
@@ -2461,15 +2455,27 @@ mod tests {
             (
                 "queue_active: false\n",
                 "",
+                1,
+                "#queuestopremove: a lone legacy `queue_active: false` is no control (go)",
+            ),
+            (
+                "queue: stop\n",
+                "",
+                1,
+                "#queuestopremove: a legacy `queue: stop` is no control (go)",
+            ),
+            (
+                "queue: go\n",
+                " stop",
                 0,
-                "a lone legacy `queue_active: false` halts",
+                "#queuestopremove: a legacy `stop` marker token is the pause gesture",
             ),
             ("queue: go\n", "", 1, "`queue: go` drains"),
             (
-                "queue: stop\n",
+                "queue: pause\n",
                 " go",
                 1,
-                "GH #79: a marker `go` overrides a stale `queue: stop` (#qactsync)",
+                "GH #79: a marker `go` overrides a frontmatter hold (#qactsync)",
             ),
             (
                 "queue_active: false\n",
@@ -2519,9 +2525,7 @@ mod tests {
         // An explicit hold on either surface still keeps it.
         for held in [
             content.replace("template\n---", "template\nqueue: pause\n---"),
-            content.replace("template\n---", "template\nqueue: stop\n---"),
             content.replace("<!-- agent:queue -->", "<!-- agent:queue pause -->"),
-            content.replace("template\n---", "template\nqueue_active: false\n---"),
         ] {
             assert_ne!(held, content);
             assert_eq!(drainable_head_count(&held), 0, "{held}");
@@ -2646,7 +2650,10 @@ mod tests {
                 .expect("the unclaimed head still drains");
         assert_eq!(continuation.head_prompt, "do [#b]");
         assert_eq!(drainable_head_count(&content), 2);
-        assert_eq!(drainable_head_count_excluding_claimed(&content, &claimed), 1);
+        assert_eq!(
+            drainable_head_count_excluding_claimed(&content, &claimed),
+            1
+        );
         assert_eq!(claimed_head_count(&content, &claimed), 1);
     }
 
@@ -2675,7 +2682,10 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert_eq!(drainable_head_count_excluding_claimed(&content, &claimed), 0);
+        assert_eq!(
+            drainable_head_count_excluding_claimed(&content, &claimed),
+            0
+        );
         assert_eq!(claimed_head_count(&content, &claimed), 2);
         let live = live_queue_head_identities(&content).unwrap();
         assert!(live.contains(&claim_identity("#gh-fix https://github.com/o/r/issues/110")));

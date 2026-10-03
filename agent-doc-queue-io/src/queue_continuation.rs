@@ -330,8 +330,10 @@ mod tests {
     ) -> PathBuf {
         std::fs::create_dir_all(dir.join(".agent-doc/snapshots")).unwrap();
         let doc = dir.join("task.md");
+        // `#queuestopremove`: an inactive queue is held with `pause`.
+        let control = if queue_active { "start" } else { "pause" };
         let content = format!(
-            "---\nsession: sid\nagent_doc_format: template\nqueue_active: {queue_active}\n---\n\n\
+            "---\nsession: sid\nagent_doc_format: template\nqueue: {control}\n---\n\n\
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n\
 ## Queue\n\n<!-- agent:queue{queue_attrs} -->\n{queue_body}<!-- /agent:queue -->\n"
         );
@@ -1389,7 +1391,10 @@ mod tests {
 
         let drained = write_doc(dir.path(), &[], true, true);
         std::fs::copy(&drained, &doc).unwrap();
-        assert!(reconcile_marker(&doc, "commit").is_none(), "queue is drained");
+        assert!(
+            reconcile_marker(&doc, "commit").is_none(),
+            "queue is drained"
+        );
         assert!(
             load_continuation_request(&doc).unwrap().is_none(),
             "a drained queue must release the bound"

@@ -83,6 +83,8 @@ pub fn active_queue_prompt(content: &str) -> Option<String> {
 
 /// True when document frontmatter explicitly parks queue execution.
 ///
+/// The only hold is `queue: pause` (`#queuestopremove`).
+///
 /// This is distinct from a queue that is merely not activated yet: Codex Stop
 /// recovery still treats an ordinary manual queue head as pending document
 /// work, but must not reopen a committed turn for an operator-stopped queue.
@@ -434,21 +436,51 @@ mod tests {
             Some("event-adapter-impl-tourneyx")
         );
         let message = super::queue_skip_diagnostic_for_content(content).unwrap();
-        assert!(message.contains("#event-adapter-impl-tourne9yx is not a tracked item"), "{message}");
-        assert!(message.contains("`--done event-adapter-impl-tourneyx`"), "{message}");
-        assert!(!message.contains("Reap it with `--done event-adapter-impl-tourne9yx`"), "{message}");
+        assert!(
+            message.contains("#event-adapter-impl-tourne9yx is not a tracked item"),
+            "{message}"
+        );
+        assert!(
+            message.contains("`--done event-adapter-impl-tourneyx`"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("Reap it with `--done event-adapter-impl-tourne9yx`"),
+            "{message}"
+        );
     }
 
     #[test]
     fn a_tracked_or_ambiguous_head_id_gets_no_suggestion() {
         let content = "<!-- agent:backlog -->\n- [ ] [#adapter-one] A.\n- [ ] [#adapter-two] B.\n<!-- /agent:backlog -->\n";
-        assert_eq!(super::untracked_head_id_suggestion(content, "adapter-one"), None);
-        assert_eq!(super::untracked_head_id_suggestion(content, "adapter-onx"), Some("adapter-one".to_string()));
-        assert_eq!(super::untracked_head_id_suggestion(content, "adapter-tw"), Some("adapter-two".to_string()));
-        assert_eq!(super::untracked_head_id_suggestion(content, "adapter-xxx"), None, "two candidates at distance <= 3 but none <= 2 is no match");
+        assert_eq!(
+            super::untracked_head_id_suggestion(content, "adapter-one"),
+            None
+        );
+        assert_eq!(
+            super::untracked_head_id_suggestion(content, "adapter-onx"),
+            Some("adapter-one".to_string())
+        );
+        assert_eq!(
+            super::untracked_head_id_suggestion(content, "adapter-tw"),
+            Some("adapter-two".to_string())
+        );
+        assert_eq!(
+            super::untracked_head_id_suggestion(content, "adapter-xxx"),
+            None,
+            "two candidates at distance <= 3 but none <= 2 is no match"
+        );
         let both = "<!-- agent:backlog -->\n- [ ] [#adapter-ab] A.\n- [ ] [#adapter-ac] B.\n<!-- /agent:backlog -->\n";
-        assert_eq!(super::untracked_head_id_suggestion(both, "adapter-ad"), None, "ambiguous");
-        assert_eq!(super::untracked_head_id_suggestion(content, "ab"), None, "too short");
+        assert_eq!(
+            super::untracked_head_id_suggestion(both, "adapter-ad"),
+            None,
+            "ambiguous"
+        );
+        assert_eq!(
+            super::untracked_head_id_suggestion(content, "ab"),
+            None,
+            "too short"
+        );
     }
 
     use super::*;
@@ -596,13 +628,16 @@ mod tests {
 
     #[test]
     fn queue_is_explicitly_stopped_distinguishes_stop_from_default_inactive() {
-        let stopped = "---\nqueue: stop\n---\n\n<!-- agent:queue go -->\n- #advance-review\n<!-- /agent:queue -->\n";
+        let stopped = "---\nqueue: pause\n---\n\n<!-- agent:queue -->\n- #advance-review\n<!-- /agent:queue -->\n";
+        // `#queuestopremove`: legacy `stop` shapes are no control, not a hold.
         let legacy_stopped = "---\nqueue_active: false\n---\n\n<!-- agent:queue -->\n- #advance-review\n<!-- /agent:queue -->\n";
+        let retired_stop = "---\nqueue: stop\n---\n\n<!-- agent:queue -->\n- #advance-review\n<!-- /agent:queue -->\n";
         let default_inactive = "---\nsession: sid\n---\n\n<!-- agent:queue -->\n- #advance-review\n<!-- /agent:queue -->\n";
         let active = "---\nqueue: go\n---\n\n<!-- agent:queue -->\n- #advance-review\n<!-- /agent:queue -->\n";
 
         assert!(queue_is_explicitly_stopped(stopped));
-        assert!(queue_is_explicitly_stopped(legacy_stopped));
+        assert!(!queue_is_explicitly_stopped(legacy_stopped));
+        assert!(!queue_is_explicitly_stopped(retired_stop));
         assert!(!queue_is_explicitly_stopped(default_inactive));
         assert!(!queue_is_explicitly_stopped(active));
     }

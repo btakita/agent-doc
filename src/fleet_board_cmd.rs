@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn document_facts_reads_a_parked_queue_as_stopped() {
-        let content = QUEUED_DOC.replace("queue_active: true", "queue_active: false");
+        let content = QUEUED_DOC.replace("queue_active: true", "queue: pause");
         let facts = document_facts(&content);
         assert!(facts.queue_stopped);
         assert!(!facts.queue_active);
@@ -499,8 +499,10 @@ mod tests {
                 root: submodule.clone(),
             },
         ];
-        let owned: BTreeSet<PathBuf> =
-            projects.iter().map(|project| project.root.clone()).collect();
+        let owned: BTreeSet<PathBuf> = projects
+            .iter()
+            .map(|project| project.root.clone())
+            .collect();
         let facts: Vec<_> = projects
             .iter()
             .flat_map(|project| collect_project_facts(project, &owned))
@@ -515,7 +517,12 @@ mod tests {
             .collect();
         assert!(labels.contains(&"src/haiven-dev"), "got {labels:?}");
         for group in &board.groups {
-            assert_eq!(group.rows.len(), 1, "{} leaked a sibling row", group.project);
+            assert_eq!(
+                group.rows.len(),
+                1,
+                "{} leaked a sibling row",
+                group.project
+            );
         }
     }
 

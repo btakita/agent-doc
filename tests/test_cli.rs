@@ -31753,7 +31753,7 @@ fn test_preflight_warns_but_does_not_target_inactive_queue_edit() {
         "agent_doc_session: test-session\n",
         "agent_doc_format: template\n",
         "agent_doc_write: crdt\n",
-        "queue_active: false\n",
+        "queue: pause\n",
         "---\n\n",
         "## Exchange\n\n",
         "<!-- agent:exchange patch=append -->\n",

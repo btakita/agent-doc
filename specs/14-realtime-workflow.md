@@ -863,7 +863,7 @@ projection structurally poisons the editor document (for example, duplicated
 exchange content or boundary markers), reconnect rebuilds the operator cut by
 replaying captured editor ops over the intent's expected base, validates that
 cut, and then replays the deferred agent-intent journal. Thus an operator-only
-`queue: stop` survives while duplicated agent content is discarded. This repair
+`queue: pause` survives while duplicated agent content is discarded. This repair
 is automatic and does not require or authorize a force-disk reset.
 
 Editor-op capture is epoch-scoped. Immediately before JetBrains applies any

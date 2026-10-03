@@ -1121,13 +1121,13 @@ mod queue_activation_binding_model {
                 }
                 Action::FrontmatterStops => {
                     let snapshot = self.content.clone();
-                    let edited = frontmatter::merge_queue_control(&snapshot, "stop").unwrap();
+                    let edited = frontmatter::merge_queue_control(&snapshot, "pause").unwrap();
                     (snapshot, edited)
                 }
                 Action::ConflictingTwoSidedEdit => {
                     let snapshot = started_document();
                     let marker_edited = set_marker_control(&snapshot, Some("go"));
-                    let edited = frontmatter::merge_queue_control(&marker_edited, "stop").unwrap();
+                    let edited = frontmatter::merge_queue_control(&marker_edited, "pause").unwrap();
                     (snapshot, edited)
                 }
             };
@@ -1151,7 +1151,7 @@ mod queue_activation_binding_model {
         concat!(
             "---\n",
             "agent_doc_session: sample\n",
-            "queue: stop\n",
+            "queue: pause\n",
             "---\n\n",
             "<!-- agent:queue -->\n",
             "- do [#sample]\n",
@@ -1162,7 +1162,7 @@ mod queue_activation_binding_model {
 
     fn started_document() -> String {
         stopped_document()
-            .replacen("queue: stop", "queue: start", 1)
+            .replacen("queue: pause", "queue: start", 1)
             .replacen("<!-- agent:queue -->", "<!-- agent:queue start -->", 1)
     }
 

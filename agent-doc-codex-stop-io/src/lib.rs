@@ -471,7 +471,10 @@ fn apply_claude_stop_with_drain_readiness(
     // `cycle-1790898286195` with no response, the operator's trigger was refused,
     // and this hook still forbade the final answer and ordered a `/loop` that
     // could only hit the same refusal. The operator must hear the refusal.
-    if cycle.as_ref().is_some_and(|cycle| cycle.response_sha256.is_none()) {
+    if cycle
+        .as_ref()
+        .is_some_and(|cycle| cycle.response_sha256.is_none())
+    {
         agent_doc_ops_log_io::log_op(
             &file,
             "claude_stop_queue_continuation_skipped reason=run_captured_no_response action=allow_final_answer",
@@ -638,8 +641,7 @@ fn log_claimed_heads_waiting(file: &Path) {
         }
     };
     let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content);
-    let claimed_heads =
-        agent_doc_queue::queue_continuation::claimed_head_count(&content, &claimed);
+    let claimed_heads = agent_doc_queue::queue_continuation::claimed_head_count(&content, &claimed);
     if claimed_heads > 0 {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1967,7 +1969,10 @@ fn should_quarantine_retained_queue_child<'a>(
     let Some(predecessor) = retained_predecessor_cycle_id else {
         return false;
     };
-    let Some(last_head) = last_auto_queue_head.map(str::trim).filter(|head| !head.is_empty()) else {
+    let Some(last_head) = last_auto_queue_head
+        .map(str::trim)
+        .filter(|head| !head.is_empty())
+    else {
         return false;
     };
     phase == agent_doc_turn::CyclePhase::PreflightStarted
@@ -2813,7 +2818,10 @@ mod tests {
         assert!(!reason.contains("Invoke the `loop` skill"), "{reason}");
         let wake = reason.find("ScheduleWakeup").unwrap();
         let skill = reason.find("loop` skill").unwrap();
-        assert!(wake < skill, "the working re-entry must come first: {reason}");
+        assert!(
+            wake < skill,
+            "the working re-entry must come first: {reason}"
+        );
     }
 
     /// `#stopfeedbacknoterror`: the exact Claude Code Stop-hook output for a
@@ -2871,7 +2879,9 @@ mod tests {
     fn continuation_feedback_is_not_an_operator_prompt() {
         let reason = claude_stop_continuation_reason("/p/doc.md", "do [#x]");
         assert!(is_stop_hook_feedback(&reason));
-        assert!(is_stop_hook_feedback("<system-reminder>\nStop hook feedback"));
+        assert!(is_stop_hook_feedback(
+            "<system-reminder>\nStop hook feedback"
+        ));
         assert!(!is_stop_hook_feedback("please fix the parser"));
     }
 
@@ -3753,14 +3763,15 @@ Done.\n\
 
         let err = anyhow::anyhow!(refusal);
         let note = closeout_repair_retained_note(&err, owned, Path::new("/p/fpe.md"));
-        let first =
-            durable_owner_repair_deferral_response(Path::new("/p/fpe.md"), &note, false);
+        let first = durable_owner_repair_deferral_response(Path::new("/p/fpe.md"), &note, false);
         assert!(matches!(first, StopResponse::Block { .. }));
-        let recursive =
-            durable_owner_repair_deferral_response(Path::new("/p/fpe.md"), &note, true);
+        let recursive = durable_owner_repair_deferral_response(Path::new("/p/fpe.md"), &note, true);
         assert!(matches!(recursive, StopResponse::Stop { .. }));
         let rendered = serde_json::to_string(&recursive).unwrap();
-        assert!(rendered.contains(retry_key), "stable retry key preserved: {rendered}");
+        assert!(
+            rendered.contains(retry_key),
+            "stable retry key preserved: {rendered}"
+        );
         assert!(rendered.contains("Do not reopen or recapture the cycle"));
         assert!(rendered.contains("Wait for the existing controller state edge"));
         assert!(rendered.contains("needs_operator"));
@@ -3794,7 +3805,8 @@ Done.\n\
         assert!(continuation.contains("codex_stop_retained_predecessor_queue_child_quarantined"));
         assert!(continuation.contains("repaired_state.last_auto_queue_head = None"));
 
-        let prompts = ["I want to demo chatting and triggering the FPE then it showing up in the dashboard."];
+        let prompts =
+            ["I want to demo chatting and triggering the FPE then it showing up in the dashboard."];
         assert!(should_quarantine_retained_queue_child(
             agent_doc_turn::CyclePhase::PreflightStarted,
             false,
@@ -3833,7 +3845,10 @@ Done.\n\
                 prompts.iter().copied(),
             ),
         ] {
-            assert!(!unsafe_shape, "only the proven empty auto-queue child is disposable");
+            assert!(
+                !unsafe_shape,
+                "only the proven empty auto-queue child is disposable"
+            );
         }
 
         let retry_key = "1790972821780862047-1-b19f206141461c9678dcc6f01db3826c43654fdd137ef7b7fcb00ecaa416e667";
@@ -3858,17 +3873,15 @@ Done.\n\
     #[test]
     fn retained_predecessor_quarantines_already_created_empty_queue_child_metadata_only() {
         let dir = setup_project();
-        let prompt = "I want to demo chatting and triggering the FPE then it showing up in the dashboard.";
+        let prompt =
+            "I want to demo chatting and triggering the FPE then it showing up in the dashboard.";
         let doc = write_auto_queue_doc(&dir, &[prompt]);
         init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
 
-        let parent = agent_doc_cycle_state_io::start_preflight(
-            &doc,
-            Some(&original),
-            Some(&original),
-        )
-        .unwrap();
+        let parent =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original))
+                .unwrap();
         agent_doc_repair_io::pending::save_pending(
             &doc,
             "### Re: prior retained response — gpt-5\n\nCompleted once.\n",
@@ -3898,12 +3911,9 @@ Done.\n\
         )
         .unwrap();
 
-        let child = agent_doc_cycle_state_io::start_preflight(
-            &doc,
-            Some(&original),
-            Some(&original),
-        )
-        .unwrap();
+        let child =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original))
+                .unwrap();
         assert_ne!(child.cycle_id, parent.cycle_id);
         agent_doc_cycle_state_io::record_selected_free_text_queue_heads(
             &doc,
@@ -5027,12 +5037,12 @@ Done.\n\
 
     #[test]
     fn stop_passes_through_committed_cycle_with_stopped_queue_head() {
-        // A halt writes `queue: stop` AND strips the marker's `go`. A leftover
-        // `go` beside `stop` is an explicit marker control that wins on every
-        // activation reader (`#qbindingone`, GH #79), so it is not a stopped queue.
+        // A held queue is `queue: pause` (`#queuestopremove`). A leftover `go`
+        // marker beside it is an explicit control that wins on every activation
+        // reader (`#qbindingone`, GH #79), so it is not a held queue.
         let dir = setup_project();
         let doc = dir.path().join("task.md");
-        let original = "---\nsession: sid\nqueue: stop\n---\n\n\
+        let original = "---\nsession: sid\nqueue: pause\n---\n\n\
 ## Exchange\n\n\
 <!-- agent:exchange patch=append -->\n\
 ### Re: #advance-review — gpt-5\n\n\
@@ -5309,17 +5319,14 @@ Reviewed the gated items.\n\
                 .is_none(),
             "all heads claimed: the turn must end quietly"
         );
-        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(ops.contains("state=waiting_on_claims"), "{ops}");
 
         // Releasing a claim restores drainability.
         complete_run(&doc);
-        agent_doc_queue_io::queue_claim::release(
-            &doc,
-            "#gh-fix https://github.com/o/r/issues/109",
-        )
-        .unwrap();
+        agent_doc_queue_io::queue_claim::release(&doc, "#gh-fix https://github.com/o/r/issues/109")
+            .unwrap();
         let resumed = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
             .unwrap()
             .expect("a released head is drainable again");
@@ -6984,9 +6991,16 @@ Reviewed the gated items.\n\
                 "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>"
             ),
         );
-        let across_notification =
-            [schedule_wakeup(loop_prompt), tool_result.clone(), notification].join("\n");
-        assert!(transcript_tail_arms_loop_reentry(&across_notification, file));
+        let across_notification = [
+            schedule_wakeup(loop_prompt),
+            tool_result.clone(),
+            notification,
+        ]
+        .join("\n");
+        assert!(transcript_tail_arms_loop_reentry(
+            &across_notification,
+            file
+        ));
 
         // A wake-up for another document, or a non-loop prompt, arms nothing.
         let other = [

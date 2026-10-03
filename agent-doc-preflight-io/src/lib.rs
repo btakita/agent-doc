@@ -2802,7 +2802,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     let marker_control = agent_doc_queue::document_queue::marker_control(&comp.attrs);
     let marker_stop = matches!(
         marker_control,
-        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop)
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Pause)
     );
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs)
         || matches!(
@@ -4163,7 +4163,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     let marker_control = agent_doc_queue::document_queue::marker_control(&comp.attrs);
     let marker_stop = matches!(
         marker_control,
-        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop)
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Pause)
     );
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs)
         || matches!(
@@ -4725,11 +4725,11 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                 let q = comps.iter().find(|c| c.name == "queue").unwrap();
                 q.replace_content(&current_content, &new_body)
             };
-            // Strip ephemeral activation controls and clear queue state.
+            // Strip ephemeral activation controls and HOLD the queue: the
+            // operator's fence asks the drain to wait here, and a cleared
+            // control would just resume it (`#queuestopremove`).
             current_content = strip_queue_activation_tokens_in_content(&current_content)?;
-            if persisted_active {
-                current_content = frontmatter::merge_queue_state(&current_content, false)?;
-            }
+            current_content = frontmatter::merge_queue_hold(&current_content)?;
             // Persist to file + snapshot (skip the raw disk write behind a live
             // editor; #fccqueue routes the queue shape through IPC convergence).
             current_content = persist_queue_maintenance_doc(
@@ -4746,9 +4746,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                 {
                     new_snap = sq.replace_content(&new_snap, &new_body);
                     new_snap = strip_queue_activation_tokens_in_content(&new_snap)?;
-                    if persisted_active
-                        && let Ok(m) = frontmatter::merge_queue_state(&new_snap, false)
-                    {
+                    if let Ok(m) = frontmatter::merge_queue_hold(&new_snap) {
                         new_snap = m;
                     }
                     if new_snap != snap
@@ -5009,10 +5007,16 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         current_content = frontmatter::clear_queue_control(&current_content)?;
         mutated = true;
         eprintln!("[preflight] queue: drained — cleared queue control (#queuestopretire)");
+    } else if need_clear_active && marker_stop {
+        // `#queuestopremove`: a `pause` (or legacy `stop`) marker gesture is the
+        // operator's hold; persist it as the one visible hold.
+        current_content = frontmatter::merge_queue_hold(&current_content)?;
+        mutated = true;
+        eprintln!("[preflight] queue: held — set queue: pause");
     } else if need_clear_active {
         current_content = frontmatter::merge_queue_state(&current_content, false)?;
         mutated = true;
-        eprintln!("[preflight] queue: set queue: stop");
+        eprintln!("[preflight] queue: halted — cleared queue control (#queuestopremove)");
     }
 
     // `#queueskip`: recompute the skipped-head set for this cycle. A head that was
@@ -5351,10 +5355,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         {
             new_snap = merged;
         } else if need_clear_active
-            && let Ok(merged) = if drain_clears_control {
-                frontmatter::clear_queue_control(&new_snap)
+            && let Ok(merged) = if marker_stop {
+                frontmatter::merge_queue_hold(&new_snap)
             } else {
-                frontmatter::merge_queue_state(&new_snap, false)
+                frontmatter::clear_queue_control(&new_snap)
             }
         {
             new_snap = merged;
@@ -6259,13 +6263,10 @@ mod tests {
             ),
             "do [#plain]".to_string(),
         ];
-        let annotations =
-            agent_doc_queue::queue_head_annotation::queue_head_annotations(&selected);
+        let annotations = agent_doc_queue::queue_head_annotation::queue_head_annotations(&selected);
         let output = PreflightOutput {
             queue_head_annotation_guidance:
-                agent_doc_queue::queue_head_annotation::queue_head_annotation_guidance(
-                    &annotations,
-                ),
+                agent_doc_queue::queue_head_annotation::queue_head_annotation_guidance(&annotations),
             queue_head_annotations: annotations,
             selected_queue_prompts: selected,
             ..Default::default()
@@ -6288,7 +6289,10 @@ mod tests {
         };
         let json = serde_json::to_value(&canonical).unwrap();
         assert!(json.get("queue_head_annotations").is_none(), "{json}");
-        assert!(json.get("queue_head_annotation_guidance").is_none(), "{json}");
+        assert!(
+            json.get("queue_head_annotation_guidance").is_none(),
+            "{json}"
+        );
     }
 
     // `#qdonestrike-durable`: a not-ready Lazily head used to discard the whole
@@ -9691,13 +9695,50 @@ mod tests {
             "no ids may be synced into a drained active queue without `go`: {:?}",
             state.synced_queue_ids
         );
-        // #queuestopretire: backlog ids were held out of this drain, so the
-        // control is NOT cleared — with no control the queue defaults to `go`
-        // and the next cycle would mirror and run them.
+        // #queuestopremove: even a drain that held backlog ids out clears the
+        // control — there is no `stop` hold. The backlog opted into mirroring
+        // (`queue=append`), so the next cycle mirrors and runs them.
         assert!(
-            updated.contains("queue: stop"),
-            "a drain that held backlog ids keeps the stop hold:\n{updated}"
+            !updated.contains("queue:"),
+            "a drain clears the control, never writes stop:\n{updated}"
         );
+    }
+
+    #[test]
+    fn run_queue_maintenance_legacy_queue_stop_with_head_runs_and_drops_stop() {
+        // #queuestopremove: the lazily.md shape from 2026-10-03 — a binary-written
+        // `queue: stop` left `do [#lzwiremodel]` waiting with no visible reason.
+        // `stop` is retired: the legacy line is no control, the head runs in the
+        // default `go`, and the next write removes the `stop` line.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: stop\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue preset=\"#spec-test-commit-push\" priority -->\n",
+            "- do [#lzwiremodel]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(state.queue_active, Some(true), "the waiting head must run");
+        assert_eq!(state.queue_prompts, vec!["do [#lzwiremodel]".to_string()]);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(!updated.contains("stop"), "{updated}");
     }
 
     #[test]
@@ -9765,9 +9806,9 @@ mod tests {
     }
 
     #[test]
-    fn run_queue_maintenance_stop_marker_halt_with_heads_keeps_stop() {
-        // #queuestopretire: a HALT with heads left is not a drain — it keeps the
-        // `stop` hold so the default `go` cannot re-dispatch the remaining head.
+    fn run_queue_maintenance_stop_marker_halt_with_heads_holds_with_pause() {
+        // #queuestopremove: a legacy `stop` MARKER gesture with heads left is
+        // the operator's hold; it persists as the one visible hold, `pause`.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -9795,7 +9836,8 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         let halted = std::fs::read_to_string(&doc).unwrap();
         assert_ne!(state.queue_active, Some(true));
-        assert!(halted.contains("queue: stop"), "{halted}");
+        assert!(halted.contains("queue: pause"), "{halted}");
+        assert!(!halted.contains("stop"), "{halted}");
         assert!(halted.contains("- do the remaining thing"), "{halted}");
     }
     #[test]
@@ -9915,8 +9957,8 @@ mod tests {
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("queue: stop"),
-            "marker `stop` must clear queue_active:\n{updated}"
+            updated.contains("queue: pause"),
+            "a marker `stop` gesture holds as `queue: pause` (#queuestopremove):\n{updated}"
         );
         assert!(
             !updated.contains("agent:queue stop"),
@@ -9925,7 +9967,7 @@ mod tests {
     }
 
     #[test]
-    fn run_queue_maintenance_removed_marker_go_stops_frontmatter_queue() {
+    fn run_queue_maintenance_removed_marker_go_clears_to_default_go() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let snapshot_content = concat!(
@@ -9947,11 +9989,11 @@ mod tests {
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
-        assert_eq!(state.queue_active, Some(false));
-        assert!(!state.queue_continuation_required);
+        // #queuestopremove: removing the token clears the control; no control
+        // is the default `go`, so the head keeps running. Hold with `pause`.
+        assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: stop"), "{updated}");
-        assert!(updated.contains("<!-- agent:queue -->"), "{updated}");
+        assert!(!updated.contains("queue: stop"), "{updated}");
         assert!(!updated.contains("agent:queue go"), "{updated}");
     }
 
@@ -9961,12 +10003,12 @@ mod tests {
         let doc = dir.path().join("session.md");
         let snapshot_content = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n",
-            "agent_doc_write: crdt\nqueue: stop\n---\n\n",
+            "agent_doc_write: crdt\nqueue: pause\n---\n\n",
             "<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue -->\n- do [#alpha]\n<!-- /agent:queue -->\n",
         );
-        let current_content = snapshot_content.replace("queue: stop", "queue: go");
+        let current_content = snapshot_content.replace("queue: pause", "queue: go");
         std::fs::write(&doc, current_content).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
@@ -9984,7 +10026,7 @@ mod tests {
     }
 
     #[test]
-    fn run_queue_maintenance_frontmatter_stop_removes_marker_go() {
+    fn run_queue_maintenance_frontmatter_pause_removes_marker_go() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let snapshot_content = concat!(
@@ -9994,7 +10036,7 @@ mod tests {
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue go -->\n- do [#alpha]\n<!-- /agent:queue -->\n",
         );
-        let current_content = snapshot_content.replace("queue: go", "queue: stop");
+        let current_content = snapshot_content.replace("queue: go", "queue: pause");
         std::fs::write(&doc, current_content).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
@@ -10007,7 +10049,7 @@ mod tests {
 
         assert_eq!(state.queue_active, Some(false));
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: stop"), "{updated}");
+        assert!(updated.contains("queue: pause"), "{updated}");
         assert!(updated.contains("<!-- agent:queue -->"), "{updated}");
         assert!(!updated.contains("agent:queue go"), "{updated}");
     }
@@ -10911,7 +10953,7 @@ mod tests {
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
             "agent_doc_write: crdt\n",
-            "queue_active: false\n",
+            "queue: pause\n",
             "---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append -->\n",
@@ -11524,7 +11566,7 @@ mod tests {
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
             "agent_doc_write: crdt\n",
-            "queue_active: false\n",
+            "queue: pause\n",
             "---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append -->\n",

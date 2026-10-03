@@ -271,7 +271,7 @@ pub fn inactive_route_queue_head(
     let marker_control = marker_control(&queue_component.attrs);
     if matches!(
         marker_control,
-        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop)
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Pause)
     ) {
         return Ok(RouteInactiveQueueHead::None);
     }

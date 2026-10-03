@@ -24,21 +24,18 @@ pub fn explicit_queue_start_mode(
     resolved_queue_binding(attrs, frontmatter_queue) == Some(QueueBindingMode::Start)
 }
 
-/// `stop` and the operator-only `pause` hold both keep the queue inactive.
+/// Whether the queue is held. `pause` is the only hold (`#queuestopremove`);
+/// a legacy `stop` marker token reads as `pause`.
 pub fn explicit_queue_stop_mode(
     attrs: &HashMap<String, String>,
     frontmatter_queue: Option<&str>,
 ) -> bool {
-    matches!(
-        resolved_queue_binding(attrs, frontmatter_queue),
-        Some(QueueBindingMode::Stop | QueueBindingMode::Pause)
-    )
+    explicit_queue_pause_mode(attrs, frontmatter_queue)
 }
 
-/// `#queueeditgo`: `queue: pause` is the operator's standing hold. The binary
-/// never writes it (a halt writes `stop`; a drain clears the control,
-/// `#queuestopretire`), so it is the one control that
-/// survives a queue edit instead of being re-armed to `go`.
+/// `#queueeditgo`: `queue: pause` is the one visible hold, and it survives a
+/// queue edit instead of being re-armed to `go`. Drains and halts clear the
+/// control (`#queuestopremove`).
 pub fn explicit_queue_pause_mode(
     attrs: &HashMap<String, String>,
     frontmatter_queue: Option<&str>,
@@ -47,7 +44,7 @@ pub fn explicit_queue_pause_mode(
 }
 
 /// Whether the queue's resolved control activates it: `go` or `start`, and not
-/// `stop`/`pause` (`#qbindingone`, GH #79).
+/// `pause` (`#qbindingone`, GH #79).
 ///
 /// Preflight's persisted-activation input reads it, and so do the readers that
 /// run WITHOUT a preflight convergence pass first (the supervisor/loop
@@ -68,7 +65,6 @@ pub fn queue_control_activation(
 enum QueueBindingMode {
     Start,
     Go,
-    Stop,
     Pause,
 }
 
@@ -77,16 +73,15 @@ impl QueueBindingMode {
         match raw?.trim().to_ascii_lowercase().as_str() {
             "start" => Some(Self::Start),
             "go" => Some(Self::Go),
-            "stop" => Some(Self::Stop),
             "pause" => Some(Self::Pause),
             _ => None,
         }
     }
 
     fn from_marker(attrs: &HashMap<String, String>) -> Option<Self> {
-        if attrs.contains_key("stop") {
-            Some(Self::Stop)
-        } else if attrs.contains_key("pause") {
+        // `#queuestopremove`: a legacy `stop` marker token is the operator's
+        // hold gesture, i.e. `pause`.
+        if attrs.contains_key("stop") || attrs.contains_key("pause") {
             Some(Self::Pause)
         } else if attrs.contains_key("go") {
             Some(Self::Go)
@@ -101,7 +96,6 @@ impl QueueBindingMode {
         match self {
             Self::Start => "start",
             Self::Go => "go",
-            Self::Stop => "stop",
             Self::Pause => "pause",
         }
     }
@@ -110,7 +104,7 @@ impl QueueBindingMode {
         match self {
             Self::Start => Some("start"),
             Self::Go => Some("go"),
-            Self::Stop | Self::Pause => None,
+            Self::Pause => None,
         }
     }
 }
@@ -131,6 +125,9 @@ fn resolved_queue_binding(
     // operator who wants it held writes `pause` or `stop` instead. A present
     // but unrecognized `queue:` value (a half-typed edit) is not "no control"
     // and stays inert rather than starting the drain mid-keystroke.
+    // `#queuestopremove`: a legacy `queue: stop` is no control, i.e. `go`.
+    let frontmatter_queue =
+        frontmatter_queue.filter(|raw| !frontmatter::is_retired_queue_stop(raw));
     QueueBindingMode::from_marker(attrs)
         .or_else(|| QueueBindingMode::from_frontmatter(frontmatter_queue))
         .or_else(|| frontmatter_queue.is_none().then_some(QueueBindingMode::Go))
@@ -154,7 +151,10 @@ pub fn queue_control_defaults_to_go(
     attrs: &HashMap<String, String>,
     frontmatter_queue: Option<&str>,
 ) -> bool {
-    frontmatter_queue.is_none() && QueueBindingMode::from_marker(attrs).is_none()
+    frontmatter_queue
+        .filter(|raw| !frontmatter::is_retired_queue_stop(raw))
+        .is_none()
+        && QueueBindingMode::from_marker(attrs).is_none()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,8 +177,12 @@ pub fn converge_queue_control_binding_content(
         return Ok((content.to_string(), false));
     };
 
-    let mut updated = set_queue_marker_binding(content, target.marker_token())?;
-    updated = frontmatter::merge_queue_control(&updated, target.frontmatter_value())?;
+    let mut updated = set_queue_marker_binding(content, target.and_then(|m| m.marker_token()))?;
+    updated = match target {
+        Some(mode) => frontmatter::merge_queue_control(&updated, mode.frontmatter_value())?,
+        // `#queuestopremove`: the inactive target is NO control, never `stop`.
+        None => frontmatter::clear_queue_control(&updated)?,
+    };
     let changed = updated != content;
     Ok((updated, changed))
 }
@@ -201,10 +205,20 @@ fn queue_binding_state(content: &str) -> Option<QueueBindingState> {
     })
 }
 
+/// A legacy `queue_active:` flag as a binding target: `true` is `start`,
+/// `false` is no control (`#queuestopremove`).
+fn legacy_flag_target(active: bool) -> Option<QueueBindingMode> {
+    active.then_some(QueueBindingMode::Start)
+}
+
+/// The control both surfaces converge to: `Some(mode)` writes it, `None`
+/// (inner) clears the control (`#queuestopremove`), and the outer `None` leaves
+/// the document untouched.
+#[allow(clippy::option_option)]
 fn queue_binding_target(
     current: QueueBindingState,
     previous: Option<QueueBindingState>,
-) -> Option<QueueBindingMode> {
+) -> Option<Option<QueueBindingMode>> {
     let has_current_control = current.marker_mode.is_some()
         || current.frontmatter_mode.is_some()
         || current.legacy_queue_active.is_some()
@@ -218,53 +232,32 @@ fn queue_binding_target(
         current.frontmatter_mode != prev.frontmatter_mode
             || current.legacy_queue_active != prev.legacy_queue_active
     });
+    let frontmatter_target = || {
+        current
+            .frontmatter_mode
+            .or_else(|| current.legacy_queue_active.and_then(legacy_flag_target))
+    };
 
     if marker_changed && !frontmatter_changed {
-        // A marker token disappearing (drain strip) is a stop, except under an
-        // operator `pause`, which only the operator may lift.
-        let fallback = if current.frontmatter_mode == Some(QueueBindingMode::Pause) {
-            QueueBindingMode::Pause
-        } else {
-            QueueBindingMode::Stop
-        };
-        return Some(current.marker_mode.unwrap_or(fallback));
+        // A marker token disappearing (drain strip) clears the control, except
+        // under an operator `pause`, which only the operator may lift.
+        let fallback = (current.frontmatter_mode == Some(QueueBindingMode::Pause))
+            .then_some(QueueBindingMode::Pause);
+        return Some(current.marker_mode.or(fallback));
     }
     if frontmatter_changed && !marker_changed {
         // Realtime editor replicas publish intermediate frontmatter states while
         // the operator is typing. An absent or unrecognized value is not a
-        // control gesture, so wait for start/go/stop instead of projecting the
+        // control gesture, so wait for start/go/pause instead of projecting the
         // unchanged marker back into the field and fighting the editor.
         if current.frontmatter_mode.is_none() && current.legacy_queue_active.is_none() {
             return None;
         }
-        return current
-            .frontmatter_mode
-            .or_else(|| {
-                current.legacy_queue_active.map(|active| {
-                    if active {
-                        QueueBindingMode::Start
-                    } else {
-                        QueueBindingMode::Stop
-                    }
-                })
-            })
-            .or(current.marker_mode)
-            .or(Some(QueueBindingMode::Stop));
+        return Some(frontmatter_target().or(current.marker_mode));
     }
     if marker_changed && frontmatter_changed {
-        let marker_target = current.marker_mode.unwrap_or(QueueBindingMode::Stop);
-        let frontmatter_target = current
-            .frontmatter_mode
-            .or_else(|| {
-                current.legacy_queue_active.map(|active| {
-                    if active {
-                        QueueBindingMode::Start
-                    } else {
-                        QueueBindingMode::Stop
-                    }
-                })
-            })
-            .unwrap_or(QueueBindingMode::Stop);
+        let marker_target = current.marker_mode;
+        let frontmatter_target = frontmatter_target();
         if marker_target != frontmatter_target {
             // A genuine two-sided edit has no lossless winner. Frontmatter is
             // the canonical durable representation, so it wins deterministically
@@ -278,42 +271,24 @@ fn queue_binding_target(
         return Some(frontmatter_target);
     }
     if let Some(marker_mode) = current.marker_mode {
-        return Some(marker_mode);
+        return Some(Some(marker_mode));
     }
     if current.has_auto {
-        return Some(QueueBindingMode::Start);
+        return Some(Some(QueueBindingMode::Start));
     }
     if previous.is_none() {
-        return current.frontmatter_mode.or_else(|| {
-            current.legacy_queue_active.map(|active| {
-                if active {
-                    QueueBindingMode::Start
-                } else {
-                    QueueBindingMode::Stop
-                }
-            })
-        });
+        return Some(frontmatter_target());
     }
     // `#qstartinert`: nothing changed on either side this cycle, and the marker
     // carries no control token. An explicitly authored frontmatter control is
-    // still the operator's standing instruction, so honor it rather than
-    // converging to `stop`.
-    //
-    // Collapsing to `stop` here was aimed at the post-drain shape (the token was
-    // consumed off the marker), but that transition is a marker CHANGE and is
-    // already handled above by `marker_changed`. Reaching this branch means the
-    // marker never carried the token at all — the ordinary shape for a document
-    // whose operator wrote `queue: start` in frontmatter and left the marker bare,
-    // or one whose marker projection failed to persist. Forcing `stop` there
-    // silently disarmed the queue on every pass: entries mirrored in, but
-    // activation resolved inactive forever and the auto-loop never got a head.
+    // still the operator's standing instruction, so honor it.
     if let Some(frontmatter_mode) = current.frontmatter_mode {
-        return Some(frontmatter_mode);
+        return Some(Some(frontmatter_mode));
     }
-    // A bare legacy `queue_active` flag with no explicit control is not a standing
-    // instruction; keep the pre-existing conservative stop.
-    if current.legacy_queue_active.is_some() {
-        return Some(QueueBindingMode::Stop);
+    // A bare legacy `queue_active` flag with no explicit control is not a
+    // standing instruction: migrate it to its canonical shape.
+    if let Some(active) = current.legacy_queue_active {
+        return Some(legacy_flag_target(active));
     }
     None
 }
@@ -486,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_frontmatter_change_can_stop_marker_control() {
+    fn snapshot_frontmatter_change_can_pause_marker_control() {
         let snapshot = concat!(
             "---\n",
             "agent_doc_session: test\n",
@@ -496,13 +471,13 @@ mod tests {
             "- do [#work]\n",
             "<!-- /agent:queue -->\n",
         );
-        let content = snapshot.replacen("queue: go", "queue: stop", 1);
+        let content = snapshot.replacen("queue: go", "queue: pause", 1);
 
         let (updated, changed) =
             converge_queue_control_binding_content(&content, Some(snapshot)).unwrap();
 
         assert!(changed);
-        assert!(updated.contains("queue: stop\n"));
+        assert!(updated.contains("queue: pause\n"));
         assert!(updated.contains("<!-- agent:queue -->"));
     }
 
@@ -527,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn rolling_fixed_point_baseline_allows_stop_then_marker_resume() {
+    fn rolling_fixed_point_baseline_allows_pause_then_marker_resume() {
         let started = concat!(
             "---\n",
             "agent_doc_session: test\n",
@@ -537,11 +512,11 @@ mod tests {
             "- do [#work]\n",
             "<!-- /agent:queue -->\n",
         );
-        let stop_gesture = started.replacen("queue: go", "queue: stop", 1);
+        let stop_gesture = started.replacen("queue: go", "queue: pause", 1);
         let (stopped, stop_changed) =
             converge_queue_control_binding_content(&stop_gesture, Some(started)).unwrap();
         assert!(stop_changed);
-        assert!(stopped.contains("queue: stop\n"));
+        assert!(stopped.contains("queue: pause\n"));
         assert!(stopped.contains("<!-- agent:queue -->"));
 
         let resume_gesture = stopped.replacen("<!-- agent:queue -->", "<!-- agent:queue go -->", 1);
@@ -607,14 +582,14 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         let content = snapshot
-            .replacen("queue: start", "queue: stop", 1)
+            .replacen("queue: start", "queue: pause", 1)
             .replacen("<!-- agent:queue start -->", "<!-- agent:queue go -->", 1);
 
         let (updated, changed) =
             converge_queue_control_binding_content(&content, Some(snapshot)).unwrap();
 
         assert!(changed);
-        assert!(updated.contains("queue: stop\n"));
+        assert!(updated.contains("queue: pause\n"));
         assert!(updated.contains("<!-- agent:queue -->"));
 
         let (fixed_point, changed_again) =
@@ -659,9 +634,9 @@ mod tests {
     }
 
     /// `#qstartinert` guard: the post-drain shape (marker token consumed, so the
-    /// marker CHANGED) must still converge to `stop`.
+    /// marker CHANGED) clears the control (`#queuestopremove`), never `stop`.
     #[test]
-    fn consumed_marker_token_still_converges_to_stop() {
+    fn consumed_marker_token_clears_the_control() {
         let snapshot = concat!(
             "---\n",
             "agent_doc_session: test\n",
@@ -679,8 +654,8 @@ mod tests {
 
         assert!(changed);
         assert!(
-            updated.contains("queue: stop\n"),
-            "a consumed marker token is a real stop transition:\n{updated}"
+            !updated.contains("queue:"),
+            "a consumed marker token clears the control:\n{updated}"
         );
     }
 
@@ -833,11 +808,17 @@ mod tests {
 
         // Any explicit control on either surface replaces the default, and a
         // half-typed `queue:` value stays inert instead of starting the drain.
-        assert!(explicit_queue_stop_mode(&bare, Some("stop")));
         assert!(explicit_queue_pause_mode(&bare, Some("pause")));
         assert!(explicit_queue_start_mode(&bare, Some("start")));
         assert!(!explicit_queue_go_mode(&bare, Some("sto")));
-        assert!(!queue_control_defaults_to_go(&bare, Some("stop")));
+        // `#queuestopremove`: a legacy `stop` is no control, i.e. `go`.
+        assert!(!explicit_queue_stop_mode(&bare, Some("stop")));
+        assert!(explicit_queue_go_mode(&bare, Some("stop")));
+        assert!(queue_control_defaults_to_go(&bare, Some("stop")));
+        // A legacy `stop` MARKER token is the operator's hold gesture.
+        let mut stop_marker = HashMap::new();
+        stop_marker.insert("stop".to_string(), String::new());
+        assert!(explicit_queue_pause_mode(&stop_marker, None));
     }
 
     #[test]

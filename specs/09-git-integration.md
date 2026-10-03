@@ -97,7 +97,7 @@ the cycle observation may use strict cycle start / prompt observation / commit
 timestamp ordering as compatibility proof.
 
 After a cycle is committed, a visible queue line is not by itself proof that the
-same turn still owes document work. Frontmatter `queue: stop` explicitly parks
+same turn still owes document work. Frontmatter `queue: pause` explicitly parks
 that head, so the Stop hook must agree with `session-check`'s
 `no_drainable_work` outcome, clear the tracked hook state, and return
 `continue=true`. The pending-work guard also shares the queue policy's eligibility

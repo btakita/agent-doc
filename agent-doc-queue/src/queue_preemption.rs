@@ -123,31 +123,36 @@ pub fn plan_deferred_clear_step(
     }
 }
 
-/// Durably pause an active auto-queue by writing canonical inactive queue state.
-/// Returns the rewritten content plus the control to restore on resume.
+/// Durably hold an active auto-queue with `queue: pause` while an operator
+/// command runs. Returns the rewritten content plus the control to restore on
+/// resume.
 ///
-/// Idempotent: pausing an already-stopped queue still rewrites to the inactive
-/// state and reports the prior control (`Stop`) so a caller can tell that no
-/// resume is owed.
+/// Idempotent: holding an already-paused queue reports the prior control
+/// (`Pause`) so a caller can tell that no resume is owed. A queue with no
+/// control is in its default `go` mode, so its prior is `Start`.
 pub fn pause_queue_for_operator_command(content: &str) -> Result<(String, QueueControl)> {
-    let was_active = frontmatter::parse(content)?.0.queue_active.unwrap_or(false);
-    let prior = if was_active {
-        QueueControl::Start
+    let (fm, _) = frontmatter::parse(content)?;
+    let prior = if fm.queue.as_deref().and_then(QueueControl::parse) == Some(QueueControl::Pause) {
+        QueueControl::Pause
     } else {
-        QueueControl::Stop
+        QueueControl::Start
     };
-    let paused = frontmatter::merge_queue_state(content, false)?;
+    let paused = frontmatter::merge_queue_hold(content)?;
     Ok((paused, prior))
 }
 
-/// Resume by restoring the recorded queue control after the command completes.
-/// Restoring `Stop` is a deliberate no-resume (the queue was already paused
-/// before the command, so it stays paused).
+/// Resume after the command completes. Restoring `Pause` is a deliberate
+/// no-resume (the queue was already held before the command); restoring
+/// `Start` lifts the hold back to the default `go` (`#queuestopremove`).
 pub fn resume_queue_after_operator_command(
     content: &str,
     resume_to: QueueControl,
 ) -> Result<String> {
-    frontmatter::merge_queue_state(content, resume_to.is_active())
+    if resume_to.is_active() {
+        frontmatter::lift_queue_hold(content)
+    } else {
+        Ok(content.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -252,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn pause_active_queue_records_prior_start_and_stops() {
+    fn pause_active_queue_records_prior_start_and_holds() {
         let content = "---\nqueue: start\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let (paused, prior) = pause_queue_for_operator_command(content).unwrap();
         assert_eq!(prior, QueueControl::Start, "active queue's prior is Start");
@@ -265,13 +270,14 @@ mod tests {
     }
 
     #[test]
-    fn pause_inactive_queue_reports_stop_prior() {
-        let content = "---\nqueue: stop\nqueue_active: false\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+    fn pause_held_queue_reports_pause_prior() {
+        let content =
+            "---\nqueue: pause\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         let (_, prior) = pause_queue_for_operator_command(content).unwrap();
         assert_eq!(
             prior,
-            QueueControl::Stop,
-            "an already-stopped queue owes no resume"
+            QueueControl::Pause,
+            "an already-held queue owes no resume"
         );
     }
 
@@ -283,22 +289,24 @@ mod tests {
             frontmatter::parse(&paused).unwrap().0.queue_active,
             Some(false)
         );
+        assert!(paused.contains("queue: pause"), "{paused}");
         let resumed = resume_queue_after_operator_command(&paused, prior).unwrap();
-        assert_eq!(
-            frontmatter::parse(&resumed).unwrap().0.queue_active,
-            Some(true),
-            "resume must restore the loop the operator command paused:\n{resumed}"
+        let (fm, _) = frontmatter::parse(&resumed).unwrap();
+        assert!(
+            fm.queue.is_none() && fm.queue_active.is_none(),
+            "resume must lift the hold back to the default go:\n{resumed}"
         );
     }
 
     #[test]
-    fn resume_to_stop_keeps_queue_paused() {
-        let content = "---\nqueue: stop\nqueue_active: false\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
-        let resumed = resume_queue_after_operator_command(content, QueueControl::Stop).unwrap();
+    fn resume_to_pause_keeps_queue_paused() {
+        let content =
+            "---\nqueue: pause\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let resumed = resume_queue_after_operator_command(content, QueueControl::Pause).unwrap();
         assert_eq!(
             frontmatter::parse(&resumed).unwrap().0.queue_active,
             Some(false),
-            "restoring Stop must not silently re-activate a queue that was already paused"
+            "restoring Pause must not silently re-activate a queue that was already paused"
         );
     }
 }

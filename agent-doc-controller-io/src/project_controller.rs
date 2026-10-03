@@ -13541,7 +13541,7 @@ mod tests {
             "registered preset head should be consumed:\n{updated}"
         );
         assert!(
-            updated.contains("queue: stop") && !updated.contains("queue_active: true"),
+            !updated.contains("queue:") && !updated.contains("queue_active: true"),
             "drained preset queue must deactivate:\n{updated}"
         );
         let conn = open_state_db(dir.path()).unwrap();
@@ -18423,7 +18423,9 @@ revised operator request
                 .contains("- ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)"),
             "the Effect should apply the Computed target without a caller requesting a strike"
         );
-        assert!(projected.contains("queue: start"));
+        // `#queuestopremove`: the torn legacy inactive flag is no control, so
+        // the remaining head re-arms the default `go`.
+        assert!(projected.contains("queue: go"), "{projected}");
         assert!(projected.contains("- do [#production-deploy]"));
 
         let terminal_events = [
@@ -18658,7 +18660,7 @@ revised operator request
         );
         let retried = std::fs::read_to_string(&canonical).unwrap();
         assert!(
-            retried.contains("queue: stop") && !retried.contains("- close the queue"),
+            !retried.contains("queue:") && !retried.contains("- close the queue"),
             "a changed retained-delivery frontier must retry the owned terminal queue drain: {retried}"
         );
     }

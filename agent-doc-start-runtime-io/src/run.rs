@@ -2707,7 +2707,8 @@ mod tests {
             .expect("matching stale pointer should be removed");
         let (fm, body) = frontmatter::parse(&updated).unwrap();
         assert_eq!(fm.resume, None);
-        assert_eq!(fm.queue.as_deref(), Some("stop"));
+        // `#queuestopremove`: a legacy `queue: stop` reads as no control.
+        assert_eq!(fm.queue.as_deref(), None);
         assert_eq!(body, "\n# Plan\n");
 
         assert_eq!(

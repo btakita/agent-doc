@@ -12,7 +12,8 @@
 //!   and the plugin's own published buffer hash equalled the committed HEAD
 //!   (`215f3ffe…`, 21532 bytes), so there was no unsaved edit to save; and
 //! * the one thing the operator was waiting on, `do [#lzwiremodel]`, sat in an
-//!   `agent:queue` that was stopped (`queue: stop`, no `go` on the marker), so
+//!   `agent:queue` that was stopped (a legacy `queue: stop`, since retired by
+//!   `#queuestopremove`; the one hold is now `queue: pause`), so
 //!   preflight reported `queue_active: false` and
 //!   `queue_drainable_head_count: 0` without naming the waiting item.
 //!
@@ -124,9 +125,9 @@ pub fn explain_no_changes(facts: NoChangesFacts<'_>) -> NoChangesExplanation {
             .join(", ");
         guidance.push_str(&format!(
             " The `agent:queue` holds {} item(s) that will not run because the queue is \
-             stopped: {listed}. Tell the operator these are waiting on a go-ahead; to run them \
-             they add `go` to the `agent:queue` marker (or set `queue: go`). Do not start them \
-             without that.",
+             held (`queue: pause`): {listed}. Tell the operator these are waiting on a go-ahead; \
+             to run them they delete the `queue: pause` line (or write `go` on the \
+             `agent:queue` marker). Do not start them without that.",
             waiting_queue_items.len()
         ));
     }
@@ -145,7 +146,7 @@ mod tests {
     /// recommended item, read through a live editor.
     const STOPPED_QUEUE_DOC: &str = concat!(
         "---\n",
-        "queue: stop\n",
+        "queue: pause\n",
         "---\n\n",
         "## Queue\n\n",
         "<!-- agent:queue preset=\"#spec-test-commit-push\" priority -->\n",

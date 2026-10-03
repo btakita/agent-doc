@@ -1069,8 +1069,9 @@ mod tests {
         );
         // A dropped continuation loses BOTH control surfaces: a marker `go`
         // beside a halted flag still continues (`#qbindingone`, GH #79).
+        // `#queuestopremove`: the only inactive control is the `pause` hold.
         let local = head
-            .replace("queue_active: true", "queue_active: false")
+            .replace("queue_active: true", "queue: pause")
             .replace("<!-- agent:queue auto go -->", "<!-- agent:queue auto -->");
         assert_eq!(
             metadata_drift_authority(&local, head),
@@ -1348,7 +1349,10 @@ mod tests {
             panic!("open cycle must stay blocked: {decision:?}");
         };
         assert!(recommended.starts_with(blocker), "{recommended}");
-        assert!(recommended.contains("resume durable checkpoint"), "{recommended}");
+        assert!(
+            recommended.contains("resume durable checkpoint"),
+            "{recommended}"
+        );
         assert_eq!(
             blocked_closeout_recovery_command(&decision).as_deref(),
             Some("agent-doc /abs/318.md")
@@ -1538,7 +1542,10 @@ mod tests {
             open_cycle: None,
         })
         .unwrap();
-        assert!(command.contains("agent-doc write --commit doc.md"), "{command}");
+        assert!(
+            command.contains("agent-doc write --commit doc.md"),
+            "{command}"
+        );
         assert!(!command.contains("agent-doc commit doc.md"), "{command}");
     }
 

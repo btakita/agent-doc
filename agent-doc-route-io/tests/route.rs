@@ -1443,7 +1443,7 @@ mod tests {
         let content = concat!(
             "---\n",
             "agent_doc_format: template\n",
-            "queue_active: false\n",
+            "queue: pause\n",
             "---\n\n",
             "<!-- agent:exchange -->\n",
             "<!-- /agent:exchange -->\n\n",
@@ -2522,9 +2522,8 @@ mod tests {
         .unwrap();
 
         let mut effects = super::route_closeout_drain_effects(super::route_repair_closeout);
-        effects.await_closeout_projection = |_, _, _| {
-            panic!("an unlandable capture must not wait on the closeout projection")
-        };
+        effects.await_closeout_projection =
+            |_, _, _| panic!("an unlandable capture must not wait on the closeout projection");
         let outcome = super::drain_open_closeout_before_routed_dispatch(&doc, effects).unwrap();
 
         let DrainOutcome::Unlandable(report) = outcome else {

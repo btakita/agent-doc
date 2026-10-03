@@ -1418,7 +1418,11 @@ Done.
 
         let unsealed = build(&doc).unwrap();
         assert_eq!(unsealed.task_class, "no_changes");
-        assert_eq!(unsealed.blockers.len(), 1, "no open cycle keeps the blocker");
+        assert_eq!(
+            unsealed.blockers.len(),
+            1,
+            "no open cycle keeps the blocker"
+        );
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         let plan = build(&doc).unwrap();
@@ -1903,7 +1907,7 @@ Done.
 agent_doc_session: test
 agent_doc_format: template
 agent_doc_write: crdt
-queue_active: false
+queue: pause
 ---
 
 ## Exchange

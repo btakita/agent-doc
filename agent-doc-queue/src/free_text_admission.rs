@@ -476,7 +476,7 @@ pub fn queue_currently_active_for_free_text_admission(
         .and_then(agent_doc_frontmatter::frontmatter::QueueControl::parse)
     {
         Some(agent_doc_frontmatter::frontmatter::QueueControl::Start) => true,
-        Some(agent_doc_frontmatter::frontmatter::QueueControl::Stop) => false,
+        Some(agent_doc_frontmatter::frontmatter::QueueControl::Pause) => false,
         None => fm.queue_active.unwrap_or(false),
     };
     let marker_active = crate::document_queue::has_auto_attr(queue_attrs)

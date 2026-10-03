@@ -1549,8 +1549,9 @@ mod tests {
         );
         // The drift drops the continuation on BOTH control surfaces: a marker
         // `go` beside a halted flag still continues (`#qbindingone`, GH #79).
+        // `#queuestopremove`: the only inactive control is the `pause` hold.
         let snapshot = head
-            .replace("queue_active: true", "queue_active: false")
+            .replace("queue_active: true", "queue: pause")
             .replace("<!-- agent:queue auto go -->", "<!-- agent:queue auto -->");
         let (dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();

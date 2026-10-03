@@ -185,6 +185,16 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
   - **After restart:** preflight and `plugin list` detect `jetbrains_plugin_install_destroyed` and `jetbrains_plugin_staging_doomed`, and the marker is kept instead of retired. `plugin update` and `agent-doc upgrade` repair a destroyed install. Plugin 0.2.484.
 - **Recovery for the affected IntelliJIdea2026.3** (paths under `/home/btakita`, not run from here): `agent-doc plugin update jetbrains --plugins-dir /home/btakita/.local/share/JetBrains/IntelliJIdea2026.3`, then restart the IDE. Check first whether it was already reinstalled.
 - **Verification:** the subagent's `make check` passed 10549 tests. The merge was a fast-forward. `make install` hot-upgraded the live IDE.
+
+### Re: queue status — remaining items are claimed — opus-5.5 · 2026-10-03T00:04-04:00
+
+All three remaining queue items are claimed, so nothing is drained inline this cycle:
+
+- `#subagents do [#preflightdeadline]` (claimed by `subagent:preflightdeadline`): a subagent is adding the admission deadline. It caps every preflight wait to the remaining budget and returns a typed, retryable refusal at phase boundaries.
+- The steering note (claimed by `subagent:closeout-steering`): live mid-turn steering is merged and installed. A subagent is closing the remaining gap: closeout, `agent-doc steering`, and the next preflight will surface queue additions the hook missed, including `#subagents` dispatch.
+- `release + publish` (claimed by `parent:after-subagents`): v0.35.443 is cut after both land, so the release includes them.
+
+Each subagent is merged, run through `make check`, and installed as it reports back. Then its claim is released and the item closes in order.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 

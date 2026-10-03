@@ -55,7 +55,7 @@ with a value: `subagents=N` sets the maximum number of concurrent claims
 - **Eligibility from current state.** While the attribute is present, *every*
   live, unclaimed, drainable head can be dispatched, not just new ones. A
   missed claim is offered again on the next cycle, which fixes weakness 1.
-- **Precedence.** A line opts out with an explicit `inline` opt-out tag or an
+- **Precedence.** A line opts out with an `[inline]` tag or an
   `[operator-verify]` tag. Ordering directives (`after A do B`,
   `run these in order`) keep dependents in order: a head becomes eligible only
   after its predecessors have closed.
@@ -94,7 +94,7 @@ with a value: `subagents=N` sets the maximum number of concurrent claims
    optional `=N`) to the queue attributes and to `QUEUE_ONLY_COMPONENT_ATTRS`,
    with typo and misplacement warnings. `PresetContext` treats the attribute as
    queue-scope subagent intent; no `preset=` value is needed. Tests: every
-   spelling classifies correctly, and the `inline` and `[operator-verify]`
+   spelling classifies correctly, and the `[inline]` and `[operator-verify]`
    opt-outs work.
 2. **qsubattr2: eligibility from current state, plus the cap.** Under the
    attribute, `pending_subagent_dispatch_for_content` drops the

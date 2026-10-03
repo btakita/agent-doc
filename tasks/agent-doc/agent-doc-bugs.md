@@ -148,6 +148,19 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - **Cause:** the focus-first order came from the JetBrains plugin. With an undetected layout (always the case on Remote Dev), it lists documents in IntelliJ's `selectedFiles` order, which puts the focused file first. The controller took that as the editor's split order.
 - **Fix:** publications now carry `column_order` (`editor` / `retained` / `unknown`). The pure function `order_layout_columns(retained, incoming, order)` resolves an unknown order against the retained layout, so focus never reorders columns and new documents append at the end. Editor-sourced order still wins. A new `pane_layout_desired_published` line logs the publisher and the incoming and resolved columns.
 - **Limitation:** on Remote Dev the order is stable but can't mirror the editor, because no split geometry is available (see #97). Documented in the JetBrains SPEC. It takes effect with plugin 0.2.483 and later; the current plugin is 0.2.484.
+
+### Re: GH #113 — upgrade reconciled plugins in the old binary — opus-5.5 · 2026-10-02T23:55-04:00
+
+> **Queue prompt:** #subagents #gh-fix https://github.com/btakita/agent-doc/issues/113
+
+**Fixed in a subagent, merged, installed, pushed, closed** (agent-doc `238e07997`; [GH #113](https://github.com/btakita/agent-doc/issues/113) closed).
+
+- **Fix:** after replacing the binary, `agent-doc upgrade` runs the plugin reconcile in the newly installed executable:
+  - It uses the exact installed path, never a PATH lookup.
+  - It passes hidden `--reconcile-plugins-release <V> --reconcile-plugins-mode once|auto` flags, which pin the release version.
+  - If the new binary fails, the upgrade fails with it. If the new binary can't be launched, the reconcile falls back to the old one with a warning. `--auto` keeps using the upgraded binary for later cycles.
+- **Merge:** combined with #114's per-target summary, which now prints from the new image too.
+- **Limitation:** this only helps upgrades *from* a release that contains it, and the hidden flags are now a contract between releases.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -163,7 +176,7 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/110~~
 - ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/111~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/112~~ — auto-struck: answered this cycle (#ftstrike)
-- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/113
+- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/113~~
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/114
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/115
 - #subagents do [#preflightdeadline]

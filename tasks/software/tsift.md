@@ -168,18 +168,50 @@ The Jai, `#sdktsiftedges` and XSD/WSDL subagents are still running, and their he
   - **Prebuilt release binaries:** built with `all-languages`.
 
 The `#sdktsiftedges` and XSD/WSDL subagents are still running.
+
+### Re: XSD + WSDL contracts done; #jaicrate dispatched — opus-5.5 · 2026-10-03T03:03-04:00
+
+> **Queue prompt:** do [#xsdcontract]
+
+> **Queue prompt:** do [#wsdlcontract]
+
+**Done.** One subagent pushed both commits to `main` without force. `make check` exit 0 at each commit by itself, with 68 result lines, no failures and no clippy warnings.
+- `1316b66 feat(graph): index XSD as an API contract (#xsdcontract)`, rebased over the Odin and Jai commits.
+- `385e043 feat(graph): index WSDL as an API contract (#wsdlcontract)`.
+
+**How it works:**
+- **Parser:** `tree-sitter-xml` 0.7, not `quick-xml`. Every indexed language must supply a tree-sitter grammar, which chunking, complexity scoring, semantic-edit reparsing and the conformance suite all rely on. Sharing that tree also keeps symbol spans identical to the chunker's, as with the JSON and YAML code.
+- **Layout:** a shared XML layer, `tsift-graph/src/xml.rs`, resolves namespaces by scope, so `xs:`, `xsd:` and a default namespace are all handled without hardcoded prefixes. The XSD and WSDL code is in `xml_contract.rs`. A WSDL's embedded `<types>` schemas go through the XSD code.
+- **XSD:** components become `schema` symbols, with the XSD element name kept as `node_kind`, so an element and a type with the same name stay distinct. Child elements and attributes become `Owner.child` properties. `type=`, `ref=`, `base=`, `substitutionGroup=`, `itemType=` and `memberTypes=` are references. Built-in `xs:` types and undeclared prefixes produce no edge.
+- **WSDL:** services, ports (`Service.port`, kind `endpoint`), portTypes and interfaces (kind `interface`), operations, messages and parts, and bindings become symbols. `binding`, `service` and `endpoint` can now be callers.
+- **Features:** `lang-xsd` and `lang-wsdl`, where WSDL requires XSD.
+- **`.xml` is not indexed.** Unlike JSON, XML contracts have their own extensions. Plain `.xml` is mostly IDE state, build files and generated output. A test asserts that `pom.xml` maps to no language.
+- **Smoke test after install:**
+  - `graph Address --callers` returns `Customer` through `type=` and `UsAddress` through `base=`.
+  - `TradePriceRequest --callers` returns both WSDL messages.
+  - The port shows up as a caller of the binding.
+
+**`#jaicrate` is dispatched and claimed** (subagent `tsift-jaicrate`, worktree `~/work/btakita/worktrees/tsift-jaicrate`):
+- **New crate:** the vendored grammar moves into a new `tsift-tree-sitter-jai` crate. It exposes the standard grammar-crate API (`LANGUAGE`, `NODE_TYPES`), so switching to an upstream `tree-sitter-jai` crate later is a one-line change.
+- **Opt-in:** `lang-jai` is no longer a default feature, and CI still runs the Jai tests.
+- **Release:** binaries are built with `--features all-languages`, and the new crate is published before `tsift-graph`.
+
+Upstream: opening an issue on constantitus/tree-sitter-jai, to offer the `scanner.c` fix and offer to publish `tree-sitter-jai` with them as owner, is waiting on the operator's go-ahead.
+
+`#sdktsiftedges` is still running. The exchange is long (132 lines), but the queue is active, so I'm not compacting.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#xsdcontract]
-- do [#wsdlcontract]
+- 🚧 do [#jaicrate]
+- ~~⏭️ do [#xsdcontract]~~
+- ~~do [#wsdlcontract]~~
 - ~~do [#releasepublishbindings]~~
 - ~~#subagent: Add C bindings~~
 - ~~#subagent: Add Odin bindings~~
-- ~~#subagent: Add Jai bindings~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#subagent: Add Jai bindings~~
 - #subagent: [#sdktsiftedges]
 <!-- /agent:queue -->
 <!--
@@ -190,9 +222,7 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#sdktsiftedges] [recommended] Import an external edge file into graph-db (e.g. tsift graph-db import <file>), then load haiven-sdk codegen/trace.json (contract node -> per-language declaration -> conformance scenario, haiven-sdk #62), so a contract change's blast radius across SDKs is one graph query. Contract nodes are already indexed as of 8022f34 (#sdktsiftcontracts), so trace.json's model nodes can join to them by name. Moved from haiven-dev tasks/sdk.md.
-- [ ] [#xsdcontract] Index XSD (.xsd) as an API contract: extend packages/tsift-graph/src/contract.rs with an XML Schema dialect (complexType/simpleType/element/attribute/group as schema symbols, Owner.child properties; type=/ref=/base= QName refs as call sites like $ref). Lays the shared XML parsing foundation (quick-xml or tree-sitter-xml) that #wsdlcontract builds on.
-- [ ] [#wsdlcontract] Index WSDL (.wsdl, 1.1 + 2.0) as an API contract on top of #xsdcontract: services, ports/endpoints, portTypes/interfaces, operations, messages/parts as symbols; message=/element=/type=/binding= refs as call sites; embedded <types><xsd:schema> projected via the XSD dialect.
-- [ ] [#jaicrate] Move the vendored Jai grammar into a new workspace crate tsift-tree-sitter-jai (standard tree-sitter grammar crate API: LANGUAGE LanguageFn + NODE_TYPES; MIT-0 LICENSE + upstream constantitus/tree-sitter-jai@96440b0 provenance), make lang-jai opt-in (off by default) and depend on it, build release binaries with --features all-languages, publish the new crate before tsift-graph. Keeps the 29 MB parser.c out of default tsift downloads.
+- [ ] 🚧 [#jaicrate] Move the vendored Jai grammar into a new workspace crate tsift-tree-sitter-jai (standard tree-sitter grammar crate API: LANGUAGE LanguageFn + NODE_TYPES; MIT-0 LICENSE + upstream constantitus/tree-sitter-jai@96440b0 provenance), make lang-jai opt-in (off by default) and depend on it, build release binaries with --features all-languages, publish the new crate before tsift-graph. Keeps the 29 MB parser.c out of default tsift downloads.
 <!-- /agent:backlog -->
 
 ## Review

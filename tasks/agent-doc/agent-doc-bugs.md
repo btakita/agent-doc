@@ -98,6 +98,19 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 **Queue steering picked up:**
 - **GH #109, #110, #111:** each is running in its own subagent and worktree outside agent-loop (`~/work/btakita/agent-doc-wt/gh1{09,10,11}`). Each commits on its own branch with no push or install; I merge, install and close the issues as they come back.
 - **Your steering note** (queue/exchange changes should be picked up as soon as an item finishes): from now on I close each item as soon as it is done, so the binary hands me your new queue and exchange edits instead of me sitting on long-running work.
+
+### Re: GH #109 — stale-supervisor pane in a layout column — opus-5.5 · 2026-10-02T23:40-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/109
+
+**Fixed, installed, pushed, and closed** (agent-doc `ff6d867e8`, merged on main; [GH #109](https://github.com/btakita/agent-doc/issues/109) closed).
+
+- **The pane was legitimately in that column.** `pmt2/mr/1102.md` was a retained column, so `%66` was filling its own document's column, not another document's. The real gaps were narrower: the pane's supervisor runs a superseded binary and was neither flagged nor recycled, and its move out of stash was never explained.
+- **Fix:** `layout_column_audit` checks column panes after every layout sync:
+  - **Stale supervisor:** detected by comparing the supervisor's exe with the installed binary, falling back to the `⚠ STALE SUPERVISOR` title when the exe can't be read. A stale supervisor in its own column gets the existing safe-boundary recycle, at most once every 10 minutes. Nothing is killed or moved.
+  - **Logging:** every promoted, foreign, or stale pick logs `layout_column_pane_selected` with its reason.
+- **Remaining:** tmux-router can still fill a column with a spare pane that no document owns. The audit reports this but doesn't prevent it; preventing it needs a tmux-router change.
+- **Verification:** combined `make check` over all of today's merged fixes passed 10541 tests, plus audit-docs, editor-parity, lean, and tla. `make install` hot-upgraded the live IDE to plugin 0.2.483.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -109,9 +122,14 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do https://github.com/btakita/agent-doc/issues/108~~
 - ~~release + publish~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/109
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/109~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/110
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/111
+- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/112
+- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/113
+- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/114
+- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/115
+- #subagents do [#preflightdeadline]
 - changes to the queue & the exchange should immediately be picked up once done as steering
 - release + publish
 <!-- /agent:queue -->

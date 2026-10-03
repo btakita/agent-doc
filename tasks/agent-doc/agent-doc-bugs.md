@@ -19,7 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -225,6 +225,33 @@ Both are merged on agent-doc main and pushed. Superproject pointer: `9832bf6e31`
 - **Caveat:** this Claude Code session started before the hook was installed, so the hook only runs here after a restart. The closeout and preflight paths cover the gap meanwhile.
 
 Next: `release + publish` (claim released) cuts **v0.35.443**.
+
+### Re: release + publish — v0.35.443 — opus-5.5 · 2026-10-03T00:49-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.443 is tagged, pushed, and installed.** Release commit `b5e9f9a4e`; tag `v0.35.443`; superproject pointer `135ccf074f`.
+
+- `make release` ran the full `make check` (nextest **10573 passed**; editor-parity row added for 0.35.443), tagged and pushed `v0.35.443`, then ran one `install-full`. Installed: `agent-doc 0.35.443`, JetBrains plugin 0.2.484.
+- The GitHub Release and PyPI workflows for v0.35.443 were still running when last checked. I'm not waiting on them, per `#ci-no-closeout-wait`.
+- v0.35.442 finished: its Release workflow succeeded, and the GitHub Release has the four platform archives, the JetBrains and VS Code packages, `SHA256SUMS`, and `EDITOR-PACKAGES.sha256`.
+
+**What 0.35.443 ships** (full entry in `VERSIONS.md`):
+- **Steering and queue:**
+  - mid-turn operator steering, with a PostToolUse hook plus closeout, `agent-doc steering`, and preflight `queue_subagent_dispatch` surfaces;
+  - queue claims, and a Stop hook that renders as feedback rather than an error;
+  - annotated queue heads treated as operator steering.
+- **Preflight:** the admission deadline (#preflightdeadline).
+- **Layout routing:** GH #109–#112.
+- **Plugin upgrade:** GH #113–#115.
+- **Clear Session Context:** the crash is fixed.
+
+**New backlog item `#closeoutstrandedmsg`:**
+- The previous closeout printed a self-contradictory "committed … STRANDED" report, and its own queue strikes weren't in the snapshot.
+- This cycle's preflight then misread those strikes as operator intent and suppressed the drain.
+- The release ran anyway, because it was the only remaining head.
+
+**Exchange size:** 195 lines across 12 responses. I won't compact without the explicit `agent_doc_auto_compact` opt-in.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -234,22 +261,11 @@ Next: `release + publish` (claim released) cuts **v0.35.443**.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do https://github.com/btakita/agent-doc/issues/108~~
-- ~~release + publish~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/109~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/110~~
-- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/111~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/112~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/113~~
-- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/114~~
-- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/115~~
-- #subagents do [#preflightdeadline]
-- changes to the queue & the exchange should immediately be picked up once done as steering
-- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#closeoutstrandedmsg] [agent-doc] A successful closeout printed a self-contradictory report and left its own queue strikes out of the snapshot (2026-10-03 00:30, cycle-1791001397823). respond printed 'closeout error recovered: the retained closeout committed cycle ... on its own after: refusing to close ... visible edits are STRANDED ... Run agent-doc commit', while session-check said committed (commit_success). The next preflight saw the closeout's own #ftstrike strikes of '#subagents do [#preflightdeadline]' and the steering note as snapshot drift, classified them as user_intent_prompt_changes, and suppressed queue continuation with no head selected. Fix: (1) the recovered-closeout report must state the terminal outcome only, not quote the superseded STRANDED remedy; (2) a closeout's binary-authored queue strikes and backlog --done must land in the committed snapshot, or be recognized as binary-owned by the next preflight and never count as operator intent. Repro context: respond with --done <id> plus two quoted free-text heads while the queue mutation projection was retained.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

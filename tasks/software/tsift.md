@@ -530,6 +530,37 @@ Running the generator changed only `trace.json`; `model.json` and every generate
 - **Checks that didn't run locally:** tsc is missing, and the C# checks need .NET 10.0.400 (10.0.112 is installed). The conformance runners need a `../haiven-api` checkout. CI on the PR hasn't been checked.
 
 `#tsiftindexesinvalidate` and `#projectlevelopt` are still running in their subagents.
+
+### Re: [#projectlevelopt] done — Luau opt-in for .lua — opus-5-5 · 2026-10-03T15:19-04:00
+
+> **Queue prompt:** #subagent: do [#projectlevelopt]
+
+Pushed `4a4e6fd` to tsift `main` without force. `make check` exited 0, and the binary is installed with `--features all-languages`. CI for the commit was still running when the subagent finished.
+
+**How to opt in,** in `.tsift/config.toml`:
+```toml
+[languages.extensions]
+lua = "luau"
+
+[languages]
+detect_rojo = true   # optional, off by default
+```
+- **`detect_rojo`** applies the `lua → luau` mapping only when the project root has a Rojo `default.project.json`. An explicit mapping wins over it.
+- **Default:** without the opt-in, `.lua` is still not indexed.
+- **Unknown language name:** if the mapping names a language this build doesn't index, indexing stops with an error that lists the valid names.
+- **Re-index:** each indexed file's language is now stored and compared, so turning the opt-in on or off re-reads or drops the affected `.lua` files on the next plain index.
+
+**`declare` and `type function`:** the pinned tree-sitter-luau grammar (1.2.0, still the newest on crates.io) doesn't support either. All three probes failed to parse: `declare function`, `declare class` and `type function`. The grammar is unchanged, and the gap is recorded in `specs/` and `VERSIONS.md`.
+
+**Limits:**
+- The config is read per indexed root, so a submodule needs its own `.tsift/config.toml`.
+- `.tsift/` is gitignored, so the opt-in isn't shared with a team.
+- Only indexing honours the opt-in. ast-grep search, complexity metrics and diff-digest still decide by file extension.
+- `#tsiftindexesinvalidate` changes the same comparison code in `index.rs`, so its rebase may conflict.
+
+**agent-doc defect:** the mid-turn steering hook delivered this session's "dispatch now" items to the subagent's own tool calls. The subagent ignored them. I filed it as `steeringleaksubagent` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
+`#tsiftindexesinvalidate` and `#tracelockjoin` are still running.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -550,7 +581,6 @@ https://github.com/chopratejas/headroom
 <!-- agent:backlog priority queue -->
 - [ ] [#tracelockjoin] (sdktracenaming) tsift graph-db haiven-trace importer, in packages/tsift-cli/src/graph_import.rs: (1) read the sibling codegen/contracts.lock commit and store it on the import-source node; (2) after refresh, compare it with the HEAD of the indexed haiven-contracts checkout (the submodule beside codegen/, else an indexed repo whose remote ends in haiven-contracts) and warn on mismatch, never fail; (3) join vocabularies on the new trace title (fall back to name), and join ws.events on operation, else the AsyncAPI message key; this fixes chat.typing, which today joins to the client chat.typing operation; (4) tests: mismatched lock warns, matching lock is silent, event with no operation joins by message key. Also fix the comment that says model.json ws.requests is keyed by operation; it is keyed by wire type. Needs haiven-sdk 57dd11c (PR 62).
 - [ ] [#tsiftindexesinvalidate] (extractorversion) tsift indexes do not invalidate when extractors change: after installing daac4fe a plain tsift index skipped unchanged files, so new TS method / C++ namespace var / C# using-alias symbols appeared only after index --rebuild. Record an extractor/schema version per indexed file (or per index) and re-extract on mismatch; add a regression test.
-- [ ] [#projectlevelopt] [recommended] (luaulegacy) Project-level opt-in to index .lua files as Luau (Roblox/Rojo legacy projects keep Luau in .lua); today only .luau maps to Luau. Also consider declare/type function once tree-sitter-luau supports them.
 <!-- /agent:backlog -->
 
 ## Review

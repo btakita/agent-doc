@@ -745,6 +745,62 @@ How it went out:
 - **Follow-ups filed:** route startup has the same refusal (`routestartupadmit`), and the steering path still exits 1 (`steerinterruptexit`).
 
 **Still running:** the subagent fixing the editor replica being dropped and refused when it re-registers, which kept your sdk.md prompt stuck in the JetBrains buffer (`steerreplicachurn`). `qsubattr5` (dogfood) is now unblocked because phases 3–4 are installed. I'll release my coordinator hold on it so the next cycle runs it.
+
+### Re: follow-up batch closeout (6 items, verified and installed) — opus-5.5 · 2026-10-03T19:14-04:00
+
+> **Queue prompt:** do [#steerreplicachurn]
+
+**Done** (`f0e395d7d`, plugin 0.2.486). An operator burst that the controller had ingested but answered `durable=false` was rebased onto stale text and refused forever. Each refusal took 45–72s of char diff on the editor's document worker, which stalled the worker, so the controller's re-register timed out and the replica was dropped. The fixes:
+- the diff is now line-first;
+- the rebase is subsequence-aware and inserts only the missing operator text;
+- reloads that change nothing no longer deregister and re-register all 23 documents.
+
+> **Queue prompt:** do [#routestartupadmit]
+
+**Done** (`0d9e22a0f`). Route startup now uses preflight's `current_authority_admission`. It admits as soon as the controller holds the text, sends one drain request without waiting on it, and still fails closed when no text exists. Covered by SimWorld and 3 mutations.
+
+> **Queue prompt:** do [#steerinterruptexit]
+
+**Done** (`c47c154ff`). Pending post-commit steering now reports `[session-check] steering pending: …` (exit 0, or 2 under `--codex-final-gate`) instead of INTERRUPTED. The change covers every consumer: respond/finalize/write --commit, both Stop hooks, the dogfood classifier, queue continuation, MCP, the skill/runbooks and the specs. 15 mutations. The Codex harness check that still pre-empts this path is filed as `codexsteerinterrupt`.
+
+> **Queue prompt:** do [#handoffrouteforward]
+
+**Done** (`997ebbfc6`).
+- **Exit drain:** the old controller's exit now drains in-flight async workers, bounded at 360s.
+- **Hand-over to the successor:** a not-yet-started route is forwarded to the successor under the same `command_id`. Admission is now idempotent per `command_id`, so no route runs twice.
+- **Await on the successor:** an await that reaches the successor first holds while the predecessor is alive, then fails with "re-run".
+- **No silent drops:** a route never disappears without a message.
+
+> **Queue prompt:** do [#layoutpublisherarbiter]
+
+**Done** (`91979c5f5`).
+- **Ordering:** route vs `plugin_publication` is now ordered by plane version, not arrival time.
+- **Column count:** the plugin's visible split owns it; an `ensure` route cannot widen it, and an `exact` route replaces it.
+- **Logging:** every loser logs `pane_layout_publication_superseded winner=… loser=… reason=…`.
+- **Stash panes:** neither layout focus nor `agent-doc focus` will select a pane in `1:stash`.
+- **Flake ruled out:** a suspected flake came from a sibling running this subagent's mutation script in its worktree. The test passed 120 of 120 under load without the guessed fix, so the fix was reverted.
+
+> **Queue prompt:** do [#claimdispatchidentity]
+
+**Done** (`94ed2734c`). One `queue_head_identity` now serves claims, dispatch, steering, drainability and selection.
+- **Matching:** it ignores leading tags and markers, then keys on the `#id` or the remaining text.
+- **Edits vs retargets:** adding `#gh-fix` to a claimed line keeps the claim; a different id or URL is a new task.
+- **Live text:** `queue claim` reads live editor text for lines not yet on disk.
+- **Old claims:** claims stored under the old key are re-keyed.
+
+**Batch verification:**
+- **Combined run:** `make check` on the integrated tree (`c845098c7…c47c154ff`) ran 10,740 tests, all passed, at load average ~21. The five realtime-io timing tests that failed under load 46–128 all passed here.
+- **audit-docs failure:**
+  - **Cause:** the superproject's installed skill copies were stale after `steerinterruptexit`.
+  - **Fix:** I regenerated them with `skill install --all`, and that gate now passes, as do the stages after it (editor-parity, python-bootstrap, lean, tla). The 22 regenerated copies are committed in the superproject.
+- **Revived test:** the same run surfaced a test that had been silently dead since 2026-09-28. `5f58f7a6b` had absorbed its `#[test]`. It is restored in `463cb883c` and passes.
+- **Install:** `make install` succeeded.
+
+**Filed:**
+- `codexsteerinterrupt`
+- `installworktreecontrollers`: install started controllers in 8 subagent worktrees. I stopped them and removed the merged worktrees.
+
+**Still held:** `qsubattr5`, the dogfood run. It switches a live session document's queue marker to `subagents=3`. The plan names `tasks/software/tsift.md`, but another active session owns that file. Tell me where to run it: there, from its own session, or here on this document.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -759,21 +815,23 @@ How it went out:
 - ~~do [#qsubattr3]~~
 - ~~do [#qsubattr4]~~
 - do [#qsubattr5]
-- #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/120
+- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/120~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#subagents: https://github.com/btakita/agent-doc/issues/121~~
-- #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/122
-- https://github.com/btakita/agent-doc/issues/123
-- #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/124
+- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/122~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~https://github.com/btakita/agent-doc/issues/123~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/124~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#routestartupadmit]~~
+- ~~do [#steerinterruptexit]~~
+- ~~do [#handoffrouteforward]~~
+- ~~do [#layoutpublisherarbiter]~~
+- ~~do [#claimdispatchidentity]~~
+- ~~do [#steerreplicachurn]~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#routestartupadmit] [agent-doc] Route startup has the same delivery_pending refusal that preflight had: agent-doc-route-io/src/startup_debounce.rs defers or refuses on 'delivery_pending' while the controller already holds the operator's text. Apply agent_doc_debounce::current_authority_admission (shipped in c845098c7) to the route startup wait, add SimWorld coverage, make check, install.
-- [ ] [#steerinterruptexit] [agent-doc] session-check's realtime-steering path still exits 1 (INTERRUPTED) for an unanswered operator prompt after a committed cycle, with 'address it in your current turn' guidance. Pending operator steering is not a failure; report it as steering with exit 0 and update the closeout and harness contract that depends on the exit code (follow-up from c845098c7).
-- [ ] [#handoffrouteforward] [agent-doc] A route admitted by a controller that then hands off SUCCESSFULLY is still lost: the old controller stays Preparing and exits after its client connections drain without waiting for async editor_route workers, so the successor never learns of the command (GH #122 remainder, 07af0fd51). Forward the in-flight async route to the successor, or drain workers before exit, and have the plugin accept the result from the successor.
-- [ ] [#layoutpublisherarbiter] [agent-doc] Route and plugin_publication layout publishers still overwrite each other (last writer wins) and the loser is not logged; also never make a pane in a non-active window (1:stash) a focus target (GH #120 asks 2-3, remainder after 0bb023110).
-- [ ] [#claimdispatchidentity] [agent-doc] queue claim and subagent dispatch disagree on what a live queue head is (GH #124 ask 5). Also, editing a claimed free-text queue line changes its claim identity, so the claim silently drops (seen 2026-10-03 when '#gh-fix' was added to claimed lines). Unify the identity and carry a claim across an operator edit of the same line.
-- [ ] [#steerreplicachurn] [agent-doc] Operator queue edits reached the CP only ~4-5 min late, so mid-turn steering could not surface them (2026-10-03, agent-doc-bugs.md): from 19:19:56Z to 19:24:16Z the JetBrains replica deregistered and re-registered every 10-60s with bootstrap_bytes=34 (crdt_replica_register/deregister in ops.log), the CRDT text stayed len=59241, and the edits arrived in one crdt_document_op_delta_ingested of delta_len=7165514 at 19:24:16Z. Find what drives the register churn (a concurrent make install or plugin reload is suspected), make operator ops flush on re-register, and add SimWorld coverage showing an edit made during churn is visible to the midturn hook within seconds.
+- [ ] [#codexsteerinterrupt] [agent-doc] In a Codex session (CODEX_THREAD_ID set), an operator prompt added after the commit is still reported INTERRUPTED (exit 1) by the active-harness-session-changed-document check, which runs before the steering-pending path shipped in c47c154ff. That check also catches console output replayed into the document as fake prompts, so it must tell real operator steering (editor-op provenance) apart from replayed harness output before it reports steering_pending. Add SimWorld/Codex hook coverage.
+- [ ] [#installworktreecontrollers] [agent-doc] make install / install-full starts an 'agent-doc controller serve' in every agent-doc worktree that has .agent-doc state (8 appeared in subagent worktrees under ~/work/btakita/worktrees/ at once on 2026-10-03, plus leftovers from test runs in each). The ensure-controller / reload fan-out must not start controllers for worktree project roots nobody has open, and test runs must not leave controllers behind (see reference_agent_doc_test_fixture_controllers_leak_to_pid1).
 - [ ] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): dogfood in tasks/software/tsift.md (replace per-line #subagent: prefixes with subagents=3); verify via queue claims + ops.log that each head is dispatched exactly once and none drain inline.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and

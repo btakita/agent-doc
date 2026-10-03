@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -596,6 +597,32 @@ So: it's fine for a short batch you're watching. For an unattended `go` queue, w
 There are five phases, each added to the backlog and the queue: `qsubattr1` (parse/classify), `qsubattr2` (eligibility + cap), `qsubattr3` (claim refresh/expiry), `qsubattr4` (skill/runbook contract), and `qsubattr5` (dogfood on tsift.md).
 
 Note: this exchange is 533 lines and still growing; I'm not compacting because the queue is active.
+
+### Re: qsubattr1: queue `subagents` / `fan-out` attribute, phase 1 — opus-5.5 · 2026-10-03T15:24-04:00
+
+> **Queue prompt:** do [#qsubattr1]
+
+Done, and the `#spec-test-build-install-commit-push` pipeline ran. agent-doc commit `6aeea8478` is pushed, and the superproject commit `ffe75a97f` (gitlink plus plan wording) is pushed too.
+
+**What landed**
+- **`agent_doc_queue::subagent_intent`** now has `QUEUE_SUBAGENTS_ATTRS` (`subagents`, `fan-out`), `parse_queue_subagents_value`, `queue_subagents_mode` and `opts_out_of_queue_subagents`.
+  - A bare flag sets the cap to 3, and `=N` must be a positive integer.
+  - If both spellings are present, the smaller valid cap wins. An invalid value turns the attribute off, so the queue drains inline.
+  - `[inline]` and `[operator-verify]` opt a line out. I used a bracket tag instead of `#inline`: it matches `[operator-verify]` and `[clean-session]`, and the coined-id hook would block `#inline`. The plan file is updated to match.
+- **`component_attrs`**: both spellings are queue-only, so they produce a `misplaced_component_attr` warning on any other component. `subagents=0` and non-numeric values warn and are ignored.
+- **`PresetContext::classify`** (in `midturn_steering.rs`): when the attribute is present, every line that hasn't opted out is classified `subagent`. That covers both mid-turn steering and preflight's `queue_subagent_dispatch`, and the attribute now combines with `preset=`.
+- **Spec**: `specs/02-document-format.md` §queue attributes describes the attribute and states that the cap, re-offering missed claims and claim refresh are planned for phases 2–4.
+
+**Verification**
+- New tests cover the spelling and cap matrix, the opt-out tags, the valid, invalid and misplaced attribute warnings, and dispatch classification under each marker shape, including `subagents=0`.
+- A mutation check passed: with the attribute's contribution turned off, the classifier test fails.
+- `make check` passed with exit 0: 10665 tests passed, 262 skipped.
+- `make install` exited 0.
+- CI run 37147783264 for `6aeea8478` was still in progress at closeout.
+
+**Caveat until phase 2:** dispatch is still offered only for lines added since the last cycle. With `subagents` on the marker, a line that was already queued drains inline, which is the problem `qsubattr2` fixes.
+
+`agent-doc-start-runtime-io/src/lib.rs` has an uncommitted change from another session. I left it untouched and didn't commit it. Running `make check` built that file too, and it stayed green.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -604,12 +631,19 @@ Note: this exchange is 533 lines and still growing; I'm not compacting because t
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- ~~do [#qsubattr1]~~
+- do [#qsubattr2]
+- do [#qsubattr3]
+- do [#qsubattr4]
+- do [#qsubattr5]
+- #subagents: https://github.com/btakita/agent-doc/issues/120
+- #subagents: https://github.com/btakita/agent-doc/issues/121
+- #subagents: https://github.com/btakita/agent-doc/issues/122
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#qsubattr1] [agent-doc] Queue subagents attribute, phase 1 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): parse `subagents`/`fan-out` (optional =N) as a queue-only attr with typo/misplacement warnings; PresetContext treats it as queue-scope subagent intent; tests for spellings and inline/[operator-verify] opt-outs.
 - [ ] [#qsubattr2] [agent-doc] Queue subagents attribute, phase 2 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): under the attr, dispatch eligibility comes from current state (drop the new-since-seed filter), with a concurrency cap of N-active_claims and ordering dependencies; capped/claimed heads are not inline-drainable; SimWorld tests for missed claim re-offered, cap, and after-A-do-B.
 - [ ] [#qsubattr3] [agent-doc] Queue subagents attribute, phase 3 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): `queue claim --refresh` heartbeat; under the attr an expired claim makes the head eligible for dispatch again, never inline drain; test for no duplicate work.
 - [ ] [#qsubattr4] [agent-doc] Queue subagents attribute, phase 4 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): coordinator contract in SKILL.md + respond/planning-dispatch runbooks for all harnesses (claim/dispatch/refresh, serialized integration, one make install per batch, release then close, orchestrate --mode parallel fallback for harnesses without an Agent tool).

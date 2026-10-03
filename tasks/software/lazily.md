@@ -16,7 +16,6 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: stop
 ---
 
 ## Status
@@ -199,19 +198,63 @@ That's roughly 9 copies of the same schema-shaped code, the exact case where sdk
 **When to revisit the kernel-IL question:** if a new binding turns into a mechanical port of an existing one (lazily-gd is 1.8k lines next to roughly 25–65k elsewhere), that's the moment to see whether a *template* of an existing binding is cheaper. Even then I'd generate a starting point and keep the result hand-maintained, not regenerate it on every change.
 
 No repo changes this cycle; it was a design question. I marked `#lazilyintermediatelangua` done because this answers it.
+
+### Re: #lzwiremodel, shared wire model + codec generation — opus-5-5 · 2026-10-03T15:50-04:00
+
+> **Queue prompt:**
+>
+> do [#lzwiremodel]
+
+**Done.** The receipts surface is now generated from one shared model in two bindings, Rust and Go. In each binding the generated file replaces hand-written declarations, and every test suite gives the same results. Pushed to all three repos:
+
+| Repo | Commit | What changed |
+|---|---|---|
+| lazily-spec | `9ccc96a` | generator, golden model, check, CI step, docs |
+| lazily-rs | `9a1ca9e` | `src/generated/receipts.rs` replaces the hand-written declarations in `src/receipt.rs` |
+| lazily-go | `7fbfe4f` | `receipts_wire_gen.go` replaces the hand-written declarations in `causal_receipts.go` |
+
+**How it works.**
+- **Model.** `scripts/wire_codegen.py` reads the schemas listed in `codegen/surfaces.json` and builds one language-neutral model. It handles the type kinds the wire actually uses: string, u64, bool, list, nullable, record, closed enum, and externally-tagged envelope. It also tracks whether a field must always be present (and is `null` when empty) or may be missing.
+- **Golden file.** The model is committed as `codegen/wire-model.json`, so a schema change shows up there as one readable diff. Every generated file's header carries the model's hash.
+- **Backends.** The Rust and Go backends emit only declarations and codecs. Behaviour stays hand-written in each binding: constructors, `is_terminal`, and `ReceiptProjection`.
+- **Fails closed.** Generation stops with an error on any schema shape it can't reproduce exactly: a non-local `$ref`, an integer without `minimum: 0`, an open object, a missing `description`, an enum value without docs, or a wire name that isn't a valid identifier. Open enums and may-be-missing fields are modelled, but neither backend emits them yet, so they're refused too.
+- **Checks.** `make wire-codegen-check` is now part of lazily-spec `make check`. It fails if the golden model is out of date or if any checked-out binding's generated file differs by a single byte. A new lazily-spec CI step runs the same check with `--require-all` against each binding's published `main`; that ordering is why the bindings were pushed first. `make wire-codegen` regenerates everything.
+- **Schema edit.** `schemas/receipts.json` only gained descriptions plus `x-lazily-enum-docs` and `x-lazily-envelope` annotations, which the generated doc comments need. The wire format is unchanged.
+
+**The model caught a real mismatch on its first surface.** Go stored a receipt's `generation` as `int64`, so it accepted negative values the schema forbids (`minimum: 0`). Rust already used `u64`. Go now decodes it as `uint64`, which is an API change for Go callers. Go's command plane still uses `int64` generations everywhere, so I didn't spread the change through it. Instead, `receiptGenerationMatches` compares the two without wrapping either side, and the stale-generation status reports a large value capped at `MaxInt64` rather than wrapping. New Go tests pin the behaviour:
+- the canonical fixture round-trips byte for byte;
+- a negative generation is rejected;
+- an unknown outcome is rejected;
+- an empty batch encodes as `[]`, not `null`;
+- the generation comparison never wraps.
+
+**Verification.**
+- **lazily-spec** `make check`: exit 0, including 17 new generator tests.
+- **lazily-go** `make check`: exit 0, run again after rebasing onto the remote's 3 new commits.
+- **lazily-rs** `make check`: exit 0 (917 test binaries ok, 0 failed). After rebasing onto the v0.59.0 version bump, I re-ran only the receipt-affected tests: the receipt unit tests, `command_conformance` (it decodes receipt frames) and `schema_compliance`. All passed.
+- **CI:** lazily-go is green. lazily-spec and lazily-rs runs were still going when I closed out.
+- **Shared working trees:** I committed only my own paths. The rebases first checked that each local-only commit matched its remote copy and that the other sessions' uncommitted README edits matched the remote, so those edits survived untouched.
+
+**What this step doesn't settle:**
+- **Lines of code.** On one surface, the generator (~560 lines) is bigger than the ~170 hand-written lines it replaced. It only pays off as more surfaces and bindings come on board.
+- **Rust conformance.** Rust still doesn't replay `causal_receipts.json`; it remains in the known-uncovered list. Adding that replay means re-pinning the corpus-floor counts, which belongs with the next step.
+- **Decode strictness.** Rust and Go still accept unknown keys and a missing `reason`/`payload_hash`, even though the schema forbids both. Enforcing that would change how they decode, so it's a decision for you, not a side effect of this change.
+
+All three are in the new recommended `#lzwiremodel2`, appended to the backlog.
+
+The exchange is 171 lines, over the 160-line warning point. I'm not stopping the queue for it; it can be compacted whenever you want.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
-- do [#lzwiremodel]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwiremodel] [recommended, lazily-spec] Shared wire model + per-binding codec generation: one language-neutral model in lazily-spec (record/scalar/list/open-enum/optional-vs-absent/u64-as-text) built from schemas/*.json + proto/, committed as a golden model.json, with thin backends that generate the msgpack/protobuf/receipt/reliable-sync wire types, error/op vocabularies, and fixture-loader scaffolding for each binding. Start with ONE surface (receipts or the graph-boundary proto) in TWO bindings (rs + one GC binding), acceptance = byte-identical conformance results and a generated file that replaces a hand-written one. Kernel (Source/Computed/Effect, scheduling, scopes) stays hand-written.
+- [ ] [#lzwiremodel2] [recommended, lazily-spec] Second wire-model step: lower the receipts surface into one GC binding (py or js), and add a Rust replay of receipts/causal_receipts.json so it leaves lazily-rs KNOWN_UNCOVERED (update the corpus-floor pins with it). Then decide whether generated decoders should enforce the schema's closed records and required-nullable fields: today rs and go both accept unknown keys and absent reason/payload_hash, and enforcing that changes decode behavior. Grow to a second surface (graph-boundary proto or reliable-sync) only if the generator removes more hand-written code than it adds. Design: src/lazily-spec/docs/wire-codegen.md.
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

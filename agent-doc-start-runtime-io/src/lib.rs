@@ -1627,31 +1627,38 @@ fn supervisor_reexec_candidates() -> Vec<(PathBuf, &'static str)> {
 #[cfg(unix)]
 fn supervisor_perform_reexec(
     shared: &SupervisorShared,
-) -> std::io::Result<std::convert::Infallible> {
+) -> Result<std::convert::Infallible, SupervisorReexecError> {
     use std::os::unix::process::CommandExt;
+    // `#reexecdeadchild`: hold the reap gate from the liveness check through the
+    // `execve`. The host loop reaps under the same gate and unpublishes the PID
+    // before releasing it, so the child cannot be reaped between this check and
+    // the image swap. A successful exec never returns (the gate dies with the old
+    // image); a failed one drops it on return.
+    let _reap_gate = shared.child_reap_gate.lock();
+    if let Some(refusal) = shared.reexec_preserve_child_refusal() {
+        return Err(SupervisorReexecError::Refused(refusal));
+    }
     let child_pid = shared.child_pid.load(Ordering::Relaxed);
     let master_fd = shared.master_fd.load(Ordering::Relaxed);
     if child_pid == 0 || master_fd < 0 {
-        return Err(std::io::Error::other(
-            "reexec: no live child/master fd to preserve",
-        ));
+        return Err(std::io::Error::other("reexec: no live child/master fd to preserve").into());
     }
     // Dup the master fd and clear CLOEXEC on the dup so it survives the execve and the
     // new image can adopt it. The original fd (CLOEXEC) closes on exec as usual.
     let inherited = unsafe { libc::dup(master_fd) };
     if inherited < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(std::io::Error::last_os_error().into());
     }
     let flags = unsafe { libc::fcntl(inherited, libc::F_GETFD) };
     if flags < 0 {
         let err = std::io::Error::last_os_error();
         unsafe { libc::close(inherited) };
-        return Err(err);
+        return Err(err.into());
     }
     if unsafe { libc::fcntl(inherited, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } < 0 {
         let err = std::io::Error::last_os_error();
         unsafe { libc::close(inherited) };
-        return Err(err);
+        return Err(err.into());
     }
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let state = ReexecState {
@@ -1704,7 +1711,64 @@ fn supervisor_perform_reexec(
         "reexec: all {} candidate(s) failed: [{}]",
         candidates.len(),
         attempts.join("; "),
-    )))
+    ))
+    .into())
+}
+
+/// Why [`supervisor_perform_reexec`] returned instead of replacing the image.
+#[cfg(unix)]
+#[derive(Debug)]
+enum SupervisorReexecError {
+    /// `#reexecdeadchild`: the preserved-child handoff was unsound (child gone
+    /// or about to be replaced). Nothing was attempted; this is a deferral, not
+    /// an exec failure, and must not disable recycling or escalate.
+    Refused(agent_doc_controller::recycle::ReexecPreserveChildRefusal),
+    /// The exec could not start.
+    Io(std::io::Error),
+}
+
+#[cfg(unix)]
+impl From<std::io::Error> for SupervisorReexecError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
+#[cfg(unix)]
+impl std::fmt::Display for SupervisorReexecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused(refusal) => write!(f, "reexec refused: preserved child {refusal}"),
+            Self::Io(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+/// `#reexecdeadchild`: has `pid` already exited (zombie) or been reaped?
+///
+/// Uses `waitid(WNOWAIT)` so the probe never consumes the exit status the host
+/// loop still has to reap. `ECHILD` means the PID is not (or no longer) our
+/// child: it was already reaped, so it cannot be adopted.
+#[cfg(unix)]
+fn preserved_child_has_exited(pid: u32) -> std::io::Result<bool> {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let rc = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if rc < 0 {
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ECHILD) {
+            return Ok(true);
+        }
+        return Err(err);
+    }
+    // WNOHANG with no state change leaves `si_pid` zero.
+    Ok(unsafe { info.si_pid() } != 0)
 }
 
 struct ManagedCapabilityProofTask {
@@ -2100,6 +2164,11 @@ pub(crate) struct SupervisorShared {
     /// preserves the child. `-1` when no child is running. Owned: replaced (old fd
     /// closed) on each spawn/adopt.
     master_fd: AtomicI32,
+    /// `#reexecdeadchild` — serializes reaping the child against handing it to
+    /// an in-place `execve`. The host loop holds it across each reap tick and
+    /// unpublishes `child_pid` before releasing it on exit; the reexec holds it
+    /// from its liveness check through the exec.
+    child_reap_gate: Mutex<()>,
     /// Flag: IPC requested a restart.
     restart_requested: AtomicBool,
     /// A child-replacement restart accepted during an open document cycle. The
@@ -2204,6 +2273,7 @@ impl SupervisorShared {
             output: SupervisorOutputState::default(),
             child_pid: AtomicU32::new(0),
             master_fd: AtomicI32::new(-1),
+            child_reap_gate: Mutex::new(()),
             restart_requested: AtomicBool::new(false),
             restart_deferred_until_boundary: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
@@ -2535,6 +2605,35 @@ impl SupervisorShared {
                 }
             }
         }
+    }
+
+    /// `#reexecdeadchild`: refuse an `execve_preserve_child` hot-reload whose
+    /// child is gone or already slated for replacement. Callers check this
+    /// before announcing a recycle; [`supervisor_perform_reexec`] re-checks it
+    /// under [`Self::child_reap_gate`].
+    #[cfg(unix)]
+    fn reexec_preserve_child_refusal(
+        &self,
+    ) -> Option<agent_doc_controller::recycle::ReexecPreserveChildRefusal> {
+        let child_pid = self.child_pid.load(Ordering::Relaxed);
+        let child_exited = child_pid != 0
+            && preserved_child_has_exited(child_pid).unwrap_or_else(|err| {
+                // Cannot prove the child is adoptable: fail closed (defer).
+                eprintln!(
+                    "[agent-doc] warning: reexec liveness probe failed for child {child_pid}: {err}; deferring hot-reload"
+                );
+                true
+            });
+        agent_doc_controller::recycle::reexec_preserve_child_refusal(
+            agent_doc_controller::recycle::ReexecPreserveChildFacts {
+                child_pid_published: child_pid != 0,
+                child_exited,
+                stop_requested: self.stop_requested.load(Ordering::Relaxed)
+                    || self.stop_agent_requested.load(Ordering::Relaxed),
+                restart_requested: self.restart_requested.load(Ordering::Acquire),
+                restart_served_by_reexec: self.restart_reexec.load(Ordering::Relaxed),
+            },
+        )
     }
 
     /// Send SIGTERM to the foreground PTY process group so an agent restart
@@ -2948,6 +3047,68 @@ mod tests {
             !idle_queue_prompt_visible(&shared, &harness),
             "active-turn blockers must win over a stale ready actor state"
         );
+    }
+
+    /// `#reexecdeadchild` regression (sdk.md "Clear Session Context" crash,
+    /// 2026-10-03T02:27:41Z): a clear's fresh restart reaped the child, then an
+    /// install-fanout recycle handed the reaped PID across `execve` and the new
+    /// image adopted a child it could never wait on. Both the precheck and the
+    /// gated `supervisor_perform_reexec` must refuse a gone/condemned child.
+    #[cfg(unix)]
+    #[test]
+    fn reexec_refuses_to_preserve_a_reaped_zombie_or_condemned_child() {
+        use agent_doc_controller::recycle::ReexecPreserveChildRefusal as Refusal;
+        let shared = SupervisorShared::new("claude", "test-instance".to_string());
+        assert_eq!(
+            shared.reexec_preserve_child_refusal(),
+            Some(Refusal::NoLiveChild)
+        );
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep child");
+        shared.child_pid.store(child.id(), Ordering::Relaxed);
+        assert_eq!(shared.reexec_preserve_child_refusal(), None);
+
+        // The operator clear: a fresh restart is pending while the child lives.
+        shared.restart_requested.store(true, Ordering::Release);
+        assert_eq!(
+            shared.reexec_preserve_child_refusal(),
+            Some(Refusal::ChildReplacementPending)
+        );
+        shared.restart_reexec.store(true, Ordering::Relaxed);
+        assert_eq!(shared.reexec_preserve_child_refusal(), None);
+        shared.restart_reexec.store(false, Ordering::Relaxed);
+        shared.restart_requested.store(false, Ordering::Release);
+
+        // SIGTERM (exit 143 in the live log) leaves an unreaped zombie first.
+        unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while shared.reexec_preserve_child_refusal().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "SIGTERMed child never observed as exited"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            shared.reexec_preserve_child_refusal(),
+            Some(Refusal::ChildExited)
+        );
+        // The probe used WNOWAIT: the exit status is still reapable.
+        let status = child.wait().expect("zombie still reapable after probe");
+        assert!(!status.success());
+
+        // Reaped by the host loop but PID still published: the live crash shape.
+        assert_eq!(
+            shared.reexec_preserve_child_refusal(),
+            Some(Refusal::ChildExited)
+        );
+        match supervisor_perform_reexec(&shared) {
+            Err(SupervisorReexecError::Refused(Refusal::ChildExited)) => {}
+            other => panic!("reexec must refuse a reaped child, got {other:?}"),
+        }
     }
 
     #[test]

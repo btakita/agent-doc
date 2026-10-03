@@ -320,8 +320,131 @@ pub fn strip_priority_markers(text: &str) -> String {
     t.trim().to_string()
 }
 
+/// The **work identity** of a live queue head: the one key queue claims,
+/// subagent dispatch, mid-turn steering alignment, in-session drainability
+/// and preflight head selection all agree on (`#claimdispatchidentity`).
+///
+/// It answers "which piece of work is this line about?", so it ignores
+/// everything on the line that only says *how* to run that work:
+///
+/// * lifecycle / priority markers (`🚧`, `⏭️`, `📌`, `**pin**`, ...), via
+///   [`strip_priority_markers`];
+/// * leading intent/preset tags: `#subagents`, `#subagent:`, `#gh-fix`,
+///   `#bug:` — any leading `#tag` / `#tag:` token that starts with a letter and
+///   is followed by more text. Tags route the work (inline vs subagent, which
+///   preset expands it); they do not change what the work is. A lone `#tag`
+///   with nothing after it is kept, so a bare `#id` head stays id-backed.
+///
+/// What remains is keyed through [`QueueItemIdentity::from_prompt`]: an
+/// id-backed remainder (`do [#a]`, `[#a]`, `do #a`, a bare `#a`) keys on the
+/// id, anything else on its whitespace-collapsed, lowercased text — so a URL
+/// or the operator's prose is the key.
+///
+/// The retarget boundary follows from that: an edit that only adds, removes or
+/// swaps tags/markers is the SAME work (a claim follows it), while an edit to
+/// the remainder — a different `#id`, a different URL, different prose — is a
+/// different task and gets a fresh identity.
+///
+/// [`QueueItemIdentity::from_prompt`] itself stays tag-sensitive: CRDT
+/// convergence and dedup decide whether two *lines of text* are one line, and
+/// collapsing `#gh-fix <url>` with `#review <url>` there would delete operator
+/// text. This key only decides which in-flight work a line names.
+pub fn queue_head_identity(text: &str) -> QueueItemIdentity {
+    QueueItemIdentity::from_prompt(&strip_intent_tags(text))
+}
+
+/// `text` with leading markers and leading `#tag` / `#tag:` intent tokens
+/// removed (see [`queue_head_identity`]). Never strips the last token, so a
+/// bare `#id` survives.
+pub fn strip_intent_tags(text: &str) -> String {
+    let mut current = strip_priority_markers(text);
+    loop {
+        let trimmed = current.trim_start();
+        let Some(rest) = trimmed.strip_prefix('#') else {
+            break;
+        };
+        if !rest
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic())
+        {
+            break;
+        }
+        let tag_len = id_prefix(rest).len();
+        let after = &rest[tag_len..];
+        let after = after.strip_prefix(':').unwrap_or(after);
+        // A tag must be a whole token: `#gh-fix:` / `#gh-fix ` qualify,
+        // `#gh-fix/x` or `#tag]` do not.
+        if !after.is_empty() && !after.starts_with(char::is_whitespace) {
+            break;
+        }
+        let remainder = strip_priority_markers(after);
+        if remainder.is_empty() {
+            break;
+        }
+        current = remainder;
+    }
+    current.trim().to_string()
+}
+
 #[cfg(test)]
 mod tests {
+    /// `#claimdispatchidentity`: tags and markers are routing, not work.
+    #[test]
+    fn head_identity_ignores_intent_tags_and_markers_but_not_the_work() {
+        let url = "https://github.com/btakita/agent-doc/issues/120";
+        let claimed = queue_head_identity(&format!("#subagents: {url}"));
+        for edited in [
+            format!("#subagents: #gh-fix {url}"),
+            format!("🚧 #subagents: #gh-fix {url}"),
+            format!("#gh-fix {url}"),
+            format!("#subagent: {url}"),
+            format!("⏭\u{fe0f} #subagents 📌 {url}"),
+            url.to_string(),
+        ] {
+            assert_eq!(queue_head_identity(&edited), claimed, "{edited:?}");
+        }
+        assert_eq!(
+            claimed,
+            QueueItemIdentity::FreeText(url.to_ascii_lowercase())
+        );
+        // A different URL is a different task.
+        assert_ne!(
+            queue_head_identity("#subagents: https://github.com/btakita/agent-doc/issues/121"),
+            claimed
+        );
+        // Id-backed: tags around a tracked id key on the id.
+        assert_eq!(
+            queue_head_identity("#subagents do [#a]"),
+            QueueItemIdentity::Id("a".into())
+        );
+        assert_eq!(
+            queue_head_identity("#subagents #a"),
+            QueueItemIdentity::Id("a".into())
+        );
+        assert_eq!(queue_head_identity("#a"), QueueItemIdentity::Id("a".into()));
+        assert_ne!(
+            queue_head_identity("#subagents do [#b]"),
+            queue_head_identity("do [#a]")
+        );
+        // Prose is the key for a tagged free-text head.
+        assert_eq!(
+            queue_head_identity("#bug: The tmux panes are swapped."),
+            queue_head_identity("#subagents #bug: the tmux panes are swapped.")
+        );
+        // Numeric `#124` is a reference, not a tag; non-token `#x/y` is kept.
+        assert_ne!(
+            queue_head_identity("#124 fix it"),
+            queue_head_identity("#125 fix it")
+        );
+        assert_ne!(queue_head_identity("#x/y fix"), queue_head_identity("fix"));
+        // Convergence identity is unchanged: still tag-sensitive.
+        assert_ne!(
+            QueueItemIdentity::from_prompt(&format!("#gh-fix {url}")),
+            QueueItemIdentity::from_prompt(&format!("#review {url}"))
+        );
+    }
+
     /// `#presetargdedup`: sibling preset invocations that differ only in their
     /// argument are distinct queue items; a bare `#id` stays id-backed.
     #[test]

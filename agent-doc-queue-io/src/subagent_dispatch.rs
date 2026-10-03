@@ -222,6 +222,142 @@ mod tests {
         );
     }
 
+    /// `#claimdispatchidentity` (live 2026-10-03, agent-doc-bugs2): the
+    /// operator edited the claimed `#subagents: <url>` into
+    /// `#subagents: #gh-fix <url>` while its subagent worked, and the line
+    /// re-appeared in `queue_subagent_dispatch` as new and unclaimed. The
+    /// claim must follow the edit; a retarget to another issue must not.
+    #[test]
+    fn edited_claimed_line_keeps_its_claim_and_is_not_redispatched() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let url = "https://github.com/btakita/agent-doc/issues/120";
+        let before = doc(&["current task"]);
+        std::fs::write(&file, &before).unwrap();
+        seed(&file, "cycle-prev", &before);
+
+        let added = doc(&["current task", &format!("#subagents: {url}")]);
+        std::fs::write(&file, &added).unwrap();
+        let offered = pending_subagent_dispatch_for_content(&file, &added).unwrap();
+        assert_eq!(offered, vec![format!("#subagents: {url}")]);
+        let handle = core::claim_item_handle(&offered[0]);
+        crate::queue_claim::claim(&file, &handle, "subagent:gh120", 600).unwrap();
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &added)
+                .unwrap()
+                .is_empty()
+        );
+
+        let edited_line = format!("#subagents: #gh-fix {url}");
+        let edited = doc(&["current task", &edited_line]);
+        std::fs::write(&file, &edited).unwrap();
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &edited)
+                .unwrap()
+                .is_empty(),
+            "the edited line is still claimed, not new dispatch work"
+        );
+        let claimed = crate::queue_claim::claimed_items_for_content(&file, &edited);
+        assert!(claimed.claims(&edited_line));
+        assert!(claimed.claims(&format!("🚧 {edited_line}")));
+        assert_eq!(
+            crate::queue_claim::active_claims_for_content(&file, &edited)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            crate::queue_claim::prune_closed_claims(&file, &edited).unwrap(),
+            0,
+            "closeout must not prune the edited line's claim as closed"
+        );
+        assert_eq!(
+            agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+                &edited, &claimed
+            ),
+            1,
+            "only the inline head is drainable while the subagent works"
+        );
+        // The subagent can still refresh/release by the text it was handed.
+        crate::queue_claim::refresh(&file, &handle, "subagent:gh120", 600).unwrap();
+
+        let retarget = "#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/121";
+        let retargeted = doc(&["current task", retarget]);
+        std::fs::write(&file, &retargeted).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &retargeted).unwrap(),
+            vec![retarget.to_string()],
+            "a different issue is a different task: unclaimed, offered"
+        );
+        assert!(
+            !crate::queue_claim::claimed_items_for_content(&file, &retargeted).claims(retarget)
+        );
+    }
+
+    /// GH #124 ask 5: every head `queue_subagent_dispatch` offers is one
+    /// `queue claim` accepts through the handle it prints, and once claimed,
+    /// dispatch, drainability, preflight selection and the steering claim
+    /// filter all treat that same head as claimed.
+    #[test]
+    fn claim_dispatch_steering_and_drainability_agree_on_heads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = doc(&[
+            "inline task",
+            "🚧 #subagents do [#x]",
+            "#subagent: https://x/issues/7",
+            "#bug: The tmux panes are swapped. #subagents",
+            "#subagents: #gh-fix https://x/issues/8",
+            // A nesting parent is a group label, not a claimable head.
+            "#subagents: epic label\n  - #subagents do [#child]",
+        ]);
+        std::fs::write(&file, &content).unwrap();
+
+        let offered = pending_subagent_dispatch_for_content(&file, &content).unwrap();
+        assert_eq!(offered.len(), 5, "{offered:?}");
+        let live = agent_doc_queue::queue_continuation::live_queue_head_texts(&content).unwrap();
+        let drainable_before =
+            agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+                &content,
+                &crate::queue_claim::claimed_items_for_content(&file, &content),
+            );
+        assert_eq!(drainable_before, 6, "nothing claimed yet");
+        for (n, head) in offered.iter().enumerate() {
+            let handle = core::claim_item_handle(head);
+            agent_doc_queue::queue_claim::resolve_claim_target(&handle, &live)
+                .unwrap_or_else(|miss| panic!("dispatch offered {head:?}; claim refused: {miss}"));
+            crate::queue_claim::claim(&file, &handle, &format!("subagent:{n}"), 600).unwrap();
+            let claimed = crate::queue_claim::claimed_items_for_content(&file, &content);
+            assert!(claimed.claims(head), "{head:?}");
+            assert!(
+                live.iter()
+                    .any(|raw| claimed.claims(raw)
+                        && is_dispatch_item(std::slice::from_ref(head), raw)),
+                "the raw live line (with markers) is the claimed, dispatched head: {head:?}"
+            );
+            assert!(
+                !pending_subagent_dispatch_for_content(&file, &content)
+                    .unwrap()
+                    .contains(head),
+                "{head:?}"
+            );
+            assert_eq!(
+                agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+                    &content, &claimed
+                ),
+                drainable_before.saturating_sub(n + 1),
+                "drainability drops exactly the claimed head {head:?}"
+            );
+        }
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     fn attr_doc(attr: &str, prompts: &[&str]) -> String {
         let queue: String = prompts.iter().map(|p| format!("- {p}\n")).collect();
         format!(

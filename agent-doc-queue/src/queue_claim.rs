@@ -12,11 +12,17 @@
 //!
 //! # Identity
 //!
-//! A claim keys on [`QueueItemIdentity::from_prompt`], the same identity queue
-//! convergence and dedup use: `#id` for id-backed heads, marker-invariant
-//! normalized free text otherwise (`strip_priority_markers`). So `🚧 do [#a]`,
-//! `do [#a]` and `[#a]` are one claim, and a preset invocation such as
-//! `#gh-fix <url>` keys on its full text.
+//! A claim keys on [`queue_head_identity`], the queue head's **work
+//! identity** that dispatch, mid-turn steering, drainability and preflight
+//! selection share (`#claimdispatchidentity`): `#id` for id-backed heads,
+//! otherwise the normalized text left after lifecycle markers (`🚧`, `⏭️`,
+//! pins) and leading intent/preset tags (`#subagents`, `#subagent:`,
+//! `#gh-fix`) are stripped. So `🚧 do [#a]`, `#subagents do [#a]` and `[#a]`
+//! are one claim, and an operator edit of a claimed
+//! `#subagents: <url>` into `#subagents: #gh-fix <url>` keeps its claim
+//! instead of re-appearing as new, unclaimed dispatch work. Changing the
+//! substance — a different `#id`, URL or prose — is a retarget and does not
+//! inherit the claim.
 //!
 //! # Lifetime
 //!
@@ -43,7 +49,7 @@
 
 use std::collections::HashSet;
 
-use agent_doc_element_queue::QueueItemIdentity;
+use agent_doc_element_queue::{QueueItemIdentity, queue_head_identity};
 use serde::{Deserialize, Serialize};
 
 /// Default claim TTL: two hours. Long enough for a background subagent to fix
@@ -87,6 +93,37 @@ pub enum ClaimOutcome {
 }
 
 impl QueueClaimLedger {
+    /// Re-derive every stored identity from its `item_text` with the current
+    /// [`claim_identity`], merging claims that now share one identity (the
+    /// later expiry wins). A ledger written before the identity rule changed
+    /// (tag-sensitive free-text keys) would otherwise hold claims that match
+    /// no live head and silently drop. Returns whether anything changed.
+    pub fn rekey(&mut self) -> bool {
+        let mut changed = false;
+        let mut merged: Vec<QueueClaim> = Vec::with_capacity(self.claims.len());
+        for mut claim in std::mem::take(&mut self.claims) {
+            let identity = claim_identity(&claim.item_text);
+            if identity != claim.identity {
+                claim.identity = identity;
+                changed = true;
+            }
+            match merged
+                .iter_mut()
+                .find(|kept| kept.identity == claim.identity)
+            {
+                Some(kept) => {
+                    changed = true;
+                    if claim.expires_at_secs > kept.expires_at_secs {
+                        *kept = claim;
+                    }
+                }
+                None => merged.push(claim),
+            }
+        }
+        self.claims = merged;
+        changed
+    }
+
     /// Claim `item` for `owner` until `now_secs + ttl_secs`.
     pub fn claim(&mut self, item: &str, owner: &str, now_secs: u64, ttl_secs: u64) -> ClaimOutcome {
         let identity = claim_identity(item);
@@ -217,10 +254,12 @@ impl QueueClaimLedger {
     }
 }
 
-/// The identity a claim on `item` keys on. Strips the `🚧` in-progress marker
-/// and other priority markers through [`QueueItemIdentity::from_prompt`].
+/// The identity a claim on `item` keys on: the shared queue-head work
+/// identity ([`queue_head_identity`]). Every claim comparison — the ledger,
+/// [`ClaimedQueueItems::claims`], live-head closure, dispatch membership —
+/// goes through this one function.
 pub fn claim_identity(item: &str) -> QueueItemIdentity {
-    QueueItemIdentity::from_prompt(item.trim())
+    queue_head_identity(item.trim())
 }
 
 /// Tracked ids a queue line references as `[#id]` or `do #id`, lowercased, in
@@ -408,6 +447,66 @@ pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String,
     })
 }
 
+/// Which document view a claim target resolved in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimHeadSource {
+    /// The on-disk document.
+    Disk,
+    /// The live editor / CRDT authority text — the view preflight computes
+    /// `queue_subagent_dispatch` from — while the editor's save to disk is
+    /// still pending (e.g. a deferred native save).
+    EditorAuthority,
+}
+
+impl ClaimHeadSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Disk => "disk",
+            Self::EditorAuthority => "editor_authority",
+        }
+    }
+}
+
+/// [`resolve_claim_target`] across the two views of the document (GH #124
+/// ask 5). Preflight computes `queue_subagent_dispatch` from the editor
+/// authority's current text; `queue claim` used to resolve against disk only,
+/// so a head the operator typed but the editor had not yet saved was offered
+/// for dispatch and then refused as "no live queue head". The disk view wins
+/// when both resolve; the authority view is consulted only on a disk miss. A
+/// miss in both reports the disk miss, with the authority-only heads appended
+/// to its live-head list so the operator sees every head either view holds.
+pub fn resolve_claim_target_in_views(
+    item: &str,
+    disk_heads: &[String],
+    authority_heads: Option<&[String]>,
+) -> Result<(String, ClaimHeadSource), QueueClaimMiss> {
+    let disk_miss = match resolve_claim_target(item, disk_heads) {
+        Ok(target) => return Ok((target, ClaimHeadSource::Disk)),
+        Err(miss) => miss,
+    };
+    let Some(authority_heads) = authority_heads else {
+        return Err(disk_miss);
+    };
+    match resolve_claim_target(item, authority_heads) {
+        Ok(target) => Ok((target, ClaimHeadSource::EditorAuthority)),
+        Err(authority_miss) if !authority_miss.ambiguous.is_empty() => Err(authority_miss),
+        Err(_) if !disk_miss.ambiguous.is_empty() => Err(disk_miss),
+        Err(_) => {
+            let mut live_heads = disk_miss.live_heads;
+            for head in authority_heads {
+                if !live_heads.contains(head) {
+                    live_heads.push(head.clone());
+                }
+            }
+            Err(QueueClaimMiss {
+                item: disk_miss.item,
+                live_heads,
+                ambiguous: Vec::new(),
+            })
+        }
+    }
+}
+
 /// A set of claimed queue items, consulted by the drainability filter.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClaimedQueueItems(HashSet<QueueItemIdentity>);
@@ -545,9 +644,15 @@ mod tests {
             message.contains("#subagents do [#preflightdeadline]"),
             "{message}"
         );
+        // `#subagents do [#a]` now keys on `a` itself, so `#a` resolves it
+        // directly; ambiguity needs two heads that only REFERENCE the id.
+        assert_eq!(
+            resolve_claim_target("#a", &["#subagents do [#a]".to_string()]).unwrap(),
+            "#subagents do [#a]"
+        );
         let twins = vec![
-            "#subagents do [#a]".to_string(),
             "review do [#a] later".to_string(),
+            "then also do [#a] again".to_string(),
         ];
         assert!(
             !resolve_claim_target("#a", &twins)
@@ -558,6 +663,131 @@ mod tests {
         assert_eq!(
             referenced_queue_ids("#subagents do [#A] and do #b-2"),
             vec!["a", "b-2"]
+        );
+    }
+
+    /// `#claimdispatchidentity` (live 2026-10-03): the operator edited the
+    /// claimed `#subagents: <url>` into `#subagents: #gh-fix <url>` while the
+    /// subagent worked. The claim must follow the edit (still claimed, still a
+    /// live head, never pruned as closed), and a retarget to a different URL
+    /// or id must not inherit it.
+    #[test]
+    fn claim_follows_a_tag_edit_but_not_a_retarget() {
+        let url = "https://github.com/btakita/agent-doc/issues/120";
+        let claimed_line = format!("#subagents: {url}");
+        let edited_line = format!("#subagents: #gh-fix {url}");
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(&claimed_line, "subagent:gh120", 100, 1000);
+
+        let live_after_edit: HashSet<_> = [claim_identity(&edited_line)].into_iter().collect();
+        let claimed = ledger.claimed_items(105, Some(&live_after_edit));
+        assert!(
+            claimed.claims(&edited_line),
+            "the edited line keeps its claim"
+        );
+        assert!(claimed.claims(&format!("🚧 {edited_line}")));
+        assert_eq!(
+            ledger.prune(105, Some(&live_after_edit)),
+            0,
+            "an edited claimed line is not a closed item"
+        );
+        assert_eq!(
+            resolve_claim_target(&claimed_line, std::slice::from_ref(&edited_line)).unwrap(),
+            edited_line,
+            "release/refresh by the original text still finds the edited head"
+        );
+
+        let retarget = "#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/121";
+        let live_after_retarget: HashSet<_> = [claim_identity(retarget)].into_iter().collect();
+        assert!(
+            !ledger
+                .claimed_items(105, Some(&live_after_retarget))
+                .claims(retarget),
+            "a different issue is a different task"
+        );
+        assert_eq!(ledger.prune(105, Some(&live_after_retarget)), 1);
+
+        let mut ids = QueueClaimLedger::default();
+        ids.claim("do [#a]", "subagent:a", 100, 1000);
+        let items = ids.claimed_items(105, None);
+        assert!(items.claims("#subagents do [#a]"));
+        assert!(items.claims("#subagents: #gh-fix do [#a]"));
+        assert!(
+            !items.claims("#subagents do [#b]"),
+            "a different id is a retarget"
+        );
+    }
+
+    /// A ledger stored under the old tag-sensitive key is re-keyed on load, so
+    /// a claim taken before the upgrade still covers the edited head.
+    #[test]
+    fn rekey_migrates_tag_sensitive_free_text_claims() {
+        let url = "https://x/issues/120";
+        let mut ledger = QueueClaimLedger {
+            claims: vec![
+                QueueClaim {
+                    identity: QueueItemIdentity::FreeText(format!("#subagents: {url}")),
+                    item_text: format!("#subagents: {url}"),
+                    owner: "subagent:a".into(),
+                    claimed_at_secs: 1,
+                    expires_at_secs: 50,
+                },
+                QueueClaim {
+                    identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
+                    item_text: format!("#gh-fix {url}"),
+                    owner: "subagent:b".into(),
+                    claimed_at_secs: 2,
+                    expires_at_secs: 90,
+                },
+            ],
+        };
+        assert!(ledger.rekey());
+        assert_eq!(ledger.claims.len(), 1, "one work identity, one claim");
+        assert_eq!(ledger.claims[0].owner, "subagent:b");
+        assert!(
+            ledger
+                .claimed_items(10, None)
+                .claims(&format!("#subagents: #gh-fix {url}"))
+        );
+        assert!(!ledger.rekey(), "rekey is idempotent");
+    }
+
+    /// GH #124 ask 5: a head present in the editor authority (what dispatch
+    /// saw) but not yet saved to disk is still claimable.
+    #[test]
+    fn claim_target_resolves_in_the_editor_authority_view_on_a_disk_miss() {
+        let disk = vec!["do [#restartideload]".to_string()];
+        let authority = vec![
+            "do [#restartideload]".to_string(),
+            "#bug: The tmux panes are swapped.".to_string(),
+        ];
+        assert_eq!(
+            resolve_claim_target_in_views(
+                "#bug: The tmux panes are swapped.",
+                &disk,
+                Some(&authority)
+            )
+            .unwrap(),
+            (
+                "#bug: The tmux panes are swapped.".to_string(),
+                ClaimHeadSource::EditorAuthority
+            )
+        );
+        assert_eq!(
+            resolve_claim_target_in_views("#restartideload", &disk, Some(&authority))
+                .unwrap()
+                .1,
+            ClaimHeadSource::Disk
+        );
+        assert!(
+            resolve_claim_target_in_views("#bug: The tmux panes are swapped.", &disk, None)
+                .is_err()
+        );
+        let miss = resolve_claim_target_in_views("#nosuch", &disk, Some(&authority)).unwrap_err();
+        assert!(
+            miss.live_heads
+                .contains(&"#bug: The tmux panes are swapped.".to_string()),
+            "{miss}"
         );
     }
 

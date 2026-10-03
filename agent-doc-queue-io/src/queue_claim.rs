@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_queue::queue_claim::{
-    ClaimOutcome, ClaimedQueueItems, QueueClaim, QueueClaimLedger, QueueClaimRefreshRefused,
-    claim_identity, resolve_claim_target,
+    ClaimHeadSource, ClaimOutcome, ClaimedQueueItems, QueueClaim, QueueClaimLedger, QueueClaimMiss,
+    QueueClaimRefreshRefused, claim_identity, resolve_claim_target_in_views,
 };
 use agent_doc_queue::queue_continuation::{live_queue_head_identities, live_queue_head_texts};
 use anyhow::{Context, Result, bail};
@@ -57,7 +57,12 @@ fn load_from_conn(
     else {
         return Ok(QueueClaimLedger::default());
     };
-    serde_json::from_str(&record.payload_json).context("parse queue claim ledger")
+    let mut ledger: QueueClaimLedger =
+        serde_json::from_str(&record.payload_json).context("parse queue claim ledger")?;
+    // `#claimdispatchidentity`: claims stored under an older identity rule are
+    // compared under the current one; the next mutation persists the re-key.
+    ledger.rekey();
+    Ok(ledger)
 }
 
 /// Apply `mutate` to the document's ledger in one immediate transaction.
@@ -122,6 +127,48 @@ pub fn load_ledger(file: &Path) -> Result<QueueClaimLedger> {
     load_from_conn(&conn, &document_hash)
 }
 
+/// Live queue heads of the editor/CRDT authority's current text, the view
+/// preflight computes `queue_subagent_dispatch` from. `None` when no editor
+/// owns the document (disk is the authority) or no current cut is available.
+fn editor_authority_queue_heads(file: &Path, source: &str) -> Option<Vec<String>> {
+    match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+        file, source,
+    ) {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => {
+            live_queue_head_texts(&text)
+        }
+        _ => None,
+    }
+}
+
+/// Resolve a claim `--item` against the on-disk document, falling back to
+/// the editor authority's current text on a miss (GH #124 ask 5): dispatch
+/// and claim must agree on what a live head is even while an editor save to
+/// disk is deferred.
+fn resolve_live_claim_target(file: &Path, item: &str, source: &str) -> Result<String> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("read {} to resolve queue item {item:?}", file.display()))?;
+    let disk_heads = live_queue_head_texts(&content).unwrap_or_default();
+    let resolved = match resolve_claim_target_in_views(item, &disk_heads, None) {
+        Ok(resolved) => resolved,
+        Err(_) => {
+            let authority = editor_authority_queue_heads(file, source);
+            resolve_claim_target_in_views(item, &disk_heads, authority.as_deref())?
+        }
+    };
+    if resolved.1 == ClaimHeadSource::EditorAuthority {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_resolved source={} reason=head_not_yet_saved_to_disk item_bytes={}",
+                resolved.1.as_str(),
+                item.trim().len()
+            ),
+        );
+    }
+    Ok(resolved.0)
+}
+
 /// Claim the live queue head `item` for `owner` for `ttl_secs`.
 ///
 /// Refuses an item that is not a live head of the document's queue: a claim on
@@ -139,12 +186,10 @@ pub fn claim(
     if owner.trim().is_empty() {
         bail!("queue claim needs a non-empty --owner (e.g. `subagent:<label>`)");
     }
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("read {} to validate the claimed queue item", file.display()))?;
     // A miss is a typed usage error (`QueueClaimMiss`) naming the live heads,
     // never a bare string: the CLI reports it as-is instead of wrapping it in
     // the generic turn-failure notice.
-    let target = resolve_claim_target(item, &live_queue_head_texts(&content).unwrap_or_default())?;
+    let target = resolve_live_claim_target(file, item, "queue_claim")?;
     let identity = claim_identity(&target);
     let now = now_secs();
     let result = mutate_ledger(file, |ledger| {
@@ -185,15 +230,9 @@ fn refresh_at(file: &Path, item: &str, owner: &str, ttl_secs: u64, now: u64) -> 
     if owner.trim().is_empty() {
         bail!("queue claim --refresh needs a non-empty --owner (the claim's holder)");
     }
-    let content = std::fs::read_to_string(file).with_context(|| {
-        format!(
-            "read {} to validate the refreshed queue item",
-            file.display()
-        )
-    })?;
     // Same resolution as `claim`, so `--item #id` refreshes a
     // `#subagents do [#id]` head and a closed head is a typed miss.
-    let target = resolve_claim_target(item, &live_queue_head_texts(&content).unwrap_or_default())?;
+    let target = resolve_live_claim_target(file, item, "queue_claim_refresh")?;
     let outcome = mutate_ledger(file, |ledger| {
         Ok(ledger.refresh(&target, owner, now, ttl_secs))
     })?;
@@ -225,16 +264,15 @@ pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
     // Release by the same resolution `claim` used, so `--item #id` releases a
     // `#subagents do [#id]` head; fall back to the literal item (a closed head
     // can still hold a stale claim worth releasing).
-    let target = match std::fs::read_to_string(file) {
-        Ok(content) => {
-            resolve_claim_target(item, &live_queue_head_texts(&content).unwrap_or_default())
-                .unwrap_or_else(|_| item.to_string())
-        }
+    let target = match resolve_live_claim_target(file, item, "queue_claim_release") {
+        Ok(target) => target,
         Err(err) => {
-            eprintln!(
-                "[queue-claim] WARNING: could not read {} to resolve {item:?}; releasing it literally: {err}",
-                file.display()
-            );
+            if err.downcast_ref::<QueueClaimMiss>().is_none() {
+                eprintln!(
+                    "[queue-claim] WARNING: could not resolve {item:?} in {}; releasing it literally: {err:#}",
+                    file.display()
+                );
+            }
             item.to_string()
         }
     };

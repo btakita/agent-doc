@@ -710,11 +710,26 @@ fn queue_items(content: &str) -> Vec<QueueItem> {
         .collect()
 }
 
+/// Live, executable queue heads (group-parent labels excluded) in queue
+/// order: exactly the set `agent-doc queue claim` resolves `--item` against
+/// (`live_queue_head_texts`), so dispatch can never offer a head the claim
+/// path refuses as "no live queue head" (GH #124 ask 5).
+fn executable_queue_items(content: &str) -> Vec<QueueItem> {
+    agent_doc_queue::queue_continuation::live_queue_head_texts(content)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|raw| {
+            let norm = normalize_queue_text(&raw);
+            (!norm.is_empty()).then_some(QueueItem { raw, norm })
+        })
+        .collect()
+}
+
+/// The shared queue-head work identity (`#claimdispatchidentity`):
+/// alignment, dispatch newness and claims all key on
+/// [`agent_doc_element_queue::queue_head_identity`].
 fn queue_identity(norm: &str) -> String {
-    format!(
-        "{:?}",
-        agent_doc_element_queue::QueueItemIdentity::from_prompt(norm)
-    )
+    format!("{:?}", agent_doc_element_queue::queue_head_identity(norm))
 }
 
 fn queue_alignment(
@@ -1352,7 +1367,7 @@ pub fn queue_attr_subagent_heads(
     let queue = components.iter().find(|c| c.name == "queue")?;
     let mode = agent_doc_queue::subagent_intent::queue_subagents_mode(&queue.attrs)?;
     let presets = PresetContext::new(content, &[]);
-    let items = queue_items(content);
+    let items = executable_queue_items(content);
     let eligible = items
         .iter()
         .filter(|item| presets.classify(&item.raw).0 == SteeringDispatch::Subagent)
@@ -1362,28 +1377,39 @@ pub fn queue_attr_subagent_heads(
     Some((mode, eligible, live))
 }
 
-/// Live queue lines with item- or queue-scoped subagent intent that are NEW
-/// relative to `reference_queue` (normalized queue texts as of the previous
-/// cycle's seed). `None` means no reference exists, so every subagent-intent
-/// line counts as new. Returns the raw (marker-stripped) line texts in queue
-/// order. Claims are the caller's concern.
+/// Live queue heads with item- or queue-scoped subagent intent that are NEW
+/// dispatch work relative to `reference_queue` (normalized queue texts as of
+/// the previous cycle's seed). `None` means no reference exists, so every
+/// subagent-intent head counts as new. Returns the raw (marker-stripped) line
+/// texts in queue order. Claims are the caller's concern.
+///
+/// "New dispatch work" is judged on the shared work identity
+/// ([`agent_doc_element_queue::queue_head_identity`], `#claimdispatchidentity`):
+/// a head is new when its identity was absent from the reference, or present
+/// only WITHOUT subagent intent (the operator escalated `do [#a]` to
+/// `#subagents do [#a]`). A tag-only edit of a line that already carried
+/// subagent intent (`#subagents: <url>` -> `#subagents: #gh-fix <url>`) is the
+/// same dispatch, not a new one.
 pub fn subagent_dispatch_heads(content: &str, reference_queue: Option<&[String]>) -> Vec<String> {
-    let reference: Option<(BTreeSet<&str>, BTreeSet<String>)> = reference_queue.map(|queue| {
-        (
-            queue.iter().map(String::as_str).collect(),
-            queue.iter().map(|norm| queue_identity(norm)).collect(),
-        )
-    });
     let presets = PresetContext::new(content, &[]);
-    queue_items(content)
+    let reference: Option<(BTreeSet<&str>, BTreeMap<String, bool>)> =
+        reference_queue.map(|queue| {
+            let mut identities: BTreeMap<String, bool> = BTreeMap::new();
+            for norm in queue {
+                let subagent = presets.classify(norm).0 == SteeringDispatch::Subagent;
+                *identities.entry(queue_identity(norm)).or_default() |= subagent;
+            }
+            (queue.iter().map(String::as_str).collect(), identities)
+        });
+    executable_queue_items(content)
         .into_iter()
+        .filter(|item| presets.classify(&item.raw).0 == SteeringDispatch::Subagent)
         .filter(|item| {
             reference.as_ref().is_none_or(|(norms, identities)| {
                 !norms.contains(item.norm.as_str())
-                    && !identities.contains(&queue_identity(&item.norm))
+                    && identities.get(&queue_identity(&item.norm)) != Some(&true)
             })
         })
-        .filter(|item| presets.classify(&item.raw).0 == SteeringDispatch::Subagent)
         .map(|item| item.norm)
         .collect()
 }
@@ -2151,6 +2177,66 @@ mod tests {
         assert_eq!(
             subagent_dispatch_heads(&scoped, Some(&reference)),
             vec!["#subagents do [#new1]".to_string(), "plain new".to_string()]
+        );
+    }
+
+    /// `#claimdispatchidentity` (live 2026-10-03): a tag-only edit of a line
+    /// that already carried subagent intent is the same dispatch, not new
+    /// work; escalating a plain line to subagent intent and retargeting to a
+    /// different URL are new. A nesting parent (a group label) is never a
+    /// dispatch head because `queue claim` cannot claim it (GH #124 ask 5).
+    #[test]
+    fn dispatch_newness_keys_on_work_identity() {
+        let url = "https://github.com/btakita/agent-doc/issues/120";
+        let reference = vec![format!("#subagents: {url}"), "do [#a]".to_string()];
+        let edited = doc(
+            &format!(
+                "- #subagents: #gh-fix {url}
+- do [#a]
+"
+            ),
+            EX,
+        );
+        assert!(
+            subagent_dispatch_heads(&edited, Some(&reference)).is_empty(),
+            "a tag-only edit of a dispatched line is not new dispatch work"
+        );
+        let escalated = doc(
+            &format!(
+                "- #subagents: {url}
+- #subagents do [#a]
+"
+            ),
+            EX,
+        );
+        assert_eq!(
+            subagent_dispatch_heads(&escalated, Some(&reference)),
+            vec!["#subagents do [#a]".to_string()],
+            "adding subagent intent to a plain line still dispatches it"
+        );
+        let retarget = "#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/121";
+        let retargeted = doc(
+            &format!(
+                "- {retarget}
+- do [#a]
+"
+            ),
+            EX,
+        );
+        assert_eq!(
+            subagent_dispatch_heads(&retargeted, Some(&reference)),
+            vec![retarget.to_string()],
+            "a different issue is new work"
+        );
+        let nested = doc(
+            "- #subagents: epic label
+  - do [#child]
+",
+            EX,
+        );
+        assert!(
+            subagent_dispatch_heads(&nested, None).is_empty(),
+            "a group parent is not a claimable head"
         );
     }
 

@@ -1222,6 +1222,27 @@ mod tests {
         assert!(hook.after_close);
         // ...and once surfaced there, nothing is left to wake for.
         assert!(observe_for_wake(&file).unwrap().items.is_empty());
+
+        // `#claimdispatchidentity`: the operator re-tags the CLAIMED line
+        // while its subagent works. The edit is the same work, still claimed,
+        // so it never wakes the session as new steering.
+        let retagged = added.replace(
+            "- #subagent: https://github.com/btakita/agent-doc/issues/116\n",
+            "- #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/116\n",
+        );
+        assert_ne!(retagged, added);
+        std::fs::write(&file, &retagged).unwrap();
+        backdate(&file);
+        let after_edit = observe_for_wake(&file).unwrap();
+        assert!(after_edit.items.is_empty(), "{after_edit:?}");
+
+        // Retargeting it to a different issue is new work: it wakes.
+        let retargeted = retagged.replace("issues/116", "issues/118");
+        std::fs::write(&file, &retargeted).unwrap();
+        backdate(&file);
+        let after_retarget = observe_for_wake(&file).unwrap();
+        assert_eq!(after_retarget.items.len(), 1, "{after_retarget:?}");
+        assert!(after_retarget.items[0].verbatim.ends_with("/118"));
     }
 
     /// The operator's complaint: a diagnostic `agent-doc steering` read

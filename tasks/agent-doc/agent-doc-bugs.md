@@ -663,6 +663,22 @@ Done, with the spec/test/build/install/commit/push preset. agent-doc commit `be4
 **Mid-turn steering arrived late.** I filed this as `steerreplicachurn` at the top of the backlog. Your three queue lines sat in the JetBrains buffer for about 4–5 minutes. During that time the editor replica kept deregistering and re-registering with a 34-byte bootstrap. The edits reached the controller in one 7 MB delta at 19:24:16Z. The hook did report them as soon as they arrived; the delay was in delivery, not in the hook.
 
 #120 and #122 are still running in their subagents. Their claims are held, and both items stay queued until they report back.
+
+### Re: queue status (all items in flight) — opus-5.5 · 2026-10-03T16:17-04:00
+
+The GH #121 line has been closed and is gone from the queue.
+
+Every remaining queue item is claimed. Nothing in the queue can be drained in this session, so the loop is waiting for subagent completions.
+
+| Item | Claimed by |
+|---|---|
+| `#subagents:` GH #120 | subagent `gh120` |
+| `#subagents:` GH #122 | subagent `gh122` |
+| `qsubattr3` (claim refresh, expiry → re-dispatch) | subagent `qsubattr3` |
+| `qsubattr4` (coordinator contract in skill and runbooks) | subagent `qsubattr4` |
+| `qsubattr5` (dogfood) | coordinator, held until qsubattr3 and qsubattr4 land and are installed |
+
+As each subagent reports back, I'll rebase its push onto main, verify it, and run one `make install` per integrated batch. Then I'll release its claim and close its queue item.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 

@@ -5,12 +5,18 @@
 //! immediately, polls stable GitHub releases, retries transient failures, and
 //! uses a per-user PID lock so only one watcher runs. Release archives are
 //! installed only after verification against the release's `SHA256SUMS`.
+//!
+//! GH #113: replacing the executable on disk does not replace the running
+//! process image, so after a binary upgrade the plugin reconcile runs as a child
+//! of the freshly installed executable (`upgrade --reconcile-plugins-release
+//! <VERSION>`), pinned to the installed release. Otherwise every fix a release
+//! makes to the plugin-install path would be skipped by the upgrade delivering it.
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::fs::{self, OpenOptions};
 use std::io::{Read as _, Write as _};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
@@ -19,6 +25,30 @@ const CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 pub const DEFAULT_AUTO_INTERVAL_SECS: u64 = 15 * 60;
 pub const MIN_AUTO_INTERVAL_SECS: u64 = 60;
 const GITHUB_REPO: &str = "btakita/agent-doc";
+
+/// GH #113: hidden `upgrade` flag that runs only the installed-plugin reconcile,
+/// pinned to the given release. This is a cross-release contract: the binary an
+/// upgrade installs is invoked with it by the binary being replaced, so future
+/// releases must keep accepting it (and [`RECONCILE_PLUGINS_MODE_FLAG`]).
+pub const RECONCILE_PLUGINS_RELEASE_FLAG: &str = "--reconcile-plugins-release";
+pub const RECONCILE_PLUGINS_MODE_FLAG: &str = "--reconcile-plugins-mode";
+
+/// Which upgrade flavor a plugin reconcile reports for: the one-shot command
+/// fails loudly, the `--auto` watcher retries on its next poll.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum ReconcileMode {
+    Once,
+    Auto,
+}
+
+impl ReconcileMode {
+    fn as_arg(self) -> &'static str {
+        match self {
+            Self::Once => "once",
+            Self::Auto => "auto",
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct AutoUpgradePlan {
@@ -30,6 +60,10 @@ struct AutoUpgradePlan {
 struct AutoUpgradeState {
     effective_version: String,
     reconciled_release: Option<String>,
+    /// The executable a previous cycle installed. Once set, this watcher's own
+    /// image is stale for the rest of its life, so every later reconcile runs
+    /// in this executable instead (GH #113).
+    upgraded_exe: Option<PathBuf>,
 }
 
 impl AutoUpgradeState {
@@ -37,6 +71,7 @@ impl AutoUpgradeState {
         Self {
             effective_version: version.to_owned(),
             reconciled_release: None,
+            upgraded_exe: None,
         }
     }
 
@@ -47,8 +82,9 @@ impl AutoUpgradeState {
         }
     }
 
-    fn binary_upgraded(&mut self, version: &str) {
+    fn binary_upgraded(&mut self, version: &str, installed_exe: PathBuf) {
         self.effective_version = version.to_owned();
+        self.upgraded_exe = Some(installed_exe);
     }
 
     fn plugins_reconciled(&mut self, release: &str) {
@@ -80,7 +116,20 @@ pub fn warn_if_outdated() {
 }
 
 /// Run one upgrade check, or watch releases continuously when `auto` is true.
-pub fn run(auto: bool, interval_seconds: Option<u64>) -> Result<()> {
+///
+/// `reconcile_plugins_release` is the hidden GH #113 child entry point: reconcile
+/// installed editor plugins against that release in THIS (freshly installed)
+/// process image, and do nothing else.
+pub fn run(
+    auto: bool,
+    interval_seconds: Option<u64>,
+    reconcile_plugins_release: Option<&str>,
+    reconcile_mode: Option<ReconcileMode>,
+) -> Result<()> {
+    if let Some(release) = reconcile_plugins_release {
+        crate::plugin::set_release_pin(Some(release));
+        return reconcile_plugins_for_mode(release, reconcile_mode.unwrap_or(ReconcileMode::Once));
+    }
     if auto {
         run_auto(interval_seconds.unwrap_or(DEFAULT_AUTO_INTERVAL_SECS))
     } else {
@@ -97,21 +146,109 @@ fn run_once() -> Result<()> {
             return Ok(());
         }
     };
-    if version_is_newer(&latest, CURRENT_VERSION) {
+    let upgraded_exe = if version_is_newer(&latest, CURRENT_VERSION) {
         eprintln!("New version available: v{latest} (current: v{CURRENT_VERSION})");
-        if !upgrade_binary(&latest) {
+        let Some(installed_exe) = upgrade_binary(&latest) else {
             // Never move plugins ahead of a binary that stayed behind.
             print_manual_upgrade_instructions();
             return Ok(());
-        }
+        };
+        Some(installed_exe)
     } else {
         eprintln!("You are already on the latest version (v{CURRENT_VERSION}).");
-    }
+        None
+    };
     // GH #107: a release can split one fix across the binary and the editor
     // plugin, so the one-shot path reconciles installed plugins exactly like
     // `--auto` does — including when the binary is already current, which is
     // how a workspace left skewed by an older one-shot upgrade gets repaired.
-    reconcile_installed_plugins_once(&latest, crate::plugin::update_all_installed)
+    // GH #113: after a replacement it runs in the new executable's image.
+    crate::plugin::set_release_pin(Some(&latest));
+    reconcile_plugins_in_image(
+        upgraded_exe.as_deref(),
+        &latest,
+        ReconcileMode::Once,
+        || reconcile_plugins_for_mode(&latest, ReconcileMode::Once),
+    )
+}
+
+/// Reconcile installed editor plugins in this process image, reporting the way
+/// `mode`'s upgrade flavor does.
+fn reconcile_plugins_for_mode(release: &str, mode: ReconcileMode) -> Result<()> {
+    match mode {
+        ReconcileMode::Once => {
+            reconcile_installed_plugins_once(release, crate::plugin::update_all_installed)
+        }
+        ReconcileMode::Auto => {
+            reconcile_installed_plugins_auto(crate::plugin::update_all_installed)
+        }
+    }
+}
+
+/// GH #113: run the plugin reconcile in the process image that matches the
+/// installed release. With no replacement this image IS that release, so
+/// `in_process` runs. After a replacement the freshly installed executable is
+/// spawned (stdio inherited) and its exit status propagates; only when it
+/// cannot be launched at all does `in_process` run, behind a warning that the
+/// OLD release's plugin code is what ran.
+fn reconcile_plugins_in_image(
+    upgraded_exe: Option<&Path>,
+    release: &str,
+    mode: ReconcileMode,
+    in_process: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let Some(exe) = upgraded_exe else {
+        return in_process();
+    };
+    eprintln!(
+        "Reconciling installed editor plugins with the upgraded v{release} binary ({}).",
+        exe.display()
+    );
+    match std::process::Command::new(exe)
+        .args(reconcile_child_args(release, mode))
+        .status()
+    {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => bail!(
+            "the installed editor plugin reconcile run by the upgraded v{release} binary ({}) \
+             failed ({status}); see its output above",
+            exe.display()
+        ),
+        Err(error) => {
+            eprintln!("{}", child_spawn_fallback_warning(exe, release, &error));
+            in_process()
+        }
+    }
+}
+
+fn reconcile_child_args(release: &str, mode: ReconcileMode) -> [String; 5] {
+    [
+        "upgrade".to_owned(),
+        RECONCILE_PLUGINS_RELEASE_FLAG.to_owned(),
+        release.to_owned(),
+        RECONCILE_PLUGINS_MODE_FLAG.to_owned(),
+        mode.as_arg().to_owned(),
+    ]
+}
+
+fn child_spawn_fallback_warning(exe: &Path, release: &str, error: &std::io::Error) -> String {
+    format!(
+        "WARNING: could not launch the upgraded v{release} binary at {} ({error}); reconciling \
+         installed editor plugins in this process instead, which runs the OLD v{CURRENT_VERSION} \
+         plugin-install code. Plugin fixes shipped in v{release} did not apply to this run; \
+         re-run `agent-doc upgrade` to reconcile with the new binary.",
+        exe.display()
+    )
+}
+
+/// `--auto`'s reconcile reporting: success is quiet unless something changed,
+/// and failure propagates to the watcher, which retries on its next poll.
+fn reconcile_installed_plugins_auto(reconcile: impl FnOnce() -> Result<usize>) -> Result<()> {
+    let updated = reconcile()?;
+    if updated > 0 {
+        eprintln!("Updated {updated} installed editor plugin target(s).");
+    }
+    Ok(())
 }
 
 /// Reconcile installed editor plugins for a one-shot upgrade and fail loudly
@@ -164,22 +301,23 @@ fn run_auto_cycle(latest: &str, state: &mut AutoUpgradeState) {
             "New version available: v{latest} (effective: v{})",
             state.effective_version
         );
-        if upgrade_binary(latest) {
+        if let Some(installed_exe) = upgrade_binary(latest) {
             // Replacing the executable does not update this running process's
             // compile-time version, so remember the effective version in memory.
-            state.binary_upgraded(latest);
+            state.binary_upgraded(latest, installed_exe);
         } else {
             eprintln!("Binary auto-upgrade failed; retrying on the next poll.");
         }
     }
     if plan.reconcile_plugins {
-        match crate::plugin::update_all_installed() {
-            Ok(updated) => {
-                if updated > 0 {
-                    eprintln!("Updated {updated} installed editor plugin target(s).");
-                }
-                state.plugins_reconciled(latest);
-            }
+        crate::plugin::set_release_pin(Some(latest));
+        match reconcile_plugins_in_image(
+            state.upgraded_exe.as_deref(),
+            latest,
+            ReconcileMode::Auto,
+            || reconcile_plugins_for_mode(latest, ReconcileMode::Auto),
+        ) {
+            Ok(()) => state.plugins_reconciled(latest),
             Err(error) => eprintln!(
                 "Installed editor plugin reconciliation failed: {error:#}. Retrying on the next poll."
             ),
@@ -196,11 +334,14 @@ fn validate_auto_interval(interval_seconds: u64) -> Result<()> {
     Ok(())
 }
 
-fn upgrade_binary(version: &str) -> bool {
+/// Install `version` and return the exact executable path that now holds it
+/// (GH #113: the plugin reconcile is spawned from that path, never a PATH
+/// lookup that could resolve to a different install).
+fn upgrade_binary(version: &str) -> Option<PathBuf> {
     match try_github_release_upgrade(version) {
-        Ok(()) => {
+        Ok(installed_exe) => {
             eprintln!("Successfully upgraded to v{version} via GitHub Releases.");
-            return true;
+            return Some(installed_exe);
         }
         Err(error) => eprintln!("GitHub binary upgrade failed: {error:#}"),
     }
@@ -210,32 +351,31 @@ fn upgrade_binary(version: &str) -> bool {
         .status()
         .is_ok_and(|status| status.success())
     {
-        if current_executable_reports_version(version) {
+        if let Some(installed_exe) = current_executable_reporting_version(version) {
             eprintln!("Successfully upgraded to v{version} via pip.");
-            return true;
+            return Some(installed_exe);
         }
         eprintln!(
             "pip completed but the running executable path does not report v{version}; refusing to mark the upgrade complete"
         );
     }
-    false
+    None
 }
 
 fn version_from_cli_output(output: &str) -> Option<&str> {
     output.split_whitespace().last()
 }
 
-fn current_executable_reports_version(expected: &str) -> bool {
-    std::env::current_exe()
-        .and_then(|path| std::process::Command::new(path).arg("--version").output())
+/// The current executable path, if running it reports exactly `expected`.
+fn current_executable_reporting_version(expected: &str) -> Option<PathBuf> {
+    let path = std::env::current_exe().ok()?;
+    let output = std::process::Command::new(&path)
+        .arg("--version")
+        .output()
         .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| {
-            let stdout = String::from_utf8(output.stdout).ok()?;
-            version_from_cli_output(&stdout).map(str::to_owned)
-        })
-        .as_deref()
-        == Some(expected)
+        .filter(|output| output.status.success())?;
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    (version_from_cli_output(&stdout) == Some(expected)).then_some(path)
 }
 
 fn print_manual_upgrade_instructions() {
@@ -305,7 +445,10 @@ fn verify_release_archive(asset_name: &str, bytes: &[u8], manifest: &str) -> Res
     Ok(())
 }
 
-fn try_github_release_upgrade(version: &str) -> Result<()> {
+/// Replace the running executable's file with `version` and return its
+/// canonical path. The path is resolved BEFORE the replacement: on Linux,
+/// `current_exe()` afterwards names the unlinked old inode (`... (deleted)`).
+fn try_github_release_upgrade(version: &str) -> Result<PathBuf> {
     let target = detect_target().context("no prebuilt archive for this platform")?;
     let exe_path = std::env::current_exe()
         .and_then(|path| path.canonicalize())
@@ -360,7 +503,7 @@ fn try_github_release_upgrade(version: &str) -> Result<()> {
         })?;
         let _ = fs::remove_file(&tmp_binary);
     }
-    Ok(())
+    Ok(exe_path)
 }
 
 fn agent_doc_cache_dir() -> Option<PathBuf> {
@@ -544,6 +687,135 @@ mod tests {
         reconcile_installed_plugins_once("0.35.441", || Ok(0)).unwrap();
     }
 
+    /// A stand-in "new binary": records its argv to `argv.txt` and exits with
+    /// `exit_code`.
+    #[cfg(unix)]
+    fn fake_upgraded_binary(dir: &Path, exit_code: i32) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let exe = dir.join("agent-doc");
+        let record = dir.join("argv.txt");
+        fs::write(
+            &exe,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexit {exit_code}\n",
+                record.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
+        exe
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaced_binary_reconciles_plugins_in_the_new_image_pinned_to_the_release() {
+        for mode in [ReconcileMode::Once, ReconcileMode::Auto] {
+            let dir = tempfile::tempdir().unwrap();
+            let exe = fake_upgraded_binary(dir.path(), 0);
+            let mut in_process_ran = false;
+            reconcile_plugins_in_image(Some(&exe), "0.35.443", mode, || {
+                in_process_ran = true;
+                Ok(())
+            })
+            .unwrap();
+            assert!(!in_process_ran, "the old image's reconcile must not run");
+            let argv = fs::read_to_string(dir.path().join("argv.txt")).unwrap();
+            assert_eq!(
+                argv.lines().collect::<Vec<_>>(),
+                [
+                    "upgrade",
+                    RECONCILE_PLUGINS_RELEASE_FLAG,
+                    "0.35.443",
+                    RECONCILE_PLUGINS_MODE_FLAG,
+                    mode.as_arg(),
+                ]
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaced_binary_reconcile_failure_propagates() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = fake_upgraded_binary(dir.path(), 3);
+        let mut in_process_ran = false;
+        let error = reconcile_plugins_in_image(Some(&exe), "0.35.443", ReconcileMode::Once, || {
+            in_process_ran = true;
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(
+            !in_process_ran,
+            "a child failure must not be retried in the old image"
+        );
+        let message = format!("{error:#}");
+        assert!(message.contains("upgraded v0.35.443 binary"), "{message}");
+        assert!(
+            message.contains('3'),
+            "exit status must be reported: {message}"
+        );
+    }
+
+    #[test]
+    fn already_current_binary_reconciles_in_process() {
+        let mut in_process_ran = false;
+        reconcile_plugins_in_image(None, "0.35.443", ReconcileMode::Once, || {
+            in_process_ran = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(in_process_ran);
+        let error = reconcile_plugins_in_image(None, "0.35.443", ReconcileMode::Auto, || {
+            Err(anyhow::anyhow!("download refused"))
+        })
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("download refused"));
+    }
+
+    #[test]
+    fn unlaunchable_upgraded_binary_falls_back_in_process_with_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("vanished-agent-doc");
+        let mut in_process_ran = false;
+        reconcile_plugins_in_image(Some(&missing), "0.35.443", ReconcileMode::Once, || {
+            in_process_ran = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            in_process_ran,
+            "spawn failure must fall back to the in-process reconcile"
+        );
+        // The fallback's result is what propagates.
+        assert!(
+            reconcile_plugins_in_image(Some(&missing), "0.35.443", ReconcileMode::Once, || {
+                Err(anyhow::anyhow!("old code failed"))
+            })
+            .is_err()
+        );
+        let warning = child_spawn_fallback_warning(
+            &missing,
+            "0.35.443",
+            &std::io::Error::from(std::io::ErrorKind::NotFound),
+        );
+        assert!(warning.starts_with("WARNING:"), "{warning}");
+        assert!(
+            warning.contains(&missing.display().to_string()),
+            "{warning}"
+        );
+        assert!(
+            warning.contains(&format!("OLD v{CURRENT_VERSION} plugin-install code")),
+            "{warning}"
+        );
+    }
+
+    #[test]
+    fn auto_reconcile_reporting_propagates_failure() {
+        reconcile_installed_plugins_auto(|| Ok(0)).unwrap();
+        reconcile_installed_plugins_auto(|| Ok(2)).unwrap();
+        assert!(reconcile_installed_plugins_auto(|| Err(anyhow::anyhow!("refused"))).is_err());
+    }
+
     #[test]
     fn version_comparison_orders_semver_triples() {
         assert!(version_is_newer("2.0.0", "1.0.0"));
@@ -574,7 +846,12 @@ mod tests {
                 reconcile_plugins: true,
             }
         );
-        state.binary_upgraded("1.1.0");
+        state.binary_upgraded("1.1.0", PathBuf::from("/opt/agent-doc"));
+        assert_eq!(
+            state.upgraded_exe.as_deref(),
+            Some(Path::new("/opt/agent-doc")),
+            "later cycles must reconcile in the installed executable, not this stale image"
+        );
         state.plugins_reconciled("1.1.0");
         assert_eq!(
             state.plan("1.1.0"),

@@ -211,17 +211,71 @@ fn fetch_releases_page(page: usize) -> Result<Vec<Value>> {
 fn find_release_with_asset(
     prefix: &str,
     ext: &str,
-    mut fetch_page: impl FnMut(usize) -> Result<Vec<Value>>,
+    fetch_page: impl FnMut(usize) -> Result<Vec<Value>>,
 ) -> Result<Value> {
+    find_release_where(prefix, ext, |_| true, fetch_page).map_err(|miss| match miss {
+        ReleaseSearchMiss::Fetch(error) => error,
+        ReleaseSearchMiss::NotFound(scanned) => anyhow::anyhow!(
+            "No {prefix}*.{ext} asset found in the {scanned} most recent GitHub releases"
+        ),
+    })
+}
+
+/// GH #113: like [`find_release_with_asset`], but skip every release newer
+/// than `ceiling`, so `agent-doc upgrade` reconciles plugins to the release it
+/// just installed instead of whatever "latest" says by the time the plugin
+/// phase runs.
+fn find_release_with_asset_at_or_below(
+    prefix: &str,
+    ext: &str,
+    ceiling: &str,
+    fetch_page: impl FnMut(usize) -> Result<Vec<Value>>,
+) -> Result<Value> {
+    let ceiling_key = numeric_dot_version(ceiling.trim_start_matches('v'))
+        .with_context(|| format!("invalid pinned release version {ceiling:?}"))?;
+    find_release_where(
+        prefix,
+        ext,
+        |release| {
+            numeric_dot_version(release_version(release).trim_start_matches('v'))
+                .is_some_and(|key| key <= ceiling_key)
+        },
+        fetch_page,
+    )
+    .map_err(|miss| match miss {
+        ReleaseSearchMiss::Fetch(error) => error,
+        ReleaseSearchMiss::NotFound(scanned) => anyhow::anyhow!(
+            "No {prefix}*.{ext} asset found at or below v{} in the {scanned} most recent GitHub releases",
+            ceiling.trim_start_matches('v')
+        ),
+    })
+}
+
+/// Why [`find_release_where`] returned no release: a page fetch failed, or the
+/// walk finished after scanning this many releases without a match (each caller
+/// phrases its own miss message).
+enum ReleaseSearchMiss {
+    Fetch(anyhow::Error),
+    NotFound(usize),
+}
+
+/// Shared newest-first page walk behind the asset searches.
+fn find_release_where(
+    prefix: &str,
+    ext: &str,
+    accept: impl Fn(&Value) -> bool,
+    mut fetch_page: impl FnMut(usize) -> Result<Vec<Value>>,
+) -> std::result::Result<Value, ReleaseSearchMiss> {
     let mut scanned = 0usize;
     for page in 1..=RELEASE_SEARCH_MAX_PAGES {
-        let releases = fetch_page(page)?;
+        let releases = fetch_page(page).map_err(ReleaseSearchMiss::Fetch)?;
         // A page shorter than the requested size is the last one. Checked
         // before the scan so a match on the final page still returns.
         let is_final_page = releases.len() < RELEASES_PER_PAGE;
         scanned += releases.len();
         for release in releases {
-            if is_stable_release(&release) && has_asset(&release, prefix, ext) {
+            if is_stable_release(&release) && accept(&release) && has_asset(&release, prefix, ext)
+            {
                 return Ok(release);
             }
         }
@@ -229,7 +283,7 @@ fn find_release_with_asset(
             break;
         }
     }
-    bail!("No {prefix}*.{ext} asset found in the {scanned} most recent GitHub releases")
+    Err(ReleaseSearchMiss::NotFound(scanned))
 }
 
 fn is_stable_release(release: &Value) -> bool {
@@ -400,6 +454,9 @@ fn verify_editor_package(release: &Value, asset: &ReleaseAsset<'_>, path: &Path)
 }
 
 fn fetch_release_for_asset(prefix: &str, ext: &str) -> Result<Value> {
+    if let Some(pinned) = release_pin() {
+        return find_release_with_asset_at_or_below(prefix, ext, &pinned, fetch_releases_page);
+    }
     let latest = fetch_latest_release()?;
     if has_asset(&latest, prefix, ext) {
         return Ok(latest);
@@ -925,6 +982,25 @@ enum JetbrainsHotUpgrade {
     StagedForRestart {
         reason: String,
     },
+}
+
+/// GH #113: the release `agent-doc upgrade` just installed. When set, plugin
+/// assets resolve to the newest release at or below it rather than to whatever
+/// GitHub reports as latest by the time the plugin phase runs.
+static RELEASE_PIN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn set_release_pin(version: Option<&str>) {
+    *RELEASE_PIN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        version.map(|version| version.trim_start_matches('v').to_owned());
+}
+
+fn release_pin() -> Option<String> {
+    RELEASE_PIN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
 }
 
 /// GH #63: `--no-dynamic` turns the restart-free upgrade off for this process.
@@ -1929,9 +2005,10 @@ mod tests {
         JetbrainsLocalInstallOutcome, RELEASE_SEARCH_MAX_PAGES, RELEASES_PER_PAGE,
         choose_plugins_dir_with_interactivity, ensure_github_api_success,
         existing_jetbrains_agent_doc_dirs, find_asset, find_best_local_zip, find_local_vscode_vsix,
-        find_local_zip, find_release_with_asset, github_get_request, github_token_from, has_asset,
-        install_jetbrains_local_zip_into, installed_jetbrains_plugin_version,
-        is_jetbrains_ide_data_dir, jetbrains_ide_pids_from_jcmd, jetbrains_install_success_message,
+        find_local_zip, find_release_with_asset, find_release_with_asset_at_or_below,
+        github_get_request, github_token_from, has_asset, install_jetbrains_local_zip_into,
+        installed_jetbrains_plugin_version, is_jetbrains_ide_data_dir,
+        jetbrains_ide_pids_from_jcmd, jetbrains_install_success_message,
         jetbrains_local_zip_matches_installation, jetbrains_plugin_dirs_in_roots,
         jetbrains_upgrade_launcher_has_main_manifest, jetbrains_upgrade_reattach_warning,
         jetbrains_version_cmp, local_jetbrains_zip_in, local_jetbrains_zip_version,
@@ -2081,6 +2158,38 @@ mod tests {
         .unwrap();
 
         assert_eq!(release_version(&found), "v0.2.0");
+    }
+
+    /// GH #113: the upgrade pins the plugin phase to the release it installed,
+    /// so a release published between the binary swap and the plugin phase is
+    /// never picked up.
+    #[test]
+    fn pinned_release_search_skips_releases_newer_than_the_pin() {
+        let newer = plugin_release("v0.35.443");
+        let pinned = plugin_release("v0.35.442");
+        let older = plugin_release("v0.35.441");
+        let found =
+            find_release_with_asset_at_or_below("agent-doc-jetbrains", "zip", "0.35.442", |_| {
+                Ok(vec![newer.clone(), pinned.clone(), older.clone()])
+            })
+            .unwrap();
+        assert_eq!(release_version(&found), "v0.35.442");
+
+        let err =
+            find_release_with_asset_at_or_below("agent-doc-jetbrains", "zip", "0.35.440", |_| {
+                Ok(vec![newer.clone(), pinned.clone()])
+            })
+            .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("at or below v0.35.440"),
+            "{err:#}"
+        );
+        assert!(
+            find_release_with_asset_at_or_below("agent-doc-jetbrains", "zip", "bogus", |_| Ok(
+                vec![]
+            ))
+            .is_err()
+        );
     }
 
     #[test]

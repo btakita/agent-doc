@@ -3066,6 +3066,14 @@ enum Commands {
             value_parser = clap::value_parser!(u64).range(upgrade::MIN_AUTO_INTERVAL_SECS..)
         )]
         interval_seconds: Option<u64>,
+        /// Internal (GH #113): reconcile installed editor plugins against this
+        /// release in this process image only. The binary being replaced by an
+        /// upgrade invokes the freshly installed one with it.
+        #[arg(long, hide = true, value_name = "VERSION", conflicts_with = "auto")]
+        reconcile_plugins_release: Option<String>,
+        /// Internal (GH #113): report the reconcile as the one-shot or `--auto` upgrade does
+        #[arg(long, hide = true, value_enum, requires = "reconcile_plugins_release")]
+        reconcile_plugins_mode: Option<upgrade::ReconcileMode>,
     },
     /// Generate content-source annotation sidecar for a document
     Annotate {
@@ -5786,7 +5794,14 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Upgrade {
             auto,
             interval_seconds,
-        } => upgrade::run(auto, interval_seconds),
+            reconcile_plugins_release,
+            reconcile_plugins_mode,
+        } => upgrade::run(
+            auto,
+            interval_seconds,
+            reconcile_plugins_release.as_deref(),
+            reconcile_plugins_mode,
+        ),
         Commands::LibPath => {
             // Print the path to the shared library built alongside this binary.
             // The cdylib is in the same target directory as the binary.
@@ -7092,12 +7107,67 @@ mod recycle_force_tests {
             Commands::Upgrade {
                 auto,
                 interval_seconds,
+                reconcile_plugins_release,
+                reconcile_plugins_mode,
             } => {
                 assert!(auto);
                 assert_eq!(interval_seconds, Some(120));
+                assert_eq!(reconcile_plugins_release, None);
+                assert_eq!(reconcile_plugins_mode, None);
             }
             _ => panic!("expected upgrade subcommand"),
         }
+    }
+
+    /// GH #113: the argv a replaced binary hands the freshly installed one must
+    /// parse as the hidden plugin-reconcile entry point.
+    #[test]
+    fn upgrade_hidden_plugin_reconcile_flags_parse() {
+        for (mode, expected) in [
+            ("once", upgrade::ReconcileMode::Once),
+            ("auto", upgrade::ReconcileMode::Auto),
+        ] {
+            let cmd = parse(&[
+                "agent-doc",
+                "upgrade",
+                upgrade::RECONCILE_PLUGINS_RELEASE_FLAG,
+                "0.35.443",
+                upgrade::RECONCILE_PLUGINS_MODE_FLAG,
+                mode,
+            ]);
+            match cmd {
+                Commands::Upgrade {
+                    auto,
+                    reconcile_plugins_release,
+                    reconcile_plugins_mode,
+                    ..
+                } => {
+                    assert!(!auto);
+                    assert_eq!(reconcile_plugins_release.as_deref(), Some("0.35.443"));
+                    assert_eq!(reconcile_plugins_mode, Some(expected));
+                }
+                _ => panic!("expected upgrade subcommand"),
+            }
+        }
+        let conflicting = std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                Cli::try_parse_from([
+                    "agent-doc",
+                    "upgrade",
+                    "--auto",
+                    upgrade::RECONCILE_PLUGINS_RELEASE_FLAG,
+                    "0.35.443",
+                ])
+                .is_err()
+            })
+            .expect("spawn parse thread")
+            .join()
+            .expect("parse thread");
+        assert!(
+            conflicting,
+            "--auto must conflict with the hidden reconcile entry point"
+        );
     }
 
     #[test]

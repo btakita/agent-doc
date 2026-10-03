@@ -111,6 +111,18 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
   - **Logging:** every promoted, foreign, or stale pick logs `layout_column_pane_selected` with its reason.
 - **Remaining:** tmux-router can still fill a column with a spare pane that no document owns. The audit reports this but doesn't prevent it; preventing it needs a tmux-router change.
 - **Verification:** combined `make check` over all of today's merged fixes passed 10541 tests, plus audit-docs, editor-parity, lean, and tla. `make install` hot-upgraded the live IDE to plugin 0.2.483.
+
+### Re: GH #110 — editor route gates — opus-5.5 · 2026-10-02T23:44-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/110
+
+**Fixed, installed, pushed, and closed** (agent-doc `be7072c2f` on main; [GH #110](https://github.com/btakita/agent-doc/issues/110) closed).
+
+- **Gate messages:** gate 3 now names the routed document and the published column set (`routed document <path> is not one of the published layout columns (...)`), and no longer says "exact visible layout". All three gates now report the receipt reason and the columns. Gate 3 also checks stacked columns by membership.
+- **Shared `--wait-for-ready` budget:** one deadline covers layout convergence first, and harness readiness gets the remainder. The route publishes once, then re-observes the layout projection while time remains instead of failing at once. An operator-owned layout still fails immediately. The CLI help states the shared budget.
+- **Stale supervisor binary:** reported on the route (`controller_editor_route_supervisor_binary_stale` plus a warning in the route output), but it doesn't refuse the route, because a stale supervisor can still host a healthy harness. #109 now recycles such supervisors at an idle boundary.
+- **Behaviour change:** routes without `--wait-for-ready` now allow the layout at most 15s, down from 30s.
+- **Verification:** included in the combined `make check` (10541 tests passed) and `make install`.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -123,7 +135,7 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - ~~do https://github.com/btakita/agent-doc/issues/108~~
 - ~~release + publish~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/109~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/110
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/110~~
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/111
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/112
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/113

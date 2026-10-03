@@ -110,6 +110,7 @@ pub fn content_and_staleness_warnings(
     }
     warnings.extend(stale_plugin_warnings(file));
     warnings.extend(plugin_byte_identity_warnings(file));
+    warnings.extend(jetbrains_staged_install_failure_warnings());
     if let Some(age_secs) =
         agent_doc_controller_io::project_controller::undrained_supervisor_drain_handoff_age(
             file, content,
@@ -516,6 +517,39 @@ pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
     )
 }
 
+/// GH #115: a staged JetBrains upgrade that deleted (or, at the next start, will
+/// delete) the plugin without installing its replacement. It needs no live
+/// registration: a destroyed install has no plugin left to register, which is
+/// exactly why `stale_plugin` stayed silent while the IDE had no agent-doc plugin.
+pub fn jetbrains_staged_install_failure_warnings() -> Vec<PreflightWarning> {
+    staged_install_failure_warnings_from(
+        agent_doc_fs::jetbrains_install::jetbrains_staged_install_failures(),
+    )
+}
+
+/// Pure core of [`jetbrains_staged_install_failure_warnings`].
+pub fn staged_install_failure_warnings_from(
+    failures: Vec<(
+        std::path::PathBuf,
+        agent_doc_fs::jetbrains_install::StagedInstallFailure,
+    )>,
+) -> Vec<PreflightWarning> {
+    use agent_doc_fs::jetbrains_install::{StagedInstallFailure, staged_install_failure_message};
+    failures
+        .into_iter()
+        .map(|(dir, failure)| PreflightWarning {
+            code: match failure {
+                StagedInstallFailure::Destroyed { .. } => "jetbrains_plugin_install_destroyed",
+                StagedInstallFailure::Doomed { .. } => "jetbrains_plugin_staging_doomed",
+            }
+            .to_string(),
+            message: staged_install_failure_message(&dir, &failure),
+            document_agent: None,
+            active_harness: None,
+        })
+        .collect()
+}
+
 /// GH #87: is `expected` already staged for `kind`'s next IDE start? Only
 /// JetBrains has a pending-install queue this side can read.
 pub fn plugin_staged_for_restart(kind: &str, expected: &str) -> bool {
@@ -683,6 +717,43 @@ mod tests {
             "the (deleted) suffix must classify without needing either inode"
         );
         assert!(deleted.is_superseded());
+    }
+
+    /// GH #115: each staged-install failure gets its own warning code and the
+    /// reinstall remedy for its plugins directory.
+    #[test]
+    fn staged_install_failures_surface_distinct_codes_with_the_remedy() {
+        use agent_doc_fs::jetbrains_install::StagedInstallFailure;
+        let dir = std::path::PathBuf::from("/h/.local/share/JetBrains/IntelliJIdea2026.3");
+        let warnings = super::staged_install_failure_warnings_from(vec![
+            (
+                dir.clone(),
+                StagedInstallFailure::Destroyed {
+                    staged: "0.2.481".to_string(),
+                    previous: Some("0.2.480".to_string()),
+                },
+            ),
+            (
+                dir.clone(),
+                StagedInstallFailure::Doomed {
+                    staged: "0.2.482".to_string(),
+                    zip: "/c/agent-doc-jetbrains-0.2.482+aa.zip".into(),
+                },
+            ),
+        ]);
+        assert_eq!(warnings[0].code, "jetbrains_plugin_install_destroyed");
+        assert_eq!(warnings[1].code, "jetbrains_plugin_staging_doomed");
+        for warning in &warnings {
+            assert!(
+                warning.message.contains(
+                    "agent-doc plugin update jetbrains --plugins-dir /h/.local/share/JetBrains/IntelliJIdea2026.3"
+                ),
+                "{}",
+                warning.message
+            );
+        }
+        assert!(warnings[0].message.contains("NO agent-doc plugin"));
+        assert!(warnings[1].message.contains("Do not restart yet"));
     }
 
     /// The discriminator must be BYTES, not the version string. Both sides here

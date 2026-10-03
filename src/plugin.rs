@@ -899,8 +899,27 @@ fn jetbrains_convergence_restart_summary(installed: usize, restart_pending: usiz
 }
 
 fn existing_jetbrains_agent_doc_dirs(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    existing_jetbrains_agent_doc_dirs_in(
+        dirs,
+        &agent_doc_fs::jetbrains_install::jetbrains_system_roots(),
+    )
+}
+
+/// GH #115: an installation a failed staging destroyed has no jar left, but it
+/// is still an existing agent-doc installation: reconciliation must reinstall
+/// it rather than skip it as "never installed here".
+fn existing_jetbrains_agent_doc_dirs_in(
+    dirs: &[PathBuf],
+    system_roots: &[PathBuf],
+) -> Vec<PathBuf> {
     dirs.iter()
-        .filter(|dir| installed_jetbrains_plugin_version(dir).is_some())
+        .filter(|dir| {
+            installed_jetbrains_plugin_version(dir).is_some()
+                || matches!(
+                    agent_doc_fs::jetbrains_install::staged_install_failure(dir, system_roots),
+                    Some(agent_doc_fs::jetbrains_install::StagedInstallFailure::Destroyed { .. })
+                )
+        })
         .cloned()
         .collect()
 }
@@ -1396,8 +1415,19 @@ fn install_jetbrains_zip_into(
     expected_version: &str,
 ) -> Result<JetbrainsLocalInstallOutcome> {
     fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
+    // GH #115: serialize every install into this plugins directory. `agent-doc
+    // upgrade` and a manual `plugin update` used to stage the same package two
+    // minutes apart, and the second staging is what destroyed the install.
+    let _install_lock = agent_doc_fs::jetbrains_install::lock_jetbrains_install(target_dir)?;
     if jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
         return Ok(JetbrainsLocalInstallOutcome::Unchanged);
+    }
+    if let Some(outcome) = already_staged_outcome(
+        target_dir,
+        &agent_doc_fs::jetbrains_install::jetbrains_system_roots(),
+        expected_version,
+    ) {
+        return Ok(outcome);
     }
     let outcome = install_jetbrains_package_bytes(
         zip_path,
@@ -1420,6 +1450,45 @@ fn install_jetbrains_zip_into(
         );
     }
     Ok(outcome)
+}
+
+/// GH #115: when the IDE's pending-install queue already holds a viable staging
+/// of `expected_version` for `target_dir`, staging it again is never useful (the
+/// live JVM already declined the restart-free swap) and used to be destructive:
+/// each staging appends its own delete+unzip block. Report the existing staging
+/// instead, and make sure the restart-required marker names it.
+fn already_staged_outcome(
+    target_dir: &Path,
+    system_roots: &[PathBuf],
+    expected_version: &str,
+) -> Option<JetbrainsLocalInstallOutcome> {
+    let staging = agent_doc_fs::jetbrains_install::pending_stagings_for(target_dir, system_roots)
+        .into_iter()
+        .find(|staging| staging.zip_present && staging.version == expected_version)?;
+    let marker = target_dir.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
+    let reason = format!(
+        "v{expected_version} is already staged for the next IDE start ({} in {}); not staging it again",
+        staging.zip.display(),
+        staging.script.display()
+    );
+    let recorded = fs::read_to_string(&marker).ok().and_then(|body| {
+        agent_doc_fs::jetbrains_install::staged_version_from_restart_marker(&body)
+    });
+    if recorded.as_deref() != Some(expected_version) {
+        record_restart_required_marker(
+            &marker,
+            &format!("staged for restart: {reason}"),
+            Some(expected_version),
+            installed_jetbrains_plugin_version(target_dir).as_deref(),
+        );
+    }
+    eprintln!("WARNING: JetBrains plugin {reason}. Restart the IDE to load it.");
+    log_jetbrains_upgrade_decision(&format!(
+        "plugin_dynamic_upgrade outcome=already_staged staged_version={expected_version} target={} zip={}",
+        target_dir.display(),
+        staging.zip.display()
+    ));
+    Some(JetbrainsLocalInstallOutcome::StagedForRestart { reason })
 }
 
 /// GH #63: the restart-free dynamic upgrade is an optimization, never the
@@ -1469,7 +1538,14 @@ fn install_jetbrains_package_bytes(
                 // version the caller already read from the package; never re-derive
                 // it from `zip_path`'s filename -- release installs pass a
                 // `NamedTempFile` (`.tmpXXXXXX`) whose name carries no version.
-                record_restart_required_marker(&restart_marker, &reason, Some(expected_version));
+                // GH #115: also record the generation the staging replaces, so a
+                // post-restart check can tell applied / not applied / destroyed.
+                record_restart_required_marker(
+                    &restart_marker,
+                    &reason,
+                    Some(expected_version),
+                    installed_jetbrains_plugin_version(target_dir).as_deref(),
+                );
                 return Ok(JetbrainsLocalInstallOutcome::StagedForRestart { reason });
             }
             Ok(None) => None,
@@ -1508,7 +1584,7 @@ fn install_jetbrains_package_bytes(
         // GH #67: record the refusal so preflight's `plugin_bytes_superseded` advises
         // a restart instead of prescribing another install that re-learns the same
         // refusal every cycle. It sits beside the plugin tree, never inside it.
-        Some(reason) => record_restart_required_marker(&restart_marker, reason, None),
+        Some(reason) => record_restart_required_marker(&restart_marker, reason, None, None),
         None => clear_restart_required_marker(&restart_marker),
     }
     Ok(match restart_reason {
@@ -1612,14 +1688,26 @@ fn log_jetbrains_upgrade_decision(message: &str) {
 }
 
 /// The first line is the refusal reason; a staged install adds a
-/// `staged_version=<v>` line (GH #87).
-fn record_restart_required_marker(marker: &Path, reason: &str, staged_version: Option<&str>) {
+/// `staged_version=<v>` line (GH #87) and the version it replaces as
+/// `previous_version=<v>` (GH #115).
+fn record_restart_required_marker(
+    marker: &Path,
+    reason: &str,
+    staged_version: Option<&str>,
+    previous_version: Option<&str>,
+) {
     let mut body = format!("{}\n", reason.replace('\n', " "));
     if let Some(version) = staged_version {
         body.push_str(&format!(
             "{}{version}\n",
             agent_doc_fs::jetbrains_install::STAGED_VERSION_MARKER_PREFIX
         ));
+        if let Some(previous) = previous_version {
+            body.push_str(&format!(
+                "{}{previous}\n",
+                agent_doc_fs::jetbrains_install::PREVIOUS_VERSION_MARKER_PREFIX
+            ));
+        }
     }
     if let Err(err) = fs::write(marker, body) {
         eprintln!(
@@ -3198,15 +3286,20 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
              java.lang.IllegalStateException: error:java.lang.IllegalStateException:\
              agent-doc upgrader could not call the platform: java.lang.NoClassDefFoundError: \
              com/intellij/ide/plugins/DynamicPlugins$UnloadPluginOptions";
-        let warning = super::dynamic_upgrade_fallback_warning(linkage, "replacing the plugin files instead");
+        let warning =
+            super::dynamic_upgrade_fallback_warning(linkage, "replacing the plugin files instead");
         assert!(warning.contains("failed before the IDE"), "{warning}");
         assert!(!warning.contains("refused"), "{warning}");
 
         let refused = "JetBrains dynamic upgrade failed for pid 1: error:java.lang.IllegalStateException:\
              plugin cannot unload dynamically (the platform reported the plugin cannot unload without a restart)";
-        let warning = super::dynamic_upgrade_fallback_warning(refused, "replacing the plugin files instead");
+        let warning =
+            super::dynamic_upgrade_fallback_warning(refused, "replacing the plugin files instead");
         assert!(warning.contains("IDE refused"), "{warning}");
-        assert!(warning.ends_with("replacing the plugin files instead."), "{warning}");
+        assert!(
+            warning.ends_with("replacing the plugin files instead."),
+            "{warning}"
+        );
     }
 
     /// GH #108: the asynchronous-classloader guard is agent-doc declining before
@@ -3227,7 +3320,10 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             );
             assert!(warning.starts_with("agent-doc declined"), "{warning}");
             assert!(!warning.contains("IDE refused"), "{warning}");
-            assert!(warning.ends_with("staged it for the next IDE start instead."), "{warning}");
+            assert!(
+                warning.ends_with("staged it for the next IDE start instead."),
+                "{warning}"
+            );
             assert_eq!(super::dynamic_upgrade_decliner(reason), "agent-doc");
             let staged = super::staged_for_restart_message(Path::new("/p"), reason);
             assert!(staged.starts_with("agent-doc declined"), "{staged}");
@@ -3237,7 +3333,10 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             super::dynamic_upgrade_decliner("plugin cannot unload dynamically: x"),
             "ide"
         );
-        assert_eq!(super::dynamic_upgrade_decliner("NoClassDefFoundError"), "upgrader_failure");
+        assert_eq!(
+            super::dynamic_upgrade_decliner("NoClassDefFoundError"),
+            "upgrader_failure"
+        );
         assert!(super::permanent_dynamic_upgrade_loss_note().contains("permanently unavailable"));
     }
 
@@ -3262,16 +3361,21 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             true,
             || {
                 Ok(Some(super::JetbrainsHotUpgrade::StagedForRestart {
-                    reason: "pid 427146: agent-doc declined the restart-free upgrade: async".to_string(),
+                    reason: "pid 427146: agent-doc declined the restart-free upgrade: async"
+                        .to_string(),
                 }))
             },
             || panic!("the dynamic path does not enumerate pids"),
         )
         .unwrap();
 
-        let headline = super::jetbrains_install_result_message(&target, &outcome, "0.2.480").unwrap();
+        let headline =
+            super::jetbrains_install_result_message(&target, &outcome, "0.2.480").unwrap();
         assert!(!headline.contains("Plugin installed"), "{headline}");
-        assert!(headline.contains("v0.2.480 staged (not installed)"), "{headline}");
+        assert!(
+            headline.contains("v0.2.480 staged (not installed)"),
+            "{headline}"
+        );
         assert!(headline.contains("v0.2.479"), "{headline}");
 
         let logged = super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow().clone());
@@ -3293,7 +3397,10 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             "0.2.480",
         )
         .unwrap();
-        assert!(installed.starts_with("Plugin installed (v0.2.479)"), "{installed}");
+        assert!(
+            installed.starts_with("Plugin installed (v0.2.479)"),
+            "{installed}"
+        );
     }
 
     #[test]
@@ -3385,6 +3492,94 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 .as_deref(),
             Some("0.2.456"),
             "{recorded}"
+        );
+        // GH #115: and the generation it replaces.
+        assert_eq!(
+            agent_doc_fs::jetbrains_install::previous_version_from_restart_marker(&recorded)
+                .as_deref(),
+            Some("0.2.455"),
+            "{recorded}"
+        );
+    }
+
+    /// GH #115: a viable pending staging of the same version is reported, never
+    /// staged a second time; a doomed or different-version one is re-staged.
+    #[test]
+    fn second_staging_of_a_pending_version_is_skipped() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("data/IntelliJIdea2026.3");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("agent-doc-jetbrains-0.2.480.jar"), b"live").unwrap();
+        let system = tmp.path().join("cache");
+        let script_dir = system.join("IntelliJIdea2026.3/plugins");
+        fs::create_dir_all(&script_dir).unwrap();
+        let roots = vec![system.clone()];
+        assert!(super::already_staged_outcome(&target, &roots, "0.2.481").is_none());
+
+        let zip = script_dir.join("agent-doc-jetbrains-0.2.481+0f.zip");
+        fs::write(
+            script_dir.join("action.script"),
+            format!(
+                "delete:{t}/agent-doc-jetbrains\ndelete:{t}/agent-doc-jetbrains\nunzip:{z}:{t}\ndelete:{z}\n",
+                t = target.display(),
+                z = zip.display()
+            ),
+        )
+        .unwrap();
+        // Doomed staging (package gone): re-staging is the repair, not a skip.
+        assert!(super::already_staged_outcome(&target, &roots, "0.2.481").is_none());
+
+        fs::write(&zip, b"pkg").unwrap();
+        assert!(super::already_staged_outcome(&target, &roots, "0.2.482").is_none());
+        match super::already_staged_outcome(&target, &roots, "0.2.481") {
+            Some(JetbrainsLocalInstallOutcome::StagedForRestart { reason }) => {
+                assert!(reason.contains("already staged"), "{reason}");
+            }
+            other => panic!("expected the existing staging, got {other:?}"),
+        }
+        let recorded = fs::read_to_string(
+            target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER),
+        )
+        .unwrap();
+        assert_eq!(
+            agent_doc_fs::jetbrains_install::staged_version_from_restart_marker(&recorded)
+                .as_deref(),
+            Some("0.2.481")
+        );
+        assert_eq!(
+            agent_doc_fs::jetbrains_install::previous_version_from_restart_marker(&recorded)
+                .as_deref(),
+            Some("0.2.480")
+        );
+        assert!(
+            fs::read_to_string(script_dir.join("action.script"))
+                .unwrap()
+                .matches("unzip:")
+                .count()
+                == 1,
+            "the skip must not touch the pending script"
+        );
+    }
+
+    /// GH #115: reconciliation reinstalls an installation a failed staging
+    /// destroyed instead of skipping it for having no jar.
+    #[test]
+    fn destroyed_installation_is_still_a_reconcile_target() {
+        let tmp = TempDir::new().unwrap();
+        let destroyed = tmp.path().join("IntelliJIdea2026.3");
+        let never = tmp.path().join("IntelliJIdea2026.2");
+        fs::create_dir_all(&destroyed).unwrap();
+        fs::create_dir_all(&never).unwrap();
+        fs::write(
+            destroyed.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER),
+            "staged\nstaged_version=0.2.481\nprevious_version=0.2.480\n",
+        )
+        .unwrap();
+        let dirs = vec![destroyed.clone(), never.clone()];
+        assert_eq!(
+            super::existing_jetbrains_agent_doc_dirs_in(&dirs, &[]),
+            vec![destroyed]
         );
     }
 
@@ -3745,10 +3940,29 @@ pub fn list() -> Result<()> {
 
     // JetBrains
     let dirs = jetbrains_plugin_dirs();
+    let system_roots = agent_doc_fs::jetbrains_install::jetbrains_system_roots();
     for d in &dirs {
+        let failure = agent_doc_fs::jetbrains_install::staged_install_failure(d, &system_roots);
         if let Some(version) = installed_jetbrains_plugin_version(d) {
             println!("jetbrains  v{}  {}", version, d.display());
             found = true;
+        } else if let Some(agent_doc_fs::jetbrains_install::StagedInstallFailure::Destroyed {
+            staged,
+            ..
+        }) = &failure
+        {
+            println!(
+                "jetbrains  MISSING (staged v{staged} deleted the plugin without installing it)  {}",
+                d.display()
+            );
+            found = true;
+        }
+        // GH #115: say it loudly, with the remedy.
+        if let Some(failure) = &failure {
+            eprintln!(
+                "WARNING: {}",
+                agent_doc_fs::jetbrains_install::staged_install_failure_message(d, failure)
+            );
         }
     }
 

@@ -65,8 +65,9 @@ public final class JetBrainsPluginUpgradeAction {
             // the next IDE start instead of letting the launcher replace jars under this
             // live JVM, which is what manufactured the `plugin_bytes_superseded` state.
             try {
-                stageForRestart(archiveValue, pluginsDirValue, expectedVersion);
-                return "staged:" + expectedVersion + ":" + reason.replace('\n', ' ').replace('\r', ' ');
+                String stagingNotes = stageForRestart(archiveValue, pluginsDirValue, expectedVersion);
+                String staged = stagingNotes.isEmpty() ? reason : reason + "; " + stagingNotes;
+                return "staged:" + expectedVersion + ":" + staged.replace('\n', ' ').replace('\r', ' ');
             } catch (Throwable stagingFailure) {
                 throw new IllegalStateException(
                     reason + " (staging for restart also failed: " + singleLine(stagingFailure) + ")",
@@ -181,31 +182,351 @@ public final class JetBrainsPluginUpgradeAction {
      *
      * The archive the launcher passes is a temp file it deletes on exit, so a durable copy goes
      * into the IDE's plugin temp directory first and the install script owns its deletion.
+     *
+     * GH #115: two stagings of the same version used to append two delete+unzip blocks that
+     * shared one fixed zip name. At the next start the first block installed the plugin and
+     * deleted the zip; the second block then deleted the freshly installed plugin and its unzip
+     * found no zip, leaving the IDE with no agent-doc plugin at all. Now each staging copies to
+     * a unique, verified zip and rewrites the script in one atomic save that drops every prior
+     * agent-doc staging and appends exactly one delete+unzip+cleanup block.
+     *
+     * @return receipt notes (prior stagings replaced, cleanup failures), empty when none
      */
-    private static void stageForRestart(String archiveValue, String pluginsDirValue, String expectedVersion)
+    private static String stageForRestart(String archiveValue, String pluginsDirValue, String expectedVersion)
         throws Exception {
         IdeaPluginDescriptor descriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
         if (descriptor == null) {
             throw new IllegalStateException("no " + PLUGIN_ID + " descriptor to stage against");
         }
-        Path existing = Path.of(pluginsDirValue).toAbsolutePath().normalize().resolve("agent-doc-jetbrains");
-        Object tempPath = Class.forName("com.intellij.openapi.application.PathManager")
-            .getMethod("getPluginTempPath")
-            .invoke(null);
-        Path tempDir = Path.of(tempPath.toString());
+        Path pluginsDir = Path.of(pluginsDirValue).toAbsolutePath().normalize();
+        Path existing = pluginsDir.resolve(PLUGIN_DIR_NAME);
+        Class<?> pathManager = Class.forName("com.intellij.openapi.application.PathManager");
+        Path tempDir = Path.of(pathManager.getMethod("getPluginTempPath").invoke(null).toString());
+        Path idePluginsPath = Path.of(pathManager.getMethod("getPluginsPath").invoke(null).toString());
         Files.createDirectories(tempDir);
-        Path staged = tempDir.resolve("agent-doc-jetbrains-" + expectedVersion + ".zip");
-        Files.copy(Path.of(archiveValue), staged, StandardCopyOption.REPLACE_EXISTING);
-        Method install = findInstallAfterRestart(PluginInstaller.class, descriptor);
-        if (install == null) {
+        Path staged = copyVerifiedStagedArchive(Path.of(archiveValue), tempDir, expectedVersion);
+        Class<?> scriptManager = Class.forName(SCRIPT_MANAGER_CLASS);
+        Path script = actionScriptFile(scriptManager, tempDir);
+        List<String> notes;
+        try {
+            notes = replaceStagingInActionScript(
+                scriptManager,
+                script,
+                existing,
+                idePluginsPath,
+                staged,
+                () -> {
+                    Method install = findInstallAfterRestart(PluginInstaller.class, descriptor);
+                    if (install == null) {
+                        throw new IllegalStateException(
+                            "StartupActionScriptManager commands are not constructible and PluginInstaller has no "
+                                + "installAfterRestart accepting a descriptor and two paths on build " + platformBuild()
+                                + "; found: " + signaturesNamed(PluginInstaller.class, "installAfterRestart")
+                        );
+                    }
+                    Object accepted = install.invoke(
+                        null, installAfterRestartArguments(install, descriptor, staged, existing)
+                    );
+                    if (Boolean.FALSE.equals(accepted)) {
+                        throw new IllegalStateException("PluginInstaller.installAfterRestart declined " + staged);
+                    }
+                    return null;
+                }
+            );
+        } catch (Exception stagingFailure) {
+            // Nothing references the copy unless the script verified it; do not leak it.
+            try {
+                Files.deleteIfExists(staged);
+            } catch (Exception cleanupFailure) {
+                stagingFailure.addSuppressed(cleanupFailure);
+            }
+            throw stagingFailure;
+        }
+        return String.join("; ", notes);
+    }
+
+    private static final String PLUGIN_DIR_NAME = "agent-doc-jetbrains";
+    private static final String STAGED_ARCHIVE_PREFIX = "agent-doc-jetbrains-";
+    private static final String SCRIPT_MANAGER_CLASS = "com.intellij.ide.startup.StartupActionScriptManager";
+
+    /** GH #115: unique per staging, so no other staging's {@code delete:<zip>} can name it. */
+    static String stagedArchiveName(String expectedVersion, String nonce) {
+        return STAGED_ARCHIVE_PREFIX + expectedVersion + "+" + nonce + ".zip";
+    }
+
+    static boolean isStagedArchive(String path) {
+        if (path == null) {
+            return false;
+        }
+        Path name = Path.of(path).getFileName();
+        return name != null
+            && name.toString().startsWith(STAGED_ARCHIVE_PREFIX)
+            && name.toString().endsWith(".zip");
+    }
+
+    /**
+     * GH #115 ask 1: copy the launcher's archive to a unique name, prove it is a readable plugin
+     * package with an {@code agent-doc-jetbrains/lib/*.jar} entry, and only then move it into
+     * place, so the script never names a partial or unreadable zip.
+     */
+    static Path copyVerifiedStagedArchive(Path archive, Path tempDir, String expectedVersion) throws Exception {
+        String nonce = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        Path staged = tempDir.resolve(stagedArchiveName(expectedVersion, nonce));
+        Path partial = tempDir.resolve(staged.getFileName() + ".partial");
+        Files.copy(archive, partial, StandardCopyOption.REPLACE_EXISTING);
+        try {
+            verifyStagedArchive(partial);
+            Files.move(partial, staged, StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception failure) {
+            try {
+                Files.deleteIfExists(partial);
+            } catch (Exception cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+        return staged;
+    }
+
+    static void verifyStagedArchive(Path zip) throws Exception {
+        try (java.util.zip.ZipFile file = new java.util.zip.ZipFile(zip.toFile())) {
+            boolean hasJar = file.stream().anyMatch(entry ->
+                !entry.isDirectory()
+                    && entry.getName().startsWith(PLUGIN_DIR_NAME + "/lib/")
+                    && entry.getName().endsWith(".jar")
+            );
+            if (!hasJar) {
+                throw new IllegalStateException(
+                    "staged package " + zip + " has no " + PLUGIN_DIR_NAME + "/lib/*.jar entry; refusing to stage "
+                        + "a delete of the installed plugin without a replacement"
+                );
+            }
+        }
+    }
+
+    private static Path actionScriptFile(Class<?> scriptManager, Path tempDir) {
+        try {
+            Method file = scriptManager.getDeclaredMethod("getActionScriptFile");
+            file.setAccessible(true);
+            return Path.of(file.invoke(null).toString());
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            try {
+                Object name = scriptManager.getField("ACTION_SCRIPT_FILE").get(null);
+                return tempDir.resolve(name.toString());
+            } catch (ReflectiveOperationException | RuntimeException missingConstant) {
+                return tempDir.resolve("action.script");
+            }
+        }
+    }
+
+    /**
+     * {kind, source, destination} of one pending-install command: kind is the command class's
+     * simple name ({@code DeleteCommand}, {@code UnzipCommand}, ...). Fails closed when a delete
+     * or unzip command's paths cannot be read, because dedupe would then be guesswork.
+     */
+    static String[] describeCommand(Object command) {
+        String kind = command.getClass().getSimpleName();
+        String source = readStringField(command, "mySource");
+        String destination = readStringField(command, "myDestination");
+        if (source == null) {
+            try {
+                Object value = command.getClass().getMethod("getSource").invoke(command);
+                source = value == null ? null : value.toString();
+            } catch (ReflectiveOperationException | RuntimeException unavailable) {
+                source = null;
+            }
+        }
+        if (source == null && (kind.equals("DeleteCommand") || kind.equals("UnzipCommand"))) {
             throw new IllegalStateException(
-                "PluginInstaller has no installAfterRestart accepting a descriptor and two paths on build "
-                    + platformBuild() + "; found: " + signaturesNamed(PluginInstaller.class, "installAfterRestart")
+                "cannot read the path of pending-install command " + command + " on build " + platformBuild()
+                    + "; refusing to stage without deduplicating the existing script"
             );
         }
-        Object accepted = install.invoke(null, installAfterRestartArguments(install, descriptor, staged, existing));
-        if (Boolean.FALSE.equals(accepted)) {
-            throw new IllegalStateException("PluginInstaller.installAfterRestart declined " + staged);
+        return new String[] {kind, source, destination};
+    }
+
+    private static String readStringField(Object target, String name) {
+        for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                Object value = field.get(target);
+                return value == null ? null : value.toString();
+            } catch (NoSuchFieldException absent) {
+                // keep walking the hierarchy
+            } catch (ReflectiveOperationException | RuntimeException inaccessible) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static boolean samePath(String left, Path right) {
+        return left != null && Path.of(left).toAbsolutePath().normalize().equals(right.toAbsolutePath().normalize());
+    }
+
+    /**
+     * GH #115: whether a pending-install command belongs to an earlier agent-doc staging: the
+     * delete of the installed plugin directory, an unzip of a staged agent-doc package, or the
+     * cleanup delete of such a package.
+     */
+    static boolean isPriorAgentDocStaging(String[] command, Path pluginDir) {
+        String kind = command[0];
+        String source = command[1];
+        if (kind.equals("UnzipCommand")) {
+            return isStagedArchive(source);
+        }
+        if (kind.equals("DeleteCommand")) {
+            return samePath(source, pluginDir) || isStagedArchive(source);
+        }
+        return false;
+    }
+
+    /**
+     * GH #115: under the script manager's own monitor (its static mutators are
+     * {@code synchronized} on the class, so no other writer in this JVM interleaves), drop every
+     * earlier agent-doc staging, append exactly one delete+unzip+cleanup block for {@code staged},
+     * save the whole script to a temp file and rename it over the original, then reload and
+     * verify the result. Superseded staged packages are deleted afterwards.
+     *
+     * {@code fallback} installs the block through {@code PluginInstaller.installAfterRestart}
+     * when this build's command classes are not constructible; the dedupe still precedes it.
+     *
+     * @return receipt notes
+     */
+    static List<String> replaceStagingInActionScript(
+        Class<?> scriptManager,
+        Path script,
+        Path pluginDir,
+        Path idePluginsPath,
+        Path staged,
+        java.util.concurrent.Callable<Object> fallback
+    ) throws Exception {
+        List<String> notes = new ArrayList<>();
+        List<String> superseded = new ArrayList<>();
+        synchronized (scriptManager) {
+            Method load = scriptManager.getMethod("loadActionScript", Path.class);
+            Method save = scriptManager.getMethod("saveActionScript", List.class, Path.class);
+            List<Object> kept = new ArrayList<>();
+            int removed = 0;
+            for (Object command : Files.exists(script) ? (List<?>) load.invoke(null, script) : List.of()) {
+                String[] described = describeCommand(command);
+                if (isPriorAgentDocStaging(described, pluginDir)) {
+                    removed++;
+                    if (isStagedArchive(described[1]) && !samePath(described[1], staged)) {
+                        superseded.add(described[1]);
+                    }
+                } else {
+                    kept.add(command);
+                }
+            }
+            List<Object> block = stagingBlock(scriptManager, pluginDir, idePluginsPath, staged);
+            if (block != null) {
+                kept.addAll(block);
+                saveActionScriptAtomically(save, kept, script);
+            } else {
+                if (kept.isEmpty()) {
+                    Files.deleteIfExists(script);
+                } else {
+                    saveActionScriptAtomically(save, kept, script);
+                }
+                // No nested types here (see JetBrainsPluginUpgradeActionShapeTest): a JDK
+                // Callable carries the installAfterRestart fallback.
+                fallback.call();
+            }
+            verifyActionScriptStaging((List<?>) load.invoke(null, script), pluginDir, staged);
+            if (removed > 0) {
+                notes.add("replaced a prior agent-doc staging (" + removed + " pending-install commands)");
+            }
+        }
+        for (String zip : superseded) {
+            try {
+                Files.deleteIfExists(Path.of(zip));
+            } catch (Exception cleanupFailure) {
+                notes.add("could not delete superseded staged package " + zip + ": " + singleLine(cleanupFailure));
+            }
+        }
+        return notes;
+    }
+
+    /**
+     * delete(plugin dir), unzip(staged, plugins path), delete(staged) -- the block
+     * {@code PluginInstaller.installAfterRestart} writes, minus its second delete of the same
+     * directory. {@code null} when this build's command classes are not constructible.
+     */
+    private static List<Object> stagingBlock(Class<?> scriptManager, Path pluginDir, Path idePluginsPath, Path staged) {
+        try {
+            ClassLoader loader = scriptManager.getClassLoader();
+            Class<?> delete = Class.forName(SCRIPT_MANAGER_CLASS + "$DeleteCommand", true, loader);
+            Class<?> unzip = Class.forName(SCRIPT_MANAGER_CLASS + "$UnzipCommand", true, loader);
+            List<Object> block = new ArrayList<>();
+            block.add(delete.getConstructor(Path.class).newInstance(pluginDir));
+            block.add(unzip.getConstructor(Path.class, Path.class).newInstance(staged, idePluginsPath));
+            block.add(delete.getConstructor(Path.class).newInstance(staged));
+            return block;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+            return null;
+        }
+    }
+
+    private static void saveActionScriptAtomically(Method save, List<Object> commands, Path script) throws Exception {
+        Path parent = script.toAbsolutePath().getParent();
+        Files.createDirectories(parent);
+        Path temp = Files.createTempFile(parent, script.getFileName().toString(), ".agent-doc.tmp");
+        try {
+            save.invoke(null, commands, temp);
+            Files.move(temp, script, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception failure) {
+            try {
+                Files.deleteIfExists(temp);
+            } catch (Exception cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure instanceof InvocationTargetException && failure.getCause() instanceof Exception
+                ? (Exception) failure.getCause()
+                : failure;
+        }
+    }
+
+    /**
+     * GH #115: the saved script must hold exactly one agent-doc unzip, of {@code staged}, whose
+     * package exists, and no delete of the plugin directory or of {@code staged} ahead of it
+     * beyond the block's own single delete.
+     */
+    static void verifyActionScriptStaging(List<?> commands, Path pluginDir, Path staged) {
+        int unzips = 0;
+        int pluginDeletesBeforeUnzip = 0;
+        boolean unzipSeen = false;
+        for (Object command : commands) {
+            String[] described = describeCommand(command);
+            if (described[0].equals("UnzipCommand") && isStagedArchive(described[1])) {
+                unzips++;
+                unzipSeen = true;
+                if (!samePath(described[1], staged)) {
+                    throw new IllegalStateException(
+                        "pending-install script still unzips another agent-doc package " + described[1]
+                    );
+                }
+            } else if (described[0].equals("DeleteCommand") && !unzipSeen
+                && (samePath(described[1], pluginDir) || samePath(described[1], staged))) {
+                pluginDeletesBeforeUnzip++;
+                if (samePath(described[1], staged)) {
+                    throw new IllegalStateException("pending-install script deletes " + staged + " before unzipping it");
+                }
+            }
+        }
+        if (unzips != 1) {
+            throw new IllegalStateException(
+                "pending-install script holds " + unzips + " agent-doc unzip commands after staging; expected 1"
+            );
+        }
+        if (pluginDeletesBeforeUnzip > 2) {
+            throw new IllegalStateException(
+                "pending-install script deletes " + pluginDir + " " + pluginDeletesBeforeUnzip + " times before its unzip"
+            );
+        }
+        if (!Files.isRegularFile(staged) || !Files.isReadable(staged)) {
+            throw new IllegalStateException("staged package " + staged + " vanished before the script was verified");
         }
     }
 

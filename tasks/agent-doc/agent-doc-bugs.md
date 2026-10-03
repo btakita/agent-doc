@@ -801,6 +801,30 @@ How it went out:
 - `installworktreecontrollers`: install started controllers in 8 subagent worktrees. I stopped them and removed the merged worktrees.
 
 **Still held:** `qsubattr5`, the dogfood run. It switches a live session document's queue marker to `subagents=3`. The plan names `tasks/software/tsift.md`, but another active session owns that file. Tell me where to run it: there, from its own session, or here on this document.
+
+### Re: qsubattr5 dogfood + subagent dispatch — opus-5.5 · 2026-10-03T19:33-04:00
+
+> **Queue prompt:** do [#qsubattr5]
+
+`qsubattr5` is **gated**. I ran the dogfood on this document's `preset="#subagents"` path. The `subagents=3` attribute itself still has to be exercised, and that needs an edit I won't make. `tasks/software/tsift.md` belongs to another session, and I don't hand-edit queue markers on a live document.
+
+**Dispatch evidence from this cycle (ops.log):**
+- Preflight logged `queue_subagent_dispatch_listed count=2` once.
+- Each new head got exactly one `queue_claim outcome=Created`:
+  - `codexsteerinterrupt` → `subagent:codexsteerinterrupt`
+  - `installworktreecontrollers` → `subagent:installworktreecontrollers`
+- Neither head drained inline. `prompt_targets` held only `qsubattr5`.
+- I released my old coordinator hold on `qsubattr5`.
+
+**To clear the gate:** add `subagents=3` to a queue marker, either this one or `tsift.md`'s from its own session. The next cycle checks the same ops.log events and also checks that a claimed head is not offered a second time.
+
+**Running in the background**, each in its own worktree under `~/work/btakita/worktrees/agent-doc-<id>`, with no install or release:
+- `codexsteerinterrupt`: make Codex's active-harness-changed-document check send provenance-proven operator steering to steering-pending instead of INTERRUPTED. Replayed console output stays refused.
+- `installworktreecontrollers`: stop the install fan-out from starting controllers for idle worktree roots, and stop test fixtures from leaking controllers.
+
+When they report back, I'll integrate both serially with one `make install`, release the claims, and close the items.
+
+Session size: the exchange is 771 lines / 30 sections. The queue is active, so I'm not compacting.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -814,12 +838,14 @@ How it went out:
 - ~~do [#qsubattr2]~~
 - ~~do [#qsubattr3]~~
 - ~~do [#qsubattr4]~~
-- do [#qsubattr5]
-- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/120~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~⏭️ do [#qsubattr5]~~
+- do [#codexsteerinterrupt]
+- do [#installworktreecontrollers]
+- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/120~~
 - ~~#subagents: https://github.com/btakita/agent-doc/issues/121~~
-- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/122~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~https://github.com/btakita/agent-doc/issues/123~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/124~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/122~~
+- ~~https://github.com/btakita/agent-doc/issues/123~~
+- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/124~~
 - ~~do [#routestartupadmit]~~
 - ~~do [#steerinterruptexit]~~
 - ~~do [#handoffrouteforward]~~
@@ -832,7 +858,6 @@ How it went out:
 <!-- agent:backlog priority -->
 - [ ] [#codexsteerinterrupt] [agent-doc] In a Codex session (CODEX_THREAD_ID set), an operator prompt added after the commit is still reported INTERRUPTED (exit 1) by the active-harness-session-changed-document check, which runs before the steering-pending path shipped in c47c154ff. That check also catches console output replayed into the document as fake prompts, so it must tell real operator steering (editor-op provenance) apart from replayed harness output before it reports steering_pending. Add SimWorld/Codex hook coverage.
 - [ ] [#installworktreecontrollers] [agent-doc] make install / install-full starts an 'agent-doc controller serve' in every agent-doc worktree that has .agent-doc state (8 appeared in subagent worktrees under ~/work/btakita/worktrees/ at once on 2026-10-03, plus leftovers from test runs in each). The ensure-controller / reload fan-out must not start controllers for worktree project roots nobody has open, and test runs must not leave controllers behind (see reference_agent_doc_test_fixture_controllers_leak_to_pid1).
-- [ ] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): dogfood in tasks/software/tsift.md (replace per-line #subagent: prefixes with subagents=3); verify via queue claims + ops.log that each head is dispatched exactly once and none drain inline.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.
@@ -843,6 +868,7 @@ How it went out:
 ## Review
 
 <!-- agent:review -->
+- [/] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): dogfood in tasks/software/tsift.md (replace per-line #subagent: prefixes with subagents=3); verify via queue claims + ops.log that each head is dispatched exactly once and none drain inline.
 - [/] [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (0 as of 2026-10-03). Then run src/agent-doc/scripts/steergate-model-eval --dataset from the project root, which exits insufficient_data until the floor is met. Integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md
 - [/] [#drivecapturedsplice] [operator-verify] Captured-splice live proof (#activateinstalledjetbrai). LIVE RUN 2026-09-30 20:33Z (operator go-ahead): after harness fixes 01b1e30b7, the recipe drove IDEA end to end — edit one captured (editor_op_capture_proof operator_ops=37 shadow_replay=agreed, 20:33:01Z), canonical advanced independently via write --commit in owner pane %93 (20:33:02Z, editor acknowledged the target), edit two captured (operator_ops=36 agreed, 20:33:12Z); the final text holds every operator edit plus the advance. No text lost. The verifier still FAILS: its proving triple needs two source=captured-local-splice-recovery reads, and the plugin only takes that path (CrdtReplicaManager rebootstrapCanonicalAndForwardCapturedLocalEdit) when its replica is STALE against the canonical text. Healthy delivery reached the editor before edit two, so the recovery never had to run. DECISION NEEDED: (a) accept the healthy-path trail as the proof, extending verify-captured-splice-recovery with a capture/advance/capture triple, or (b) require the stale-replica race, making the recipe type edit two while the advance is still in flight. Aside: the scratch doc is under gitignored tmp/, so every advance ends commit_refused_ignored_path (write lands on disk, commit refused). Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or 'make pypi-quota-check' reporting a ceiling in reach. Rechecked 2026-09-30 16:25 EDT: 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 158 releases (0.35.113..0.35.424), post-cutover mean 34.7 KiB, ~49,485 further releases fit; VERDICT headroom fine. Nothing to act on or delete. pypi/support#12214 still open, 1 comment (github-actions bot), untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check reports (next tranche 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.

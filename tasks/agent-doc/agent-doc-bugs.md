@@ -123,6 +123,21 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - **Stale supervisor binary:** reported on the route (`controller_editor_route_supervisor_binary_stale` plus a warning in the route output), but it doesn't refuse the route, because a stale supervisor can still host a healthy harness. #109 now recycles such supervisors at an idle boundary.
 - **Behaviour change:** routes without `--wait-for-ready` now allow the layout at most 15s, down from 30s.
 - **Verification:** included in the combined `make check` (10541 tests passed) and `make install`.
+
+### Re: GH #111 — focus route collapsed the layout — opus-5.5 · 2026-10-02T23:47-04:00
+
+> **Queue prompt:** #subagents #gh-fix https://github.com/btakita/agent-doc/issues/111
+
+**Fixed in a subagent, merged, installed, pushed, closed** (agent-doc `b6a7b48ac`, merge `00148fb7b`; [GH #111](https://github.com/btakita/agent-doc/issues/111) closed).
+
+- **`--col` semantics:** route `--col` now carries an explicit `layout_mode`:
+  - `exact`: a positive multi-column observation, which replaces the layout.
+  - `ensure`: each named document gets a column, and nothing is removed.
+  - Old plugins that send a single `--col` infer `ensure`. A focus route therefore keeps the retained layout (focus-only), or appends the document if it has no column. An unknown mode is refused before publishing.
+- **Pure merge function:** the merge is `merge_editor_route_columns(mode, retained, route)`, ready to become the body of the planned per-publisher `Computed` for the desired layout.
+- **Logging:** `pane_layout_projection` lines carry `publisher= plane_version= columns= retained_columns= observed_panes=`, and narrowing logs `pane_layout_projection_narrowed`.
+- **Merge:** hand-resolved against #110 (gate budget) and #112 (column order). The route resolves the mode and merges first, then #110's gates run, and #112's ordering still applies at publication. Plugin 0.2.483.
+- **Open question:** in `ensure` mode on Remote Dev, visiting several documents in turn keeps appending columns until a positive observation replaces the layout. The alternative is to have the routed document take over the focused document's column. Say if you want that.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -136,7 +151,7 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - ~~release + publish~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/109~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/110~~
-- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/111
+- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/111~~ — auto-struck: answered this cycle (#ftstrike)
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/112
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/113
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/114

@@ -624,14 +624,33 @@ I claimed both queue heads and started each in its own background subagent and t
 - **`#searchtimeoutflake`** (`worktrees/tsift-searchflake`): makes the search-timeout test deterministic. The agent must show the fixed test still fails when the product code is mutated, and must run it 50 or more times under load.
 
 The exchange is large (579 lines). I'm not compacting while the queue is active.
+
+### Re: [#searchtimeoutflake] done — deterministic search-timeout tests — opus-5-5 · 2026-10-03T16:13-04:00
+
+> **Queue prompt:** do [#searchtimeoutflake]
+
+The subagent pushed `0122b21` to tsift `main` without force. `make check` exited 0 (3,912 passed), and the binary is installed. CI was still pending.
+
+**Root cause: the race was in the tests, not the product.** Two tests had it: `..._index_disappears_during_worker_run` and its sibling `..._index_turns_stale_during_worker_run`. Each one deleted the index or made it stale after a fixed 100 ms sleep. Under load, that change could land before the search's own pre-search index check, which then auto-reindexed. The timeout diagnosis read a fresh index and said "looks fresh" instead of giving the reindex hint.
+
+**Fix:**
+- A test-only barrier in `run_search_with_timeout`, enabled only by `TSIFT_TEST_SEARCH_TIMEOUT_BARRIER_DIR`. After the timeout fires and before the diagnosis is built, it writes `timed-out` and waits for `resume`. With the variable unset, nothing changes.
+- A shared test helper makes the index change between those two files. The assertions are unchanged.
+
+**Evidence:**
+- **Reproduced first:** before the fix, 4 of 30 runs failed with 128 busy loops on 32 cores and `--test-threads 8`.
+- **After the fix:** 60/60 passed, and 50/50 across every `search_timeout*` test.
+- **Tests still catch the bug:** suppressing the hint failed both tests. So did building the diagnosis before the barrier. Each mutation was restored from a scratch copy and verified with `cmp`; `git checkout` was never used.
+
+**Installed binary:** this install replaced the one `#tracejoinremeasure`'s subagent had installed. That subagent is still running and re-installs if it changes tsift.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
-- do [#tracejoinremeasure]
-- do [#searchtimeoutflake]
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- ⏭️ do [#tracejoinremeasure]
+- ~~do [#searchtimeoutflake]~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -641,7 +660,6 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#tracejoinremeasure] (sdktracenaming) Re-measure haiven-trace joins on the real haiven-sdk root checkout with tsift 78bb7f4 and haiven-sdk 57dd11c, with no scratch copies under a shared tsift root. Record the new joined/unmatched counts in specs/graph.md next to the historical 1,612/1,616 figure, and confirm the contracts-pin warning fires against the f634a0f submodule.
-- [ ] [#searchtimeoutflake] The tsift test exit_code::search_timeout_reports_reindex_when_index_disappears_during_worker_run failed once in the all-languages make check pass (2026-10-03, during the 78bb7f4 rebase), then passed three times alone and on a full re-run. Find the timing race and make it deterministic.
 <!-- /agent:backlog -->
 
 ## Review

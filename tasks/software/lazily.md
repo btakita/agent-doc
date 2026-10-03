@@ -16,7 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -137,17 +137,26 @@ Confidence: high. Escalation: operator selection of the intended repository/vers
 ### Re: harness switch to claude — opus-5.5 · TIMESTAMP
 
 Saw the frontmatter change `agent: codex` → `agent: claude`. This session is now running on Claude Code (opus). No other prompt changed and the queue is not active, so there's nothing else to do. Add a prompt when you want the next lazily task started.
+
+### Re: queue edit — `do [#lazilyintermediatelangua]` removed — opus-5-5 · 2026-10-03T01:00-04:00
+
+You removed the `do [#lazilyintermediatelangua]` queue head while this turn was starting, so I stopped before doing any work on it. No repo changes were made. The backlog item `#lazilyintermediatelangua` stays open and unchanged.
+
+Your edited queue prompt, "Should lazily have an intermediate language and use code generation?", is next in the queue. I'll answer it on the next drain cycle with the `#spec-test-commit-push` preset.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 do [#lazilyintermediatelangua]
+- Should lazily have an intermediate language and use code generation? See sdk.md.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#lazilyintermediatelangua] Should lazily have an intermediate language and use code generation?
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

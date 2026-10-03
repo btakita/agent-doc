@@ -143,6 +143,31 @@ Since the release, other work has landed on `main` under "Unreleased". Contract 
 - **Verification:** `make check` exit 0 both before and after the rebase. Installed, and a smoke test passed: search found the proc group, and `graph add --callers` returned `main` and `inner`.
 
 The Jai, `#sdktsiftedges` and XSD/WSDL subagents are still running, and their heads stay claimed.
+
+### Re: Jai bindings done; opt-in question — opus-5.5 · 2026-10-03T02:54-04:00
+
+> **Queue prompt:** #subagent: Add Jai bindings
+
+**Done.** The subagent pushed `6b8b435 feat(graph): index Jai for search and graph (#jaiindex)` to `main`, rebased onto C and Odin without force. `make check` exit 0: 1894 passed, 0 failed.
+- **Grammar:** crates.io has no Jai grammar, so the subagent vendored [constantitus/tree-sitter-jai](https://github.com/constantitus/tree-sitter-jai) `96440b0`. Its MIT-0 license is compatible with tsift's MIT.
+  - The files live under `packages/tsift-graph/vendor/tree-sitter-jai/`, and a new `build.rs` compiles `parser.c` and `scanner.c` with `cc` when `lang-jai` is on.
+  - **Cost:** `parser.c` is **29 MB**, which adds about 872k lines to the repo and about 1.2 MB gzipped to the crate. It also adds about a minute to a cold build.
+- **Symbols:** procedures (including nested ones), structs, unions, `enum` and `enum_flags` with their members, named `#import`s, `#type` aliases, file-scope constants and variables, and fields.
+  - A plain `Handle :: u32` is reported as a `const`, because the grammar parses it like any constant.
+- **Call edges:** `f()` and `Module.f()`. `#import` and `#load` count as imports for impact analysis.
+- **Not supported:** rename and structural rewrite, because ast-grep has no Jai grammar.
+- **Not tested on real Jai code:** there is none on this machine, and the grammar's own test file parses with 3 error nodes.
+
+**Making all languages opt-in (asked in the console).** I recommend against making every language opt-in, and only Jai needs it. Waiting on the operator's decision:
+- With everything off by default, `cargo install tsift` would produce a binary that can't index anything. The mainstream languages should stay on by default.
+- A Cargo feature only controls what gets *compiled*. With `lang-jai` off, the 29 MB `parser.c` still ships in the repo and in every crates.io `tsift` download. The real fix is moving the grammar into its own crate (for example `tsift-grammar-jai`), which `tsift-graph` pulls in only under `lang-jai`.
+- `release.yml` builds with the default features. If anything becomes opt-in, the release build should use `--features all-languages` so the prebuilt binaries still include every language.
+- Proposed tiers:
+  - **On by default:** the mainstream languages, plus zig, odin and gdscript, whose grammars are small and published on crates.io.
+  - **Off by default:** `lang-jai`, moved into its own grammar crate. The release workflow would publish that crate before `tsift`.
+  - **Prebuilt release binaries:** built with `all-languages`.
+
+The `#sdktsiftedges` and XSD/WSDL subagents are still running.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -153,8 +178,8 @@ The Jai, `#sdktsiftedges` and XSD/WSDL subagents are still running, and their he
 - do [#wsdlcontract]
 - ~~do [#releasepublishbindings]~~
 - ~~#subagent: Add C bindings~~
-- ~~#subagent: Add Odin bindings~~ — auto-struck: answered this cycle (#ftstrike)
-- #subagent: Add Jai bindings
+- ~~#subagent: Add Odin bindings~~
+- ~~#subagent: Add Jai bindings~~ — auto-struck: answered this cycle (#ftstrike)
 - #subagent: [#sdktsiftedges]
 <!-- /agent:queue -->
 <!--

@@ -180,7 +180,7 @@ fn reconcile_plugins_for_mode(release: &str, mode: ReconcileMode) -> Result<()> 
             reconcile_installed_plugins_once(release, crate::plugin::update_all_installed)
         }
         ReconcileMode::Auto => {
-            reconcile_installed_plugins_auto(crate::plugin::update_all_installed)
+            reconcile_installed_plugins_auto(release, crate::plugin::update_all_installed)
         }
     }
 }
@@ -243,10 +243,15 @@ fn child_spawn_fallback_warning(exe: &Path, release: &str, error: &std::io::Erro
 
 /// `--auto`'s reconcile reporting: success is quiet unless something changed,
 /// and failure propagates to the watcher, which retries on its next poll.
-fn reconcile_installed_plugins_auto(reconcile: impl FnOnce() -> Result<usize>) -> Result<()> {
-    let updated = reconcile()?;
-    if updated > 0 {
-        eprintln!("Updated {updated} installed editor plugin target(s).");
+/// GH #114: the auto watcher reports only cycles that changed something, from
+/// the same per-target outcomes as the one-shot summary.
+fn reconcile_installed_plugins_auto(
+    release: &str,
+    reconcile: impl FnOnce() -> Result<crate::plugin::PluginReconcileReport>,
+) -> Result<()> {
+    let report = reconcile()?;
+    if report.changed() > 0 {
+        crate::plugin::report_reconcile_summary(&report, release);
     }
     Ok(())
 }
@@ -254,20 +259,16 @@ fn reconcile_installed_plugins_auto(reconcile: impl FnOnce() -> Result<usize>) -
 /// Reconcile installed editor plugins for a one-shot upgrade and fail loudly
 /// when they cannot be brought to `latest`, so a partially delivered release
 /// never reports success (GH #107).
+///
+/// GH #114: the closing summary is derived from per-target outcomes, so a
+/// staged target is reported as needing a restart rather than as updated.
 fn reconcile_installed_plugins_once(
     latest: &str,
-    reconcile: impl FnOnce() -> Result<usize>,
+    reconcile: impl FnOnce() -> Result<crate::plugin::PluginReconcileReport>,
 ) -> Result<()> {
     match reconcile() {
-        Ok(0) => {
-            eprintln!("Installed editor plugins already match v{latest}.");
-            Ok(())
-        }
-        Ok(updated) => {
-            eprintln!(
-                "Updated {updated} installed editor plugin target(s) to the v{latest} release. \
-                 Restart the editor if it does not reload the plugin on its own."
-            );
+        Ok(report) => {
+            crate::plugin::report_reconcile_summary(&report, latest);
             Ok(())
         }
         Err(error) => bail!(
@@ -677,14 +678,24 @@ mod tests {
         let mut called = false;
         reconcile_installed_plugins_once("0.35.441", || {
             called = true;
-            Ok(1)
+            Ok(crate::plugin::PluginReconcileReport {
+                targets: vec![crate::plugin::PluginTargetReport {
+                    family: crate::plugin::PluginEditorFamily::JetBrains,
+                    label: "IntelliJIdea2026.3".to_string(),
+                    version: "0.2.481".to_string(),
+                    outcome: crate::plugin::PluginTargetOutcome::HotUpgraded,
+                }],
+            })
         })
         .unwrap();
         assert!(
             called,
             "the one-shot upgrade must reconcile installed plugins"
         );
-        reconcile_installed_plugins_once("0.35.441", || Ok(0)).unwrap();
+        reconcile_installed_plugins_once("0.35.441", || {
+            Ok(crate::plugin::PluginReconcileReport::default())
+        })
+        .unwrap();
     }
 
     /// A stand-in "new binary": records its argv to `argv.txt` and exits with
@@ -811,9 +822,15 @@ mod tests {
 
     #[test]
     fn auto_reconcile_reporting_propagates_failure() {
-        reconcile_installed_plugins_auto(|| Ok(0)).unwrap();
-        reconcile_installed_plugins_auto(|| Ok(2)).unwrap();
-        assert!(reconcile_installed_plugins_auto(|| Err(anyhow::anyhow!("refused"))).is_err());
+        let release = "0.35.442";
+        reconcile_installed_plugins_auto(release, || {
+            Ok(crate::plugin::PluginReconcileReport::default())
+        })
+        .unwrap();
+        assert!(
+            reconcile_installed_plugins_auto(release, || Err(anyhow::anyhow!("refused")))
+                .is_err()
+        );
     }
 
     #[test]

@@ -98,4 +98,57 @@ class NativeReloadCoordinatorTest {
                 coordinator.contains("replica restart incomplete"),
         )
     }
+
+    /**
+     * `#steerreplicachurn`: a repeated `reload_library` request for a build that is
+     * already loaded must not quiesce anything. Each such request used to
+     * deregister and re-register every open document's replica.
+     */
+    @Test
+    fun `reload that would keep the loaded generation is a no-op`() {
+        assertTrue(nativeReloadKeepsCurrentGenerationUtil(100L, 100L, 0L))
+        assertTrue("an unreadable target never reloads", nativeReloadKeepsCurrentGenerationUtil(100L, 0L, 0L))
+        assertTrue("a build that already failed validation is not retried", nativeReloadKeepsCurrentGenerationUtil(100L, 200L, 200L))
+        assertFalse(nativeReloadKeepsCurrentGenerationUtil(100L, 200L, 0L))
+        assertFalse(nativeReloadKeepsCurrentGenerationUtil(100L, 200L, 150L))
+    }
+
+    @Test
+    fun `replicas are rebuilt only when the quiesce tore them down`() {
+        val tornDown = NativeReloadReplicaHandoff(emptyMap(), reloadSafe = false, replicasTornDown = true)
+        val untouched = NativeReloadReplicaHandoff(emptyMap(), reloadSafe = false, replicasTornDown = false)
+        assertFalse("watcher quiesce failed first", nativeReloadReplicaRestartRequiredUtil(false, null))
+        assertFalse("capture missed its deadline", nativeReloadReplicaRestartRequiredUtil(true, untouched))
+        assertTrue(nativeReloadReplicaRestartRequiredUtil(true, tornDown))
+        assertTrue("a quiesce that threw is assumed to have disposed", nativeReloadReplicaRestartRequiredUtil(true, null))
+    }
+
+    @Test
+    fun `coordinator checks for a no-op before quiescing and gates the replica rebuild`() {
+        val manager = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            ).first { Files.exists(it) },
+        )
+        val coordinator = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/NativeReloadCoordinator.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeReloadCoordinator.kt"),
+            ).first { Files.exists(it) },
+        )
+        val noOp = coordinator.indexOf("AgentDocLib.reloadWouldKeepCurrentGeneration()")
+        val quiesce = coordinator.indexOf("CrdtReplicaManager.quiesceAllForNativeReload()")
+        assertTrue("the no-op check must precede every quiesce", noOp in 0 until quiesce)
+        val gate = coordinator.indexOf("nativeReloadReplicaRestartRequiredUtil(")
+        val restart = coordinator.indexOf("CrdtReplicaManager.restartAfterNativeReload(")
+        assertTrue("the replica rebuild must be gated", gate in 0 until restart)
+        val captureFailure = manager
+            .substringAfter("if (captured == null) {")
+            .substringBefore("capturedByProject[project] = captured")
+        assertTrue(
+            "a capture that missed its deadline disposed nothing",
+            captureFailure.contains("replicasTornDown = false"),
+        )
+    }
 }

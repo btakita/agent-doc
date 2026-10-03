@@ -73,6 +73,15 @@ internal fun nativeRetiredGenerationTransition(
         NativeRetiredGenerationTransition.LoadReplacementRetainingInertMapping
     }
 
+/** `#steerreplicachurn`: the pure no-op test [AgentDocLib.hotReload] applies first. */
+internal fun nativeReloadKeepsCurrentGenerationUtil(
+    loadedMtime: Long,
+    targetMtime: Long,
+    failedReloadMtime: Long,
+): Boolean =
+    (targetMtime != 0L && targetMtime == failedReloadMtime) ||
+        nativeReloadTransition(loadedMtime, targetMtime, true, true) == NativeReloadTransition.KeepCurrent
+
 internal fun nativeReloadTransition(
     loadedMtime: Long,
     targetMtime: Long,
@@ -1261,6 +1270,23 @@ interface AgentDocLib : Library {
                     }
 
             return loadFrom(libPath)
+        }
+
+        /**
+         * `#steerreplicachurn`: true when [hotReload] would leave the loaded
+         * generation in place without loading anything: the target is the
+         * loaded build, or a build that already failed validation. The
+         * coordinator checks this BEFORE quiescing, because quiescing tears
+         * down every open document's CRDT replica. A repeated `reload_library`
+         * fan-out for one install deregistered and re-registered all 23 open
+         * documents every 10-60 s while the native generation never changed.
+         */
+        @Synchronized
+        internal fun reloadWouldKeepCurrentGeneration(): Boolean {
+            if (loadedGeneration == null) return false
+            val path = loadedPath ?: return false
+            val targetMtime = File(path).lastModified()
+            return nativeReloadKeepsCurrentGenerationUtil(loadedMtime, targetMtime, failedReloadMtime)
         }
 
         @Synchronized

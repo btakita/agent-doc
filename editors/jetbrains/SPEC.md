@@ -39,6 +39,16 @@ failure may restore the old named shadow. Durable reliable-sync
 outboxes live in the project controller; the reloadable cdylib sends typed
 controller RPCs and retains no SQLite connection.
 
+A reload intent whose target library is the loaded build (same mtime), or a
+build that already failed validation, is satisfied before any handoff work: no
+listener or replica is quiesced (`#steerreplicachurn`). Quiescing tears down
+every open document's CRDT replica, and a repeated `reload_library` fan-out for
+one install used to deregister and re-register all of them every 10-60 s while
+the native generation never changed. Replicas are rebuilt after a reload attempt
+only when its quiesce actually disposed the replica managers; a checkpoint that
+missed its deadline returns before disposing anything, so the live replicas are
+left attached rather than force-refreshed.
+
 Before native reload reattaches any CRDT replica, JetBrains republishes each
 open session document's reliable-liveness registration with the current plugin
 classloader endpoint identity. Existing local presence tags are retained; if

@@ -99,13 +99,19 @@ internal object NativeReloadCoordinator {
             return
         }
         val handoff = reloadGate.begin() ?: return
+        if (AgentDocLib.reloadWouldKeepCurrentGeneration()) {
+            // `#steerreplicachurn`: nothing would load, so nothing may be torn
+            // down. Quiescing first used to deregister every open document's
+            // replica and re-register it from a fresh cut, once per repeated
+            // `reload_library` request, while the generation never changed.
+            log.info("[native] reload intent already satisfied trigger=$trigger; replicas untouched")
+            reloadGate.complete(handoff)
+            return
+        }
         try {
             ApplicationManager.getApplication().executeOnPooledThread {
-                var replicaHandoff =
-                    NativeReloadReplicaHandoff(
-                        projectDocuments = emptyMap(),
-                        reloadSafe = false,
-                    )
+                var replicaHandoff: NativeReloadReplicaHandoff? = null
+                var replicaQuiesceAttempted = false
                 var watchers = emptyList<PatchWatcher>()
                 var surfaceProjects = emptyList<com.intellij.openapi.project.Project>()
                 try {
@@ -121,6 +127,7 @@ internal object NativeReloadCoordinator {
                         log.warn("[native] reload failed closed; an IPC listener did not terminate")
                         return@executeOnPooledThread
                     }
+                    replicaQuiesceAttempted = true
                     val replicaQuiesce = CrdtReplicaManager.quiesceAllForNativeReload()
                     replicaHandoff = replicaQuiesce
                     if (!replicaQuiesce.reloadSafe) {
@@ -162,11 +169,24 @@ internal object NativeReloadCoordinator {
                             log.warn("[native] reload liveness republish failed", error)
                         }
                         try {
-                            val report = CrdtReplicaManager.restartAfterNativeReload(
-                                replicaHandoff,
-                                surfaceProjects,
-                            )
-                            if (report.expected == 0) {
+                            val report =
+                                if (
+                                    nativeReloadReplicaRestartRequiredUtil(
+                                        replicaQuiesceAttempted,
+                                        replicaHandoff,
+                                    )
+                                ) {
+                                    CrdtReplicaManager.restartAfterNativeReload(
+                                        replicaHandoff
+                                            ?: NativeReloadReplicaHandoff(emptyMap(), reloadSafe = false),
+                                        surfaceProjects,
+                                    )
+                                } else {
+                                    null
+                                }
+                            if (report == null) {
+                                log.info("[native] replica restart skipped; the live replicas were never torn down")
+                            } else if (report.expected == 0) {
                                 log.warn(
                                     "[native] replica restart observed no open markdown documents " +
                                         "attached=0/0 live_projects=${report.liveProjects}",

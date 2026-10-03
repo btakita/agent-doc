@@ -809,6 +809,40 @@ it never requests an editor full state, force-refreshes, or re-registers from th
 editor buffer. In particular, a stale native baseline quarantines the local
 delta and schedules a pull of the current controller canonical projection.
 
+Captured-splice recovery rebases the quarantined operator delta onto the current
+controller canonical (`#steerreplicachurn`). The rebase works on the operator's
+**net** change against its captured base, split into windows: each changed base
+region widened over every equivalent anchoring of an insertion or deletion (an
+indel slides across repeated text) and joined with every canonical change it
+touches, boundaries included. A window canonical never touched is translated
+through equal spans as before. A touched window merges only when every canonical
+change in it is a pure insertion of non-whitespace text and canonical's version of
+the window is a subsequence of the operator's version: canonical then holds an
+earlier state of the operator's own typing, typically a burst the controller
+ingested whose receipt the editor never saw (`durable=false`). The merge emits
+only the insertions canonical lacks, so no canonical code point is deleted and
+the ingested burst is never inserted a second time. Every other overlap —
+controller text the operator never typed, a canonical deletion beside the edit, a
+whitespace-only insertion — still refuses and keeps the delta retained.
+
+The rebase diffs by line first and refines only small changed hunks by code
+point. Char-level Myers is O((N+M)·D), and a compaction makes D approach N: on a
+173k-character session it ran 45-72 s on the editor's per-document lane, which
+starved the open-document attach deadline (so the controller recorded
+`reregister=definitively_refused_by_all` and dropped the replica from the
+delivery cut) and the native-reload quiesce deadline. Line anchoring also keeps a
+compaction's deletion inside its own hunk; whole-document char matching paired
+stray characters of the deleted exchange with the queue and made an independent
+queue edit look like an overlap.
+
+When the attached endpoint's replica text already equals the canonical the delta
+was rebased onto, and the operator has not typed since the captured cut, the
+rebased splices forward on that endpoint. Only otherwise does recovery register
+a replacement from a full canonical bootstrap. At registration, when the line
+merge of shadow, live buffer, and canonical conflicts (the splice stream did not
+survive a native reload), the same native rebase of the single shadow-to-buffer
+splice is the merge-forward candidate before the ambiguity hold applies.
+
 The deferred candidate remains retained as an ordered semantic intent, and the
 per-document settlement graph resumes persistence and closeout only when its
 derived projected state is current. Process exit, controller recycle,

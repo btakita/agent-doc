@@ -76,7 +76,25 @@ internal data class NativeReloadReplicaRestartReport(
 internal data class NativeReloadReplicaHandoff(
     val projectDocuments: Map<Project, Set<String>>,
     val reloadSafe: Boolean,
+    /**
+     * `#steerreplicachurn`: whether the quiesce disposed the replica managers.
+     * A capture that missed its deadline returns before disposing anything; the
+     * live replicas must then be left alone, not re-registered.
+     */
+    val replicasTornDown: Boolean = true,
 )
+
+/**
+ * `#steerreplicachurn`: whether a native-reload attempt must rebuild the CRDT
+ * replicas. Only a quiesce that actually disposed the managers requires it; a
+ * quiesce that threw is treated as having disposed them, the conservative case.
+ * Rebuilding replicas that were never torn down force-refreshed every open
+ * document's registration on each failed-closed reload attempt.
+ */
+internal fun nativeReloadReplicaRestartRequiredUtil(
+    replicaQuiesceAttempted: Boolean,
+    handoff: NativeReloadReplicaHandoff?,
+): Boolean = replicaQuiesceAttempted && (handoff?.replicasTornDown ?: true)
 
 internal fun nativeReloadReplicaRestartReport(
     expectedPaths: Collection<String>,
@@ -466,6 +484,19 @@ internal enum class LocalReplicaBaselineDecision {
     ForwardLocal,
     RebootstrapCanonicalThenForward,
 }
+
+/**
+ * `#steerreplicachurn`: a captured local delta rebased onto [canonicalText] may
+ * be forwarded on the endpoint that is already attached exactly when that
+ * endpoint's replica text IS that canonical generation and the operator has not
+ * typed since the captured cut. Otherwise recovery re-registers from canonical.
+ */
+internal fun capturedRebaseCanReuseEndpointUtil(
+    endpointReplicaText: String?,
+    canonicalText: String,
+    visibleEditorText: String?,
+    capturedVisibleText: String,
+): Boolean = endpointReplicaText == canonicalText && visibleEditorText == capturedVisibleText
 
 internal fun localReplicaBaselineDecisionUtil(
     replicaText: String?,
@@ -1615,6 +1646,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val root = resolveProjectRoot(filePath) ?: return false
         val canonical = CpSocketReplicaTransport(root).currentCanonicalText(filePath) ?: return false
         val rebased = NativePatching.rebaseCapturedSplices(capturedBaseText, canonical, batch) ?: return false
+        if (
+            capturedRebaseCanReuseEndpointUtil(
+                endpointReplicaText = staleForwarder.replicaText(),
+                canonicalText = canonical,
+                visibleEditorText = editorBufferText(filePath),
+                capturedVisibleText = visibleEditorText,
+            )
+        ) {
+            // `#steerreplicachurn`: the endpoint already holds this exact
+            // canonical generation (it received the controller's update while
+            // the operator's burst waited). Forward the rebased splices on it.
+            // Re-registering from a full bootstrap (6.4 MB for sdk.md, 12 s)
+            // raced every controller write, failed promotion, and churned the
+            // replica the controller was waiting on.
+            return forwarders[filePath] === staleForwarder && staleForwarder.forwardLocalEdits(rebased)
+        }
         val replacement =
             forwarderFor(
                 filePath = filePath,
@@ -3356,18 +3403,30 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun cleanRegistrationMerge(shadow: String?, buffer: String?, canonical: String?): String? {
         if (shadow == null || buffer == null || canonical == null) return null
         if (buffer == canonical || buffer == shadow || canonical == shadow) return null
-        val json = NativePatching.reconcileText(shadow, buffer, canonical, -1) ?: return null
-        return try {
-            val root = com.google.gson.JsonParser.parseString(json).asJsonObject
-            if (!root.get("ok").asBoolean || root.get("conflicts").asInt != 0) {
-                null
-            } else {
-                root.get("text").asString
+        val json = NativePatching.reconcileText(shadow, buffer, canonical, -1)
+        val reconciled =
+            json?.let {
+                try {
+                    val root = com.google.gson.JsonParser.parseString(it).asJsonObject
+                    if (!root.get("ok").asBoolean || root.get("conflicts").asInt != 0) {
+                        null
+                    } else {
+                        root.get("text").asString
+                    }
+                } catch (e: Exception) {
+                    log.warn("[crdt-replica] registration merge result unreadable: ${e.message}")
+                    null
+                }
             }
-        } catch (e: Exception) {
-            log.warn("[crdt-replica] registration merge result unreadable: ${e.message}")
-            null
-        }
+        // `#steerreplicachurn`: a line merge conflicts when canonical already
+        // holds the first part of a prompt the operator kept typing (its push
+        // was ingested but the receipt was lost, then a native reload dropped
+        // the captured splice stream). The native rebase merges exactly that
+        // case by inserting only what canonical lacks, and refuses any overlap
+        // with controller text, so the hold still covers every real conflict.
+        return reconciled
+            ?: NativePatching.rebaseCapturedSplices(shadow, canonical, singleSpliceBatchUtil(shadow, buffer))
+                ?.resultingText
     }
 
     /** Complete the causal projection decision only after this endpoint owns the map slot. */
@@ -4019,7 +4078,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val captured = manager.captureNativeReloadResumeStates(captureDeadlineNanos)
                 if (captured == null) {
                     managers.forEach { (_, activeManager) -> activeManager.disposed.set(false) }
-                    return NativeReloadReplicaHandoff(emptyMap(), reloadSafe = false)
+                    return NativeReloadReplicaHandoff(emptyMap(), reloadSafe = false, replicasTornDown = false)
                 }
                 capturedByProject[project] = captured
             }

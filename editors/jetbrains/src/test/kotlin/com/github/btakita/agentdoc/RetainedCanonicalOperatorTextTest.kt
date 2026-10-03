@@ -471,4 +471,52 @@ class RetainedCanonicalOperatorTextTest {
         assertFalse(refusal.contains("retainedCanonicalProjectionPaths.add("))
         assertTrue(refusal.contains("return false"))
     }
+
+    /**
+     * `#steerreplicachurn`: a rebased captured delta forwards on the attached
+     * endpoint when it already holds that exact canonical, instead of re-registering
+     * a multi-megabyte full bootstrap that races every controller write.
+     */
+    @Test
+    fun `a rebased captured delta reuses an endpoint that already holds canonical`() {
+        assertTrue(capturedRebaseCanReuseEndpointUtil("compacted", "compacted", "buffer", "buffer"))
+        assertFalse("endpoint behind canonical", capturedRebaseCanReuseEndpointUtil("stale", "compacted", "buffer", "buffer"))
+        assertFalse("endpoint detached", capturedRebaseCanReuseEndpointUtil(null, "compacted", "buffer", "buffer"))
+        assertFalse("operator typed since the cut", capturedRebaseCanReuseEndpointUtil("compacted", "compacted", "buffer+", "buffer"))
+
+        val manager = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            ).first { Files.exists(it) },
+        )
+        val recovery = manager
+            .substringAfter("private fun rebootstrapCanonicalAndForwardCapturedLocalEdit(")
+            .substringBefore("fun requestRemoteDrain(")
+        val reuse = recovery.indexOf("capturedRebaseCanReuseEndpointUtil(")
+        val reregister = recovery.indexOf("bootstrapFromControllerCanonical = true")
+        assertTrue("endpoint reuse must be tried before a full re-register", reuse in 0 until reregister)
+    }
+
+    /**
+     * `#steerreplicachurn`: the line merge conflicts when canonical holds the first
+     * part of a prompt the operator kept typing. Registration must fall back to the
+     * native captured-splice rebase (which refuses controller-text overlap) rather
+     * than hold the operator's buffer forever.
+     */
+    @Test
+    fun `registration merge falls back to the native captured splice rebase`() {
+        val manager = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            ).first { Files.exists(it) },
+        )
+        val merge = manager
+            .substringAfter("private fun cleanRegistrationMerge(")
+            .substringBefore("private fun finalizeRegistrationProjection(")
+        assertTrue(
+            merge.contains("NativePatching.rebaseCapturedSplices(shadow, canonical, singleSpliceBatchUtil(shadow, buffer))"),
+        )
+    }
 }

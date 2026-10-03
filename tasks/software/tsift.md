@@ -286,6 +286,33 @@ The exchange is now 203 lines, but the queue is active, so I'm not compacting.
 - `all-languages` also adds the grammars used only for structural matching, so release archives and build times grow.
 
 `#graphrefreshperf` and `#neighborhoodlimit0` are still running in subagents. The exchange is 225 lines, but the queue is active, so I'm not compacting.
+
+### Re: #neighborhoodlimit0 done — opus-5.5 · 2026-10-03T03:33-04:00
+
+> **Queue prompt:** do [#neighborhoodlimit0]
+
+**Done.** The subagent pushed `709cd35 fix(graph-db): make neighborhood --limit 0 unlimited and report truncation (#neighborhoodlimit0)` to `main` without force. The only rebase conflict was a VERSIONS.md bullet, and both sides were kept. `make check` exit 0 before and after the rebase. Installed with `--features all-languages`.
+- **Root cause:** the handler turned `--limit 0` into "no limit given" before the output budget ran. The budget helpers also treated `0` and an absent limit the same, so both applied the default budget: 8–12 nodes and 16–24 edges per kind, plus a 6,000-token cap. Nodes over the quota were dropped silently.
+- **New behaviour:** `neighborhood`, `related` and `evidence` share one rule, matching their existing help text:
+  - no `--limit`: the default budget;
+  - `--limit N`: quotas and cap scaled from N;
+  - `--limit 0`: no per-kind quota and no token cap. The ranked-neighbors preview stays capped.
+- **Reporting:** these fields are new, with no existing field changed:
+  - under `output_budget`: `unlimited`, the `dropped_nodes` and `dropped_edges` totals, `dropped_nodes_by_kind` and `dropped_edges_by_kind`, and a `hint` naming `--limit 0` and `--cursor`;
+  - in the envelope: matching metrics, a summary line, and the hint as `follow_up`;
+  - in human output: an `output_budget:` line.
+- **Test:** `graph_db_neighborhood_limit_zero_lifts_per_kind_quota_and_token_cap` uses a node with 40 neighbours. The default call truncates and reports what it dropped; `--limit 0` returns all 41 nodes and 40 edges with nothing dropped.
+- **Real data** (haiven-sdk at `src/haiven-dev/src/haiven-sdk`, read-only) for `ChatMessageV0` at depth 2:
+
+  | Run | Nodes / edges | Dropped |
+  |---|---|---|
+  | Default | 25 / 14 | 16 nodes (`sdk_declaration`=11, `ast_span`=5) and 38 edges, with the hint |
+  | `--limit 0` | 41 / 52 | none |
+
+- **Docs:** `specs/graph.md`, `specs/search-navigation.md`, VERSIONS.
+- **CI:** the [run](https://github.com/btakita/tsift/actions) on `709cd35` was still in progress at closeout. The previous run, on `bc55362` (`#jaicrate`), passed.
+
+`#graphrefreshperf` is still running in its subagent. `#jaicratepublish` is waiting for operator approval. The exchange is 250 lines, but the queue is active, so I'm not compacting.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -300,8 +327,8 @@ The exchange is now 203 lines, but the queue is active, so I'm not compacting.
 - ~~#subagent: Add Odin bindings~~
 - ~~#subagent: Add Jai bindings~~
 - ~~#subagent: [#sdktsiftedges]~~
-- ⏭️ do [#graphrefreshperf]
-- do [#neighborhoodlimit0]
+- do [#graphrefreshperf]
+- ~~do [#neighborhoodlimit0]~~
 - ~~do [#sdktraceroot]~~
 <!-- /agent:queue -->
 <!--
@@ -313,7 +340,6 @@ https://github.com/chopratejas/headroom
 <!-- agent:backlog priority queue -->
 - [/] [#jaicratepublish] [operator-verify] Before the next tsift release: publish tsift-tree-sitter-jai 0.1.102 to crates.io once by hand with a token (cargo publish -p tsift-tree-sitter-jai, token in passage), then register the btakita/tsift release.yml trusted publisher for the crate on crates.io. The release publish job uses OIDC trusted publishing, which only works for crates that already exist, so without this the next release fails at this crate before tsift-graph. Gated on operator approval of the publish and the crates.io settings change.
 - [ ] [#graphrefreshperf] Root-scope graph-db refresh over the haiven-sdk tree (sdk-ruff worktree of the feat/codegen-trace branch) ran >13 min without finishing; ~50% of samples in link_ast_navigation_edges plus heavy libc. Profile, fix the hot path, add a perf-gate case.
-- [ ] [#neighborhoodlimit0] graph-db neighborhood: the default output budget drops nodes per kind (11 ChatMessageV0 declarations hidden) and --limit 0 does not lift it. Make --limit 0 mean unlimited (or add --all), and report the dropped counts in the envelope.
 <!-- /agent:backlog -->
 
 ## Review

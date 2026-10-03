@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.442
+
+- **JetBrains upgrade reporting tells the truth about the asynchronous-retirement guard (GH #108).**
+  On builds that ship `AwaitClassloaderUnloadAsyncPostReconfiguration`, agent-doc declines the
+  restart-free upgrade before the IDE is consulted; the output now says agent-doc declined it
+  (also for the 0.35.435-0.35.441 upgrader wording) instead of "the IDE refused", and states once
+  that restart-free upgrade is permanently unavailable on that build. A staged release install no
+  longer prints `Plugin installed (v<old>)`: it names the staged version and the generation that
+  stays loaded. Every dynamic-upgrade decision (`hot_upgraded` / `staged_for_restart` /
+  `restart_required`, with decliner, version, and pid-bearing reason) is logged to `ops.log`, and
+  a staged-restart marker is retired once an installed jar at `staged_version` written no earlier
+  than the marker proves the restart applied it. JetBrains plugin 0.2.481.
+
 ## 0.35.441
 
 - **The focus escalation no longer grows the layout it republishes (GH #106).** A focus-only tab

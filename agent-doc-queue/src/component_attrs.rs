@@ -10,7 +10,15 @@ use crate::document_queue::BacklogQueueSyncMode;
 
 /// Attributes that are only meaningful on the `agent:queue` component. Seeing
 /// one of these on any other component is a misplaced-attribute mistake.
-const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &["auto", "preset", "start", "go", "stop"];
+const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
+    "auto",
+    "preset",
+    "start",
+    "go",
+    "stop",
+    "subagents",
+    "fan-out",
+];
 
 /// Component attribute keys recognized anywhere in the document, excluding the
 /// queue-only set above.
@@ -48,6 +56,14 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                     issues.push(format!(
                         "`{key}` is a queue-only attribute but appears on `agent:{}` (did you mean `<!-- agent:queue {key} -->`?)",
                         component.name
+                    ));
+                } else if crate::subagent_intent::is_queue_subagents_attr(key)
+                    && let Err(reason) =
+                        crate::subagent_intent::parse_queue_subagents_value(value)
+                {
+                    issues.push(format!(
+                        "`{key}={value}` on `agent:queue`: {reason} (use a bare `{key}` for the default cap of {})",
+                        crate::subagent_intent::DEFAULT_QUEUE_SUBAGENTS_CAP
                     ));
                 }
             } else if key == "queue" && matches!(component.name.as_str(), "backlog" | "pending") {
@@ -230,5 +246,31 @@ mod tests {
         let warning = component_attr_warning(content)
             .expect("`preset` on backlog should warn as a queue-only attribute");
         assert!(warning.message_body().contains("queue-only"));
+    }
+
+    #[test]
+    fn component_attr_warning_queue_subagents_attr() {
+        for marker in [
+            "<!-- agent:queue subagents -->",
+            "<!-- agent:queue subagents=2 go -->",
+            "<!-- agent:queue fan-out preset=\"#spec\" -->",
+        ] {
+            let content = format!("{marker}\n- do [#a]\n<!-- /agent:queue -->\n");
+            assert!(
+                component_attr_warning(&content).is_none(),
+                "valid subagents attr must not warn: {marker}"
+            );
+        }
+        let bad = "<!-- agent:queue subagents=0 -->\n- do [#a]\n<!-- /agent:queue -->\n";
+        let body = component_attr_warning(bad).expect("zero cap warns").message_body();
+        assert!(body.contains("subagents=0"), "{body}");
+        assert!(body.contains("positive concurrency cap"), "{body}");
+
+        let misplaced = "<!-- agent:backlog fan-out -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n";
+        let body = component_attr_warning(misplaced)
+            .expect("fan-out on backlog warns")
+            .message_body();
+        assert!(body.contains("queue-only attribute"), "{body}");
+        assert!(body.contains("fan-out"), "{body}");
     }
 }

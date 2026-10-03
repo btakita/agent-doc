@@ -960,15 +960,21 @@ fn binary_owned_line(norm: &str, owned: &BTreeSet<String>) -> bool {
 struct PresetContext<'a> {
     current: &'a str,
     inherited: Vec<PresetIntent>,
+    /// `<!-- agent:queue subagents -->` (alias `fan-out`): every queue line
+    /// without an opt-out tag carries subagent intent.
+    queue_subagents: bool,
 }
 
 impl<'a> PresetContext<'a> {
     fn new(current: &'a str, session_presets: &[String]) -> Self {
         let mut inherited = Vec::new();
         let mut queue_names = Vec::new();
+        let mut queue_subagents = false;
         if let Ok(components) = agent_doc_element::element::parse(current)
             && let Some(queue) = components.iter().find(|c| c.name == "queue")
         {
+            queue_subagents =
+                agent_doc_queue::subagent_intent::queue_subagents_mode(&queue.attrs).is_some();
             if let Some(value) = queue.attrs.get("preset") {
                 queue_names.push(value.clone());
             }
@@ -1000,7 +1006,11 @@ impl<'a> PresetContext<'a> {
                 }
             }
         }
-        Self { current, inherited }
+        Self {
+            current,
+            inherited,
+            queue_subagents,
+        }
     }
 
     /// Resolve presets for one queue line through the same resolver closeout
@@ -1018,7 +1028,10 @@ impl<'a> PresetContext<'a> {
         let literal_subagent_tag =
             agent_doc_queue::subagent_intent::carries_subagent_intent_tag(raw);
         intents.extend(self.inherited.iter().cloned());
+        let queue_attr_subagent = self.queue_subagents
+            && !agent_doc_queue::subagent_intent::opts_out_of_queue_subagents(raw);
         let subagent = literal_subagent_tag
+            || queue_attr_subagent
             || intents
                 .iter()
                 .any(|intent| preset_requests_subagents(&intent.name, &intent.body));
@@ -1964,6 +1977,24 @@ mod tests {
             "#gh-fix https://x/issues/1"
         );
         assert_eq!(shell_single_quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn queue_subagents_attr_makes_every_line_subagent_intent_except_opt_outs() {
+        for marker in ["subagents", "fan-out", "subagents=2 preset=\"#gh-fix\""] {
+            let content = format!(
+                "{FM}# Session\n\n<!-- agent:queue {marker} go -->\n- do [#a]\n- do [#b] [inline]\n- [operator-verify] check the pane\n- fix the bug\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+            );
+            assert_eq!(
+                subagent_dispatch_heads(&content, None),
+                vec!["do [#a]".to_string(), "fix the bug".to_string()],
+                "{marker}"
+            );
+        }
+        let invalid = format!(
+            "{FM}# Session\n\n<!-- agent:queue subagents=0 -->\n- do [#a]\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+        );
+        assert!(subagent_dispatch_heads(&invalid, None).is_empty());
     }
 
     #[test]

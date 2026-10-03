@@ -21,13 +21,109 @@ rule. This runbook carries the rest.
   queue lifecycle separate from persistent operator-owned context.
 - **Realtime steering (`#realtime-steering-verbatim`):** a document is realtime —
   the operator may add a prompt WHILE your turn is running. Every item the
-  operator adds must be addressed and worked on, never committed-and-ignored. If
-  `session-check` reports a committed cycle plus a fresh operator prompt, that is
-  realtime steering, **not** a failed closeout: your prior response is already in
-  HEAD. Address the surfaced prompt (the binary hands it to you **verbatim**) in
-  your current turn — continue with `agent-doc <FILE>`. Do NOT re-run respond/finalize on
-  the prior response, do NOT `--force-disk` (it clobbers the operator's live
-  edits), and do NOT re-answer a prompt already committed in HEAD.
+  operator adds must be addressed and worked on, never committed-and-ignored. When
+  the operator steers after your response committed, `session-check` (and the
+  `respond` / `finalize` / `write --commit` terminal report) prints
+  `[session-check] steering pending: …` and exits `0` (`#steerinterruptexit`):
+  pending steering is **not** a failed closeout or an interruption, and your prior
+  response is already in HEAD. Each item is listed **verbatim** with its
+  `dispatch`; handle it per the dispatch rules below — an `address_now` prompt is
+  the next cycle's input (`agent-doc <FILE>` admits it; Claude Code re-enters with
+  `/loop agent-doc <FILE>`, and the Stop hook holds the final answer once for it
+  unless a ready supervisor's steering wake will submit the trigger). Do NOT
+  re-run respond/finalize on the prior response, do NOT `--force-disk` (it
+  clobbers the operator's live edits), and do NOT re-answer a prompt already
+  committed in HEAD. Genuine integrity failures still exit nonzero as
+  `INTERRUPTED`.
+- **Mid-turn steering (`#midturn-steering`):** steering no longer waits for
+  closeout. After every tool call the PostToolUse hook (Claude Code, Codex)
+  hands the running turn new operator edits as `[agent-doc] operator steering
+  arrived mid-turn`, each item verbatim with a typed `dispatch`. Edits pass the
+  typing gate first (`#steeringtypinggate`, shared with preflight admission):
+  a line ending in an article or function word (`… publish the`), an
+  unbalanced backtick, quote, or bracket, or a dangling `,` `:` `+` is held;
+  finished-looking text (terminal punctuation, a closed `[#id]`, a URL)
+  settles after half the quiet window (`agent_doc_steering_debounce_ms`,
+  default 2500) and anything else after the full window. A hard max-hold
+  (`agent_doc_steering_max_hold_ms` in `.agent-doc/config.toml`, default
+  45000) releases a stuck item anyway, marked `possibly_partial: true`: act
+  only on its unambiguous part and re-read it before relying on its ending.
+  Each item is surfaced exactly once; a re-edit before delivery replaces the
+  held version.
+  - `address_now`: a new exchange prompt, or an edit/removal of the queue item
+    this turn is executing (shown as `previous` → `verbatim`). Address it in the
+    current turn: adjust the in-progress work, or stop/wrap up for a removal.
+  - `drain_after_current`: a new or edited queue item. It runs in operator queue
+    order AFTER the current item closes. Acknowledge it; do not interrupt,
+    interleave, or start it now.
+  - `subagent`: a queue item with subagent intent (`#subagents` on the line, a
+    preset expanding to "run … in subagents", or such a preset at queue or cycle
+    scope). Spawn a background subagent for it immediately, one per item; when it
+    touches a repo give it its own worktree outside the IDE-watched project and
+    never run two subagents against one repo checkout. Keep working the current
+    item yourself and record the dispatch in your response.
+  OpenCode, Grok Build, Cursor, and other hook-less harnesses poll
+  `agent-doc steering <FILE>` (`--json` for the typed form) between
+  long-running steps; that poll is their delivery channel, so it advances. To
+  inspect steering without consuming it (an operator, a monitor, another
+  agent), always use `agent-doc steering --peek <FILE>`.
+  After closeout (`#steeringafterclose`) the hook keeps reporting new edits,
+  framed as next-cycle queue work, while the same harness turn runs (for
+  example while you wait on subagents). When the turn ends and the pane is
+  idle, the route-owned supervisor wakes it (`#steeringwake`): settled,
+  unsurfaced, unclaimed steering becomes an idle-drain subject and the
+  supervisor submits `agent-doc <FILE>` through the same guarded dispatch as a
+  queue head (harness prompt-ready proof, never into a busy turn, drain-owner
+  lease, convergence gate), once per steering set (a durable receipt fences
+  it). The wake reads without consuming, so the woken turn still receives the
+  items through preflight, the hook, or the boundary report. Items a worker
+  claimed (`agent-doc queue claim`) never wake the session. Cursor has no
+  route-owned pane, so it is never woken; it receives steering at its next
+  agent-doc command.
+  Steering does not depend on the hook (`#closeout-steering`): whatever no hook
+  delivered is appended to the `respond` / `write --commit` terminal output and
+  the post-commit `session-check` as `[agent-doc] operator steering arrived
+  during this turn and was not yet surfaced` (once), and `agent-doc steering`
+  keeps reporting it after the cycle closes. A `subagent` item there is a
+  dispatch-now directive with its claim command; handle it before ending the
+  turn or scheduling the next re-entry. The next preflight lists new
+  subagent-intent queue items under `queue_subagent_dispatch` (never in
+  `selected_queue_prompts`): run each `claim_command`, then dispatch it.
+- **Queue subagents coordinator (`#queuesubagents`).** Under
+  `<!-- agent:queue subagents -->` (alias `fan-out`; `=N` caps concurrent
+  claims, default 3), the in-session agent is the coordinator, and
+  `queue_subagent_dispatch` is the list to dispatch THIS cycle. Preflight
+  recomputes it every cycle, so a missed claim is offered again. Heads held by
+  the cap or by a still-queued `after=` / ordered-list predecessor are already
+  excluded from the loop; do not drain them inline. Lines tagged `[inline]` or
+  `[operator-verify]` drain in queue order as usual. For each dispatch item:
+  1. Run its `claim_command` (`agent-doc queue claim <FILE> --item <...> --owner subagent:<label>`).
+  2. Dispatch one background subagent per item. When it touches a repo, give it
+     its own git worktree OUTSIDE the IDE-watched project (for example
+     `~/worktrees/<repo>-<label>`), and never run two subagents in
+     one checkout. Heads that `agent-doc plan` gives the same repo
+     `write_scope` still get separate worktrees, but they are integrated one at a
+     time. A head marked `parallelizable: false` runs alone.
+  3. While a subagent runs past a cycle, keep its claim alive with
+     `agent-doc queue claim <FILE> --item <...> --owner subagent:<label> --refresh`
+     (the heartbeat; the default TTL is 2h). Under the attribute, an expired claim
+     is offered for dispatch again and never drained inline.
+  4. A subagent commits and pushes its branch (fast-forward only, never force).
+     It never runs `make install`, a release build, a version bump, a tag, or a
+     release.
+  5. When subagents report back, integrate their work serially: rebase or
+     cherry-pick each onto main, run the preset's verification, run ONE
+     `make install` per integrated batch, and push. Then run
+     `agent-doc queue release <FILE> --item <...>`. The next cycle answers and
+     closes the item: `--done <id>` for an `#id` head, or quote a free-text head
+     as `> **Queue prompt:**`.
+  Harnesses without an in-session Agent tool (Codex, OpenCode, Grok Build,
+  Cursor) claim the same items and fall back to
+  `agent-doc orchestrate <FILE> --mode parallel --task "<item>" ...` over the
+  dispatch items. If neither path exists, say so in the response and drain the
+  items inline. When every remaining head is claimed or held, end the turn
+  quietly (the Stop hook logs `state=waiting_on_claims`): subagent completion
+  notifications resume the loop, and you do not need to poll or schedule a re-entry.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay
@@ -50,6 +146,31 @@ consume stops at that deferred id-head, so the **only** path that can strike the
 free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
+
+**Annotated `#id` heads are operator steering — answer the annotation (`#qheadannotation`).**
+The canonical backlog-mirror head is `do [#id]`. When the operator appends their own
+text to it — `do [#id]: can the *.h files be generated too?`, `[#id] and keep the old
+API` — that text is a directive for the **current** turn in its own right, not
+decoration, and it applies whether it was there at preflight or typed onto the head
+mid-turn. Preflight surfaces it as `queue_head_annotations: [{id, annotation_verbatim}]`
+with `queue_head_annotation_guidance`. Do the backlog item **and** answer the
+annotation in the same response, quoting it as:
+
+```markdown
+> **Operator note:** can the *.h files be generated too?
+
+<your answer>
+```
+
+Quoting the whole head in the `> **Queue prompt:**` echo is **not** an answer (that
+is exactly how the sdk.md question was consumed unanswered on 2026-10-02). An
+id-completing closeout (`--done <id>`) checks the live head: if its annotation has
+no `> **Operator note:**` quote followed by answer prose, the pre-write gate fails
+closed and nothing is captured — add the answer and retry. If an annotation only
+appears after the response was captured, the consume does not drop it: the head is
+consumed by id and the annotation is re-queued verbatim as its own free-text line
+right after it. A bare `[#id]: note` (no `do`) is inert prose, i.e. an ordinary
+free-text head answered through the `#qdeferstrike` quote above.
 
 A queue head that references one or more registered `#preset` names is a preset
 head, not ordinary free text, including composable forms such as `#gh-fix URL`.

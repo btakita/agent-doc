@@ -9906,10 +9906,133 @@ fn handle_editor_command_await_rpc(
         "diagnostic_payload",
     )?)
     .context("parse editor_command_await payload")?;
-    runtime.async_editor_commands.await_terminal(
+    let bootstrap = runtime.bootstrap_snapshot()?;
+    runtime.async_editor_commands.await_terminal_adopting(
         &payload.command_id,
         Duration::from_millis(payload.timeout_ms.max(ASYNC_EDITOR_COMMAND_MIN_AWAIT_MS)),
+        || forwarding_predecessor_pid(&bootstrap),
     )
+}
+
+/// `#handoffrouteforward`: the predecessor controller that may still forward an
+/// async command it admitted before handing off to this process — while it is
+/// alive. The process check re-reads `/proc` per call, so a predecessor that
+/// exited (or was reaped) stops holding unknown-command awaits at once.
+fn forwarding_predecessor_pid(bootstrap: &ControllerBootstrap) -> Option<u32> {
+    bootstrap
+        .previous_controller_pid
+        .filter(|pid| *pid != std::process::id())
+        .filter(|pid| is_same_project_controller_pid(&bootstrap.project_root, *pid))
+}
+
+/// `#handoffrouteforward`: bound on how long a forwarding predecessor waits for
+/// its successor's terminal result. A route's own deadline (`deadline_ms`) is
+/// the editor's wait; the successor answers within it plus this grace.
+const ASYNC_EDITOR_FORWARD_AWAIT_GRACE: Duration = Duration::from_secs(5);
+
+/// `#handoffrouteforward`: hand an async editor command this (predecessor)
+/// controller admitted, but never dispatched, to the successor its self-handoff
+/// promoted, and return the successor's terminal result as this worker's own.
+///
+/// The same `command_id` is re-submitted over the public socket, which now names
+/// the successor. The successor runs it exactly once (a duplicate admission of a
+/// known id never spawns a second worker), so whichever controller the editor's
+/// `editor_command_await` reaches publishes the same terminal result. Any
+/// failure is terminal and explicit: the editor is told the route was not run
+/// and to run it again — never left with a silent loss.
+fn forward_async_editor_command_to_successor(
+    admitted: &ControllerBootstrap,
+    request: &ControllerRequest,
+    submit: &lazily::CommandSubmit,
+) -> CommandSubmitDispatchResult {
+    let project_root = admitted.project_root.as_path();
+    let public_sock = socket_path(project_root);
+    let await_timeout = Duration::from_millis(submit.deadline_ms.max(1))
+        .min(CONTROLLER_HANDOFF_SETTLE_BUDGET);
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "editor_command_async_forwarded command={} command_id={} predecessor_pid={} predecessor_generation={} socket={}",
+            submit.name,
+            submit.command_id,
+            std::process::id(),
+            admitted.controller_generation,
+            public_sock.display(),
+        ),
+    );
+    let outcome = (|| -> Result<serde_json::Value> {
+        let mut forwarded = request.clone();
+        forwarded.command = "editor_command_submit_async".to_string();
+        let accepted: serde_json::Value = request_controller_on_stream_with_timeout(
+            project_root,
+            forwarded,
+            CONTROLLER_RPC_TIMEOUT,
+            connect_path(&public_sock)?,
+        )
+        .context("successor refused the forwarded command")?;
+        anyhow::ensure!(
+            accepted["exit_code"].as_i64() == Some(0),
+            "successor did not admit the forwarded command: {accepted}"
+        );
+        let mut await_request = empty_controller_request("editor_command_await");
+        await_request.file = request.file.clone();
+        await_request.diagnostic_payload = Some(
+            serde_json::json!({
+                "command_id": submit.command_id,
+                "timeout_ms": u64::try_from(await_timeout.as_millis()).unwrap_or(u64::MAX),
+            })
+            .to_string(),
+        );
+        request_controller_on_stream_with_timeout(
+            project_root,
+            await_request,
+            await_timeout + ASYNC_EDITOR_FORWARD_AWAIT_GRACE,
+            connect_path(&public_sock)?,
+        )
+        .context("successor did not report the forwarded command's result")
+    })();
+    match outcome {
+        Ok(terminal) => {
+            let applied = terminal["projection"]["commands"][0]["status"] == "applied";
+            CommandSubmitDispatchResult {
+                exit_code: terminal["exit_code"]
+                    .as_i64()
+                    .and_then(|code| i32::try_from(code).ok())
+                    .unwrap_or(1),
+                output: terminal["output"].as_str().unwrap_or_default().to_string(),
+                payload: terminal["payload"].clone(),
+                terminal_applied: applied,
+                terminal_reason: (!applied).then(|| {
+                    terminal["receipt"]["reason"]
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("{} failed on successor", submit.name))
+                }),
+            }
+        }
+        Err(err) => {
+            let reason = format!(
+                "{name} was not run: the controller that accepted it (pid {pid}, generation \
+                 {generation}) handed off to a successor and could not forward it ({err:#}). \
+                 Run the command again (handoff_forward_failed).",
+                name = submit.name,
+                pid = std::process::id(),
+                generation = admitted.controller_generation,
+            );
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "editor_command_async_forward_failed command={} command_id={} error={}",
+                    submit.name,
+                    submit.command_id,
+                    compact_command_output(&format!("{err:#}")),
+                ),
+            );
+            let mut result = CommandSubmitDispatchResult::rejected(&submit.name, reason);
+            result.terminal_reason = Some("handoff_forward_failed".to_string());
+            result
+        }
+    }
 }
 
 /// Submit an editor command and return after CP admission.
@@ -9972,6 +10095,12 @@ fn command_submit_dispatch_refused_not_authoritative(result: &CommandSubmitDispa
 /// `Promoted`): it waits for authority to change, then dispatches once against
 /// the new state. A refusal from a non-transient state (`Retiring`, `Failed`)
 /// is terminal, since this process will never become authoritative again.
+///
+/// `#handoffrouteforward`: once this process's self-handoff has promoted a
+/// successor, waiting can never succeed either — this process stays `Preparing`
+/// until it exits. A worker that has not dispatched (every dispatch so far was a
+/// side-effect-free `not authoritative` refusal) then hands the command to
+/// `forward` exactly once and returns its result.
 fn dispatch_async_editor_command_across_handoff(
     runtime: &ControllerRuntime,
     admitted: &ControllerBootstrap,
@@ -9979,6 +10108,7 @@ fn dispatch_async_editor_command_across_handoff(
     command: &str,
     settle: &AsyncEditorHandoffSettle,
     mut dispatch: impl FnMut(&ControllerBootstrap) -> CommandSubmitDispatchResult,
+    forward: impl FnOnce() -> CommandSubmitDispatchResult,
 ) -> CommandSubmitDispatchResult {
     fn handoff_in_flight(state: ControllerHandoffState) -> bool {
         matches!(
@@ -9988,6 +10118,7 @@ fn dispatch_async_editor_command_across_handoff(
     }
     let mut last_refusal: Option<CommandSubmitDispatchResult> = None;
     let mut park: Option<AsyncEditorHandoffPark<'_>> = None;
+    let mut forward = Some(forward);
     let outcome = retry_controller_handoff_refusal(
         log_path,
         command,
@@ -9995,6 +10126,11 @@ fn dispatch_async_editor_command_across_handoff(
         settle.interval,
         |delay| (settle.sleep)(delay),
         || {
+            if runtime.async_editor_commands.successor_promoted()
+                && let Some(forward) = forward.take()
+            {
+                return Ok(forward());
+            }
             let live = runtime
                 .bootstrap_snapshot()
                 .unwrap_or_else(|_| admitted.clone());
@@ -10040,6 +10176,37 @@ fn handle_editor_command_submit_async_rpc_with_settle(
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
     let command_kind = AsyncEditorCommandKind::try_from(submit.name.as_str())?;
     validate_async_editor_command_payload(command_kind, &payload_json)?;
+    // `#handoffrouteforward`: a command id this process already admitted is the
+    // same command arriving again — a predecessor's forward racing the editor's
+    // own replay after a handoff drop. Answer with the admission it already has
+    // and let the caller await the one worker; never run the route twice.
+    if runtime.async_editor_commands.is_admitted(&submit.command_id) {
+        let command_id = submit.command_id.clone();
+        let progress =
+            command_submit_progress_events(&command_id, submit.authority_generation, false);
+        let projection = command_submit_projection(&submit, &progress);
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "editor_command_async_duplicate_admission command={} command_id={}",
+                submit.name, command_id
+            ),
+        );
+        return Ok(serde_json::json!({
+            "command_id": command_id,
+            "exit_code": 0,
+            "output": format!("{} accepted", submit.name),
+            "payload": {
+                "accepted": true,
+                "already_admitted": true,
+                "command": submit.name,
+                "command_id": command_id,
+            },
+            "projection": serde_json::to_value(projection.to_image())?,
+            "events": serde_json::to_value(progress)?,
+            "receipt": serde_json::Value::Null,
+        }));
+    }
     if command_kind == AsyncEditorCommandKind::EditorRoute {
         refuse_editor_route_to_superseded_editor(bootstrap, &payload_json)?;
     }
@@ -10082,7 +10249,11 @@ fn handle_editor_command_submit_async_rpc_with_settle(
     let worker_command_id = command_id.clone();
     let worker_name = submit.name.clone();
     let worker_focus_fence = focus_fence.clone();
+    let in_flight = ControllerAsyncEditorCommandGraph::begin_worker(runtime);
     if let Err(err) = spawn_editor_command_async_worker(move || {
+        // `#handoffrouteforward`: held until the terminal projection is
+        // published, so a predecessor that handed off does not exit under it.
+        let _in_flight = in_flight;
         // `#asynchandoffsettle` (GH #122): never arbitrate authority from the
         // admission-time `worker_bootstrap` clone; re-read it per attempt and
         // wait a mid-handoff refusal out.
@@ -10100,6 +10271,17 @@ fn handle_editor_command_submit_async_rpc_with_settle(
                     command_kind,
                     payload_json.clone(),
                     worker_focus_fence.as_ref(),
+                )
+            },
+            || {
+                // The successor admits it under its own focus fence.
+                worker_runtime
+                    .async_editor_commands
+                    .release_focus_fence(worker_focus_fence.as_ref());
+                forward_async_editor_command_to_successor(
+                    &worker_bootstrap,
+                    &worker_request,
+                    &worker_submit,
                 )
             },
         );
@@ -13270,6 +13452,7 @@ pub(crate) fn serve_with_options(
                     let handoff_promoted = Arc::clone(&recycle_handoff_promoted);
                     let stop_after_handoff = Arc::clone(&should_stop);
                     let draining_clients = Arc::clone(&active_clients);
+                    let draining_runtime = Arc::clone(&runtime);
                     std::thread::spawn(move || {
                         let result = (|| -> Result<()> {
                             // Serialize self-initiated handoff with every client
@@ -13294,9 +13477,12 @@ pub(crate) fn serve_with_options(
                                 // predecessor; let every already-accepted RPC
                                 // drain before retiring it.
                                 handoff_promoted.store(true, Ordering::SeqCst);
-                                while draining_clients.load(Ordering::SeqCst) > 0 {
-                                    std::thread::sleep(CONNECT_POLL);
-                                }
+                                drain_predecessor_after_promotion(
+                                    &draining_runtime,
+                                    &draining_clients,
+                                    ASYNC_EDITOR_PREDECESSOR_DRAIN_BUDGET,
+                                    std::thread::sleep,
+                                );
                                 stop_after_handoff.store(true, Ordering::SeqCst);
                             }
                             Err(err) => {
@@ -13339,6 +13525,54 @@ pub(crate) fn serve_with_options(
         let _ = std::fs::remove_file(&sock);
     }
     Ok(())
+}
+
+/// `#handoffrouteforward`: how long a predecessor that handed off keeps running
+/// for async editor workers it admitted. A parked worker forwards within one
+/// settle interval of promotion and then waits at most the settle budget (plus
+/// grace) for its successor's result; a worker already dispatching finishes its
+/// own route. Twice the settle budget bounds both without ever hanging exit.
+const ASYNC_EDITOR_PREDECESSOR_DRAIN_BUDGET: Duration =
+    CONTROLLER_HANDOFF_SETTLE_BUDGET.saturating_mul(2);
+
+/// `#handoffrouteforward`: retire a predecessor whose self-handoff promoted a
+/// successor. Already-accepted client connections drain unbounded, as before;
+/// async editor workers (answered `accepted` before they dispatch, so they hold
+/// no client connection) are told the successor exists — so a parked worker
+/// forwards its command there — and are waited out, bounded. Before this, the
+/// drain counted only client connections and exited under a parked
+/// `editor_route` worker: the route died with the process and the successor
+/// never learned of it. Returns the workers still in flight at exit (logged).
+fn drain_predecessor_after_promotion(
+    runtime: &ControllerRuntime,
+    active_clients: &AtomicUsize,
+    worker_budget: Duration,
+    mut sleep: impl FnMut(Duration),
+) -> usize {
+    runtime.async_editor_commands.mark_successor_promoted();
+    let started = Instant::now();
+    loop {
+        let clients = active_clients.load(Ordering::SeqCst);
+        let workers = runtime.async_editor_commands.in_flight_worker_count();
+        if clients == 0 && (workers == 0 || started.elapsed() >= worker_budget) {
+            if workers > 0
+                && let Ok(bootstrap) = runtime.bootstrap_snapshot()
+            {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "controller_handoff_drain_abandoned_async_workers pid={} generation={} workers={} budget_ms={}",
+                        bootstrap.pid,
+                        bootstrap.controller_generation,
+                        workers,
+                        worker_budget.as_millis(),
+                    ),
+                );
+            }
+            return workers;
+        }
+        sleep(CONNECT_POLL);
+    }
 }
 
 const ORPHAN_DRAIN_BACKOFF_SCOPE: &str = "queue_orphan_drain_backoff";
@@ -30431,6 +30665,7 @@ mod tests {
                     "pane layout observation refused: controller not authoritative (handoff_state=Preparing)".to_string(),
                 )
             },
+            || panic!("no successor was promoted"),
         );
         assert_eq!(result.exit_code, 1);
         assert!(result.output.contains("controller not authoritative"));
@@ -30477,6 +30712,7 @@ mod tests {
                     )
                 }
             },
+            || panic!("no successor was promoted"),
         );
         assert_eq!(result.exit_code, 0);
         assert_eq!(dispatched, 2);
@@ -30518,10 +30754,249 @@ mod tests {
                     "pane layout observation refused: controller not authoritative (handoff_state=Retiring)".to_string(),
                 )
             },
+            || panic!("no successor was promoted"),
         );
         assert_eq!(result.exit_code, 1);
         assert_eq!(dispatched, 1);
         assert_eq!(slept_ref.load(Ordering::SeqCst), 0, "never waited");
+    }
+
+    /// `#handoffrouteforward`: a real successor controller serving the public
+    /// socket of `dir` through the production request path (`serve_client`).
+    struct TestSuccessorController {
+        runtime: Arc<ControllerRuntime>,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Drop for TestSuccessorController {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    fn spawn_test_successor_controller(dir: &tempfile::TempDir) -> TestSuccessorController {
+        let mut bootstrap = test_bootstrap(dir);
+        bootstrap.pid = 457;
+        bootstrap.controller_generation = 2;
+        bootstrap.previous_controller_pid = Some(456);
+        let runtime = test_controller_runtime(&bootstrap);
+        let sock = socket_path(dir.path());
+        let _ = std::fs::remove_file(&sock);
+        let listener = ListenerOptions::new()
+            .name(sock.clone().to_fs_name::<GenericFilePath>().unwrap())
+            .create_sync()
+            .unwrap();
+        listener
+            .set_nonblocking(ListenerNonblockingMode::Accept)
+            .unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let runtime = Arc::clone(&runtime);
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        Ok(stream) => {
+                            let runtime = Arc::clone(&runtime);
+                            let stop = Arc::clone(&stop);
+                            let sock = sock.clone();
+                            std::thread::spawn(move || {
+                                let _ = serve_client(stream, &runtime, &stop, &sock);
+                            });
+                        }
+                        Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(2));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+        };
+        TestSuccessorController {
+            runtime,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    /// The predecessor side of a self-handoff: `Preparing`, and its settle sleep
+    /// is where the successor gets promoted (what the self-handoff thread's
+    /// `drain_predecessor_after_promotion` publishes).
+    fn promoting_predecessor_settle(runtime: &Arc<ControllerRuntime>) -> AsyncEditorHandoffSettle {
+        let runtime = Arc::clone(runtime);
+        AsyncEditorHandoffSettle {
+            budget: Duration::from_millis(400),
+            interval: Duration::from_millis(1),
+            sleep: Arc::new(move |delay| {
+                runtime.async_editor_commands.mark_successor_promoted();
+                std::thread::sleep(delay);
+            }),
+        }
+    }
+
+    /// `#handoffrouteforward` (GH #122 remainder): a route admitted by a
+    /// controller whose handoff then SUCCEEDS is forwarded to the successor and
+    /// completes there; the predecessor publishes the successor's result under
+    /// the same command id, so the editor's await resolves on either process.
+    /// Before the fix the worker waited on a `Preparing` state this process
+    /// never leaves, and died with it.
+    #[test]
+    fn a_route_admitted_before_a_successful_handoff_completes_on_the_successor() {
+        let dir = async_handoff_test_project();
+        let successor = spawn_test_successor_controller(&dir);
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        let runtime = test_controller_runtime(&bootstrap);
+
+        let response = handle_editor_command_submit_async_rpc_with_settle(
+            &bootstrap,
+            &runtime,
+            async_sync_tmux_layout_request_for_test(&dir, "cmd-forward-on-handoff"),
+            promoting_predecessor_settle(&runtime),
+        )
+        .unwrap();
+        assert_eq!(response["exit_code"], 0);
+
+        let predecessor = async_command_status_for_test(runtime.as_ref(), "cmd-forward-on-handoff");
+        assert_eq!(
+            predecessor["exit_code"], 0,
+            "the route must complete, not die with the predecessor: {predecessor}"
+        );
+        assert_eq!(predecessor["projection"]["commands"][0]["status"], "applied");
+        let on_successor =
+            async_command_status_for_test(successor.runtime.as_ref(), "cmd-forward-on-handoff");
+        assert_eq!(on_successor["exit_code"], 0, "ran on the successor: {on_successor}");
+        assert_eq!(on_successor["projection"]["commands"][0]["status"], "applied");
+        assert_eq!(runtime.async_editor_commands.in_flight_worker_count(), 0);
+        assert_eq!(runtime.async_editor_commands.handoff_parked_count(), 0);
+    }
+
+    /// `#handoffrouteforward`: when the successor cannot take the route, the
+    /// editor gets an explicit, actionable failure — never a silent loss and
+    /// never the transient `not authoritative` refusal it would retry forever.
+    #[test]
+    fn a_route_that_cannot_be_forwarded_fails_explicitly() {
+        let dir = async_handoff_test_project();
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        let runtime = test_controller_runtime(&bootstrap);
+
+        handle_editor_command_submit_async_rpc_with_settle(
+            &bootstrap,
+            &runtime,
+            async_sync_tmux_layout_request_for_test(&dir, "cmd-forward-fails"),
+            promoting_predecessor_settle(&runtime),
+        )
+        .unwrap();
+
+        let status = async_command_status_for_test(runtime.as_ref(), "cmd-forward-fails");
+        assert_eq!(status["exit_code"], 1, "unexpected status: {status}");
+        let output = status["output"].as_str().unwrap_or_default();
+        assert!(
+            output.contains("handoff_forward_failed") && output.contains("Run the command again"),
+            "the failure names the handoff and what to do: {status}"
+        );
+        assert_eq!(status["projection"]["commands"][0]["status"], "rejected");
+        assert_eq!(runtime.async_editor_commands.in_flight_worker_count(), 0);
+    }
+
+    /// `#handoffrouteforward`: the predecessor's forward and the editor's own
+    /// replay of the same command id (after its await connection was cut) must
+    /// converge on ONE worker.
+    #[test]
+    fn a_second_admission_of_a_known_command_id_does_not_run_it_again() {
+        let dir = async_handoff_test_project();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        let first = handle_editor_command_submit_async_rpc(
+            &bootstrap,
+            &runtime,
+            async_sync_tmux_layout_request_for_test(&dir, "cmd-admitted-twice"),
+        )
+        .unwrap();
+        assert!(first["payload"]["already_admitted"].is_null());
+        let second = handle_editor_command_submit_async_rpc(
+            &bootstrap,
+            &runtime,
+            async_sync_tmux_layout_request_for_test(&dir, "cmd-admitted-twice"),
+        )
+        .unwrap();
+        assert_eq!(second["exit_code"], 0);
+        assert_eq!(second["payload"]["already_admitted"], true, "{second}");
+        assert_eq!(runtime.async_editor_commands.in_flight_worker_count(), 0);
+    }
+
+    /// `#handoffrouteforward`: an editor await that reaches the successor before
+    /// the predecessor's forward lands is held while that predecessor lives, and
+    /// fails explicitly (naming the re-run) once it does not.
+    #[test]
+    fn an_await_on_the_successor_adopts_a_command_its_predecessor_forwards() {
+        let dir = async_handoff_test_project();
+        let runtime = test_controller_runtime(&test_bootstrap(&dir));
+        let publisher = {
+            let runtime = Arc::clone(&runtime);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(50));
+                runtime.async_editor_commands.publish(
+                    "cmd-forwarded-later",
+                    AsyncEditorCommandPhase::Terminal,
+                    serde_json::json!({ "command_id": "cmd-forwarded-later", "exit_code": 0 }),
+                );
+            })
+        };
+        let adopted = runtime
+            .async_editor_commands
+            .await_terminal_adopting("cmd-forwarded-later", Duration::from_secs(5), || {
+                Some(456)
+            })
+            .unwrap();
+        publisher.join().unwrap();
+        assert_eq!(adopted["exit_code"], 0);
+
+        let started = Instant::now();
+        let err = runtime
+            .async_editor_commands
+            .await_terminal_adopting("cmd-never-forwarded", Duration::from_secs(5), || None)
+            .unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(1), "no predecessor: fail at once");
+        let message = format!("{err:#}");
+        assert!(message.contains("unknown or expired async editor command"));
+        assert!(message.contains("re-run the command"), "{message}");
+    }
+
+    /// `#handoffrouteforward`: the predecessor's exit waits for its admitted
+    /// async workers (which hold no client connection) and tells them the
+    /// successor exists — bounded, so a stuck worker cannot pin the process.
+    #[test]
+    fn the_predecessor_drain_waits_for_admitted_async_workers() {
+        let dir = async_handoff_test_project();
+        let runtime = test_controller_runtime(&test_bootstrap(&dir));
+        let clients = AtomicUsize::new(0);
+        let mut worker = Some(ControllerAsyncEditorCommandGraph::begin_worker(&runtime));
+        let mut sleeps = 0usize;
+        let abandoned =
+            drain_predecessor_after_promotion(&runtime, &clients, Duration::from_secs(30), |_| {
+                sleeps += 1;
+                if sleeps == 3 {
+                    worker.take();
+                }
+            });
+        assert_eq!(abandoned, 0);
+        assert_eq!(sleeps, 3, "exit waited for the in-flight worker");
+        assert!(runtime.async_editor_commands.successor_promoted());
+
+        let _stuck = ControllerAsyncEditorCommandGraph::begin_worker(&runtime);
+        let abandoned = drain_predecessor_after_promotion(
+            &runtime,
+            &clients,
+            Duration::from_millis(20),
+            std::thread::sleep,
+        );
+        assert_eq!(abandoned, 1, "bounded: a stuck worker is reported, not waited forever");
     }
 
     /// GH #122 invariant 3: the settle budget covers a handoff whose successor

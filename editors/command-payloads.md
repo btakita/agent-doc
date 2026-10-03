@@ -43,6 +43,14 @@ target path is the lazily command envelope.
 | Session status/clear/restart/doctor | `session_command` | `agent-doc.session_command.v1` | editor-spawned CLI |
 | CRDT replica register/update/pull/projection | `crdt_replica` | `agent-doc.crdt_replica.v1` | controller `crdt_replica` custom envelope |
 
+Async submits survive a controller handoff (`#handoffrouteforward`): a command
+admitted by a predecessor that then hands off is forwarded to the successor under
+the same `command_id`, and its terminal result is published on both processes.
+Re-submitting a `command_id` the controller already admitted returns its
+admission with `payload.already_admitted: true` and never runs it again. A
+command that cannot be forwarded ends in a terminal `rejected` receipt with
+reason `handoff_forward_failed` and output telling the operator to run it again.
+
 For `sync_tmux_layout`, a terminal command receipt of `applied` acknowledges
 that the controller durably accepted the desired pane-layout projection. The
 embedded `ControllerTmuxLayoutSyncReceipt.applied` field separately reports

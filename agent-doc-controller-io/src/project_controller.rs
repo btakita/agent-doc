@@ -2449,6 +2449,9 @@ pub(crate) struct ControllerRuntime {
 
 const ASYNC_EDITOR_COMMAND_RESULT_TTL: Duration = Duration::from_secs(5 * 60);
 const ASYNC_EDITOR_COMMAND_RESULT_CAPACITY: usize = 256;
+/// `#handoffrouteforward`: how often an await for an unknown command re-checks
+/// that the predecessor which may still forward it is alive.
+const ASYNC_EDITOR_FORWARD_ADOPT_POLL: Duration = Duration::from_millis(200);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AsyncEditorCommandPhase {
@@ -2494,6 +2497,32 @@ struct ControllerAsyncEditorCommandGraph {
     /// does not re-`prepare_handoff`, so an aborted handoff's rollback to
     /// `Stable` stays observable long enough for the parked worker to dispatch.
     handoff_parked: AtomicUsize,
+    /// `#handoffrouteforward`: async workers admitted by this process that have
+    /// not yet published their terminal projection. A predecessor that handed
+    /// off keeps running until these settle (bounded), so a worker is never
+    /// killed with the process while it still owes the editor a result.
+    in_flight_workers: AtomicUsize,
+    /// `#handoffrouteforward`: set once this process's self-handoff promoted a
+    /// successor onto the public socket. This process can never become
+    /// authoritative again, so a worker that has not dispatched forwards its
+    /// command to the successor instead of waiting for authority to return.
+    successor_promoted: AtomicBool,
+}
+
+/// `#handoffrouteforward`: RAII registration of one admitted async editor
+/// worker; released when the worker has published its terminal projection (or
+/// unwinds).
+pub(crate) struct AsyncEditorWorkerInFlight {
+    runtime: Arc<ControllerRuntime>,
+}
+
+impl Drop for AsyncEditorWorkerInFlight {
+    fn drop(&mut self) {
+        self.runtime
+            .async_editor_commands
+            .in_flight_workers
+            .fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// RAII registration of one async editor worker parked on a handoff refusal.
@@ -2519,6 +2548,33 @@ impl ControllerAsyncEditorCommandGraph {
         self.handoff_parked.load(Ordering::SeqCst)
     }
 
+    pub(crate) fn begin_worker(runtime: &Arc<ControllerRuntime>) -> AsyncEditorWorkerInFlight {
+        runtime
+            .async_editor_commands
+            .in_flight_workers
+            .fetch_add(1, Ordering::SeqCst);
+        AsyncEditorWorkerInFlight {
+            runtime: Arc::clone(runtime),
+        }
+    }
+
+    pub(crate) fn in_flight_worker_count(&self) -> usize {
+        self.in_flight_workers.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn mark_successor_promoted(&self) {
+        self.successor_promoted.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) fn successor_promoted(&self) -> bool {
+        self.successor_promoted.load(Ordering::SeqCst)
+    }
+
+    /// Is `command_id` already admitted (accepted or terminal) here?
+    pub(crate) fn is_admitted(&self, command_id: &str) -> bool {
+        self.current(command_id).is_some()
+    }
+
     fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
         Self {
             ctx: scope.ctx().clone(),
@@ -2528,6 +2584,8 @@ impl ControllerAsyncEditorCommandGraph {
             transition: Condvar::new(),
             focus_effect_gate: Mutex::new(()),
             handoff_parked: AtomicUsize::new(0),
+            in_flight_workers: AtomicUsize::new(0),
+            successor_promoted: AtomicBool::new(false),
         }
     }
 
@@ -2591,7 +2649,26 @@ impl ControllerAsyncEditorCommandGraph {
             .then_some(projection.response)
     }
 
+    #[cfg(test)]
     fn await_terminal(&self, command_id: &str, timeout: Duration) -> Result<serde_json::Value> {
+        self.await_terminal_adopting(command_id, timeout, || None)
+    }
+
+    /// Await `command_id`'s terminal projection.
+    ///
+    /// `#handoffrouteforward`: a command this process does not know may still be
+    /// on its way. A predecessor that admitted it before handing off forwards it
+    /// here, and an editor whose await reached this (new) public socket first
+    /// would otherwise fail a route that is about to run.
+    /// `forwarding_predecessor` names that predecessor while it is still alive
+    /// (re-checked every [`ASYNC_EDITOR_FORWARD_ADOPT_POLL`]); once it is gone
+    /// the unknown command fails explicitly, naming it.
+    pub(crate) fn await_terminal_adopting(
+        &self,
+        command_id: &str,
+        timeout: Duration,
+        forwarding_predecessor: impl Fn() -> Option<u32>,
+    ) -> Result<serde_json::Value> {
         let deadline = Instant::now() + timeout;
         let command_id = command_id.to_string();
         let mut transition = self.transition_gate.lock();
@@ -2599,7 +2676,17 @@ impl ControllerAsyncEditorCommandGraph {
             self.prune_expired_locked(Instant::now());
             let projection = self.projections.observe(&self.ctx, &command_id);
             let Some(projection) = projection else {
-                anyhow::bail!("unknown or expired async editor command: {command_id}");
+                let now = Instant::now();
+                if now < deadline && forwarding_predecessor().is_some() {
+                    let wait = (deadline - now).min(ASYNC_EDITOR_FORWARD_ADOPT_POLL);
+                    self.transition.wait_for(&mut transition, wait);
+                    continue;
+                }
+                anyhow::bail!(
+                    "unknown or expired async editor command: {command_id} (no controller \
+                     generation holds it: if it was admitted before a controller handoff, \
+                     the predecessor exited without forwarding it — re-run the command)"
+                );
             };
             if projection.phase == AsyncEditorCommandPhase::Terminal {
                 return Ok(projection.response);

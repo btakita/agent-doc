@@ -737,7 +737,27 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   route-owned supervisor owns the harness child and pane, while
   dispatch/cycle/CRDT recovery state is durable in SQLite; therefore the
   controller replacement does not interrupt the turn. A non-stable handoff is
-  the strict launch gate. `agent-doc admin recycle --force` is a real flag (no
+  the strict launch gate.
+  `#handoffrouteforward`: async editor commands (`editor_command_submit_async`:
+  Run Agent Doc `editor_route`, `sync_tmux_layout`, `focus_document_pane`) are
+  answered `accepted` before their worker dispatches, so they hold no client
+  connection and the client-connection drain alone does not cover them. After a
+  self-handoff promotes its successor, the predecessor marks the successor
+  promoted and its drain also waits for every admitted async worker, bounded by
+  twice the handoff settle budget (abandoned workers are logged as
+  `controller_handoff_drain_abandoned_async_workers`). A worker that has not
+  dispatched (every attempt so far was a side-effect-free `controller not
+  authoritative` refusal) forwards the same `command_id` to the successor over
+  the public socket (`editor_command_async_forwarded`), awaits the successor's
+  terminal result, and publishes it as its own, so the editor's
+  `editor_command_await` resolves on either process. The successor admits a
+  known `command_id` only once (`already_admitted`), so a forward and the
+  editor's own replay converge on one worker, and an await for an unknown id is
+  held while the predecessor named by `previous_controller_pid` is still a live
+  same-project controller. If forwarding fails the route is rejected
+  explicitly with `handoff_forward_failed` and a re-run instruction; it is never
+  dropped silently.
+  `agent-doc admin recycle --force` is a real flag (no
   `-- ` separator needed), composes with `--all-projects`, and skips only the
   normal controller debounce.
   When NO live controller answers the single-project form and a document path was

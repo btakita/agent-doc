@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.445
+
+- **Gitignored session documents close out cleanly (GH #119).** `write --commit` / `respond` on a
+  document `.gitignore` matches used to exit 1 with `terminal proof: missing HEAD` while
+  `session-check` called the same cycle `committed (terminal_proof_phase_repair)`. The terminal proof
+  no longer promotes an `abandoned` cycle to `committed`: a cycle closed because its commit was
+  refused for an ignored path ends the turn with exit 0 and an explicit "response written to disk,
+  no git commit" notice, and `session-check` reports it truthfully as `abandoned
+  (commit_refused_ignored_path)`. Any other abandoned cycle fails the closeout instead of being
+  relabelled.
+- **No queue projection warning on queue-less documents (GH #96, second site).** A commit of a
+  document with no `agent:queue` component no longer prints `answered free-text authority
+  projection failed: … component \`queue\` was not found`.
+- **Steering completion-gate decision log (#steergatelog).** Every reactive steering delivery
+  decision records a feature row and a premature / on-time / late outcome label in `state.db`.
+- **Online-learned typing-completion gate (#steergateperceptron).** An online logistic regression
+  over the decision-log features answers first in the steering settle decision, seeded to match the
+  deterministic gate exactly and trained from outcome labels per operator/project. The deterministic
+  floors still apply (an unbalanced delimiter holds; the max-hold always delivers). Toggle with
+  `agent_doc_steering_learned_gate`; inspect with `agent-doc steering --explain`.
+
 ## 0.35.444
 
 - **`queue: stop` removed (#queuestopremove).** A queue is either running (no control, `go`, or

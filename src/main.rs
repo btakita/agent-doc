@@ -3933,6 +3933,38 @@ enum PendingAction {
 
 #[derive(Subcommand)]
 enum QueueAction {
+    /// Claim a live queue head for a worker outside the in-session loop
+    /// (`#queueclaim`), e.g. a dispatched subagent. A claimed head is in flight:
+    /// the in-session loop, preflight selection, and the Stop-hook continuation
+    /// skip it. The claim ends when the item leaves the queue, on `queue
+    /// release`, or when its TTL expires (re-claim to refresh).
+    Claim {
+        /// Path to the session document
+        file: PathBuf,
+        /// The queue item: `#id` / `do [#id]`, or the queue line's text
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: String,
+        /// Who holds the claim, e.g. `subagent:<label>`
+        #[arg(long)]
+        owner: String,
+        /// Claim lifetime in seconds (default two hours)
+        #[arg(long, default_value_t = agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS)]
+        ttl_secs: u64,
+    },
+    /// Release a queue claim (`#queueclaim`) so the in-session loop can take the
+    /// item again, e.g. when its subagent reports back.
+    Release {
+        /// Path to the session document
+        file: PathBuf,
+        /// The claimed queue item: `#id` / `do [#id]`, or the queue line's text
+        #[arg(long, value_name = "ID_OR_TEXT")]
+        item: String,
+    },
+    /// List the document's active queue claims as JSON (`#queueclaim`).
+    Claims {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Reconstruct historical queue heads from snapshots, sidecars, and git history
     #[command(name = "recover-lost")]
     RecoverLost {
@@ -6616,6 +6648,37 @@ fn try_main() -> anyhow::Result<()> {
             }
         },
         Commands::Queue { action } => match action {
+            QueueAction::Claim {
+                file,
+                item,
+                owner,
+                ttl_secs,
+            } => {
+                let (outcome, claim) =
+                    agent_doc_queue_io::queue_claim::claim(&file, &item, &owner, ttl_secs)?;
+                eprintln!(
+                    "[queue] claimed {:?} for {} until {} ({:?})",
+                    claim.item_text, claim.owner, claim.expires_at_secs, outcome
+                );
+                Ok(())
+            }
+            QueueAction::Release { file, item } => {
+                match agent_doc_queue_io::queue_claim::release(&file, &item)? {
+                    Some(claim) => {
+                        eprintln!("[queue] released {:?} (owner {})", claim.item_text, claim.owner)
+                    }
+                    None => eprintln!("[queue] no claim on {item:?}; nothing to release"),
+                }
+                Ok(())
+            }
+            QueueAction::Claims { file } => {
+                let content = std::fs::read_to_string(&file)
+                    .with_context(|| format!("read {}", file.display()))?;
+                let claims =
+                    agent_doc_queue_io::queue_claim::active_claims_for_content(&file, &content)?;
+                println!("{}", serde_json::to_string_pretty(&claims)?);
+                Ok(())
+            }
             QueueAction::RecoverLost {
                 file,
                 json,

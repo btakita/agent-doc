@@ -12,6 +12,7 @@ pub mod document_queue;
 pub mod free_text_admission;
 pub mod idle_drain;
 pub mod queue;
+pub mod queue_claim;
 pub mod queue_closeout_guard;
 pub mod queue_command;
 pub mod queue_consume;

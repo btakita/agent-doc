@@ -13,6 +13,7 @@ use agent_doc_frontmatter::frontmatter;
 use anyhow::{Context, Result};
 
 use crate::document_queue::{self, QueueEntry, QueuePrompt};
+use crate::queue_claim::ClaimedQueueItems;
 
 /// Shared non-stall guidance surfaced wherever `queue_continuation_required ==
 /// true`. Centralizing the wording keeps preflight JSON
@@ -183,6 +184,18 @@ pub fn required_continuation(
     content: &str,
     snapshot_content: Option<&str>,
 ) -> Result<Option<QueueContinuation>> {
+    required_continuation_excluding_claimed(content, snapshot_content, &ClaimedQueueItems::none())
+}
+
+/// [`required_continuation`], skipping heads `claimed` by a worker outside the
+/// in-session loop (`#queueclaim`). A claimed head is in flight elsewhere, so
+/// it is not the in-session loop's next head; when every remaining head is
+/// claimed (or deferred) no continuation is required.
+pub fn required_continuation_excluding_claimed(
+    content: &str,
+    snapshot_content: Option<&str>,
+    claimed: &ClaimedQueueItems,
+) -> Result<Option<QueueContinuation>> {
     let (fm, _) = frontmatter::parse(content)?;
     let components = element::parse(content)?;
     let Some(queue_component) = components
@@ -237,7 +250,7 @@ pub fn required_continuation(
         }
     }
 
-    let Some(head) = continuation_head_skipping_answered_residue(content) else {
+    let Some(head) = continuation_head_skipping_answered_residue(content, claimed) else {
         return Ok(None);
     };
     let head_prompt = head.text;
@@ -268,7 +281,10 @@ pub fn required_continuation(
 /// 2026-09-29 14:28: "Fix …/issues/59" came back as the next head). This uses
 /// the same residue predicate as session-check and the preflight strike, so a
 /// recurring imperative head is never skipped.
-fn continuation_head_skipping_answered_residue(content: &str) -> Option<QueuePrompt> {
+fn continuation_head_skipping_answered_residue(
+    content: &str,
+    claimed: &ClaimedQueueItems,
+) -> Option<QueuePrompt> {
     let (queue_facts, activation) = active_queue_for_supervisor_start(content, false)?;
     let exchange_text = element::parse(content)
         .ok()
@@ -284,11 +300,12 @@ fn continuation_head_skipping_answered_residue(content: &str) -> Option<QueuePro
         .into_iter()
         .filter(|entry| match entry {
             QueueEntry::Prompt(prompt) => {
-                !crate::queue_heads::free_text_queue_head_is_completed_residue(
-                    content,
-                    &exchange_text,
-                    prompt.text.trim(),
-                )
+                !claimed.claims(&prompt.text)
+                    && !crate::queue_heads::free_text_queue_head_is_completed_residue(
+                        content,
+                        &exchange_text,
+                        prompt.text.trim(),
+                    )
             }
             _ => true,
         })
@@ -719,6 +736,12 @@ pub fn dispatchable_head_prompt_text(content: &str, scope: DrainScope) -> Option
 
 /// Count agent-drainable heads in the active queue for the in-session loop.
 pub fn drainable_head_count(content: &str) -> usize {
+    drainable_head_count_excluding_claimed(content, &ClaimedQueueItems::none())
+}
+
+/// [`drainable_head_count`], not counting heads `claimed` by a worker outside
+/// the in-session loop (`#queueclaim`).
+pub fn drainable_head_count_excluding_claimed(content: &str, claimed: &ClaimedQueueItems) -> usize {
     let Some((queue_facts, activation)) = active_queue(content) else {
         return 0;
     };
@@ -728,6 +751,7 @@ pub fn drainable_head_count(content: &str) -> usize {
     let preset_only = preset_only_identity_ids(content);
     document_queue::prompts(&activation.entries_after)
         .into_iter()
+        .filter(|prompt| !claimed.claims(&prompt.text))
         .filter(|prompt| {
             head_is_drainable(
                 &prompt.text,
@@ -740,6 +764,37 @@ pub fn drainable_head_count(content: &str) -> usize {
             )
         })
         .count()
+}
+
+/// Live queue heads that are claimed by a worker outside the in-session loop
+/// (`#queueclaim`). Non-zero with no drainable head is the "waiting on
+/// in-flight work" state: the loop must end its turn quietly, not re-enter.
+pub fn claimed_head_count(content: &str, claimed: &ClaimedQueueItems) -> usize {
+    if claimed.is_empty() {
+        return 0;
+    }
+    let Some((_, entries)) = queue_component_entries(content) else {
+        return 0;
+    };
+    document_queue::prompts(&entries)
+        .into_iter()
+        .filter(|prompt| claimed.claims(&prompt.text))
+        .count()
+}
+
+/// Identities of every live (unstruck, executable) queue head. A claim whose
+/// identity is absent here belongs to an item that has closed (`#queueclaim`).
+/// `None` when the document has no parseable queue.
+pub fn live_queue_head_identities(
+    content: &str,
+) -> Option<HashSet<agent_doc_element_queue::QueueItemIdentity>> {
+    let (_, entries) = queue_component_entries(content)?;
+    Some(
+        document_queue::prompts(&entries)
+            .into_iter()
+            .map(|prompt| crate::queue_claim::claim_identity(&prompt.text))
+            .collect(),
+    )
 }
 
 /// Count active queue entries that are predicate-proven non-drainable noise.
@@ -2561,6 +2616,58 @@ mod tests {
             Some("bare-id")
         );
         assert_eq!(extract_head_id("no id here"), None);
+    }
+
+    /// `#queueclaim`: a head dispatched to a subagent is in flight elsewhere,
+    /// so the in-session drainability filter skips it and the continuation
+    /// lands on the next unclaimed head.
+    #[test]
+    fn drainability_skips_a_claimed_head() {
+        use crate::queue_claim::{ClaimedQueueItems, claim_identity};
+        let content = doc_with_backlog(
+            &["do [#a]", "do [#b]"],
+            &["- [ ] [#a] first", "- [ ] [#b] second"],
+        );
+        let claimed = ClaimedQueueItems::from_identities([claim_identity("🚧 do [#a]")]);
+        let continuation =
+            required_continuation_excluding_claimed(&content, Some(&content), &claimed)
+                .unwrap()
+                .expect("the unclaimed head still drains");
+        assert_eq!(continuation.head_prompt, "do [#b]");
+        assert_eq!(drainable_head_count(&content), 2);
+        assert_eq!(drainable_head_count_excluding_claimed(&content, &claimed), 1);
+        assert_eq!(claimed_head_count(&content, &claimed), 1);
+    }
+
+    /// `#queueclaim`: when every remaining head is claimed, no continuation is
+    /// required — the loop waits on its workers instead of re-entering.
+    #[test]
+    fn all_claimed_heads_require_no_continuation() {
+        use crate::queue_claim::{ClaimedQueueItems, claim_identity};
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Queue\n\n<!-- agent:queue go -->\n\
+- #gh-fix https://github.com/o/r/issues/109\n\
+- #gh-fix https://github.com/o/r/issues/110\n\
+<!-- /agent:queue -->\n"
+            .to_string();
+        assert!(
+            required_continuation(&content, Some(&content))
+                .unwrap()
+                .is_some()
+        );
+        let claimed = ClaimedQueueItems::from_identities([
+            claim_identity("#gh-fix https://github.com/o/r/issues/109"),
+            claim_identity("📌 #gh-fix https://github.com/o/r/issues/110"),
+        ]);
+        assert!(
+            required_continuation_excluding_claimed(&content, Some(&content), &claimed)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(drainable_head_count_excluding_claimed(&content, &claimed), 0);
+        assert_eq!(claimed_head_count(&content, &claimed), 2);
+        let live = live_queue_head_identities(&content).unwrap();
+        assert!(live.contains(&claim_identity("#gh-fix https://github.com/o/r/issues/110")));
     }
 }
 

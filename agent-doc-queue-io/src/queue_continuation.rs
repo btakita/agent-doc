@@ -94,6 +94,26 @@ pub fn reconcile_marker(
     file: &Path,
     source_command: &str,
 ) -> Option<queue_policy::QueueContinuation> {
+    // `#queueclaim`: closeout is where a consumed head ends its claim. Prune
+    // claims on items no longer in the queue (and expired ones) before
+    // deciding continuation. Never fatal to closeout, but never silent.
+    match std::fs::read_to_string(file) {
+        Ok(content) => {
+            if let Err(err) = crate::queue_claim::prune_closed_claims(file, &content) {
+                eprintln!(
+                    "[queue-continuation] WARNING: failed to prune closed queue claims for {}: {err:#}",
+                    file.display()
+                );
+            }
+        }
+        // A missing document has no queue and no claims to prune; `detect`
+        // below reports no continuation for it.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => eprintln!(
+            "[queue-continuation] WARNING: could not read {} to prune closed queue claims: {err}",
+            file.display()
+        ),
+    }
     match detect(file) {
         Ok(Some(continuation)) => {
             if let Err(err) = write_continuation_marker(file, &continuation, source_command) {

@@ -2815,8 +2815,19 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     } else {
         content.clone()
     };
+    // `#queueclaim`: heads claimed by a worker outside the in-session loop (a
+    // dispatched subagent) are in flight, so they are neither counted nor
+    // selected for this cycle.
+    let claimed_queue_items = if activation.active {
+        agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content)
+    } else {
+        agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+    };
     let queue_drainable_head_count = if activation.active {
-        agent_doc_queue::queue_continuation::drainable_head_count(&drainability_content)
+        agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+            &drainability_content,
+            &claimed_queue_items,
+        )
     } else {
         0
     };
@@ -2848,6 +2859,9 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             &skipped_queue_head_ids,
         )
         .prompts
+        .into_iter()
+        .filter(|prompt| !claimed_queue_items.claims(prompt))
+        .collect()
     } else {
         Vec::new()
     };
@@ -5030,7 +5044,19 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             active_harness: None,
         });
     }
-    let active_queue_prompt_texts = active_queue_projection.prompts;
+    // `#queueclaim`: a head claimed by a worker outside the in-session loop (a
+    // dispatched subagent) is in flight; this cycle must not select, mark, or
+    // consume it.
+    let claimed_queue_items = if activation.active {
+        agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &current_content)
+    } else {
+        agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+    };
+    let active_queue_prompt_texts: Vec<String> = active_queue_projection
+        .prompts
+        .into_iter()
+        .filter(|prompt| !claimed_queue_items.claims(prompt))
+        .collect();
     if activation.active
         && let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
             file,
@@ -5295,7 +5321,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     {
         0
     } else if activation.active {
-        agent_doc_queue::queue_continuation::drainable_head_count(&current_content)
+        agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+            &current_content,
+            &claimed_queue_items,
+        )
     } else {
         0
     };

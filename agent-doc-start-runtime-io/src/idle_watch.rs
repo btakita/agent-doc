@@ -69,6 +69,35 @@ const RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL: u32 = 30;
 /// `Stop`) is the durable proof that a run is still generating into the cycle,
 /// so a live marker vetoes the reclaim; only an idle harness can have orphaned
 /// the preflight.
+/// `#reexecdeadchild`: record a refused `execve_preserve_child` hot-reload.
+fn log_reexec_child_refusal(
+    session_log: &mut Option<SessionLog>,
+    path: &Path,
+    shared: &SupervisorShared,
+    trigger: &str,
+    refusal: agent_doc_controller::recycle::ReexecPreserveChildRefusal,
+    logged: &mut Option<agent_doc_controller::recycle::ReexecPreserveChildRefusal>,
+) {
+    if *logged == Some(refusal) {
+        return;
+    }
+    *logged = Some(refusal);
+    let pane = shared.inject_pane.as_deref().unwrap_or("<pty>");
+    log_event(
+        session_log,
+        &format!(
+            "supervisor_reexec_preserve_child_refused trigger={trigger} pane={pane} reason={refusal} action=defer_to_host_loop (#reexecdeadchild)"
+        ),
+    );
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "supervisor_reexec_preserve_child_refused file={} trigger={trigger} pane={pane} reason={refusal} action=defer_to_host_loop (#reexecdeadchild)",
+            path.display(),
+        ),
+    );
+}
+
 fn supervisor_may_reclaim_empty_preflight(attempt_tick: bool, harness_turn_live: bool) -> bool {
     attempt_tick && !harness_turn_live
 }
@@ -1566,6 +1595,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // the pane) on every later idle boundary. The supervisor keeps running on
             // its current binary until the operator restarts it.
             let mut reexec_recycle_disabled = false;
+            // `#reexecdeadchild`: last logged preserved-child refusal (log on change).
+            let mut reexec_child_refusal_logged: Option<
+                agent_doc_controller::recycle::ReexecPreserveChildRefusal,
+            > = None;
             // `#supautoinstall`: dogfood auto-install rung that PRECEDES the recycle rung.
             // When this supervisor hosts an agent-doc session editing agent-doc's OWN
             // source and a finalize committed an edit, build+install at the idle boundary
@@ -3321,7 +3354,28 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     stale_restart_safe_checkpoint,
                     effective_cycle_open,
                 );
+                #[cfg(unix)]
+                let restart_reexec_child_refusal = if !reexec_recycle_disabled
+                    && matches!(restart_action, SupervisorRestartAction::ReexecInPlace)
+                {
+                    shared.reexec_preserve_child_refusal()
+                } else {
+                    None
+                };
+                #[cfg(not(unix))]
+                let restart_reexec_child_refusal: Option<
+                    agent_doc_controller::recycle::ReexecPreserveChildRefusal,
+                > = None;
+                if let Some(refusal) = restart_reexec_child_refusal {
+                    log_reexec_child_refusal(
+                        &mut session_log,
+                        &path,
+                        &shared,
+                        "restart_drain",
+                        refusal, &mut reexec_child_refusal_logged);
+                }
                 if !reexec_recycle_disabled
+                    && restart_reexec_child_refusal.is_none()
                     && matches!(restart_action, SupervisorRestartAction::ReexecInPlace)
                 {
                     #[cfg(unix)]
@@ -3366,7 +3420,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                         match supervisor_perform_reexec(&shared) {
                             Ok(never) => match never {},
-                            Err(err) => {
+                            Err(SupervisorReexecError::Refused(refusal)) => {
+                                log_reexec_child_refusal(
+                                    &mut session_log,
+                                    &path,
+                                    &shared,
+                                    "restart_drain",
+                                    refusal, &mut reexec_child_refusal_logged);
+                            }
+                            Err(SupervisorReexecError::Io(err)) => {
                                 // A failed execve must NOT strand the restart. Clear the
                                 // reexec intent so the in-process host loop's restart-kill
                                 // condition fires and relaunches the child on the current
@@ -3941,7 +4003,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         SupervisorRecycleAction::RecycleDebounced => recycle_debounced,
                         _ => false,
                     };
-                if do_recycle {
+                // `#reexecdeadchild`: never hand a dead or about-to-be-replaced
+                // child across `execve`. The host loop owns that exit/restart;
+                // the next generation's watch recycles onto the fresh binary.
+                #[cfg(unix)]
+                let reexec_child_refusal = if do_recycle {
+                    shared.reexec_preserve_child_refusal()
+                } else {
+                    None
+                };
+                #[cfg(not(unix))]
+                let reexec_child_refusal: Option<
+                    agent_doc_controller::recycle::ReexecPreserveChildRefusal,
+                > = None;
+                if let Some(refusal) = reexec_child_refusal {
+                    log_reexec_child_refusal(&mut session_log, &path, &shared, "stale_recycle", refusal, &mut reexec_child_refusal_logged);
+                }
+                if do_recycle && reexec_child_refusal.is_none() {
                     // `#ctlrecycle` R3 — hot-reload onto the fresh binary IN PLACE via
                     // `execve`, preserving the live harness child + tmux pane. Falls
                     // back to a clean exit (child restarts) if the in-place swap cannot
@@ -4013,7 +4091,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_supervisor_io::recycle_request::clear_recycle_request(&file);
                         match supervisor_perform_reexec(&shared) {
                             Ok(never) => match never {},
-                            Err(err) => {
+                            Err(SupervisorReexecError::Refused(refusal)) => {
+                                // Lost the race to the host loop's reap: a
+                                // deferral, not an exec failure.
+                                log_reexec_child_refusal(
+                                    &mut session_log,
+                                    &path,
+                                    &shared,
+                                    "stale_recycle",
+                                    refusal, &mut reexec_child_refusal_logged);
+                            }
+                            Err(SupervisorReexecError::Io(err)) => {
                                 // `#suprecyclestall` — a failed execve must NOT kill
                                 // the session. Previously we `process::exit(0)` here,
                                 // which orphaned the live harness child and hung the
@@ -5294,7 +5382,11 @@ mod tests {
         for needle in [
             ["CapturedFinalizeResumeOutcome::", "Unlandable {"].concat(),
             ["unlandable: ", "true,"].concat(),
-            ["&& !needs_operator\n", "                                    && !unlandable,"].concat(),
+            [
+                "&& !needs_operator\n",
+                "                                    && !unlandable,",
+            ]
+            .concat(),
             ["action=stop_retrying recovery=", "\\\"{recovery}\\\""].concat(),
         ] {
             assert!(

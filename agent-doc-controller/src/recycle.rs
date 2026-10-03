@@ -80,9 +80,129 @@ pub fn routine_stale_recycle_deferred_intra_turn(
     routine_stale_recycle && !turn_boundary
 }
 
+/// Why an `execve_preserve_child` hot-reload must not run right now.
+///
+/// `#reexecdeadchild`: the in-place reexec hands the CURRENT harness child to
+/// the replacement image, which adopts it and resumes reaping it. That handoff
+/// is only sound while the child is alive and nothing has already decided to
+/// replace it. Observed live on `tasks/sdk.md` (2026-10-03T02:27:41Z): an
+/// operator "Clear Session Context" (`session_clear delivery=supervisor_restart_fresh`)
+/// SIGTERMed the child, the host loop reaped it (`exit_code=143`), and in the
+/// window before the host loop stopped the idle watch an install-fanout recycle
+/// fired `supervisor_binary_stale_self_recycled ... child_pid=899775` with the
+/// already-reaped PID. The new image adopted a PID it could never wait on
+/// (`try_wait failed: No child processes`), synthesized exit 1, lost the fresh
+/// restart the clear asked for, and the operator saw the harness "crash" twice
+/// (`claude exited with code 1. Restarting in 2s...`) before a fresh relaunch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReexecPreserveChildRefusal {
+    /// No child PID is published (between generations, or never spawned).
+    NoLiveChild,
+    /// A stop or a child-replacing restart is pending: the current host loop
+    /// owns that kill + relaunch, and an exec would silently drop the request.
+    ChildReplacementPending,
+    /// The published child already exited (zombie) or was already reaped.
+    ChildExited,
+}
+
+impl ReexecPreserveChildRefusal {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NoLiveChild => "no_live_child",
+            Self::ChildReplacementPending => "child_replacement_pending",
+            Self::ChildExited => "child_exited",
+        }
+    }
+}
+
+impl std::fmt::Display for ReexecPreserveChildRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Observed facts the `execve_preserve_child` handoff depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReexecPreserveChildFacts {
+    pub child_pid_published: bool,
+    pub child_exited: bool,
+    pub stop_requested: bool,
+    pub restart_requested: bool,
+    /// The pending restart is itself served by the in-place reexec
+    /// (`restart_reexec`), so it is not a child replacement.
+    pub restart_served_by_reexec: bool,
+}
+
+/// `#reexecdeadchild`: decide whether an in-place reexec may preserve the
+/// current child. `None` means the handoff is sound.
+pub fn reexec_preserve_child_refusal(
+    facts: ReexecPreserveChildFacts,
+) -> Option<ReexecPreserveChildRefusal> {
+    if !facts.child_pid_published {
+        return Some(ReexecPreserveChildRefusal::NoLiveChild);
+    }
+    if facts.child_exited {
+        return Some(ReexecPreserveChildRefusal::ChildExited);
+    }
+    if facts.stop_requested || (facts.restart_requested && !facts.restart_served_by_reexec) {
+        return Some(ReexecPreserveChildRefusal::ChildReplacementPending);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn live_child() -> ReexecPreserveChildFacts {
+        ReexecPreserveChildFacts {
+            child_pid_published: true,
+            ..Default::default()
+        }
+    }
+
+    /// `#reexecdeadchild` regression: the sdk.md clear crash. A clear's fresh
+    /// restart SIGTERMed and reaped the child; the recycle must refuse to hand
+    /// the dead PID across `execve`.
+    #[test]
+    fn reexec_refuses_to_preserve_an_exited_or_replaced_child() {
+        assert_eq!(reexec_preserve_child_refusal(live_child()), None);
+        assert_eq!(
+            reexec_preserve_child_refusal(ReexecPreserveChildFacts::default()),
+            Some(ReexecPreserveChildRefusal::NoLiveChild)
+        );
+        assert_eq!(
+            reexec_preserve_child_refusal(ReexecPreserveChildFacts {
+                child_exited: true,
+                ..live_child()
+            }),
+            Some(ReexecPreserveChildRefusal::ChildExited)
+        );
+        // The operator clear: `restart mode=fresh` is pending, child not yet dead.
+        assert_eq!(
+            reexec_preserve_child_refusal(ReexecPreserveChildFacts {
+                restart_requested: true,
+                ..live_child()
+            }),
+            Some(ReexecPreserveChildRefusal::ChildReplacementPending)
+        );
+        assert_eq!(
+            reexec_preserve_child_refusal(ReexecPreserveChildFacts {
+                stop_requested: true,
+                ..live_child()
+            }),
+            Some(ReexecPreserveChildRefusal::ChildReplacementPending)
+        );
+        // A restart routed to the in-place reexec keeps the child by design.
+        assert_eq!(
+            reexec_preserve_child_refusal(ReexecPreserveChildFacts {
+                restart_requested: true,
+                restart_served_by_reexec: true,
+                ..live_child()
+            }),
+            None
+        );
+    }
 
     fn identity(modified_secs: u64) -> crate::status::ControllerBinaryIdentity {
         crate::status::ControllerBinaryIdentity {

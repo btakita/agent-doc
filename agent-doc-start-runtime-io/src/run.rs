@@ -1927,7 +1927,19 @@ pub fn run_with_reap_policy_resume_and_harness(
                     kill_requested = true;
                     shared.kill_child();
                 }
-                match sup.tick() {
+                // `#reexecdeadchild`: reap under the gate and unpublish the PID
+                // before releasing it, so the idle watch's in-place reexec can
+                // never hand an already-reaped child to the replacement image
+                // (the window between this exit and the idle-watch join below).
+                let outcome = {
+                    let _reap_gate = shared.child_reap_gate.lock();
+                    let outcome = sup.tick();
+                    if !matches!(outcome, TickOutcome::Running) {
+                        shared.child_pid.store(0, Ordering::Relaxed);
+                    }
+                    outcome
+                };
+                match outcome {
                     TickOutcome::Running => std::thread::sleep(poll),
                     TickOutcome::PromptOperator { exit_code }
                     | TickOutcome::Halted { exit_code }
@@ -2797,7 +2809,10 @@ mod tests {
         assert!(launch_mints_session_id(false));
         let source = include_str!("run.rs");
         let gate = source
-            .find(concat!("if launch_mints_session_id", "(preserved_child_survived)"))
+            .find(concat!(
+                "if launch_mints_session_id",
+                "(preserved_child_survived)"
+            ))
             .expect("the launch-args id mint must be gated on child survival");
         let mint = source[gate..]
             .find(concat!("assign_and_record_session_id", "(&canonical"))

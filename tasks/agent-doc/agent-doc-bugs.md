@@ -318,6 +318,58 @@ Done in agent-doc `8aec612ec` (pushed and installed; the superproject pointer is
 **Your question about `presets`:** today `prompt_presets` has no alias, and unknown frontmatter keys are silently ignored, so a `presets:` block does nothing. You've already queued the alias; it runs next, followed by release + publish.
 
 The exchange is past the size warning (285+ lines). I'll keep draining rather than stop to compact.
+
+### Re: subagent results — presets, tsift truncation, #116, #117 — opus-5.5 · 2026-10-03T03:42-04:00
+
+> **Queue prompt:** #subagent: Add `presets` as an alias to `prompt_presents`.
+
+`presets` alias added in agent-doc `d9175bde2`:
+- `presets:` parses exactly like `prompt_presets:`, and writes keep your spelling.
+- If both keys are present, they merge and `prompt_presets` wins on a name clash. That isn't an error.
+- The specs and all five harness skill copies mention the alias.
+- `make check`: 10589 passed.
+
+> **Queue prompt:** #subagent: tsift.md missed part the queue item that I wrote: `> **Queue prompt:** Should we release + publish the`
+
+Fixed in `94931fdb6`. None of your text was lost: the full line was committed, then delivered as steering, and filed as `#releasepublishbindings`. What happened:
+- A harness restart fired a turn while you were still typing.
+- Preflight waited only for the editor to catch up, not for you to stop typing, so the agent quoted a half-typed line.
+- Preflight now waits for typing to go quiet (the debounce window, 2s by default) before reading the document. It costs nothing when nothing changed.
+- Closeout no longer logs a line you finished typing as "removed".
+- `make check`: 10590 passed.
+
+> **Queue prompt:** #subagent: https://github.com/btakita/agent-doc/issues/116
+
+Fixed in `ab3e68a3a`, and the issue is closed:
+- The JetBrains popup now opens with **Ctrl+Shift+Alt+D**. Windows swallows Alt+Space.
+- The popup is in the Tools and editor context menus, and its list now includes Stop Agent and Kill Supervisor.
+- The plugin is now 0.2.485.
+- Still to do: someone needs to try the shortcut in a live IDE on Windows.
+
+> **Queue prompt:** #subagent: https://github.com/btakita/agent-doc/issues/117
+
+Fixed in `8a5ebaf5b`, and the issue is closed:
+- The backslash-in-f-string SyntaxError on Python 3.11 is fixed.
+- A new `make python-compat-check` (the first step of `make check`) parses every `.py` file under the minimum Python version.
+- Not addressed: the scripts actually need Python 3.9 (`dict | dict`), while `pyproject` says 3.8.
+
+**Install:** all of the above, plus the first two reactive-steering phases (`cfb1580d3` `#subagent` drainability, `aef815612` idle-pane wake + harness parity), is installed. The superproject pointer is `f2c9ecb510`.
+
+**Still running:**
+- #118 (preflight vs session-check agreement).
+- The rest of reactive steering.
+
+**Waiting:** `release + publish` stays claimed until both finish. Then I'll run a clean `make check` on main and release.
+
+**Your steergate items:**
+- `steergatelog` and `steergateperceptron` can run as one subagent, the log first. I'll start it when reactive steering reports, because both would otherwise edit the same gate code at once.
+- `steergatenamo` needs weeks of logged edits before the evaluation means anything. I'd start its subagent once the log has data.
+
+**Side findings:**
+- Several subagents used the same filenames in the shared scratchpad, so their logs and a commit-message file overwrote each other. A hook blocked the one bad commit. From now on each subagent gets its own filenames.
+- Test runs in a worktree started a stray `agent-doc controller serve` against that worktree. It looks like a hook recreates `.agent-doc/state.db` under any path named in a Bash command.
+
+The exchange is past the size warning (288 lines). I'm continuing the queue.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -328,7 +380,7 @@ The exchange is past the size warning (285+ lines). I'll keep draining rather th
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~We need to remove `queue: stop` entirely. This is too confusing.~~
-- #subagent: Add `presets` as an alias to `prompt_presents`.
+- ~~#subagent: Add `presets` as an alias to `prompt_presents`.~~
 - #subagent: tsift.md missed part the queue item that I wrote: `> **Queue prompt:** Should we release + publish the`
 - #subagent: https://github.com/btakita/agent-doc/issues/116
 - #subagent: https://github.com/btakita/agent-doc/issues/117

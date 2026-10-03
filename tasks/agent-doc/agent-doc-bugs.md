@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -393,6 +392,35 @@ Fixed in agent-doc `c8ab9659d` (installed; superproject pointer `16a45ffc51`). T
 **Caveat:** the document and cycle named in the issue aren't in any log on this machine. The fix is based on reading the code plus a local example of the same refusal from 2026-10-01. The issue's "possibly related" note isn't covered: a committed cycle that left no response and didn't strike its queue item.
 
 Next: `release + publish`.
+
+### Re: release + publish — opus-5.5 · 2026-10-03T04:16-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.444 released.** The tag is pushed and `install-full` ran, so `agent-doc --version` reports 0.35.444. The superproject pointer is `ba1cd1dcc0`.
+
+**Verification:** `make release` ran the full `make check` (10639 passed), tagged `v0.35.444` and pushed main plus the tag. The Release (GitHub assets) and PyPI workflows were still running when I checked; I'm not waiting on them.
+
+**Release gate fix:** the first `make release` failed at `editor-parity` because the release had no `editors/release-parity.tsv` row. I added the 0.35.444 row (JetBrains plugin 0.2.485, popup shortcut GH #116; VS Code: no change; Zed: staged), folded it into the unpushed release commit, and re-ran the release.
+
+**What's in 0.35.444** (VERSIONS.md has the full entry):
+- `queue: stop` is removed; `pause` is the one hold.
+- Reactive realtime steering: the idle-session wake and the typing-completion gate, across Claude Code / Codex / OpenCode / Grok / Cursor.
+- GH #118: one shared turn-admission check, so no recovery can absorb your steering.
+- The typing wait for queue items you're still writing.
+- The no-changes explanation.
+- The closeout late-strike fix.
+- The `presets` alias.
+- GH #116: the JetBrains popup shortcut.
+- GH #117: Python 3.11.
+
+**Not in this release:** `steergatelog` and `steergateperceptron`. A subagent is still building them; they ship next release. `steergatenamo` waits for logged data.
+
+**Housekeeping:**
+- The other session's uncommitted `agent-doc-start-runtime-io/src/lib.rs` stayed out of the release commit.
+- macOS assets follow the weekly Darwin cadence, so they aren't part of this release.
+
+The exchange is 363+ lines; it may be worth compacting once the queue is idle.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -402,13 +430,6 @@ Next: `release + publish`.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~We need to remove `queue: stop` entirely. This is too confusing.~~
-- ~~#subagent: Add `presets` as an alias to `prompt_presents`.~~
-- ~~#subagent: tsift.md missed part the queue item that I wrote: `> **Queue prompt:** Should we release + publish the`~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#subagent: https://github.com/btakita/agent-doc/issues/116~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#subagent: https://github.com/btakita/agent-doc/issues/117~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#subagent: https://github.com/btakita/agent-doc/issues/118~~ — auto-struck: answered this cycle (#ftstrike)
-- release + publish
 <!-- /agent:queue -->
 
 

@@ -377,6 +377,12 @@ pub struct ProjectConfig {
     /// decision log (`#steergatelog`). Absent, 45000 applies.
     #[serde(default, alias = "steering_label_window_ms")]
     pub agent_doc_steering_label_window_ms: Option<u64>,
+    /// The online-learned typing-completion gate (`#steergateperceptron`).
+    /// Absent, it is ON: its seeded weights are proven to decide exactly like
+    /// the deterministic gate, and it learns from the decision log's labels.
+    /// `false` keeps the deterministic gate only (the weights still learn).
+    #[serde(default, alias = "steering_learned_gate")]
+    pub agent_doc_steering_learned_gate: Option<bool>,
     /// Project-default age in seconds past which an active agent turn is
     /// reported as a runaway (`#runawayturnsurfaced`). Absent, the built-in
     /// `agent_doc_harness::DEFAULT_RUNAWAY_TURN_SECS` applies; `0` disables the

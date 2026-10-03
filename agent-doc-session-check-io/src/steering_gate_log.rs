@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use agent_doc_debounce::edit_settle::{GateFeatures, SettleDecision, SettleTier};
+use agent_doc_debounce::learned_gate::{DEFAULT_LEARNING_RATE, GateWeights, LearnedGate};
 use agent_doc_document_realtime::midturn_steering::{GateDecision, SteeringChange};
 use agent_doc_sqlite::steering_gate_log::{self as store, StoredGateRow};
 use agent_doc_state_scope::LocalProcessScope;
@@ -156,6 +157,17 @@ pub struct GateRow {
     pub re_edited_at_ms: Option<u64>,
     #[serde(default)]
     pub label: Option<GateLabel>,
+    /// The learned gate's probability (in thousandths) that the item was
+    /// finished, from the weights in force for this decision
+    /// (`#steergateperceptron`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_probability_milli: Option<u32>,
+    /// The learned gate's zone for this decision: `send`, `hold`, `defer`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_zone: Option<String>,
+    /// The learned gate was enabled (its verdict applied) for this decision.
+    #[serde(default)]
+    pub learned_gate: bool,
 }
 
 impl GateRow {
@@ -382,11 +394,13 @@ pub struct GateObservation {
     pub now_ms: u64,
     pub document_changed_ms: Option<u64>,
     pub boundary: bool,
+    /// The learned gate's verdicts applied to these decisions.
+    pub learned_gate: bool,
     pub decisions: Vec<GateDecision>,
 }
 
 /// Input to the decision-log graph.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GateLogEvent {
     /// Cold hydration: a document's recent rows and the pause profile, loaded
     /// once per process before its first observation is folded.
@@ -394,6 +408,7 @@ pub enum GateLogEvent {
         document: String,
         rows: Vec<GateRow>,
         profile: Option<PauseProfile>,
+        weights: Option<GateWeights>,
     },
     Observed(GateObservation),
 }
@@ -406,7 +421,7 @@ pub struct TrackedRow {
 }
 
 /// Everything the event stream folds to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GateLogTracking {
     pub label_window_ms: u64,
     pub epoch: u64,
@@ -414,6 +429,11 @@ pub struct GateLogTracking {
     pub rows: BTreeMap<String, TrackedRow>,
     pub profile: PauseProfile,
     pub profile_revision: u64,
+    /// The operator's learned gate weights (`#steergateperceptron`), trained
+    /// online as labels attach.
+    pub weights: GateWeights,
+    pub weights_revision: u64,
+    pub learning_rate: f64,
 }
 
 impl GateLogTracking {
@@ -425,7 +445,27 @@ impl GateLogTracking {
             rows: BTreeMap::new(),
             profile: PauseProfile::default(),
             profile_revision: 0,
+            weights: GateWeights::seeded(),
+            weights_revision: 0,
+            learning_rate: DEFAULT_LEARNING_RATE,
         }
+    }
+}
+
+/// What a labelled row teaches the learned gate (`#steergateperceptron`):
+/// 1 = the operator had finished (send), 0 = still typing (hold). `None`
+/// when the row is no evidence either way.
+pub fn training_target(row: &GateRow) -> Option<f64> {
+    match (row.phase, row.label?) {
+        (GatePhase::Delivered, GateLabel::Premature) => Some(0.0),
+        (GatePhase::Delivered, GateLabel::OnTime | GateLabel::Late) => Some(1.0),
+        (GatePhase::HeldPastHalf, GateLabel::Late) => Some(1.0),
+        (GatePhase::HeldPastHalf | GatePhase::HeldEarly, GateLabel::OnTime)
+            if row.superseded_at_ms.is_some() =>
+        {
+            Some(0.0)
+        }
+        _ => None,
     }
 }
 
@@ -460,6 +500,7 @@ pub fn advance(current: &GateLogTracking, event: &GateLogEvent) -> Option<GateLo
             document,
             rows,
             profile,
+            weights,
         } => {
             next.hydrated_documents.insert(document.clone());
             for row in rows {
@@ -474,6 +515,11 @@ pub fn advance(current: &GateLogTracking, event: &GateLogEvent) -> Option<GateLo
                 && next.profile_revision == 0
             {
                 next.profile = profile.clone();
+            }
+            if let Some(weights) = weights
+                && next.weights_revision == 0
+            {
+                next.weights = weights.clone().normalized();
             }
         }
         GateLogEvent::Observed(observation) => fold_observation(&mut next, observation),
@@ -536,6 +582,11 @@ fn fold_observation(next: &mut GateLogTracking, obs: &GateObservation) {
                 superseded_at_ms: None,
                 re_edited_at_ms: None,
                 label: None,
+                model_probability_milli: Some(
+                    (next.weights.probability(&decision.features) * 1000.0).round() as u32,
+                ),
+                model_zone: Some(next.weights.zone(&decision.features).as_str().to_string()),
+                learned_gate: obs.learned_gate,
             };
             next.rows.insert(
                 key.clone(),
@@ -620,19 +671,85 @@ fn fold_observation(next: &mut GateLogTracking, obs: &GateObservation) {
         if let Some(label) = derive_label(row, past_half, obs.now_ms, next.label_window_ms) {
             tracked.row.label = Some(label);
             tracked.revision = bump();
+            // Online learning: each label trains the gate once, in the fold
+            // that attaches it.
+            if let Some(target) = training_target(&tracked.row) {
+                next.weights
+                    .update(&tracked.row.features, target, next.learning_rate);
+                next.weights_revision = bump();
+            }
         }
     }
     next.epoch = epoch;
 }
 
 /// A write the sink owes storage.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SinkWrite {
     Row(Box<GateRow>),
     Profile {
         operator: String,
         profile: PauseProfile,
     },
+    Weights {
+        operator: String,
+        weights: GateWeights,
+    },
+}
+
+/// Serialized form of [`GateWeights`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WeightsRecord {
+    pub weights: Vec<f64>,
+    #[serde(default)]
+    pub updates: u64,
+}
+
+impl From<&GateWeights> for WeightsRecord {
+    fn from(w: &GateWeights) -> Self {
+        Self {
+            weights: w.weights.clone(),
+            updates: w.updates,
+        }
+    }
+}
+
+impl From<WeightsRecord> for GateWeights {
+    fn from(r: WeightsRecord) -> Self {
+        GateWeights {
+            weights: r.weights,
+            updates: r.updates,
+        }
+        .normalized()
+    }
+}
+
+fn model_state_key(operator: &str) -> String {
+    format!("steering_gate_model:{operator}")
+}
+
+/// The persisted weights for `operator` in `root`, else the seed.
+pub fn load_weights(root: &Path, operator: &str) -> Result<GateWeights> {
+    if !agent_doc_sqlite::state_store::state_db_path(root).exists() {
+        return Ok(GateWeights::seeded());
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
+    load_weights_from(&conn, operator)
+}
+
+fn load_weights_from(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    operator: &str,
+) -> Result<GateWeights> {
+    Ok(
+        agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+            conn,
+            &model_state_key(operator),
+        )?
+        .and_then(|raw| serde_json::from_str::<WeightsRecord>(&raw).ok())
+        .map(GateWeights::from)
+        .unwrap_or_else(GateWeights::seeded),
+    )
 }
 
 fn profile_state_key(operator: &str) -> String {
@@ -645,6 +762,7 @@ pub struct SteeringGateLog {
     machine: StateMachine<GateLogTracking, GateLogEvent>,
     pending_writes: Computed<Vec<(String, u64, SinkWrite)>>,
     median_pause: Computed<Option<u64>>,
+    weights: Computed<GateWeights>,
     projection: LatestDurableProjection<String, SinkWrite>,
     _sink: Effect,
 }
@@ -691,11 +809,22 @@ impl SteeringGateLog {
                     },
                 ));
             }
+            if tracking.weights_revision > 0 {
+                writes.push((
+                    model_state_key(&pending_operator),
+                    tracking.weights_revision,
+                    SinkWrite::Weights {
+                        operator: pending_operator.clone(),
+                        weights: tracking.weights.clone(),
+                    },
+                ));
+            }
             writes
         });
         let median_pause = scope
             .ctx()
             .computed(move |ctx| ctx.get(&state).profile.median_ms());
+        let weights = scope.ctx().computed(move |ctx| ctx.get(&state).weights);
         let projection = LatestDurableProjection::new(scope.ctx(), SINK_GENERATION);
         let sink = {
             let projection = projection.clone();
@@ -710,6 +839,7 @@ impl SteeringGateLog {
             machine,
             pending_writes,
             median_pause,
+            weights,
             projection,
             _sink: sink,
         }
@@ -740,6 +870,11 @@ impl SteeringGateLog {
     /// The operator's rolling median pause (a feature of the next decision).
     pub fn median_pause_ms(&self) -> Option<u64> {
         self.scope.ctx().get(&self.median_pause)
+    }
+
+    /// The learned gate weights the next decision uses.
+    pub fn weights(&self) -> GateWeights {
+        self.scope.ctx().get(&self.weights)
     }
 
     fn hydrated(&self, document: &str) -> bool {
@@ -781,6 +916,14 @@ fn sink_pending(
                         &profile_state_key(operator),
                         &serde_json::to_string(profile)?,
                         profile.last_change_ms.unwrap_or(0),
+                    )?;
+                }
+                SinkWrite::Weights { operator, weights } => {
+                    store::upsert_gate_model(
+                        conn,
+                        &model_state_key(operator),
+                        &serde_json::to_string(&WeightsRecord::from(weights))?,
+                        weights.updates,
                     )?;
                 }
             }
@@ -838,10 +981,12 @@ fn hydrate(
         &profile_state_key(operator),
     )?
     .and_then(|raw| serde_json::from_str(&raw).ok());
+    let weights = Some(load_weights_from(&conn, operator)?);
     log.send(GateLogEvent::Hydrated {
         document: document.to_string(),
         rows,
         profile,
+        weights,
     });
     Ok(())
 }
@@ -936,6 +1081,43 @@ pub fn median_pause_ms(
     live_log(root, file, document, now_ms, max_hold_ms)
         .ok()
         .and_then(|log| log.median_pause_ms())
+}
+
+/// Whether the learned gate is on for `file`'s project
+/// (`agent_doc_steering_learned_gate`, default on: the seeded weights are
+/// proven to decide exactly like the deterministic gate).
+pub fn learned_gate_enabled(file: &Path) -> bool {
+    agent_doc_project_config_io::load_project_for_doc(file)
+        .agent_doc_steering_learned_gate
+        .unwrap_or(true)
+}
+
+/// The learned classifier for the next decision, `None` when disabled or
+/// when the log cannot be read (the deterministic gate always works).
+pub fn learned_classifier(
+    root: &Path,
+    file: &Path,
+    document: &str,
+    now_ms: u64,
+    max_hold_ms: u64,
+) -> Option<LearnedGate> {
+    if !learned_gate_enabled(file) {
+        return None;
+    }
+    live_log(root, file, document, now_ms, max_hold_ms)
+        .ok()
+        .map(|log| LearnedGate::new(log.weights()))
+}
+
+/// The most recent logged decision (optionally for one document).
+pub fn latest_row(root: &Path, document: Option<&str>) -> Result<Option<GateRow>> {
+    if !agent_doc_sqlite::state_store::state_db_path(root).exists() {
+        return Ok(None);
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
+    store::latest_gate_row(&conn, document)?
+        .map(|stored| GateRow::from_stored(&stored))
+        .transpose()
 }
 
 /// One exported dataset row: the stored row with its label resolved as of
@@ -1054,6 +1236,7 @@ mod tests {
             now_ms,
             document_changed_ms: Some(changed),
             boundary: false,
+            learned_gate: true,
             decisions,
         })
     }
@@ -1133,6 +1316,48 @@ mod tests {
         );
     }
 
+    /// `#steergateperceptron`: labels attached by the live log train the
+    /// weights online, the Effect persists them, and the next process loads
+    /// the trained model. Repeated premature full-window deliveries move the
+    /// model to hold that shape.
+    #[test]
+    fn premature_labels_train_and_persist_the_learned_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = SteeringGateLog::new(dir.path(), "op", DEFAULT_LABEL_WINDOW_MS);
+        let seeded = GateWeights::seeded();
+        assert_eq!(
+            seeded.zone(&features(2_000)),
+            agent_doc_debounce::learned_gate::GateZone::Send
+        );
+        let mut now = 0;
+        for i in 0..12 {
+            let v = format!("v{i}");
+            let edit = format!("e{i}");
+            now += 3_000;
+            log.send(observed(
+                now,
+                now - 2_000,
+                vec![decision(&v, None, SettleDecision::Settled, 2_000)],
+            ));
+            now += 1_000;
+            log.send(observed(now, now, vec![decision(&edit, Some(&v), HELD, 0)]));
+        }
+        let trained = log.weights();
+        assert!(trained.updates >= 12, "{}", trained.updates);
+        let idx = agent_doc_debounce::learned_gate::FEATURE_NAMES
+            .iter()
+            .position(|name| *name == "inconclusive_quiet_full_window")
+            .unwrap();
+        assert!(trained.weights[idx] < seeded.weights[idx]);
+        assert_eq!(
+            trained.zone(&features(2_000)),
+            agent_doc_debounce::learned_gate::GateZone::Hold
+        );
+        assert!(log.pending_writes().is_empty());
+        assert_eq!(load_weights(dir.path(), "op").unwrap(), trained);
+        assert_eq!(load_weights(dir.path(), "someone-else").unwrap(), seeded);
+    }
+
     #[test]
     fn pause_profile_tracks_a_rolling_median() {
         let mut profile = PauseProfile::default();
@@ -1168,6 +1393,11 @@ mod tests {
         assert_eq!(exported[0].row.label, Some(GateLabel::OnTime));
         assert_eq!(exported[1].row.phase, GatePhase::Delivered);
         assert_eq!(exported[1].row.label, None);
+        // `steering --explain` reads the latest decision back.
+        let latest = latest_row(dir.path(), Some("plan.md")).unwrap().unwrap();
+        assert_eq!(latest.phase, GatePhase::Delivered);
+        assert_eq!(latest.model_zone.as_deref(), Some("send"));
+        assert!(latest.learned_gate);
 
         // A later process observes the re-edit against the hydrated row.
         let second = SteeringGateLog::new(dir.path(), "op", DEFAULT_LABEL_WINDOW_MS);

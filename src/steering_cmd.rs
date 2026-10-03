@@ -163,3 +163,91 @@ pub fn run_dataset(file: Option<&Path>, json: bool, limit: Option<usize>) -> Res
     println!("[agent-doc] export with `agent-doc steering dataset --json`");
     Ok(())
 }
+
+/// `agent-doc steering --explain [FILE] [--json]` (`#steergateperceptron`):
+/// the learned gate's weights and each feature's contribution to the latest
+/// logged decision. Read-only.
+pub fn run_explain(file: Option<&Path>, json: bool) -> Result<()> {
+    use agent_doc_debounce::learned_gate::{FEATURE_NAMES, GateZone};
+    use agent_doc_session_check_io::steering_gate_log as gate_log;
+    let root = gate_log_project(file)?;
+    let operator = gate_log::operator_id();
+    let weights = gate_log::load_weights(&root, &operator)?;
+    let enabled =
+        gate_log::learned_gate_enabled(&file.map_or_else(|| root.join("."), Path::to_path_buf));
+    let document = file.map(|file| gate_log::document_key(&root, file));
+    let latest = gate_log::latest_row(&root, document.as_deref())?;
+    let decision = latest.as_ref().map(|row| {
+        let probability = weights.probability(&row.features);
+        serde_json::json!({
+            "row": row,
+            "probability": probability,
+            "zone": GateZone::of(probability).as_str(),
+            "score": weights.score(&row.features),
+            "contributions": weights.contributions(&row.features).iter().map(|c| serde_json::json!({
+                "feature": c.feature,
+                "value": c.value,
+                "weight": c.weight,
+                "contribution": c.contribution,
+            })).collect::<Vec<_>>(),
+        })
+    });
+    if json {
+        let value = serde_json::json!({
+            "project": root.display().to_string(),
+            "operator": operator,
+            "learned_gate_enabled": enabled,
+            "updates": weights.updates,
+            "weights": FEATURE_NAMES.iter().zip(&weights.weights)
+                .map(|(name, weight)| serde_json::json!({"feature": name, "weight": weight}))
+                .collect::<Vec<_>>(),
+            "latest_decision": decision,
+        });
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+    println!(
+        "[agent-doc] learned completion gate: {} (operator {operator}, {} labelled update(s); send >= 0.8, hold <= 0.3, deterministic tier in between)",
+        if enabled {
+            "on"
+        } else {
+            "off (deterministic only)"
+        },
+        weights.updates,
+    );
+    println!("weights:");
+    for (name, weight) in FEATURE_NAMES.iter().zip(&weights.weights) {
+        println!("  {name:<32} {weight:>8.3}");
+    }
+    match latest {
+        None => println!("latest decision: none logged yet"),
+        Some(row) => {
+            let probability = weights.probability(&row.features);
+            println!(
+                "latest decision: {} {} ({}) at {} — tier {}, decision {}, label {}",
+                row.document,
+                row.phase.as_str(),
+                row.consumer,
+                row.decided_at_ms,
+                row.tier.as_str(),
+                row.decision,
+                row.label.map_or("open", |label| label.as_str()),
+            );
+            println!(
+                "  p(finished) = {probability:.3} -> {} (score {:.3})",
+                GateZone::of(probability).as_str(),
+                weights.score(&row.features)
+            );
+            println!("  contributions (weight x value):");
+            for c in weights.contributions(&row.features) {
+                if c.value != 0.0 {
+                    println!(
+                        "    {:<32} {:>8.3} = {:>7.3} x {:.3}",
+                        c.feature, c.contribution, c.weight, c.value
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}

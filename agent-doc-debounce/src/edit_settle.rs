@@ -18,10 +18,13 @@
 //! 3. **Hard max-hold**: past `max_hold_ms` an item is delivered anyway,
 //!    flagged `possibly_partial`, so a stuck gate can never swallow a prompt.
 //!
-//! An optional [`CompletionClassifier`] may resolve an *inconclusive or
-//! unfinished-looking* edit earlier. None is built in: the deterministic gate is
-//! always active, and a classifier's answer can only shorten a hold, never
-//! extend one past max-hold.
+//! An optional [`CompletionClassifier`] may answer before the deterministic
+//! tier does (`#steergateperceptron`: the online-learned
+//! [`crate::learned_gate::LearnedGate`]). The deterministic rules stay the hard
+//! floor: an unbalanced delimiter always holds, and the max-hold always
+//! delivers, whatever the classifier says. A "finished" verdict settles after
+//! half the quiet window at the earliest; a "still typing" verdict holds at
+//! most until max-hold.
 
 /// What the text alone says about whether the operator finished it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +53,12 @@ pub enum CompletionVerdict {
 /// happens elsewhere and fills that cache. None is enabled today.
 pub trait CompletionClassifier: std::fmt::Debug {
     fn cached_verdict(&self, content_hash: &str) -> Option<CompletionVerdict>;
+
+    /// The verdict for one decision, given its observable features
+    /// (`#steergateperceptron`). Defaults to the content-hash cache.
+    fn assess(&self, _features: &GateFeatures, content_hash: &str) -> Option<CompletionVerdict> {
+        self.cached_verdict(content_hash)
+    }
 }
 
 /// The deterministic-only classifier: never has a verdict.
@@ -193,6 +202,8 @@ pub struct SettleInputs {
     pub debounce_ms: u64,
     pub max_hold_ms: u64,
     pub signal: CompletionSignal,
+    /// The text leaves a delimiter open: a hard hold no verdict overrides.
+    pub unbalanced_delimiters: bool,
     pub verdict: Option<CompletionVerdict>,
 }
 
@@ -213,15 +224,39 @@ impl SettleDecision {
 }
 
 /// The one settle decision (`#steeringtypinggate`).
+///
+/// The deterministic tier decides unless a classifier verdict applies:
+/// - `Complete` settles once half the quiet window has passed, except over
+///   an unbalanced delimiter (hard floor);
+/// - `Incomplete` / `StillTyping` holds what the deterministic tier would
+///   settle, re-checking after half the window, never past max-hold (hard
+///   floor).
 pub fn settle_decision(inputs: SettleInputs) -> SettleDecision {
-    let quiet = inputs.quiet_for_ms.max(inputs.stable_for_ms).unwrap_or(0);
-    let effective = match (inputs.signal, inputs.verdict) {
-        (_, Some(CompletionVerdict::Complete)) => CompletionSignal::Complete,
-        (_, Some(CompletionVerdict::Incomplete | CompletionVerdict::StillTyping)) => {
-            CompletionSignal::Incomplete
+    let deterministic = windowed_decision(inputs, inputs.signal);
+    match inputs.verdict {
+        None => deterministic,
+        Some(CompletionVerdict::Complete) if inputs.unbalanced_delimiters => deterministic,
+        Some(CompletionVerdict::Complete) => windowed_decision(inputs, CompletionSignal::Complete),
+        Some(CompletionVerdict::Incomplete | CompletionVerdict::StillTyping) => {
+            if deterministic != SettleDecision::Settled {
+                return deterministic;
+            }
+            let quiet = inputs.quiet_for_ms.max(inputs.stable_for_ms).unwrap_or(0);
+            let held = inputs.held_for_ms.max(quiet);
+            if held >= inputs.max_hold_ms {
+                return SettleDecision::MaxHoldExpired;
+            }
+            SettleDecision::Held {
+                recheck_after_ms: (inputs.debounce_ms / 2)
+                    .min(inputs.max_hold_ms - held)
+                    .max(100),
+            }
         }
-        (signal, None) => signal,
-    };
+    }
+}
+
+fn windowed_decision(inputs: SettleInputs, effective: CompletionSignal) -> SettleDecision {
+    let quiet = inputs.quiet_for_ms.max(inputs.stable_for_ms).unwrap_or(0);
     let window = match effective {
         CompletionSignal::Complete => Some(inputs.debounce_ms / 2),
         CompletionSignal::Inconclusive => Some(inputs.debounce_ms),
@@ -678,6 +713,7 @@ mod tests {
             debounce_ms: 2000,
             max_hold_ms: 45_000,
             signal,
+            unbalanced_delimiters: false,
             verdict: None,
         }
     }

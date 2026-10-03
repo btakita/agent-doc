@@ -72,6 +72,28 @@ pub fn merge_gate_row(conn: &Connection, row: &StoredGateRow) -> Result<i64> {
     .context("merge steering gate log row")
 }
 
+/// Persist learned gate weights (`#steergateperceptron`) unless the stored
+/// copy has already absorbed at least as many updates: a long-lived process
+/// holding older weights can never roll back a newer model.
+pub fn upsert_gate_model(
+    conn: &Connection,
+    state_key: &str,
+    payload: &str,
+    updates: u64,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO project_runtime_state (state_key, payload, updated_at_ms) \
+         VALUES (?1, ?2, ?3) \
+         ON CONFLICT(state_key) DO UPDATE SET \
+           payload = excluded.payload, updated_at_ms = excluded.updated_at_ms \
+         WHERE COALESCE(json_extract(project_runtime_state.payload, '$.updates'), -1) \
+               <= ?3",
+        params![state_key, payload, to_i64(updates)],
+    )
+    .context("upsert steering gate model")?;
+    Ok(())
+}
+
 /// Keep at most `max_rows` rows, dropping the oldest.
 pub fn prune_gate_rows(conn: &Connection, max_rows: i64) -> Result<usize> {
     Ok(conn.execute(

@@ -2567,6 +2567,11 @@ enum Commands {
         /// Watch the document and print one JSON line per settled steering batch
         #[arg(long)]
         follow: bool,
+        /// Print the learned completion gate's weights and each feature's
+        /// contribution to the latest decision (`#steergateperceptron`);
+        /// FILE narrows "latest" to that document
+        #[arg(long, conflicts_with_all = ["peek", "follow"])]
+        explain: bool,
     },
     /// Display markdown outline with section structure and token counts
     Outline {
@@ -5149,10 +5154,18 @@ fn try_main() -> anyhow::Result<()> {
         } => steering_cmd::run_dataset(file.as_deref(), json, limit),
         Commands::Steering {
             action: None,
+            explain: true,
+            file,
+            json,
+            ..
+        } => steering_cmd::run_explain(file.as_deref(), json),
+        Commands::Steering {
+            action: None,
             file,
             json,
             peek,
             follow,
+            ..
         } => {
             let file = file.context(
                 "agent-doc steering needs a session document: agent-doc steering <FILE>",

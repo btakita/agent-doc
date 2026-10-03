@@ -368,16 +368,6 @@ pub fn observe_with_mode(
         } else {
             completion_signal(&candidate.item.verbatim)
         };
-        let settle_inputs = SettleInputs {
-            quiet_for_ms,
-            stable_for_ms,
-            held_for_ms: stable_for_ms.unwrap_or(0),
-            debounce_ms: ctx.debounce_ms,
-            max_hold_ms: ctx.max_hold_ms,
-            signal,
-            verdict: ctx.classifier.cached_verdict(&candidate.content_hash),
-        };
-        let decision = settle_decision(settle_inputs);
         let chars = candidate.item.verbatim.chars().count() as u64;
         let (item_started_ms, item_started_chars) = match prior {
             Some(prior) => (
@@ -390,6 +380,42 @@ pub fn observe_with_mode(
                 .unwrap_or((ctx.now_ms, chars)),
         };
         let last_edit_ms = ctx.document_changed_ms.unwrap_or(ctx.now_ms);
+        let unbalanced_delimiters = candidate.item.change != SteeringChange::Deleted
+            && has_unbalanced_delimiters(&candidate.item.verbatim);
+        let features = GateFeatures {
+            trailing_token: trailing_token(&candidate.item.verbatim),
+            signal,
+            unbalanced_delimiters,
+            closed_list_item: candidate.item.change != SteeringChange::Deleted
+                && closed_list_item(current, &candidate.item.verbatim),
+            quiet_ms: quiet_for_ms.max(stable_for_ms).unwrap_or(0),
+            median_pause_ms: ctx.median_pause_ms,
+            typing_chars_per_min: typing_chars_per_min(
+                chars.saturating_sub(item_started_chars),
+                last_edit_ms.saturating_sub(item_started_ms),
+            ),
+            item_age_ms: ctx.now_ms.saturating_sub(item_started_ms),
+            component: match candidate.item.source {
+                SteeringSource::Queue => GateComponent::Queue,
+                SteeringSource::Exchange => GateComponent::Exchange,
+            },
+            debounce_ms: ctx.debounce_ms,
+            max_hold_ms: ctx.max_hold_ms,
+        };
+        // `#steergateperceptron`: the classifier sees the same features the
+        // decision log records; the deterministic floors stay inside
+        // `settle_decision`.
+        let settle_inputs = SettleInputs {
+            quiet_for_ms,
+            stable_for_ms,
+            held_for_ms: stable_for_ms.unwrap_or(0),
+            debounce_ms: ctx.debounce_ms,
+            max_hold_ms: ctx.max_hold_ms,
+            signal,
+            unbalanced_delimiters,
+            verdict: ctx.classifier.assess(&features, &candidate.content_hash),
+        };
+        let decision = settle_decision(settle_inputs);
         decisions.push(GateDecision {
             key: candidate.key.clone(),
             text_hash: gate_text_hash(&candidate.item.verbatim),
@@ -398,27 +424,7 @@ pub fn observe_with_mode(
             change: candidate.item.change,
             decision,
             tier: deterministic_tier(settle_inputs),
-            features: GateFeatures {
-                trailing_token: trailing_token(&candidate.item.verbatim),
-                signal,
-                unbalanced_delimiters: candidate.item.change != SteeringChange::Deleted
-                    && has_unbalanced_delimiters(&candidate.item.verbatim),
-                closed_list_item: candidate.item.change != SteeringChange::Deleted
-                    && closed_list_item(current, &candidate.item.verbatim),
-                quiet_ms: quiet_for_ms.max(stable_for_ms).unwrap_or(0),
-                median_pause_ms: ctx.median_pause_ms,
-                typing_chars_per_min: typing_chars_per_min(
-                    chars.saturating_sub(item_started_chars),
-                    last_edit_ms.saturating_sub(item_started_ms),
-                ),
-                item_age_ms: ctx.now_ms.saturating_sub(item_started_ms),
-                component: match candidate.item.source {
-                    SteeringSource::Queue => GateComponent::Queue,
-                    SteeringSource::Exchange => GateComponent::Exchange,
-                },
-                debounce_ms: ctx.debounce_ms,
-                max_hold_ms: ctx.max_hold_ms,
-            },
+            features,
         });
         if decision.deliver() {
             ready_keys.insert(candidate.key.clone());
@@ -1675,6 +1681,103 @@ mod tests {
         assert!(obs.ready.is_empty(), "{:?}", obs.ready);
         assert_eq!(obs.pending, 1);
         assert!(obs.recheck_after_ms.is_some());
+    }
+
+    /// One delivery observed while replaying a recorded edit stream.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct Delivered {
+        at_ms: u64,
+        verbatim: String,
+        possibly_partial: bool,
+    }
+
+    /// Replay a recorded edit stream (`(at_ms, queue lines)`) against a fake
+    /// clock that ticks every 250ms, observing at every tick the way the
+    /// hook does after each tool call.
+    fn replay(
+        stream: &[(u64, &str)],
+        until_ms: u64,
+        classifier: &dyn agent_doc_debounce::edit_settle::CompletionClassifier,
+    ) -> Vec<Delivered> {
+        let owned = BTreeSet::new();
+        let baseline = doc("- current task\n", EX);
+        let mut wm = seeded(&baseline, Some("current task"));
+        let mut delivered = Vec::new();
+        let mut now = 0;
+        while now <= until_ms {
+            let latest = stream.iter().rev().find(|(at, _)| *at <= now);
+            let (changed, current) = match latest {
+                Some((at, lines)) => (*at, doc(&format!("- current task\n{lines}"), EX)),
+                None => (0, baseline.clone()),
+            };
+            let ctx = ObserveContext {
+                now_ms: now,
+                document_changed_ms: Some(changed),
+                debounce_ms: 2_000,
+                binary_owned_queue_ids: &owned,
+                max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+                classifier,
+                median_pause_ms: Some(900),
+            };
+            let obs = observe(&wm, &current, &ctx);
+            delivered.extend(obs.ready.iter().map(|item| Delivered {
+                at_ms: now,
+                verbatim: item.verbatim.clone(),
+                possibly_partial: item.possibly_partial,
+            }));
+            wm = obs.next;
+            now += 250;
+        }
+        delivered
+    }
+
+    /// `#steergateperceptron`: fake clock + recorded edit stream. The seeded
+    /// learned gate makes exactly the deterministic gate's deliveries: the
+    /// tsift fragment is held (until max-hold delivers it flagged), a bare
+    /// `do [#id]` is delivered half a window after its last keystroke, and an
+    /// issue URL is delivered the same way.
+    #[test]
+    fn recorded_edit_stream_seeded_learned_gate_matches_deterministic() {
+        let stream: &[(u64, &str)] = &[
+            (0, "- Should we\n"),
+            (400, "- Should we release\n"),
+            (900, "- Should we release + publish the\n"),
+            // Abandoned mid-sentence; 10s later two more items arrive.
+            (10_000, "- Should we release + publish the\n- do\n"),
+            (10_200, "- Should we release + publish the\n- do [#\n"),
+            (10_400, "- Should we release + publish the\n- do [#abc]\n"),
+            (
+                20_000,
+                "- Should we release + publish the\n- do [#abc]\n- #subagent: https://github.com/btakita/agent-doc/issues/118\n",
+            ),
+        ];
+        let learned = agent_doc_debounce::learned_gate::LearnedGate::new(
+            agent_doc_debounce::learned_gate::GateWeights::seeded(),
+        );
+        let deterministic = replay(
+            stream,
+            50_000,
+            &agent_doc_debounce::edit_settle::DeterministicOnly,
+        );
+        assert_eq!(replay(stream, 50_000, &learned), deterministic);
+
+        let find = |text: &str| {
+            deterministic
+                .iter()
+                .find(|d| d.verbatim == text)
+                .unwrap_or_else(|| panic!("{text:?} never delivered: {deterministic:?}"))
+        };
+        let id = find("do [#abc]");
+        assert!(!id.possibly_partial);
+        assert!((11_400..=11_750).contains(&id.at_ms), "{id:?}");
+        let url = find("#subagent: https://github.com/btakita/agent-doc/issues/118");
+        assert!((21_000..=21_250).contains(&url.at_ms), "{url:?}");
+        // The fragment is never delivered as settled: only the max-hold
+        // (45s after it was first seen in this version) releases it, flagged.
+        let fragment = find("Should we release + publish the");
+        assert!(fragment.possibly_partial, "{fragment:?}");
+        assert!(fragment.at_ms >= 45_000, "{fragment:?}");
+        assert_eq!(deterministic.len(), 3, "{deterministic:?}");
     }
 
     /// `#steeringtypinggate` real case (tasks/software/tsift.md, 2026-10-03):

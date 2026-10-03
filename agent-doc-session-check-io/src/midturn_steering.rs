@@ -425,13 +425,28 @@ fn prepare_with_gate(
     let owned = cycle.as_ref().map(binary_owned_ids).unwrap_or_default();
     let observed_at_ms = now_ms();
     let document = crate::steering_gate_log::document_key(&root, file);
+    // `#steergateperceptron`: the online-learned gate answers first when
+    // enabled; the deterministic floors stay inside the settle decision, and
+    // the gate lives in the binary, so every harness gets the same answer.
+    let learned = crate::steering_gate_log::learned_classifier(
+        &root,
+        file,
+        &document,
+        observed_at_ms,
+        max_hold_ms,
+    );
+    let deterministic = agent_doc_debounce::edit_settle::DeterministicOnly;
+    let classifier: &dyn agent_doc_debounce::edit_settle::CompletionClassifier = match &learned {
+        Some(gate) => gate,
+        None => &deterministic,
+    };
     let ctx = ObserveContext {
         now_ms: observed_at_ms,
         document_changed_ms: mtime_ms(&meta),
         debounce_ms,
         binary_owned_queue_ids: if boundary { &owned } else { &empty },
         max_hold_ms,
-        classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
+        classifier,
         median_pause_ms: crate::steering_gate_log::median_pause_ms(
             &root,
             file,
@@ -488,6 +503,7 @@ fn prepare_with_gate(
         now_ms: ctx.now_ms,
         document_changed_ms: ctx.document_changed_ms,
         boundary,
+        learned_gate: learned.is_some(),
         decisions: std::mem::take(&mut observation.decisions),
     };
     let mut next = observation.next;

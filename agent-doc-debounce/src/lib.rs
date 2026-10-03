@@ -7,6 +7,7 @@
 
 pub mod admission_deadline;
 pub mod edit_settle;
+pub mod learned_gate;
 
 /// Maximum time a command may observe a pending Lazily current transition
 /// before returning control to the durable recovery state machine.

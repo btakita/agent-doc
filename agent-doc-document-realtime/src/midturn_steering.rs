@@ -162,6 +162,11 @@ pub struct SteeringWatermark {
     /// The cycle closed (or was superseded); observations stay silent.
     #[serde(default)]
     pub closed: bool,
+    /// Queue view of the PREVIOUS cycle's seed, kept when preflight re-seeds
+    /// the same cycle, so "new since the last cycle" (`queue_subagent_dispatch`)
+    /// stays stable across a re-entrant preflight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_cycle_queue: Option<Vec<String>>,
 }
 
 impl SteeringWatermark {
@@ -188,6 +193,7 @@ impl SteeringWatermark {
             last_observed_content_hash: Some(content_hash(baseline)),
             last_observed_stat: None,
             closed: false,
+            prior_cycle_queue: None,
         }
     }
 }
@@ -213,6 +219,21 @@ pub struct Observation {
     pub next: SteeringWatermark,
 }
 
+/// Whether the observation happens inside the running turn or at/after its
+/// boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObserveMode {
+    /// Mid-turn: the cycle is open and executing its current item.
+    InTurn,
+    /// Turn boundary (`respond` / `write --commit` terminal report, the
+    /// post-commit `session-check`, or a `steering` poll after close): the
+    /// cycle's current item is finished (consumed or answered), so its
+    /// removal or the answered prompt's resolution is closeout bookkeeping,
+    /// not steering, and every other unsurfaced change is reported in queue
+    /// terms for the NEXT cycle (`#closeout-steering`).
+    Boundary,
+}
+
 /// Compare `current` against the watermark and return settled new steering
 /// plus the advanced watermark. Pure: callers persist `next`.
 pub fn observe(
@@ -220,9 +241,20 @@ pub fn observe(
     current: &str,
     ctx: &ObserveContext<'_>,
 ) -> Observation {
+    observe_with_mode(watermark, current, ctx, ObserveMode::InTurn)
+}
+
+/// [`observe`] with an explicit [`ObserveMode`].
+pub fn observe_with_mode(
+    watermark: &SteeringWatermark,
+    current: &str,
+    ctx: &ObserveContext<'_>,
+    mode: ObserveMode,
+) -> Observation {
+    let boundary = mode == ObserveMode::Boundary;
     let mut candidates: Vec<Candidate> = Vec::new();
-    candidates.extend(exchange_candidates(watermark, current));
-    let queue = queue_alignment(watermark, current, ctx.binary_owned_queue_ids);
+    candidates.extend(exchange_candidates(watermark, current, boundary));
+    let queue = queue_alignment(watermark, current, ctx.binary_owned_queue_ids, boundary);
     candidates.extend(queue.candidates.iter().cloned());
 
     let doc_quiet = ctx
@@ -317,7 +349,11 @@ struct Candidate {
     item: SteeringItem,
 }
 
-fn exchange_candidates(watermark: &SteeringWatermark, current: &str) -> Vec<Candidate> {
+fn exchange_candidates(
+    watermark: &SteeringWatermark,
+    current: &str,
+    boundary: bool,
+) -> Vec<Candidate> {
     let without_agent_responses = strip_new_response_sections(&watermark.baseline, current);
     let set = exchange_steering_set_between(&watermark.baseline, &without_agent_responses);
     let mut out = Vec::new();
@@ -347,6 +383,13 @@ fn exchange_candidates(watermark: &SteeringWatermark, current: &str) -> Vec<Cand
                     SteeringChange::Added
                 };
                 (change, false, previous)
+            }
+            // At the boundary the answered prompt resolving is closeout, not
+            // steering.
+            RealtimeSteering::PromptDeleted { .. } | RealtimeSteering::PromptReduced { .. }
+                if boundary =>
+            {
+                continue;
             }
             RealtimeSteering::PromptDeleted { .. } => {
                 // The agent's own response checkpoint resolves the prompt it
@@ -491,12 +534,20 @@ fn queue_alignment(
     watermark: &SteeringWatermark,
     current: &str,
     binary_owned_ids: &BTreeSet<String>,
+    boundary: bool,
 ) -> QueueAlignment {
     let old = &watermark.acknowledged_queue;
     let new = queue_items(current);
     let old_keys: Vec<String> = old.iter().map(|norm| queue_identity(norm)).collect();
     let new_keys: Vec<String> = new.iter().map(|item| queue_identity(&item.norm)).collect();
-    let current_index = watermark.current_item.as_deref().and_then(|current_item| {
+    // At the boundary the current item is finished: its consumption is not
+    // an operator deletion and an edit to it is ordinary queue work.
+    let current_item = if boundary {
+        None
+    } else {
+        watermark.current_item.as_deref()
+    };
+    let current_index = current_item.and_then(|current_item| {
         let identity = queue_identity(current_item);
         old_keys
             .iter()
@@ -638,26 +689,68 @@ fn queue_alignment(
                 new_index,
                 new_len,
             } => {
-                let paired = old_len.min(new_len);
-                for offset in 0..paired {
-                    let (o, n) = (old_index + offset, new_index + offset);
-                    if binary_owned_line(&new[n].norm, binary_owned_ids) {
-                        delete(&mut alignment, o);
-                        alignment.events.push(QueueEvent::Keep(new[n].norm.clone()));
-                    } else {
-                        edit(&mut alignment, o, n);
+                // Pair a replaced line with its edit only when the texts are
+                // plausibly the same item; positional pairing misread a
+                // consumed head followed by an operator addition as two edits.
+                let pairs = pair_replaced_lines(
+                    &old[old_index..old_index + old_len],
+                    &new[new_index..new_index + new_len],
+                );
+                for o in 0..old_len {
+                    if !pairs.iter().any(|(po, _)| *po == o) {
+                        delete(&mut alignment, old_index + o);
                     }
                 }
-                for o in old_index + paired..old_index + old_len {
-                    delete(&mut alignment, o);
-                }
-                for n in new_index + paired..new_index + new_len {
-                    insert(&mut alignment, n);
+                for n in 0..new_len {
+                    let n_abs = new_index + n;
+                    match pairs.iter().find(|(_, pn)| *pn == n) {
+                        Some((o, _)) if binary_owned_line(&new[n_abs].norm, binary_owned_ids) => {
+                            delete(&mut alignment, old_index + o);
+                            alignment
+                                .events
+                                .push(QueueEvent::Keep(new[n_abs].norm.clone()));
+                        }
+                        Some((o, _)) => edit(&mut alignment, old_index + o, n_abs),
+                        None => insert(&mut alignment, n_abs),
+                    }
                 }
             }
         }
     }
     alignment
+}
+
+/// Greedy best-match pairing of a replaced block: `(old_offset, new_offset)`
+/// for every pair whose texts are similar enough to be one edited item
+/// (containment, or a character similarity ratio of at least 0.5).
+fn pair_replaced_lines(old: &[String], new: &[QueueItem]) -> Vec<(usize, usize)> {
+    let mut scored: Vec<(f32, usize, usize)> = Vec::new();
+    for (o, old_text) in old.iter().enumerate() {
+        for (n, new_item) in new.iter().enumerate() {
+            let new_text = new_item.norm.as_str();
+            let score = if new_text.contains(old_text.as_str()) || old_text.contains(new_text) {
+                1.0
+            } else {
+                similar::TextDiff::from_chars(old_text.as_str(), new_text).ratio()
+            };
+            if score >= 0.5 {
+                scored.push((score, o, n));
+            }
+        }
+    }
+    scored.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.1.cmp(&b.1))
+            .then(a.2.cmp(&b.2))
+    });
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
+    for (_, o, n) in scored {
+        if !pairs.iter().any(|(po, pn)| *po == o || *pn == n) {
+            pairs.push((o, n));
+        }
+    }
+    pairs
 }
 
 /// A queue line whose only directive targets are ids the binary itself added
@@ -919,6 +1012,142 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              finish the current item first."
         }
     }
+}
+
+/// Header line every closeout (turn-boundary) steering payload starts with.
+pub const CLOSEOUT_STEERING_MARKER: &str =
+    "[agent-doc] operator steering arrived during this turn and was not yet surfaced";
+
+/// The `--item` handle to claim a queue line with: its single `[#id]` (or
+/// `do #id`) reference when it has exactly one, else the verbatim line.
+pub fn claim_item_handle(verbatim: &str) -> String {
+    let ids = referenced_queue_ids(verbatim);
+    match ids.as_slice() {
+        [id] => format!("#{id}"),
+        _ => verbatim.trim().to_string(),
+    }
+}
+
+/// Tracked ids a queue line references (`[#id]` / `do #id`).
+pub fn referenced_queue_ids(text: &str) -> Vec<String> {
+    agent_doc_queue::queue_claim::referenced_queue_ids(text)
+}
+
+fn shell_single_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// The exact claim command for a subagent dispatch of `verbatim` in `document`.
+pub fn claim_command_for(document: &str, verbatim: &str) -> String {
+    format!(
+        "agent-doc queue claim {} --item {} --owner subagent:<label>",
+        shell_single_quote(document),
+        shell_single_quote(&claim_item_handle(verbatim))
+    )
+}
+
+/// Render unsurfaced steering for the turn-boundary report (`respond` /
+/// `write --commit` terminal output, post-commit `session-check`, or a
+/// `steering` poll after close). `None` when nothing is ready.
+///
+/// Unlike [`render_steering_context`] the current item is already closed, so
+/// queue work is framed for the NEXT cycle, and a `subagent` item is an
+/// explicit dispatch-now directive with its claim command: a harness whose
+/// PostToolUse hook never ran still gets it here, before the loop schedules
+/// its next re-entry (`#closeout-steering`).
+pub fn render_closeout_steering_context(
+    document: &str,
+    ready: &[SteeringItem],
+    pending: usize,
+) -> Option<String> {
+    if ready.is_empty() {
+        return None;
+    }
+    let mut out = format!(
+        "{CLOSEOUT_STEERING_MARKER} ({} item(s)) in {document}. The operator edited the session \
+         document while the turn ran and no mid-turn hook delivered it; every item below is \
+         verbatim and must be handled per its `dispatch` BEFORE you end the turn or schedule the \
+         next loop re-entry. Your response is already committed: do not re-run `respond`, do \
+         not `--force-disk`.",
+        ready.len()
+    );
+    for (idx, item) in ready.iter().enumerate() {
+        out.push_str(&format!(
+            "\n\n[steering {}/{}] dispatch={} source={} change={}",
+            idx + 1,
+            ready.len(),
+            item.dispatch.as_str(),
+            match item.source {
+                SteeringSource::Exchange => "exchange",
+                SteeringSource::Queue => "queue",
+            },
+            match item.change {
+                SteeringChange::Added => "added",
+                SteeringChange::Edited => "edited",
+                SteeringChange::Deleted => "deleted",
+            },
+        ));
+        if let Some(previous) = &item.previous {
+            out.push_str(&format!("\nprevious: {previous}"));
+        }
+        let label = if item.change == SteeringChange::Deleted {
+            "removed"
+        } else {
+            "verbatim"
+        };
+        out.push_str(&format!("\n{label}: {}", item.verbatim));
+        let action = match (item.dispatch, item.source) {
+            (SteeringDispatch::Subagent, _) => format!(
+                "DISPATCH NOW to a NEW background subagent (one per item). Claim it first with \
+                 `{}` so the loop and Stop hook do not drain it inline, then dispatch; if it \
+                 touches a repository, give the subagent its own git worktree outside the \
+                 IDE-watched project. Run `agent-doc queue release` when the subagent reports \
+                 back.",
+                claim_command_for(document, &item.verbatim)
+            ),
+            (SteeringDispatch::AddressNow, SteeringSource::Exchange) => format!(
+                "a new operator prompt: answer it in the next cycle (`agent-doc {document}`); do \
+                 not re-answer prompts already committed."
+            ),
+            _ => "queued in operator order: the next cycle drains it through the normal queue; \
+                  acknowledge it, nothing to start now."
+                .to_string(),
+        };
+        out.push_str(&format!("\naction: {action}"));
+    }
+    if pending > 0 {
+        out.push_str(&format!(
+            "\n\nThe operator is still typing {pending} more item(s); `agent-doc steering \
+             {document}` or the next preflight will surface them once settled."
+        ));
+    }
+    Some(out)
+}
+
+/// Live queue lines with item- or queue-scoped subagent intent that are NEW
+/// relative to `reference_queue` (normalized queue texts as of the previous
+/// cycle's seed). `None` means no reference exists, so every subagent-intent
+/// line counts as new. Returns the raw (marker-stripped) line texts in queue
+/// order. Claims are the caller's concern.
+pub fn subagent_dispatch_heads(content: &str, reference_queue: Option<&[String]>) -> Vec<String> {
+    let reference: Option<(BTreeSet<&str>, BTreeSet<String>)> = reference_queue.map(|queue| {
+        (
+            queue.iter().map(String::as_str).collect(),
+            queue.iter().map(|norm| queue_identity(norm)).collect(),
+        )
+    });
+    let presets = PresetContext::new(content, &[]);
+    queue_items(content)
+        .into_iter()
+        .filter(|item| {
+            reference.as_ref().is_none_or(|(norms, identities)| {
+                !norms.contains(item.norm.as_str())
+                    && !identities.contains(&queue_identity(&item.norm))
+            })
+        })
+        .filter(|item| presets.classify(&item.raw).0 == SteeringDispatch::Subagent)
+        .map(|item| item.norm)
+        .collect()
 }
 
 #[cfg(test)]
@@ -1303,6 +1532,104 @@ mod tests {
         };
         assert_eq!(observe(&wm, &current, &ctx(3_000)).ready.len(), 1);
         assert!(observe(&wm, &current, &ctx(10_000)).ready.is_empty());
+    }
+
+    #[test]
+    fn boundary_mode_treats_head_consumption_as_bookkeeping() {
+        let owned = BTreeSet::new();
+        let baseline = doc("- current task\n- later work\n", EX);
+        // Closeout consumed the current head; the operator added a line and
+        // edited a later one.
+        let current = doc(
+            "- later work, plus docs\n- #subagents do [#preflightdeadline]\n",
+            EX,
+        );
+        let wm = seeded(&baseline, Some("current task"));
+        let obs = observe_with_mode(&wm, &current, &quiet_ctx(&owned), ObserveMode::Boundary);
+        let changes: Vec<_> = obs
+            .ready
+            .iter()
+            .map(|item| (item.change, item.dispatch, item.current_item))
+            .collect();
+        assert_eq!(
+            changes,
+            vec![
+                (
+                    SteeringChange::Edited,
+                    SteeringDispatch::DrainAfterCurrent,
+                    false
+                ),
+                (SteeringChange::Added, SteeringDispatch::Subagent, false),
+            ],
+            "{:?}",
+            obs.ready
+        );
+        // In-turn, the same removal is an address-now deletion.
+        let in_turn = observe(&wm, &current, &quiet_ctx(&owned));
+        assert!(
+            in_turn
+                .ready
+                .iter()
+                .any(|item| item.change == SteeringChange::Deleted && item.current_item)
+        );
+    }
+
+    #[test]
+    fn closeout_render_is_an_explicit_dispatch_directive() {
+        let item = SteeringItem {
+            source: SteeringSource::Queue,
+            change: SteeringChange::Added,
+            dispatch: SteeringDispatch::Subagent,
+            current_item: false,
+            verbatim: "#subagents do [#preflightdeadline]".to_string(),
+            previous: None,
+            presets: Vec::new(),
+        };
+        let text = render_closeout_steering_context("tasks/bugs.md", &[item], 0).unwrap();
+        assert!(text.starts_with(CLOSEOUT_STEERING_MARKER), "{text}");
+        assert!(text.contains("DISPATCH NOW"), "{text}");
+        assert!(
+            text.contains(
+                "`agent-doc queue claim 'tasks/bugs.md' --item '#preflightdeadline' --owner subagent:<label>`"
+            ),
+            "{text}"
+        );
+        assert_eq!(
+            claim_item_handle("#gh-fix https://x/issues/1"),
+            "#gh-fix https://x/issues/1"
+        );
+        assert_eq!(shell_single_quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn subagent_dispatch_heads_are_new_subagent_intent_lines() {
+        let content = doc(
+            "- current task\n- #subagents do [#old]\n- #subagents do [#new1]\n- plain new\n",
+            EX,
+        );
+        let reference = vec![
+            "current task".to_string(),
+            "#subagents do [#old]".to_string(),
+        ];
+        assert_eq!(
+            subagent_dispatch_heads(&content, Some(&reference)),
+            vec!["#subagents do [#new1]".to_string()]
+        );
+        assert_eq!(
+            subagent_dispatch_heads(&content, None),
+            vec![
+                "#subagents do [#old]".to_string(),
+                "#subagents do [#new1]".to_string()
+            ]
+        );
+        let scoped = content.replace(
+            "<!-- agent:queue -->",
+            "<!-- agent:queue preset=\"#subagents\" -->",
+        );
+        assert_eq!(
+            subagent_dispatch_heads(&scoped, Some(&reference)),
+            vec!["#subagents do [#new1]".to_string(), "plain new".to_string()]
+        );
     }
 
     #[test]

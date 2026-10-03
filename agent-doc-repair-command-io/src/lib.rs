@@ -752,7 +752,15 @@ pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
         codex_final_gate,
         &agent_doc_closeout_runtime_io::session_check_effects(),
         agent_doc_session_check_io::session_check_settle_window(),
-    )
+    )?;
+    // `#closeout-steering`: the post-commit check also carries operator
+    // steering the closeout report has not surfaced yet (same agent-channel
+    // watermark, so nothing repeats).
+    agent_doc_session_check_io::midturn_steering::emit_closeout_steering(
+        file,
+        &mut std::io::stdout().lock(),
+    );
+    Ok(())
 }
 
 fn resume_captured_finalize_intent(
@@ -850,12 +858,13 @@ fn structural_target_refusal_clause(reason: &str) -> Option<&str> {
 /// transaction; if that resume is deferred, the new — landable — capture is
 /// what the loop retries.
 pub fn requote_unlandable_capture(file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
-    let capture = agent_doc_session_check_io::current_replayable_capture(file)?.with_context(|| {
-        format!(
-            "{} has no unmaterialized captured response to re-capture",
-            file.display()
-        )
-    })?;
+    let capture =
+        agent_doc_session_check_io::current_replayable_capture(file)?.with_context(|| {
+            format!(
+                "{} has no unmaterialized captured response to re-capture",
+                file.display()
+            )
+        })?;
     let Some(unlandable) = agent_doc_session_check_io::unlandable_capture_reason(&capture) else {
         anyhow::bail!(
             "captured response {} for {} is landable; refusing to rewrite it. Resume it unchanged with `agent-doc repair {} --resume-capture`.",

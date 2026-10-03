@@ -84,13 +84,7 @@ pub enum ClaimOutcome {
 
 impl QueueClaimLedger {
     /// Claim `item` for `owner` until `now_secs + ttl_secs`.
-    pub fn claim(
-        &mut self,
-        item: &str,
-        owner: &str,
-        now_secs: u64,
-        ttl_secs: u64,
-    ) -> ClaimOutcome {
+    pub fn claim(&mut self, item: &str, owner: &str, now_secs: u64, ttl_secs: u64) -> ClaimOutcome {
         let identity = claim_identity(item);
         let expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         let fresh = QueueClaim {
@@ -148,7 +142,11 @@ impl QueueClaimLedger {
     }
 
     /// Drop expired and closed claims. Returns how many were removed.
-    pub fn prune(&mut self, now_secs: u64, live_heads: Option<&HashSet<QueueItemIdentity>>) -> usize {
+    pub fn prune(
+        &mut self,
+        now_secs: u64,
+        live_heads: Option<&HashSet<QueueItemIdentity>>,
+    ) -> usize {
         let before = self.claims.len();
         self.claims.retain(|claim| {
             !claim.is_expired(now_secs)
@@ -176,6 +174,126 @@ impl QueueClaimLedger {
 /// and other priority markers through [`QueueItemIdentity::from_prompt`].
 pub fn claim_identity(item: &str) -> QueueItemIdentity {
     QueueItemIdentity::from_prompt(item.trim())
+}
+
+/// Tracked ids a queue line references as `[#id]` or `do #id`, lowercased, in
+/// first-seen order. Preset tags (`#subagents`, `#gh-fix`) are not references,
+/// so `#subagents do [#a]` references exactly `a`.
+pub fn referenced_queue_ids(text: &str) -> Vec<String> {
+    let lower = text.to_ascii_lowercase();
+    let is_id_char = |ch: char| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_');
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |id: &str| {
+        if !id.is_empty() && id.chars().all(is_id_char) && !out.iter().any(|seen| seen == id) {
+            out.push(id.to_string());
+        }
+    };
+    let mut rest = lower.as_str();
+    while let Some(start) = rest.find("[#") {
+        let after = &rest[start + 2..];
+        match after.find(']') {
+            Some(end) => {
+                push(&after[..end]);
+                rest = &after[end + 1..];
+            }
+            None => break,
+        }
+    }
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    for pair in words.windows(2) {
+        if pair[0] == "do"
+            && let Some(id) = pair[1].strip_prefix('#')
+        {
+            let id: String = id.chars().take_while(|ch| is_id_char(*ch)).collect();
+            push(&id);
+        }
+    }
+    out
+}
+
+/// A `queue claim` / `queue release` `--item` that names no live queue head
+/// (or names several). An operator/agent usage error with a specific remedy,
+/// not an Agent Doc turn failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueClaimMiss {
+    pub item: String,
+    pub live_heads: Vec<String>,
+    /// Several live heads reference the `#id`; empty for a plain miss.
+    pub ambiguous: Vec<String>,
+}
+
+impl std::fmt::Display for QueueClaimMiss {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let quote = |items: &[String]| {
+            items
+                .iter()
+                .map(|item| format!("{item:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        if self.ambiguous.is_empty() {
+            write!(
+                f,
+                "no live queue head matches {:?}; live heads: {}. Pass `--item` as a head's `#id` \
+                 or its exact queue line text.",
+                self.item,
+                if self.live_heads.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    quote(&self.live_heads)
+                }
+            )
+        } else {
+            write!(
+                f,
+                "{:?} matches several live queue heads: {}. Pass `--item` as the exact queue line \
+                 text.",
+                self.item,
+                quote(&self.ambiguous)
+            )
+        }
+    }
+}
+
+impl std::error::Error for QueueClaimMiss {}
+
+/// Resolve a claim `--item` to the live queue head it names.
+///
+/// The item matches a head by claim identity (the exact line, marker-
+/// invariant, or a bare `#id` for an id-backed head). When that misses and the
+/// item is an `#id`, it matches the single live head that REFERENCES the id,
+/// so `#a` claims a `#subagents do [#a]` head whose identity is its full text.
+pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String, QueueClaimMiss> {
+    let identity = claim_identity(item);
+    if let Some(head) = live_heads
+        .iter()
+        .find(|head| claim_identity(head) == identity)
+    {
+        return Ok(head.clone());
+    }
+    if let QueueItemIdentity::Id(id) = &identity {
+        let referencing: Vec<String> = live_heads
+            .iter()
+            .filter(|head| referenced_queue_ids(head).iter().any(|r| r == id))
+            .cloned()
+            .collect();
+        match referencing.len() {
+            1 => return Ok(referencing[0].clone()),
+            0 => {}
+            _ => {
+                return Err(QueueClaimMiss {
+                    item: item.trim().to_string(),
+                    live_heads: live_heads.to_vec(),
+                    ambiguous: referencing,
+                });
+            }
+        }
+    }
+    Err(QueueClaimMiss {
+        item: item.trim().to_string(),
+        live_heads: live_heads.to_vec(),
+        ambiguous: Vec::new(),
+    })
 }
 
 /// A set of claimed queue items, consulted by the drainability filter.
@@ -241,6 +359,46 @@ mod tests {
         assert_eq!(ledger.claims.len(), 1);
         assert_eq!(ledger.release("do [#a]").unwrap().owner, "subagent:b");
         assert!(ledger.release("do [#a]").is_none());
+    }
+
+    #[test]
+    fn hash_id_resolves_a_preset_prefixed_head() {
+        let heads = vec![
+            "#gh-fix https://x/issues/110".to_string(),
+            "#subagents do [#preflightdeadline]".to_string(),
+        ];
+        assert_eq!(
+            resolve_claim_target("#preflightdeadline", &heads).unwrap(),
+            "#subagents do [#preflightdeadline]"
+        );
+        assert_eq!(
+            resolve_claim_target("#subagents do [#preflightdeadline]", &heads).unwrap(),
+            "#subagents do [#preflightdeadline]"
+        );
+        let miss = resolve_claim_target("#nosuch", &heads).unwrap_err();
+        let message = miss.to_string();
+        assert!(
+            message.starts_with("no live queue head matches \"#nosuch\"; live heads: "),
+            "{message}"
+        );
+        assert!(
+            message.contains("#subagents do [#preflightdeadline]"),
+            "{message}"
+        );
+        let twins = vec![
+            "#subagents do [#a]".to_string(),
+            "review do [#a] later".to_string(),
+        ];
+        assert!(
+            !resolve_claim_target("#a", &twins)
+                .unwrap_err()
+                .ambiguous
+                .is_empty()
+        );
+        assert_eq!(
+            referenced_queue_ids("#subagents do [#A] and do #b-2"),
+            vec!["a", "b-2"]
+        );
     }
 
     #[test]

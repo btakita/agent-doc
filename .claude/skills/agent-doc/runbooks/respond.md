@@ -48,6 +48,15 @@ rule. This runbook carries the rest.
     item yourself and record the dispatch in your response.
   OpenCode and other hook-less harnesses poll `agent-doc steering <FILE>`
   (`--json` for the typed form) between long-running steps.
+  Steering does not depend on the hook (`#closeout-steering`): whatever no hook
+  delivered is appended to the `respond` / `write --commit` terminal output and
+  the post-commit `session-check` as `[agent-doc] operator steering arrived
+  during this turn and was not yet surfaced` (once), and `agent-doc steering`
+  keeps reporting it after the cycle closes. A `subagent` item there is a
+  dispatch-now directive with its claim command; handle it before ending the
+  turn or scheduling the next re-entry. The next preflight lists new
+  subagent-intent queue items under `queue_subagent_dispatch` (never in
+  `selected_queue_prompts`): run each `claim_command`, then dispatch it.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay

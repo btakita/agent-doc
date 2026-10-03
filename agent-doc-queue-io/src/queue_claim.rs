@@ -21,8 +21,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_queue::queue_claim::{
     ClaimOutcome, ClaimedQueueItems, QueueClaim, QueueClaimLedger, claim_identity,
+    resolve_claim_target,
 };
-use agent_doc_queue::queue_continuation::live_queue_head_identities;
+use agent_doc_queue::queue_continuation::{live_queue_head_identities, live_queue_head_texts};
 use anyhow::{Context, Result, bail};
 
 const QUEUE_CLAIMS_STATE_KIND: &str = "queue_claims";
@@ -140,17 +141,14 @@ pub fn claim(
     }
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("read {} to validate the claimed queue item", file.display()))?;
-    let identity = claim_identity(item);
-    let live = live_queue_head_identities(&content).unwrap_or_default();
-    if !live.contains(&identity) {
-        bail!(
-            "{item:?} is not a live head of the agent:queue in {}; claim the `#id` or the exact queue line text",
-            file.display()
-        );
-    }
+    // A miss is a typed usage error (`QueueClaimMiss`) naming the live heads,
+    // never a bare string: the CLI reports it as-is instead of wrapping it in
+    // the generic turn-failure notice.
+    let target = resolve_claim_target(item, &live_queue_head_texts(&content).unwrap_or_default())?;
+    let identity = claim_identity(&target);
     let now = now_secs();
     let result = mutate_ledger(file, |ledger| {
-        let outcome = ledger.claim(item, owner, now, ttl_secs);
+        let outcome = ledger.claim(&target, owner, now, ttl_secs);
         let stored = ledger
             .claims
             .iter()
@@ -174,7 +172,25 @@ pub fn claim(
 
 /// Release the claim on `item`. Returns the released claim, if there was one.
 pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
-    let released = mutate_ledger(file, |ledger| Ok(ledger.release(item)))?;
+    // Release by the same resolution `claim` used, so `--item #id` releases a
+    // `#subagents do [#id]` head; fall back to the literal item (a closed head
+    // can still hold a stale claim worth releasing).
+    let target = match std::fs::read_to_string(file) {
+        Ok(content) => {
+            resolve_claim_target(item, &live_queue_head_texts(&content).unwrap_or_default())
+                .unwrap_or_else(|_| item.to_string())
+        }
+        Err(err) => {
+            eprintln!(
+                "[queue-claim] WARNING: could not read {} to resolve {item:?}; releasing it literally: {err}",
+                file.display()
+            );
+            item.to_string()
+        }
+    };
+    let released = mutate_ledger(file, |ledger| {
+        Ok(ledger.release(&target).or_else(|| ledger.release(item)))
+    })?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -263,9 +279,17 @@ mod tests {
         let doc = write_doc(dir.path(), &["fix issue 109 now", "fix issue 110 now"]);
         let content = std::fs::read_to_string(&doc).unwrap();
 
+        let miss = claim(&doc, "not in the queue", "subagent:x", 60).unwrap_err();
         assert!(
-            claim(&doc, "not in the queue", "subagent:x", 60).is_err(),
-            "claiming a non-head must fail loudly"
+            miss.downcast_ref::<agent_doc_queue::queue_claim::QueueClaimMiss>()
+                .is_some(),
+            "claiming a non-head must fail loudly with a typed miss: {miss:#}"
+        );
+        assert!(
+            format!("{miss}").starts_with(
+                "no live queue head matches \"not in the queue\"; live heads: \"fix issue 109 now\""
+            ),
+            "{miss}"
         );
         let (outcome, stored) = claim(&doc, "🚧 fix issue 109 now", "subagent:gh109", 60).unwrap();
         assert_eq!(outcome, ClaimOutcome::Created);
@@ -284,5 +308,26 @@ mod tests {
         assert!(release(&doc, "fix issue 110 now").unwrap().is_some());
         assert!(!claimed_items_for_content(&doc, &content).claims("fix issue 110 now"));
         assert!(release(&doc, "fix issue 110 now").unwrap().is_none());
+    }
+
+    #[test]
+    fn claim_by_hash_id_targets_a_preset_prefixed_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(
+            dir.path(),
+            &[
+                "#gh-fix https://x/issues/110",
+                "#subagents do [#preflightdeadline]",
+            ],
+        );
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let (_, stored) = claim(&doc, "#preflightdeadline", "subagent:pd", 60).unwrap();
+        assert_eq!(stored.item_text, "#subagents do [#preflightdeadline]");
+        assert!(
+            claimed_items_for_content(&doc, &content).claims("#subagents do [#preflightdeadline]"),
+            "the drainability filter must see the claim on the full head"
+        );
+        assert!(release(&doc, "#preflightdeadline").unwrap().is_some());
+        assert!(load_ledger(&doc).unwrap().claims.is_empty());
     }
 }

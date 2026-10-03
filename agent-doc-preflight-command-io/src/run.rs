@@ -2003,6 +2003,26 @@ pub fn run_with_options_to_writer(
             &selected_free_text_queue_heads,
         )?;
     }
+    // `#closeout-steering`: new subagent-intent queue lines the cycle must
+    // dispatch (claimed ones excluded). Computed before the seed below so it
+    // is judged against the previous cycle's steering seed.
+    let queue_subagent_dispatch = agent_doc_preflight_io::queue_subagent_dispatch_entries(
+        file,
+        &agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
+            file,
+            &diff_result_with_current.current,
+        ),
+    );
+    if !queue_subagent_dispatch.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_subagent_dispatch_listed file={} count={}",
+                file.display(),
+                queue_subagent_dispatch.len()
+            ),
+        );
+    }
     // `#midturn-steering`: seed the cycle-scoped steering watermark from the
     // document this cycle admitted, so the PostToolUse hook can hand the
     // running turn any operator edits made after this point. Best-effort: a
@@ -2299,6 +2319,9 @@ pub fn run_with_options_to_writer(
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,
+        queue_subagent_dispatch_guidance: (!queue_subagent_dispatch.is_empty())
+            .then(|| agent_doc_preflight_io::QUEUE_SUBAGENT_DISPATCH_GUIDANCE.to_string()),
+        queue_subagent_dispatch,
         queue_head_annotation_guidance:
             agent_doc_queue::queue_head_annotation::queue_head_annotation_guidance(
                 &queue_head_annotations,

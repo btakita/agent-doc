@@ -825,6 +825,12 @@ How it went out:
 When they report back, I'll integrate both serially with one `make install`, release the claims, and close the items.
 
 Session size: the exchange is 771 lines / 30 sections. The queue is active, so I'm not compacting.
+
+### Re: codexsteerinterrupt (claimed, in flight) — opus-5.5 · 2026-10-03T19:33-04:00
+
+> **Queue prompt:** do [#codexsteerinterrupt]
+
+This cycle selected this head, but a background subagent already has it in its worktree. The claim expires at 1791077478. `installworktreecontrollers` is claimed by a subagent too. Running either one here would duplicate their work, so nothing ran inline. Every remaining head is claimed, so the queue has no drainable work (`queue_drainable_head_count=0`). Both items close when their subagents report and I integrate them with one `make install`.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -838,8 +844,8 @@ Session size: the exchange is 771 lines / 30 sections. The queue is active, so I
 - ~~do [#qsubattr2]~~
 - ~~do [#qsubattr3]~~
 - ~~do [#qsubattr4]~~
-- ~~⏭️ do [#qsubattr5]~~
-- do [#codexsteerinterrupt]
+- ~~do [#qsubattr5]~~
+- ⏭️ do [#codexsteerinterrupt]
 - do [#installworktreecontrollers]
 - ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/120~~
 - ~~#subagents: https://github.com/btakita/agent-doc/issues/121~~

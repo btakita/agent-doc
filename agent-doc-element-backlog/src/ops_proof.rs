@@ -71,13 +71,16 @@ pub fn classify_ops_proof_completion(item: &PendingItem) -> Option<String> {
         return None;
     }
 
-    // #opsproof-falsepos: an open actionable item must NOT be reaped just
-    // because its prose cites already-landed dependency work. The completion
-    // marker must be the item's own leading status verb. Gated items were
-    // deliberately code-completed by the agent, so a proven marker anywhere in
-    // their text legitimately closes them.
+    // #opsproof-falsepos: an item must NOT be reaped just because its prose
+    // cites already-landed dependency work. The completion marker must be the
+    // item's own leading status verb. A gated item may also carry it as a
+    // trailing status update ("... SHIPPED abc1234 (CI green)"), the shape
+    // agents append when a review gate is satisfied. A marker buried mid-text
+    // is a cited prerequisite: a review item filed with "field shipped
+    // 2f5da61df" in its unblock condition was reaped the moment it was added
+    // (#steergatenamodata).
     let is_gated = matches!(item.state, PendingState::Gated);
-    if !is_gated && !marker_is_leading_status(&upper) {
+    if !marker_is_leading_status(&upper) && !(is_gated && marker_is_trailing_status(&upper)) {
         return None;
     }
 
@@ -115,6 +118,20 @@ pub const LEADING_STATUS_WORDS: usize = 4;
 /// tokens. `upper` must already be ASCII-uppercased.
 pub fn marker_is_leading_status(upper: &str) -> bool {
     has_ops_completion_marker(&leading_status_segment(upper))
+}
+
+/// True when an ops-completion marker sits in the item's final clause (after
+/// the last `. ` or `; ` break) together with a commit hash: a status update
+/// appended to a gated item. `upper` must already be ASCII-uppercased.
+pub fn marker_is_trailing_status(upper: &str) -> bool {
+    let trimmed = upper.trim_end().trim_end_matches('.');
+    let start = [". ", "; "]
+        .iter()
+        .filter_map(|sep| trimmed.rfind(sep).map(|idx| idx + sep.len()))
+        .max()
+        .unwrap_or(0);
+    let clause = &trimmed[start..];
+    has_ops_completion_marker(clause) && contains_commit_hash(clause)
 }
 
 pub fn leading_status_segment(upper: &str) -> String {
@@ -280,6 +297,28 @@ mod tests {
             "review-gated path SHIPPED abcdef1 (CI 2 passed)",
         ));
         assert_eq!(result.as_deref(), Some("commit+ci"));
+    }
+
+    /// #steergatenamodata: a review item that cites its prerequisite commit in
+    /// its unblock condition is not done; it was reaped the moment it was added.
+    #[test]
+    fn rejects_gated_item_citing_a_prerequisite_commit_mid_text() {
+        let result = classify_ops_proof_completion(&item(
+            "steergatenamodata",
+            PendingState::Gated,
+            "[agent-doc] Rerun the model evaluation on real pause points: once >= 200 labelled rows carry text_tail (0 today; field shipped 2f5da61df), run the eval script. Integrate only if it beats the perceptron. Results: tasks/agent-doc/eval.md.",
+        ));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn accepts_gated_trailing_status_update() {
+        let result = classify_ops_proof_completion(&item(
+            "trailing",
+            PendingState::Gated,
+            "Await the live proof of the captured splice. Proof landed and fix SHIPPED abcdef1",
+        ));
+        assert_eq!(result.as_deref(), Some("commit"));
     }
 
     #[test]

@@ -1929,7 +1929,32 @@ fn apply_pending_and_status_mutations_with_mode(
                         )?;
                         return Ok(());
                     }
-                    backlog_cmd::with_pending_write_transaction(file, tracked_work_envelope)?;
+                    let transaction =
+                        backlog_cmd::with_pending_write_transaction(file, tracked_work_envelope);
+                    if transaction.is_err() {
+                        // `#opsproof-samecycle-add`: a retained (deferred) publish
+                        // still lands this cycle's adds later, and the next preflight
+                        // must not ops-proof-reap them as pre-existing items. The ids
+                        // are intent, known once the envelope planned, so record them
+                        // before propagating; on a hard failure the exemption is inert.
+                        let planned = added_ids.borrow().as_ref().map(|(same, review, _)| {
+                            review
+                                .iter()
+                                .chain(same.iter())
+                                .cloned()
+                                .collect::<Vec<_>>()
+                        });
+                        if let Some(ids) = planned.filter(|ids| !ids.is_empty())
+                            && let Err(err) =
+                                agent_doc_cycle_state_io::record_pending_added_ids(file, &ids)
+                        {
+                            eprintln!(
+                                "[write] warning: failed to record same-cycle added ids for {} before propagating the tracked-work error: {err:#}",
+                                file.display()
+                            );
+                        }
+                    }
+                    transaction?;
                     // `#mutplanwitness`: the envelope published. Anything that
                     // retains or fails the mutation write propagates above and
                     // leaves this unset, which is exactly what the resume,

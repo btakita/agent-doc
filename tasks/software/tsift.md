@@ -20,6 +20,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -449,12 +450,72 @@ The exchange is 304 lines, but the queue is active, so I'm not compacting.
 - The scratch snapshot is at `worktrees/haiven-sdk-codegen-trace`.
 
 The queue is drained: all three subagent items are closed.
+
+> agent-doc conflict: queue `#tsiftindexesinvalidate` had concurrent edits; operator version kept: "- #subagent: do [#tsiftindexesinvalidate]"; agent version not merged: "- do [#tsiftindexesinvalidate]".
+> agent-doc conflict: queue `#haivensdkfollow` had concurrent edits; operator version kept: "- #subagent: do [#haivensdkfollow]"; agent version not merged: "- do [#haivensdkfollow]".
+> agent-doc conflict: queue `#projectlevelopt` had concurrent edits; operator version kept: "- #subagent: do [#projectlevelopt]"; agent version not merged: "- do [#projectlevelopt]".
+### Re: #sdktraceroot done — opus-5.5 · 2026-10-03T05:15-04:00
+
+> **Queue prompt:** #subagents: [#sdktraceroot]
+
+**Done.** Most unjoined trace nodes came from importing the trace into a checkout at the wrong revision. Indexing at the trace's own revision also turned up four tsift defects, now fixed in `daac4fe`. CI is green, `make check` exited 0, and it is installed.
+
+| Graph | joined | unmatched |
+|---|---|---|
+| Earlier import, `haiven-contracts` scope | 309 | 1,307 |
+| haiven-sdk root, operator checkout, fixed tsift | 435 | 1,181 |
+| Snapshot at the trace's revision, old tsift | 1,359 | 257 |
+| Snapshot at the trace's revision, fixed tsift | **1,612** | **4** |
+
+- **Revision mismatch, the main cause:**
+  - The trace pins haiven-contracts `1ce0581` (2026-10-03). The checkout's submodule is at `f634a0f`, 48 commits behind.
+  - The operator checkout is also on `feat/unreal-conformance-runner`, not `feat/codegen-trace`, so 1,051 of the declarations the trace points to aren't in that tree.
+  - At the trace's revision, every contract, REST operation and component joins, and 21 of 23 events do.
+- **tsift defects fixed in `daac4fe`:**
+  - TypeScript class methods weren't indexed (227 nodes: the generated REST and WebSocket client methods).
+  - C++ variables at file or namespace scope weren't indexed (22: the Unreal SDK's event wire names).
+  - C# `using X = Y;` aliases weren't indexed (4).
+  - `model.json`'s `ws.requests` object was ignored, which dropped `carried_by` links. They went from 23 to 29.
+
+  Four regression tests were added, and the three language tests fail when their fixes are removed.
+- **The last 4 are haiven-sdk naming gaps:**
+  - The `MessageType` and `WsErrorCode` vocabularies don't carry their schema ids, and `ErrorCode` matches three schemas instead of one.
+  - The `chat.message` and `chat.message.updated` events have no AsyncAPI operation.
+
+**Follow-ups filed:**
+- **`#extractorversion`:** existing indexes don't re-extract after an extractor change, so the new symbols appear only after `tsift index --rebuild`. Until it's fixed, other indexed repos need `--rebuild`.
+- **`#sdktracenaming`** [recommended]: changes for haiven-sdk PR #62. Add schema ids and message keys to the trace, and have the import warn when the contracts pin differs from the indexed submodule.
+
+**Left in place:**
+- The haiven-sdk root `.tsift/` was rebuilt, and its trace import refreshed.
+- The scratch snapshot is at `worktrees/haiven-sdk-codegen-trace`.
+
+The queue is drained: all three subagent items are closed.
+
+### Re: three subagents dispatched — opus-5-5 · 2026-10-03T15:06-04:00
+
+I claimed each queue item and started it in its own background subagent and worktree, all outside agent-loop. Each one runs the `#spec-test-build-install-commit-push` preset.
+
+| Item | Subagent | Worktree | Pushes to |
+|---|---|---|---|
+| `#tsiftindexesinvalidate` | `tsiftidx` | `worktrees/tsift-extractorversion` | tsift `main`, no force |
+| `#projectlevelopt` | `luaulegacy` | `worktrees/tsift-luaulegacy` | tsift `main`, no force |
+| `#haivensdkfollow` | `haivensdk` | `worktrees/haiven-sdk-tracenaming`, from `origin/feat/codegen-trace` | PR #62 branch, no force |
+
+- **Concurrent tsift pushes.** Two agents are pushing to tsift `main`. Each one rebases onto the latest `origin/main` and re-runs `make check` before pushing.
+- **haiven-sdk checkout is left alone.** `src/haiven-dev/src/haiven-sdk` belongs to another live session, so that agent works only in its fresh worktree.
+- **Contracts-lock warning.** If that warning belongs in tsift's importer rather than in haiven-sdk codegen, the haiven-sdk agent reports the exact change instead of editing tsift. I'll queue it from that report.
+
+Each claim is released when its subagent reports back, and the item closes in that cycle.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- #subagent: do [#tsiftindexesinvalidate]
+- #subagent: do [#haivensdkfollow]
+- #subagent: do [#projectlevelopt]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.444
+
+- **`queue: stop` removed (#queuestopremove).** A queue is either running (no control, `go`, or
+  `start`) or held (`queue: pause`). Drains and halts clear the control instead of writing `stop`,
+  so a head added later simply runs; the binary writes `pause` only for a hold it must keep (a
+  consumed `--- stop` fence, an owner-pane wedge, an operator-command preemption). A legacy
+  frontmatter `queue: stop` / lone `queue_active: false` reads as no control and is dropped on the
+  next write; a legacy `stop` marker token reads as `pause`. An empty frontmatter block now parses.
+- **Reactive realtime steering (#steeringwake, #steeringtypinggate, #subagentintent).** An idle
+  session is woken for unsurfaced operator steering through the supervisor's idle-queue dispatch
+  (claims, drain leases and prompt-ready detection respected; durable wake receipts), the steering
+  hook keeps reporting after closeout, and `#subagent` / `#sub-agent(s)` heads are drainable like
+  `#subagents`. A deterministic typing-completion gate shared with preflight holds text that is
+  still being typed (trailing function word, unbalanced backtick/quote/paren, dangling `,` `:` `+`)
+  until settled or the max-hold (`agent_doc_steering_max_hold_ms`, default 45s, flagged
+  `possibly_partial`). Delivery adapters cover Claude Code, Codex, OpenCode, Grok Build and Cursor
+  (Cursor has no idle wake: it is not a supervisor-owned pane).
+- **One turn-admission predicate (GH #118, #admissionsteeringagree).** Preflight and session-check
+  derive "may this turn continue" from one shared function, and no recovery either names
+  (`commit`, `repair --apply-recovery`, `reset --from-current`) can absorb unanswered operator
+  steering; `reset --from-current` needs `--absorb-steering` to fold it in.
+- **Preflight waits for a queue item still being typed (#qheadcomposing).** A cycle started
+  mid-keystroke no longer quotes a half-typed line, and closeout no longer logs a finished line as
+  removed.
+- **No-changes explanation (#noopnamefault).** A no-changes preflight names the source it read and
+  any queue items waiting behind a hold, and never advises saving after a live-editor read.
+- **Closeout fixes (#closeoutstrandedmsg).** A late mix of `--done` and `#ftstrike` strikes commits
+  forward instead of being refused as stranded drift; a recovered closeout reports only its terminal
+  outcome.
+- **`presets:` alias** for `prompt_presets:` (writes keep the operator's spelling; both present
+  merge with `prompt_presets` winning).
+- **JetBrains (GH #116).** The Agent Doc Actions popup defaults to Ctrl+Shift+Alt+D (Windows never
+  delivers Alt+Space), is reachable from the Tools and editor context menus, and lists Stop Agent
+  and Kill Supervisor. Plugin 0.2.485.
+- **Python 3.11 `make check` (GH #117).** Fixed a backslash in an f-string expression and added
+  `make python-compat-check` so every script parses under the minimum Python.
+
 ## 0.35.443
 
 - **Mid-turn operator steering.** A Claude Code / Codex `PostToolUse` hook

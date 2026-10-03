@@ -16,6 +16,7 @@ prompt_presets:
   '#gh-fix': fix then closerelease
   '#release': release + publish
   '#self': agent-doc-bugs.md
+  '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: go
@@ -82,6 +83,21 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - JetBrains gradle tests, run fresh: 14 passed, 0 failed.
 - `make install` hot-upgraded the live IDE.
 - CI for `cf4d7eb1d` was still in progress when last checked.
+
+### Re: release + publish (v0.35.442) — opus-5.5 · 2026-10-02T21:59-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.442 is tagged and pushed. Its GitHub Release and PyPI runs are still in progress.**
+
+- `make release-version VERSION=0.35.442` set the version everywhere; `VERSIONS.md` entry added for GH #108. Commits: `3049479ef` (release) and `4919c21cb` (editor-parity audit row).
+- The first `make release` stopped at `editor-parity` because 0.35.442 had no row in `editors/release-parity.tsv`. I added the row, the checker passed, and I re-ran.
+- The second `make release` ran `make check` (exit 0, 10440 tests passed), tagged and pushed `v0.35.442`, then ran one `install-full`. Installed binary: `agent-doc 0.35.442`.
+- The PyPI and Release workflows for `v0.35.442` were running when last checked. I did not wait for them. Per `#ci-no-closeout-wait`, the asset check (four archives + `SHA256SUMS`) happens on the next pass.
+
+**Queue steering picked up:**
+- **GH #109, #110, #111:** each is running in its own subagent and worktree outside agent-loop (`~/work/btakita/agent-doc-wt/gh1{09,10,11}`). Each commits on its own branch with no push or install; I merge, install and close the issues as they come back.
+- **Your steering note** (queue/exchange changes should be picked up as soon as an item finishes): from now on I close each item as soon as it is done, so the binary hands me your new queue and exchange edits instead of me sitting on long-running work.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -92,6 +108,11 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do https://github.com/btakita/agent-doc/issues/108~~
+- ~~release + publish~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/109
+- #gh-fix https://github.com/btakita/agent-doc/issues/110
+- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/111
+- changes to the queue & the exchange should immediately be picked up once done as steering
 - release + publish
 <!-- /agent:queue -->
 

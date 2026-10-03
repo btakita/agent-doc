@@ -381,9 +381,9 @@ The exchange is past the size warning (288 lines). I'm continuing the queue.
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~We need to remove `queue: stop` entirely. This is too confusing.~~
 - ~~#subagent: Add `presets` as an alias to `prompt_presents`.~~
-- #subagent: tsift.md missed part the queue item that I wrote: `> **Queue prompt:** Should we release + publish the`
-- #subagent: https://github.com/btakita/agent-doc/issues/116
-- #subagent: https://github.com/btakita/agent-doc/issues/117
+- ~~#subagent: tsift.md missed part the queue item that I wrote: `> **Queue prompt:** Should we release + publish the`~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#subagent: https://github.com/btakita/agent-doc/issues/116~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#subagent: https://github.com/btakita/agent-doc/issues/117~~ — auto-struck: answered this cycle (#ftstrike)
 - #subagent: https://github.com/btakita/agent-doc/issues/118
 - release + publish
 <!-- /agent:queue -->

@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -457,6 +456,43 @@ GH #119 is fixed and closed, and the fix is out in **v0.35.445**. A gitignored s
 - I'm not working on `#steergatenamo`. It's waiting until the decision log has collected real data.
 
 The exchange is long (392 lines), but the queue is active, so I'm not compacting.
+
+### Re: #steergatenamo — pretrained end-of-turn models — opus-5.5 · 2026-10-03T13:04-04:00
+
+> **Queue prompt:** do [#steergatenamo]
+
+The evaluation is done, and the decision is to **integrate nothing yet**. A gated review item, `#steergatenamodata`, will rerun it on real data once that exists. Full write-up: `tasks/agent-doc/eval-steergatenamo.md`.
+
+**The real dataset couldn't be used.** `steering_gate_log` holds 1 row and 0 labels. Its rows also kept only a hash of the text, so no text model could ever have been scored on them. I fixed that: each logged decision now keeps `text_tail`, the last 280 characters of the item it judged. That text stays in local `state.db`; it's what a model would have seen at that pause.
+
+**Proxy evaluation instead.** I used 171 of your own submitted prompts from local Claude Code transcripts. Each full prompt counts as finished, and word-boundary prefixes of it count as still typing. That gives 507 examples, scored with grouped 5-fold held-out evaluation. Only aggregates were printed.
+
+| | AUC alone | AUC with rules (held out) | premature at 90% delivery | size | latency |
+|---|---|---|---|---|---|
+| rules only | 0.80 | 0.78 | 58% | — | — |
+| Namo v1 English | 0.75 | 0.82 | 42% | 136 MB | 2.5 ms |
+| turnsense | 0.87 | **0.89** | **34%** | 176 MB | 18 ms |
+
+**Why not ship turnsense:**
+- **It's weak exactly where real pauses happen.** Both models score prefixes ending on a sentence boundary ("Fix X." and then keep typing) as *more* finished than truly finished prompts. That's exactly where a typist really pauses, and random prefixes under-sample it.
+- **The proxy has no timing.** The perceptron's quiet-window and typing-speed features are what separate a pause from a finished prompt there.
+- **Cost:** a 176 MB download, plus the `ort` native runtime, plus about 18 ms per decision on the hook path.
+- **Namo** adds little where the rules give no verdict (AUC 0.60 there), so I dropped it.
+
+**What shipped** (pushed to agent-doc `main` and installed with `make install`; not released yet):
+- `2f5da61df`: the `text_tail` field, with tests for the bound and for loading old rows that lack it.
+- `agent-doc-debounce` example `completion_signal`, so the harness scores the shipped rules classifier rather than a copy.
+- `scripts/steergate-model-eval`: it scores the models against the logged rules+perceptron probability with `--dataset`, and on the proxy corpus without it.
+- A README note.
+
+**Also fixed: a defect in my v0.35.445 release.** The release commit had no editor-parity audit row, so `make check` (and therefore CI) fails on it. The earlier full check ran before the version bump, which is why I missed it. Fixed forward in `ca33e215f`. The published tag is unchanged; CI for that tag will still show this failure.
+
+**Verification:**
+- `make check`: 10657 tests, none failed.
+- The stages that didn't run after the parity failure were re-run and pass: python-compat, audit-docs, editor-parity, python-bootstrap, lean, and tla.
+- CI for `2f5da61df` was still running at closeout.
+
+The exchange is long (427 lines), but the queue is active, so I'm not compacting.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -465,9 +501,7 @@ The exchange is long (392 lines), but the queue is active, so I'm not compacting
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/119~~
-- do [#steergatenamo]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
@@ -476,13 +510,13 @@ The exchange is long (392 lines), but the queue is active, so I'm not compacting
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
-- [ ] [#steergatenamo] [recommended] [agent-doc] Evaluate a pretrained end-of-turn model as an extra steergateperceptron feature: score videosdk-live/Namo-Turn-Detector-v1 (~66M) and latishab/turnsense offline against the steergatelog dataset; integrate locally (ONNX via the ort crate, no API, no harness) only if it beats the rules+perceptron on held-out data, weighing binary/download size. If close but not sufficient, fine-tune on the logged operator edits. Caveat: these are trained on speech transcripts, not typed technical prompts (backticks, [ids], URLs, #subagent: prefixes).
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#steergatenamodata] [agent-doc] Rerun the #steergatenamo model evaluation on real pause points: once >= 200 labelled steering_gate_log rows carry text_tail (0 today; field shipped 2f5da61df), run src/agent-doc/scripts/steergate-model-eval --dataset from the project root. Integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Unblocked by data accumulating (the script exits with insufficient_data until then). Proxy results + decision: tasks/agent-doc/eval-steergatenamo.md.
 - [/] [#drivecapturedsplice] [operator-verify] Captured-splice live proof (#activateinstalledjetbrai). LIVE RUN 2026-09-30 20:33Z (operator go-ahead): after harness fixes 01b1e30b7, the recipe drove IDEA end to end — edit one captured (editor_op_capture_proof operator_ops=37 shadow_replay=agreed, 20:33:01Z), canonical advanced independently via write --commit in owner pane %93 (20:33:02Z, editor acknowledged the target), edit two captured (operator_ops=36 agreed, 20:33:12Z); the final text holds every operator edit plus the advance. No text lost. The verifier still FAILS: its proving triple needs two source=captured-local-splice-recovery reads, and the plugin only takes that path (CrdtReplicaManager rebootstrapCanonicalAndForwardCapturedLocalEdit) when its replica is STALE against the canonical text. Healthy delivery reached the editor before edit two, so the recovery never had to run. DECISION NEEDED: (a) accept the healthy-path trail as the proof, extending verify-captured-splice-recovery with a capture/advance/capture triple, or (b) require the stale-replica race, making the recipe type edit two while the advance is still in flight. Aside: the scratch doc is under gitignored tmp/, so every advance ends commit_refused_ignored_path (write lands on disk, commit refused). Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or 'make pypi-quota-check' reporting a ceiling in reach. Rechecked 2026-09-30 16:25 EDT: 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 158 releases (0.35.113..0.35.424), post-cutover mean 34.7 KiB, ~49,485 further releases fit; VERDICT headroom fine. Nothing to act on or delete. pypi/support#12214 still open, 1 comment (github-actions bot), untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check reports (next tranche 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation. NEW BLOCKER 2026-09-30: grok 1.0.41 is now SIGNED OUT ('grok -p' -> 'Error: Not signed in'); operator runs 'grok login --device-code' (or sets XAI_API_KEY), and the free usage quota or the planned subscription must be active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed earlier; the last live MCP probe stopped at the usage limit before committed closeout. Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.

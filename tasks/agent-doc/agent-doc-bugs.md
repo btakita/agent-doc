@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -550,6 +549,19 @@ The restore above landed in git, but the next preflight removed it again, this t
 The two `semantic_completion_match` warnings this turn are false positives. `#steergatemodelrerun` is the restored copy of the reaped item, and this question has nothing to do with `#pypiquotafix`.
 
 Your steering test reached me at 14:07; it runs next in the queue.
+
+### Re: real-time steering test — opus-5.5 · 2026-10-03T14:10-04:00
+
+> **Queue prompt:** This is a test to see if the real-time steering works. Do you see it right now? Tell me when you see it. 13:59:17 ET
+
+**Yes. It reached me mid-turn at 14:07:06 ET**, about 7 minutes 49 seconds after your 13:59:17 timestamp. It came through the PostToolUse steering hook while I was still working on the perceptron question.
+
+**Why it took almost 8 minutes:** the steering hook only runs *between* tool calls, and I was inside long ones: the ~4-minute `make check`, then a commit, install and push. Your item was delivered at the first tool boundary after those finished. The typing gate didn't hold it at all. By then it had been quiet for 160 seconds, so it went straight through (`full_window`, probability 0.881 → send). In a turn made of short tool calls it would have reached me within seconds of you finishing typing.
+
+**What it shows:**
+- Delivery works and is verbatim. It was routed as `drain_after_current`, meaning queued behind the item I was on rather than interrupting it, which is why this answer comes now.
+- The delivery was logged and labelled `on_time` within the same turn, so the fix from the last item is working: the learned gate now has 2 training updates.
+- The real limit is the harness: a hook cannot interrupt a tool call that's still running. Steering latency is bounded by the longest tool call in flight.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -559,8 +571,6 @@ Your steering test reached me at 14:07; it runs next in the queue.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#perceptroncurrentlyworki]~~
-- This is a test to see if the real-time steering works. Do you see it right now? Tell me when you see it. 13:59:17 ET
 <!-- /agent:queue -->
 
 

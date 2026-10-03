@@ -125,17 +125,35 @@ Since the release, other work has landed on `main` under "Unreleased". Contract 
 - `make check` exit 0, about 1,889 tests passed with none failing. Installed with `cargo install --path . --locked --force`. A smoke test found definitions and prototypes, and `graph --callees` resolved.
 
 `#xsdcontract` and `#wsdlcontract` reached the queue when the deferred backlog write landed. The XML subagent I already dispatched is working on both, in that order, in `~/work/btakita/worktrees/tsift-xml`. I've claimed both heads for it so this loop doesn't run them a second time. The Odin, Jai and `#sdktsiftedges` subagents are still running.
+
+### Re: Odin bindings done — opus-5.5 · 2026-10-03T02:48-04:00
+
+> **Queue prompt:** #subagent: Add Odin bindings
+
+**Done.** The subagent pushed `db968c2 feat(graph): index Odin for search and graph (#odinindex)` to `main`, rebased onto the C commit without force.
+- **Grammar:** the `tree-sitter-odin` 1.3.0 crate from crates.io (published by tree-sitter-grammars). It works with the workspace's tree-sitter 0.26.9, so nothing had to be vendored.
+- **Symbols:**
+  - procedures, including proc groups, those inside top-level `when`, and `foreign` prototypes;
+  - structs, unions and enums, plus enum members and `bit_field`s;
+  - fields, constants, type aliases and package-level variables.
+  - A constant whose value is a type counts as a type alias.
+- **Call edges:** `f()`, `pkg.f()` and `obj->f()`. `import` and `foreign import` count as imports for impact analysis.
+- **Name filter:** the Odin grammar doesn't mark which identifier is the declaration name. A new filter keeps only the identifier before `::`, `:` or `:=`, so values, proc-group members and locals are not symbols. The symbol test fails when the filter is disabled.
+- **Rename:** not available for Odin. ast-grep has no Odin grammar, so Odin joins the indexed-but-not-structural group with Zig and GDScript.
+- **Verification:** `make check` exit 0 both before and after the rebase. Installed, and a smoke test passed: search found the proc group, and `graph add --callers` returned `main` and `inner`.
+
+The Jai, `#sdktsiftedges` and XSD/WSDL subagents are still running, and their heads stay claimed.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#xsdcontract]
+- ⏭️ do [#xsdcontract]
 - do [#wsdlcontract]
 - ~~do [#releasepublishbindings]~~
-- ~~#subagent: Add C bindings~~ — auto-struck: answered this cycle (#ftstrike)
-- #subagent: Add Odin bindings
+- ~~#subagent: Add C bindings~~
+- 🚧 #subagent: Add Odin bindings
 - #subagent: Add Jai bindings
 - #subagent: [#sdktsiftedges]
 <!-- /agent:queue -->
@@ -147,7 +165,7 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#sdktsiftedges] [recommended] Import an external edge file into graph-db (e.g. tsift graph-db import <file>), then load haiven-sdk codegen/trace.json (contract node -> per-language declaration -> conformance scenario, haiven-sdk #62), so a contract change's blast radius across SDKs is one graph query. Contract nodes are already indexed as of 8022f34 (#sdktsiftcontracts), so trace.json's model nodes can join to them by name. Moved from haiven-dev tasks/sdk.md.
-- [ ] 🚧 [#xsdcontract] Index XSD (.xsd) as an API contract: extend packages/tsift-graph/src/contract.rs with an XML Schema dialect (complexType/simpleType/element/attribute/group as schema symbols, Owner.child properties; type=/ref=/base= QName refs as call sites like $ref). Lays the shared XML parsing foundation (quick-xml or tree-sitter-xml) that #wsdlcontract builds on.
+- [ ] [#xsdcontract] Index XSD (.xsd) as an API contract: extend packages/tsift-graph/src/contract.rs with an XML Schema dialect (complexType/simpleType/element/attribute/group as schema symbols, Owner.child properties; type=/ref=/base= QName refs as call sites like $ref). Lays the shared XML parsing foundation (quick-xml or tree-sitter-xml) that #wsdlcontract builds on.
 - [ ] [#wsdlcontract] Index WSDL (.wsdl, 1.1 + 2.0) as an API contract on top of #xsdcontract: services, ports/endpoints, portTypes/interfaces, operations, messages/parts as symbols; message=/element=/type=/binding= refs as call sites; embedded <types><xsd:schema> projected via the XSD dialect.
 <!-- /agent:backlog -->
 

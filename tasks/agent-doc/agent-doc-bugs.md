@@ -138,6 +138,16 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - **Logging:** `pane_layout_projection` lines carry `publisher= plane_version= columns= retained_columns= observed_panes=`, and narrowing logs `pane_layout_projection_narrowed`.
 - **Merge:** hand-resolved against #110 (gate budget) and #112 (column order). The route resolves the mode and merges first, then #110's gates run, and #112's ordering still applies at publication. Plugin 0.2.483.
 - **Open question:** in `ensure` mode on Remote Dev, visiting several documents in turn keeps appending columns until a positive observation replaces the layout. The alternative is to have the routed document take over the focused document's column. Say if you want that.
+
+### Re: GH #112 — column order flipped with focus — opus-5.5 · 2026-10-02T23:52-04:00
+
+> **Queue prompt:** #subagents #gh-fix https://github.com/btakita/agent-doc/issues/112
+
+**Fixed in a subagent, merged, installed, pushed, closed** (agent-doc `8b6c366d0`; [GH #112](https://github.com/btakita/agent-doc/issues/112) closed).
+
+- **Cause:** the focus-first order came from the JetBrains plugin. With an undetected layout (always the case on Remote Dev), it lists documents in IntelliJ's `selectedFiles` order, which puts the focused file first. The controller took that as the editor's split order.
+- **Fix:** publications now carry `column_order` (`editor` / `retained` / `unknown`). The pure function `order_layout_columns(retained, incoming, order)` resolves an unknown order against the retained layout, so focus never reorders columns and new documents append at the end. Editor-sourced order still wins. A new `pane_layout_desired_published` line logs the publisher and the incoming and resolved columns.
+- **Limitation:** on Remote Dev the order is stable but can't mirror the editor, because no split geometry is available (see #97). Documented in the JetBrains SPEC. It takes effect with plugin 0.2.483 and later; the current plugin is 0.2.484.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -152,7 +162,7 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/109~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/110~~
 - ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/111~~ — auto-struck: answered this cycle (#ftstrike)
-- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/112
+- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/112~~ — auto-struck: answered this cycle (#ftstrike)
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/113
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/114
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/115

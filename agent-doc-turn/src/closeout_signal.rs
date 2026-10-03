@@ -1202,26 +1202,66 @@ fn extract_bracket_ids(text: &str) -> Vec<String> {
     out
 }
 
+/// GH #123: a completion marker only counts when the clause does not negate it.
+/// "`#verify120` cannot be verified" contains `verified` as a substring; reading
+/// it as completion inferred the opposite of what the response said.
 fn contains_completion_marker(text: &str) -> bool {
-    [
-        "implemented",
-        "fixed",
-        "done.",
-        "done ",
-        "completed",
-        "updated",
-        "verification:",
-        "verified",
-        "pushed",
-        "commit:",
-        "outcome:",
-        "what changed:",
-        "landed",
-        "shipped",
-    ]
-    .iter()
-    .any(|marker| text.contains(marker))
+    COMPLETION_MARKERS.iter().any(|marker| {
+        text.match_indices(marker)
+            .any(|(start, _)| !completion_marker_negated(&text[..start]))
+    })
 }
+
+/// True when the words just before a marker (same clause) negate it.
+fn completion_marker_negated(prefix: &str) -> bool {
+    let clause_start = prefix
+        .rfind(['.', ';', ':', '!', '?', '\n', '|', ','])
+        .map_or(0, |idx| idx + 1);
+    prefix[clause_start..]
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '\'' || ch == '’'))
+        .filter(|word| !word.is_empty())
+        .rev()
+        .take(4)
+        .any(|word| {
+            matches!(
+                word.replace('’', "'").as_str(),
+                "not"
+                    | "cannot"
+                    | "can't"
+                    | "couldn't"
+                    | "isn't"
+                    | "wasn't"
+                    | "aren't"
+                    | "weren't"
+                    | "won't"
+                    | "hasn't"
+                    | "haven't"
+                    | "never"
+                    | "unable"
+                    | "nothing"
+                    | "no"
+                    | "neither"
+                    | "nor"
+            ) || word.ends_with("n't")
+        })
+}
+
+const COMPLETION_MARKERS: &[&str] = &[
+    "implemented",
+    "fixed",
+    "done.",
+    "done ",
+    "completed",
+    "updated",
+    "verification:",
+    "verified",
+    "pushed",
+    "commit:",
+    "outcome:",
+    "what changed:",
+    "landed",
+    "shipped",
+];
 
 pub fn explicit_done_signal_ids(text: &str) -> Vec<String> {
     let normalized = normalize_done_signal_text(text);
@@ -2250,6 +2290,37 @@ Closes #lostid.
         assert!(!response_clearly_completes_pending_id(
             "### Re: do [#alpha]\n\nBlocked on CI.",
             "alpha"
+        ));
+    }
+
+    /// GH #123: the completion heuristic fired on a response whose first
+    /// sentence denied completion — `verified` matched inside "cannot be
+    /// verified". A negated marker is not a completion signal.
+    #[test]
+    fn negated_completion_marker_does_not_complete_the_id() {
+        let denial = concat!(
+            "### Re: do [#verify120] — opus\n\n",
+            "**`#verify120` cannot be verified: there is no release to verify it against.** ",
+            "`releases/latest` is still `v0.35.445` (published 16:55:49Z), which is exactly ",
+            "what is installed, checked at 19:38:47Z.\n\n",
+            "| id | unblocks when |\n|---|---|\n",
+            "| #verify120 | a release after v0.35.445 carrying those fixes |\n",
+        );
+        assert!(!response_clearly_completes_pending_id(denial, "verify120"));
+        for negated in [
+            "### Re: do [#a]\n\nThis is not fixed.\n",
+            "### Re: do [#a]\n\nThe change was never pushed.\n",
+            "### Re: do [#a]\n\nIt hasn't landed, and nothing shipped.\n",
+        ] {
+            assert!(
+                !response_clearly_completes_pending_id(negated, "a"),
+                "negated marker read as completion: {negated}"
+            );
+        }
+        // A negation in an earlier clause does not cancel a later affirmation.
+        assert!(response_clearly_completes_pending_id(
+            "### Re: do [#a]\n\nThe first attempt did not work. Fixed it with a retry.\n",
+            "a"
         ));
     }
 

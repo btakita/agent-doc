@@ -2066,6 +2066,29 @@ fn apply_pending_and_status_mutations_with_mode(
     })
 }
 
+/// GH #123: cycle facts for a tracked-work envelope that was retained and has
+/// since been proven landed by `await_deferred_tracked_work_commit`. Mirrors
+/// the structured-outcome records the apply closure writes after an applied
+/// transaction (`--done`, `--backlog-gate`, kept-open edits).
+fn record_landed_retained_tracked_work_outcomes(
+    file: &Path,
+    pending_done: &[String],
+    pending_gate: &[String],
+    pending_kept_open_ids: &[String],
+) -> Result<()> {
+    if !pending_done.is_empty() {
+        agent_doc_cycle_state_io::record_pending_done_ids(file, pending_done)?;
+    }
+    if !pending_gate.is_empty() {
+        agent_doc_cycle_state_io::record_pending_gated_ids(file, pending_gate)?;
+    }
+    if !pending_kept_open_ids.is_empty() {
+        agent_doc_cycle_state_io::record_pending_kept_open_ids(file, pending_kept_open_ids)?;
+    }
+    agent_doc_cycle_state_io::mark_pending_mutations(file)?;
+    Ok(())
+}
+
 /// `#backlogqueuepopulation`: collapse every mutation that makes tracked work
 /// executable into one binary-owned cycle fact. The queue reconciler consumes
 /// this set after the backlog mutations land; unrelated open items are excluded
@@ -2949,6 +2972,17 @@ fn run_command_inner_within_pass(
                     // the cycle's commit. Await convergence, then finish the
                     // ordinary closeout tail; never exit 0 uncommitted.
                     await_deferred_tracked_work_commit(file, options.force_disk)?;
+                    // GH #123: the retained envelope has now landed, but the
+                    // apply closure stopped at the retained transaction before
+                    // recording this cycle's structured outcomes. Record them
+                    // now so the pre-commit gate and `session-check` read the
+                    // same `--done`/`--backlog-gate` facts as an applied write.
+                    record_landed_retained_tracked_work_outcomes(
+                        file,
+                        &options.pending_done,
+                        &options.pending_gate,
+                        &pending_kept_open_ids,
+                    )?;
                     PendingStatusMutationOutcome {
                         queue_completion_projected: true,
                     }
@@ -2990,6 +3024,15 @@ fn run_command_inner_within_pass(
             file,
             options.force_disk,
         )?;
+        // GH #123: this gate runs after the response is materialized, so it
+        // reads this invocation's structured outcomes alongside the cycle
+        // state and cannot refuse a commit that recovery would complete anyway.
+        let precommit_done_ids: Vec<String> = options
+            .pending_done
+            .iter()
+            .chain(options.review_resolve.iter())
+            .cloned()
+            .collect();
         agent_doc_session_check_io::precommit_pending_done_check_with_options(
             file,
             agent_doc_session_check_io::PendingDoneCheckOptions {
@@ -2997,6 +3040,9 @@ fn run_command_inner_within_pass(
                 backlog_effects: Some(
                     &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
                 ),
+                recorded_done_ids: &precommit_done_ids,
+                kept_open_ids: &pending_kept_open_ids,
+                response_materialized: true,
             },
         )?;
     }
@@ -4239,6 +4285,60 @@ mod tests {
             "- [/] [#flakystatedbfixture] evidence-gated text after repeated verification"
         ));
         assert!(!content.contains("stale text"));
+    }
+
+    /// GH #123: a retained tracked-work envelope stops the apply closure before
+    /// it records this cycle's structured outcomes. Once the retained write is
+    /// proven landed, the deferral branch records them, so the pre-commit gate
+    /// and `session-check` see the `--backlog-gate` that closes `do #id`.
+    #[test]
+    fn landed_retained_envelope_records_backlog_gate_for_the_closeout_gate() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n❯ do [#verify120]\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n- [/] [#verify120] Verify against a release\n<!-- /agent:pending -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(
+            &doc,
+            "### Re: do [#verify120] — opus\n\nImplemented the release check.\nVerification:\n- cargo test\n",
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_template",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        let gate = vec!["verify120".to_string()];
+        let kept_open = pending_kept_open_ids_from_mutations(&[], &gate, &[], &[], &[], &[], None);
+
+        record_landed_retained_tracked_work_outcomes(&doc, &[], &gate, &kept_open).unwrap();
+
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(
+            state
+                .pending_kept_open_ids
+                .contains(&"verify120".to_string())
+        );
+        assert!(state.pending_gated_ids.contains(&"verify120".to_string()));
+        agent_doc_session_check_io::precommit_pending_done_check_with_options(
+            &doc,
+            agent_doc_session_check_io::PendingDoneCheckOptions::default(),
+        )
+        .expect("the recorded --backlog-gate closes the `do #verify120` head");
     }
 
     /// `#retainedapplywitness`: 2026-09-29 07:25Z, a converged document timed out

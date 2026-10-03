@@ -421,9 +421,26 @@ pub fn prewrite_pending_capture_check(
 }
 
 #[derive(Clone, Copy, Default)]
-pub struct PendingDoneCheckOptions {
+pub struct PendingDoneCheckOptions<'a> {
     pub force_disk: bool,
     pub backlog_effects: Option<&'static dyn agent_doc_element_backlog_io::BacklogCommandEffects>,
+    /// GH #123: structured completion outcomes THIS invocation requested
+    /// (`--done`, `--review-resolve`). Unioned with the cycle state so the
+    /// pre-commit gate reads the same evidence the pre-write gate already
+    /// passed, even when the tracked-work envelope was retained and its cycle
+    /// facts were never recorded.
+    pub recorded_done_ids: &'a [String],
+    /// GH #123: structured non-completion outcomes THIS invocation requested
+    /// (`--backlog-gate`, `--backlog-edit`, ...). A structured outcome for an
+    /// id always outranks the prose completion heuristic.
+    pub kept_open_ids: &'a [String],
+    /// GH #123: the response is already materialized (`write_applied`), so the
+    /// cycle's commit is owed and captured-finalize recovery will complete it
+    /// whatever this gate returns. A refusal here could only make `respond`
+    /// report a terminal failure for a cycle that then commits; the gate is
+    /// advisory instead, and the pre-write gate (same evidence) is the one
+    /// that blocks.
+    pub response_materialized: bool,
 }
 
 fn malformed_tracked_item_refs_completed_by_response(
@@ -451,7 +468,7 @@ pub fn precommit_pending_done_check(file: &Path) -> Result<()> {
 
 pub fn precommit_pending_done_check_with_options(
     file: &Path,
-    options: PendingDoneCheckOptions,
+    options: PendingDoneCheckOptions<'_>,
 ) -> Result<()> {
     let mode = crate::resolve_pending_done_mode_with_force_disk(file, options.force_disk)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
@@ -497,10 +514,27 @@ pub fn precommit_pending_done_check_with_options(
     }
     let open_tracked_work_ids =
         agent_doc_document::tracked_work_projection::open_tracked_work_ids(&doc_content);
+    // GH #123: every structured outcome for an id — recorded `--done`, a reap,
+    // or this invocation's own `--done`/`--review-resolve`/`--backlog-gate`/
+    // `--backlog-edit` — answers the gate before prose is consulted.
+    let recorded_done_ids: Vec<String> = state
+        .pending_done_ids
+        .iter()
+        .chain(state.reaped_pending_ids.iter())
+        .chain(options.recorded_done_ids.iter())
+        .cloned()
+        .collect();
+    let kept_open_ids: Vec<String> = state
+        .pending_kept_open_ids
+        .iter()
+        .chain(state.pending_gated_ids.iter())
+        .chain(options.kept_open_ids.iter())
+        .cloned()
+        .collect();
     let missing = agent_doc_turn::closeout_signal::tracked_work_completion_missing_done_ids(
         &response_text,
-        &state.pending_done_ids,
-        &state.pending_kept_open_ids,
+        &recorded_done_ids,
+        &kept_open_ids,
         &open_tracked_work_ids,
     );
     if missing.is_empty() {
@@ -549,6 +583,29 @@ pub fn precommit_pending_done_check_with_options(
         .collect::<Vec<_>>()
         .join(" ");
 
+    if options.response_materialized {
+        // GH #123: the response already landed and the commit is owed; a
+        // refusal cannot keep this cycle uncommitted, only make `respond`
+        // disagree with the `session-check` verdict that follows.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "pending_done_gate_post_write_advisory file={} missing={} reason=response_materialized_commit_owed (#gh123)",
+                file.display(),
+                ids
+            ),
+        );
+        eprintln!(
+            "[finalize] warn: response appears to complete existing pending {ids} \
+             but no matching `--done` or `--backlog-gate` was recorded this cycle; \
+             the response is already written, so this cycle commits.\n\
+             [finalize] hint: if the item is complete, follow up with \
+             `agent-doc write --commit {} --backlog-only {hint}`",
+            file.display()
+        );
+        return Ok(());
+    }
+
     log_closeout_guard(
         file,
         agent_doc_flow::types::FlowStage::PreCommitGuard,
@@ -557,7 +614,7 @@ pub fn precommit_pending_done_check_with_options(
     );
     anyhow::bail!(
         "[finalize] pre-commit gate: response appears to complete existing pending {} \
-         but no matching `--done` was recorded this cycle\n\
+         but no matching `--done` (completed) or `--backlog-gate` (kept open) was recorded this cycle\n\
          [finalize] hint: re-run finalize with {}, \
          add <!-- no-pending-done-guard --> to suppress, \
          or set pending_done_guard = \"warn\" to downgrade",
@@ -661,7 +718,7 @@ pub fn prewrite_pending_done_check(
     );
     anyhow::bail!(
         "[finalize] pre-write gate: response appears to complete existing pending {} \
-         but no matching `--done` was recorded this cycle\n\
+         but no matching `--done` (completed) or `--backlog-gate` (kept open) was recorded this cycle\n\
          [finalize] hint: re-run finalize with {}, \
          add <!-- no-pending-done-guard --> to suppress, \
          or set pending_done_guard = \"warn\" to downgrade{}",
@@ -1532,6 +1589,7 @@ mod precommit_pending_capture_tests {
             super::PendingDoneCheckOptions {
                 force_disk: true,
                 backlog_effects: Some(&TEST_BACKLOG_COMMAND_EFFECTS),
+                ..Default::default()
             },
         )
         .expect("auto_done should record and apply missing --done mutations");
@@ -1606,6 +1664,108 @@ mod precommit_pending_capture_tests {
             },
         )
         .expect("pre-write kept-open ids should not require --done");
+    }
+
+    const GH123_COMPLETING_RESPONSE: &str = "### Re: do [#verify120] — opus\n\nImplemented the release check.\nVerification:\n- cargo test\n";
+
+    /// GH #123: `--backlog-gate <id>` is a documented `do #id` closeout. The
+    /// pre-commit gate must read this invocation's structured outcome even when
+    /// the retained tracked-work envelope never recorded it in cycle state.
+    #[test]
+    fn precommit_pending_done_accepts_this_invocations_backlog_gate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            GH123_COMPLETING_RESPONSE,
+            "- [ ] [#verify120] Verify the fix against a release\n",
+            &[],
+        );
+        assert!(
+            super::precommit_pending_done_check(&doc).is_err(),
+            "fixture must exercise the gate: without a structured outcome it refuses"
+        );
+
+        let gated = vec!["verify120".to_string()];
+        super::precommit_pending_done_check_with_options(
+            &doc,
+            super::PendingDoneCheckOptions {
+                kept_open_ids: &gated,
+                ..Default::default()
+            },
+        )
+        .expect("an explicit --backlog-gate outranks the prose completion heuristic");
+
+        let done = vec!["#VERIFY120".to_string()];
+        super::precommit_pending_done_check_with_options(
+            &doc,
+            super::PendingDoneCheckOptions {
+                recorded_done_ids: &done,
+                ..Default::default()
+            },
+        )
+        .expect("this invocation's --done satisfies the gate");
+    }
+
+    /// GH #123: recorded gated and reaped ids are structured outcomes too.
+    #[test]
+    fn precommit_pending_done_accepts_recorded_gated_or_reaped_ids() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            GH123_COMPLETING_RESPONSE,
+            "- [ ] [#verify120] Verify the fix against a release\n",
+            &[],
+        );
+        agent_doc_cycle_state_io::record_pending_gated_ids(&doc, &["verify120".to_string()])
+            .unwrap()
+            .unwrap();
+        super::precommit_pending_done_check(&doc)
+            .expect("a recorded --backlog-gate outranks the prose completion heuristic");
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            GH123_COMPLETING_RESPONSE,
+            "- [ ] [#verify120] Verify the fix against a release\n",
+            &[],
+        );
+        agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["verify120".to_string()])
+            .unwrap()
+            .unwrap();
+        super::precommit_pending_done_check(&doc)
+            .expect("a recorded reap outranks the prose completion heuristic");
+    }
+
+    /// GH #123: once the response is materialized the commit is owed and
+    /// captured-finalize recovery completes it, so a refusal here only made
+    /// `respond` report `terminal_failure` for a cycle `session-check` then
+    /// called committed. The gate must not disagree with the durable outcome.
+    #[test]
+    fn precommit_pending_done_is_advisory_once_response_materialized() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            GH123_COMPLETING_RESPONSE,
+            "- [ ] [#verify120] Verify the fix against a release\n",
+            &[],
+        );
+        super::precommit_pending_done_check_with_options(
+            &doc,
+            super::PendingDoneCheckOptions {
+                response_materialized: true,
+                ..Default::default()
+            },
+        )
+        .expect("a materialized response's owed commit is not refused");
+        let err = super::precommit_pending_done_check(&doc).unwrap_err();
+        assert!(
+            err.to_string().contains("`--backlog-gate`"),
+            "the refusal names every structured outcome that satisfies it: {err}"
+        );
     }
 
     #[test]

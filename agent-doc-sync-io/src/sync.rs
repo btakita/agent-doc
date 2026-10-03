@@ -4644,6 +4644,11 @@ fn run_with_options_internal_at_root(
         passive: matches!(auto_start_mode, AutoStartMode::SafePassive),
     };
 
+    // GH #109: capture every pane's window/title before tmux-router moves
+    // anything, so the post-router audit can say which column pane left the
+    // stash and why it was the one chosen.
+    let pane_windows_before_router = crate::layout_column_audit::snapshot_pane_windows(tmux);
+
     // Open-cycle panes are logged during DETACH, but they are not kept visible.
     // Stashing preserves the process and avoids recurring 3-pane projections.
     let router_start = Instant::now();
@@ -4667,6 +4672,43 @@ fn run_with_options_internal_at_root(
         auto_start_mode,
     );
     let post_router_start = Instant::now();
+
+    // GH #109: validate and attribute the pane realising each column. A stash
+    // promotion, a pane bound to another document, or a stale supervisor each
+    // get a `layout_column_pane_selected` line; a stale supervisor in the
+    // column's own pane also gets its safe-boundary recycle requested. Never
+    // moves, kills, or reaps a pane.
+    {
+        let pane_windows_after_router = crate::layout_column_audit::snapshot_pane_windows(tmux);
+        let session_keys: HashMap<PathBuf, String> = session_files
+            .borrow()
+            .iter()
+            .map(|(key, file)| (file.clone(), key.clone()))
+            .collect();
+        let registry_pane = |file: &Path| -> Option<String> {
+            let key = session_keys.get(file)?;
+            match tmux_router::registry::lookup(tmux_router_registry_path, key) {
+                Ok(pane) => pane,
+                Err(error) => {
+                    eprintln!(
+                        "[sync] layout column audit: registry lookup failed for {}: {error:#}",
+                        file.display()
+                    );
+                    None
+                }
+            }
+        };
+        crate::layout_column_audit::audit_layout_column_panes(
+            tmux,
+            &crate::layout_column_audit::LayoutColumnAuditInput {
+                file_panes: &result.file_panes,
+                pre_resolved: &pre_resolved_panes,
+                registry_pane: &registry_pane,
+                before: &pane_windows_before_router,
+                after: &pane_windows_after_router,
+            },
+        );
+    }
 
     // Log pane count after tmux_router::sync
     if let Some(w) = window {
@@ -7254,6 +7296,97 @@ mod tests {
         assert!(pane_runs_other_document_owner(&iso, &bare_pane, &doc));
         assert!(pane_runs_other_document_owner(&iso, &owner_pane, &doc));
         assert!(!pane_runs_other_document_owner(&iso, &shell_pane, &doc));
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn layout_column_never_reuses_a_pane_bound_to_another_document() {
+        // GH #109 ask 1: a pane whose agent-doc supervisor is bound to document A
+        // must never realise document B's column, however live it is; it stays
+        // eligible for A's own column. Also pins the reusable freshness predicate
+        // on real panes: the column's own supervisor is found in the pane tree,
+        // and agent-doc's `⚠ STALE SUPERVISOR` title is consulted when no
+        // supervisor process can be observed.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc_a = tmp.path().join("tasks").join("1102.md");
+        let doc_b = tmp.path().join("tasks").join("agent-doc.ad.md");
+        std::fs::create_dir_all(doc_a.parent().unwrap()).unwrap();
+        std::fs::write(&doc_a, "---\nagent_doc_session: column-a\n---\n").unwrap();
+        std::fs::write(&doc_b, "---\nagent_doc_session: column-b\n---\n").unwrap();
+
+        let fake_bin_dir = tmp.path().join("bin");
+        std::fs::create_dir_all(&fake_bin_dir).unwrap();
+        let fake = fake_bin_dir.join("agent-doc");
+        std::fs::write(&fake, "#!/bin/sh\nsleep 60\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake, perms).unwrap();
+        }
+
+        let iso = IsolatedTmux::new("sync-column-foreign-document");
+        let shell_pane = iso.new_session("test", tmp.path()).unwrap();
+        let owner_a = iso.split_window(&shell_pane, tmp.path(), "-dh").unwrap();
+        assert!(wait_for_shell(&iso, &shell_pane, Duration::from_secs(15)));
+        let command = format!(
+            "{} start --route-owned -- {}",
+            fake.display(),
+            doc_a.display()
+        );
+        iso.raw_cmd(&["send-keys", "-t", &owner_a, &command, "Enter"])
+            .unwrap();
+        assert!(
+            wait_for(Duration::from_secs(15), || {
+                matches!(
+                    pane_occupant_for_document(&iso, &owner_a, &doc_b),
+                    PaneOccupant::OtherDocument(ref owned) if owned.ends_with("1102.md")
+                )
+            }),
+            "the supervisor bound to A must read as another document's owner for B"
+        );
+        assert!(
+            !pane_projection_is_reusable_for_document(&iso, &owner_a, &doc_b),
+            "A's live pane must never satisfy B's column"
+        );
+        assert!(
+            pane_projection_is_reusable_for_document(&iso, &owner_a, &doc_a),
+            "A's own pane stays eligible for A's column"
+        );
+
+        let own =
+            crate::layout_column_audit::pane_supervisor_freshness(&iso, &owner_a, &doc_a, None);
+        assert_ne!(
+            own,
+            crate::layout_column_audit::PaneSupervisorFreshness::Unknown {
+                reason: "no_supervisor_process"
+            },
+            "the column's own supervisor must be found in the pane's process tree"
+        );
+
+        assert_eq!(
+            crate::layout_column_audit::pane_supervisor_freshness(&iso, &shell_pane, &doc_a, None),
+            crate::layout_column_audit::PaneSupervisorFreshness::Unknown {
+                reason: "no_supervisor_process"
+            }
+        );
+        iso.raw_cmd(&[
+            "select-pane",
+            "-t",
+            &shell_pane,
+            "-T",
+            agent_doc_turn::turn_status::STALE_SUPERVISOR_PANE_MARKER,
+        ])
+        .unwrap();
+        assert_eq!(
+            crate::layout_column_audit::pane_supervisor_freshness(&iso, &shell_pane, &doc_a, None),
+            crate::layout_column_audit::PaneSupervisorFreshness::Stale {
+                supervisor_pid: None,
+                evidence: "title_marker"
+            },
+            "agent-doc's own stale-supervisor title is evidence when no process proof exists"
+        );
     }
 
     #[test]

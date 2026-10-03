@@ -3794,6 +3794,21 @@ fn host_supervisor_binary_is_stale(supervisor_pid: u32, installed_path: &Path) -
     Some(agent_doc_supervisor::config::host_supervisor_build_is_stale(running, installed))
 }
 
+/// GH #109: the reusable host-supervisor freshness predicate for callers that
+/// already hold a supervisor PID (e.g. a pane's `agent-doc start` wrapper found
+/// in its process tree) rather than a document lease.
+///
+/// Same directional rule (`#supdirstale`) and same installed-binary resolution
+/// as the preflight/command staleness probes, so a pane the layout path calls
+/// stale is exactly the supervisor preflight would warn about. `None` when the
+/// installed binary or the running exe cannot be observed — callers decide how
+/// to treat missing evidence; it is never "fresh".
+pub fn host_supervisor_pid_binary_is_stale(supervisor_pid: u32) -> Option<bool> {
+    let installed = current_binary_identity().ok()?;
+    agent_doc_fs::running_exe_build_for_pid(supervisor_pid)?;
+    host_supervisor_binary_is_stale(supervisor_pid, &installed.path)
+}
+
 /// The supervisor's own projection wins; an older supervisor that omits it
 /// falls back to the directional host verdict (`#supdirstale`), and an
 /// unobservable fallback fails open.

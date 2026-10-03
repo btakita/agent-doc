@@ -188,6 +188,19 @@ asking document as a new column (GH #106): the escalation's output is its own
 next input, so appending grew the column count by one per tab switch. An
 uncovered document fails closed with
 `controller_editor_surface_focus_escalation_skipped cause=document_outside_retained_layout`.
+- Realising a column is audited after tmux-router runs (GH #109). A column pane
+that moved windows (a stash → layout promotion), runs another document, or
+whose route-owned supervisor maps a superseded binary gets one
+`layout_column_pane_selected` line naming its source (`pre_resolved`,
+`registry`, `router_ephemeral`), origin and final window, binding, supervisor
+freshness, and the candidates. A pane bound to another document is reported as
+`layout_column_pane_foreign_document` and never touched. A stale supervisor in
+the column's own pane is not excluded (that would leave the document's column
+unrealised or provision a second owner) and is never reaped: the layout path
+requests the existing safe-boundary recycle, at most once per supervisor per
+ten minutes, and logs `layout_column_pane_supervisor_stale`. Binary identity
+(`#supdirstale`) is the staleness authority; agent-doc's own
+`⚠ STALE SUPERVISOR` title decides only when the binary cannot be observed.
 - Explicit `--pane` remains a direct tmux selection escape hatch. `--blocking`
   keeps the legacy synchronous local actor/registry resolver and may surface a
   stashed pane before returning.

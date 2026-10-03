@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+pub mod layout_column_audit;
 pub mod resync;
 pub mod sync;
 

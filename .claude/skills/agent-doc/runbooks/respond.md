@@ -82,6 +82,41 @@ rule. This runbook carries the rest.
   turn or scheduling the next re-entry. The next preflight lists new
   subagent-intent queue items under `queue_subagent_dispatch` (never in
   `selected_queue_prompts`): run each `claim_command`, then dispatch it.
+- **Queue subagents coordinator (`#queuesubagents`).** Under
+  `<!-- agent:queue subagents -->` (alias `fan-out`; `=N` caps concurrent
+  claims, default 3), the in-session agent is the coordinator, and
+  `queue_subagent_dispatch` is the list to dispatch THIS cycle. Preflight
+  recomputes it every cycle, so a missed claim is offered again. Heads held by
+  the cap or by a still-queued `after=` / ordered-list predecessor are already
+  excluded from the loop; do not drain them inline. Lines tagged `[inline]` or
+  `[operator-verify]` drain in queue order as usual. For each dispatch item:
+  1. Run its `claim_command` (`agent-doc queue claim <FILE> --item <...> --owner subagent:<label>`).
+  2. Dispatch one background subagent per item. When it touches a repo, give it
+     its own git worktree OUTSIDE the IDE-watched project (for example
+     `~/worktrees/<repo>-<label>`), and never run two subagents in
+     one checkout. Heads that `agent-doc plan` gives the same repo
+     `write_scope` still get separate worktrees, but they are integrated one at a
+     time. A head marked `parallelizable: false` runs alone.
+  3. While a subagent runs past a cycle, keep its claim alive with
+     `agent-doc queue claim <FILE> --item <...> --owner subagent:<label> --refresh`
+     (the heartbeat; the default TTL is 2h). Under the attribute, an expired claim
+     is offered for dispatch again and never drained inline.
+  4. A subagent commits and pushes its branch (fast-forward only, never force).
+     It never runs `make install`, a release build, a version bump, a tag, or a
+     release.
+  5. When subagents report back, integrate their work serially: rebase or
+     cherry-pick each onto main, run the preset's verification, run ONE
+     `make install` per integrated batch, and push. Then run
+     `agent-doc queue release <FILE> --item <...>`. The next cycle answers and
+     closes the item: `--done <id>` for an `#id` head, or quote a free-text head
+     as `> **Queue prompt:**`.
+  Harnesses without an in-session Agent tool (Codex, OpenCode, Grok Build,
+  Cursor) claim the same items and fall back to
+  `agent-doc orchestrate <FILE> --mode parallel --task "<item>" ...` over the
+  dispatch items. If neither path exists, say so in the response and drain the
+  items inline. When every remaining head is claimed or held, end the turn
+  quietly (the Stop hook logs `state=waiting_on_claims`): subagent completion
+  notifications resume the loop, and you do not need to poll or schedule a re-entry.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay

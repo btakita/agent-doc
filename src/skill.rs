@@ -3504,6 +3504,43 @@ mod tests {
         ));
     }
 
+    /// qsubattr4: the queue-level `subagents` attribute makes the in-session
+    /// agent a coordinator. The hot path names the contract and links it; the
+    /// respond and planning-dispatch runbooks own the full procedure.
+    #[test]
+    fn bundled_surfaces_carry_queue_subagents_coordinator_contract() {
+        assert!(SKILL_TEMPLATE.contains("Under `<!-- agent:queue subagents -->`"));
+        assert!(SKILL_TEMPLATE.contains("agent-doc queue claim ... --refresh"));
+        assert!(SKILL_TEMPLATE.contains("ONE `make install` per batch"));
+        assert!(SKILL_TEMPLATE.contains("agent-doc orchestrate <FILE> --mode parallel"));
+        assert!(SKILL_TEMPLATE.contains("(`#queuesubagents`)"));
+        let runbook = |name: &str| {
+            BUNDLED_RUNBOOKS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, body)| *body)
+                .unwrap_or_else(|| panic!("{name} missing from BUNDLED_RUNBOOKS"))
+        };
+        let respond = runbook("respond.md");
+        for needle in [
+            "Queue subagents coordinator (`#queuesubagents`)",
+            "`queue_subagent_dispatch` is the list to dispatch THIS cycle",
+            "--owner subagent:<label> --refresh",
+            "OUTSIDE the IDE-watched project",
+            "never run two subagents in\n     one checkout",
+            "ONE\n     `make install` per integrated batch",
+            "agent-doc queue release <FILE> --item <...>",
+            "`agent-doc orchestrate <FILE> --mode parallel --task \"<item>\" ...`",
+            "end the turn\n  quietly",
+        ] {
+            assert!(respond.contains(needle), "respond.md missing {needle:?}");
+        }
+        let planning = runbook("planning-dispatch.md");
+        assert!(planning.contains("Under `<!-- agent:queue subagents -->`"));
+        assert!(planning.contains("`agent-doc orchestrate <FILE> --mode parallel`"));
+        assert!(planning.contains("(`#queuesubagents`)"));
+    }
+
     #[test]
     fn bundled_skill_preserves_operator_visible_document_authority() {
         assert!(SKILL_TEMPLATE.contains("Operator-visible document text is authoritative"));

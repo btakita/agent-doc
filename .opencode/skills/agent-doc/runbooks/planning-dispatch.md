@@ -35,7 +35,8 @@ The command emits a structured planning record as JSON.
 5. If `execution_scope=plan_backlog_only`, do not start repo implementation, tests, builds, installs, commits, or pushes from this cycle even if the raw prompt contained imperative wording. Capture the plan and backlog items first, then wait for a later `do #id ...` turn to authorize implementation.
 6. Otherwise, execute `repo_actions` before `finalize` / `write --commit`.
 7. Resolve `pending_mutations` in the same cycle so backlog/review tracked-work state does not drift.
-8. If `blockers` is non-empty, surface the blocker and stop instead of freelancing around it.
+8. Under `<!-- agent:queue subagents -->` (alias `fan-out`, `=N` cap), dispatch preflight's `queue_subagent_dispatch` items instead of draining them. Claim each item, then give it one background subagent in its own worktree outside the IDE-watched project. Integrate their work serially; that includes heads with the same repo `write_scope`. A `parallelizable: false` head runs alone. Harnesses without an in-session Agent tool fall back to `agent-doc orchestrate <FILE> --mode parallel` over those items under the same claims. The claim, `--refresh` heartbeat, integration, single `make install`, and release-then-close order is in `respond.md` (`#queuesubagents`).
+9. If `blockers` is non-empty, surface the blocker and stop instead of freelancing around it.
    A turn the binary's preflight already sealed never reports the `No changes` blocker: plan reads the open cycle, recovers the free-text queue head preflight selected, and otherwise returns `task_class: preflight_sealed` with no blocker — execute the preflight contract (`#plansealedturn`, GH #68 §1).
 
 ## Notes

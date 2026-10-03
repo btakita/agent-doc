@@ -118,6 +118,24 @@ class TerminalUtilTest {
         assertEquals("route-key-1", payload.get("route_key").asString)
         assertEquals("--col", payload.getAsJsonArray("layout_args")[0].asString)
         assertEquals("--focus", payload.getAsJsonArray("layout_args")[2].asString)
+        assertFalse(payload.has("column_order"))
+    }
+
+    @Test
+    fun `CP editor route request names its column order source`() {
+        val request = CpRouteClient.editorRouteRequest(
+            filePath = "/repo/tasks/root.md",
+            relativePath = "tasks/root.md",
+            layoutArgs = listOf("--col", "/repo/tasks/root.md", "--focus", "/repo/tasks/root.md"),
+            waitForReadySeconds = 15,
+            attemptId = null,
+            routeKey = null,
+            columnOrder = "unknown",
+        )
+        val payload = com.google.gson.JsonParser.parseString(
+            request.get("diagnostic_payload").asString,
+        ).asJsonObject
+        assertEquals("unknown", payload.get("column_order").asString)
     }
 
     @Test

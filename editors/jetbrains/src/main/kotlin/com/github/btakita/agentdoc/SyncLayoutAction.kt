@@ -295,6 +295,18 @@ class SyncLayoutAction : AnAction(), DumbAware {
         internal fun undetectedLayoutColumns(visibleMdFiles: List<String>): List<String> =
             visibleMdFiles.filter(String::isNotBlank).distinct()
 
+        /**
+         * GH #112: the order source of [buildSyncColumns] / route `--col` lists.
+         * Only a detected multi-column layout carries a left-to-right split order.
+         * The undetected fallback lists `selectedFiles`, which IntelliJ orders
+         * focused-window first, so its order is `unknown` and the controller keeps
+         * the order it already retains for those documents. On a Remote Dev
+         * backend the detector is `unknown` whenever no single client reports a
+         * multi-file split set (GH #97), so pane order there is stable, not mirrored.
+         */
+        internal fun syncColumnOrder(editorLayout: EditorLayout?): String =
+            if (editorLayout != null && editorLayout.columns.size > 1) "editor" else "unknown"
+
         internal fun buildSyncColumns(
             visibleMdFiles: List<String>,
             editorLayout: EditorLayout?,
@@ -449,6 +461,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         noAutostart = noAutostart,
                         exactVisible = true,
                         callerKind = syncCallerKind(noAutostart, callerKind),
+                        columnOrder = syncColumnOrder(editorLayout),
                     )
                     if (receipt.exitCode != 0) {
                         LOG.warn("[sync] Project Controller async submit failed projectRoot=$projectRoot focus=$focusedFile columns=$columns output=${receipt.output}")

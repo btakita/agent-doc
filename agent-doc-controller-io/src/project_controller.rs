@@ -216,6 +216,13 @@ pub struct ControllerTmuxLayoutSyncInvocation {
     pub exact_visible: bool,
     #[serde(default)]
     pub caller_kind: String,
+    /// Where `columns`' left-to-right order came from (GH #112). Publishers
+    /// without a positive split-order observation send `unknown`, and the
+    /// controller resolves it against the retained desired layout with
+    /// [`agent_doc_tmux::order_layout_columns`]. Absent means `editor`, the
+    /// pre-#112 meaning, so older publishers keep their authority.
+    #[serde(default)]
+    pub column_order: agent_doc_tmux::LayoutColumnOrder,
     /// Controller-local actor bindings joined reactively with `columns`.
     ///
     /// This is never accepted from or serialized to an RPC caller. The
@@ -9282,6 +9289,7 @@ mod tests {
                 no_autostart,
                 exact_visible: true,
                 caller_kind: caller_kind.to_string(),
+                column_order: Default::default(),
                 actor_bindings: Vec::new(),
             };
 
@@ -9302,6 +9310,7 @@ mod tests {
                 no_autostart: false,
                 exact_visible: true,
                 caller_kind: "projection".to_string(),
+                column_order: Default::default(),
                 actor_bindings: Vec::new(),
             },
         }
@@ -9408,6 +9417,7 @@ mod tests {
                 no_autostart: true,
                 exact_visible: true,
                 caller_kind: "automatic".to_string(),
+                column_order: Default::default(),
                 actor_bindings: Vec::new(),
             },
             None,
@@ -9487,6 +9497,7 @@ mod tests {
                     no_autostart: true,
                     exact_visible: true,
                     caller_kind: "automatic".to_string(),
+                    column_order: Default::default(),
                     actor_bindings: Vec::new(),
                 },
                 source_plane_version: None,
@@ -9582,6 +9593,7 @@ mod tests {
                 no_autostart: true,
                 exact_visible: true,
                 caller_kind: "automatic".to_string(),
+                column_order: Default::default(),
                 actor_bindings: Vec::new(),
             },
             None,
@@ -9612,6 +9624,7 @@ mod tests {
                 no_autostart: true,
                 exact_visible: true,
                 caller_kind: "automatic".to_string(),
+                column_order: Default::default(),
                 actor_bindings: Vec::new(),
             },
             None,
@@ -18565,6 +18578,7 @@ revised operator request
                 no_autostart: false,
                 exact_visible: true,
                 caller_kind: "automatic".to_string(),
+                column_order: Default::default(),
                 actor_bindings: Vec::new(),
             },
             source_plane_version: None,

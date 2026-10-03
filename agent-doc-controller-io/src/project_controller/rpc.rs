@@ -635,9 +635,15 @@ pub(crate) fn request_path_with_reason(path: &Path, command: &str, reason: &str)
 }
 
 fn request_path_json(path: &Path, request_value: serde_json::Value) -> Result<String> {
+    // `#preflightdeadline`: inside a preflight admission, no RPC may wait past
+    // the admission deadline, and none may start once it is spent.
+    let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
+        "project_controller_rpc",
+        CONTROLLER_RPC_TIMEOUT,
+    )?;
     let stream = connect_path(path)?;
     stream
-        .set_recv_timeout(Some(CONTROLLER_RPC_TIMEOUT))
+        .set_recv_timeout(Some(timeout))
         .context("failed to set project controller response timeout")?;
     let (reader_half, mut writer_half) = stream.split();
     let mut request = serde_json::to_string(&request_value)?;
@@ -647,15 +653,8 @@ fn request_path_json(path: &Path, request_value: serde_json::Value) -> Result<St
 
     let mut reader = BufReader::new(reader_half);
     let mut response = String::new();
-    read_controller_response_line(&mut reader, &mut response)?;
+    read_controller_response_line_with_timeout(&mut reader, &mut response, timeout)?;
     Ok(response.trim().to_string())
-}
-
-pub(crate) fn read_controller_response_line<R: BufRead>(
-    reader: &mut R,
-    response: &mut String,
-) -> Result<()> {
-    read_controller_response_line_with_timeout(reader, response, CONTROLLER_RPC_TIMEOUT)
 }
 
 fn read_controller_response_line_with_timeout<R: BufRead>(
@@ -1407,7 +1406,9 @@ fn request_across_controller_handoff<T>(
     retry_controller_handoff_refusal(
         request.file.as_deref().unwrap_or(project_root),
         &request.command,
-        CONTROLLER_HANDOFF_SETTLE_BUDGET,
+        // `#preflightdeadline`: a handoff settle never outlives the admission
+        // deadline; a zero budget surfaces the first refusal unretried.
+        agent_doc_debounce::admission_deadline::clamp(CONTROLLER_HANDOFF_SETTLE_BUDGET),
         CONTROLLER_HANDOFF_SETTLE_INTERVAL,
         std::thread::sleep,
         attempt,
@@ -1420,6 +1421,13 @@ fn request_controller_on_stream_with_timeout<T: DeserializeOwned>(
     timeout: Duration,
     stream: interprocess::local_socket::Stream,
 ) -> Result<T> {
+    // `#preflightdeadline`: every per-call timeout is clamped to the preflight
+    // admission deadline (unchanged outside an admission), and a request is
+    // refused before it is sent once that deadline is spent.
+    let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
+        "project_controller_rpc",
+        timeout,
+    )?;
     stream
         .set_recv_timeout(Some(timeout))
         .context("failed to set project controller response timeout")?;
@@ -12454,12 +12462,18 @@ pub(crate) fn wait_for_controller_path_with_timeout(
     if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(path) {
         anyhow::bail!(reason);
     }
+    // `#preflightdeadline`: the connect wait never outlives the admission deadline.
+    let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
+        "project_controller_connect",
+        timeout,
+    )?;
     let start = Instant::now();
     loop {
         if let Ok(stream) = connect_path(path) {
             return Ok(stream);
         }
         if start.elapsed() >= timeout {
+            agent_doc_debounce::admission_deadline::ensure_remaining("project_controller_connect")?;
             anyhow::bail!(
                 "timed out waiting for project controller at {}",
                 path.display()

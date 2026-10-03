@@ -235,10 +235,28 @@ pub fn run_with_options_to_writer(
     options: PreflightOptions,
     writer: &mut dyn Write,
 ) -> Result<()> {
+    // `#preflightdeadline`: one turn-scoped current-document projection pass
+    // for the whole preflight run. Preflight reaches the session-check guard
+    // suite, commit, and closeout through many entry points; each opened (and
+    // dropped) its own pass, so the same unchanged document was re-resolved
+    // once per entry point — ops.log showed `session-check:*` guards reached
+    // from preflight resolving with `pass=uninstalled`. Nested passes reuse
+    // this graph, which is keyed by the live CRDT revision (or the detached
+    // disk hash), so an operator or agent edit mid-run still invalidates it.
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        run_with_options_to_writer_in_pass(file, options, writer)
+    })
+}
+
+fn run_with_options_to_writer_in_pass(
+    file: &Path,
+    options: PreflightOptions,
+    writer: &mut dyn Write,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
-    crate::progress::enter("pane_authority");
+    crate::progress::enter("pane_authority")?;
     // `#preflightreactive`: establish one document graph before any operation
     // that can recycle a process, start a controller, repair a projection, or
     // mutate cycle state. A rejected invocation must have no side effects.
@@ -257,7 +275,7 @@ pub fn run_with_options_to_writer(
     preflight_effects.observe_execution_authority_admitted(pane_authority.permits());
     preflight_effects.observe_authority_current(true);
 
-    crate::progress::enter("supervisor_recycle_check");
+    crate::progress::enter("supervisor_recycle_check")?;
     // Schedule a known-stale supervisor before any document resolution or
     // integrity gate can abort this stage. The request is idempotent and is
     // honored only at the supervisor's safe idle boundary.
@@ -266,7 +284,7 @@ pub fn run_with_options_to_writer(
         "preflight_entry",
     );
 
-    crate::progress::enter("initial_controller_ensure");
+    crate::progress::enter("initial_controller_ensure")?;
     // A normal preflight already requires the project controller for its
     // derived-read projection below. Establish that actor boundary before the
     // first current-document read as well: immediately after `admin recycle`,
@@ -297,7 +315,7 @@ pub fn run_with_options_to_writer(
         );
     }
 
-    crate::progress::enter("resolve_initial_document");
+    crate::progress::enter("resolve_initial_document")?;
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     // #rtwwire (rung 3): classify against the realtime document model. When an
     // editor is active, the CRDT relay is the authority and disk is not read as
@@ -386,7 +404,7 @@ pub fn run_with_options_to_writer(
             ),
         );
     }
-    crate::progress::enter("integrity_validation");
+    crate::progress::enter("integrity_validation")?;
     // A preflight may perform recovery and queue/backlog maintenance. Refuse
     // every mutation when the authoritative document is already structurally
     // invalid; recovery must never normalize corruption into a new baseline.
@@ -423,13 +441,13 @@ pub fn run_with_options_to_writer(
         warnings.push(warning);
     }
 
-    crate::progress::enter("auto_gc");
+    crate::progress::enter("auto_gc")?;
     // Step 0a: Auto-GC (at most once per day, tracked in state.db).
     if !options.probe {
         agent_doc_preflight_io::gc::run_preflight_auto_gc(file);
     }
 
-    crate::progress::enter("pre_mutation_debounce");
+    crate::progress::enter("pre_mutation_debounce")?;
     // Pre-mutation debounce: recovery, pending maintenance, commit, and
     // duplicate-residue cleanup all mutate authoritative or recovery state.
     // Do not let those paths race an editor buffer that is still publishing a
@@ -476,7 +494,7 @@ pub fn run_with_options_to_writer(
     let preserve_fresh_owned_pane_reentry =
         !options.probe && entry_cycle_was_open && authoritative_actor_owns_current_pane;
 
-    crate::progress::enter("repair");
+    crate::progress::enter("repair")?;
     // Repair is the first signal-gated effect. Everything through pending
     // maintenance belongs to this effect boundary; commit cannot start until
     // this boundary is settled.
@@ -498,7 +516,7 @@ pub fn run_with_options_to_writer(
         );
     }
 
-    crate::progress::enter("layout_health");
+    crate::progress::enter("layout_health")?;
     // Step 0: Check tmux layout health.
     eprintln!("[preflight] step 0: layout check");
     let mut layout_issues = check_layout();
@@ -528,7 +546,7 @@ pub fn run_with_options_to_writer(
         }
     }
 
-    crate::progress::enter("closeout_drift_check");
+    crate::progress::enter("closeout_drift_check")?;
     // Step 0d: Fail closed on out-of-band closeout drift before transcript
     // repair can normalize a dirty response body into prompt-looking lines.
     // Open cycles still go through repair first so interrupted write/commit
@@ -551,7 +569,7 @@ pub fn run_with_options_to_writer(
         )?;
     }
 
-    crate::progress::enter("recover_orphaned_pending");
+    crate::progress::enter("recover_orphaned_pending")?;
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: repair");
     // #queue-active-deprecated-line-stuck: drop a legacy `queue_active:` line that
@@ -596,7 +614,7 @@ pub fn run_with_options_to_writer(
             }
         }
     }
-    crate::progress::enter("stuck_cycle_detection");
+    crate::progress::enter("stuck_cycle_detection")?;
     // Detect the stuck-captured-cycle wedge: cycle_state advanced to Committed
     // while the active capture body never landed in HEAD. Emit as a non-blocking
     // warning so the harness can take a recovery path (e.g. force write --commit)
@@ -660,7 +678,7 @@ pub fn run_with_options_to_writer(
             }
         };
 
-    crate::progress::enter("ensure_initialized");
+    crate::progress::enter("ensure_initialized")?;
     // Step 1b: Ensure document is initialized (snapshot + git baseline).
     // If no snapshot exists, creates one and commits the file.
     if !options.probe
@@ -691,7 +709,7 @@ pub fn run_with_options_to_writer(
         )?;
     }
 
-    crate::progress::enter("pending_maintenance");
+    crate::progress::enter("pending_maintenance")?;
     // Step 1c: Pending component maintenance — lazy backfill, reap, archive, and
     // reorder detection. MUST run BEFORE step 2 commit so the single step-2
     // commit bundles the pending mutations with the previous-cycle response,
@@ -710,7 +728,7 @@ pub fn run_with_options_to_writer(
     let backlog_reordered = pending_report.reordered;
     let backlog_gated_count = pending_report.backlog_gated_count;
 
-    crate::progress::enter("review_auto_verify");
+    crate::progress::enter("review_auto_verify")?;
     // `#optverify`: opportunistic gated-review auto-verification. Runs before the
     // step-2 commit so any opt-in `[/]→[x]` flip is staged atomically (the
     // mutation touches both the working-tree file and the snapshot). Default off
@@ -759,7 +777,7 @@ pub fn run_with_options_to_writer(
         .settle(PreflightEffect::Repair)
         .context("preflight repair effect settlement")?;
 
-    crate::progress::enter("commit_previous_cycle");
+    crate::progress::enter("commit_previous_cycle")?;
     // Commit of the previous cycle is ready because the repair/maintenance
     // signal settled, not because this call happens to be below it.
     preflight_effects
@@ -805,7 +823,7 @@ pub fn run_with_options_to_writer(
         recovered = true;
     }
 
-    crate::progress::enter("cross_document_sweep");
+    crate::progress::enter("cross_document_sweep")?;
     // Step 2d: Cross-document sweep (Fix 5) — commit any other tracked docs in the same
     // project that have uncommitted snapshot content. Turns preflight into a catch-all
     // backstop: even if a previous session's commit was skipped, the next preflight
@@ -931,7 +949,7 @@ pub fn run_with_options_to_writer(
         }
     }
 
-    crate::progress::enter("claims_log");
+    crate::progress::enter("claims_log")?;
     // Step 3: Read and truncate the claims log.
     eprintln!("[preflight] step 3: claims");
     let claims = if options.probe {
@@ -940,7 +958,7 @@ pub fn run_with_options_to_writer(
         read_and_truncate_claims(file)
     };
 
-    crate::progress::enter("settle_debounce");
+    crate::progress::enter("settle_debounce")?;
     // Step 3b: Wait for file to settle (mtime + typing indicator debounce).
     // Check both file mtime (disk-level) and cross-process typing indicator
     // (buffer-level) to avoid picking up mid-typing edits.
@@ -949,7 +967,7 @@ pub fn run_with_options_to_writer(
         agent_doc_preflight_io::debounce::wait_for_lazily_current_observation(file);
     }
 
-    crate::progress::enter("related_documents");
+    crate::progress::enter("related_documents")?;
     // Step 3c: Check related documents for changes.
     eprintln!("[preflight] step 3c: related docs");
     let linked_changes = if options.probe {
@@ -964,7 +982,7 @@ pub fn run_with_options_to_writer(
         );
     }
 
-    crate::progress::enter("compute_diff");
+    crate::progress::enter("compute_diff")?;
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
     // Lazily reactive state-diff feed (#preflight-lazily-diff-feed): after the
@@ -1022,7 +1040,7 @@ pub fn run_with_options_to_writer(
         }
     }
 
-    crate::progress::enter("queue_maintenance");
+    crate::progress::enter("queue_maintenance")?;
     // Step 4b2: Queue component analysis — resolve activation, consume start
     // fences, and emit queue prompts for the skill. If the document/harness diff
     // is otherwise empty, an active queue head item becomes the prompt diff for
@@ -1260,7 +1278,7 @@ pub fn run_with_options_to_writer(
         }
     }
 
-    crate::progress::enter("prompt_classification");
+    crate::progress::enter("prompt_classification")?;
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
 
@@ -1400,7 +1418,7 @@ pub fn run_with_options_to_writer(
         }
     }
 
-    crate::progress::enter("turn_scope");
+    crate::progress::enter("turn_scope")?;
     // #op-scoped-drift-2: emit the TurnScope manifest (read/write set + driver)
     // for the prompts this turn is answering.
     let turn_scope = derive_turn_scope(&diff_result_with_current.current, &prompt_targets);
@@ -1475,7 +1493,7 @@ pub fn run_with_options_to_writer(
         }
     }
 
-    crate::progress::enter("slash_commands_and_tier");
+    crate::progress::enter("slash_commands_and_tier")?;
     // Step 4d: Extract slash commands from user-added diff lines (classified into skill vs built-in).
     let mut parsed_commands = command_diff_result
         .as_ref()
@@ -1678,7 +1696,7 @@ pub fn run_with_options_to_writer(
         suggested,
     );
 
-    crate::progress::enter("callbacks_and_accretion");
+    crate::progress::enter("callbacks_and_accretion")?;
     // Step 5: Scan for pending callback requests from other processes.
     let pending_callbacks = agent_doc_callback_io::scan_pending_callbacks(None).unwrap_or_default();
     if !pending_callbacks.is_empty() {
@@ -1698,7 +1716,7 @@ pub fn run_with_options_to_writer(
         .ok()
         .filter(|report| !report.is_healthy());
 
-    crate::progress::enter("read_cut_and_cycle_open");
+    crate::progress::enter("read_cut_and_cycle_open")?;
     // Publish one document-scoped read cut before opening a cycle. The hashes
     // identify the exact document/baseline/config observations; every
     // agent-facing field below is read back from this Computed projection.
@@ -1887,7 +1905,7 @@ pub fn run_with_options_to_writer(
         )?;
     }
 
-    crate::progress::enter("owner_pane_detection");
+    crate::progress::enter("owner_pane_detection")?;
     // `#queue-no-stop-unrelated-edit`: compute before owner-pane detection so
     // same-pane recursion signals use only prompt changes that affect this turn.
     let mut user_intent_prompt_changes = compute_user_intent_prompt_changes(
@@ -2084,7 +2102,7 @@ pub fn run_with_options_to_writer(
         }
     };
 
-    crate::progress::enter("pipeline_state");
+    crate::progress::enter("pipeline_state")?;
     let pipeline = resolve_pipeline_state(file)?;
 
     // `#wd40` / `#staleloop-recycle-restart`: a stale route-owned supervisor that
@@ -2494,6 +2512,35 @@ fn converge_exact_document_replay_before_preflight(file: &Path) -> Result<(Strin
         ),
     );
     Ok((converged, Some(copies)))
+}
+
+#[cfg(test)]
+mod projection_pass_guard {
+    /// `#preflightdeadline`: preflight's session-check, commit and closeout
+    /// entry points each opened (and dropped) their own projection pass, so
+    /// one unchanged document was re-resolved once per entry point within a
+    /// single run (`pass=uninstalled` in ops.log for `session-check:*` guards
+    /// reached from preflight). Like `closeout_pass_guard`, this is guarded
+    /// structurally: an unwrapped run is merely slower, never wrong, which is
+    /// exactly why a behavioural test cannot see it.
+    #[test]
+    fn the_preflight_run_opens_one_projection_pass_for_every_nested_entry_point() {
+        let source = include_str!("run.rs");
+        let body = source
+            .split_once("\n#[cfg(test)]\nmod projection_pass_guard")
+            .map(|(before, _)| before)
+            .unwrap_or(source);
+        let entry = "pub fn run_with_options_to_writer(";
+        let start = body
+            .find(entry)
+            .unwrap_or_else(|| panic!("entry point `{entry}` moved or was renamed"));
+        let window = &body[start..(start + 1400).min(body.len())];
+        assert!(
+            window.contains("with_current_document_projection_pass(")
+                && window.contains("run_with_options_to_writer_in_pass("),
+            "`{entry}` must run the whole preflight inside one projection pass"
+        );
+    }
 }
 
 #[cfg(test)]

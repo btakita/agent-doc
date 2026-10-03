@@ -9429,12 +9429,16 @@ fn handle_editor_route_rpc(
         payload.layout_mode.as_deref(),
         layout_invocation.columns.len(),
     )?;
-    let retained_columns = runtime
+    let (retained_columns, retained_focus) = runtime
         .pane_layout_desired()
-        .map(|desired| desired.invocation.columns)
+        .map(|desired| (desired.invocation.columns, desired.invocation.focus))
         .unwrap_or_default();
-    let (merged_columns, layout_merge) =
-        merge_editor_route_columns(layout_mode, &retained_columns, &layout_invocation.columns);
+    let (merged_columns, layout_merge) = merge_editor_route_columns(
+        layout_mode,
+        &retained_columns,
+        retained_focus.as_deref(),
+        &layout_invocation.columns,
+    );
     layout_invocation.columns = merged_columns;
     agent_doc_ops_log_io::log_op(
         &canonical,
@@ -10773,8 +10777,9 @@ enum EditorRouteLayoutMode {
     /// replace the retained one, including narrowing it.
     Exact,
     /// Each named document must have a column. Documents the retained layout
-    /// already covers are focus-only; others are added to the retained column
-    /// set. The retained layout is never narrowed.
+    /// already covers are focus-only; others take the place of the retained
+    /// focus column, so the retained layout is neither narrowed nor grown
+    /// (GH #120).
     Ensure,
 }
 
@@ -10814,8 +10819,13 @@ enum EditorRouteLayoutMergeKind {
     /// `ensure` and every routed document already has a retained column: the
     /// retained structure is republished unchanged and only focus moves.
     FocusOnly,
-    /// `ensure` and some routed documents were missing: they were appended to
-    /// the retained column set.
+    /// `ensure` and some routed documents were missing: each took the place of
+    /// a retained column (the retained focus column first), so the column
+    /// count did not change (GH #120).
+    Replaced,
+    /// `ensure` and the route named more uncovered columns than the retained
+    /// layout had columns to replace: the excess was appended. The published
+    /// width never exceeds the wider of the two observations.
     Added,
 }
 
@@ -10823,6 +10833,7 @@ enum EditorRouteLayoutMergeKind {
 struct EditorRouteLayoutMerge {
     kind: EditorRouteLayoutMergeKind,
     route_columns: usize,
+    replaced_columns: usize,
     added_columns: usize,
 }
 
@@ -10832,7 +10843,13 @@ impl EditorRouteLayoutMerge {
             EditorRouteLayoutMergeKind::Exact => "exact".to_string(),
             EditorRouteLayoutMergeKind::Seeded => "seeded".to_string(),
             EditorRouteLayoutMergeKind::FocusOnly => "focus_only".to_string(),
-            EditorRouteLayoutMergeKind::Added => format!("added:{}", self.added_columns),
+            EditorRouteLayoutMergeKind::Replaced => {
+                format!("replaced:{}", self.replaced_columns)
+            }
+            EditorRouteLayoutMergeKind::Added => format!(
+                "added:{}+replaced:{}",
+                self.added_columns, self.replaced_columns
+            ),
         }
     }
 }
@@ -10843,25 +10860,45 @@ impl EditorRouteLayoutMerge {
 ///
 /// `retained` is the pane layout graph's current desired columns — the same
 /// source of truth GH #106's focus escalation (`focus_escalation_columns`)
-/// republishes. In `ensure` mode the result always starts from the retained
-/// columns in their order, so a route can widen the structural layout but never
-/// narrow it; the routed document stays a column, which the post-publication
-/// route gate requires.
+/// republishes — and `retained_focus` is that layout's focused document. In
+/// `ensure` mode the result always starts from the retained columns in their
+/// order, so a route never narrows the structural layout and the routed
+/// document stays a column, which the post-publication route gate requires.
+///
+/// GH #120: an `ensure` route must not *grow* the layout either. Its output is
+/// the next route's `retained` input, so appending an uncovered document made
+/// every tab switch publish `observed_panes + 1` columns and the window climbed
+/// 1 → 2 → 3 until a plugin publication collapsed it again. A single-file
+/// `ensure` route is the editor's undetected fallback: it says which document
+/// is now in front, not that a new split appeared. So an uncovered route column
+/// takes the place of the retained focus column (the split the operator just
+/// switched tabs in), then of the rightmost column no other route column
+/// claims. Only when the route itself names more uncovered columns than there
+/// are unclaimed retained columns is the excess appended, so the published
+/// width is at most `max(retained.len(), route.len())`.
 fn merge_editor_route_columns(
     mode: EditorRouteLayoutMode,
     retained: &[String],
+    retained_focus: Option<&str>,
     route: &[String],
 ) -> (Vec<String>, EditorRouteLayoutMerge) {
-    let merge = |kind, added_columns| EditorRouteLayoutMerge {
+    let merge = |kind, replaced_columns, added_columns| EditorRouteLayoutMerge {
         kind,
         route_columns: route.len(),
+        replaced_columns,
         added_columns,
     };
     if mode == EditorRouteLayoutMode::Exact {
-        return (route.to_vec(), merge(EditorRouteLayoutMergeKind::Exact, 0));
+        return (
+            route.to_vec(),
+            merge(EditorRouteLayoutMergeKind::Exact, 0, 0),
+        );
     }
     if retained.is_empty() {
-        return (route.to_vec(), merge(EditorRouteLayoutMergeKind::Seeded, 0));
+        return (
+            route.to_vec(),
+            merge(EditorRouteLayoutMergeKind::Seeded, 0, 0),
+        );
     }
     let column_documents = |column: &str| {
         column
@@ -10871,26 +10908,60 @@ fn merge_editor_route_columns(
             .map(str::to_string)
             .collect::<Vec<_>>()
     };
-    let mut merged = retained.to_vec();
-    let mut added_columns = 0;
+    let covering_column = |columns: &[String], document: &str| {
+        columns
+            .iter()
+            .position(|existing| column_documents(existing).iter().any(|d| d == document))
+    };
+    // A retained column a route column already covers stays in place and is
+    // not available for replacement.
+    let mut claimed = vec![false; retained.len()];
+    let mut uncovered = Vec::new();
     for column in route {
         let documents = column_documents(column);
-        let covered = documents.iter().any(|document| {
-            merged
-                .iter()
-                .any(|existing| column_documents(existing).contains(document))
-        });
-        if !covered && !documents.is_empty() {
-            merged.push(column.clone());
-            added_columns += 1;
+        if documents.is_empty() {
+            continue;
+        }
+        let covered = documents
+            .iter()
+            .filter_map(|document| covering_column(retained, document))
+            .collect::<Vec<_>>();
+        if covered.is_empty() {
+            uncovered.push(column.clone());
+        } else {
+            for index in covered {
+                claimed[index] = true;
+            }
         }
     }
-    let kind = if added_columns == 0 {
-        EditorRouteLayoutMergeKind::FocusOnly
-    } else {
+    let mut merged = retained.to_vec();
+    let mut replaced_columns = 0;
+    let mut added_columns = 0;
+    let focus_index = retained_focus.and_then(|focus| covering_column(retained, focus));
+    for column in uncovered {
+        let target = focus_index
+            .filter(|index| !claimed[*index])
+            .or_else(|| (0..retained.len()).rev().find(|index| !claimed[*index]));
+        match target {
+            Some(index) => {
+                merged[index] = column;
+                claimed[index] = true;
+                replaced_columns += 1;
+            }
+            None => {
+                merged.push(column);
+                added_columns += 1;
+            }
+        }
+    }
+    let kind = if added_columns > 0 {
         EditorRouteLayoutMergeKind::Added
+    } else if replaced_columns > 0 {
+        EditorRouteLayoutMergeKind::Replaced
+    } else {
+        EditorRouteLayoutMergeKind::FocusOnly
     };
-    (merged, merge(kind, added_columns))
+    (merged, merge(kind, replaced_columns, added_columns))
 }
 
 /// How an editor route moved its layout focus onto the routed document.
@@ -29004,27 +29075,70 @@ mod tests {
     }
 
     #[test]
-    fn gh111_route_for_a_document_outside_the_retained_layout_adds_a_column() {
+    fn gh120_route_for_a_document_outside_the_retained_layout_replaces_the_focus_column() {
         let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
         fixture
-            .route("alpha", &["alpha", "beta"], Some("exact"))
+            .route("beta", &["alpha", "beta"], Some("exact"))
             .unwrap();
 
         let routed = fixture.route("gamma", &["gamma"], Some("ensure")).unwrap();
         assert_eq!(routed.exit_code, 0);
         assert_eq!(
             fixture.desired_columns(),
-            vec![fixture.id("alpha"), fixture.id("beta"), fixture.id("gamma")],
-            "the routed document joins the retained column set instead of replacing it"
+            vec![fixture.id("alpha"), fixture.id("gamma")],
+            "the routed document takes the retained focus column; the width is unchanged"
         );
         assert_eq!(fixture.desired_focus(), Some(fixture.id("gamma")));
         assert!(
             fixture
                 .ops_log()
-                .contains("mode=ensure explicit=true merge=added:1 route_columns=1 retained_columns=2 published_columns=3"),
+                .contains("mode=ensure explicit=true merge=replaced:1 route_columns=1 retained_columns=2 published_columns=2"),
             "{}",
             fixture.ops_log()
         );
+    }
+
+    /// GH #120: every `ensure` route used to publish `retained + 1` columns, and
+    /// the next route read that back as its retained layout, so tab switches
+    /// across documents climbed 1 -> 2 -> 3 -> 4. Publish, then publish again
+    /// from what was published: the width must hold.
+    #[test]
+    fn gh120_ensure_routes_never_publish_more_columns_than_they_retained() {
+        let documents = ["alpha", "beta", "gamma", "delta"];
+        let fixture = RouteLayoutFixture::new(&documents);
+        fixture.route("alpha", &["alpha"], Some("ensure")).unwrap();
+        assert_eq!(fixture.desired_columns(), vec![fixture.id("alpha")]);
+
+        for focus in ["beta", "gamma", "delta", "alpha", "gamma", "beta"] {
+            let routed = fixture.route(focus, &[focus], Some("ensure")).unwrap();
+            assert_eq!(routed.exit_code, 0);
+            let desired = fixture.runtime.pane_layout_desired().unwrap();
+            assert_eq!(desired.provenance.publisher, PaneLayoutPublisher::Route);
+            assert_eq!(
+                desired.invocation.columns.len(),
+                desired.provenance.retained_columns,
+                "a route publication must not grow the layout it was derived from"
+            );
+            assert_eq!(fixture.desired_columns(), vec![fixture.id(focus)]);
+            assert_eq!(fixture.desired_focus(), Some(fixture.id(focus)));
+        }
+
+        // Same series against a two-column retained layout: it stays two wide,
+        // and the unfocused column is never displaced.
+        fixture
+            .route("alpha", &["alpha", "beta"], Some("exact"))
+            .unwrap();
+        fixture.route("beta", &["beta"], Some("ensure")).unwrap();
+        for focus in ["gamma", "delta", "gamma"] {
+            fixture.route(focus, &[focus], Some("ensure")).unwrap();
+            assert_eq!(
+                fixture.desired_columns(),
+                vec![fixture.id("alpha"), fixture.id(focus)]
+            );
+        }
+        let ops = fixture.ops_log();
+        assert!(!ops.contains("merge=added"), "{ops}");
+        assert!(!ops.contains("pane_layout_projection_narrowed"), "{ops}");
     }
 
     #[test]
@@ -29100,22 +29214,48 @@ mod tests {
         let (columns, merge) = merge_editor_route_columns(
             EditorRouteLayoutMode::Ensure,
             &retained,
+            Some("/p/a.md"),
             &["/p/b.md".to_string()],
         );
         assert_eq!(columns, retained);
         assert_eq!(merge.kind, EditorRouteLayoutMergeKind::FocusOnly);
 
+        // GH #120: the uncovered column replaces a retained column the route
+        // does not claim (here `b`, since `a` is covered), never appends.
         let (columns, merge) = merge_editor_route_columns(
             EditorRouteLayoutMode::Ensure,
             &retained,
+            Some("/p/a.md"),
             &["/p/notes.md,/p/c.md".to_string(), "/p/a.md".to_string()],
         );
-        assert_eq!(columns, vec!["/p/a.md", "/p/b.md", "/p/notes.md,/p/c.md"]);
-        assert_eq!(merge.label(), "added:1");
+        assert_eq!(columns, vec!["/p/a.md", "/p/notes.md,/p/c.md"]);
+        assert_eq!(merge.label(), "replaced:1");
+
+        // The retained focus column is replaced first.
+        let (columns, merge) = merge_editor_route_columns(
+            EditorRouteLayoutMode::Ensure,
+            &retained,
+            Some("/p/a.md"),
+            &["/p/c.md".to_string()],
+        );
+        assert_eq!(columns, vec!["/p/c.md", "/p/b.md"]);
+        assert_eq!(merge.kind, EditorRouteLayoutMergeKind::Replaced);
+
+        // Only a route naming more uncovered columns than the retained layout
+        // has may widen it, and never beyond the route's own width.
+        let (columns, merge) = merge_editor_route_columns(
+            EditorRouteLayoutMode::Ensure,
+            &["/p/a.md".to_string()],
+            Some("/p/a.md"),
+            &["/p/c.md".to_string(), "/p/d.md".to_string()],
+        );
+        assert_eq!(columns, vec!["/p/c.md", "/p/d.md"]);
+        assert_eq!(merge.label(), "added:1+replaced:1");
 
         let (columns, merge) = merge_editor_route_columns(
             EditorRouteLayoutMode::Ensure,
             &[],
+            None,
             &["/p/c.md".to_string()],
         );
         assert_eq!(columns, vec!["/p/c.md"]);
@@ -29124,6 +29264,7 @@ mod tests {
         let (columns, merge) = merge_editor_route_columns(
             EditorRouteLayoutMode::Exact,
             &retained,
+            Some("/p/a.md"),
             &["/p/a.md".to_string()],
         );
         assert_eq!(columns, vec!["/p/a.md"]);

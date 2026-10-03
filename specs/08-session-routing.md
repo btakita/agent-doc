@@ -144,15 +144,21 @@ visible layout and replaces the retained desired layout, including narrowing
 it. `ensure` asks only that each named document has a column: the controller
 starts from the retained desired columns (the pane layout graph's current
 desired value, the same source the `#focusstashescalate` retained-layout
-fallback republishes), keeps them in order, and appends only route columns
-none of whose documents is already covered. A route whose documents are all
-covered is therefore focus-only and never narrows the structural layout. When
+fallback republishes) and keeps them in order. A route whose documents are all
+covered is focus-only and never narrows the structural layout. A route column
+none of whose documents is covered takes the place of the retained focus
+column, then of the rightmost retained column no other route column covers; it
+is appended only when the route names more uncovered columns than there are
+retained columns left to replace (GH #120). An `ensure` route therefore never
+publishes more columns than `max(retained, route)`: appending made its output
+its own next input, so every tab switch published `observed_panes + 1` and the
+window climbed until a plugin publication collapsed it. When
 the field is absent (editors that predate it), two or more columns infer
 `exact` and a single column infers `ensure`; an unknown value fails closed
 before publication. The JetBrains plugin sends `exact` only for a detected
 multi-column layout and `ensure` for its undetected single-file fallback.
 `controller_editor_route_layout_mode` logs the mode, whether it was explicit,
-the merge (`exact`, `seeded`, `focus_only`, `added:N`) and the route, retained
+the merge (`exact`, `seeded`, `focus_only`, `replaced:N`, `added:N+replaced:M`) and the route, retained
 and published column counts. Every `pane_layout_projection` line carries
 `publisher=` (`route`, `plugin_publication`, `escalation`, `editor_surface`,
 `command`), `plane_version=`, `columns=`, `retained_columns=` and

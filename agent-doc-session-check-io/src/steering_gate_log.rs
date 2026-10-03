@@ -137,6 +137,12 @@ pub struct GateRow {
     pub text_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_text_hash: Option<String>,
+    /// The end of the item's text at this decision (`#steergatenamo`), so an
+    /// offline text classifier can be scored on the real pause points
+    /// (`scripts/steergate-model-eval --dataset`). Absent on rows logged
+    /// before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_tail: Option<String>,
     pub decided_at_ms: u64,
     /// The gate's verdict: `settled`, `max_hold_expired`, or `held`.
     pub decision: String,
@@ -573,6 +579,7 @@ fn fold_observation(next: &mut GateLogTracking, obs: &GateObservation) {
                 change: decision.change,
                 text_hash: decision.text_hash.clone(),
                 previous_text_hash: decision.previous_text_hash.clone(),
+                text_tail: Some(decision.text_tail.clone()),
                 decided_at_ms: obs.now_ms,
                 decision: decision_name(decision.decision).to_string(),
                 tier: decision.tier,
@@ -1215,6 +1222,7 @@ mod tests {
             key: format!("queue:add:{hash}"),
             text_hash: hash.to_string(),
             previous_text_hash: previous.map(str::to_string),
+            text_tail: format!("item {hash}"),
             source: SteeringSource::Queue,
             change: if previous.is_some() {
                 SteeringChange::Edited
@@ -1260,6 +1268,31 @@ mod tests {
     const HELD: SettleDecision = SettleDecision::Held {
         recheck_after_ms: 1_000,
     };
+
+    /// `#steergatenamo`: each row keeps the text tail it was decided on, so a
+    /// text classifier can be scored offline on the real pause points; it
+    /// survives storage, and rows logged before the field existed still load.
+    #[test]
+    fn a_row_keeps_its_decision_text_tail_through_storage() {
+        let state = fold(&[observed(
+            3_000,
+            2_000,
+            vec![decision("v1", None, SettleDecision::Settled, 2_000)],
+        )]);
+        let delivered = row(&state, "v1", GatePhase::Delivered);
+        assert_eq!(delivered.text_tail.as_deref(), Some("item v1"));
+        let stored = delivered.to_stored().unwrap();
+        let reloaded = GateRow::from_stored(&stored).unwrap();
+        assert_eq!(reloaded.text_tail.as_deref(), Some("item v1"));
+
+        let mut legacy: serde_json::Value = serde_json::from_str(&stored.row_json).unwrap();
+        legacy.as_object_mut().unwrap().remove("text_tail");
+        let legacy_stored = StoredGateRow {
+            row_json: legacy.to_string(),
+            ..stored
+        };
+        assert_eq!(GateRow::from_stored(&legacy_stored).unwrap().text_tail, None);
+    }
 
     /// Delivered, then re-edited inside the window: premature. The superseded
     /// hold that preceded it was right to hold.

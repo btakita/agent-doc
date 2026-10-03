@@ -261,6 +261,10 @@ pub struct GateDecision {
     pub text_hash: String,
     /// For an edit: hash of the normalized text the agent last knew.
     pub previous_text_hash: Option<String>,
+    /// The end of the item's text as decided on, bounded to
+    /// [`GATE_TEXT_TAIL_CHARS`] (`#steergatenamo`): what a text classifier
+    /// would have seen at this pause. The hash alone cannot be scored.
+    pub text_tail: String,
     pub source: SteeringSource,
     pub change: SteeringChange,
     pub decision: agent_doc_debounce::edit_settle::SettleDecision,
@@ -273,6 +277,17 @@ pub struct GateDecision {
 /// normalized text, the same for exchange and queue items.
 pub fn gate_text_hash(text: &str) -> String {
     content_hash(&normalize_queue_text(text))
+}
+
+/// Characters of item text the decision log keeps per row (`#steergatenamo`).
+/// End-of-turn evidence lives at the end of the text, so keep the tail.
+pub const GATE_TEXT_TAIL_CHARS: usize = 280;
+
+/// The last [`GATE_TEXT_TAIL_CHARS`] characters of `text`, on a char boundary.
+pub fn gate_text_tail(text: &str) -> String {
+    let trimmed = text.trim_end();
+    let skip = trimmed.chars().count().saturating_sub(GATE_TEXT_TAIL_CHARS);
+    trimmed.chars().skip(skip).collect()
 }
 
 /// The candidate-key family: versions of one item being typed share it.
@@ -420,6 +435,7 @@ pub fn observe_with_mode(
             key: candidate.key.clone(),
             text_hash: gate_text_hash(&candidate.item.verbatim),
             previous_text_hash: candidate.item.previous.as_deref().map(gate_text_hash),
+            text_tail: gate_text_tail(&candidate.item.verbatim),
             source: candidate.item.source,
             change: candidate.item.change,
             decision,
@@ -1337,6 +1353,17 @@ pub fn subagent_dispatch_heads(content: &str, reference_queue: Option<&[String]>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#steergatenamo`: the decision log keeps the END of the item, where
+    /// end-of-turn evidence is, bounded and cut on a char boundary.
+    #[test]
+    fn gate_text_tail_keeps_the_bounded_end_of_the_item() {
+        assert_eq!(gate_text_tail("fix the bug.  \n"), "fix the bug.");
+        let long = format!("{}é tail end", "x".repeat(GATE_TEXT_TAIL_CHARS * 2));
+        let tail = gate_text_tail(&long);
+        assert_eq!(tail.chars().count(), GATE_TEXT_TAIL_CHARS);
+        assert!(tail.ends_with("é tail end"));
+    }
 
     const FM: &str = "---\nprompt_presets:\n  '#subagents': 'run the remaining items in subagents'\n  '#gh-fix': 'fix the github issue'\n---\n";
 

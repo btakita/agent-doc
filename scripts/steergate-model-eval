@@ -1,0 +1,396 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "numpy",
+#   "onnxruntime",
+#   "transformers",
+#   "huggingface_hub",
+#   "scikit-learn",
+# ]
+# ///
+"""Offline evaluation of pretrained end-of-turn models as a steering-gate feature.
+
+`#steergatenamo`: does a pretrained end-of-turn text model separate a finished
+operator prompt from one still being typed better than the shipped rules tier,
+and does it add held-out signal on top of it?
+
+Two corpora:
+
+- `--dataset` (the real one): labelled `steering_gate_log` rows from
+  `agent-doc steering dataset --json`, scored on the `text_tail` each row kept
+  at its decision. The baseline is what the gate actually ran: the logged
+  rules+perceptron probability. Rows logged before `text_tail` existed have none and
+  are skipped.
+- default (proxy): the operator's own submitted prompts from Claude Code
+  transcripts. Each full prompt is labelled complete, and word-boundary
+  prefixes of it are labelled still-typing. A prefix that happens to end a
+  sentence is genuinely ambiguous, so it is reported separately and excluded
+  from the headline numbers. Random prefixes are NOT real pause points, so this
+  only bounds what a model could add.
+
+Nothing from either corpus is printed or written: only aggregates.
+
+Usage:
+    scripts/steergate-model-eval [--transcripts DIR ...] [--max-prompts N] [--json]
+    scripts/steergate-model-eval --dataset [--min-rows N] [--json]   # run from the project
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+import random
+import re
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+REPO = Path(__file__).resolve().parent.parent
+DEFAULT_TRANSCRIPTS = [str(Path.home() / ".claude" / "projects")]
+SENTENCE_END = re.compile(r"[.!?)\]`]\s*$")
+
+
+@dataclass
+class Example:
+    group: int
+    text: str
+    complete: int
+    ambiguous: bool
+
+
+def operator_prompts(dirs: list[str], max_prompts: int, seed: int) -> list[str]:
+    seen: set[str] = set()
+    prompts: list[str] = []
+    for root in dirs:
+        for path in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+            try:
+                handle = open(path, encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            with handle:
+                for line in handle:
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("type") != "user" or event.get("isMeta"):
+                        continue
+                    content = (event.get("message") or {}).get("content")
+                    if isinstance(content, list):
+                        texts = [c.get("text", "") for c in content if c.get("type") == "text"]
+                        if len(texts) != 1:
+                            continue
+                        content = texts[0]
+                    if not isinstance(content, str):
+                        continue
+                    text = content.strip()
+                    if not plausible_typed_prompt(text) or text in seen:
+                        continue
+                    seen.add(text)
+                    prompts.append(text)
+    random.Random(seed).shuffle(prompts)
+    return prompts[:max_prompts]
+
+
+def plausible_typed_prompt(text: str) -> bool:
+    if not text or len(text) > 600 or len(text.split()) < 3:
+        return False
+    # Harness-injected or pasted content, slash commands, interrupts.
+    if text.startswith(("<", "/", "[", "Caveat:", "This session is being continued")):
+        return False
+    return "<pasted_content" not in text and "<system-reminder>" not in text
+
+
+def build_examples(prompts: list[str], prefixes_per_prompt: int, seed: int) -> list[Example]:
+    rng = random.Random(seed)
+    examples: list[Example] = []
+    for group, prompt in enumerate(prompts):
+        examples.append(Example(group, prompt, 1, False))
+        cuts = [m.start() for m in re.finditer(r"\s+", prompt)]
+        cuts = [c for c in cuts if 0 < c < len(prompt.rstrip())]
+        for cut in rng.sample(cuts, min(prefixes_per_prompt, len(cuts))):
+            prefix = prompt[:cut]
+            examples.append(Example(group, prefix, 0, bool(SENTENCE_END.search(prefix))))
+    return examples
+
+
+def rules_signals(texts: list[str]) -> list[str]:
+    payload = b"".join(t.replace("\0", " ").encode() + b"\0" for t in texts)
+    result = subprocess.run(
+        ["cargo", "run", "-q", "-p", "agent-doc-debounce", "--example", "completion_signal"],
+        cwd=REPO,
+        input=payload,
+        capture_output=True,
+        check=True,
+    )
+    signals = result.stdout.decode().split()
+    assert len(signals) == len(texts), (len(signals), len(texts))
+    return signals
+
+
+class OnnxTurnModel:
+    """A text classifier whose class 1 means "end of turn"."""
+
+    def __init__(self, name: str, repo_id: str, filename: str, max_length: int, template: str):
+        import onnxruntime as ort
+        from huggingface_hub import hf_hub_download
+        from transformers import AutoTokenizer
+
+        self.name = name
+        path = hf_hub_download(repo_id=repo_id, filename=filename)
+        self.size_bytes = os.path.getsize(path)
+        self.tokenizer = AutoTokenizer.from_pretrained(repo_id)
+        # The end of the text is what decides end-of-turn: drop the head, never the tail.
+        self.tokenizer.truncation_side = "left"
+        self.session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+        self.inputs = {i.name for i in self.session.get_inputs()}
+        self.max_length = max_length
+        self.template = template
+        self.latencies_ms: list[float] = []
+
+    def p_end(self, text: str) -> float:
+        enc = self.tokenizer(
+            self.template.format(text=text),
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="np",
+        )
+        feed = {k: enc[k].astype(np.int64) for k in ("input_ids", "attention_mask") if k in self.inputs}
+        started = time.perf_counter()
+        logits = self.session.run(None, feed)[0][0]
+        self.latencies_ms.append((time.perf_counter() - started) * 1000)
+        logits = np.asarray(logits, dtype=np.float64).reshape(-1)
+        if logits.size == 1:
+            return float(1 / (1 + np.exp(-logits[0])))
+        exp = np.exp(logits - logits.max())
+        return float((exp / exp.sum())[1])
+
+
+MODELS = [
+    dict(
+        name="namo-en",
+        repo_id="videosdk-live/Namo-Turn-Detector-v1-English",
+        filename="model_quant.onnx",
+        max_length=512,
+        template="{text}",
+    ),
+    dict(
+        name="turnsense",
+        repo_id="latishab/turnsense",
+        filename="model_quantized.onnx",
+        max_length=256,
+        template="<|user|> {text}",
+    ),
+]
+
+
+def auc(y: np.ndarray, score: np.ndarray) -> float:
+    from sklearn.metrics import roc_auc_score
+
+    return float(roc_auc_score(y, score)) if len(set(y.tolist())) == 2 else float("nan")
+
+
+def rules_one_hot(signals: list[str]) -> np.ndarray:
+    order = ["complete", "inconclusive", "incomplete"]
+    return np.array([[float(s == o) for o in order] for s in signals])
+
+
+def held_out_stack(y: np.ndarray, groups: np.ndarray, base: np.ndarray, extra: np.ndarray | None):
+    """5-fold grouped CV: logistic regression on rules (+ model logit)."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import log_loss
+    from sklearn.model_selection import GroupKFold
+
+    x = base if extra is None else np.column_stack([base, extra])
+    oof = np.zeros(len(y))
+    for train, test in GroupKFold(n_splits=5).split(x, y, groups):
+        model = LogisticRegression(max_iter=1000).fit(x[train], y[train])
+        oof[test] = model.predict_proba(x[test])[:, 1]
+    return dict(auc=auc(y, oof), log_loss=float(log_loss(y, np.clip(oof, 1e-6, 1 - 1e-6)))), oof
+
+
+def premature_at_hold_budget(y: np.ndarray, p: np.ndarray, deliver_rate: float) -> float:
+    """Share of still-typing texts delivered when the gate delivers `deliver_rate` of complete ones."""
+    complete_scores = np.sort(p[y == 1])
+    if complete_scores.size == 0:
+        return float("nan")
+    threshold = complete_scores[int((1 - deliver_rate) * (complete_scores.size - 1))]
+    return float((p[y == 0] >= threshold).mean())
+
+
+def dataset_rows() -> list[dict]:
+    result = subprocess.run(
+        ["agent-doc", "steering", "dataset", "--json"], capture_output=True, check=True
+    )
+    return json.loads(result.stdout or b"[]")
+
+
+def dataset_label(row: dict) -> int | None:
+    """1 = the item was finished at this decision, 0 = still being typed.
+
+    Mirrors the learned gate's training targets: a premature delivery and a
+    hold the operator kept typing through were unfinished; an on-time or late
+    delivery and a late hold were finished.
+    """
+    label = row.get("label")
+    if label is None:
+        return None
+    if row.get("phase") == "delivered":
+        return 0 if label == "premature" else 1
+    return 1 if label == "late" else 0
+
+
+def evaluate_dataset(min_rows: int) -> dict:
+    rows = [r for r in dataset_rows() if r.get("text_tail") and dataset_label(r) is not None]
+    report: dict = dict(corpus=dict(labelled_rows_with_text=len(rows), min_rows=min_rows))
+    if len(rows) < min_rows:
+        report["verdict"] = "insufficient_data"
+        return report
+    y = np.array([dataset_label(r) for r in rows])
+    gate = np.array([(r.get("model_probability_milli") or 500) / 1000 for r in rows])
+    signal = [str((r.get("features") or {}).get("signal", "inconclusive")).lower() for r in rows]
+    rules = np.array([{"complete": 1.0, "incomplete": 0.0}.get(s, 0.5) for s in signal])
+    report["rules_auc"] = auc(y, rules)
+    report["rules_plus_perceptron_auc"] = auc(y, gate)
+    report["models"] = {}
+    for spec in MODELS:
+        model = OnnxTurnModel(**spec)
+        p = np.array([model.p_end(r["text_tail"]) for r in rows])
+        logit = np.log(np.clip(p, 1e-6, 1 - 1e-6) / np.clip(1 - p, 1e-6, 1))
+        gate_logit = np.log(np.clip(gate, 1e-6, 1 - 1e-6) / np.clip(1 - gate, 1e-6, 1))
+        groups = np.arange(len(rows))
+        stacked, _ = held_out_stack(y, groups, gate_logit.reshape(-1, 1), logit)
+        alone, _ = held_out_stack(y, groups, gate_logit.reshape(-1, 1), None)
+        report["models"][model.name] = dict(
+            auc_alone=auc(y, p),
+            held_out_perceptron=alone,
+            held_out_perceptron_plus_model=stacked,
+        )
+    return report
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--transcripts", nargs="*", default=DEFAULT_TRANSCRIPTS)
+    parser.add_argument("--max-prompts", type=int, default=1500)
+    parser.add_argument("--prefixes-per-prompt", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--dataset", action="store_true", help="score the real decision log")
+    parser.add_argument("--min-rows", type=int, default=200)
+    args = parser.parse_args()
+
+    if args.dataset:
+        report = evaluate_dataset(args.min_rows)
+        print(json.dumps(report, indent=2))
+        return 3 if report.get("verdict") == "insufficient_data" else 0
+
+    prompts = operator_prompts(args.transcripts, args.max_prompts, args.seed)
+    if len(prompts) < 50:
+        print(f"only {len(prompts)} usable prompts; need >= 50", file=sys.stderr)
+        return 2
+    examples = build_examples(prompts, args.prefixes_per_prompt, args.seed)
+    texts = [e.text for e in examples]
+    y = np.array([e.complete for e in examples])
+    groups = np.array([e.group for e in examples])
+    ambiguous = np.array([e.ambiguous for e in examples])
+    main_rows = ~ambiguous
+
+    signals = rules_signals(texts)
+    rules_score = np.array([{"complete": 1.0, "inconclusive": 0.5, "incomplete": 0.0}[s] for s in signals])
+    inconclusive = np.array([s == "inconclusive" for s in signals])
+
+    report: dict = dict(
+        corpus=dict(
+            prompts=len(prompts),
+            examples=int(main_rows.sum()),
+            complete=int(y[main_rows].sum()),
+            still_typing=int((y[main_rows] == 0).sum()),
+            ambiguous_sentence_end_prefixes=int(ambiguous.sum()),
+            rules_inconclusive_share=float(inconclusive[main_rows].mean()),
+        ),
+        rules=dict(
+            auc=auc(y[main_rows], rules_score[main_rows]),
+            complete_verdict_recall=float((np.array(signals)[main_rows & (y == 1)] == "complete").mean()),
+            complete_verdict_premature=float((np.array(signals)[main_rows & (y == 0)] == "complete").mean()),
+            incomplete_verdict_on_complete=float((np.array(signals)[main_rows & (y == 1)] == "incomplete").mean()),
+        ),
+        models={},
+    )
+
+    m = main_rows
+    base = rules_one_hot(signals)
+    rules_stack, _ = held_out_stack(y[m], groups[m], base[m], None)
+    report["rules"]["held_out"] = rules_stack
+    for spec in MODELS:
+        model = OnnxTurnModel(**spec)
+        p = np.array([model.p_end(t) for t in texts])
+        logit = np.log(np.clip(p, 1e-6, 1 - 1e-6) / np.clip(1 - p, 1e-6, 1))
+        stacked, oof = held_out_stack(y[m], groups[m], base[m], logit[m])
+        report["models"][model.name] = dict(
+            onnx_mb=round(model.size_bytes / 1e6, 1),
+            mean_latency_ms=round(float(np.mean(model.latencies_ms)), 2),
+            p95_latency_ms=round(float(np.percentile(model.latencies_ms, 95)), 2),
+            auc_alone=auc(y[m], p[m]),
+            accuracy_at_0_5=float(((p[m] >= 0.5) == (y[m] == 1)).mean()),
+            premature_at_0_5=float((p[m & (y == 0)] >= 0.5).mean()),
+            auc_on_rules_inconclusive=auc(y[m & inconclusive], p[m & inconclusive]),
+            auc_on_ambiguous_vs_complete=auc(
+                y[(ambiguous) | ((y == 1))], p[(ambiguous) | ((y == 1))]
+            ),
+            held_out_rules_plus_model=stacked,
+            premature_at_90pct_delivery=dict(
+                rules_only=premature_at_hold_budget(y[m], _rules_oof(y, groups, base, m), 0.9),
+                rules_plus_model=premature_at_hold_budget(y[m], oof, 0.9),
+            ),
+        )
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print_report(report)
+    return 0
+
+
+def _rules_oof(y, groups, base, m):
+    _, oof = held_out_stack(y[m], groups[m], base[m], None)
+    return oof
+
+
+def print_report(report: dict) -> None:
+    c = report["corpus"]
+    r = report["rules"]
+    print(
+        f"corpus: {c['prompts']} operator prompts -> {c['examples']} examples "
+        f"({c['complete']} complete, {c['still_typing']} still-typing); "
+        f"{c['ambiguous_sentence_end_prefixes']} sentence-end prefixes held out as ambiguous; "
+        f"rules inconclusive on {c['rules_inconclusive_share']:.1%}"
+    )
+    print(
+        f"rules: AUC {r['auc']:.3f}  complete-verdict recall {r['complete_verdict_recall']:.1%}  "
+        f"premature {r['complete_verdict_premature']:.1%}  "
+        f"incomplete-on-finished {r['incomplete_verdict_on_complete']:.1%}  "
+        f"held-out AUC {r['held_out']['auc']:.3f} log-loss {r['held_out']['log_loss']:.3f}"
+    )
+    for name, s in report["models"].items():
+        h = s["held_out_rules_plus_model"]
+        pm = s["premature_at_90pct_delivery"]
+        print(
+            f"{name}: {s['onnx_mb']} MB, {s['mean_latency_ms']} ms mean / {s['p95_latency_ms']} ms p95; "
+            f"AUC alone {s['auc_alone']:.3f}, acc@0.5 {s['accuracy_at_0_5']:.1%}, premature@0.5 {s['premature_at_0_5']:.1%}; "
+            f"AUC where rules inconclusive {s['auc_on_rules_inconclusive']:.3f}; "
+            f"AUC ambiguous-vs-complete {s['auc_on_ambiguous_vs_complete']:.3f}; "
+            f"rules+model held-out AUC {h['auc']:.3f} log-loss {h['log_loss']:.3f}; "
+            f"premature at 90% delivery: rules {pm['rules_only']:.1%} -> rules+model {pm['rules_plus_model']:.1%}"
+        )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

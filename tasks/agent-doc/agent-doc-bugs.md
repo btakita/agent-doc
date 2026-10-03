@@ -18,7 +18,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -37,6 +37,28 @@ queue: go
 Compacted content:
 - Archived 4 response topic(s): GH #99, #100, #101 and release; GH #102; GH #104–105, queue fixes, retained delivery, tmux sync, and v0.35.440; 1 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): #gh-fix issue 95; #gh-fix issue 96; #gh-fix issue 97; 2 more
+
+### Re: GH #106, GH #107, and release v0.35.441 — opus-5.5 · 2026-10-02T20:45-04:00
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/106
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/107
+
+> **Queue prompt:** release + publish
+
+**GH #106: the layout escalation no longer feeds on itself** (`0bbc15868`). When you switch tabs and the target pane is stashed, the escalation used to take the last published layout, add the document as a new column, and publish that as the next layout. Each switch then read the previous switch's output, which is why the columns climbed 1→2→3→4 within one second. Now the saved layout is republished unchanged, and only when it already contains the document. Otherwise the escalation stops and logs `cause=document_outside_retained_layout`. Because nothing is ever appended, the column count can't exceed what the editor reported, and the order can't depend on which document asked first (the issue's asks 1–4).
+- New regression test `focus_only_escalations_never_grow_the_retained_layout`: three uncovered documents each try to escalate against a one-column layout, and the layout stays at one column every time. The existing retained-layout test is updated to match. Spec updated in `specs/07-session-tmux-commands.md`.
+- Not covered by this change: asks 5 (log when one projection undoes another) and 6 (clean up the stale-supervisor panes piling up in stash). Both repeat GH #105 asks that v0.35.440 addressed on the accounting side. The escalation was the part that kept making them worse.
+
+**GH #107: `agent-doc upgrade` now updates editor plugins too** (`f0797d87d`). The one-shot upgrade runs the same plugin update as `--auto`. It does this after a binary upgrade and also when the binary is already current, so re-running it repairs a workspace an earlier binary-only upgrade left out of step. If the plugin step fails, the command exits non-zero and says the release is not fully installed. If the binary upgrade itself fails, plugins are left alone so they never get ahead of the binary. Two unit tests added; spec updated in `specs/07-core-commands.md`.
+
+**Release v0.35.441**
+- `make check`: 10437 tests passed, all other gates green.
+- `audit-docs` first failed because the superproject's Grok, OpenCode, Codex and Cursor skill copies still carried an older version. I regenerated them with `skill install --all` and the audit passed.
+- Version bumped with `release-version`; VERSIONS.md entry and editor-parity row added (no plugin change; plugin stays 0.2.480).
+- `make release` re-ran the full suite, tagged and pushed `v0.35.441`, and ran `install-full`. `agent-doc --version` now reports 0.35.441.
+- GH #106 and #107 are closed by their commits.
+- The Release, PyPI and CI workflows were still running when I checked. The Book workflow passed.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -45,10 +67,7 @@ Compacted content:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do https://github.com/btakita/agent-doc/issues/106
-- do https://github.com/btakita/agent-doc/issues/107
-- release + publish
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

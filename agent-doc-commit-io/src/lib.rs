@@ -1147,11 +1147,28 @@ pub fn commit_document_only_drift(file: &Path) -> Result<bool> {
             );
         }
 
+        // `#admissionsteeringagree` (GH #118): adopting `current` as the new
+        // baseline folds every operator edit in it into history. An unanswered
+        // queue revision or exchange prompt would then stop being a diff and no
+        // cycle would ever answer it, so steering keeps the snapshot as the
+        // staging side and leaves the prompt for the next turn.
+        let current_carries_operator_steering =
+            current_carries_closed_cycle_steering(&head, snapshot.as_deref(), &current);
         let adopt_current = current != head
             && !current_has_uncommitted_response
             && !current_has_unresolved_prompt
             && current_exchange_is_unchanged
-            && !snapshot_has_uncommitted_response;
+            && !snapshot_has_uncommitted_response
+            && !current_carries_operator_steering;
+        if current_carries_operator_steering {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_only_commit_kept_snapshot_for_operator_steering file={} (#admissionsteeringagree)",
+                    file.display(),
+                ),
+            );
+        }
         if !adopt_current {
             return Ok(commit_with_outcome_scoped(file)?.did_commit);
         }
@@ -1306,6 +1323,23 @@ pub fn current_document_only_drift_is_safe_to_commit(file: &Path) -> bool {
             agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, snapshot)
                 .is_none()
         })
+        && !current_carries_closed_cycle_steering(&head, snapshot.as_deref(), &current)
+}
+
+/// The closed-cycle steering observation every admission/recovery site reads
+/// (`#admissionsteeringagree`). `head` is the empty string when the document has
+/// no committed revision; then only the snapshot is a baseline.
+fn current_carries_closed_cycle_steering(
+    head: &str,
+    snapshot: Option<&str>,
+    current: &str,
+) -> bool {
+    agent_doc_document_realtime::baseline_comparison::closed_cycle_steering_between(
+        (!head.is_empty()).then_some(head),
+        snapshot,
+        current,
+    )
+    .is_present()
 }
 
 fn document_only_exchange_is_unchanged(head: &str, current: &str) -> bool {

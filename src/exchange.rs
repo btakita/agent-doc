@@ -68,8 +68,17 @@ fn mutate(file: &Path, transform: impl FnOnce(&str) -> Result<String>) -> Result
     // preserving the session and any active response capture. Do not elect disk
     // authority here: a console-steering prompt can arrive while an editor owns
     // the live buffer.
-    crate::reset::run(file, true, true, false)
-        .context("failed to re-baseline snapshot/CRDT after exchange mutation")?;
+    // The structural edit itself just rewrote the visible document, so its
+    // re-baseline deliberately adopts it (`SteeringPolicy::Absorb`); the
+    // `#admissionsteeringagree` guard is for the recovery `reset` names.
+    crate::reset::run_with_steering_policy(
+        file,
+        true,
+        true,
+        false,
+        crate::reset::SteeringPolicy::Absorb,
+    )
+    .context("failed to re-baseline snapshot/CRDT after exchange mutation")?;
     eprintln!(
         "[exchange] mutated {} and re-baselined state projections",
         file.display()

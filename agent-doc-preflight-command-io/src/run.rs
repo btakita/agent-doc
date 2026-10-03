@@ -176,6 +176,27 @@ fn project_active_prompt_marker_with(
     }
 }
 
+/// Record every admission verdict so a refusal can be compared against the
+/// `session-check` verdict for the same document (`#admissionsteeringagree`;
+/// GH #118 could not be reconstructed from the ops log because neither the
+/// steering observation nor the verdict was recorded).
+fn log_turn_admission(
+    file: &Path,
+    stage: &str,
+    verdict: &agent_doc_session_check_io::TurnAdmissionVerdict,
+) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "preflight_turn_admission file={} stage={} admission={} steering_pending={}",
+            file.display(),
+            stage,
+            verdict.admission.as_str(),
+            verdict.steering.is_some(),
+        ),
+    );
+}
+
 fn closeout_cycle_is_open(file: &Path) -> Result<bool> {
     let projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
     if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
@@ -561,9 +582,21 @@ fn run_with_options_to_writer_in_pass(
         agent_doc_preflight_runtime_io::recover_route_queue_snapshot_commit_boundary(file, &rc)?;
     }
     let open_cycle = closeout_cycle_is_open(file)?;
-    if !options.probe
-        && !open_cycle
-        && agent_doc_session_check_io::detect_unstarted_prompt_bearing_diff(file)?.is_none()
+    // `#admissionsteeringagree` (GH #118): admission is the same predicate
+    // `session-check` answers its committed-cycle verdict with. A fresh operator
+    // prompt after a closed cycle is the next turn's input: admit, and let this
+    // turn's commit carry any closeout drift, instead of refusing and naming a
+    // recovery that would fold the prompt into the baseline.
+    let entry_admission = if options.probe {
+        None
+    } else {
+        let verdict = agent_doc_session_check_io::turn_admission(file, open_cycle)?;
+        log_turn_admission(file, "closeout_drift_check", &verdict);
+        Some(verdict)
+    };
+    if entry_admission
+        .as_ref()
+        .is_some_and(agent_doc_session_check_io::TurnAdmissionVerdict::requires_clean_closeout)
     {
         agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
             file,
@@ -586,11 +619,24 @@ fn run_with_options_to_writer_in_pass(
         if migrated != content {
             match agent_doc_document_realtime_io::atomic_write_through_authority(file, &migrated) {
                 Ok(()) => {
-                    if let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
-                        file,
-                        &migrated,
-                        agent_doc_ops_log_io::log_op,
-                    ) {
+                    // `#admissionsteeringagree`: strip the line from the EXISTING
+                    // baseline, never re-baseline from the visible document — that
+                    // would fold any unanswered operator prompt into history and
+                    // make the next diff (and admission) miss it.
+                    let stripped_baseline = agent_doc_snapshot_io::load_document_baseline(file)
+                        .map(|baseline| {
+                            baseline.map(|baseline| {
+                                frontmatter::strip_deprecated_queue_active_line(&baseline)
+                            })
+                        });
+                    if let Err(err) = stripped_baseline.and_then(|baseline| match baseline {
+                        Some(baseline) => agent_doc_snapshot_io::checkpoint_document_baseline(
+                            file,
+                            &baseline,
+                            agent_doc_ops_log_io::log_op,
+                        ),
+                        None => Ok(()),
+                    }) {
                         eprintln!(
                             "[preflight] warning: dropped deprecated queue_active line but failed to update snapshot for {}: {err}",
                             file.display()
@@ -702,14 +748,24 @@ fn run_with_options_to_writer_in_pass(
     // backlog state into the snapshot while leaving the operator's live prompt
     // only in the visible document. That binary-owned maintenance is committed
     // with the response cycle; it is not orphaned response drift.
-    if !options.probe
-        && agent_doc_session_check_io::detect_unstarted_prompt_bearing_diff(file)?.is_none()
-    {
-        agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
-            file,
-            &rc,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
-        )?;
+    //
+    // `#admissionsteeringagree`: the same predicate as step 0d. Steering observed
+    // at entry stays admitted — a repair between the two gates cannot answer an
+    // operator prompt, so a later "no steering" reading means the prompt was moved
+    // or folded, and refusing would strand it exactly as GH #118 did.
+    if !options.probe {
+        let verdict = agent_doc_session_check_io::turn_admission(file, false)?;
+        log_turn_admission(file, "post_repair_closeout_drift_check", &verdict);
+        let steering_at_entry = entry_admission
+            .as_ref()
+            .is_some_and(agent_doc_session_check_io::TurnAdmissionVerdict::continues_with_steering);
+        if verdict.requires_clean_closeout() && !steering_at_entry {
+            agent_doc_preflight_runtime_io::enforce_no_uncommitted_closeout_drift(
+                file,
+                &rc,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )?;
+        }
     }
 
     crate::progress::enter("pending_maintenance")?;

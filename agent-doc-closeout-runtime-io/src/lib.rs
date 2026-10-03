@@ -1920,6 +1920,32 @@ pub fn closeout_recovery_hint(file: &Path) -> String {
         file,
         &closeout_effects(),
     );
+    let rendered = closeout_recovery_hint_for_state(file, state);
+    // `#admissionsteeringagree` (GH #118): the remedy is chosen by the same
+    // admission predicate preflight and `session-check` decide with. While an
+    // operator prompt is unanswered, never name a recovery that rebuilds the
+    // baseline from (or restores over) the visible file — it would fold the
+    // prompt away. A failed observation keeps the classifier's remedy but says
+    // so; the executors re-check steering before they mutate.
+    match agent_doc_session_check_io::turn_admission(file, false) {
+        Ok(verdict) => agent_doc_turn::turn_admission::steering_safe_recovery(
+            &file.display().to_string(),
+            state,
+            verdict.steering.as_deref(),
+            rendered,
+        ),
+        Err(err) => format!(
+            "{rendered} (operator-steering observation unavailable: {}; confirm with `agent-doc session-check {}` that no prompt is pending before running it)",
+            format!("{err:#}").replace('\n', " "),
+            file.display()
+        ),
+    }
+}
+
+fn closeout_recovery_hint_for_state(
+    file: &Path,
+    state: agent_doc_turn::closeout_recovery::CloseoutRecoveryState,
+) -> String {
     match agent_doc_flow_io::closeout::closeout_recovery_command_for_file(file, state) {
         Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
         // `#deadlockhint`: the caller saw drift but the recovery classifier found

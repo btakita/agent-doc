@@ -2472,7 +2472,10 @@ pub fn detect_uncommitted_closeout_drift_with_context(
         )));
     }
     if let Some(marker) = crate::detect_uncommitted_exchange_drift(file)? {
-        if detect_unstarted_prompt_bearing_diff(file)?.is_some() {
+        // `#admissionsteeringagree`: the same predicate `session-check` answers
+        // the committed-cycle verdict with. Steering admits; drift waits for
+        // that turn's commit.
+        if crate::turn_admission(file, false)?.continues_with_steering() {
             return Ok(None);
         }
         return Ok(Some(format!(
@@ -2487,7 +2490,10 @@ pub fn detect_uncommitted_closeout_drift_with_context(
             snapshot_len,
             head_len,
         } => {
-            if detect_unstarted_prompt_bearing_diff(file)?.is_some() {
+            // `#admissionsteeringagree` (GH #118): one predicate with
+            // `session-check`. A fresh operator prompt after a closed cycle is the
+            // next turn's input, never a reason to refuse admission.
+            if crate::turn_admission(file, false)?.continues_with_steering() {
                 return Ok(None);
             }
             let identity = rc
@@ -2496,10 +2502,11 @@ pub fn detect_uncommitted_closeout_drift_with_context(
                 .map(|(snapshot, head)| snapshot_head_drift_identity(&snapshot, &head))
                 .unwrap_or_else(|| "snapshot_sha256=unavailable, head_sha256=unavailable, first_differing_line=unavailable".to_string());
             Ok(Some(format!(
-                "snapshot differs from HEAD without an open or recoverable agent-doc cycle (snapshot_len={}, head_len={}, {}; recovery_rejected=no_open_cycle_or_recognized_safe_binary_owned_drift; inspect=`agent-doc doctor {} --json`){} {}",
+                "snapshot differs from HEAD without an open or recoverable agent-doc cycle (snapshot_len={}, head_len={}, {}; {}; recovery_rejected=no_open_cycle_or_recognized_safe_binary_owned_drift; inspect=`agent-doc doctor {} --json`){} {}",
                 snapshot_len,
                 head_len,
                 identity,
+                closed_cycle_admission_note(file),
                 file.display(),
                 agent_doc_git_io::status::tracked_side_effect_note(file)?,
                 effects.closeout_recovery_hint(file)
@@ -2510,6 +2517,31 @@ pub fn detect_uncommitted_closeout_drift_with_context(
         | agent_doc_snapshot_io::SnapshotCommitStatus::NoHead
         | agent_doc_snapshot_io::SnapshotCommitStatus::NotInGitRepo => Ok(None),
     }
+}
+
+/// GH #118 ask 3: "without an open or recoverable agent-doc cycle" is true of a
+/// committed cycle and reads as "nothing is in flight". Say which closed cycle
+/// this is and that the admission predicate observed no unanswered operator
+/// steering, so a refusal can never be mistaken for "there is a pending prompt,
+/// but stop anyway".
+fn closed_cycle_admission_note(file: &Path) -> String {
+    let cycle = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
+        Ok(Some(state)) => format!(
+            "last_cycle=`{}` phase={} last_event={}",
+            state.cycle_id,
+            state.phase.as_str(),
+            state.last_event
+        ),
+        Ok(None) => "last_cycle=none".to_string(),
+        Err(err) => format!(
+            "last_cycle=unavailable ({})",
+            format!("{err:#}").replace('\n', " ")
+        ),
+    };
+    format!(
+        "{cycle}; turn_admission={} (no unanswered operator steering observed)",
+        agent_doc_turn::turn_admission::TurnAdmission::RequireCleanCloseout.as_str()
+    )
 }
 
 fn snapshot_head_drift_identity(snapshot: &str, head: &str) -> String {
@@ -3064,7 +3096,13 @@ fn inspect_core_profiled(
                 file.display()
             )));
         }
-        if let Some(marker) = detect_unstarted_prompt_bearing_diff(file)? {
+        // `#admissionsteeringagree` (GH #118): the verdict preflight admission
+        // derives from too. Continue-with-steering here is admission there.
+        if let crate::TurnAdmissionVerdict {
+            steering: Some(marker),
+            ..
+        } = crate::turn_admission(file, state.is_open())?
+        {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}\n{}",
                 state.cycle_id,

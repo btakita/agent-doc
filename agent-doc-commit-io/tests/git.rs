@@ -166,8 +166,13 @@ mod tests {
         )
         .unwrap();
 
+        // Binary-owned advancement: the queue head was consumed (struck) and the
+        // next item queued. Replacing a live queue revision in place instead
+        // would be operator steering (`#admissionsteeringagree`), which this
+        // recovery must never adopt — see
+        // `document_only_commit_never_adopts_current_over_pending_operator_steering`.
         let current = head
-            .replace("- do [#one]", "- do [#two]")
+            .replace("- do [#one]", "- ~~do [#one]~~\n- do [#two]")
             .replace("- [ ] [#one] first", "- [ ] [#two] second");
         fs::write(&file, &current).unwrap();
 
@@ -179,7 +184,8 @@ mod tests {
             committed.contains("- do [#two]")
                 && committed.contains("- [ ] [#two] second")
                 && !committed.contains("stale snapshot")
-                && !committed.contains("[#one]"),
+                && !committed.contains("- do [#one]")
+                && !committed.contains("[#one] first"),
             "the explicit document-only recovery must stage current authority, allowing only normal boundary projection:\n{committed}"
         );
         assert!(
@@ -190,6 +196,71 @@ mod tests {
                 .unwrap()
                 .success(),
             "a successful recovery must not strand the authoritative document after commit"
+        );
+    }
+
+    /// `#admissionsteeringagree` (GH #118): `agent-doc commit` is a recovery
+    /// preflight and `session-check` name. Its document-only path may adopt the
+    /// current authority as the new baseline — which, with an operator's queue
+    /// revision still unanswered, folds that steering into history so no cycle
+    /// ever answers it. With steering present the snapshot stays the staging side.
+    #[test]
+    fn document_only_commit_never_adopts_current_over_pending_operator_steering() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let file = root.join("session.md");
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:status -->\nidle\n<!-- /agent:status -->\n\n",
+            "<!-- agent:queue -->\n- do [#one] old option\n<!-- /agent:queue -->\n",
+        );
+        commit_file(root, "session.md", head, "initial");
+        let snapshot = head.replace("idle\n", "stale snapshot\n");
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let current = head.replace(
+            "- do [#one] old option",
+            "- do [#one] keep the cursor box visible on the remote terminal",
+        );
+        fs::write(&file, &current).unwrap();
+        assert!(
+            agent_doc_document_realtime::baseline_comparison::closed_cycle_steering_between(
+                Some(head),
+                Some(&snapshot),
+                &current,
+            )
+            .is_present(),
+            "fixture: the queue revision is operator steering"
+        );
+        assert!(!agent_doc_commit_io::current_document_only_drift_is_safe_to_commit(&file));
+
+        let _ = commit_document_only_drift(&file);
+
+        let baseline = agent_doc_snapshot_io::load_document_baseline(&file)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !baseline.contains("keep the cursor box visible"),
+            "the baseline absorbed the operator's unanswered revision:\n{baseline}"
+        );
+        let committed = agent_doc_git_io::revision::show_head(&file)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !committed.contains("keep the cursor box visible"),
+            "the operator's unanswered revision was committed as metadata:\n{committed}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("document_only_commit_kept_snapshot_for_operator_steering"),
+            "{log}"
         );
     }
 

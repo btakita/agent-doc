@@ -174,6 +174,19 @@ impl RealtimeSteeringSet {
             .unwrap_or(RealtimeSteering::None)
     }
 
+    /// The `"<label>: <verbatim aggregate>"` marker every steering surface prints
+    /// (`session-check`, preflight admission, the closeout recovery hint, the
+    /// recovery executors). `None` when no steering is present.
+    pub fn marker(&self) -> Option<String> {
+        let primary = self.primary();
+        let label = primary.label()?;
+        let verbatim = self
+            .verbatim_aggregate()
+            .or_else(|| primary.verbatim().map(str::to_string))
+            .unwrap_or_default();
+        Some(format!("{label}: {verbatim}"))
+    }
+
     /// Every directive's full verbatim text, concatenated oldest-first so the agent
     /// receives all concurrent steering at once. Directives are separated by a blank
     /// line; a leading count header is included when there is more than one so the
@@ -334,6 +347,35 @@ pub fn realtime_steering_all_between(baseline: &str, current: &str) -> RealtimeS
     let mut directives = exchange_steering_all_between(baseline, current).directives;
     directives.extend(queue_steering_between(baseline, current));
     RealtimeSteeringSet::new(directives)
+}
+
+/// Closed-cycle steering observation (`#admissionsteeringagree`, GH #118): every
+/// unanswered operator directive visible in `current` once no agent-doc cycle is
+/// open.
+///
+/// This is the ONE comparison that preflight admission, `session-check`, the
+/// closeout recovery hint, and every recovery executor read. Before it existed
+/// each site re-assembled "HEAD first, then the turn baseline" on its own, and the
+/// recovery classifier did not ask at all — so `session-check` could tell the
+/// agent to answer a fresh queue prompt while preflight refused admission and named
+/// `reset --from-current`, which folds that same prompt into the baseline.
+///
+/// HEAD gates first: when nothing is unresolved against HEAD there is no steering.
+/// Otherwise the turn baseline (the snapshot, or HEAD when there is none) is the
+/// more precise comparison, because binary-owned maintenance may already have
+/// advanced it past HEAD.
+pub fn closed_cycle_steering_between(
+    head: Option<&str>,
+    baseline: Option<&str>,
+    current: &str,
+) -> RealtimeSteeringSet {
+    if let Some(head) = head {
+        let set_from_head = realtime_steering_all_between(head, current);
+        if !set_from_head.is_present() {
+            return set_from_head;
+        }
+    }
+    realtime_steering_all_between(baseline.or(head).unwrap_or_default(), current)
 }
 
 /// Exchange-only half of [`realtime_steering_all_between`]: every unstarted
@@ -936,6 +978,41 @@ mod tests {
                 .unwrap()
                 .contains("concurrent operator")
         );
+    }
+
+    /// `#admissionsteeringagree` (GH #118): the issue's shape — the snapshot
+    /// lags HEAD by binary-owned metadata only, and the operator has typed a fresh
+    /// prompt into the visible document. The closed-cycle observation must report
+    /// that prompt (preflight and session-check both read it), and must not invent
+    /// steering out of the metadata-only snapshot/HEAD drift alone.
+    #[test]
+    fn closed_cycle_steering_reports_fresh_prompt_across_metadata_snapshot_drift() {
+        let head = doc("");
+        let snapshot = head.replace(
+            "agent_doc_format: template\n",
+            "agent_doc_format: template\nresume: stale\n",
+        );
+        assert_ne!(snapshot, head);
+        let current = doc("❯ bug: when I select the remote terminal, the cursor box disappears\n");
+
+        let set = closed_cycle_steering_between(Some(&head), Some(&snapshot), &current);
+        assert_eq!(set.len(), 1);
+        assert!(
+            set.verbatim_aggregate()
+                .unwrap()
+                .contains("the cursor box disappears")
+        );
+
+        // Metadata-only drift with no operator edit is not steering.
+        assert!(!closed_cycle_steering_between(Some(&head), Some(&snapshot), &head).is_present());
+        // A prompt already committed in HEAD is answered history, not steering,
+        // even when the snapshot lags behind it.
+        assert!(
+            !closed_cycle_steering_between(Some(&current), Some(&snapshot), &current).is_present()
+        );
+        // With no HEAD the snapshot is the baseline; with neither, everything is new.
+        assert!(closed_cycle_steering_between(None, Some(&head), &current).is_present());
+        assert!(closed_cycle_steering_between(None, None, &current).is_present());
     }
 
     #[test]

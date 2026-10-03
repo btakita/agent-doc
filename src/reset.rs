@@ -50,17 +50,53 @@ fn closed_actor_reset_guidance(file: &Path, editor_attached: bool) -> Option<Str
     })
 }
 
+/// Whether `--from-current` may fold unanswered operator steering into the
+/// rebuilt baseline (`#admissionsteeringagree`, GH #118).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SteeringPolicy {
+    /// Refuse while a closed cycle's document carries an unanswered operator
+    /// prompt: the rebuilt baseline would contain it, it would stop being a diff,
+    /// and no cycle would ever answer it. The CLI default.
+    Preserve,
+    /// The caller explicitly accepts the visible file, prompt included, as the new
+    /// baseline (`--absorb-steering`, or a structural `exchange` edit that just
+    /// rewrote the document itself).
+    Absorb,
+}
+
+/// The CLI default policy (`SteeringPolicy::Preserve`); the binary dispatches
+/// through [`run_with_steering_policy`] so `--absorb-steering` can opt out.
+#[cfg(test)]
 pub fn run(
     file: &Path,
     from_current: bool,
     preserve_session: bool,
     force_disk: bool,
 ) -> Result<()> {
+    run_with_steering_policy(
+        file,
+        from_current,
+        preserve_session,
+        force_disk,
+        SteeringPolicy::Preserve,
+    )
+}
+
+pub fn run_with_steering_policy(
+    file: &Path,
+    from_current: bool,
+    preserve_session: bool,
+    force_disk: bool,
+    steering_policy: SteeringPolicy,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
     if preserve_session && !from_current {
         anyhow::bail!("--preserve-session requires --from-current");
+    }
+    if from_current && steering_policy == SteeringPolicy::Preserve {
+        refuse_to_absorb_pending_steering(file)?;
     }
 
     let mut content = if force_disk {
@@ -240,6 +276,34 @@ pub fn run(
     Ok(())
 }
 
+/// `#admissionsteeringagree`: the same predicate preflight admission and
+/// `session-check` decide with. `reset --from-current` is the recovery GH #118's
+/// refusal named while an operator prompt was unanswered; it must not be the step
+/// that silently answers "nothing is pending" by rebuilding the baseline over it.
+fn refuse_to_absorb_pending_steering(file: &Path) -> Result<()> {
+    let cycle_open = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        .is_some_and(|state| state.phase.is_open());
+    let verdict = agent_doc_session_check_io::turn_admission(file, cycle_open)?;
+    let Some(steering) = verdict.steering else {
+        return Ok(());
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "reset_from_current_refused_pending_operator_steering file={} (#admissionsteeringagree)",
+            file.display(),
+        ),
+    );
+    anyhow::bail!(
+        "reset --from-current refused for {}: rebuilding the baseline from the visible file would fold unanswered operator steering into it, and no cycle would ever answer it. {} If you have read the pending prompt and really mean to discard it as a prompt, rerun with `--absorb-steering`.",
+        file.display(),
+        agent_doc_turn::turn_admission::steering_preserving_recovery(
+            &file.display().to_string(),
+            &steering,
+        ),
+    )
+}
+
 fn rebuild_recovery_projections_from_current(file: &Path, content: &str) -> Result<()> {
     agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
@@ -370,6 +434,63 @@ mod tests {
         assert!(
             agent_doc_document_realtime_io::pending_document_write_journal(&doc).is_empty(),
             "explicit force-disk reset must retire the superseded retained lineage",
+        );
+    }
+
+    /// `#admissionsteeringagree` (GH #118): `reset --from-current` is the
+    /// recovery the refusal named while an operator prompt was unanswered.
+    /// Rebuilding the baseline from the visible file would make that prompt stop
+    /// being a diff, so the CLI default refuses and names the steering turn;
+    /// `--absorb-steering` is the explicit opt-out.
+    #[test]
+    fn from_current_refuses_to_fold_pending_operator_steering_into_the_baseline() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: alt+shift\n\nFixed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let visible = baseline.replace(
+            "Fixed.\n",
+            "Fixed.\n\n❯ bug: the cursor box disappears on the remote terminal\n",
+        );
+        std::fs::write(&doc, &visible).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        for preserve_session in [false, true] {
+            let err = run(&doc, true, preserve_session, preserve_session)
+                .expect_err("pending steering must refuse");
+            let message = format!("{err:#}");
+            assert!(
+                message.contains("pending_operator_steering")
+                    && message.contains("--absorb-steering")
+                    && message.contains("the cursor box disappears"),
+                "{message}"
+            );
+            assert_eq!(
+                agent_doc_snapshot_io::load_document_baseline(&doc)
+                    .unwrap()
+                    .unwrap(),
+                baseline,
+                "a refused reset must leave the baseline (and so the prompt's diff) intact"
+            );
+        }
+
+        run_with_steering_policy(&doc, true, true, true, SteeringPolicy::Absorb).unwrap();
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            visible
         );
     }
 

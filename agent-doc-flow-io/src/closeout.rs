@@ -1756,6 +1756,32 @@ pub fn apply_closeout_recovery(
     }
 
     let state = classify_closeout_recovery_state_for_file(file, effects);
+    // `#admissionsteeringagree` (GH #118): every metadata recovery below either
+    // rebuilds the baseline from the visible file and commits it, or restores the
+    // visible file from HEAD. With an operator prompt still unanswered, both make
+    // that prompt stop being a diff, so no cycle would ever answer it. Withhold
+    // and name the steering-preserving path the admission predicate names.
+    if agent_doc_turn::turn_admission::recovery_absorbs_visible_document(state)
+        && state != CloseoutRecoveryState::Clean
+        && let Some(steering) = pending_operator_steering(file, effects)?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "closeout_recovery_withheld_for_operator_steering file={} state={} (#admissionsteeringagree)",
+                file.display(),
+                state.as_str(),
+            ),
+        );
+        return Ok(RecoveryApplication::NotApplied {
+            state,
+            reason: "auto-apply withheld — the document carries unanswered operator steering, and this recovery would fold it into the baseline (or restore over it)".to_string(),
+            recommended: agent_doc_turn::turn_admission::steering_preserving_recovery(
+                &file.display().to_string(),
+                &steering,
+            ),
+        });
+    }
     match state {
         CloseoutRecoveryState::Clean => Ok(RecoveryApplication::NothingToDo),
         CloseoutRecoveryState::OpenEmptyPreflight => {
@@ -2052,6 +2078,23 @@ fn log_closeout_recovery_mutation(
             reason.as_str()
         ),
     );
+}
+
+/// The closed-cycle steering observation (`#admissionsteeringagree`), read
+/// through this boundary's own document authority. Same pure comparison as
+/// `agent_doc_session_check_io::turn_admission`.
+fn pending_operator_steering(file: &Path, effects: &dyn CloseoutEffects) -> Result<Option<String>> {
+    let head = agent_doc_git_io::revision::show_head(file)?;
+    let snapshot = agent_doc_snapshot_io::load_document_baseline(file)?;
+    let current = effects.resolve_current_document(file, "closeout_recovery_operator_steering")?;
+    Ok(
+        agent_doc_document_realtime::baseline_comparison::closed_cycle_steering_between(
+            head.as_deref(),
+            snapshot.as_deref(),
+            current.content(),
+        )
+        .marker(),
+    )
 }
 
 /// Apply the provably-safe recovery for `QueueMetadataDrift` /

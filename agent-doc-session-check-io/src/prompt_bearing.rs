@@ -10,22 +10,13 @@ pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String
 }
 
 fn detect_unstarted_prompt_bearing_diff_inner(file: &Path) -> Result<Option<String>> {
-    let set = realtime_steering_set_since_turn_baseline(file)?;
-    let steering = set.primary();
-    let Some(label) = steering.label() else {
-        return Ok(None);
-    };
     // `#realtime-steering-verbatim` + `#realtime-steering-aggregate`: surface EVERY
     // operator prompt added mid-turn in FULL (not a first-line preview, and not just
     // the first of several). The operator can add multiple concurrent steering
     // directives while the turn is active; all of them must reach the agent at once
     // so it can address them together and find patterns across them, rather than
     // draining one head at a time.
-    let verbatim = set
-        .verbatim_aggregate()
-        .or_else(|| steering.verbatim().map(str::to_string))
-        .unwrap_or_default();
-    Ok(Some(format!("{label}: {verbatim}")))
+    Ok(realtime_steering_set_since_turn_baseline(file)?.marker())
 }
 
 pub fn realtime_steering_set_since_turn_baseline(
@@ -47,31 +38,63 @@ pub fn realtime_steering_set_since_turn_baseline(
         return Ok(set);
     }
 
+    // `#admissionsteeringagree`: the closed-cycle observation is one pure
+    // function shared with the recovery executors, so no site re-assembles the
+    // HEAD-then-baseline fallback on its own.
     let head = agent_doc_git_io::revision::show_head(file)?;
-    if let Some(head) = head.as_deref() {
-        // Mirror `realtime_steering_since_turn_baseline`: if nothing is unresolved
-        // against HEAD, there is no steering; otherwise fall through to the more
-        // precise snapshot turn baseline so the two paths never disagree.
-        let set_from_head =
-            agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(
-                head, &current,
-            )
-            .realtime_steering_all();
-        if !set_from_head.is_present() {
-            return Ok(set_from_head);
-        }
+    let baseline = agent_doc_snapshot_io::load_document_baseline(file)?;
+    Ok(
+        agent_doc_document_realtime::baseline_comparison::closed_cycle_steering_between(
+            head.as_deref(),
+            baseline.as_deref(),
+            &current,
+        ),
+    )
+}
+
+/// The I/O shell of the closed-cycle turn-admission predicate
+/// (`#admissionsteeringagree`, GH #118): `agent_doc_turn::turn_admission`
+/// decides; this observes the facts once.
+///
+/// Preflight's drift gates, `detect_uncommitted_closeout_drift`, the
+/// `session-check` committed-cycle verdict, and the closeout recovery hint all
+/// call this, so the two surfaces cannot tell the agent opposite things about the
+/// same document. `steering` carries the verbatim marker whenever the verdict is
+/// `ContinueWithSteering`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnAdmissionVerdict {
+    pub admission: agent_doc_turn::turn_admission::TurnAdmission,
+    pub steering: Option<String>,
+}
+
+impl TurnAdmissionVerdict {
+    pub fn requires_clean_closeout(&self) -> bool {
+        self.admission.requires_clean_closeout()
     }
 
-    let baseline = match agent_doc_snapshot_io::load_document_baseline(file)? {
-        Some(snapshot) => snapshot,
-        None => head.unwrap_or_default(),
+    pub fn continues_with_steering(&self) -> bool {
+        self.admission.continues_with_steering()
+    }
+}
+
+pub fn turn_admission(file: &Path, cycle_open: bool) -> Result<TurnAdmissionVerdict> {
+    // An open cycle owns its own recovery; do not spend a steering observation
+    // on a verdict that cannot use it.
+    let steering = if cycle_open {
+        None
+    } else {
+        detect_unstarted_prompt_bearing_diff(file)?
     };
-    Ok(
-        agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(
-            &baseline, &current,
-        )
-        .realtime_steering_all(),
-    )
+    let admission = agent_doc_turn::turn_admission::TurnAdmission::decide(
+        agent_doc_turn::turn_admission::TurnAdmissionFacts {
+            cycle_open,
+            steering_pending: steering.is_some(),
+        },
+    );
+    Ok(TurnAdmissionVerdict {
+        admission,
+        steering,
+    })
 }
 
 pub fn realtime_steering_since_turn_baseline(

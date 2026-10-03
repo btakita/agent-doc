@@ -1657,6 +1657,77 @@ mod tests {
         );
     }
 
+    /// `#admissionsteeringagree` (GH #118): the same shape as
+    /// `apply_recovery_commits_recovery_projection_visible_drift_through_mutation`,
+    /// except the visible "metadata" drift is an operator revision of a queue
+    /// item — realtime steering. Rebuilding the baseline from the visible file and
+    /// committing it would fold the unanswered prompt into history, so the
+    /// executor withholds and names the steering turn instead.
+    #[test]
+    fn apply_recovery_withholds_visible_drift_that_carries_operator_steering() {
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n### Re: x — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto go -->\n- do [#a] old option\n<!-- /agent:queue -->\n",
+        );
+        let visible = head.replace(
+            "- do [#a] old option",
+            "- do [#a] keep the cursor box visible on the remote terminal",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(head);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            head,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(head),
+            Some(head),
+        )
+        .unwrap();
+        std::fs::write(&doc, &visible).unwrap();
+        assert_eq!(
+            classify_closeout_recovery_state_for_file(&doc),
+            CloseoutRecoveryState::RecoveryProjectionVisibleDrift
+        );
+
+        match apply_closeout_recovery(&doc).unwrap() {
+            RecoveryApplication::NotApplied {
+                state, recommended, ..
+            } => {
+                assert_eq!(state, CloseoutRecoveryState::RecoveryProjectionVisibleDrift);
+                assert!(
+                    recommended.contains("pending_operator_steering")
+                        && recommended.contains("keep the cursor box visible"),
+                    "{recommended}"
+                );
+            }
+            other => panic!("expected NotApplied over pending steering, got {other:?}"),
+        }
+
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            snapshot, head,
+            "the baseline must not absorb the operator's revision"
+        );
+        assert_eq!(
+            agent_doc_git_io::revision::show_head(&doc)
+                .unwrap()
+                .unwrap(),
+            head,
+            "nothing may be committed over pending steering"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), visible);
+    }
+
     #[test]
     fn apply_recovery_withholds_queue_metadata_drift_when_live_heads_diverge() {
         // Both sides carry distinct live continuation heads with no consuming

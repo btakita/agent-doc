@@ -13635,8 +13635,9 @@ fn test_agent_doc_diff_owns_unstarted_prompt_bearing_policy() {
         "agent_doc_cycle_state_io::load_document_projection",
         "projected_open_turn_steering_set",
         "RealtimeSteeringSet::from_turn_projection",
-        "agent_doc_document_realtime::baseline_comparison::BaselineComparison::new",
-        ".realtime_steering_all()",
+        // `#admissionsteeringagree`: the actorless fallback is the one pure
+        // closed-cycle observation shared with the recovery executors.
+        "agent_doc_document_realtime::baseline_comparison::closed_cycle_steering_between(",
     ] {
         assert!(
             prompt_bearing_io.contains(required),

@@ -2263,6 +2263,10 @@ enum Commands {
         /// directly to disk. Intended for explicit recovery/headless invocations.
         #[arg(long)]
         force_disk: bool,
+        /// With --from-current, rebuild the baseline even though the visible file
+        /// carries unanswered operator steering (folds that prompt into history).
+        #[arg(long)]
+        absorb_steering: bool,
     },
     /// Squash session git history into one commit
     Clean {
@@ -4782,7 +4786,18 @@ fn try_main() -> anyhow::Result<()> {
             from_current,
             preserve_session,
             force_disk,
-        } => reset::run(&file, from_current, preserve_session, force_disk),
+            absorb_steering,
+        } => reset::run_with_steering_policy(
+            &file,
+            from_current,
+            preserve_session,
+            force_disk,
+            if absorb_steering {
+                reset::SteeringPolicy::Absorb
+            } else {
+                reset::SteeringPolicy::Preserve
+            },
+        ),
         Commands::Clean { file, archive } => clean::run(&file, archive),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Checkpoint {

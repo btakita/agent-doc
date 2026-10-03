@@ -261,21 +261,46 @@ Preflight warnings:
 - **Operator action:** the JetBrains plugin is 0.2.484 and this build ships 0.2.485. Run `agent-doc plugin install jetbrains`, then reload the IDE.
 
 The exchange is now 203 lines, but the queue is active, so I'm not compacting.
+
+### Re: #jaicrate done — opus-5.5 · 2026-10-03T03:21-04:00
+
+> **Queue prompt:** do [#jaicrate]
+
+**Done.** The subagent pushed `bc55362` to `main` without force, rebased onto `c05c7af`. `make check` exit 0: **3837 passed, 0 failed**. It now includes an all-languages pass. Installed with `--features all-languages`, and a `.jai` fixture still indexes: `graph length --callers` returns `main`.
+- **New crate `packages/tsift-tree-sitter-jai`:**
+  - Version 0.1.102, `license = "MIT-0"`, with upstream's LICENSE and a provenance README (constantitus/tree-sitter-jai@96440b0).
+  - `bindings/rust/{build.rs,lib.rs}` mirror upstream's binding and expose `LANGUAGE` and `NODE_TYPES`. Upstream ships no other query constants.
+  - The `build.rs` compiles `scanner.c` too. Upstream's script omits it, so upstream's own crate as written would not link.
+  - The C sources were moved with `git mv` and are byte-identical. `node-types.json` was added from upstream.
+  - Package: 14 files, **1.2 MiB compressed**, under the 10 MB limit. `cargo package` verify passes.
+- **`tsift-graph`:** depends on it as `tree-sitter-jai = { package = "tsift-tree-sitter-jai", …, optional = true }`, so switching to an upstream `tree-sitter-jai` crate is a one-line change. Its `build.rs`, `vendor/`, `cc` and `tree-sitter-language` dependencies are gone.
+- **Opt-in:** `lang-jai` is out of `default` in the root, `tsift-graph` and `tsift-search`, and stays in `all-languages`. With default features, `cargo tree -i tsift-tree-sitter-jai` finds nothing, and neither the `tsift` nor the `tsift-graph` package contains `parser.c`.
+- **CI:** `make check` now also runs clippy and `cargo test --workspace --features all-languages`. The Jai tests run there: 1,908 tests with all languages against 1,905 by default, the extra three being the Jai-specific named tests. Each workspace test pass takes about 2 minutes.
+- **Release:** `release.yml` builds with `--features all-languages`. `tsift-tree-sitter-jai` is published and package-checked before `tsift-graph`. The version-consistency check covers it automatically.
+- **Docs:** `specs/structural-patterns.md`, `specs/architecture.md`, the README (install notes for `--features lang-jai` and `all-languages`), and VERSIONS.
+
+**Before the next release (`#jaicratepublish`, gated on the operator):** crates.io trusted publishing only works for crates that already exist. `tsift-tree-sitter-jai` needs one manual token publish, plus its trusted publisher registered on crates.io. Otherwise the next release's publish job fails at this crate, before `tsift-graph`.
+
+**Risks:**
+- The next release will be the first to compile the 29 MB `parser.c` on the Windows (MSVC) and macOS runners.
+- `all-languages` also adds the grammars used only for structural matching, so release archives and build times grow.
+
+`#graphrefreshperf` and `#neighborhoodlimit0` are still running in subagents. The exchange is 225 lines, but the queue is active, so I'm not compacting.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#jaicrate]
+- ~~do [#jaicrate]~~
 - ~~do [#xsdcontract]~~
 - ~~do [#wsdlcontract]~~
 - ~~do [#releasepublishbindings]~~
 - ~~#subagent: Add C bindings~~
 - ~~#subagent: Add Odin bindings~~
 - ~~#subagent: Add Jai bindings~~
-- ~~#subagent: [#sdktsiftedges]~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 do [#graphrefreshperf]
+- ~~#subagent: [#sdktsiftedges]~~
+- ⏭️ do [#graphrefreshperf]
 - do [#neighborhoodlimit0]
 - ~~do [#sdktraceroot]~~
 <!-- /agent:queue -->
@@ -286,8 +311,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jaicrate] Move the vendored Jai grammar into a new workspace crate tsift-tree-sitter-jai (standard tree-sitter grammar crate API: LANGUAGE LanguageFn + NODE_TYPES; MIT-0 LICENSE + upstream constantitus/tree-sitter-jai@96440b0 provenance), make lang-jai opt-in (off by default) and depend on it, build release binaries with --features all-languages, publish the new crate before tsift-graph. Keeps the 29 MB parser.c out of default tsift downloads.
-- [ ] 🚧 [#graphrefreshperf] Root-scope graph-db refresh over the haiven-sdk tree (sdk-ruff worktree of the feat/codegen-trace branch) ran >13 min without finishing; ~50% of samples in link_ast_navigation_edges plus heavy libc. Profile, fix the hot path, add a perf-gate case.
+- [/] [#jaicratepublish] [operator-verify] Before the next tsift release: publish tsift-tree-sitter-jai 0.1.102 to crates.io once by hand with a token (cargo publish -p tsift-tree-sitter-jai, token in passage), then register the btakita/tsift release.yml trusted publisher for the crate on crates.io. The release publish job uses OIDC trusted publishing, which only works for crates that already exist, so without this the next release fails at this crate before tsift-graph. Gated on operator approval of the publish and the crates.io settings change.
+- [ ] [#graphrefreshperf] Root-scope graph-db refresh over the haiven-sdk tree (sdk-ruff worktree of the feat/codegen-trace branch) ran >13 min without finishing; ~50% of samples in link_ast_navigation_edges plus heavy libc. Profile, fix the hot path, add a perf-gate case.
 - [ ] [#neighborhoodlimit0] graph-db neighborhood: the default output budget drops nodes per kind (11 ChatMessageV0 declarations hidden) and --limit 0 does not lift it. Make --limit 0 mean unlimited (or add --all), and report the dropped counts in the envelope.
 <!-- /agent:backlog -->
 

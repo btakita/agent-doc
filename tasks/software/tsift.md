@@ -20,6 +20,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -339,12 +340,35 @@ The exchange is now 203 lines, but the queue is active, so I'm not compacting.
 - **New item `#kotlinsymclash`:** tsift links two Kotlin grammars, `tree-sitter-kotlin-ng` from tsift-graph and `tree-sitter-kotlin-sg` from ast-grep. Both export the C symbol `tree_sitter_kotlin`, so link order decides which one is used. The subagent hit three Kotlin test failures when it declared its new module first, and worked around it with module order. Release binaries are currently correct.
 
 The exchange is 277 lines, but the queue is active, so I'm not compacting.
+
+### Re: #sdktraceroot + #kotlinsymclash + Luau dispatched — opus-5.5 · 2026-10-03T04:20-04:00
+
+> **Queue prompt:** #subagents: [#sdktraceroot], [#kotlinsymclash], Add tsift support for the Luau (Roblox) language.
+
+Each item is claimed in the queue and running in its own background subagent. Each subagent has its own worktree outside agent-loop, based on `origin/main`. All three follow the spec → test → build → install → commit → push preset and push without force, rebasing if another one pushes first.
+
+- **`#sdktraceroot`** (subagent `tsift-sdktraceroot`):
+  - Refresh the haiven-sdk root scope, then import `trace.json` and `model.json`. Compare the counts with the earlier scoped import: 309 of 1,640 matched.
+  - Sort the unjoined contracts, events, REST operations and components by cause: missing indexing, path:line drift, a contracts revision that differs from the trace pin, or a declaration that doesn't exist.
+  - haiven-sdk stays read-only. If a cause turns out to be a tsift defect, the subagent fixes it in `worktrees/tsift-sdktraceroot`.
+- **`#kotlinsymclash`** (subagent `tsift-kotlinsym`, `worktrees/tsift-kotlinsym`):
+  - Link only one Kotlin grammar, and show with `nm` that the binary defines `tree_sitter_kotlin` once.
+  - Check whether ast-grep's bundled grammars clash with tsift's grammar crates for any other language.
+  - Add a test that pins the expected grammar, and show it fails when the module order is flipped back.
+- **Luau** (subagent `tsift-luau`, `worktrees/tsift-luau`):
+  - Follow the pattern of the C++ addition (`c902e41`): a grammar crate, `.luau` detection, feature wiring including `all-languages`, symbol, call and `require` extraction, and search and graph indexing.
+  - Check for a duplicate grammar symbol before linking.
+
+The exchange is 304 lines, but the queue is active, so I'm not compacting.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- #subagents: [#sdktraceroot]
+- #subagents: [#kotlinsymclash]
+- #subagents: Add tsift support for the Luau (Roblox) language.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

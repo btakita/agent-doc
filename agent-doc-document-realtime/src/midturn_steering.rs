@@ -908,8 +908,10 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
             "subagent intent: dispatch this item NOW to a NEW background subagent (one \
              subagent per item). If it touches a repository, give that subagent its own git \
              worktree outside the IDE-watched project; never run two subagents against one \
-             checkout. Keep working the current item yourself; record the item as dispatched \
-             in your response."
+             checkout. Before dispatching, claim it with `agent-doc queue claim <FILE> --item \
+             <id-or-line> --owner subagent:<label>` so the loop and Stop hook do not re-enter for \
+             it; run `agent-doc queue release` when the subagent reports back. Keep working the \
+             current item yourself; record the item as dispatched in your response."
         }
         (SteeringDispatch::DrainAfterCurrent, _, _, _) => {
             "queued in operator order: it runs AFTER the current item closes, through the normal \

@@ -120,6 +120,43 @@ where
     loop {
         let observation = observe(file, "preflight_visible_mutation");
 
+        // `#preflightsteeradmit`: a `delivery_pending` transition already HAS the
+        // authoritative text — the controller's canonical cut, operator edits
+        // included. `delivery_converged` only says every replica has received
+        // that cut; it is an availability fact, not a receipt, and nothing about
+        // admitting the turn depends on it. Every mutation preflight makes after
+        // this point is CAS-guarded against the expected current text, and
+        // operator ops that land after the steering watermark is seeded reach the
+        // agent as mid-turn steering. Waiting here turned an operator typing into
+        // the queue or exchange as the turn started into a refused cycle
+        // (`cycle contract UNAVAILABLE`, `remained delivery_pending for 4.7s`,
+        // tasks/sdk.md 2026-10-03). So admit on the current authority, and only
+        // ask the relay — best effort, never awaited — to push the delivery on.
+        // Blockers with no authoritative text (`missing_replica`,
+        // `current_pending`, `authority_unavailable`) still wait and fail closed.
+        if let Some(live_editors) = admissible_on_current_authority(&observation) {
+            let drain = match signal(
+                file,
+                CrdtReplicaEventReason::CanonicalProjection,
+                live_editors,
+            ) {
+                Ok(()) => "requested".to_string(),
+                Err(error) => format!("failed:{error:#}").replace('\n', " "),
+            };
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_visible_mutation_admitted_on_current_authority file={} state={} live_editors={} waited_ms={} urgent_drain={} (#preflightsteeradmit)",
+                    file.display(),
+                    observation.state,
+                    live_editors,
+                    start.elapsed().as_millis(),
+                    drain,
+                ),
+            );
+            return Ok(());
+        }
+
         // `#preflightdeadline`: the clamped budget bounds one settle window, but
         // the re-register and progress branches below grant further windows.
         // Once the admission deadline is spent, a still-pending transition ends
@@ -275,6 +312,23 @@ where
     }
 }
 
+/// `#preflightsteeradmit`: the live-editor count to drain when `observation` is a
+/// pending delivery that nevertheless carries the authoritative current text.
+/// `None` for every state that has no such text, which keeps waiting.
+fn admissible_on_current_authority(observation: &Observation) -> Option<usize> {
+    let delivery_pending = observation.state == "delivery_pending";
+    match agent_doc_debounce::current_authority_admission(
+        delivery_pending && observation.text.is_some(),
+        !delivery_pending,
+    ) {
+        agent_doc_debounce::CurrentAuthorityAdmission::AdmitWhileDeliveryPending => {
+            Some(observation.drain_targets.unwrap_or(0))
+        }
+        agent_doc_debounce::CurrentAuthorityAdmission::Admit
+        | agent_doc_debounce::CurrentAuthorityAdmission::WaitForAuthority => None,
+    }
+}
+
 /// `#rundocdispatchrobust`: how many extra no-progress windows preflight grants an
 /// attached editor whose model is missing, each after asking it to re-register.
 const PREFLIGHT_EDITOR_REREGISTER_ROUNDS: u32 = 3;
@@ -357,7 +411,9 @@ pub fn wait_for_lazily_current_observation(file: &Path) {
 
     loop {
         let observation = observe_lazily_current(file, "preflight_observation");
-        if observation.ready {
+        // `#preflightsteeradmit`: a pending delivery already carries the coherent
+        // current cut; waiting for every replica to ACK it is not part of reading it.
+        if observation.ready || admissible_on_current_authority(&observation).is_some() {
             tracing::debug!(
                 waited_ms = start.elapsed().as_millis() as u64,
                 authority_state = observation.state,
@@ -603,13 +659,18 @@ mod tests {
         );
     }
 
-    /// `#preflightsettleparity`: an advancing frontier must reset the
-    /// no-progress deadline here exactly as it does on the route side, so a slow
-    /// but healthy ACK round trip no longer hard-fails preflight.
+    /// `#preflightsteeradmit` regression (operator-reported 2026-10-03,
+    /// tasks/sdk.md): the operator typed into the queue and exchange as a turn
+    /// started, the controller already held those edits in its canonical text,
+    /// and preflight refused the cycle because replica delivery stayed
+    /// `delivery_pending` for 4.7s. A pending delivery that carries the
+    /// authoritative text must be admitted at once — no settle wait, no refusal —
+    /// while still asking the relay to push the delivery on.
     #[test]
-    fn preflight_mutation_wait_does_not_defer_a_frontier_that_keeps_advancing() {
+    fn preflight_mutation_wait_admits_a_pending_delivery_on_the_current_authority() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
+        let signals = RefCell::new(Vec::new());
         let observations = Cell::new(0usize);
 
         let started = Instant::now();
@@ -617,31 +678,40 @@ mod tests {
             &doc,
             Duration::from_millis(300),
             |_file, _source| {
-                let n = observations.get();
-                observations.set(n + 1);
-                if n < 12 {
-                    pending(&format!("prompt {n}"), 1)
-                } else {
-                    converged()
-                }
+                observations.set(observations.get() + 1);
+                pending("operator queue edit in flight", 2)
             },
-            |_file, _reason, _targets| Ok(()),
+            |_file, reason, targets| {
+                signals.borrow_mut().push((reason, targets));
+                Ok(())
+            },
         );
 
         assert!(
             outcome.is_ok(),
-            "an advancing frontier must not be deferred: {outcome:?}"
+            "an operator edit still being delivered must not refuse the turn: {outcome:?}"
+        );
+        assert_eq!(
+            observations.get(),
+            1,
+            "admission must not poll the delivery"
         );
         assert!(
-            started.elapsed() >= Duration::from_millis(300),
-            "the fixture must actually outlast the no-progress budget"
+            started.elapsed() < Duration::from_millis(300),
+            "admission must not spend the settle budget, took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            signals.into_inner(),
+            vec![(CrdtReplicaEventReason::CanonicalProjection, 2)],
+            "the pending delivery is still pushed on, best effort"
         );
     }
 
-    /// The progress reset is not a blank cheque: a genuinely wedged transition
-    /// still fails closed with the same operator-facing reason.
+    /// A failed drain request is not a reason to refuse: the text is already
+    /// authoritative.
     #[test]
-    fn preflight_mutation_wait_still_defers_a_stalled_frontier() {
+    fn preflight_mutation_wait_admits_a_pending_delivery_when_the_drain_request_fails() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
 
@@ -649,13 +719,36 @@ mod tests {
             &doc,
             Duration::from_millis(300),
             |_file, _source| pending("frozen", 1),
+            |_file, _reason, _targets| anyhow::bail!("no controller"),
+        );
+        assert!(outcome.is_ok(), "{outcome:?}");
+    }
+
+    /// The admission is for a pending DELIVERY of authoritative text only. A
+    /// state with no authoritative text (`current_pending`: the relay could not
+    /// reach a consistent cut) still fails closed with its reason.
+    #[test]
+    fn preflight_mutation_wait_still_defers_when_no_authoritative_text_exists() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+
+        let outcome = wait_for_lazily_current_before_mutation_with_effects(
+            &doc,
+            Duration::from_millis(100),
+            |_file, _source| Observation {
+                ready: false,
+                state: "current_pending",
+                drain_targets: None,
+                text: None,
+                error: None,
+            },
             |_file, _reason, _targets| Ok(()),
         );
 
         let message = format!("{:#}", outcome.unwrap_err());
         assert!(
-            message.contains("delivery_pending") && message.contains("preflight deferred"),
-            "a wedged transition must still fail closed with its reason: {message}"
+            message.contains("current_pending") && message.contains("preflight deferred"),
+            "a state without authoritative text must still fail closed: {message}"
         );
     }
 
@@ -751,7 +844,10 @@ mod tests {
                         n, 0,
                         "only the initial pending sample should precede the boundary"
                     );
-                    pending("frozen", 1)
+                    // `#preflightsteeradmit`: a pending delivery is admitted
+                    // outright, so the boundary is exercised by a blocker that
+                    // still waits.
+                    missing_replica()
                 }
             },
             |_file, _reason, _targets| Ok(()),

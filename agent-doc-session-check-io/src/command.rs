@@ -577,6 +577,38 @@ pub fn unmerged_editor_steering_note(
     disk_content: &str,
     binary_authored: &[&str],
 ) -> String {
+    unsaved_operator_steering_verbatim(authority_content, disk_content, binary_authored)
+        .map(|verbatim| {
+            format!(
+                " Operator steering inside the unmerged editor save (not yet on disk; relay it to the operator verbatim, do not answer it until the save settles): {verbatim}"
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// `#operatorleadpendingsave`: the operator steering an unsaved editor lead
+/// carries, as pending steering rather than an unmerged-save warning. The
+/// edit is authoritative already; it reaches the running turn through mid-turn
+/// steering, or becomes the next admission's input.
+pub fn pending_operator_steering_note(
+    authority_content: &str,
+    disk_content: &str,
+    binary_authored: &[&str],
+) -> String {
+    unsaved_operator_steering_verbatim(authority_content, disk_content, binary_authored)
+        .map(|verbatim| {
+            format!(
+                " Pending operator steering in the editor authority (authoritative now; it reaches the running turn as mid-turn steering, or the next `agent-doc` admission as input): {verbatim}"
+            )
+        })
+        .unwrap_or_default()
+}
+
+fn unsaved_operator_steering_verbatim(
+    authority_content: &str,
+    disk_content: &str,
+    binary_authored: &[&str],
+) -> Option<String> {
     let steering = agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(
         disk_content,
         authority_content,
@@ -598,14 +630,108 @@ pub fn unmerged_editor_steering_note(
                 .collect(),
         )
     };
-    steering
-        .verbatim_aggregate()
-    .map(|verbatim| {
-        format!(
-            " Operator steering inside the unmerged editor save (not yet on disk; relay it to the operator verbatim, do not answer it until the save settles): {verbatim}"
-        )
-    })
-    .unwrap_or_default()
+    steering.verbatim_aggregate()
+}
+
+/// `#operatorleadpendingsave`: whether an authority/disk divergence is only the
+/// operator's edits ahead of a lagging disk projection.
+///
+/// While an editor holds authority the disk is irrelevant to the turn: the
+/// operator typing into the queue or exchange leaves disk behind until the
+/// controller's editor-native save lands, and reporting that as `INTERRUPTED`
+/// stopped the turn over the operator's own edit (tasks/sdk.md, 2026-10-03:
+/// `component_divergence=exchange:…,queue:…`). Every fact that would make the
+/// divergence the BINARY's — an open cycle (including `write_applied`), a
+/// retained capture or document write, this cycle's unlanded tracked-work
+/// mutations — keeps the existing fail-closed path; the pure provenance rule
+/// ([`agent_doc_document::admission_divergence::authority_leads_disk_by_operator_edits`])
+/// decides the rest, keeping a disk that is ahead of or conflicting with the
+/// authority a hard failure.
+fn operator_edit_lead_over_disk(
+    file: &Path,
+    authority_content: &str,
+    disk_content: &str,
+    cycle_phase: Option<CyclePhase>,
+    retained_document_write_blocks: bool,
+) -> bool {
+    if authority_content == disk_content
+        || cycle_phase.is_some_and(CyclePhase::is_open)
+        || retained_document_write_blocks
+        || agent_doc_capture_io::load_active(file)
+            .ok()
+            .flatten()
+            .is_some()
+    {
+        return false;
+    }
+    let unlanded_own_mutations = agent_doc_cycle_state_io::load(file)
+        .ok()
+        .flatten()
+        .is_some_and(|state| {
+            agent_doc_turn::write_ownership::recorded_tracked_work_is_unlanded(
+                agent_doc_turn::write_ownership::RecordedTrackedWork {
+                    done_ids: &state.pending_done_ids,
+                    added_ids: &state.pending_added_ids,
+                    requested_done_ids: &state.requested_done_ids,
+                    requested_added_ids: &state.requested_added_ids,
+                    requested_mutations: state.requested_tracked_work_mutations,
+                    mutations_applied: state.tracked_work_mutations_applied,
+                },
+                disk_content,
+            )
+        });
+    if unlanded_own_mutations {
+        return false;
+    }
+    let baseline = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
+    let head = agent_doc_git_io::revision::show_head(file).ok().flatten();
+    agent_doc_document::admission_divergence::authority_leads_disk_by_operator_edits(
+        baseline.as_deref(),
+        head.as_deref(),
+        authority_content,
+        disk_content,
+    )
+}
+
+/// Report an operator-edit lead as a pending save (plus any pending steering),
+/// never as an interruption.
+fn report_operator_edit_pending_save(
+    file: &Path,
+    authority_content: &str,
+    disk_content: &str,
+    source: &str,
+) {
+    let divergence =
+        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+            authority_content,
+            disk_content,
+        );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_check_operator_edit_pending_save file={} source={} authority_hash={} disk_hash={} component_divergence={} (#operatorleadpendingsave)",
+            file.display(),
+            source,
+            agent_doc_hash::short_content_hash(authority_content),
+            agent_doc_hash::short_content_hash(disk_content),
+            divergence,
+        ),
+    );
+    eprintln!(
+        "[session-check] pending-save: the editor authority for {} leads its disk projection by operator edits only (component_divergence={}). This is not a turn failure: the editor buffer is authoritative and the controller persists it with an editor-native save as delivery allows. Do not patch, restore, or force-disk the file.{}",
+        file.display(),
+        divergence,
+        pending_operator_steering_note(
+            authority_content,
+            disk_content,
+            &binary_authored_texts(file)
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        ),
+    );
 }
 
 /// `#retainedsteeringecho`: text the binary itself wrote to `file` — committed
@@ -794,6 +920,21 @@ fn ensure_terminal_authority_disk_convergence(
             authority_content,
             agent_doc_ops_log_io::log_op,
         )?;
+        return Ok(());
+    }
+    if operator_edit_lead_over_disk(
+        file,
+        authority_content,
+        disk_content,
+        cycle_phase,
+        effects.retained_document_write_blocks(file),
+    ) {
+        report_operator_edit_pending_save(
+            file,
+            authority_content,
+            disk_content,
+            "terminal_convergence",
+        );
         return Ok(());
     }
     let recovery_status =
@@ -1437,8 +1578,26 @@ fn run_with_options_inner(
                 )
             }
         };
+        let projection_matches =
+            terminal_projection_matches_required_scope(file, &authority_content, &disk_content)?;
+        let operator_edit_lead = !projection_matches
+            && operator_edit_lead_over_disk(
+                file,
+                &authority_content,
+                &disk_content,
+                cycle_phase,
+                retained_document_write_blocks,
+            );
+        if operator_edit_lead {
+            report_operator_edit_pending_save(
+                file,
+                &authority_content,
+                &disk_content,
+                "read_only_terminal_convergence",
+            );
+        }
         anyhow::ensure!(
-            terminal_projection_matches_required_scope(file, &authority_content, &disk_content,)?,
+            projection_matches || operator_edit_lead,
             "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); {}. {}{}",
             file.display(),
             agent_doc_hash::content_hash(&authority_content),
@@ -3921,6 +4080,117 @@ mod terminal_convergence_tests {
         );
     }
 
+    fn commit_session_doc(dir: &Path, content: &str) -> std::path::PathBuf {
+        let file = dir.join("session.md");
+        std::fs::write(&file, content).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+            vec!["add", "session.md"],
+            vec!["commit", "-m", "committed closeout", "--no-verify"],
+        ] {
+            let out = Command::new("git")
+                .current_dir(dir)
+                .args(&args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {out:?}");
+        }
+        file
+    }
+
+    const LEAD_COMMITTED: &str = "# Session\n\n<!-- agent:queue -->\n- shipped item\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\nPrior answer.\n<!-- /agent:exchange -->\n";
+
+    /// `#operatorleadpendingsave` regression (tasks/sdk.md, 2026-10-03): the
+    /// operator's queue + exchange edit lives in the editor authority while
+    /// disk still holds the committed revision and the controller's save is
+    /// pending. That is a pending save / pending steering, not INTERRUPTED.
+    #[test]
+    fn session_check_reports_operator_edits_ahead_of_disk_as_a_pending_save() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = commit_session_doc(dir.path(), LEAD_COMMITTED);
+        let authority = LEAD_COMMITTED
+            .replace(
+                "- shipped item\n",
+                "- shipped item\n- operator added this\n",
+            )
+            .replace("Prior answer.\n", "Prior answer.\n\nalso check CI please\n");
+
+        ensure_terminal_authority_disk_convergence(&file, &authority, LEAD_COMMITTED, &TestEffects)
+            .expect("operator edits ahead of a lagging disk are not a turn failure");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            LEAD_COMMITTED,
+            "session-check must never write the operator's edit to disk itself",
+        );
+    }
+
+    /// The boundary: a disk that carries content the authority lacks (written
+    /// behind the editor) has no operator provenance and stays INTERRUPTED,
+    /// even with a committed plane to compare against.
+    #[test]
+    fn session_check_still_interrupts_a_disk_that_conflicts_with_the_authority() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = commit_session_doc(dir.path(), LEAD_COMMITTED);
+        let authority = LEAD_COMMITTED.replace(
+            "- shipped item\n",
+            "- shipped item\n- operator added this\n",
+        );
+        let disk = LEAD_COMMITTED.replace("- shipped item\n", "- written behind the editor\n");
+        std::fs::write(&file, &disk).unwrap();
+
+        let err =
+            ensure_terminal_authority_disk_convergence(&file, &authority, &disk, &TestEffects)
+                .expect_err("a conflicting disk projection must stay fail-closed");
+        assert!(
+            format!("{err:#}").contains("refusing a false successful closeout"),
+            "{err:#}"
+        );
+    }
+
+    /// An open cycle owns its divergence: the binary's write may be the lead, so
+    /// the operator-lead classification must not apply.
+    #[test]
+    fn session_check_operator_lead_does_not_apply_while_a_cycle_is_open() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = commit_session_doc(dir.path(), LEAD_COMMITTED);
+        let authority = LEAD_COMMITTED.replace(
+            "- shipped item\n",
+            "- shipped item\n- operator added this\n",
+        );
+        assert!(operator_edit_lead_over_disk(
+            &file,
+            &authority,
+            LEAD_COMMITTED,
+            None,
+            false,
+        ));
+        for phase in [
+            CyclePhase::PreflightStarted,
+            CyclePhase::ResponseCaptured,
+            CyclePhase::WriteApplied,
+        ] {
+            assert!(
+                !operator_edit_lead_over_disk(
+                    &file,
+                    &authority,
+                    LEAD_COMMITTED,
+                    Some(phase),
+                    false
+                ),
+                "{phase:?} owns its divergence"
+            );
+        }
+        assert!(
+            !operator_edit_lead_over_disk(&file, &authority, LEAD_COMMITTED, None, true),
+            "a retained document write owns its divergence"
+        );
+    }
+
     #[test]
     fn session_check_self_heals_transiently_stale_committed_projection() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -4456,7 +4726,7 @@ mod settle_window_tests {
             (entry..entry_end).contains(&exits[0]),
             "the exit(1) must live in exit_on_interrupted"
         );
-        assert!(SESSION_CHECK_SETTLE_WINDOW_SECS >= 20);
+        const { assert!(SESSION_CHECK_SETTLE_WINDOW_SECS >= 20) };
     }
 
     #[test]

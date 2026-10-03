@@ -251,7 +251,60 @@ pub fn authority_subsumes_disk(durable_disk: &str, durable_authority: &str) -> b
         .all(|disk_line| authority_lines.by_ref().any(|line| line == disk_line))
 }
 
-/// What a three-way split means for the caller now that admission merges it.
+/// `#operatorleadpendingsave`: whether the live editor authority leads its disk
+/// projection by *operator* edits only, so the divergence is a pending editor
+/// save (and, when the edit is a prompt, pending steering) — not a turn failure.
+///
+/// While an editor holds authority the disk is a lagging projection: the
+/// operator typing into the queue or exchange makes authority and disk differ
+/// until the controller's editor-native save lands. Reporting that as
+/// `INTERRUPTED` stopped turns over the operator's own in-flight edit
+/// (tasks/sdk.md, 2026-10-03).
+///
+/// The caller supplies the facts this pure rule cannot see — whether the binary
+/// itself owns a write in flight (an open cycle, a retained capture or document
+/// write, unlanded tracked-work mutations) — and must not call this when it
+/// does. Given that, the lead is operator-originated when, in the durable
+/// (marker-normalized) domain:
+///
+/// - a committed plane exists to judge provenance against (`baseline` or `head`);
+///   with neither there is no proof, so the answer is `false`;
+/// - the authority is NOT itself a committed plane — an authority equal to the
+///   baseline or HEAD means the lag is the binary's own committed projection,
+///   which keeps its existing settlement path; and
+/// - disk carries nothing of its own: it equals a committed plane (it is merely
+///   stale), or the authority preserves every disk line in order.
+///
+/// A disk that is AHEAD of or CONFLICTING with the authority — content on disk
+/// that neither the authority nor a committed plane carries — has no operator
+/// provenance through the editor and stays a hard failure, as does a
+/// transient-marker-only difference (its own self-heal owns it).
+pub fn authority_leads_disk_by_operator_edits(
+    baseline: Option<&str>,
+    head: Option<&str>,
+    authority: &str,
+    disk: &str,
+) -> bool {
+    if authority == disk {
+        return false;
+    }
+    let committed: Vec<String> = [baseline, head]
+        .into_iter()
+        .flatten()
+        .map(normalize_transient_agent_doc_markers)
+        .collect();
+    if committed.is_empty() {
+        return false;
+    }
+    let durable_authority = normalize_transient_agent_doc_markers(authority);
+    let durable_disk = normalize_transient_agent_doc_markers(disk);
+    if durable_authority == durable_disk || committed.contains(&durable_authority) {
+        return false;
+    }
+    committed.contains(&durable_disk) || authority_subsumes_disk(&durable_disk, &durable_authority)
+}
+
+/// What a three-way split means for the caller now that admission merges it./// What a three-way split means for the caller now that admission merges it.
 ///
 /// There is no operator action to prescribe, and no action for the agent either:
 /// the merge happens inside admission. This text exists so a diagnostic that
@@ -273,6 +326,71 @@ authority: either one discards the other writer's text that the merge preserves.
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const COMMITTED: &str = "# S\n\n<!-- agent:queue -->\n- a\n<!-- /agent:queue -->\n";
+    const OPERATOR: &str =
+        "# S\n\n<!-- agent:queue -->\n- a\n- typed by the operator\n<!-- /agent:queue -->\n";
+
+    /// `#operatorleadpendingsave`: the tasks/sdk.md shape — disk is the
+    /// committed revision, the authority adds the operator's queue edit.
+    #[test]
+    fn operator_edits_ahead_of_a_stale_disk_are_a_pending_save() {
+        assert!(authority_leads_disk_by_operator_edits(
+            Some(COMMITTED),
+            Some(COMMITTED),
+            OPERATOR,
+            COMMITTED,
+        ));
+        // An operator deletion/rewrite is still a lead while disk is merely stale.
+        let rewritten = "# S\n\n<!-- agent:queue -->\n- rewritten\n<!-- /agent:queue -->\n";
+        assert!(authority_leads_disk_by_operator_edits(
+            None,
+            Some(COMMITTED),
+            rewritten,
+            COMMITTED,
+        ));
+        // Disk carrying an earlier operator save the authority extends.
+        let saved = "# S\n\n<!-- agent:queue -->\n- a\n- typed\n<!-- /agent:queue -->\n";
+        let more = "# S\n\n<!-- agent:queue -->\n- a\n- typed\n- more\n<!-- /agent:queue -->\n";
+        assert!(authority_leads_disk_by_operator_edits(
+            Some(COMMITTED),
+            Some(COMMITTED),
+            more,
+            saved,
+        ));
+    }
+
+    /// Every divergence without operator provenance stays a hard failure.
+    #[test]
+    fn non_operator_divergence_is_not_a_pending_save() {
+        // Disk ahead of / conflicting with the authority.
+        let disk_only =
+            "# S\n\n<!-- agent:queue -->\n- written behind the editor\n<!-- /agent:queue -->\n";
+        assert!(!authority_leads_disk_by_operator_edits(
+            Some(COMMITTED),
+            Some(COMMITTED),
+            OPERATOR,
+            disk_only,
+        ));
+        // The authority IS the committed plane: the binary's own projection lags.
+        assert!(!authority_leads_disk_by_operator_edits(
+            Some(COMMITTED),
+            Some(COMMITTED),
+            COMMITTED,
+            "# S\n",
+        ));
+        // No committed plane: no provenance proof.
+        assert!(!authority_leads_disk_by_operator_edits(
+            None, None, OPERATOR, COMMITTED,
+        ));
+        // Converged planes are not a lead.
+        assert!(!authority_leads_disk_by_operator_edits(
+            Some(COMMITTED),
+            Some(COMMITTED),
+            OPERATOR,
+            OPERATOR,
+        ));
+    }
 
     #[test]
     fn a_single_advanced_branch_stays_resolvable() {

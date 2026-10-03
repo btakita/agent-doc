@@ -1506,6 +1506,107 @@ mod tests {
         assert_eq!(obs.ready[0].presets[0].scope, PresetScope::Queue);
     }
 
+    /// `#preflightsteeradmit` SimWorld: the operator types into the queue as a
+    /// turn starts (tasks/sdk.md, 2026-10-03). The relay hub already holds the
+    /// edit in its canonical text while a second replica has not acknowledged it,
+    /// so delivery is pending. Admission must proceed on that canonical text, and
+    /// the operator's NEXT queue and exchange edits — landing after the seeded
+    /// baseline — must reach the running turn as mid-turn steering.
+    #[test]
+    fn operator_edit_in_flight_at_turn_start_is_admitted_and_later_edits_steer() {
+        use crate::crdt_relay::RelayHub;
+        use agent_doc_debounce::{CurrentAuthorityAdmission, current_authority_admission};
+        use agent_doc_merge::crdt_sync::ReplicaState;
+
+        fn drain(hub: &mut RelayHub, client: u64) {
+            for update in hub.pending_updates(client).unwrap() {
+                hub.ack_delivery(client, &update.patch_id, update.generation)
+                    .unwrap();
+            }
+        }
+        fn operator_insert(hub: &mut RelayHub, editor: &ReplicaState, after: &str, text: &str) {
+            let current = editor.text();
+            let offset = current.find(after).expect("anchor") + after.len();
+            editor.apply_local_edit(offset as u32, 0, text);
+            let update = editor.diff(&ReplicaState::new(99).state_vector()).unwrap();
+            hub.relay_update(2, &update).unwrap();
+        }
+
+        let owned = BTreeSet::new();
+        let committed = doc("- current task\n", EX);
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap(); // the operator's editor
+        hub.register(3).unwrap(); // a second live replica
+        hub.apply_canonical_replace("", &committed).unwrap();
+        drain(&mut hub, 2);
+        drain(&mut hub, 3);
+        assert!(hub.delivery_converged());
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        assert_eq!(editor.text(), committed);
+
+        // The operator's edit is in the canonical authority, but replica 3 has
+        // not acknowledged it: exactly the `delivery_pending` refusal shape.
+        operator_insert(&mut hub, &editor, "- current task\n", "- in-flight item\n");
+        assert!(
+            !hub.delivery_converged(),
+            "the fixture must hold delivery pending"
+        );
+        let admitted = hub.canonical_text();
+        assert!(admitted.contains("- in-flight item\n"));
+        assert_eq!(
+            current_authority_admission(true, hub.delivery_converged()),
+            CurrentAuthorityAdmission::AdmitWhileDeliveryPending,
+            "an operator edit still being delivered must not refuse the turn",
+        );
+        assert!(current_authority_admission(true, hub.delivery_converged()).admits());
+
+        // Preflight seeds the steering watermark from the admitted authority:
+        // the in-flight edit is turn input, not steering.
+        let watermark = seeded(&admitted, Some("current task"));
+        let unchanged = observe(&watermark, &admitted, &quiet_ctx(&owned));
+        assert!(unchanged.ready.is_empty(), "{:?}", unchanged.ready);
+
+        // Edits that land after the baseline flow through mid-turn steering.
+        operator_insert(
+            &mut hub,
+            &editor,
+            "- in-flight item\n",
+            "- also update the README table\n",
+        );
+        operator_insert(
+            &mut hub,
+            &editor,
+            "work on the current item\n",
+            "\nalso check the CI status please\n",
+        );
+        let later = hub.canonical_text();
+        let steering = observe(&watermark, &later, &quiet_ctx(&owned));
+        let queue = steering
+            .ready
+            .iter()
+            .find(|item| item.source == SteeringSource::Queue)
+            .unwrap_or_else(|| panic!("queue steering missing: {:?}", steering.ready));
+        assert_eq!(queue.verbatim, "also update the README table");
+        assert_eq!(queue.dispatch, SteeringDispatch::DrainAfterCurrent);
+        let exchange = steering
+            .ready
+            .iter()
+            .find(|item| item.source == SteeringSource::Exchange)
+            .unwrap_or_else(|| panic!("exchange steering missing: {:?}", steering.ready));
+        assert!(
+            exchange
+                .verbatim
+                .contains("also check the CI status please")
+        );
+        assert_eq!(exchange.dispatch, SteeringDispatch::AddressNow);
+
+        // A state with no authoritative text still waits.
+        assert_eq!(
+            current_authority_admission(false, false),
+            CurrentAuthorityAdmission::WaitForAuthority
+        );
+    }
+
     #[test]
     fn exchange_prompt_surfaces_address_now() {
         let owned = BTreeSet::new();

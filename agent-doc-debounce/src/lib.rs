@@ -103,6 +103,45 @@ pub enum SettleAction {
     Defer { reason: SettleDeferReason },
 }
 
+/// How turn admission treats one Lazily current-authority observation
+/// (`#preflightsteeradmit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurrentAuthorityAdmission {
+    /// The authoritative text exists and every live replica has received it.
+    Admit,
+    /// The authoritative text exists but replica delivery is still pending —
+    /// typically the operator's own edit fanning out. Admit on that text; later
+    /// operator ops reach the turn as mid-turn steering.
+    AdmitWhileDeliveryPending,
+    /// No authoritative text yet (missing replica, no consistent cut, authority
+    /// unreachable): wait, and fail closed if it never appears.
+    WaitForAuthority,
+}
+
+impl CurrentAuthorityAdmission {
+    pub const fn admits(self) -> bool {
+        !matches!(self, Self::WaitForAuthority)
+    }
+}
+
+/// Decide turn admission from one current-authority observation.
+///
+/// While an editor holds authority, admission depends on whether the
+/// authoritative text EXISTS, never on whether every replica has acknowledged
+/// it: `delivery_converged` is an availability fact, not a receipt, and waiting
+/// on it refused turns whenever the operator was typing as one started
+/// (tasks/sdk.md, 2026-10-03: `remained delivery_pending for 4.7s`).
+pub const fn current_authority_admission(
+    authoritative_text_available: bool,
+    delivery_converged: bool,
+) -> CurrentAuthorityAdmission {
+    match (authoritative_text_available, delivery_converged) {
+        (false, _) => CurrentAuthorityAdmission::WaitForAuthority,
+        (true, true) => CurrentAuthorityAdmission::Admit,
+        (true, false) => CurrentAuthorityAdmission::AdmitWhileDeliveryPending,
+    }
+}
+
 /// Shared settle-wait decision for Lazily current-transition polls.
 ///
 /// Both the route startup wait and the preflight pre-mutation wait drive this

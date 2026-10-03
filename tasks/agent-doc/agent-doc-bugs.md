@@ -562,6 +562,40 @@ Your steering test reached me at 14:07; it runs next in the queue.
 - Delivery works and is verbatim. It was routed as `drain_after_current`, meaning queued behind the item I was on rather than interrupting it, which is why this answer comes now.
 - The delivery was logged and labelled `on_time` within the same turn, so the fix from the last item is working: the learned gate now has 2 training updates.
 - The real limit is the harness: a hook cannot interrupt a tool call that's still running. Steering latency is bounded by the longest tool call in flight.
+
+### Re: queue `subagents` / `fan-out` attribute + is `#subagent:` reliable? — opus-5.5 · 2026-10-03T15:09-04:00
+
+> **Queue prompt:** do [#planattributeauto]
+
+**Is the `#subagent:` prefix in tsift.md reliable?** Mostly. It worked today: all three tsift heads were claimed (for example `#subagent: do [#projectlevelopt]`, owner `subagent:luaulegacy`) and each got its own worktree. `#subagent` is a built-in intent tag, so it doesn't even have to be registered. There are real gaps, though, and the attribute should close them:
+
+1. **Dispatch is only offered once.** `subagent_dispatch_heads` lists only lines that are new since the previous cycle's seed. If the cycle that lists a head doesn't claim it (the model skips it, the turn is interrupted, or closeout fails), the next seed already contains it, and from then on it **drains inline** without any warning.
+2. **A claim can expire while its subagent is still working.** The default TTL is 2h and there's no heartbeat. When a long subagent outlives its claim, the head becomes selectable inline and the work runs twice.
+3. **`preset=` takes one value.** You can't combine `#subagents` with `#spec-test-build-install-commit-push` on the marker. That's the only reason you have to tag every line.
+4. **Nothing limits concurrency or repo conflicts.** Every tagged head is dispatched at once. Integration order, `Cargo.lock`/`VERSIONS.md` conflicts, and per-subagent `make install` recycles are left to the coordinator's judgement.
+5. **Only Claude Code can do this.** Codex, OpenCode, and Grok have no in-session dispatch path.
+
+So: it's fine for a short batch you're watching. For an unattended `go` queue, we need the attribute.
+
+**Plan:** `tasks/agent-doc/plan-queue-subagents-attribute.md` (committed 125e1a12c). The attribute is `subagents` (alias `fan-out`), either bare or `subagents=N` to set a concurrency cap (default 3), and it can sit alongside `preset=`. Key decisions:
+- **Eligibility comes from current state, not "new since seed".** Under the attribute, every unclaimed drainable head can be dispatched, so a missed claim is offered again next cycle.
+- **Opt-outs and ordering.** A line opts out with an `inline` tag or `[operator-verify]`. `after A do B` dependencies stay in order.
+- **Cap.** Heads over the cap wait for a free slot; they never drain inline.
+- **Heartbeat.** `queue claim --refresh` keeps a claim alive while its subagent runs. An expired claim under the attribute makes the head dispatchable again, never inline.
+- **The coordinator integrates.** Subagents commit in worktrees outside agent-loop and never install or release. The coordinator then:
+  1. rebases or cherry-picks each result;
+  2. runs the preset verification once;
+  3. runs `make install` once per batch;
+  4. pushes;
+  5. releases the claim;
+  6. closes the item on the next cycle.
+
+  Heads that write to the same repo are integrated one at a time.
+- **Other harnesses.** Codex, OpenCode, and Grok fall back to `agent-doc orchestrate --mode parallel` under the same claims and cap. If neither path is available, preflight warns and the heads drain inline.
+
+There are five phases, each added to the backlog and the queue: `qsubattr1` (parse/classify), `qsubattr2` (eligibility + cap), `qsubattr3` (claim refresh/expiry), `qsubattr4` (skill/runbook contract), and `qsubattr5` (dogfood on tsift.md).
+
+Note: this exchange is 533 lines and still growing; I'm not compacting because the queue is active.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -570,11 +604,16 @@ Your steering test reached me at 14:07; it runs next in the queue.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#qsubattr1] [agent-doc] Queue subagents attribute, phase 1 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): parse `subagents`/`fan-out` (optional =N) as a queue-only attr with typo/misplacement warnings; PresetContext treats it as queue-scope subagent intent; tests for spellings and inline/[operator-verify] opt-outs.
+- [ ] [#qsubattr2] [agent-doc] Queue subagents attribute, phase 2 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): under the attr, dispatch eligibility comes from current state (drop the new-since-seed filter), with a concurrency cap of N-active_claims and ordering dependencies; capped/claimed heads are not inline-drainable; SimWorld tests for missed claim re-offered, cap, and after-A-do-B.
+- [ ] [#qsubattr3] [agent-doc] Queue subagents attribute, phase 3 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): `queue claim --refresh` heartbeat; under the attr an expired claim makes the head eligible for dispatch again, never inline drain; test for no duplicate work.
+- [ ] [#qsubattr4] [agent-doc] Queue subagents attribute, phase 4 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): coordinator contract in SKILL.md + respond/planning-dispatch runbooks for all harnesses (claim/dispatch/refresh, serialized integration, one make install per batch, release then close, orchestrate --mode parallel fallback for harnesses without an Agent tool).
+- [ ] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): dogfood in tasks/software/tsift.md (replace per-line #subagent: prefixes with subagents=3); verify via queue claims + ops.log that each head is dispatched exactly once and none drain inline.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

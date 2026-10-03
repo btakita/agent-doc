@@ -744,9 +744,20 @@ fn retry_controller_transport_drop<T>(
 /// before surfacing a not-authoritative refusal, and how often it re-asks.
 ///
 /// A handoff promotes (or the replacement self-reaps) in well under a second in
-/// the normal case; the budget covers a recycle storm where several generations
-/// churn back to back.
-const CONTROLLER_HANDOFF_SETTLE_BUDGET: Duration = Duration::from_secs(10);
+/// the normal case. The budget is NOT sized for that case: it is derived from
+/// the handoff's own bound. One self-handoff attempt waits up to
+/// [`HANDOFF_CONNECT_WAIT`] for its successor before aborting (rolling the
+/// predecessor back) and retrying, so the window a refusal can land in is
+/// `attempts x HANDOFF_CONNECT_WAIT`.
+///
+/// GH #122: an operator recycle on btakita-dev 2026-10-03 18:32:35 timed out
+/// its successor three times and promoted on the fourth attempt — a 141s
+/// `Preparing` window — while the old fixed 10s budget exhausted four times
+/// without ever settling. The budget covers [`CONTROLLER_HANDOFF_SETTLE_ATTEMPTS`]
+/// full attempts, so it still bounds a handoff that never promotes.
+const CONTROLLER_HANDOFF_SETTLE_ATTEMPTS: u32 = 6;
+const CONTROLLER_HANDOFF_SETTLE_BUDGET: Duration =
+    HANDOFF_CONNECT_WAIT.saturating_mul(CONTROLLER_HANDOFF_SETTLE_ATTEMPTS);
 const CONTROLLER_HANDOFF_SETTLE_INTERVAL: Duration = Duration::from_millis(200);
 
 /// (`#handoffrefusalretry`) Did the controller refuse because it is not yet
@@ -9908,6 +9919,120 @@ fn handle_editor_command_submit_async_rpc(
     runtime: &Arc<ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
+    handle_editor_command_submit_async_rpc_with_settle(
+        bootstrap,
+        runtime,
+        request,
+        AsyncEditorHandoffSettle::production(),
+    )
+}
+
+/// (`#asynchandoffsettle`, GH #122) How an async editor-command worker waits out
+/// a controller handoff that refused it.
+#[derive(Clone)]
+struct AsyncEditorHandoffSettle {
+    budget: Duration,
+    interval: Duration,
+    sleep: Arc<dyn Fn(Duration) + Send + Sync>,
+}
+
+impl AsyncEditorHandoffSettle {
+    fn production() -> Self {
+        Self {
+            budget: CONTROLLER_HANDOFF_SETTLE_BUDGET,
+            interval: CONTROLLER_HANDOFF_SETTLE_INTERVAL,
+            sleep: Arc::new(std::thread::sleep),
+        }
+    }
+}
+
+fn command_submit_dispatch_refused_not_authoritative(result: &CommandSubmitDispatchResult) -> bool {
+    result.exit_code != 0 && result.output.contains("controller not authoritative")
+}
+
+/// (`#asynchandoffsettle`, GH #122) Run an async editor command's dispatch under
+/// the handoff settle policy, arbitrating authority from the LIVE controller
+/// state on every attempt.
+///
+/// The async submit is answered `accepted` before its worker dispatches, so the
+/// client-side `#layoutobservehandoff` retry (which wraps the submit) never sees
+/// the worker's refusal. And the worker used to dispatch against a bootstrap
+/// CLONED at admission — `handoff_state` is a plain field, so a worker admitted
+/// while `Preparing` refused from that frozen snapshot even after the
+/// controller promoted (or rolled an aborted handoff back to `Stable`). On
+/// btakita-dev 2026-10-03 three Run Agent Doc routes on `laptop.md` failed in
+/// the same second they started, unretried, and their layout was lost.
+///
+/// Each attempt re-reads `runtime.bootstrap`. After a refusal the worker does
+/// not re-dispatch while the controller is still mid-handoff (`Preparing` /
+/// `Promoted`): it waits for authority to change, then dispatches once against
+/// the new state. A refusal from a non-transient state (`Retiring`, `Failed`)
+/// is terminal, since this process will never become authoritative again.
+fn dispatch_async_editor_command_across_handoff(
+    runtime: &ControllerRuntime,
+    admitted: &ControllerBootstrap,
+    log_path: &Path,
+    command: &str,
+    settle: &AsyncEditorHandoffSettle,
+    mut dispatch: impl FnMut(&ControllerBootstrap) -> CommandSubmitDispatchResult,
+) -> CommandSubmitDispatchResult {
+    fn handoff_in_flight(state: ControllerHandoffState) -> bool {
+        matches!(
+            state,
+            ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
+        )
+    }
+    let mut last_refusal: Option<CommandSubmitDispatchResult> = None;
+    let mut park: Option<AsyncEditorHandoffPark<'_>> = None;
+    let outcome = retry_controller_handoff_refusal(
+        log_path,
+        command,
+        settle.budget,
+        settle.interval,
+        |delay| (settle.sleep)(delay),
+        || {
+            let live = runtime
+                .bootstrap_snapshot()
+                .unwrap_or_else(|_| admitted.clone());
+            if let Some(refusal) = last_refusal.as_ref()
+                && handoff_in_flight(live.handoff_state)
+            {
+                // Authority has not changed since the refusal: re-dispatching
+                // would only re-run (and re-log) a route that refuses again.
+                return Err(anyhow::anyhow!("{}", refusal.output));
+            }
+            let result = dispatch(&live);
+            if command_submit_dispatch_refused_not_authoritative(&result) {
+                let live_state = runtime
+                    .bootstrap_snapshot()
+                    .map(|state| state.handoff_state)
+                    .unwrap_or(live.handoff_state);
+                if live_state == ControllerHandoffState::Stable
+                    || handoff_in_flight(live_state)
+                {
+                    let err = anyhow::anyhow!("{}", result.output);
+                    last_refusal = Some(result);
+                    park.get_or_insert_with(|| runtime.async_editor_commands.park_on_handoff());
+                    return Err(err);
+                }
+            }
+            Ok(result)
+        },
+    );
+    drop(park);
+    match outcome {
+        Ok(result) => result,
+        Err(err) => last_refusal
+            .unwrap_or_else(|| CommandSubmitDispatchResult::rejected(command, format!("{err:#}"))),
+    }
+}
+
+fn handle_editor_command_submit_async_rpc_with_settle(
+    bootstrap: &ControllerBootstrap,
+    runtime: &Arc<ControllerRuntime>,
+    request: ControllerRequest,
+    settle: AsyncEditorHandoffSettle,
+) -> Result<serde_json::Value> {
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
     let command_kind = AsyncEditorCommandKind::try_from(submit.name.as_str())?;
     validate_async_editor_command_payload(command_kind, &payload_json)?;
@@ -9954,13 +10079,25 @@ fn handle_editor_command_submit_async_rpc(
     let worker_name = submit.name.clone();
     let worker_focus_fence = focus_fence.clone();
     if let Err(err) = spawn_editor_command_async_worker(move || {
-        let result = dispatch_command_submit_payload(
-            &worker_bootstrap,
+        // `#asynchandoffsettle` (GH #122): never arbitrate authority from the
+        // admission-time `worker_bootstrap` clone; re-read it per attempt and
+        // wait a mid-handoff refusal out.
+        let result = dispatch_async_editor_command_across_handoff(
             worker_runtime.as_ref(),
-            &worker_request,
-            command_kind,
-            payload_json,
-            worker_focus_fence.as_ref(),
+            &worker_bootstrap,
+            &worker_project_root,
+            &worker_name,
+            &settle,
+            |live_bootstrap| {
+                dispatch_command_submit_payload(
+                    live_bootstrap,
+                    worker_runtime.as_ref(),
+                    &worker_request,
+                    command_kind,
+                    payload_json.clone(),
+                    worker_focus_fence.as_ref(),
+                )
+            },
         );
         let terminal_reason = result.terminal_reason.as_deref().unwrap_or("");
         agent_doc_ops_log_io::log_op(
@@ -14108,9 +14245,12 @@ pub(crate) fn controller_recycle_ready(runtime: &ControllerRuntime) -> bool {
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
         return false;
     };
+    // `#asynchandoffsettle` (GH #122): an async editor worker refused by the
+    // previous (aborted) handoff attempt is waiting for this rollback to
+    // `Stable`; re-preparing before it dispatches would refuse it again.
     agent_doc_controller::recycle::controller_recycle_safe_to_handoff(
         bootstrap.handoff_state == ControllerHandoffState::Stable,
-    )
+    ) && runtime.async_editor_commands.handoff_parked_count() == 0
 }
 
 /// `#ctlrecycle` R1/R2 — record the recycle and let the serve loop exit so the next
@@ -30001,6 +30141,266 @@ mod tests {
         let err =
             handle_editor_command_submit_async_rpc(&bootstrap, &runtime, request).unwrap_err();
         assert!(format!("{err:#}").contains("unsupported async editor command"));
+    }
+
+    fn async_sync_tmux_layout_request_for_test(
+        dir: &tempfile::TempDir,
+        command_id: &str,
+    ) -> ControllerRequest {
+        command_submit_request_for_test(
+            None,
+            "sync_tmux_layout",
+            "agent-doc.sync_tmux_layout.v1",
+            serde_json::json!({
+                "project_root": dir.path().display().to_string(),
+                "columns": ["tasks/one.md"],
+                "focus": null,
+                "no_autostart": false,
+                "exact_visible": true,
+                "caller_kind": "manual"
+            }),
+            command_id,
+        )
+    }
+
+    fn async_command_status_for_test(
+        runtime: &ControllerRuntime,
+        command_id: &str,
+    ) -> serde_json::Value {
+        let mut request = empty_controller_request("editor_command_status");
+        request.diagnostic_payload =
+            Some(serde_json::json!({ "command_id": command_id }).to_string());
+        handle_editor_command_status_rpc(runtime, request).unwrap()
+    }
+
+    fn async_handoff_test_project() -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        std::fs::write(
+            dir.path().join("tasks/one.md"),
+            "---\nagent_doc_session: one\nagent: codex\n---\n# one\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    /// GH #122 invariant 1+2: btakita-dev 2026-10-03 18:32:58. An async
+    /// `sync_tmux_layout`/`editor_route` worker admitted while the controller is
+    /// `Preparing` must wait the handoff out and dispatch against the LIVE
+    /// authority once it is `Stable` again — not refuse from the bootstrap it
+    /// cloned at admission, outside every retry.
+    #[test]
+    fn async_editor_worker_admitted_mid_handoff_dispatches_once_authority_settles() {
+        let dir = async_handoff_test_project();
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        let runtime = test_controller_runtime(&bootstrap);
+        let sleeps = Arc::new(AtomicUsize::new(0));
+        let settle = AsyncEditorHandoffSettle {
+            budget: Duration::from_secs(60),
+            interval: Duration::from_millis(1),
+            sleep: {
+                let runtime = Arc::clone(&runtime);
+                let sleeps = Arc::clone(&sleeps);
+                Arc::new(move |_| {
+                    // The handoff aborts (or promotes) while the worker waits:
+                    // only the runtime's live bootstrap sees it.
+                    if sleeps.fetch_add(1, Ordering::SeqCst) == 2 {
+                        runtime.bootstrap.lock().handoff_state = ControllerHandoffState::Stable;
+                    }
+                })
+            },
+        };
+
+        let response = handle_editor_command_submit_async_rpc_with_settle(
+            &bootstrap,
+            &runtime,
+            async_sync_tmux_layout_request_for_test(&dir, "cmd-sync-mid-handoff"),
+            settle,
+        )
+        .unwrap();
+        assert_eq!(response["exit_code"], 0);
+
+        let status = async_command_status_for_test(runtime.as_ref(), "cmd-sync-mid-handoff");
+        assert_eq!(
+            status["exit_code"], 0,
+            "a worker admitted mid-handoff must not surface the transient refusal: {status}"
+        );
+        assert_eq!(status["projection"]["commands"][0]["status"], "applied");
+        assert!(sleeps.load(Ordering::SeqCst) >= 3, "the worker waited");
+        assert_eq!(runtime.async_editor_commands.handoff_parked_count(), 0);
+    }
+
+    /// GH #122: a worker that is refused, and whose handoff never settles,
+    /// surfaces the refusal once the budget is spent — it never hangs.
+    #[test]
+    fn async_editor_worker_surfaces_the_refusal_when_the_handoff_never_settles() {
+        let dir = async_handoff_test_project();
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        let runtime = test_controller_runtime(&bootstrap);
+        let settle = AsyncEditorHandoffSettle {
+            budget: Duration::from_millis(30),
+            interval: Duration::from_millis(1),
+            sleep: Arc::new(std::thread::sleep),
+        };
+
+        handle_editor_command_submit_async_rpc_with_settle(
+            &bootstrap,
+            &runtime,
+            async_sync_tmux_layout_request_for_test(&dir, "cmd-sync-never-settles"),
+            settle,
+        )
+        .unwrap();
+        let status = async_command_status_for_test(runtime.as_ref(), "cmd-sync-never-settles");
+        assert_ne!(status["exit_code"], 0, "unexpected status: {status}");
+        assert!(
+            status.to_string().contains("controller not authoritative"),
+            "the refusal is surfaced, not swallowed: {status}"
+        );
+        assert_eq!(runtime.async_editor_commands.handoff_parked_count(), 0);
+    }
+
+    /// GH #122: while authority is unchanged, a parked worker does not
+    /// re-dispatch (and re-log `controller_editor_route_started`) a route that
+    /// would only refuse again ~5 times a second.
+    #[test]
+    fn a_parked_async_worker_does_not_redispatch_while_authority_is_unchanged() {
+        let dir = async_handoff_test_project();
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        let runtime = test_controller_runtime(&bootstrap);
+        let settle = AsyncEditorHandoffSettle {
+            budget: Duration::from_millis(30),
+            interval: Duration::from_millis(1),
+            sleep: Arc::new(std::thread::sleep),
+        };
+        let mut dispatched = 0usize;
+        let result = dispatch_async_editor_command_across_handoff(
+            runtime.as_ref(),
+            &bootstrap,
+            dir.path(),
+            "editor_route",
+            &settle,
+            |_| {
+                dispatched += 1;
+                CommandSubmitDispatchResult::rejected(
+                    "editor_route",
+                    "pane layout observation refused: controller not authoritative (handoff_state=Preparing)".to_string(),
+                )
+            },
+        );
+        assert_eq!(result.exit_code, 1);
+        assert!(result.output.contains("controller not authoritative"));
+        assert_eq!(dispatched, 1);
+        assert_eq!(runtime.async_editor_commands.handoff_parked_count(), 0);
+    }
+
+    #[test]
+    fn a_parked_async_worker_holds_off_the_self_recycle_until_it_dispatches() {
+        let dir = async_handoff_test_project();
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        let runtime = test_controller_runtime(&bootstrap);
+        let recycle_ready_while_parked = Arc::new(Mutex::new(Vec::<bool>::new()));
+        let settle = AsyncEditorHandoffSettle {
+            budget: Duration::from_secs(60),
+            interval: Duration::from_millis(1),
+            sleep: {
+                let runtime = Arc::clone(&runtime);
+                let seen = Arc::clone(&recycle_ready_while_parked);
+                Arc::new(move |_| {
+                    // The aborted handoff rolls back to `Stable`; the serve loop
+                    // must not re-prepare while the refused worker is parked.
+                    runtime.bootstrap.lock().handoff_state = ControllerHandoffState::Stable;
+                    seen.lock().push(controller_recycle_ready(runtime.as_ref()));
+                })
+            },
+        };
+        let mut dispatched = 0usize;
+        let result = dispatch_async_editor_command_across_handoff(
+            runtime.as_ref(),
+            &bootstrap,
+            dir.path(),
+            "editor_route",
+            &settle,
+            |live| {
+                dispatched += 1;
+                if live.handoff_state == ControllerHandoffState::Stable {
+                    CommandSubmitDispatchResult::applied("routed".to_string(), &()).unwrap()
+                } else {
+                    CommandSubmitDispatchResult::rejected(
+                        "editor_route",
+                        "pane layout observation refused: controller not authoritative (handoff_state=Preparing)".to_string(),
+                    )
+                }
+            },
+        );
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(dispatched, 2);
+        assert_eq!(*recycle_ready_while_parked.lock(), vec![false]);
+        assert_eq!(runtime.async_editor_commands.handoff_parked_count(), 0);
+        assert!(controller_recycle_ready(runtime.as_ref()));
+    }
+
+    /// GH #122: a refusal from a state this process never leaves (`Retiring`)
+    /// is terminal at once — waiting cannot make it authoritative.
+    #[test]
+    fn a_refusal_from_a_retiring_controller_is_not_waited_out() {
+        let dir = async_handoff_test_project();
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Retiring;
+        let runtime = test_controller_runtime(&bootstrap);
+        let mut dispatched = 0usize;
+        let slept_ref = Arc::new(AtomicUsize::new(0));
+        let settle = AsyncEditorHandoffSettle {
+            budget: Duration::from_secs(60),
+            interval: Duration::from_millis(1),
+            sleep: {
+                let slept_ref = Arc::clone(&slept_ref);
+                Arc::new(move |_| {
+                    slept_ref.fetch_add(1, Ordering::SeqCst);
+                })
+            },
+        };
+        let result = dispatch_async_editor_command_across_handoff(
+            runtime.as_ref(),
+            &bootstrap,
+            dir.path(),
+            "editor_route",
+            &settle,
+            |_| {
+                dispatched += 1;
+                CommandSubmitDispatchResult::rejected(
+                    "editor_route",
+                    "pane layout observation refused: controller not authoritative (handoff_state=Retiring)".to_string(),
+                )
+            },
+        );
+        assert_eq!(result.exit_code, 1);
+        assert_eq!(dispatched, 1);
+        assert_eq!(slept_ref.load(Ordering::SeqCst), 0, "never waited");
+    }
+
+    /// GH #122 invariant 3: the settle budget covers a handoff whose successor
+    /// times out and is retried — the measured 141s window (three aborted
+    /// attempts + the promoting one) — and is still bounded.
+    #[test]
+    fn the_handoff_settle_budget_covers_an_aborted_and_retried_handoff() {
+        let measured_window = Duration::from_secs(141);
+        assert!(
+            CONTROLLER_HANDOFF_SETTLE_BUDGET > measured_window,
+            "budget {:?} is shorter than the measured {:?} handoff",
+            CONTROLLER_HANDOFF_SETTLE_BUDGET,
+            measured_window
+        );
+        assert!(CONTROLLER_HANDOFF_SETTLE_BUDGET >= HANDOFF_CONNECT_WAIT * 4);
+        assert!(CONTROLLER_HANDOFF_SETTLE_BUDGET <= Duration::from_secs(600));
+        assert_eq!(
+            AsyncEditorHandoffSettle::production().budget,
+            CONTROLLER_HANDOFF_SETTLE_BUDGET
+        );
     }
 
     #[test]

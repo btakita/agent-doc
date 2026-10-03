@@ -2489,9 +2489,36 @@ struct ControllerAsyncEditorCommandGraph {
     transition_gate: Mutex<()>,
     transition: Condvar,
     focus_effect_gate: Mutex<()>,
+    /// `#asynchandoffsettle` (GH #122): async workers parked on a mid-handoff
+    /// `controller not authoritative` refusal. While non-zero, a self-recycle
+    /// does not re-`prepare_handoff`, so an aborted handoff's rollback to
+    /// `Stable` stays observable long enough for the parked worker to dispatch.
+    handoff_parked: AtomicUsize,
+}
+
+/// RAII registration of one async editor worker parked on a handoff refusal.
+pub(crate) struct AsyncEditorHandoffPark<'a> {
+    parked: &'a AtomicUsize,
+}
+
+impl Drop for AsyncEditorHandoffPark<'_> {
+    fn drop(&mut self) {
+        self.parked.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl ControllerAsyncEditorCommandGraph {
+    pub(crate) fn park_on_handoff(&self) -> AsyncEditorHandoffPark<'_> {
+        self.handoff_parked.fetch_add(1, Ordering::SeqCst);
+        AsyncEditorHandoffPark {
+            parked: &self.handoff_parked,
+        }
+    }
+
+    pub(crate) fn handoff_parked_count(&self) -> usize {
+        self.handoff_parked.load(Ordering::SeqCst)
+    }
+
     fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
         Self {
             ctx: scope.ctx().clone(),
@@ -2500,6 +2527,7 @@ impl ControllerAsyncEditorCommandGraph {
             transition_gate: Mutex::new(()),
             transition: Condvar::new(),
             focus_effect_gate: Mutex::new(()),
+            handoff_parked: AtomicUsize::new(0),
         }
     }
 

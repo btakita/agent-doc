@@ -44,6 +44,7 @@ pub const CODEX_UPDATE_AVAILABLE_BLOCKER: &str = "codex update-available dialog"
 mod grok;
 pub mod managed_capability;
 pub mod prompt_source;
+pub mod steering_delivery;
 pub mod timeout;
 
 /// How the supervisor builds args on restart after a crash.

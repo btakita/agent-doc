@@ -2296,6 +2296,7 @@ dependencies = [
  "agent-doc-run-context-io",
  "agent-doc-session-accretion-io",
  "agent-doc-session-actor-io",
+ "agent-doc-session-check-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-start-io",

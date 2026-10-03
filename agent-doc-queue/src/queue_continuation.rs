@@ -673,6 +673,36 @@ pub fn live_drainable_continuation_head(content: &str, scope: DrainScope) -> Opt
     Some(tracked_head_id(&stripped, &preset_only).unwrap_or(stripped))
 }
 
+/// [`live_drainable_continuation_head`], skipping heads `claimed` by a worker
+/// (`#queueclaim`, `#steeringwake`). The idle supervisor must never wake the
+/// session for a head a subagent (or the parent's own deferred claim) already
+/// owns: that is a double dispatch of in-flight work.
+pub fn live_drainable_continuation_head_excluding_claimed(
+    content: &str,
+    scope: DrainScope,
+    claimed: &ClaimedQueueItems,
+) -> Option<String> {
+    let (queue_facts, activation) =
+        active_queue_for_supervisor_start(content, matches!(scope, DrainScope::Supervisor))?;
+    let entries: Vec<QueueEntry> = activation
+        .entries_after
+        .into_iter()
+        .filter(|entry| match entry {
+            QueueEntry::Prompt(prompt) => !claimed.claims(&prompt.text),
+            _ => true,
+        })
+        .collect();
+    let head = eligible_head_prompt_from_entries(
+        content,
+        &entries,
+        queue_facts.preset_supplies_directive,
+        scope,
+    )?;
+    let stripped = strip_in_progress_marker(&head.text);
+    let preset_only = preset_only_identity_ids(content);
+    Some(tracked_head_id(&stripped, &preset_only).unwrap_or(stripped))
+}
+
 /// Live drainable active queue head **prompt text** for `scope` (`do [#id]`),
 /// where [`live_drainable_continuation_head`] returns only the bare id.
 ///
@@ -2002,6 +2032,54 @@ mod tests {
     /// heads. They were read as references to a missing backlog item
     /// `#subagent`, so drainability was zero and the idle supervisor never woke
     /// the session for them.
+    /// `#steeringwake`: the supervisor's idle drain skips claimed heads, so a
+    /// head a subagent owns is never re-dispatched into the idle parent.
+    #[test]
+    fn supervisor_head_skips_claimed_heads() {
+        use crate::queue_claim::{ClaimedQueueItems, claim_identity};
+        let content = concat!(
+            "<!-- agent:queue go -->\n",
+            "- #subagents: first\n",
+            "- #subagents: second\n",
+            "- release + publish\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let claimed = ClaimedQueueItems::from_identities([
+            claim_identity("#subagents: first"),
+            claim_identity("#subagents: second"),
+        ]);
+        assert_eq!(
+            live_drainable_continuation_head_excluding_claimed(
+                content,
+                DrainScope::Supervisor,
+                &claimed
+            )
+            .as_deref(),
+            Some("release + publish")
+        );
+        let all = ClaimedQueueItems::from_identities([
+            claim_identity("#subagents: first"),
+            claim_identity("#subagents: second"),
+            claim_identity("release + publish"),
+        ]);
+        assert_eq!(
+            live_drainable_continuation_head_excluding_claimed(
+                content,
+                DrainScope::Supervisor,
+                &all
+            ),
+            None
+        );
+        assert_eq!(
+            live_drainable_continuation_head_excluding_claimed(
+                content,
+                DrainScope::Supervisor,
+                &ClaimedQueueItems::none()
+            ),
+            live_drainable_continuation_head(content, DrainScope::Supervisor)
+        );
+    }
+
     #[test]
     fn singular_subagent_tag_heads_are_drainable_like_the_registered_plural() {
         let content = concat!(

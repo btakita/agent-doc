@@ -54,6 +54,7 @@ agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.443" }
 agent-doc-start-io = { path = "../agent-doc-start-io", version = "0.35.443" }
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.443" }
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.443" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.443" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.443" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.443" }
 agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.443" }

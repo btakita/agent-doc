@@ -237,8 +237,14 @@ impl PreparedObservation {
 /// How an observation treats a cycle that no longer accepts mid-turn steering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClosedCyclePolicy {
-    /// The in-turn hook: a closed cycle silences the watermark for good.
-    Silence,
+    /// The in-turn hook. While the cycle is open it reports in-turn
+    /// steering; once the cycle closes it keeps reporting unsurfaced changes in
+    /// boundary mode (`#steeringafterclose`). An agent that keeps working in
+    /// the same harness turn after closeout (dispatching subagents, waiting on
+    /// them) used to go deaf here: the 2026-10-03 `#subagent` additions to
+    /// agent-doc-bugs.md landed while tool calls were still running and the
+    /// silenced hook dropped them.
+    Hook,
     /// Polls (`agent-doc steering`): after close, keep reporting unsurfaced
     /// queue/exchange changes in boundary mode until the next preflight.
     Boundary,
@@ -267,6 +273,18 @@ fn prepare(
     consumer: &str,
     policy: ClosedCyclePolicy,
 ) -> Result<Option<PreparedObservation>> {
+    prepare_with_gate(file, consumer, policy, true)
+}
+
+/// [`prepare`] with the unchanged-document gate optional. The gate is a pure
+/// optimization for advancing consumers; a non-advancing reader that needs the
+/// full unsurfaced set relative to a watermark (the idle wake) turns it off.
+fn prepare_with_gate(
+    file: &Path,
+    consumer: &str,
+    policy: ClosedCyclePolicy,
+    unchanged_gate: bool,
+) -> Result<Option<PreparedObservation>> {
     let Some(root) = project_root(file) else {
         return Ok(None);
     };
@@ -277,7 +295,7 @@ fn prepare(
     let stored_base = load_watermark(&conn, &state_key("base", file))?;
     // Boundary-capable consumers need the cycle up front to pick the base;
     // the hook keeps its rare-path cycle lookup.
-    let cycle = if policy == ClosedCyclePolicy::Silence {
+    let cycle = if policy == ClosedCyclePolicy::Hook {
         None
     } else {
         agent_doc_cycle_state_io::load_with_closeout_projection(file)?
@@ -293,10 +311,10 @@ fn prepare(
             .is_none_or(|cycle| cycle.cycle_id == base.cycle_id)
     };
     let base = match stored_base {
-        Some(base) if policy == ClosedCyclePolicy::Silence || base_describes_cycle(&base) => base,
+        Some(base) if policy == ClosedCyclePolicy::Hook || base_describes_cycle(&base) => base,
         // No seed for the latest cycle (or none at all): compare with the
         // last committed baseline.
-        _ if policy != ClosedCyclePolicy::Silence => match committed_baseline_watermark(file)? {
+        _ if policy != ClosedCyclePolicy::Hook => match committed_baseline_watermark(file)? {
             Some(base) => base,
             None => return Ok(None),
         },
@@ -314,45 +332,45 @@ fn prepare(
     let cycle_open = cycle
         .as_ref()
         .is_some_and(|cycle| cycle_accepts_steering(cycle, &watermark.cycle_id));
-    let boundary = match policy {
-        ClosedCyclePolicy::Silence => false,
+    let mut boundary = match policy {
+        // A watermark a pre-`#steeringafterclose` hook silenced already knows
+        // its cycle closed.
+        ClosedCyclePolicy::Hook => watermark.closed,
         ClosedCyclePolicy::Boundary => !cycle_open,
         ClosedCyclePolicy::ForceBoundary => true,
     };
-    if watermark.closed {
-        if policy == ClosedCyclePolicy::Silence {
-            return Ok(None);
-        }
-        // A hook-silenced watermark still owes the boundary report.
-        watermark.closed = false;
-    }
-    let prepared = |next: Option<SteeringWatermark>, report: Option<SteeringReport>| {
-        Ok(Some(PreparedObservation {
-            consumer: consumer.to_string(),
-            consumer_key: consumer_key.clone(),
-            root: root.clone(),
-            next,
-            report,
-            boundary,
-        }))
-    };
+    // A silenced watermark still owes the boundary report.
+    watermark.closed = false;
+    let prepared =
+        |next: Option<SteeringWatermark>, report: Option<SteeringReport>, boundary: bool| {
+            Ok(Some(PreparedObservation {
+                consumer: consumer.to_string(),
+                consumer_key: consumer_key.clone(),
+                root: root.clone(),
+                next,
+                report,
+                boundary,
+            }))
+        };
 
     // Hot-path gate: unchanged file stat and nothing settling → no read.
     let meta = std::fs::metadata(file).with_context(|| format!("stat {}", file.display()))?;
     let fingerprint = stat_fingerprint(&meta);
-    if watermark.pending.is_empty()
+    if unchanged_gate
+        && watermark.pending.is_empty()
         && watermark.last_observed_stat.as_deref() == Some(fingerprint.as_str())
     {
-        return prepared(None, None);
+        return prepared(None, None, boundary);
     }
     let content =
         std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
-    if watermark.pending.is_empty()
+    if unchanged_gate
+        && watermark.pending.is_empty()
         && watermark.last_observed_content_hash.as_deref()
             == Some(core::content_hash(&content).as_str())
     {
         watermark.last_observed_stat = Some(fingerprint);
-        return prepared(Some(watermark), None);
+        return prepared(Some(watermark), None, boundary);
     }
 
     // The turn boundary is the last chance before the loop re-enters: an
@@ -397,9 +415,21 @@ fn prepare(
                     );
                 }
             }
-            _ => {
-                watermark.closed = true;
-                return prepared(Some(watermark), None);
+            closed => {
+                // The cycle closed while this harness turn kept running:
+                // report the same edits in boundary terms (queue work for the
+                // next cycle), excluding the closed cycle's own bookkeeping.
+                boundary = true;
+                let owned = closed.as_ref().map(binary_owned_ids).unwrap_or_default();
+                observation = core::observe_with_mode(
+                    &watermark,
+                    &content,
+                    &ObserveContext {
+                        binary_owned_queue_ids: &owned,
+                        ..ctx
+                    },
+                    core::ObserveMode::Boundary,
+                );
             }
         }
     }
@@ -412,7 +442,7 @@ fn prepare(
         pending: observation.pending,
         after_close: boundary,
     };
-    prepared(Some(next), Some(report))
+    prepared(Some(next), Some(report), boundary)
 }
 
 /// Observe `file` for `consumer`. Returns `Ok(None)` when there is no active
@@ -420,14 +450,14 @@ fn prepare(
 /// unchanged; otherwise a report (possibly with zero ready items while edits
 /// are still settling).
 ///
-/// The hook consumer goes silent once the cycle closes. Poll consumers
-/// (`cli`, `follow`) keep reporting unsurfaced changes after close, in
-/// boundary mode, until the next preflight re-seeds (`#closeout-steering`).
+/// Every consumer keeps reporting unsurfaced changes after the cycle closes,
+/// in boundary mode, until the next preflight re-seeds (`#closeout-steering`,
+/// `#steeringafterclose`).
 ///
 /// When `advance` is false the watermark is not written (a peek).
 pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<SteeringReport>> {
     let policy = if consumer == CONSUMER_HOOK {
-        ClosedCyclePolicy::Silence
+        ClosedCyclePolicy::Hook
     } else {
         ClosedCyclePolicy::Boundary
     };
@@ -447,6 +477,138 @@ pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<Stee
 /// [`PreparedObservation::acknowledge`].
 pub fn prepare_closeout(file: &Path) -> Result<Option<PreparedObservation>> {
     prepare(file, CONSUMER_HOOK, ClosedCyclePolicy::ForceBoundary)
+}
+
+/// What the idle supervisor's steering wake sees (`#steeringwake`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WakeObservation {
+    /// Settled steering no agent-facing consumer has surfaced and no worker
+    /// has claimed, in document order.
+    pub items: Vec<SteeringItem>,
+    /// Identity of the whole set: the steering base's cycle plus every item.
+    /// Empty when `items` is empty.
+    pub fingerprint: String,
+    /// Candidates still held by the settle gate.
+    pub pending: usize,
+    /// When a held candidate can next settle, in ms from now. The supervisor
+    /// schedules exactly one re-observation for it instead of polling.
+    pub recheck_after_ms: Option<u64>,
+}
+
+fn steering_item_identity(item: &SteeringItem) -> String {
+    format!(
+        "{}:{}:{}",
+        match item.source {
+            core::SteeringSource::Exchange => "exchange",
+            core::SteeringSource::Queue => "queue",
+        },
+        match item.change {
+            core::SteeringChange::Added => "added",
+            core::SteeringChange::Edited => "edited",
+            core::SteeringChange::Deleted => "deleted",
+        },
+        core::normalize_queue_text(&item.verbatim)
+    )
+}
+
+/// Non-consuming observation for the idle steering wake (`#steeringwake`).
+///
+/// The same derivation every steering consumer uses ([`prepare`]), read
+/// against the agent channel's watermark (the hook consumer, which the
+/// turn-boundary report also advances) without advancing it. The `steering`
+/// poll watermark is deliberately NOT consulted: a consuming diagnostic read
+/// (`agent-doc steering` run by an operator or another agent) must never
+/// suppress the wake. The cost is at most one duplicate for a hookless
+/// harness that polled an item after closeout; the alternative is loss.
+/// Queue items a worker has
+/// claimed (`agent-doc queue claim`) are in flight elsewhere and never wake
+/// the session. The woken turn receives the items through its normal
+/// channels (preflight, the hook, or the boundary report), so the wake itself
+/// never consumes steering.
+pub fn observe_for_wake(file: &Path) -> Result<WakeObservation> {
+    let hook = prepare_with_gate(file, CONSUMER_HOOK, ClosedCyclePolicy::Boundary, false)?;
+    let Some(hook_report) = hook.as_ref().and_then(|prepared| prepared.report.clone()) else {
+        return Ok(WakeObservation::default());
+    };
+    let content = std::fs::read_to_string(file).unwrap_or_default();
+    let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content);
+    let items: Vec<SteeringItem> = hook_report
+        .items
+        .iter()
+        .filter(|item| {
+            item.source != core::SteeringSource::Queue || !claimed.claims(&item.verbatim)
+        })
+        .cloned()
+        .collect();
+    let fingerprint = if items.is_empty() {
+        String::new()
+    } else {
+        let mut basis = hook_report.cycle_id.clone();
+        for item in &items {
+            basis.push('\n');
+            basis.push_str(&steering_item_identity(item));
+        }
+        core::content_hash(&basis)
+    };
+    let pending = hook_report.pending;
+    let recheck_after_ms = (pending > 0).then(|| {
+        let debounce = debounce_ms_for(file, &content);
+        let quiet_for = std::fs::metadata(file)
+            .ok()
+            .as_ref()
+            .and_then(mtime_ms)
+            .map(|changed| now_ms().saturating_sub(changed))
+            .unwrap_or(0);
+        debounce.saturating_sub(quiet_for).max(250)
+    });
+    Ok(WakeObservation {
+        items,
+        fingerprint,
+        pending,
+        recheck_after_ms,
+    })
+}
+
+fn wake_receipt_key(file: &Path) -> String {
+    state_key("wake", file)
+}
+
+/// The durable receipt of the last steering set a wake was delivered for.
+pub fn load_wake_receipt(file: &Path) -> Result<Option<String>> {
+    let Some(root) = project_root(file) else {
+        return Ok(None);
+    };
+    if !agent_doc_sqlite::state_store::state_db_path(&root).exists() {
+        return Ok(None);
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+        &conn,
+        &wake_receipt_key(file),
+    )
+}
+
+/// Record that a wake for `fingerprint` was submitted to the owning pane.
+pub fn record_wake_receipt(file: &Path, fingerprint: &str, items: usize) -> Result<()> {
+    let Some(root) = project_root(file) else {
+        return Ok(());
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+        &conn,
+        &wake_receipt_key(file),
+        fingerprint,
+        now_ms(),
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "steering_wake_delivered file={} fingerprint={} items={items} (#steeringwake)",
+            file.display(),
+            fingerprint.get(..12).unwrap_or(fingerprint),
+        ),
+    );
+    Ok(())
 }
 
 /// Render a report for the turn-boundary surface.
@@ -609,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn seeded_watermark_without_an_open_cycle_reports_once_to_polls_only() {
+    fn seeded_watermark_without_an_open_cycle_reports_once_per_consumer() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
@@ -625,9 +787,18 @@ mod tests {
             baseline.replace("- current task\n", "- current task\n- new work\n"),
         )
         .unwrap();
-        // The hook needs an open cycle: with none it silences for good.
-        assert_eq!(observe(&file, CONSUMER_HOOK, true).unwrap(), None);
-        assert_eq!(observe(&file, CONSUMER_HOOK, true).unwrap(), None);
+        // `#steeringafterclose`: with no open cycle the hook still reports the
+        // unsurfaced addition, in boundary terms, exactly once.
+        let hook = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("hook report");
+        assert_eq!(hook.items.len(), 1, "{hook:?}");
+        assert!(hook.after_close);
+        assert!(
+            observe(&file, CONSUMER_HOOK, true)
+                .unwrap()
+                .is_none_or(|report| report.items.is_empty())
+        );
         // A poll reports the unsurfaced addition after close, once.
         let report = observe(&file, CONSUMER_CLI, true).unwrap().expect("report");
         assert_eq!(report.items.len(), 1, "{report:?}");
@@ -886,5 +1057,132 @@ mod tests {
         assert!(context.contains("#subagents fix issue 111"), "{context}");
         // Exactly once.
         assert_eq!(post_tool_use_response(&payload).unwrap(), None);
+    }
+
+    fn backdate(file: &Path) {
+        std::fs::File::options()
+            .write(true)
+            .open(file)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+            .unwrap();
+    }
+
+    /// The 2026-10-03 incident (`#steeringwake`): the cycle closed, the agent
+    /// went idle, and the operator queued `#subagent: <issue>` items. The idle
+    /// wake must see them, must not consume them (the woken turn's hook or
+    /// boundary report still delivers them exactly once), and must skip items
+    /// a worker already claimed.
+    #[test]
+    fn idle_wake_sees_post_close_additions_without_consuming_and_skips_claims() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 2500\nprompt_presets:\n  '#subagents': 'run the remaining items in subagents'\n---\n# S\n\n<!-- agent:queue go -->\n- current task\n- release + publish\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let closed = baseline.replace("- current task\n", "");
+        std::fs::write(&file, &closed).unwrap();
+        close_cycle(&file, &closed);
+        let mut report = Vec::new();
+        emit_closeout_steering(&file, &mut report);
+
+        // Nothing new since the boundary report: no wake.
+        assert!(observe_for_wake(&file).unwrap().items.is_empty());
+
+        let added = closed.replace(
+            "- release + publish\n",
+            "- #subagent: https://github.com/btakita/agent-doc/issues/116\n\
+             - #subagent: https://github.com/btakita/agent-doc/issues/117\n\
+             - release + publish\n",
+        );
+        std::fs::write(&file, &added).unwrap();
+        // Still being typed (inside the debounce window): held, with exactly
+        // one scheduled re-observation instead of a poll.
+        let typing = observe_for_wake(&file).unwrap();
+        assert!(typing.items.is_empty(), "{typing:?}");
+        assert_eq!(typing.pending, 2);
+        assert!(typing.recheck_after_ms.is_some_and(|ms| ms <= 2500));
+
+        backdate(&file);
+        let wake = observe_for_wake(&file).unwrap();
+        assert_eq!(wake.items.len(), 2, "{wake:?}");
+        assert!(
+            wake.items
+                .iter()
+                .all(|item| item.dispatch == core::SteeringDispatch::Subagent)
+        );
+        assert!(!wake.fingerprint.is_empty());
+        // Non-consuming: the same set, the same fingerprint.
+        assert_eq!(observe_for_wake(&file).unwrap(), wake);
+
+        // A worker claims one: it is in flight elsewhere and never wakes.
+        agent_doc_queue_io::queue_claim::claim(
+            &file,
+            "#subagent: https://github.com/btakita/agent-doc/issues/116",
+            "subagent:gh-116",
+            3600,
+        )
+        .unwrap();
+        let after_claim = observe_for_wake(&file).unwrap();
+        assert_eq!(after_claim.items.len(), 1, "{after_claim:?}");
+        assert!(after_claim.items[0].verbatim.ends_with("/117"));
+        assert_ne!(after_claim.fingerprint, wake.fingerprint);
+
+        // The agent channel still delivers both, once: the wake ate nothing.
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert_eq!(hook.items.len(), 2, "{hook:?}");
+        assert!(hook.after_close);
+        // ...and once surfaced there, nothing is left to wake for.
+        assert!(observe_for_wake(&file).unwrap().items.is_empty());
+    }
+
+    /// The operator's complaint: a diagnostic `agent-doc steering` read
+    /// consumed steering. A consuming poll must never suppress the idle wake.
+    #[test]
+    fn a_consuming_steering_poll_never_suppresses_the_idle_wake() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        seed_for_cycle(&file, "cycle-1", baseline, Some("current task"), Vec::new()).unwrap();
+        std::fs::write(
+            &file,
+            baseline.replace("- current task\n", "- current task\n- new work\n"),
+        )
+        .unwrap();
+        backdate(&file);
+        assert_eq!(observe_for_wake(&file).unwrap().items.len(), 1);
+        assert_eq!(
+            observe(&file, CONSUMER_CLI, true)
+                .unwrap()
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
+        assert_eq!(observe_for_wake(&file).unwrap().items.len(), 1);
+    }
+
+    #[test]
+    fn wake_receipt_round_trips_through_state_db() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "# S\n").unwrap();
+        assert_eq!(load_wake_receipt(&file).unwrap(), None);
+        record_wake_receipt(&file, "abc123", 2).unwrap();
+        assert_eq!(load_wake_receipt(&file).unwrap().as_deref(), Some("abc123"));
     }
 }

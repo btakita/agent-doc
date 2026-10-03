@@ -955,7 +955,9 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
         "idle_watch_queue_head_revision_gate",
     ) {
         Ok(Some(revision @ agent_doc_crdt_relay_io::CurrentRevision::Current { .. })) => {
-            if let Some(cached) = memoized_queue_head(&canonical, &revision) {
+            if let Some(cached) = memoized_queue_head(&canonical, &revision)
+                && !memoized_head_may_be_claimed(file, &cached)
+            {
                 return cached;
             }
             Some(revision)
@@ -1022,10 +1024,7 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
         head: if queue_unresolved_prompts == Some(0) {
             None
         } else {
-            agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-                &content,
-                agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-            )
+            supervisor_drainable_head(file, &content)
         },
         transition,
     };
@@ -1042,18 +1041,35 @@ fn idle_watch_disk_queue_head(file: &Path) -> QueueHeadObservation {
     let head = agent_doc_fs::read_optional_text(file)
         .ok()
         .flatten()
-        .and_then(|content| {
-            agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-                &content,
-                agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-            )
-        });
+        .and_then(|content| supervisor_drainable_head(file, &content));
     // Disk IS the authority on this path, so there is no editor delivery in
     // flight to wait for — the transition is converged by construction.
     QueueHeadObservation::Observed {
         head,
         transition: IdleQueueTransition::Converged,
     }
+}
+
+/// The supervisor's drainable head, skipping heads a worker has claimed
+/// (`#queueclaim`, `#steeringwake`). A claimed head is in flight elsewhere;
+/// waking the idle parent for it is a double dispatch.
+fn supervisor_drainable_head(file: &Path, content: &str) -> Option<String> {
+    let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, content);
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+        content,
+        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        &claimed,
+    )
+}
+
+/// A memoized head was derived before any claim made since; claims live in
+/// `state.db`, not the document, so they never change the revision the memo is
+/// keyed on. Re-derive whenever the ledger holds any claim.
+fn memoized_head_may_be_claimed(file: &Path, cached: &QueueHeadObservation) -> bool {
+    matches!(cached, QueueHeadObservation::Observed { head: Some(_), .. })
+        && agent_doc_queue_io::queue_claim::load_ledger(file)
+            .map(|ledger| !ledger.claims.is_empty())
+            .unwrap_or(false)
 }
 
 fn idle_watch_paused_queue_head(file: &Path) -> QueueHeadObservation {
@@ -1682,6 +1698,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // machine cell and two `Computed`s in a process-lifetime scope, so a
             // derived fact cannot be left behind by a branch that forgot it.
             let revision_state = IdleRevisionState::new();
+            // `#steeringwake`: unsurfaced operator steering is a Computed wake
+            // subject over the steering observation; the idle-queue dispatch
+            // below is its Effect, and each submitted wake records a durable,
+            // fingerprint-fenced receipt back into the graph.
+            let steering_wake = agent_doc_supervisor::steering_wake::SteeringWakeState::new();
+            match agent_doc_session_check_io::midturn_steering::load_wake_receipt(&path) {
+                Ok(Some(receipt)) => steering_wake
+                    .send(agent_doc_supervisor::steering_wake::SteeringWakeEvent::Delivered(receipt)),
+                Ok(None) => {}
+                Err(err) => agent_doc_ops_log_io::log_op(
+                    &path,
+                    &format!(
+                        "steering_wake_receipt_load_failed file={} error={err:#} (#steeringwake)",
+                        path.display()
+                    ),
+                ),
+            }
+            let wake_log_path = path.clone();
+            let _steering_wake_effect = steering_wake.on_subject_change(move |subject| {
+                if let Some(subject) = subject {
+                    agent_doc_ops_log_io::log_op(
+                        &wake_log_path,
+                        &format!(
+                            "steering_wake_due file={} subject={subject:?} (#steeringwake)",
+                            wake_log_path.display()
+                        ),
+                    );
+                }
+            });
+            let mut steering_recheck_at: Option<std::time::Instant> = None;
+            let mut steering_wake_error_logged = false;
+            let mut prev_actor_ready = false;
             // The ONE thing here that is genuinely an effect: writing a
             // diagnostic. Gated on derived health, so it fires on the transition
             // and never per tick.
@@ -1789,6 +1837,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 log_event(&mut session_log, &event);
                 agent_doc_ops_log_io::log_op(&path, &event);
             }
+        }
+        // `#steeringwake`: a held (still-being-typed) steering item asked for
+        // exactly one re-observation once its settle window can elapse.
+        if steering_recheck_at.is_some_and(|at| now >= at) {
+            steering_recheck_at = None;
+            document_delivery_reconcile_pending = true;
+            last_quiescent_maintenance = None;
         }
         let document_delivery_edge_due = document_delivery_reconcile_pending;
         if resume_signal_watch.as_ref().is_some_and(|watch| {
@@ -2064,6 +2119,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                 }
                 let actor_ready_fast = actor_state_is_ready(&shared);
+                // `#steeringwake`: the busy→ready edge is a reconcile edge. Edits
+                // made while the agent was busy were observed against a busy
+                // pane; without this the idle pane re-derived nothing until the
+                // next document revision or the 60s safety probe.
+                if actor_ready_fast && !prev_actor_ready {
+                    document_delivery_reconcile_pending = true;
+                }
+                prev_actor_ready = actor_ready_fast;
                 let stale_recycle_reconcile_due = supervisor_stale_fast
                     && stale_recycle_reconcile_due(
                         stale_recycle_deferral.awaiting_turn_boundary(),
@@ -2466,6 +2529,49 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     IdleQueueTransition::Unresolved
                 }
             };
+            // `#steeringwake`: with no drainable head, unsurfaced settled
+            // steering becomes the drain subject, so the same guarded dispatch
+            // (prompt-ready per harness, no busy turn, drain-owner lease,
+            // convergence gate, dedup) wakes the idle pane for it.
+            if active_head.is_none()
+                && actor_ready_fast
+                && active_transition != IdleQueueTransition::Unresolved
+            {
+                match agent_doc_session_check_io::midturn_steering::observe_for_wake(&path) {
+                    Ok(observation) => {
+                        steering_wake_error_logged = false;
+                        steering_recheck_at = observation
+                            .recheck_after_ms
+                            .map(|ms| now + std::time::Duration::from_millis(ms));
+                        steering_wake.send(
+                            agent_doc_supervisor::steering_wake::SteeringWakeEvent::Observed(
+                                (!observation.items.is_empty()).then(|| {
+                                    agent_doc_supervisor::steering_wake::SteeringWakeSet {
+                                        fingerprint: observation.fingerprint.clone(),
+                                        items: observation.items.len(),
+                                    }
+                                }),
+                            ),
+                        );
+                    }
+                    Err(err) => {
+                        if !steering_wake_error_logged {
+                            steering_wake_error_logged = true;
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "steering_wake_observe_failed file={} error={err:#} (#steeringwake)",
+                                    path.display()
+                                ),
+                            );
+                        }
+                    }
+                }
+                active_head = agent_doc_supervisor::steering_wake::idle_drain_subject(
+                    active_head,
+                    steering_wake.subject(),
+                );
+            }
             last_dispatched =
                 rearm_queue_dispatch_dedup(last_dispatched, active_head.as_deref());
             queue_continuation_triggers.observe_head(
@@ -5203,6 +5309,32 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     }
                                     last_dispatched = if completed { None } else { Some(head) };
                                 } else {
+                                    if agent_doc_supervisor::steering_wake::is_steering_wake_subject(&head)
+                                        && let Some(fingerprint) = steering_wake.fingerprint_for(&head)
+                                    {
+                                        let items = steering_wake
+                                            .tracking()
+                                            .observed
+                                            .map_or(0, |set| set.items);
+                                        steering_wake.send(
+                                            agent_doc_supervisor::steering_wake::SteeringWakeEvent::Delivered(
+                                                fingerprint.clone(),
+                                            ),
+                                        );
+                                        if let Err(err) = agent_doc_session_check_io::midturn_steering::record_wake_receipt(
+                                            &path,
+                                            &fingerprint,
+                                            items,
+                                        ) {
+                                            agent_doc_ops_log_io::log_op(
+                                                &path,
+                                                &format!(
+                                                    "steering_wake_receipt_failed file={} error={err:#} (#steeringwake)",
+                                                    path.display()
+                                                ),
+                                            );
+                                        }
+                                    }
                                     last_dispatched = Some(head);
                                 }
                                 log_event(

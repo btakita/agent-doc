@@ -5492,6 +5492,7 @@ struct SimWorld {
 }
 
 mod engine;
+mod steering_delivery_model;
 
 #[derive(Debug)]
 struct DeterministicRng(u64);

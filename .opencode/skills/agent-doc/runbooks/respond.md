@@ -46,8 +46,24 @@ rule. This runbook carries the rest.
     touches a repo give it its own worktree outside the IDE-watched project and
     never run two subagents against one repo checkout. Keep working the current
     item yourself and record the dispatch in your response.
-  OpenCode and other hook-less harnesses poll `agent-doc steering <FILE>`
-  (`--json` for the typed form) between long-running steps.
+  OpenCode, Grok Build, Cursor, and other hook-less harnesses poll
+  `agent-doc steering <FILE>` (`--json` for the typed form) between
+  long-running steps; that poll is their delivery channel, so it advances. To
+  inspect steering without consuming it (an operator, a monitor, another
+  agent), always use `agent-doc steering --peek <FILE>`.
+  After closeout (`#steeringafterclose`) the hook keeps reporting new edits,
+  framed as next-cycle queue work, while the same harness turn runs (for
+  example while you wait on subagents). When the turn ends and the pane is
+  idle, the route-owned supervisor wakes it (`#steeringwake`): settled,
+  unsurfaced, unclaimed steering becomes an idle-drain subject and the
+  supervisor submits `agent-doc <FILE>` through the same guarded dispatch as a
+  queue head (harness prompt-ready proof, never into a busy turn, drain-owner
+  lease, convergence gate), once per steering set (a durable receipt fences
+  it). The wake reads without consuming, so the woken turn still receives the
+  items through preflight, the hook, or the boundary report. Items a worker
+  claimed (`agent-doc queue claim`) never wake the session. Cursor has no
+  route-owned pane, so it is never woken; it receives steering at its next
+  agent-doc command.
   Steering does not depend on the hook (`#closeout-steering`): whatever no hook
   delivered is appended to the `respond` / `write --commit` terminal output and
   the post-commit `session-check` as `[agent-doc] operator steering arrived

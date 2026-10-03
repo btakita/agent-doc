@@ -35,6 +35,7 @@ pub mod selfkill;
 pub mod session_lineage;
 pub mod session_owner;
 pub mod startup_miss;
+pub mod steering_wake;
 pub mod terminal_filter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

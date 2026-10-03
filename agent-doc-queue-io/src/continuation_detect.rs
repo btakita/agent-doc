@@ -24,7 +24,14 @@ pub fn detect_required_continuation_with(
         Err(_) => return Ok(None),
     };
     let snapshot_content = load_snapshot(file)?;
-    queue_continuation::required_continuation(&content, snapshot_content.as_deref())
+    // `#queueclaim`: a head claimed by a worker outside the in-session loop
+    // (a dispatched subagent) is in flight, not drainable.
+    let claimed = crate::queue_claim::claimed_items_for_content(file, &content);
+    queue_continuation::required_continuation_excluding_claimed(
+        &content,
+        snapshot_content.as_deref(),
+        &claimed,
+    )
 }
 
 /// Detect whether already-resolved current document content requires queue
@@ -39,7 +46,12 @@ pub fn detect_required_continuation_for_content_with(
         return Ok(None);
     }
     let snapshot_content = load_snapshot(file)?;
-    queue_continuation::required_continuation(content, snapshot_content.as_deref())
+    let claimed = crate::queue_claim::claimed_items_for_content(file, content);
+    queue_continuation::required_continuation_excluding_claimed(
+        content,
+        snapshot_content.as_deref(),
+        &claimed,
+    )
 }
 
 #[cfg(test)]

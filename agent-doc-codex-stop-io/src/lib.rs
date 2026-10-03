@@ -104,6 +104,37 @@ struct ClaudeStopBlock {
     reason: String,
 }
 
+/// `#stopfeedbacknoterror`: a queue continuation keeps the Claude turn going
+/// through `hookSpecificOutput.additionalContext`, not `decision: "block"`.
+///
+/// Claude Code labels every Stop-hook `decision: "block"` (and every exit-2
+/// stderr) as a hook ERROR, so each drained queue item showed the operator
+/// "Stop hook error" beside text that said "not an error". Since Claude Code
+/// 2.1.163 a Stop hook may return `additionalContext` instead: "Non-error
+/// feedback for Claude. The conversation continues so Claude can act on it,
+/// but unlike `decision: "block"` it is shown in the transcript as hook
+/// feedback rather than a hook error", under the same loop protections
+/// (`stop_hook_active` and the consecutive-continuation cap). A continuation is
+/// the hook working as designed, so it uses the feedback form. A genuine hook
+/// failure still uses [`ClaudeStopBlock`]: that one IS an error.
+///
+/// Claude-only. The Codex Stop contract (`StopResponse`) is unchanged.
+#[derive(Debug, PartialEq, Eq)]
+struct ClaudeStopContinuation {
+    reason: String,
+}
+
+impl ClaudeStopContinuation {
+    fn to_hook_output(&self) -> serde_json::Value {
+        serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "Stop",
+                "additionalContext": self.reason,
+            }
+        })
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
 enum StopResponse {
@@ -347,7 +378,7 @@ fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
         .and_then(|input| apply_claude_stop(&input))
     {
         Ok(response) => Ok(response
-            .map(|response| serde_json::to_value(response).expect("serialize Claude Stop block"))
+            .map(|response| response.to_hook_output())
             .unwrap_or_else(|| serde_json::json!({}))),
         // Failing closed is right the FIRST time: the operator needs to hear
         // that the continuation check could not run. Repeating it is not.
@@ -368,7 +399,7 @@ fn claude_stop_response(payload: Option<&str>) -> Result<serde_json::Value> {
     }
 }
 
-fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>> {
+fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopContinuation>> {
     apply_claude_stop_with_drain_readiness(
         input,
         agent_doc_controller_io::project_controller::supervisor_drain_readiness_for_doc,
@@ -398,7 +429,7 @@ fn supervisor_handoff_overdue(file: &Path) -> bool {
 fn apply_claude_stop_with_drain_readiness(
     input: &ClaudeStopInput,
     drain_readiness: impl Fn(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
-) -> Result<Option<ClaudeStopBlock>> {
+) -> Result<Option<ClaudeStopContinuation>> {
     let cwd = PathBuf::from(&input.cwd);
     let Some((_loaded_root, state)) = load_bound_session_for_stop(&cwd, &input.session_id)? else {
         return Ok(None);
@@ -465,6 +496,7 @@ fn apply_claude_stop_with_drain_readiness(
         return Ok(None);
     }
     let Some(prompt) = active_auto_queue_prompt(&file)? else {
+        log_claimed_heads_waiting(&file);
         return Ok(None);
     };
 
@@ -523,10 +555,11 @@ fn apply_claude_stop_with_drain_readiness(
         return Ok(None);
     }
 
-    // `#stopblocksupervisorowned`: Claude Code renders EVERY Stop-hook block as
-    // "Stop hook error", whatever its reason says, so a block on each drained
-    // item reads as an error on each drained item. It is only needed when no one
-    // else will continue the queue. A live, fresh supervisor's idle-queue watch
+    // `#stopblocksupervisorowned`: a continuation request is only needed when no
+    // one else will continue the queue. (It used to be a `decision: "block"`,
+    // which Claude Code renders as "Stop hook error"; it is now non-error
+    // `additionalContext` feedback, `#stopfeedbacknoterror`, but it still costs
+    // the agent a turn, so it is still withheld from a ready supervisor.) A live, fresh supervisor's idle-queue watch
     // submits the next `agent-doc <FILE>` trigger into this pane once the turn
     // ends — a real submitted prompt that seals its own cycle contract — so the
     // block adds nothing but the error line. Block only when that supervisor is
@@ -584,10 +617,38 @@ fn apply_claude_stop_with_drain_readiness(
             run_id.as_deref().unwrap_or("none"),
         ),
     );
-    Ok(Some(ClaudeStopBlock {
-        decision: "block",
+    Ok(Some(ClaudeStopContinuation {
         reason: claude_stop_continuation_reason(&file.display().to_string(), &prompt),
     }))
+}
+
+/// `#queueclaim`: when no drainable head remains but live heads are claimed by
+/// workers outside the in-session loop (dispatched subagents), the turn ends
+/// quietly and the document is waiting on that in-flight work. Record the
+/// waiting state so the quiet stop is explainable from ops.log.
+fn log_claimed_heads_waiting(file: &Path) {
+    let content = match current_document_content(file, "claude_stop_claimed_heads_check") {
+        Ok(content) => content,
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] Claude Stop hook could not read {} to report claimed queue heads: {err:#}",
+                file.display()
+            );
+            return;
+        }
+    };
+    let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content);
+    let claimed_heads =
+        agent_doc_queue::queue_continuation::claimed_head_count(&content, &claimed);
+    if claimed_heads > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "claude_stop_queue_continuation_skipped reason=heads_claimed_in_flight \
+                 claimed_heads={claimed_heads} action=allow_final_answer state=waiting_on_claims"
+            ),
+        );
+    }
 }
 
 /// `#loopreentrynoop`: the Claude Code Stop-hook continuation instruction.
@@ -643,7 +704,12 @@ fn claude_transcript_arms_loop_reentry(transcript: &Path, file: &Path) -> bool {
 /// "Stop hook error".
 fn is_stop_hook_feedback(text: &str) -> bool {
     let text = text.trim_start();
-    text.starts_with("Stop hook feedback:") || text.starts_with("<task-notification>")
+    text.starts_with("Stop hook feedback:")
+        || text.starts_with("<task-notification>")
+        // `#stopfeedbacknoterror`: the continuation now arrives as Stop-hook
+        // `additionalContext`, which Claude Code injects as a system reminder.
+        || text.starts_with("<system-reminder>")
+        || text.contains("(`#loopreentrynoop`)")
 }
 
 /// `#stoploopalreadyarmed`: true when, after the operator prompt that started
@@ -704,30 +770,44 @@ pub fn transcript_tail_arms_loop_reentry(tail: &str, file: &Path) -> bool {
     false
 }
 
-/// GH #85 / `#loopskillnoadmit`: name the one re-entry that admits a cycle.
+/// GH #85 / `#loopskillnoadmit` / `#loopreentrynoop`: name the one re-entry
+/// that admits a cycle, and nothing else.
 ///
-/// A `loop` Skill call never admits one, on the first iteration or any later
-/// one: a Skill call is not a submitted prompt, so `UserPromptSubmit` never
-/// runs binary preflight or claims the drain-owner lease. The first-iteration
-/// branch that led with "Invoke the `loop` skill now" was verified a no-op on
-/// 2026-10-01 (tasks/agent-doc/agent-doc-bugs.md: no preflight and no lease
-/// followed the call); the drain only resumed because the loop skill's own
-/// dynamic mode then scheduled a wake-up. So lead with that wake-up directly.
-/// Claude Code renders a blocking Stop reason as an error, so the first clause
-/// still says nothing failed.
+/// A `loop` Skill call never admits a cycle: it is not a submitted prompt, so
+/// `UserPromptSubmit` never runs binary preflight or claims the drain-owner
+/// lease (verified a no-op 2026-10-01 on tasks/agent-doc/agent-doc-bugs.md).
+/// Shelling `agent-doc <FILE>` or `agent-doc preflight` is forbidden too. The
+/// working route is a `ScheduleWakeup` whose prompt is the trigger.
+///
+/// Kept short on purpose (`#stopfeedbacknoterror`): the earlier text repeated
+/// itself across ~800 bytes. The head is previewed, not quoted in full, because
+/// a multi-line free-text head would otherwise dominate the message.
 pub fn claude_stop_continuation_reason(file_display: &str, prompt: &str) -> String {
     format!(
-        "Queue continuation, not an error: agent-doc's Stop hook kept the active queue moving \
-         for {file_display}. The completed cycle durably proved another drainable head: \
-         {prompt:?}. Do not send the final answer. Re-enter now: schedule a wake-up that \
-         SUBMITS `/loop agent-doc {file_display}` as a real prompt (Claude Code: \
-         `ScheduleWakeup` with that exact prompt). Do not call the `loop` skill instead: a \
-         Skill call is not a submitted prompt, so binary preflight never runs and it seals NO \
-         cycle contract. Do NOT shell-run `agent-doc {file_display}` from the owner pane, and a \
-         missing cycle contract is NOT a reason to shell `agent-doc preflight`. A scheduled \
-         re-entry is a continuation, not a stall. (`#loopreentrynoop`)"
+        "agent-doc queue continues for {file_display}; next head: {head:?}. Re-enter with \
+         `ScheduleWakeup` using exactly the prompt `/loop agent-doc {file_display}`, not the \
+         `loop` skill (a Skill call submits no prompt, so it admits no cycle). Do not shell \
+         `agent-doc {file_display}` or `agent-doc preflight`. (`#loopreentrynoop`)",
+        head = continuation_head_preview(prompt),
     )
 }
+
+/// First line of `prompt`, capped at [`CONTINUATION_HEAD_PREVIEW_CHARS`]
+/// characters (char-boundary safe), with an ellipsis when anything was cut.
+fn continuation_head_preview(prompt: &str) -> String {
+    let trimmed = prompt.trim();
+    let first_line = trimmed.lines().next().unwrap_or("");
+    let mut preview: String = first_line
+        .chars()
+        .take(CONTINUATION_HEAD_PREVIEW_CHARS)
+        .collect();
+    if preview.len() < trimmed.len() {
+        preview.push('…');
+    }
+    preview
+}
+
+const CONTINUATION_HEAD_PREVIEW_CHARS: usize = 120;
 
 fn apply_stop_within_budget(input: StopInput, budget: std::time::Duration) -> Result<StopHookRun> {
     #[cfg(test)]
@@ -2693,24 +2773,35 @@ mod tests {
     #[test]
     fn continuation_reason_names_the_noop_case_and_a_working_reentry() {
         let reason = claude_stop_continuation_reason("/p/doc.md", "do [#x]");
-        // GH #85: Claude Code labels a blocking reason as an error, so the
-        // first clause must say nothing failed.
-        assert!(
-            reason.starts_with("Queue continuation, not an error:"),
-            "{reason}"
-        );
         for needle in [
             "ScheduleWakeup",
-            "SUBMITS `/loop agent-doc /p/doc.md`",
-            "loop` skill",
-            "seals NO cycle contract",
-            "continuation, not a stall",
-            "Do NOT shell-run",
-            "NOT a reason to shell `agent-doc preflight`",
+            "exactly the prompt `/loop agent-doc /p/doc.md`",
+            "not the `loop` skill",
+            "admits no cycle",
+            "Do not shell `agent-doc /p/doc.md` or `agent-doc preflight`",
             "do [#x]",
+            "(`#loopreentrynoop`)",
         ] {
             assert!(reason.contains(needle), "lost `{needle}`: {reason}");
         }
+        // `#stopfeedbacknoterror`: concise. The previous text was ~800 bytes
+        // and said "not an error" beside a UI that labeled it an error.
+        assert!(
+            reason.len() <= 360 + 2 * "/p/doc.md".len(),
+            "continuation must stay concise ({} bytes): {reason}",
+            reason.len()
+        );
+        assert!(!reason.contains("error"), "{reason}");
+    }
+
+    /// A long multi-line free-text head is previewed, not quoted in full.
+    #[test]
+    fn continuation_reason_previews_a_long_head() {
+        let head = format!("{}\nsecond line with a fenced log", "é".repeat(400));
+        let reason = claude_stop_continuation_reason("/p/doc.md", &head);
+        assert!(!reason.contains("second line"), "{reason}");
+        assert!(reason.contains('…'), "{reason}");
+        assert!(reason.len() < 700, "{} bytes", reason.len());
     }
 
     /// `#loopskillnoadmit`: a `loop` Skill call admits no cycle on ANY
@@ -2719,11 +2810,69 @@ mod tests {
     #[test]
     fn continuation_never_orders_a_loop_skill_call() {
         let reason = claude_stop_continuation_reason("/p/doc.md", "do [#x]");
-        assert!(reason.contains("Re-enter now:"), "{reason}");
         assert!(!reason.contains("Invoke the `loop` skill"), "{reason}");
         let wake = reason.find("ScheduleWakeup").unwrap();
         let skill = reason.find("loop` skill").unwrap();
         assert!(wake < skill, "the working re-entry must come first: {reason}");
+    }
+
+    /// `#stopfeedbacknoterror`: the exact Claude Code Stop-hook output for a
+    /// queue continuation is non-error `additionalContext` feedback (stdout
+    /// JSON, exit 0), never a `decision: "block"`, which Claude Code labels a
+    /// hook error. The fail-closed branch keeps `decision: "block"` because a
+    /// hook failure is an error.
+    #[test]
+    fn claude_continuation_output_is_non_error_feedback_json() {
+        let output = ClaudeStopContinuation {
+            reason: claude_stop_continuation_reason("/p/doc.md", "do [#x]"),
+        }
+        .to_hook_output();
+        assert_eq!(
+            output,
+            serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "Stop",
+                    "additionalContext": claude_stop_continuation_reason("/p/doc.md", "do [#x]"),
+                }
+            })
+        );
+        assert!(output.get("decision").is_none(), "{output}");
+        assert!(output.get("reason").is_none(), "{output}");
+    }
+
+    /// The Codex Stop contract is untouched by the Claude feedback form.
+    #[test]
+    fn codex_stop_output_shapes_are_unchanged() {
+        assert_eq!(
+            serde_json::to_value(StopResponse::Block {
+                decision: "block",
+                reason: "r".to_string(),
+            })
+            .unwrap(),
+            serde_json::json!({"decision": "block", "reason": "r"})
+        );
+        assert_eq!(
+            serde_json::to_value(StopResponse::Continue { continue_: true }).unwrap(),
+            serde_json::json!({"continue": true})
+        );
+        assert_eq!(
+            serde_json::to_value(StopResponse::Stop {
+                continue_: false,
+                stop_reason: "s".to_string(),
+            })
+            .unwrap(),
+            serde_json::json!({"continue": false, "stopReason": "s"})
+        );
+    }
+
+    /// The continuation feedback is a harness record inside the turn, so it
+    /// must not end the search for an armed re-entry (`#stoploopalreadyarmed`).
+    #[test]
+    fn continuation_feedback_is_not_an_operator_prompt() {
+        let reason = claude_stop_continuation_reason("/p/doc.md", "do [#x]");
+        assert!(is_stop_hook_feedback(&reason));
+        assert!(is_stop_hook_feedback("<system-reminder>\nStop hook feedback"));
+        assert!(!is_stop_hook_feedback("please fix the parser"));
     }
 
     #[test]
@@ -5093,10 +5242,88 @@ Reviewed the gated items.\n\
         .unwrap()
         .expect("clean Claude closeout must keep draining");
 
-        assert_eq!(response.decision, "block");
         assert!(response.reason.contains("fix the next queue item"));
         assert!(response.reason.contains("`loop` skill"));
-        assert!(response.reason.contains("Do NOT shell-run `agent-doc"));
+        assert!(response.reason.contains("Do not shell `agent-doc"));
+        assert!(
+            response.to_hook_output()["hookSpecificOutput"]["additionalContext"]
+                .as_str()
+                .is_some()
+        );
+    }
+
+    /// `#queueclaim`: a head dispatched to a subagent is claimed. When every
+    /// remaining head is claimed, the Stop hook must let the turn end quietly
+    /// (no continuation) instead of re-entering for work already in flight;
+    /// releasing the claim restores the continuation.
+    #[test]
+    fn claude_stop_does_not_reenter_for_claimed_heads() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(
+            &dir,
+            &[
+                "#gh-fix https://github.com/o/r/issues/109",
+                "#gh-fix https://github.com/o/r/issues/110",
+            ],
+        );
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+        complete_run(&doc);
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+        };
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+
+        // One head claimed: the continuation names the OTHER head.
+        agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "#gh-fix https://github.com/o/r/issues/109",
+            "subagent:gh109",
+            3600,
+        )
+        .unwrap();
+        let next = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+            .unwrap()
+            .expect("the unclaimed head still continues");
+        assert!(next.reason.contains("issues/110"), "{}", next.reason);
+        assert!(!next.reason.contains("issues/109"), "{}", next.reason);
+
+        // Every head claimed: quiet stop, no continuation, no block.
+        complete_run(&doc);
+        agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "#gh-fix https://github.com/o/r/issues/110",
+            "subagent:gh110",
+            3600,
+        )
+        .unwrap();
+        assert!(
+            apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+                .unwrap()
+                .is_none(),
+            "all heads claimed: the turn must end quietly"
+        );
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(ops.contains("state=waiting_on_claims"), "{ops}");
+
+        // Releasing a claim restores drainability.
+        complete_run(&doc);
+        agent_doc_queue_io::queue_claim::release(
+            &doc,
+            "#gh-fix https://github.com/o/r/issues/109",
+        )
+        .unwrap();
+        let resumed = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+            .unwrap()
+            .expect("a released head is drainable again");
+        assert!(resumed.reason.contains("issues/109"), "{}", resumed.reason);
     }
 
     /// `#stopneedsclosedcycle`: the marker is document-level and outlives the

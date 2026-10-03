@@ -4313,8 +4313,9 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "recycle_yield_pending(file)",
         "std::fs::read_to_string(file)",
         "let snapshot_content = load_snapshot(file)?",
-        "queue_continuation::required_continuation(&content, snapshot_content.as_deref())",
-        "queue_continuation::required_continuation(content, snapshot_content.as_deref())",
+        "crate::queue_claim::claimed_items_for_content(file, &content)",
+        "crate::queue_claim::claimed_items_for_content(file, content)",
+        "queue_continuation::required_continuation_excluding_claimed(",
     ] {
         assert!(
             queue_io_detect.contains(required_snippet),

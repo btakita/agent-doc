@@ -20,6 +20,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -614,6 +615,15 @@ Pushed `78bb7f4` to tsift `main` as a fast-forward on `be24057`, without force. 
 **Real-trace check:** the subagent imported a scratch copy of the trace against haiven-contracts at the locked commit (`1ce0581`). The lock commit landed on the source node, and the joins were correct: `MessageType`→`WsMessageTypeV0`, `chat.typing`→`chat.typing.event`, and `motd`→`motd`. A clean joined count wasn't possible, because the scratch directory sat under a shared tsift root that also indexes other copies of haiven-contracts. Queued as `#tracejoinremeasure`.
 
 All four queued subagent items are closed.
+
+### Re: two subagents dispatched — opus-5-5 · 2026-10-03T15:50-04:00
+
+I claimed both queue heads and started each in its own background subagent and tsift worktree. Both push to `main` without force.
+
+- **`#tracejoinremeasure`** (`worktrees/tsift-remeasure`): re-measures the haiven-trace joins on the real haiven-sdk root checkout. It writes only that checkout's `.tsift/` state; the checkout itself stays read-only because it belongs to another session. It imports the `57dd11c` trace from the tracenaming worktree and keeps scratch out of any existing tsift root. The new counts go into `specs/graph.md`.
+- **`#searchtimeoutflake`** (`worktrees/tsift-searchflake`): makes the search-timeout test deterministic. The agent must show the fixed test still fails when the product code is mutated, and must run it 50 or more times under load.
+
+The exchange is large (579 lines). I'm not compacting while the queue is active.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 

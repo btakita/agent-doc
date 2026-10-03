@@ -555,7 +555,7 @@ fn consume_queue_prompts_with_options(
         effects.current_document_content(file, "queue_consume")?
     };
     let snapshot_content = load_snapshot_recovery_only(file, "queue consume planning");
-    let Some(plan) = plan_queue_prompt_consumption_with_snapshot_and_count(
+    let Some(mut plan) = plan_queue_prompt_consumption_with_snapshot_and_count(
         file,
         &content,
         snapshot_content.as_deref(),
@@ -565,6 +565,31 @@ fn consume_queue_prompts_with_options(
     else {
         return Ok(None);
     };
+    // `#qheadannotation` never-drop backstop: an id consume of a head carrying an
+    // unanswered operator annotation re-queues the annotation as its own line,
+    // then re-plans the same consume over that document.
+    if !done_ids.is_empty()
+        && let Some(requeued_content) = requeue_unaddressed_queue_head_annotations(
+            file,
+            &content,
+            &plan.consumed_texts,
+            "queue_consume",
+        )?
+    {
+        plan = plan_queue_prompt_consumption_with_snapshot_and_count(
+            file,
+            &requeued_content,
+            snapshot_content.as_deref(),
+            done_ids,
+            free_text_count,
+        )?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "queue consume: re-planning after re-queueing an operator annotation consumed \
+                 nothing (#qheadannotation); refusing to drop the annotation"
+            )
+        })?;
+    }
     if expected_head.is_some_and(|expected| plan.consumed_text.trim() != expected.trim()) {
         agent_doc_ops_log_io::log_op(
             file,
@@ -672,6 +697,60 @@ fn consume_queue_prompts_with_options(
     }
 
     Ok(Some(outcome))
+}
+
+/// `#qheadannotation` never-drop backstop for the id consume paths.
+///
+/// The pre-capture closeout gate refuses an id completion whose live head
+/// carries an unanswered operator annotation, but a post-capture consume can
+/// still observe an annotation the gate's witness could not (the operator typed
+/// it after the response was captured). At that point failing closed would
+/// strand a captured response, so the annotation is instead re-queued verbatim
+/// as its own free-text line directly after the head: the head is consumed by
+/// id as before, and the operator's text survives as the next queue item.
+/// Evidence is the cycle's captured response and the document cut being
+/// mutated (which holds the materialized response).
+fn requeue_unaddressed_queue_head_annotations(
+    file: &Path,
+    content: &str,
+    consumed_heads: &[String],
+    source: &str,
+) -> Result<Option<String>> {
+    if consumed_heads.is_empty() {
+        return Ok(None);
+    }
+    let captured = projected_capture_response_body(file);
+    let mut evidence = vec![content];
+    if let Some(captured) = captured.as_deref() {
+        evidence.push(captured);
+    }
+    let Some((updated, requeued)) =
+        agent_doc_queue::queue_head_annotation::requeue_unaddressed_annotations(
+            content,
+            consumed_heads,
+            &evidence,
+        )?
+    else {
+        return Ok(None);
+    };
+    for annotation in &requeued {
+        eprintln!(
+            "[queue] WARNING: #{} was completed without answering its operator annotation {:?}; \
+             re-queued the annotation as its own queue item (#qheadannotation)",
+            annotation.id, annotation.annotation_verbatim
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_head_annotation_requeued file={} id={} annotation_hash={} source={} #qheadannotation",
+                file.display(),
+                annotation.id,
+                agent_doc_hash::content_hash(&annotation.annotation_verbatim),
+                source
+            ),
+        );
+    }
+    Ok(Some(updated))
 }
 
 struct QueueConsumptionProofRuntimeEffects;
@@ -1228,15 +1307,41 @@ pub fn mark_completed_queue_prompts_for_done_ids(
     // the editor-attached path converges via the relay. The mark uses full-text
     // `render` (whole-body normalization + done-id key fallback) so it keeps the
     // existing `converge_document_or_disk` write rather than node-only ops.
-    let content = effects.current_document_content(file, "queue_done_id_mark")?;
+    let authority_content = effects.current_document_content(file, "queue_done_id_mark")?;
     let revision_baseline = load_snapshot_recovery_only(file, "queue done-id revision proof");
     let eligible_done_ids =
         agent_doc_queue::queue_closeout_guard::done_ids_for_unchanged_queue_revisions(
             revision_baseline.as_deref(),
-            &content,
+            &authority_content,
             done_ids,
         );
     let done_ids = eligible_done_ids.as_slice();
+    // `#qheadannotation` never-drop backstop (see the consume path): the heads
+    // this mark completes are exactly the live prompts naming a done id.
+    let heads_to_mark = {
+        let components = element::parse(&authority_content)?;
+        match components
+            .iter()
+            .find(|component| component.name == "queue")
+        {
+            Some(queue_component) => {
+                let body = &authority_content
+                    [queue_component.open_end..queue_component.close_start];
+                let entries = agent_doc_queue::document_queue::parse(body)
+                    .context("queue done-id mark: failed to parse document queue")?;
+                mark_entries_completed_by_done_ids(&entries, done_ids).1
+            }
+            None => Vec::new(),
+        }
+    };
+    let requeued_content = requeue_unaddressed_queue_head_annotations(
+        file,
+        &authority_content,
+        &heads_to_mark,
+        "queue_done_id_mark",
+    )?;
+    let requeued = requeued_content.is_some();
+    let content = requeued_content.unwrap_or_else(|| authority_content.clone());
     let components = element::parse(&content)?;
     let Some(queue_component) = components
         .iter()
@@ -1309,17 +1414,27 @@ pub fn mark_completed_queue_prompts_for_done_ids(
         effects
             .atomic_write(file, &new_document)
             .context("queue done-id mark: failed to write document")?;
-    } else if done_node_keys.ast_backed {
+    } else if done_node_keys.ast_backed && !requeued {
         let ops = queue_mark_done_node_ops(&done_node_keys.keys);
         converge_awaiting_retained_delivery(
             effects,
             file,
             &new_document,
             "queue_done_id_mark",
-            || effects.converge_structural_ops(file, &ops, &content, "queue_done_id_mark"),
+            || {
+                effects.converge_structural_ops(
+                    file,
+                    &ops,
+                    &authority_content,
+                    "queue_done_id_mark",
+                )
+            },
         )
         .context("queue done-id mark: failed to write document")?;
     } else {
+        // A re-queued annotation inserts a line, which structural mark_done ops
+        // cannot express, so it converges as a full-text write against the
+        // authority cut it was derived from.
         converge_awaiting_retained_delivery(
             effects,
             file,
@@ -1329,7 +1444,7 @@ pub fn mark_completed_queue_prompts_for_done_ids(
                 effects.converge_document_or_disk(
                     file,
                     &new_document,
-                    &content,
+                    &authority_content,
                     "queue_done_id_mark",
                 )
             },
@@ -2678,6 +2793,96 @@ mod core_tests {
         .expect("the matching id-backed head is still consumed");
         assert_eq!(planned.consumed_texts, vec!["do [#foo]".to_string()]);
         assert_eq!(planned.remaining, 1, "the free-text head must survive");
+    }
+
+    fn annotated_head_doc(exchange: &str) -> String {
+        format!(
+            "---\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#sdkrestemitnative]: can the *.h files be generated from the contract as well?\n- do [#next]\n<!-- /agent:queue -->\n\n<!-- agent:backlog queue -->\n- [ ] [#next] next\n<!-- /agent:backlog -->\n"
+        )
+    }
+
+    /// `#qheadannotation` backstop (sdk.md, 2026-10-02, no snapshot baseline so
+    /// the revision fence could not see the mid-turn edit): consuming the id head
+    /// keeps the unanswered operator annotation as its own queue line.
+    #[test]
+    fn done_id_consume_requeues_an_unanswered_head_annotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("sdk.md");
+        let content = annotated_head_doc(
+            "### Re: do #sdkrestemitnative\n\n> **Queue prompt:**\n>\n> do [#sdkrestemitnative]: can the *.h files be generated from the contract as well?\n\nDone as draft PR #50.\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let outcome = super::consume_queue_prompts_with_outcome(
+            &doc,
+            &["sdkrestemitnative".to_string()],
+            true,
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the id head is still consumed");
+        assert_eq!(outcome.consumed_count, 1);
+        assert!(!outcome.drained);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(
+                "- can the *.h files be generated from the contract as well?\n- do [#next]\n"
+            ),
+            "the operator annotation must survive as its own queue item: {updated}"
+        );
+        assert!(
+            !updated.contains("- do [#sdkrestemitnative]: can"),
+            "the id head itself is consumed: {updated}"
+        );
+    }
+
+    #[test]
+    fn done_id_consume_drops_nothing_extra_when_the_annotation_is_answered() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("sdk.md");
+        let content = annotated_head_doc(
+            "### Re: do #sdkrestemitnative\n\n> **Operator note:** can the *.h files be generated from the contract as well?\n\nYes, the headers are generated now.\n",
+        );
+        std::fs::write(&doc, &content).unwrap();
+        super::consume_queue_prompts_with_outcome(
+            &doc,
+            &["sdkrestemitnative".to_string()],
+            true,
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the id head is consumed");
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let queue = updated
+            .split("<!-- agent:queue -->")
+            .nth(1)
+            .and_then(|rest| rest.split("<!-- /agent:queue -->").next())
+            .unwrap();
+        assert!(
+            !queue.contains("\n- can the *.h files"),
+            "an answered annotation is not re-queued: {queue}"
+        );
+        assert!(queue.contains("- do [#next]"), "{queue}");
+    }
+
+    #[test]
+    fn done_id_mark_requeues_an_unanswered_head_annotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("sdk.md");
+        let content = annotated_head_doc("");
+        std::fs::write(&doc, &content).unwrap();
+        let marked = mark_completed_queue_prompts_for_done_ids(
+            &doc,
+            &["sdkrestemitnative".to_string()],
+            true,
+        )
+        .unwrap();
+        assert_eq!(marked, 1);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("- can the *.h files be generated from the contract as well?\n"),
+            "{updated}"
+        );
+        assert!(updated.contains("~~do [#sdkrestemitnative]"), "{updated}");
     }
 
     #[test]

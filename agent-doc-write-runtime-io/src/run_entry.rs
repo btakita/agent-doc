@@ -39,6 +39,7 @@ fn enforce_selected_queue_response_contract(
     if !flags.strict_closeout {
         return Ok(());
     }
+    enforce_queue_head_annotation_response_contract(current, response, flags)?;
     let mut missing = agent_doc_queue::queue_closeout_guard::
         selected_free_text_heads_missing_response_evidence_for_closeout(
             baseline,
@@ -91,6 +92,47 @@ fn enforce_selected_queue_response_contract(
         );
     }
     Ok(())
+}
+
+/// `#qheadannotation`: an id-completing closeout must not consume a queue head
+/// whose operator annotation the response leaves unanswered.
+///
+/// `current` is the live (operator-visible) witness the caller resolved, not the
+/// preflight-time selection, so an annotation the operator typed onto the head
+/// mid-turn is checked too. Fail closed before capture: the response is still
+/// in the agent's hands, nothing has been mutated, and the head with its
+/// annotation stays exactly as the operator wrote it.
+fn enforce_queue_head_annotation_response_contract(
+    current: &str,
+    response: &str,
+    flags: &WriteFlags,
+) -> Result<()> {
+    let mut completion_ids = flags.pending_done_ids.clone();
+    completion_ids.extend(flags.queue_completion_ids.iter().cloned());
+    let missing = agent_doc_queue::queue_head_annotation::unaddressed_completed_annotations(
+        current,
+        response,
+        &completion_ids,
+    )?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let listed = missing
+        .iter()
+        .map(|annotation| {
+            format!(
+                "#{} annotated {:?}",
+                annotation.id, annotation.annotation_verbatim
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let example = agent_doc_queue::queue_head_annotation::operator_note_evidence_example(
+        &missing[0].annotation_verbatim,
+    );
+    anyhow::bail!(
+        "[finalize] pre-write gate: the queue head this closeout completes carries an operator annotation the response does not address: {listed}. An annotation on a `do [#id]` head is operator steering for this turn, not decoration. Answer it in the same response, quoted as:\n\n{example}\n\nthen retry. No response has been captured, and the queue head (with its annotation) is unchanged."
+    )
 }
 
 fn resolve_current_document_content(file: &Path, source: &str) -> Result<String> {
@@ -3302,14 +3344,103 @@ mod tests {
             pending_done_ids: vec!["fperuntranscription".to_string()],
             ..without_done
         };
-        enforce_selected_queue_response_contract(
+        // `#qheadannotation`: the prose glued onto the directive is operator
+        // steering, so `--done` alone no longer consumes it unanswered ...
+        let err = enforce_selected_queue_response_contract(
             Some(&doc),
             Some(&current),
             &current,
             response,
             &with_done,
         )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("operator annotation"), "{err}");
+        // ... but `--done` plus an answered operator note needs no queue-prompt
+        // quote: the leading directive's completion still covers the head.
+        let answered = "### Re: FPE lanes\n\n> **Operator note:** FPE run the transcription with Harmblock?\n\nYes, the transcription ran with Harmblock.";
+        enforce_selected_queue_response_contract(
+            Some(&doc),
+            Some(&current),
+            &current,
+            answered,
+            &with_done,
+        )
         .expect("--done of the head's leading directive id is its completion evidence");
+    }
+
+    /// `#qheadannotation` (sdk.md, 2026-10-02): an id-completing closeout must
+    /// answer the operator text appended to the `do [#id]` head; quoting the head
+    /// as a `> **Queue prompt:**` echo is not an answer.
+    #[test]
+    fn annotated_id_head_requires_answered_operator_note_at_closeout() {
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- \u{1f6a7} do [#sdkrestemitnative]: can the *.h files be generated from the contract as well?\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let flags = WriteFlags {
+            strict_closeout: true,
+            commit_requested: true,
+            pending_done_ids: vec!["sdkrestemitnative".to_string()],
+            ..Default::default()
+        };
+        let echo_only = "### Re: do #sdkrestemitnative\n\n> **Queue prompt:**\n>\n> do [#sdkrestemitnative]: can the *.h files be generated from the contract as well?\n\nDone as draft PR #50.";
+        let err = enforce_selected_queue_response_contract(None, None, current, echo_only, &flags)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("#sdkrestemitnative annotated"), "{err}");
+        assert!(
+            err.contains("> **Operator note:** can the *.h files be generated from the contract as well?"),
+            "{err}"
+        );
+        assert!(err.contains("No response has been captured"), "{err}");
+
+        let answered = "### Re: do #sdkrestemitnative\n\n> **Operator note:** can the *.h files be generated from the contract as well?\n\nYes: the C++ headers are now emitted too.\n\nDone as draft PR #50.";
+        enforce_selected_queue_response_contract(None, None, current, answered, &flags).unwrap();
+
+        // The same head via `queue_completion_ids` is gated the same way.
+        let via_queue_ids = WriteFlags {
+            pending_done_ids: Vec::new(),
+            queue_completion_ids: vec!["sdkrestemitnative".to_string()],
+            ..flags.clone()
+        };
+        assert!(
+            enforce_selected_queue_response_contract(None, None, current, echo_only, &via_queue_ids)
+                .is_err()
+        );
+    }
+
+    /// `#qheadannotation` mid-turn: the gate reads the live head handed to it,
+    /// so an annotation typed after preflight (absent from the baseline) is
+    /// still enforced, and a plain `do [#id]` head needs no operator note.
+    #[test]
+    fn annotation_added_mid_turn_is_gated_against_the_live_head() {
+        let baseline = concat!(
+            "<!-- agent:queue go -->\n",
+            "- \u{1f6a7} do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let live = concat!(
+            "<!-- agent:queue go -->\n",
+            "- \u{1f6a7} do [#a]: also cover the header files?\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let flags = WriteFlags {
+            strict_closeout: true,
+            commit_requested: true,
+            pending_done_ids: vec!["a".to_string()],
+            ..Default::default()
+        };
+        let response = "### Re: do #a\n\nImplemented #a.";
+        enforce_selected_queue_response_contract(None, Some(baseline), baseline, response, &flags)
+            .expect("an unannotated head needs no operator note");
+        assert!(
+            enforce_selected_queue_response_contract(None, Some(baseline), live, response, &flags)
+                .is_err(),
+            "the live (mid-turn) annotation must be enforced"
+        );
     }
 
     #[test]

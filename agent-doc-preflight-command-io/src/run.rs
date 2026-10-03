@@ -2223,6 +2223,15 @@ pub fn run_with_options_to_writer(
         .map(serde_json::from_value)
         .transpose()
         .context("failed to decode derived preflight session accretion")?;
+    let selected_queue_prompts = if exchange_prompt_preempts_queue {
+        Vec::new()
+    } else {
+        preflight_read_projection.queue.selected_prompts.clone()
+    };
+    // `#qheadannotation`: surface operator text appended to a selected `do [#id]`
+    // head as a typed directive instead of leaving it buried in the head string.
+    let queue_head_annotations =
+        agent_doc_queue::queue_head_annotation::queue_head_annotations(&selected_queue_prompts);
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -2262,11 +2271,12 @@ pub fn run_with_options_to_writer(
         gate_verify: gate_verify_results,
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
-        selected_queue_prompts: if exchange_prompt_preempts_queue {
-            Vec::new()
-        } else {
-            preflight_read_projection.queue.selected_prompts.clone()
-        },
+        selected_queue_prompts,
+        queue_head_annotation_guidance:
+            agent_doc_queue::queue_head_annotation::queue_head_annotation_guidance(
+                &queue_head_annotations,
+            ),
+        queue_head_annotations,
         queue_active: preflight_read_projection.queue.active,
         queue_deferred: preflight_read_projection.queue.deferred,
         queue_start_at: preflight_read_projection.queue.start_at.clone(),

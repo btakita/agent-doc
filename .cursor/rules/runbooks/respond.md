@@ -51,6 +51,31 @@ free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
 
+**Annotated `#id` heads are operator steering — answer the annotation (`#qheadannotation`).**
+The canonical backlog-mirror head is `do [#id]`. When the operator appends their own
+text to it — `do [#id]: can the *.h files be generated too?`, `[#id] and keep the old
+API` — that text is a directive for the **current** turn in its own right, not
+decoration, and it applies whether it was there at preflight or typed onto the head
+mid-turn. Preflight surfaces it as `queue_head_annotations: [{id, annotation_verbatim}]`
+with `queue_head_annotation_guidance`. Do the backlog item **and** answer the
+annotation in the same response, quoting it as:
+
+```markdown
+> **Operator note:** can the *.h files be generated too?
+
+<your answer>
+```
+
+Quoting the whole head in the `> **Queue prompt:**` echo is **not** an answer (that
+is exactly how the sdk.md question was consumed unanswered on 2026-10-02). An
+id-completing closeout (`--done <id>`) checks the live head: if its annotation has
+no `> **Operator note:**` quote followed by answer prose, the pre-write gate fails
+closed and nothing is captured — add the answer and retry. If an annotation only
+appears after the response was captured, the consume does not drop it: the head is
+consumed by id and the annotation is re-queued verbatim as its own free-text line
+right after it. A bare `[#id]: note` (no `do`) is inert prose, i.e. an ordinary
+free-text head answered through the `#qdeferstrike` quote above.
+
 A queue head that references one or more registered `#preset` names is a preset
 head, not ordinary free text, including composable forms such as `#gh-fix URL`.
 Address every resolved preset expansion supplied by preflight. The closeout gate

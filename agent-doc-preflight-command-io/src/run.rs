@@ -1564,6 +1564,7 @@ pub fn run_with_options_to_writer(
         );
     }
     let prompt_presets_requested = prompt_preset_resolution.requested;
+    let midturn_session_presets = prompt_presets_requested.clone();
     // `#orchestratepresetexpand`: ship the preset BODIES with the request so the
     // agent never needs a second command to expand them. The names are already
     // canonicalized and proven present by the `missing` bail above.
@@ -2002,6 +2003,32 @@ pub fn run_with_options_to_writer(
             &selected_free_text_queue_heads,
         )?;
     }
+    // `#midturn-steering`: seed the cycle-scoped steering watermark from the
+    // document this cycle admitted, so the PostToolUse hook can hand the
+    // running turn any operator edits made after this point. Best-effort: a
+    // seed failure must not refuse an admitted turn, and closeout
+    // `session-check` still surfaces exchange steering without it.
+    if !options.probe {
+        let current_item = if exchange_prompt_preempts_queue {
+            None
+        } else {
+            queue_state.selected_queue_prompts.first().cloned()
+        };
+        if let Err(err) = seed_midturn_steering(
+            file,
+            current_item.as_deref(),
+            midturn_session_presets.clone(),
+        ) {
+            eprintln!("[preflight] warning: mid-turn steering seed failed (non-fatal): {err:#}");
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "midturn_steering_seed_failed file={} error={err:#}",
+                    file.display()
+                ),
+            );
+        }
+    }
 
     // #codex-owned-pane-prompt-miss-followups: surface a structured owner-pane
     // self-invocation contract so Codex guidance can drive an in-pane response
@@ -2309,6 +2336,28 @@ const REVIEW_LEGIBILITY_TARGET: usize = 10;
 /// has to name the consequence and the triage-first remedy instead of repeating a
 /// bare command. Below the budget the migration is simply correct, and the
 /// warning stays short.
+/// Seed the `#midturn-steering` watermark for the cycle preflight just opened.
+fn seed_midturn_steering(
+    file: &Path,
+    current_item: Option<&str>,
+    session_presets: Vec<String>,
+) -> Result<()> {
+    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(());
+    };
+    if !matches!(cycle.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
+        return Ok(());
+    }
+    let baseline = resolve_current_preflight_document(file, "midturn_steering_seed")?;
+    agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+        file,
+        &cycle.cycle_id,
+        &baseline,
+        current_item,
+        session_presets,
+    )
+}
+
 fn legacy_gated_in_backlog_message(
     gated_in_backlog: usize,
     review_count: usize,

@@ -7,6 +7,7 @@ pub mod closeout_guards;
 pub mod command;
 pub mod detect;
 pub mod guard_modes;
+pub mod midturn_steering;
 pub mod partial_staging;
 pub mod profile;
 pub(crate) use agent_doc_document_realtime_io::{

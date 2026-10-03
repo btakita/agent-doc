@@ -1257,6 +1257,7 @@ fn retire_codex_project_hook_commands(path: &Path) -> Result<()> {
 
     retire_codex_hook_command(hooks_map, "UserPromptSubmit", CODEX_USER_PROMPT_COMMAND);
     retire_codex_hook_command(hooks_map, "Stop", CODEX_STOP_COMMAND);
+    retire_codex_hook_command(hooks_map, "PostToolUse", STEERING_POSTTOOLUSE_COMMAND);
 
     let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
     write_if_changed(path, &rendered)
@@ -1356,6 +1357,15 @@ fn merge_codex_hooks_json(path: &Path) -> Result<()> {
         Some("Checking agent-doc completion boundary"),
         Some(CODEX_STOP_HOOK_TIMEOUT_SECS),
     );
+    // `#midturn-steering`: Codex `PostToolUse` accepts the same
+    // `hookSpecificOutput.additionalContext` envelope as Claude Code.
+    ensure_codex_hook_command(
+        hooks_map,
+        "PostToolUse",
+        STEERING_POSTTOOLUSE_COMMAND,
+        None,
+        Some(STEERING_HOOK_TIMEOUT_SECS),
+    );
 
     let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
     write_if_changed(path, &rendered)
@@ -1373,6 +1383,15 @@ const COINED_ID_PRETOOLUSE_COMMAND: &str = "agent-doc hook coined-id-pre-tool-us
 /// only a bare `agent-doc <FILE>` first line and no-ops on everything else, so
 /// it cannot perturb an ordinary prompt.
 const PREFLIGHT_USER_PROMPT_COMMAND: &str = "agent-doc hook preflight-user-prompt-submit";
+/// `#midturn-steering`. `PostToolUse` fires after every tool call, so the
+/// binary can hand the running turn operator edits to `agent:queue` and the
+/// exchange as soon as they settle, instead of at the next cycle boundary. The
+/// handler is silent with no active cycle or nothing new, short-circuits on an
+/// unchanged document stat, and never fails the tool call.
+pub(crate) const STEERING_POSTTOOLUSE_COMMAND: &str = "agent-doc hook steering-post-tool-use";
+/// Harness deadline for the steering hook. The hot path is a stat plus two
+/// `state.db` reads; the bound only covers a cold cycle-state lookup.
+pub(crate) const STEERING_HOOK_TIMEOUT_SECS: u64 = 10;
 /// Consequential Claude Stop boundary: a clean closeout with a durable next
 /// queue head is not allowed to become a final answer.
 const CLAUDE_STOP_COMMAND: &str = "agent-doc hook claude-stop";
@@ -1704,6 +1723,15 @@ fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
         COINED_ID_PRETOOLUSE_COMMAND,
         None,
         None,
+    );
+    // `#midturn-steering`: no matcher, so steering reaches the turn after any
+    // tool call (a long Bash build is exactly when the operator steers).
+    ensure_codex_hook_command(
+        hooks_map,
+        "PostToolUse",
+        STEERING_POSTTOOLUSE_COMMAND,
+        None,
+        Some(STEERING_HOOK_TIMEOUT_SECS),
     );
     // `#preflightinbinary`: run preflight in-binary on the trigger prompt so the
     // cycle contract arrives with the prompt rather than a round trip later.
@@ -2197,8 +2225,12 @@ mod tests {
             // an agent that does not read it re-runs preflight every turn — so
             // it earns a line. Keep the headroom small: the guard exists to
             // catch drift, and a generous ceiling stops catching it.
+            // 153: `#midturn-steering` adds one bullet. Steering now arrives
+            // mid-turn through a hook, and an agent that does not know the
+            // `dispatch` contract would interrupt the current item for every
+            // queue addition, so it must be on the hot path.
             assert!(
-                line_count(&content) <= 152,
+                line_count(&content) <= 153,
                 "{env:?} rendered instruction surface grew to {} lines",
                 line_count(&content)
             );
@@ -3022,6 +3054,13 @@ mod tests {
 
         let hooks: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&hooks_path).unwrap()).unwrap();
+        let post_hooks = hooks["hooks"]["PostToolUse"][0]["hooks"]
+            .as_array()
+            .unwrap();
+        assert!(post_hooks.iter().any(|hook| {
+            hook["command"].as_str() == Some(STEERING_POSTTOOLUSE_COMMAND)
+                && hook["timeout"].as_u64() == Some(STEERING_HOOK_TIMEOUT_SECS)
+        }));
         let stop_hooks = hooks["hooks"]["Stop"][0]["hooks"].as_array().unwrap();
         assert!(stop_hooks.iter().any(|hook| {
             hook["command"].as_str() == Some(CODEX_STOP_COMMAND)
@@ -3190,6 +3229,20 @@ mod tests {
                 .filter(|command| command.as_str() == PREFLIGHT_USER_PROMPT_COMMAND)
                 .count(),
             1,
+        );
+        // `#midturn-steering`: exactly one PostToolUse steering hook, timed.
+        let post: Vec<_> = settings["hooks"]["PostToolUse"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|entry| entry["hooks"].as_array().cloned().unwrap_or_default())
+            .filter(|hook| hook["command"].as_str() == Some(STEERING_POSTTOOLUSE_COMMAND))
+            .collect();
+        assert_eq!(post.len(), 1, "{settings:#}");
+        assert_eq!(post[0]["type"], "command");
+        assert_eq!(
+            post[0]["timeout"].as_u64(),
+            Some(STEERING_HOOK_TIMEOUT_SECS)
         );
     }
 

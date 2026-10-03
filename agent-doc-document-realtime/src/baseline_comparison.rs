@@ -336,6 +336,14 @@ pub fn realtime_steering_all_between(baseline: &str, current: &str) -> RealtimeS
     RealtimeSteeringSet::new(directives)
 }
 
+/// Exchange-only half of [`realtime_steering_all_between`]: every unstarted
+/// operator prompt in the exchange tail since `baseline`, without the queue
+/// revision directives. Mid-turn steering (`midturn_steering`) classifies queue
+/// edits with its own aligned watermark, so it must not see them twice.
+pub fn exchange_steering_set_between(baseline: &str, current: &str) -> RealtimeSteeringSet {
+    exchange_steering_all_between(baseline, current)
+}
+
 /// Queue instructions have their own parser: the exchange guard deliberately
 /// excludes managed queue syntax. Compare complete prompt revisions, ignoring
 /// selection/priority decoration, completed rows, and reordering.

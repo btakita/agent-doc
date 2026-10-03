@@ -360,6 +360,12 @@ pub struct ProjectConfig {
     /// absent here too, the built-in default of 50 applies.
     #[serde(default, alias = "clear_threshold")]
     pub agent_doc_clear_threshold: Option<u8>,
+    /// Project-default quiet period in milliseconds before a mid-turn operator
+    /// edit counts as settled steering (`#midturn-steering`). A per-document
+    /// frontmatter `agent_doc_steering_debounce_ms` takes precedence; absent
+    /// here too, the built-in default of 2500 applies.
+    #[serde(default, alias = "steering_debounce_ms")]
+    pub agent_doc_steering_debounce_ms: Option<u64>,
     /// Project-default age in seconds past which an active agent turn is
     /// reported as a runaway (`#runawayturnsurfaced`). Absent, the built-in
     /// `agent_doc_harness::DEFAULT_RUNAWAY_TURN_SECS` applies; `0` disables the

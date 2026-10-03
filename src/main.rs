@@ -95,6 +95,7 @@ mod session_cmd;
 #[cfg(test)]
 mod sim_world;
 mod skill;
+mod steering_cmd;
 mod terminal;
 #[cfg(test)]
 mod test_support;
@@ -2541,6 +2542,25 @@ enum Commands {
         #[arg(long, default_value = "3")]
         max_cycles: u32,
     },
+    /// Show operator steering added to the document mid-turn (`#midturn-steering`):
+    /// new/edited `agent:queue` items and new exchange prompts since this
+    /// cycle's preflight, verbatim, each with a typed `dispatch`
+    /// (`address_now` | `drain_after_current` | `subagent`). Claude Code and
+    /// Codex receive the same steering automatically through the PostToolUse
+    /// hook; this command is the poll surface for other harnesses and monitors.
+    Steering {
+        /// Path to the session document
+        file: PathBuf,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Do not advance the watermark (report without consuming)
+        #[arg(long, conflicts_with = "follow")]
+        peek: bool,
+        /// Watch the document and print one JSON line per settled steering batch
+        #[arg(long)]
+        follow: bool,
+    },
     /// Display markdown outline with section structure and token counts
     Outline {
         /// Path to the markdown document
@@ -3826,6 +3846,9 @@ enum HookAction {
     /// cycle contract reaches the agent with the prompt instead of via a
     /// round trip (`UserPromptSubmit` stdin JSON hook payload)
     PreflightUserPromptSubmit,
+    /// Hand the running turn any operator steering added to the session
+    /// document since the last tool call (`PostToolUse` stdin JSON hook payload)
+    SteeringPostToolUse,
 }
 
 #[derive(Subcommand)]
@@ -5065,6 +5088,12 @@ fn try_main() -> anyhow::Result<()> {
                 )
             }
         }
+        Commands::Steering {
+            file,
+            json,
+            peek,
+            follow,
+        } => steering_cmd::run(&file, json, peek, follow),
         Commands::Outline { file, json } => outline_cmd::run_outline(&file, json),
         Commands::AutoDag { file, json } => auto_dag::run_command(&file, json),
         Commands::Board {
@@ -6389,6 +6418,9 @@ fn try_main() -> anyhow::Result<()> {
                 agent_doc_hooks_io::coined_id_pretooluse::handle_pretooluse()
             }
             HookAction::PreflightUserPromptSubmit => preflight_hook::handle_user_prompt_submit(),
+            HookAction::SteeringPostToolUse => {
+                agent_doc_session_check_io::midturn_steering::handle_post_tool_use()
+            }
         },
         Commands::Cleanup {
             file,

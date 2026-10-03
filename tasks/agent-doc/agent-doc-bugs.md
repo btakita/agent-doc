@@ -195,6 +195,36 @@ All three remaining queue items are claimed, so nothing is drained inline this c
 - `release + publish` (claimed by `parent:after-subagents`): v0.35.443 is cut after both land, so the release includes them.
 
 Each subagent is merged, run through `make check`, and installed as it reports back. Then its claim is released and the item closes in order.
+
+### Re: #preflightdeadline + closeout steering — merged, installed, pushed — opus-5.5 · 2026-10-03T00:30-04:00
+
+> **Queue prompt:** #subagents do [#preflightdeadline]
+
+> **Queue prompt:** changes to the queue & the exchange should immediately be picked up once done as steering
+
+Both are merged on agent-doc main and pushed. Superproject pointer: `9832bf6e31`.
+
+**Verification:**
+- Combined `make check`: nextest **10573 tests passed**.
+- audit-docs, editor-parity, python-bootstrap, lean, and tla all pass. audit-docs passed after `make install` refreshed the superproject's Grok skill copy.
+- `make install` done. Installed: `agent-doc 0.35.442` + JetBrains plugin 0.2.484.
+
+**#preflightdeadline** (`73f5d7930`):
+- **Deadline:** preflight now carries an admission deadline (the hook's 90s budget minus a 5s margin, so 85s).
+- **Clamped waits:** controller call/connect/handoff windows and the settle/observation waits are all clamped to the time remaining.
+- **Refusal:** past the deadline, preflight refuses at the next phase boundary with a typed `PreflightAdmissionRefused` naming the phase. It surfaces as `cycle contract UNAVAILABLE` with a `remedy: retryable` line and is logged as `preflight_admission_deadline_refused`.
+- **Repeated resolving:** the whole preflight run now shares session-check's turn-scoped document projection, which removes repeated per-guard resolves. agent-loop's ops.log showed 241 uncached resolves.
+- **Part (3)**, moving the overrunning phase off the admission path, waits for evidence. No `preflight_admission_overrun` has been logged in 105 ops.log files; the new refusal line names the phase when one happens.
+
+**Steering picked up as soon as it lands** (live steering `ab0fb89ac`, plus closeout gap `b2bf60bc3`):
+- **Mid-turn hook:** the PostToolUse hook delivers settled queue/exchange edits during the turn, debounced, verbatim, and exactly once. Each item carries `address_now`, `drain_after_current`, or `subagent`.
+- **Closeout report:** closeout (`respond`, `write --commit`, post-commit `session-check`) now prints any steering the hook didn't deliver. `#subagents` items appear as `DISPATCH NOW` with the claim command.
+- **After close:** `agent-doc steering` keeps reporting after the cycle closes.
+- **Next preflight:** new `#subagents` items are listed under `queue_subagent_dispatch` rather than run inline.
+- **Claim by `#id`:** `queue claim/release --item #id` now matches `#subagents do [#id]` heads. This cycle's release by bare `#preflightdeadline` worked on the installed build.
+- **Caveat:** this Claude Code session started before the hook was installed, so the hook only runs here after a restart. The closeout and preflight paths cover the gap meanwhile.
+
+Next: `release + publish` (claim released) cuts **v0.35.443**.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -223,7 +253,6 @@ Each subagent is merged, run through `make check`, and installed as it reports b
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.
-- [ ] [#preflightdeadline] [agent-doc] Make a preflight admission overrun impossible by construction (GH #78 follow-up). Today every wait inside preflight has its own local bound (3s settle waits, per-call controller timeouts), but nothing caps their SUM against the hook's 90s budget. The #78 session-check profile ran resolve_current_document_content 13x on a 518-byte document. Fix: (1) carry an admission deadline (the budget minus a margin) on the per-run PreflightProgress handle, and clamp every bounded wait in preflight to the time remaining; (2) check the deadline at each progress::enter phase boundary, so preflight returns a typed, named, retryable refusal at a step boundary instead of being abandoned mid-step; (3) once the first live overrun names its phase (now logged as preflight_admission_overrun), move that work off the admission path, e.g. to the supervisor's idle boundary. Code: agent-doc-preflight-command-io/src/progress.rs, src/preflight_hook.rs, agent-doc-preflight-io/src/debounce.rs.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

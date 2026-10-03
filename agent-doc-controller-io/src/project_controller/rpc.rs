@@ -33373,7 +33373,10 @@ mod tests {
             let _stream = listener.accept().unwrap();
             let _ = released.recv();
         });
-        let deadline = Duration::from_millis(50);
+        // Large enough that scheduling jitter on a loaded machine stays well
+        // inside the 2x bound (50ms flaked at 156ms during a parallel
+        // `make check`), small enough that a retry still crosses it.
+        let deadline = Duration::from_millis(300);
 
         let started = Instant::now();
         let observation =

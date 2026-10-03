@@ -814,7 +814,10 @@ fn ensure_terminal_authority_disk_convergence(
         unmerged_editor_steering_note(
             authority_content,
             disk_content,
-            &binary_authored_texts(file).iter().map(String::as_str).collect::<Vec<_>>(),
+            &binary_authored_texts(file)
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
         ),
     );
 }
@@ -1156,6 +1159,20 @@ pub fn run_read_only_with_options(
     run_with_options(file, codex_final_gate, &read_only)
 }
 
+/// The supervisor-scope queue head that is still unowned. A head claimed by a
+/// subagent (or held by the queue subagents attribute) is in flight
+/// elsewhere, so neither the supervisor nor the in-session fallback
+/// (`#supdrainlive`) may drain it. Ignoring claims here once told a session to
+/// drain a head a subagent was already working on (agent-doc-bugs.md,
+/// 2026-10-03).
+fn supervisor_scope_unclaimed_head(file: &Path, content: &str) -> Option<String> {
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+        content,
+        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        &agent_doc_queue_io::queue_claim::claimed_items_for_content(file, content),
+    )
+}
+
 fn run_with_options_inner(
     file: &Path,
     codex_final_gate: bool,
@@ -1444,7 +1461,10 @@ fn run_with_options_inner(
             unmerged_editor_steering_note(
                 &authority_content,
                 &disk_content,
-                &binary_authored_texts(file).iter().map(String::as_str).collect::<Vec<_>>(),
+                &binary_authored_texts(file)
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
             ),
         );
         if retained_closeout_resume.should_resume() {
@@ -1719,12 +1739,9 @@ fn run_with_options_inner(
                 // `detect` already returned None, so a `Some` supervisor head ⟺ a
                 // focused-cycle head — the queue is NOT operator-stalled; the agent
                 // yields and the supervisor force-`/clear`s + re-dispatches it.
-                let supervisor_head = content.as_deref().and_then(|content| {
-                    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-                        content,
-                        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-                    )
-                });
+                let supervisor_head = content
+                    .as_deref()
+                    .and_then(|content| supervisor_scope_unclaimed_head(file, content));
                 // #supdrainlive (GH #73): a hand-off is only valid if the receiver
                 // can receive. Gate the yield on supervisor liveness; when it cannot
                 // drain, admit a human is needed instead of asserting "NOT a stall".
@@ -4485,5 +4502,44 @@ mod settle_window_tests {
                 "no INTERRUPTED message emits {needle:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod supervisor_scope_claim_tests {
+    use super::*;
+
+    /// Every head is claimed by a subagent (or held by the queue subagents
+    /// attribute): the supervisor-scope fallback must report no head, so
+    /// session-check does not tell the session to drain in-flight work.
+    #[test]
+    fn claimed_and_held_heads_are_not_supervisor_drainable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue subagents=1 go -->\n",
+            "- do [#a]\n",
+            "- do [#b]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#a] first\n",
+            "- [ ] [#b] second\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+        assert!(
+            agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+                content,
+                agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            )
+            .is_some(),
+            "precondition: without claims a head is supervisor-drainable"
+        );
+
+        // `a` is claimed (the one slot), so `b` is held by the cap.
+        agent_doc_queue_io::queue_claim::claim(&file, "#a", "subagent:a", 600).unwrap();
+        assert_eq!(supervisor_scope_unclaimed_head(&file, content), None);
     }
 }

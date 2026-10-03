@@ -2919,9 +2919,10 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     };
     let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
     let queue_supervisor_drainable = activation.active
-        && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+        && agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
             &drainability_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            &claimed_queue_items,
         )
         .is_some();
     let skipped_queue_head_ids: std::collections::HashSet<String> =

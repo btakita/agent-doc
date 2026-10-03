@@ -386,6 +386,32 @@ The exchange is 304 lines, but the queue is active, so I'm not compacting.
   - `lang.rs` wasn't rustfmt-clean before this change and was left as is.
 
 `#sdktraceroot` and Luau are still running.
+
+### Re: Luau support done — opus-5.5 · 2026-10-03T04:58-04:00
+
+> **Queue prompt:** #subagents: Add tsift support for the Luau (Roblox) language.
+
+**Done.** `3a5c4b8` ("feat(graph): index Luau for search and graph (#luauindex)") is pushed to `main` without force, rebased onto `247cbc3`, and installed with `--features all-languages`. `make check` exited 0 both before and after the rebase.
+
+- **Grammar:** `tree-sitter-luau` 1.2.0 (ABI 14, works with tree-sitter 0.26.9). `lang-luau` is on by default and is part of `all-languages`. Luau is index-only, like Odin, because ast-grep has no Luau grammar.
+- **No symbol clash:** `nm` finds exactly one `tree_sitter_luau`, one `tree_sitter_lua` (ast-grep's) and one `tree_sitter_kotlin`.
+- **`.lua` is unchanged:** only `.luau` maps to Luau.
+- **Extracted:**
+  - Functions: `function f`, `local function f`, `function M.f`, and function literals assigned to locals, fields or tables. Methods: `function M:f`.
+  - Type aliases: `type` and `export type`, including generics.
+  - Top-level names: `require` imports and variables. A table is a `class` when the file has `X.__index = X`, and a `mod` when the file ends with `return X`.
+  - Call edges from `f()`, `M.f()` and `obj:f()`.
+  - `impact` treats any `require(...)` line as an import, including `require(script.Parent.X)`.
+- **Tests:**
+  - extraction, module detection, call edges, and a check that `.lua` isn't treated as Luau;
+  - a conformance row and an `impact` import test.
+
+  On a sample project, the installed binary's search and graph results show the callers and callees.
+- **Docs:** `specs/structural-patterns.md`, `specs/architecture.md` and `VERSIONS.md`.
+
+**Follow-up filed:** `#luaulegacy` [recommended], a project-level option to index `.lua` as Luau for older Roblox/Rojo projects. Calls are matched by bare name, as in every other language, so methods named `new` in different classes run together in the graph.
+
+`#sdktraceroot` is still running.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -394,7 +420,7 @@ The exchange is 304 lines, but the queue is active, so I'm not compacting.
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - #subagents: [#sdktraceroot]
 - ~~#subagents: [#kotlinsymclash]~~ — auto-struck: answered this cycle (#ftstrike)
-- #subagents: Add tsift support for the Luau (Roblox) language.
+- ~~#subagents: Add tsift support for the Luau (Roblox) language.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -403,6 +429,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#projectlevelopt] [luaulegacy] [recommended] Project-level opt-in to index .lua files as Luau (Roblox/Rojo legacy projects keep Luau in .lua); today only .luau maps to Luau. Also consider declare/type function once tree-sitter-luau supports them.
 - [ ] [#sdktraceroot] [recommended] After #graphrefreshperf: import haiven-sdk codegen/trace.json into the ROOT graph so per-language declarations join by path:line, and investigate unjoined trace nodes (8/51 contracts, 10/23 events, 56/195 REST ops, 50 components); check for a contracts-revision mismatch vs the trace pin.
 <!-- /agent:backlog -->
 

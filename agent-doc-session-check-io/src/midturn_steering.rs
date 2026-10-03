@@ -688,6 +688,101 @@ pub fn record_wake_receipt(file: &Path, fingerprint: &str, items: usize) -> Resu
     Ok(())
 }
 
+/// `#steerinterruptexit`: every settled steering item a committed cycle left
+/// unanswered, each with its typed `dispatch`, for the `session-check`
+/// `steering pending` status.
+///
+/// Stateless on purpose: it reads no consumer watermark and writes none, so a
+/// repeated `session-check` keeps reporting the same pending steering until a
+/// cycle answers it, and the hook / boundary report still deliver each item
+/// exactly once through their own watermarks. The base is the committed turn
+/// baseline (HEAD when there is no snapshot), observed in boundary mode with no
+/// debounce, excluding the closed cycle's own queue bookkeeping. Items the
+/// typing gate still holds are omitted; the status line's marker carries them
+/// verbatim regardless.
+pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
+    let baseline = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten()
+        .or_else(|| agent_doc_git_io::revision::show_head(file).ok().flatten());
+    let Some(baseline) = baseline else {
+        return Vec::new();
+    };
+    let base = SteeringWatermark::seed(
+        &format!("committed:{}", core::content_hash(&baseline)),
+        &baseline,
+        None,
+        Vec::new(),
+    );
+    let owned = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten()
+        .map(|cycle| binary_owned_ids(&cycle))
+        .unwrap_or_default();
+    let deterministic = agent_doc_debounce::edit_settle::DeterministicOnly;
+    let ctx = ObserveContext {
+        now_ms: now_ms(),
+        document_changed_ms: None,
+        debounce_ms: 0,
+        binary_owned_queue_ids: &owned,
+        max_hold_ms: max_hold_ms_for(file),
+        classifier: &deterministic,
+        median_pause_ms: None,
+    };
+    core::observe_with_mode(&base, current, &ctx, core::ObserveMode::Boundary).ready
+}
+
+/// Whether `item` came from the exchange (a prompt only an agent cycle can
+/// answer), as opposed to queue work the queue drain owns.
+pub fn is_exchange_item(item: &SteeringItem) -> bool {
+    item.source == core::SteeringSource::Exchange
+}
+
+/// Render [`pending_steering_items`] for the `steering pending` status: one
+/// block per item, its dispatch and source first, then the operator's text
+/// verbatim. `None` when there is nothing settled to list.
+pub fn render_pending_steering_items(items: &[SteeringItem]) -> Option<String> {
+    if items.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for (idx, item) in items.iter().enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "[steering {}/{}] dispatch={} source={} change={}{}",
+            idx + 1,
+            items.len(),
+            item.dispatch.as_str(),
+            match item.source {
+                core::SteeringSource::Exchange => "exchange",
+                core::SteeringSource::Queue => "queue",
+            },
+            match item.change {
+                core::SteeringChange::Added => "added",
+                core::SteeringChange::Edited => "edited",
+                core::SteeringChange::Deleted => "deleted",
+            },
+            if item.possibly_partial {
+                " possibly_partial=true"
+            } else {
+                ""
+            },
+        ));
+        if let Some(previous) = &item.previous {
+            out.push_str(&format!("\nprevious: {previous}"));
+        }
+        let label = if item.change == core::SteeringChange::Deleted {
+            "removed"
+        } else {
+            "verbatim"
+        };
+        out.push_str(&format!("\n{label}: {}", item.verbatim));
+    }
+    Some(out)
+}
+
 /// Render a report for the turn-boundary surface.
 pub fn render_closeout(report: &SteeringReport) -> Option<String> {
     core::render_closeout_steering_context(&report.document, &report.items, report.pending)

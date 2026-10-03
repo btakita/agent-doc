@@ -140,14 +140,18 @@ fn preflight_admits_when_session_check_says_continue_with_steering() {
         "preflight must not refuse a turn whose next prompt is pending steering"
     );
 
-    // session-check derives from it too: continue and answer the prompt.
+    // session-check derives from it too: continue and answer the prompt. That
+    // is pending steering, not an interruption (`#steerinterruptexit`).
     match session_check(&doc) {
-        SessionCheckStatus::Interrupted(message) => {
+        SessionCheckStatus::SteeringPending(message) => {
             assert!(
                 message.contains("unresolved prompt-bearing user changes")
                     && message.contains("the cursor box disappears"),
                 "{message}"
             );
+        }
+        SessionCheckStatus::Interrupted(message) => {
+            panic!("pending steering after a committed cycle is not a failure: {message}")
         }
         SessionCheckStatus::Ok(message) => {
             panic!("pending steering must be surfaced, not reported clean: {message}")

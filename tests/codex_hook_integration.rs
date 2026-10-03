@@ -109,6 +109,82 @@ fn session_check_codex_final_gate_blocks_on_active_auto_queue() {
         .stdout(predicate::str::contains("queue_continuation_required=true"));
 }
 
+/// A committed cycle whose live document carries an operator prompt added
+/// after the commit (`#steerinterruptexit`).
+fn committed_cycle_with_post_commit_steering() -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let committed = "---\nagent_doc_session: sid\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange patch=append -->\n### Re: done — gpt-5\n\nCompleted.\n<!-- /agent:exchange -->\n";
+    fs::write(&doc, committed).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        committed,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+    agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+    agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+        &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+        &doc,
+        "commit_success",
+        Some(committed),
+        Some(committed),
+    )
+    .unwrap();
+    fs::write(
+        &doc,
+        committed.replace(
+            "Completed.\n",
+            "Completed.\n\n❯ Also check the CI run for the release.\n",
+        ),
+    )
+    .unwrap();
+    (tmp, doc)
+}
+
+#[test]
+fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
+    // `#steerinterruptexit`: steering after a committed cycle is not a failure.
+    // The CLI exits 0, names it `steering pending`, lists the item verbatim
+    // with its dispatch, and defers queue continuation behind it.
+    let (tmp, doc) = committed_cycle_with_post_commit_steering();
+    let out = agent_doc()
+        .current_dir(tmp.path())
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[session-check] steering pending:"))
+        .stdout(predicate::str::contains(
+            "dispatch=address_now source=exchange change=added",
+        ))
+        .stdout(predicate::str::contains(
+            "❯ Also check the CI run for the release.",
+        ))
+        .stdout(predicate::str::contains(
+            "queue_continuation_required=false steering_pending=true",
+        ))
+        .stdout(predicate::str::contains("INTERRUPTED").not());
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout).to_ascii_lowercase();
+    assert!(
+        !stdout.contains("current turn"),
+        "steering is the next cycle's input, not this turn's: {stdout}"
+    );
+
+    // The strict Codex final gate still holds the final answer for it, with
+    // the gate's "work owed" code, not the failure code.
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "0")
+        .args(["session-check", doc.to_str().unwrap(), "--codex-final-gate"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("[session-check] steering pending:"));
+}
+
 #[test]
 fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
     // Reproduces the sampleorders shape: a clean template/CRDT Codex

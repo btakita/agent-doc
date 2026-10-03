@@ -592,7 +592,7 @@ mod tests {
                     "expected missing committed response interruption, got: {msg}"
                 );
             }
-            SessionCheckStatus::Ok(msg) => {
+            SessionCheckStatus::Ok(msg) | SessionCheckStatus::SteeringPending(msg) => {
                 panic!("expected Interrupted, got Ok: {msg}");
             }
         }
@@ -672,7 +672,7 @@ mod tests {
 
         let status = inspect(&doc).unwrap();
         match status {
-            SessionCheckStatus::Ok(msg) => {
+            SessionCheckStatus::Ok(msg) | SessionCheckStatus::SteeringPending(msg) => {
                 assert!(msg.contains("ok"), "expected ok, got: {msg}");
             }
             SessionCheckStatus::Interrupted(msg) => {
@@ -2569,8 +2569,12 @@ Body\n\
             other => panic!("expected interrupted status, got {other:?}"),
         }
     }
+    /// `#steerinterruptexit`: an operator prompt added after a committed cycle
+    /// is pending steering, not an interruption. The status names it with the
+    /// steering prefix, lists the item verbatim with its dispatch, and never
+    /// tells the agent to address it in its current turn.
     #[test]
-    fn session_check_interrupts_when_committed_state_has_new_prompt_diff() {
+    fn session_check_reports_steering_pending_when_committed_state_has_new_prompt_diff() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = tmp.path().join("doc.md");
         let committed = concat!(
@@ -2611,11 +2615,135 @@ Body\n\
         fs::write(&doc, current).unwrap();
 
         match inspect(&doc).unwrap() {
-            SessionCheckStatus::Interrupted(message) => {
+            SessionCheckStatus::SteeringPending(message) => {
+                assert!(
+                    message.starts_with(
+                        agent_doc_turn::response_text::SESSION_CHECK_STEERING_PENDING_PREFIX
+                    ),
+                    "{message}"
+                );
                 assert!(message.contains("no new agent-doc cycle started"));
                 assert!(message.contains("prompt_target"));
+                assert!(
+                    message.contains("dispatch=address_now source=exchange change=added")
+                        && message.contains("verbatim: ❯ Follow up on the remaining gap."),
+                    "every item verbatim with its dispatch: {message}"
+                );
+                assert!(!message.contains("INTERRUPTED"), "{message}");
+                assert!(
+                    !message.to_ascii_lowercase().contains("current turn"),
+                    "steering is the next cycle's input: {message}"
+                );
+                assert!(
+                    agent_doc_turn::response_text::is_committed_prompt_diff_interruption(&message),
+                    "the Codex Stop hook still recognizes the committed steering shape: {message}"
+                );
             }
-            other => panic!("expected interrupted status, got {other:?}"),
+            other => panic!("expected steering-pending status, got {other:?}"),
+        }
+    }
+    /// `#steerinterruptexit`: the embedded closeout boundary `respond` /
+    /// `finalize` / `write --commit` run succeeds over pending steering (it was
+    /// an `INTERRUPTED` bail, so the terminal report exited 1 and the dogfood
+    /// notice fired), and it writes nothing to the operator's document.
+    #[test]
+    fn enforce_clean_closeout_succeeds_over_pending_steering() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = committed.replace(
+            "Completed.\n",
+            "Completed.\n\n❯ Follow up on the remaining gap.\n",
+        );
+        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, &current).unwrap();
+
+        {
+            let _lock = agent_doc_test_support::env_lock();
+            agent_doc_session_check_io::enforce_clean_closeout(
+                &doc,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )
+            .expect("pending steering is not a failed closeout");
+        }
+        assert_eq!(fs::read_to_string(&doc).unwrap(), current);
+    }
+
+    /// `#steerinterruptexit` boundary: pending steering is exit-0 status, but it
+    /// must not mask a genuine integrity failure the guard sweep finds in the
+    /// same document.
+    #[test]
+    fn session_check_pending_steering_does_not_mask_a_genuine_integrity_failure() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "_- [ ] [#pcops] Project controller ops\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current = committed.replace(
+            "Completed.\n",
+            "Completed.\n\n❯ Follow up on the remaining gap.\n",
+        );
+        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, &current).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("malformed tracked checklist item"),
+                    "{message}"
+                );
+            }
+            other => panic!("a genuine integrity failure must stay non-zero, got {other:?}"),
         }
     }
     #[test]
@@ -5364,7 +5492,7 @@ Body\n\
                     "expected uncommitted closeout guard failure, got: {msg}"
                 );
             }
-            SessionCheckStatus::Ok(msg) => {
+            SessionCheckStatus::Ok(msg) | SessionCheckStatus::SteeringPending(msg) => {
                 panic!("expected Interrupted, got Ok: {msg}");
             }
         }
@@ -6277,7 +6405,7 @@ Body\n\
                     "consumed/done manual head must not be flagged: {message}"
                 );
             }
-            SessionCheckStatus::Ok(_) => {}
+            SessionCheckStatus::Ok(_) | SessionCheckStatus::SteeringPending(_) => {}
         }
     }
     #[test]
@@ -6348,7 +6476,7 @@ Body\n\
             SessionCheckStatus::Interrupted(msg) => {
                 assert!(msg.contains("free-text"), "got: {msg}");
             }
-            SessionCheckStatus::Ok(warnings) => {
+            SessionCheckStatus::Ok(warnings) | SessionCheckStatus::SteeringPending(warnings) => {
                 assert!(warnings.contains("free-text"), "got: {warnings}");
             }
         }
@@ -7007,7 +7135,7 @@ Body\n\
                 assert!(msg.contains("news/2026-05-01/README.md"));
                 assert!(msg.contains("agent-doc write --commit"));
             }
-            SessionCheckStatus::Ok(msg) => {
+            SessionCheckStatus::Ok(msg) | SessionCheckStatus::SteeringPending(msg) => {
                 panic!("expected Interrupted, got Ok: {msg}");
             }
         }
@@ -7068,7 +7196,7 @@ Body\n\
 
         let status = inspect(&doc).unwrap();
         match status {
-            SessionCheckStatus::Ok(_) => {}
+            SessionCheckStatus::Ok(_) | SessionCheckStatus::SteeringPending(_) => {}
             SessionCheckStatus::Interrupted(msg) => {
                 panic!("expected Ok, got Interrupted: {msg}");
             }

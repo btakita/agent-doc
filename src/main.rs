@@ -619,7 +619,10 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
             file,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )? {
-            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
+            // `#steerinterruptexit`: the turn is finished; the steering is the
+            // next turn's input, not an unfinished turn for `fix` to repair.
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message)
+            | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
                 Ok(agent_doc_sync_io::SyncSessionCheckStatus::Ok(message))
             }
             agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => Ok(
@@ -828,6 +831,14 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
                 agent_doc_workflow_io::doctor::LiveSessionCheckFacts {
                     ok: Some(true),
                     status: Some("ok".to_string()),
+                    message: Some(message),
+                    warnings: report.warnings,
+                }
+            }
+            agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
+                agent_doc_workflow_io::doctor::LiveSessionCheckFacts {
+                    ok: Some(true),
+                    status: Some("steering_pending".to_string()),
                     message: Some(message),
                     warnings: report.warnings,
                 }
@@ -4534,12 +4545,14 @@ fn is_operator_usage_error(err: &anyhow::Error) -> bool {
 
 fn print_terminal_error_report(err: &anyhow::Error) {
     let mut report = format!("Error: {err:?}");
+    let diagnostic = format!("{err:#}");
     if !is_operator_usage_error(err)
+        // `#steerinterruptexit`: pending operator steering is not a defect.
+        && agent_doc_workflow::preflight_policy::is_dogfood_terminal_issue(&diagnostic)
         && let Some(file) = dogfood_document_argument()
         && agent_doc_controller_io::project_controller::dogfood_agent_doc_crate_root(&file)
             .is_some()
     {
-        let diagnostic = format!("{err:#}");
         let document_id = agent_doc_hash::document_id_for_path(&file);
         let prompt = agent_doc_workflow::preflight_policy::format_dogfood_terminal_issue_prompt(
             &document_id,

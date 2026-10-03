@@ -2215,7 +2215,8 @@ mod tests {
         .unwrap()
         {
             agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => message,
-            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message)
+            | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
                 panic!("session-check must report the unlandable capture, got Ok: {message}")
             }
         };
@@ -4683,7 +4684,11 @@ mod tests {
     }
 
     #[test]
-    fn repair_fails_closed_when_only_later_prompt_drift_remains_after_committed_patchback() {
+    /// `#steerinterruptexit`: once the committed patchback is adopted, the only
+    /// remaining drift is a later operator prompt. That is pending steering for
+    /// the next cycle, not a repair failure: repair succeeds, never absorbs or
+    /// commits the prompt, and session-check reports it as `steering pending`.
+    fn repair_leaves_later_prompt_drift_as_pending_steering_after_committed_patchback() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("test.md");
@@ -4744,12 +4749,19 @@ mod tests {
         );
         std::fs::write(&doc, &current).unwrap();
 
-        let err = repair(&doc).expect_err(
-            "repair should fail closed when only later prompt drift remains after adopting the committed patchback",
-        );
-        let message = err.to_string();
-        assert!(message.contains("unresolved prompt-bearing user changes"));
-        assert!(message.contains("do [#followup]. spec-test-build-install-commit-push"));
+        repair(&doc).expect("pending operator steering is not a repair failure");
+        match agent_doc_session_check_io::inspect_read_only(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
+                assert!(message.contains("unresolved prompt-bearing user changes"));
+                assert!(message.contains("do [#followup]. spec-test-build-install-commit-push"));
+            }
+            other => panic!("expected pending steering after repair, got {other:?}"),
+        }
 
         let repaired_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()

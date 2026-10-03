@@ -21,13 +21,20 @@ rule. This runbook carries the rest.
   queue lifecycle separate from persistent operator-owned context.
 - **Realtime steering (`#realtime-steering-verbatim`):** a document is realtime —
   the operator may add a prompt WHILE your turn is running. Every item the
-  operator adds must be addressed and worked on, never committed-and-ignored. If
-  `session-check` reports a committed cycle plus a fresh operator prompt, that is
-  realtime steering, **not** a failed closeout: your prior response is already in
-  HEAD. Address the surfaced prompt (the binary hands it to you **verbatim**) in
-  your current turn — continue with `agent-doc <FILE>`. Do NOT re-run respond/finalize on
-  the prior response, do NOT `--force-disk` (it clobbers the operator's live
-  edits), and do NOT re-answer a prompt already committed in HEAD.
+  operator adds must be addressed and worked on, never committed-and-ignored. When
+  the operator steers after your response committed, `session-check` (and the
+  `respond` / `finalize` / `write --commit` terminal report) prints
+  `[session-check] steering pending: …` and exits `0` (`#steerinterruptexit`):
+  pending steering is **not** a failed closeout or an interruption, and your prior
+  response is already in HEAD. Each item is listed **verbatim** with its
+  `dispatch`; handle it per the dispatch rules below — an `address_now` prompt is
+  the next cycle's input (`agent-doc <FILE>` admits it; Claude Code re-enters with
+  `/loop agent-doc <FILE>`, and the Stop hook holds the final answer once for it
+  unless a ready supervisor's steering wake will submit the trigger). Do NOT
+  re-run respond/finalize on the prior response, do NOT `--force-disk` (it
+  clobbers the operator's live edits), and do NOT re-answer a prompt already
+  committed in HEAD. Genuine integrity failures still exit nonzero as
+  `INTERRUPTED`.
 - **Mid-turn steering (`#midturn-steering`):** steering no longer waits for
   closeout. After every tool call the PostToolUse hook (Claude Code, Codex)
   hands the running turn new operator edits as `[agent-doc] operator steering

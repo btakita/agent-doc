@@ -106,7 +106,10 @@ where
 
     fn session_interruption(&self, file: &Path) -> Result<Option<String>> {
         match agent_doc_session_check_io::inspect(file, &self.session_check_effects)? {
-            agent_doc_session_check_io::SessionCheckStatus::Ok(_) => Ok(None),
+            // `#steerinterruptexit`: pending steering is this preflight's own
+            // input, not a reason to refuse the resumed commit.
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_)
+            | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(_) => Ok(None),
             agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => Ok(Some(reason)),
         }
     }

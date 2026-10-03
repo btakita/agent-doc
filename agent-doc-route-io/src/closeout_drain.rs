@@ -51,7 +51,11 @@ fn project_closeout_recovery_effects(
 ) -> Result<CloseoutRecoveryAttempt> {
     let block_reason = match (effects.repair_closeout)(file) {
         Ok(label) => match (effects.inspect_session)(file)? {
-            SessionCheckStatus::Ok(_) => return Ok(CloseoutRecoveryAttempt::Recovered(label)),
+            // `#steerinterruptexit`: the closeout recovered; pending steering is
+            // the routed dispatch's own input, not a block.
+            SessionCheckStatus::Ok(_) | SessionCheckStatus::SteeringPending(_) => {
+                return Ok(CloseoutRecoveryAttempt::Recovered(label));
+            }
             SessionCheckStatus::Interrupted(reason) => reason,
         },
         Err(error) => error.to_string(),

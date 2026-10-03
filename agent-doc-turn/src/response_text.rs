@@ -150,6 +150,22 @@ fn first_steering_marker(reason: &str) -> Option<(usize, &'static str)> {
         .min_by_key(|(at, _)| *at)
 }
 
+/// `#steerinterruptexit`: the line `session-check` prints for operator
+/// steering that arrived after a committed cycle. It is a status, not a
+/// failure: exit `0`, and every consumer (Stop hooks, the Codex final gate,
+/// closeout reports, the dogfood terminal-issue notice, queue continuation)
+/// keys on this prefix rather than on `INTERRUPTED`.
+pub const SESSION_CHECK_STEERING_PENDING_PREFIX: &str = "[session-check] steering pending:";
+
+/// Whether `message` is a `session-check` pending-steering report (anywhere in
+/// a multi-line diagnostic, so a wrapped error chain still classifies).
+pub fn is_session_check_steering_pending(message: &str) -> bool {
+    message.contains(SESSION_CHECK_STEERING_PENDING_PREFIX)
+}
+
+/// A committed cycle followed by unanswered operator steering. Matches both
+/// the `steering pending` status and the legacy `INTERRUPTED` wording a
+/// pre-`#steerinterruptexit` binary prints.
 pub fn is_committed_prompt_diff_interruption(reason: &str) -> bool {
     reason.contains("is `committed`")
         && first_steering_marker(reason).is_some()

@@ -486,6 +486,23 @@ fn apply_claude_stop_with_drain_readiness(
     // so it is the run, not the document text, that the repeat guard below
     // reconciles against.
     let run_id = cycle.as_ref().map(|cycle| cycle.cycle_id.clone());
+    if let Some(continuation) =
+        claude_queue_continuation(input, &file, run_id.as_deref(), &drain_readiness)?
+    {
+        return Ok(Some(continuation));
+    }
+    claude_steering_continuation(input, &file, run_id.as_deref(), &drain_readiness)
+}
+
+/// The queue half of [`apply_claude_stop_with_drain_readiness`]: a durably
+/// proven next queue head that nobody else will drain.
+fn claude_queue_continuation(
+    input: &ClaudeStopInput,
+    file: &Path,
+    run_id: Option<&str>,
+    drain_readiness: &impl Fn(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
+) -> Result<Option<ClaudeStopContinuation>> {
+    let file = file.to_path_buf();
     // A continuation marker or the session-check stall projection proves that
     // the prior item reached a clean closeout. This avoids redirecting an
     // unfinished response back through `/loop` merely because its current head
@@ -526,7 +543,7 @@ fn apply_claude_stop_with_drain_readiness(
         agent_doc_queue_io::continuation_request::load_continuation_request(&file)?;
     if let Some(reason) = agent_doc_queue_io::continuation_request::non_advancing_continuation(
         previous_request.as_ref(),
-        run_id.as_deref(),
+        run_id,
         &prompt,
     ) {
         agent_doc_ops_log_io::log_op(
@@ -603,7 +620,7 @@ fn apply_claude_stop_with_drain_readiness(
     // the block it can no longer bound.
     agent_doc_queue_io::continuation_request::record_continuation_request(
         &file,
-        run_id.as_deref(),
+        run_id,
         &prompt,
     )
     .with_context(|| {
@@ -617,12 +634,139 @@ fn apply_claude_stop_with_drain_readiness(
         &format!(
             "claude_stop_queue_continuation head_bytes={} run={} source=exact_session_binding action=block_and_loop",
             prompt.len(),
-            run_id.as_deref().unwrap_or("none"),
+            run_id.unwrap_or("none"),
         ),
     );
     Ok(Some(ClaudeStopContinuation {
         reason: claude_stop_continuation_reason(&file.display().to_string(), &prompt),
     }))
+}
+
+/// `#steerinterruptexit`: the steering half of the Claude Stop gate.
+///
+/// `session-check` now reports operator steering after a committed cycle as
+/// `steering pending` with exit `0`, so the old implicit stop (a closeout that
+/// "failed" and skipped the auto-loop) no longer happens. An exchange prompt the
+/// operator added while the turn ran is the next cycle's input and only an
+/// agent cycle can answer it, so the final answer is held once per run for it,
+/// with the same bounds as the queue continuation: never inside a recursive
+/// stop, never twice for one run (the shared request ledger), not when the
+/// `/loop` re-entry is already armed, and not when a ready supervisor's
+/// steering wake (`#steeringwake`) will submit the trigger itself. Queue-sourced
+/// steering is queue work: the queue continuation above already decided it.
+fn claude_steering_continuation(
+    input: &ClaudeStopInput,
+    file: &Path,
+    run_id: Option<&str>,
+    drain_readiness: &impl Fn(&Path) -> agent_doc_controller::status::SupervisorDrainReadiness,
+) -> Result<Option<ClaudeStopContinuation>> {
+    // Observation failures allow the final answer: this gate adds a hold the
+    // hook never had, so it must not add a new way for the hook to fail closed.
+    let observed = (|| -> Result<Option<(String, String, usize)>> {
+        let content = current_document_content(file, "claude_stop_pending_steering")?;
+        let items =
+            agent_doc_session_check_io::midturn_steering::pending_steering_items(file, &content);
+        let Some(first) = items
+            .iter()
+            .find(|item| agent_doc_session_check_io::midturn_steering::is_exchange_item(item))
+        else {
+            return Ok(None);
+        };
+        // The same verdict `session-check` and preflight admission derive from.
+        let Some(marker) = agent_doc_session_check_io::turn_admission(file, false)?.steering else {
+            return Ok(None);
+        };
+        Ok(Some((marker, first.verbatim.clone(), items.len())))
+    })();
+    let (marker, verbatim, item_count) = match observed {
+        Ok(Some(observed)) => observed,
+        Ok(None) => return Ok(None),
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claude_stop_steering_observation_failed error={err:#} action=allow_final_answer (#steerinterruptexit)"
+                ),
+            );
+            return Ok(None);
+        }
+    };
+    if input.stop_hook_active {
+        agent_doc_ops_log_io::log_op(
+            file,
+            "claude_stop_steering_continuation_repeat action=allow_bounded_fallback (#steerinterruptexit)",
+        );
+        return Ok(None);
+    }
+    let previous_request =
+        agent_doc_queue_io::continuation_request::load_continuation_request(file)?;
+    if let Some(reason) = agent_doc_queue_io::continuation_request::non_advancing_continuation(
+        previous_request.as_ref(),
+        run_id,
+        &marker,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "claude_stop_steering_continuation_skipped reason={} action=allow_final_answer (#steerinterruptexit)",
+                reason.token(),
+            ),
+        );
+        return Ok(None);
+    }
+    if let Some(transcript) = input.transcript_path.as_deref()
+        && claude_transcript_arms_loop_reentry(Path::new(transcript), file)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            "claude_stop_steering_continuation_already_armed action=allow_final_answer (#steerinterruptexit)",
+        );
+        return Ok(None);
+    }
+    let supervisor_wakes = drain_readiness(file).is_ready()
+        && !supervisor_handoff_overdue(file)
+        // Settled items wake now; items still settling wake once they settle.
+        && agent_doc_session_check_io::midturn_steering::observe_for_wake(file)
+            .is_ok_and(|wake| !wake.items.is_empty() || wake.pending > 0);
+    if supervisor_wakes {
+        agent_doc_ops_log_io::log_op(
+            file,
+            "claude_stop_steering_continuation_supervisor_owned action=allow_final_answer reason=steering_wake (#steerinterruptexit)",
+        );
+        return Ok(None);
+    }
+    agent_doc_queue_io::continuation_request::record_continuation_request(file, run_id, &marker)
+        .with_context(|| {
+            format!(
+                "record the Stop-hook steering continuation request for {}",
+                file.display()
+            )
+        })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "claude_stop_steering_continuation run={} items={} action=block_and_loop (#steerinterruptexit)",
+            run_id.unwrap_or("none"),
+            item_count,
+        ),
+    );
+    Ok(Some(ClaudeStopContinuation {
+        reason: claude_stop_steering_reason(&file.display().to_string(), &verbatim),
+    }))
+}
+
+/// The Stop-hook instruction for pending exchange steering. Like
+/// [`claude_stop_continuation_reason`], it names the one re-entry that admits
+/// a cycle; the steering is the next cycle's prompt, not a failed closeout.
+pub fn claude_stop_steering_reason(file_display: &str, verbatim: &str) -> String {
+    format!(
+        "agent-doc operator steering is pending for {file_display}: the operator added {head:?} \
+         after your response was committed. This is not a failed closeout and nothing needs \
+         repair; it is the next cycle's prompt. Re-enter with `ScheduleWakeup` using exactly the \
+         prompt `/loop agent-doc {file_display}` (a `loop` Skill call admits no cycle). Do not \
+         re-run finalize, do not `--force-disk`. (`#steerinterruptexit`)",
+        head = continuation_head_preview(verbatim),
+    )
 }
 
 /// `#queueclaim`: when no drainable head remains but live heads are claimed by
@@ -977,7 +1121,13 @@ fn apply_bound_stop(
             settle_session_binding(file, cleanup_roots, loaded_root, state)?;
             Ok(StopResponse::Continue { continue_: true })
         }
-        agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
+        // `#steerinterruptexit`: steering pending after a committed cycle is a
+        // success status for the CLI, but the Stop gate must still hand it back
+        // before a final answer. Its message keeps the committed-prompt-diff
+        // shape, so it takes the same in-pane steering path an `INTERRUPTED`
+        // report from an older binary took; nothing below treats it as a failure.
+        agent_doc_session_check_io::SessionCheckStatus::SteeringPending(reason)
+        | agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
             // `#binaryownedfinalize`: once the response is durably captured, the
             // Stop hook is a status gate, not a request for another agent-authored
             // finalize attempt. Give the binary's keyed repair/commit operation a
@@ -1170,12 +1320,7 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                     file,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )
-                .is_ok_and(|status| {
-                    matches!(
-                        status,
-                        agent_doc_session_check_io::SessionCheckStatus::Ok(_)
-                    )
-                });
+                .is_ok_and(|status| !status.is_failure());
             }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::WaitingForSignal {
                 reason,
@@ -5413,6 +5558,112 @@ Reviewed the gated items.\n\
         .cycle_id
     }
 
+    /// A committed Claude run whose document then gained an operator exchange
+    /// prompt (`#steerinterruptexit`). No queue, so only steering can hold the stop.
+    fn committed_run_with_post_commit_steering() -> (tempfile::TempDir, PathBuf) {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        fs::write(
+            &doc,
+            "---\nagent_doc_session: sid\nagent_doc_format: template\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: done — opus\n\nCompleted.\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let committed = fs::read_to_string(&doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        fs::write(
+            &doc,
+            committed.replace(
+                "Completed.\n",
+                "Completed.\n\n❯ Also check the CI run for the release.\n",
+            ),
+        )
+        .unwrap();
+        (dir, doc)
+    }
+
+    /// `#steerinterruptexit`: once `session-check` reports post-commit steering
+    /// as exit-0 `steering pending`, the closeout no longer "fails" into an
+    /// implicit stop, so the Claude Stop gate holds the final answer once per
+    /// run for an exchange prompt the operator added, names it verbatim, and
+    /// names the one re-entry that admits a cycle. Bounded like the queue
+    /// continuation: never inside a recursive stop, never twice per run.
+    #[test]
+    fn claude_stop_holds_the_final_answer_once_for_post_commit_steering() {
+        use agent_doc_controller::status::SupervisorDrainReadiness;
+        let (dir, _doc) = committed_run_with_post_commit_steering();
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+        };
+        let recursive = ClaudeStopInput {
+            stop_hook_active: true,
+            ..input.clone()
+        };
+        assert!(
+            apply_claude_stop_with_drain_readiness(&recursive, |_| {
+                SupervisorDrainReadiness::NoLiveSupervisor
+            })
+            .unwrap()
+            .is_none(),
+            "a recursive stop must never re-block"
+        );
+
+        let response = apply_claude_stop_with_drain_readiness(&input, |_| {
+            SupervisorDrainReadiness::NoLiveSupervisor
+        })
+        .unwrap()
+        .expect("pending exchange steering must not be dropped at the stop");
+        assert!(
+            response.reason.contains("Also check the CI run for the release."),
+            "{}",
+            response.reason
+        );
+        assert!(response.reason.contains("not a failed closeout"), "{}", response.reason);
+        assert!(response.reason.contains("/loop agent-doc"), "{}", response.reason);
+
+        assert!(
+            apply_claude_stop_with_drain_readiness(&input, |_| {
+                SupervisorDrainReadiness::NoLiveSupervisor
+            })
+            .unwrap()
+            .is_none(),
+            "one continuation request per run"
+        );
+    }
+
+    /// `#steerinterruptexit` + `#steeringwake`: a ready supervisor whose idle
+    /// steering wake will submit the trigger owns the re-entry, so the hook
+    /// does not block for it.
+    #[test]
+    fn claude_stop_leaves_post_commit_steering_to_a_ready_supervisor_wake() {
+        use agent_doc_controller::status::SupervisorDrainReadiness;
+        let (dir, _doc) = committed_run_with_post_commit_steering();
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+        };
+        assert!(
+            apply_claude_stop_with_drain_readiness(&input, |_| SupervisorDrainReadiness::Ready {
+                supervisor_pid: 7
+            })
+            .unwrap()
+            .is_none(),
+            "the supervisor's steering wake owns the re-entry"
+        );
+    }
+
     /// `#stopblocksupervisorowned`: with a live, fresh supervisor the idle-queue
     /// watch continues the queue, so the hook must not raise a block (Claude
     /// Code shows every block as "Stop hook error"). Without one it still blocks.
@@ -6776,10 +7027,14 @@ Reviewed the gated items.\n\
         )
         .unwrap()
         {
-            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
+            // `#steerinterruptexit`: `steering pending` (no Codex thread in the
+            // environment) or the active-session drift `INTERRUPTED` (a Codex
+            // thread bound); the Stop hook takes the same path for both.
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message)
+            | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
                 assert!(is_committed_prompt_diff_interruption(&message), "{message}");
             }
-            other => panic!("expected interrupted session-check status, got {other:?}"),
+            other => panic!("expected committed prompt-diff session-check status, got {other:?}"),
         }
 
         let response = apply_stop(&StopInput {
@@ -7073,10 +7328,14 @@ Reviewed the gated items.\n\
         )
         .unwrap()
         {
-            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
+            // `#steerinterruptexit`: `steering pending` (no Codex thread in the
+            // environment) or the active-session drift `INTERRUPTED` (a Codex
+            // thread bound); the Stop hook takes the same path for both.
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message)
+            | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
                 assert!(is_committed_prompt_diff_interruption(&message), "{message}");
             }
-            other => panic!("expected interrupted session-check status, got {other:?}"),
+            other => panic!("expected committed prompt-diff session-check status, got {other:?}"),
         }
 
         let response = apply_stop(&StopInput {

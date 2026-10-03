@@ -2509,7 +2509,11 @@ fn write_commit_fails_closed_when_internal_session_check_rejects_closeout() {
 }
 
 #[test]
-fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
+fn finalize_reports_concurrent_prompt_added_after_baseline_as_pending_steering() {
+    // `#steerinterruptexit`: a prompt the operator added while the turn ran is
+    // pending steering, not a failed closeout. Finalize commits the response,
+    // exits 0, and its terminal report names the steering verbatim; the late
+    // prompt stays outside the committed snapshot for the next cycle.
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);
     let baseline_content = fs::read_to_string(&doc).unwrap();
@@ -2539,8 +2543,9 @@ fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
             "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\nAnswered only the original prompt.\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .failure()
-        .stderr(predicates::str::contains("[session-check] INTERRUPTED"))
+        .success()
+        .stderr(predicates::str::contains("[session-check] steering pending:"))
+        .stderr(predicates::str::contains("[session-check] INTERRUPTED").not())
         .stderr(predicates::str::contains("prompt_target"))
         .stderr(predicates::str::contains("What remains after this response?"));
 
@@ -2559,7 +2564,9 @@ fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
         .current_dir(tmp.path())
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
-        .failure()
+        .success()
+        .stdout(predicates::str::contains("[session-check] steering pending:"))
+        .stdout(predicates::str::contains("dispatch=address_now"))
         .stdout(predicates::str::contains("prompt_target"))
         .stdout(predicates::str::contains(
             "What remains after this response?",

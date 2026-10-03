@@ -197,6 +197,17 @@ Affected component: editor IPC / writeback\n\n\
     )
 }
 
+/// Whether a terminal diagnostic is an Agent Doc defect that earns the dogfood
+/// `ACTIONABLE_AGENT_DOC_FIX_PROMPT` notice.
+///
+/// `#steerinterruptexit`: pending operator steering is not one. The operator
+/// editing a realtime document while a turn runs is the document working as
+/// designed; filing it as "Agent Doc did not complete this turn" sent agents
+/// hunting for a defect that was the operator's own next prompt.
+pub fn is_dogfood_terminal_issue(diagnostic: &str) -> bool {
+    !agent_doc_turn::response_text::is_session_check_steering_pending(diagnostic)
+}
+
 pub fn dogfood_terminal_issue_class(diagnostic: &str) -> &'static str {
     let normalized = diagnostic.to_ascii_lowercase();
     if normalized.contains("open_cycle") || normalized.contains("open cycle") {
@@ -489,6 +500,19 @@ mod tests {
         assert!(note.contains("Issue class: `ipc_proof_insufficient`"));
         assert!(!note.contains("```bad"));
         assert!(note.contains("'''bad"));
+    }
+
+    #[test]
+    fn pending_steering_is_not_a_dogfood_terminal_issue() {
+        let steering = "[session-check] steering pending: cycle `cycle-1` is `committed` (commit_success), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: prompt_target: also check CI";
+        assert!(!is_dogfood_terminal_issue(steering));
+        assert!(!is_dogfood_terminal_issue(&format!(
+            "respond failed\n\nCaused by:\n    {steering}"
+        )));
+        assert!(is_dogfood_terminal_issue(
+            "[session-check] INTERRUPTED: cycle `cycle-1` is still `write_applied`"
+        ));
+        assert!(is_dogfood_terminal_issue("[lint-gate] INTERRUPTED: 1 blocking lint finding"));
     }
 
     #[test]

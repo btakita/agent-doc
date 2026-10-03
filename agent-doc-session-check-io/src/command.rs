@@ -93,7 +93,30 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionCheckStatus {
     Ok(String),
+    /// `#steerinterruptexit`: the last cycle committed cleanly and the operator
+    /// has since added steering no cycle has answered yet. That is pending
+    /// work, not a failed closeout: the CLI prints it and exits `0`, the
+    /// embedded closeout (`respond` / `finalize` / `write --commit`) succeeds,
+    /// and the message carries every item verbatim with its `dispatch`. It
+    /// starts with [`agent_doc_turn::response_text::SESSION_CHECK_STEERING_PENDING_PREFIX`].
+    SteeringPending(String),
     Interrupted(String),
+}
+
+impl SessionCheckStatus {
+    /// Whether this outcome fails the turn boundary. Pending steering does not.
+    pub fn is_failure(&self) -> bool {
+        matches!(self, Self::Interrupted(_))
+    }
+
+    /// The status line, whichever outcome it is.
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Ok(message) | Self::SteeringPending(message) | Self::Interrupted(message) => {
+                message
+            }
+        }
+    }
 }
 
 pub struct SessionCheckReport {
@@ -461,14 +484,14 @@ fn continuation_guidance_for(file: &Path) -> String {
     agent_doc_queue::queue_continuation::continuation_guidance(pause_reason.as_deref())
 }
 
-/// `#realtime-steering-verbatim` / `#no-thrash-steering`: clear, deterministic
-/// closeout guidance for the case where a committed cycle's document already
-/// carries a fresh operator prompt (the operator edited/steered while the turn
-/// was active — the whole point of a realtime document). The prior response is
-/// already committed; the correct move is to ADDRESS the new prompt in the
-/// current turn, not to re-run finalize on the old response, force-disk over the
-/// live buffer, or re-answer prompts already committed in `HEAD`. Handing the
-/// agent this exact instruction is what prevents the thrash loop (repeated
+/// `#realtime-steering-verbatim` / `#no-thrash-steering` / `#steerinterruptexit`:
+/// deterministic guidance for a committed cycle whose document already carries
+/// fresh operator steering (the operator edited while the turn ran, which is
+/// the whole point of a realtime document). The prior response is committed;
+/// the steering is the NEXT cycle's input, handled per item `dispatch`. It is
+/// not a failure, so it neither asks the agent to redo the closeout nor frames
+/// the steering as an interruption of the current turn. Handing the agent this
+/// exact instruction is what prevents the thrash loop (repeated
 /// preflight/finalize, empty cycles, force-disk clobbers).
 fn realtime_steering_closeout_guidance(file: &Path) -> String {
     // `#steeringremedydeadlock` / `#admissionsplitmerge`: this used to substitute an
@@ -481,9 +504,56 @@ fn realtime_steering_closeout_guidance(file: &Path) -> String {
     // still recorded, because a three-plane split is worth seeing in the log.
     log_three_way_merge_steering_observation(file);
     format!(
-        "This is realtime operator steering, not a failed closeout — your prior response is already committed in HEAD. Address the operator prompt above in your CURRENT turn: run `agent-doc {}` to continue and finalize a response for it. Do NOT re-run finalize on the prior response, do NOT use `--force-disk` (that clobbers the operator's live edits), and do NOT re-answer any prompt already committed in HEAD (the realtime replica reconciles your committed response back into the live buffer).",
-        file.display()
+        "This is pending operator steering, not a failed closeout: your prior response is already committed in HEAD. Handle each item by its `dispatch`: `address_now` is the next cycle's prompt (`agent-doc {file}` admits it to continue), `drain_after_current` runs in operator queue order through the normal drain, and `subagent` goes to a new background subagent (claim it first with `agent-doc queue claim {file} --item <id-or-line> --owner subagent:<label>`). Do NOT re-run finalize on the prior response, do NOT use `--force-disk` (that clobbers the operator's live edits), and do NOT re-answer any prompt already committed in HEAD (the realtime replica reconciles your committed response back into the live buffer).",
+        file = file.display()
     )
+}
+
+/// `#steerinterruptexit`: the outcome for unanswered operator steering found
+/// after a terminal cycle. A `committed` cycle's steering is pending work, not
+/// a failure ([`SessionCheckStatus::SteeringPending`], exit `0`); any other
+/// terminal phase keeps the fail-closed `INTERRUPTED` it always had, because
+/// nothing proves its own turn was answered.
+fn committed_cycle_steering_status(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+    repaired_drift: Option<&str>,
+    marker: &str,
+) -> SessionCheckStatus {
+    let repaired = repaired_drift
+        .map(|reason| format!(", repaired committed historical {reason} snapshot drift,"))
+        .unwrap_or_else(|| ",".to_string());
+    let detail = format!(
+        "cycle `{}` is `{}` ({}){repaired} but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {marker}",
+        state.cycle_id,
+        state.phase.as_str(),
+        state.last_event,
+    );
+    let guidance = realtime_steering_closeout_guidance(file);
+    if state.phase != CyclePhase::Committed {
+        return SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: {detail}\n{guidance}"
+        ));
+    }
+    let items = crate::resolve_current_document_content(file, "session_check_steering_pending")
+        .ok()
+        .map(|current| crate::midturn_steering::pending_steering_items(file, &current))
+        .unwrap_or_default();
+    let items = crate::midturn_steering::render_pending_steering_items(&items)
+        .map(|rendered| format!("\n{rendered}"))
+        .unwrap_or_default();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_check_steering_pending file={} cycle_id={} (#steerinterruptexit)",
+            file.display(),
+            state.cycle_id,
+        ),
+    );
+    SessionCheckStatus::SteeringPending(format!(
+        "{} {detail}{items}\n{guidance}",
+        agent_doc_turn::response_text::SESSION_CHECK_STEERING_PENDING_PREFIX,
+    ))
 }
 
 /// Record a three-plane split that the next admission will reconcile by merge.
@@ -2049,7 +2119,38 @@ fn run_with_options_inner(
             }
             Ok(())
         }
+        SessionCheckStatus::SteeringPending(message) => {
+            report_steering_pending(file, &message, codex_final_gate);
+            Ok(())
+        }
         SessionCheckStatus::Interrupted(message) => Err(SessionCheckInterrupted(message).into()),
+    }
+}
+
+/// `#steerinterruptexit`: print a pending-steering status as a successful
+/// check. The queue continuation is deferred behind the steering, exactly like
+/// `#prompt-preempts-auto-queue`: the next `agent-doc <FILE>` admits the
+/// steering as its prompt, and queue work resumes in operator order after it.
+///
+/// Under `--codex-final-gate` the check exits `2`, the gate's "work is still
+/// owed" code that an active queue continuation already uses: pending steering
+/// must be handled before a final answer, but it is not a failed closeout (`1`).
+fn report_steering_pending(file: &Path, message: &str, codex_final_gate: bool) {
+    println!("{message}");
+    println!("queue_continuation_required=false steering_pending=true");
+    eprintln!(
+        "[session-check] queue continuation deferred for {}: pending operator steering runs first; the next `agent-doc {}` admits it as its prompt (#steerinterruptexit).",
+        file.display(),
+        file.display(),
+    );
+    if codex_final_gate {
+        eprintln!(
+            "[session-check] codex-final-gate: operator steering is pending for {} — handle each item by its dispatch (continue with `agent-doc {}`) before sending any final answer.",
+            file.display(),
+            file.display(),
+        );
+        crate::profile::report_now(file);
+        std::process::exit(2);
     }
 }
 
@@ -2119,6 +2220,43 @@ fn inspect_with_warnings_inner(
     file: &Path,
     effects: &impl SessionCheckEffects,
 ) -> Result<SessionCheckReport> {
+    let mut steering = None;
+    let report = inspect_with_warnings_sweep(file, effects, &mut steering)?;
+    Ok(steering_survives_steering_carried_drift(report, steering))
+}
+
+/// `#steerinterruptexit`: the guard sweep runs over pending steering so a
+/// genuine integrity finding still fails the check. A finding whose own
+/// recovery is the pending steering turn (`Recovery [pending_operator_steering]`:
+/// "that turn's commit carries the remaining drift") is not a second failure,
+/// though: it is the same steering, seen as drift. It stays visible as a
+/// warning and the status stays `steering pending`.
+fn steering_survives_steering_carried_drift(
+    mut report: SessionCheckReport,
+    steering: Option<String>,
+) -> SessionCheckReport {
+    let Some(steering) = steering else {
+        return report;
+    };
+    if let SessionCheckStatus::Interrupted(message) = &report.status
+        && message.contains(&format!(
+            "Recovery [{}]",
+            agent_doc_turn::turn_admission::PENDING_OPERATOR_STEERING_RECOVERY
+        ))
+    {
+        report
+            .warnings
+            .push(message.replacen("INTERRUPTED:", "warn (carried by the steering turn):", 1));
+        report.status = SessionCheckStatus::SteeringPending(steering);
+    }
+    report
+}
+
+fn inspect_with_warnings_sweep(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+    steering_message: &mut Option<String>,
+) -> Result<SessionCheckReport> {
     let mut report = SessionCheckReport {
         status: inspect_core(file, effects)?,
         warnings: Vec::new(),
@@ -2128,7 +2266,13 @@ fn inspect_with_warnings_inner(
         effects.retained_document_write_blocks(file),
         file,
     );
-    if matches!(report.status, SessionCheckStatus::Ok(_)) {
+    // `#steerinterruptexit`: pending steering is not a failure, so the integrity
+    // guard sweep still runs over it and a genuine finding still wins.
+    let steering_pending = matches!(report.status, SessionCheckStatus::SteeringPending(_));
+    if let SessionCheckStatus::SteeringPending(message) = &report.status {
+        *steering_message = Some(message.clone());
+    }
+    if matches!(report.status, SessionCheckStatus::Ok(_)) || steering_pending {
         // Build one CycleContext for the guard sweep and seed it with the resolved
         // CurrentDocument. Guards that need content, frontmatter, or components
         // read from that lazily graph instead of independently resolving and
@@ -2261,9 +2405,15 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::profile::timed("guard_prompt_only_exchange_tail", || {
-            crate::check_prompt_only_exchange_tail_guard(file, &rc)
-        })? {
+        // A prompt-only exchange tail IS the pending steering already reported;
+        // it is not a second, failing finding about the committed cycle.
+        match if steering_pending {
+            GuardResult::None
+        } else {
+            crate::profile::timed("guard_prompt_only_exchange_tail", || {
+                crate::check_prompt_only_exchange_tail_guard(file, &rc)
+            })?
+        } {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -2368,7 +2518,14 @@ fn retained_write_gate_status(
     retained_write_blocks: bool,
     file: &Path,
 ) -> SessionCheckStatus {
-    if retained_write_blocks && matches!(status, SessionCheckStatus::Ok(_)) {
+    // A retained write blocks pending steering too: the steering is the next
+    // cycle's input, and preflight refuses that cycle until the write settles.
+    if retained_write_blocks
+        && matches!(
+            status,
+            SessionCheckStatus::Ok(_) | SessionCheckStatus::SteeringPending(_)
+        )
+    {
         SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: retained document-write delivery remains unsettled for {}; automatic controller reconciliation remains scheduled. Refusing a false clean closeout because preflight would block the same effect. Run only `agent-doc session-check {}` after recovery settles; do not resubmit finalize/write, force disk, or replace the queued edit.",
             file.display(),
@@ -2581,6 +2738,13 @@ fn enforce_clean_closeout_inner(file: &Path, effects: &impl SessionCheckEffects)
     }
     match report.status {
         SessionCheckStatus::Ok(_) => Ok(()),
+        // `#steerinterruptexit`: the closeout succeeded; the steering is the
+        // next cycle's input. The terminal report names it here, and the
+        // `#closeout-steering` block after it delivers the items once.
+        SessionCheckStatus::SteeringPending(message) => {
+            eprintln!("{message}");
+            Ok(())
+        }
         SessionCheckStatus::Interrupted(message) => anyhow::bail!(message),
     }
 }
@@ -3134,15 +3298,12 @@ fn inspect_core_profiled(
         }
         if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
             if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
-                return Ok(SessionCheckStatus::Interrupted(format!(
-                    "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}\n{}",
-                    state.cycle_id,
-                    state.phase.as_str(),
-                    state.last_event,
-                    reason,
-                    prompt_marker,
-                    realtime_steering_closeout_guidance(file)
-                )));
+                return Ok(committed_cycle_steering_status(
+                    file,
+                    &state,
+                    Some(reason),
+                    &prompt_marker,
+                ));
             }
             return Ok(SessionCheckStatus::Ok(format!(
                 "[session-check] ok — cycle `{}` is `{}` ({}); repaired committed historical {} snapshot drift",
@@ -3155,15 +3316,12 @@ fn inspect_core_profiled(
         if let Some(marker) = crate::detect_bypassed_response_write(file)? {
             if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
-                    return Ok(SessionCheckStatus::Interrupted(format!(
-                        "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}\n{}",
-                        state.cycle_id,
-                        state.phase.as_str(),
-                        state.last_event,
-                        reason,
-                        prompt_marker,
-                        realtime_steering_closeout_guidance(file)
-                    )));
+                    return Ok(committed_cycle_steering_status(
+                        file,
+                        &state,
+                        Some(reason),
+                        &prompt_marker,
+                    ));
                 }
                 return Ok(SessionCheckStatus::Ok(format!(
                     "[session-check] ok — cycle `{}` is `{}` ({}); repaired committed historical {} snapshot drift",
@@ -3279,14 +3437,9 @@ fn inspect_core_profiled(
             ..
         } = crate::turn_admission(file, state.is_open())?
         {
-            return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}\n{}",
-                state.cycle_id,
-                state.phase.as_str(),
-                state.last_event,
-                marker,
-                realtime_steering_closeout_guidance(file)
-            )));
+            return Ok(committed_cycle_steering_status(
+                file, &state, None, &marker,
+            ));
         }
         return Ok(SessionCheckStatus::Ok(format!(
             "[session-check] ok — cycle `{}` is `{}` ({})",
@@ -3547,10 +3700,57 @@ mod terminal_convergence_tests {
                 assert!(message.contains("preflight would block the same effect"));
                 assert!(!message.contains("reload"));
             }
-            SessionCheckStatus::Ok(message) => {
+            SessionCheckStatus::Ok(message) | SessionCheckStatus::SteeringPending(message) => {
                 panic!("retained write incorrectly preserved clean status: {message}")
             }
         }
+    }
+
+    /// `#steerinterruptexit`: a guard finding whose recovery IS the pending
+    /// steering turn keeps the steering status; any other finding still fails.
+    #[test]
+    fn steering_carried_drift_keeps_steering_but_genuine_findings_fail() {
+        let steering = "[session-check] steering pending: prompt_target: x".to_string();
+        let carried = SessionCheckReport {
+            status: SessionCheckStatus::Interrupted(
+                "[session-check] INTERRUPTED: snapshot drift. Recovery [pending_operator_steering]: `agent-doc d.md`"
+                    .to_string(),
+            ),
+            warnings: Vec::new(),
+        };
+        let kept = steering_survives_steering_carried_drift(carried, Some(steering.clone()));
+        assert_eq!(kept.status, SessionCheckStatus::SteeringPending(steering.clone()));
+        assert_eq!(kept.warnings.len(), 1, "{:?}", kept.warnings);
+
+        let genuine = SessionCheckReport {
+            status: SessionCheckStatus::Interrupted(
+                "[session-check] INTERRUPTED: user-authored agent:queue edit(s) were dropped"
+                    .to_string(),
+            ),
+            warnings: Vec::new(),
+        };
+        let failed = steering_survives_steering_carried_drift(genuine, Some(steering));
+        assert!(failed.status.is_failure(), "{:?}", failed.status);
+    }
+
+    /// `#steerinterruptexit`: pending steering is a success status, so a
+    /// retained write must gate it exactly like `Ok` — preflight would refuse
+    /// the cycle that answers the steering until the write settles.
+    #[test]
+    fn retained_write_gate_blocks_pending_steering_like_ok() {
+        let file = Path::new("/tmp/retained-session.md");
+        let gated = retained_write_gate_status(
+            SessionCheckStatus::SteeringPending(
+                "[session-check] steering pending: prompt_target: x".to_string(),
+            ),
+            true,
+            file,
+        );
+        assert!(
+            matches!(&gated, SessionCheckStatus::Interrupted(message)
+                if message.contains("retained document-write delivery remains unsettled")),
+            "{gated:?}"
+        );
     }
 
     #[test]

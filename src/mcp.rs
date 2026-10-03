@@ -579,6 +579,11 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
     )?;
     let (ok, status, message) = match report.status {
         agent_doc_session_check_io::SessionCheckStatus::Ok(message) => (true, "ok", message),
+        // `#steerinterruptexit`: a successful closeout with operator steering
+        // still to answer; `message` carries each item verbatim with its dispatch.
+        agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
+            (true, "steering_pending", message)
+        }
         agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
             (false, "interrupted", message)
         }
@@ -708,6 +713,11 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
     )?;
     let (ok, status, message) = match report.status {
         agent_doc_session_check_io::SessionCheckStatus::Ok(message) => (true, "ok", message),
+        // `#steerinterruptexit`: a successful closeout with operator steering
+        // still to answer; `message` carries each item verbatim with its dispatch.
+        agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message) => {
+            (true, "steering_pending", message)
+        }
         agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
             (false, "interrupted", message)
         }

@@ -128,6 +128,9 @@ pub struct ControllerEditorRouteInvocation {
     pub layout_args: Vec<String>,
     pub dispatch_only: bool,
     pub plain_trigger: bool,
+    /// Harness-readiness budget in seconds. The controller `editor_route` passes
+    /// the REMAINDER of the caller's `--wait-for-ready` after layout convergence
+    /// (GH #110), never a fresh allowance.
     pub wait_for_ready_secs: Option<u64>,
     pub force_disk: bool,
     /// Whether route may perform the fleet-wide stale-registry prune before
@@ -1428,6 +1431,31 @@ impl ControllerPaneLayoutGraph {
             if pane_layout_route_readiness(&projection, document) != PaneLayoutRouteReadiness::Wait
                 || Instant::now() >= deadline
             {
+                return projection;
+            }
+            self.waiters.wait_for(
+                &mut guard,
+                deadline.saturating_duration_since(Instant::now()),
+            );
+        }
+    }
+
+    /// GH #110: block until the layout projection differs from `observed`, or
+    /// `timeout` elapses. An editor route that was refused by a transient
+    /// projection re-observes on this producer edge (a newer desired layout,
+    /// tmux observation, or effect receipt all notify `waiters`) instead of
+    /// sleeping blind; the timeout only bounds the wait when nothing changes.
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn await_projection_change(
+        &self,
+        observed: &PaneLayoutProjection,
+        timeout: Duration,
+    ) -> PaneLayoutProjection {
+        let deadline = Instant::now() + timeout;
+        let mut guard = self.wait_lock.lock();
+        loop {
+            let projection = self.projection();
+            if &projection != observed || Instant::now() >= deadline {
                 return projection;
             }
             self.waiters.wait_for(
@@ -6448,6 +6476,18 @@ impl ControllerRuntime {
     ) -> PaneLayoutProjection {
         self.pane_layout_graph
             .await_route_document(document, timeout)
+    }
+
+    /// GH #110: await a change from `observed` for at most `timeout`. See
+    /// [`ControllerPaneLayoutGraph::await_projection_change`].
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn await_pane_layout_projection_change(
+        &self,
+        observed: &PaneLayoutProjection,
+        timeout: Duration,
+    ) -> PaneLayoutProjection {
+        self.pane_layout_graph
+            .await_projection_change(observed, timeout)
     }
 
     fn release_pane_layout_route_lease(&self, generation: u64) {

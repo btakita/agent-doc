@@ -8434,6 +8434,9 @@ struct ControllerEditorRoutePayload {
     dispatch_only: Option<bool>,
     #[serde(default)]
     plain_trigger: Option<bool>,
+    /// `--wait-for-ready` (default 15, capped at 600): ONE budget for the whole
+    /// editor route. Layout convergence (gates 2/3 re-observe until it passes)
+    /// spends it first; harness readiness gets only what remains (GH #110).
     #[serde(default)]
     wait_for_ready_secs: Option<u64>,
     #[serde(default)]
@@ -9333,6 +9336,11 @@ fn handle_editor_route_rpc(
     let relative_path = editor_route_relative_path(bootstrap, &canonical, &payload)?;
     let layout_args = validate_editor_route_layout_args(&payload.layout_args)?;
     let wait_secs = payload.wait_for_ready_secs.unwrap_or(15).min(600);
+    // GH #110: one `--wait-for-ready` budget covers layout convergence first and
+    // harness readiness with whatever remains, so the RPC as a whole stays
+    // bounded by the operator's number (the JetBrains client times the call out
+    // at that budget plus a small grace).
+    let route_deadline = Instant::now() + Duration::from_secs(wait_secs);
     let source = payload
         .source
         .as_deref()
@@ -9371,31 +9379,67 @@ fn handle_editor_route_rpc(
             ),
         );
     }
-    anyhow::ensure!(
-        layout_invocation.focus.as_deref() == Some(routed_document.as_str()),
-        "editor route refused before layout publication: focused document does not match routed document"
-    );
-    let (layout_receipt, _route_layout_lease) =
-        handle_editor_route_layout(bootstrap, runtime, layout_invocation)?;
-    anyhow::ensure!(
-        tmux_layout_command_applied(&layout_receipt),
-        "editor route layout did not converge before dispatch: {}",
-        layout_receipt.reason
-    );
-    anyhow::ensure!(
-        layout_receipt.columns.contains(&routed_document),
-        "editor route refused: routed document is absent from the exact visible layout"
-    );
+    if let Some(refusal) = editor_route_focus_refusal(&layout_invocation, &routed_document) {
+        anyhow::bail!(refusal);
+    }
+    // Publish exactly once; the lease holds passive publications back until
+    // dispatch settles. The gates then re-observe this publication.
+    let (first_receipt, _route_layout_lease, published_layout) = handle_editor_route_layout(
+        bootstrap,
+        runtime,
+        layout_invocation,
+        route_deadline.saturating_duration_since(Instant::now()),
+    )?;
+    let (layout_receipt, layout_observations) = await_editor_route_layout_gates(
+        &routed_document,
+        route_deadline,
+        first_receipt,
+        |refusal, remaining| {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_editor_route_layout_reobserve file={} remaining_ms={} refusal={}",
+                    canonical.display(),
+                    remaining.as_millis(),
+                    refusal,
+                ),
+            );
+            reobserve_editor_route_layout(bootstrap, runtime, &published_layout, remaining)
+        },
+    )?;
+    let harness_ready_secs = route_deadline
+        .saturating_duration_since(Instant::now())
+        .as_secs();
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
-            "controller_editor_route_layout_converged file={} columns={} focus={} reason={}",
+            "controller_editor_route_layout_converged file={} columns={} focus={} reason={} observations={} wait_for_ready_secs={} harness_ready_secs={}",
             canonical.display(),
             layout_receipt.columns.len(),
             layout_receipt.focus.as_deref().unwrap_or("none"),
             layout_receipt.reason,
+            layout_observations,
+            wait_secs,
+            harness_ready_secs,
         ),
     );
+    // GH #110 ask 5 (diagnostic half; see GH #109 for pane selection): the
+    // occupant guard only proves the pane is alive and owned, not that its
+    // route-owned supervisor runs the installed build. Surface a stale
+    // supervisor binary on the route instead of letting it pass silently. This
+    // is read-only and fail-open; it never refuses, because a stale supervisor
+    // still hosts a live, working harness and recycles itself.
+    let supervisor_stale_warning = host_supervisor_stale_warning_for_doc(&canonical);
+    if let Some(warning) = supervisor_stale_warning.as_deref() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_editor_route_supervisor_binary_stale file={} warning={}",
+                canonical.display(),
+                warning.replace('\n', " "),
+            ),
+        );
+    }
 
     let _attempt_guard =
         crate::route_snapshot::EditorRouteAttemptIdGuard::set(payload.attempt_id.as_deref());
@@ -9406,7 +9450,8 @@ fn handle_editor_route_rpc(
         layout_args,
         dispatch_only: payload.dispatch_only.unwrap_or(true),
         plain_trigger: payload.plain_trigger.unwrap_or(true),
-        wait_for_ready_secs: Some(wait_secs),
+        // GH #110: the remainder of the shared budget, never a fresh one.
+        wait_for_ready_secs: Some(harness_ready_secs),
         force_disk: payload.force_disk.unwrap_or(false),
         prune_before_lookup: true,
         background_existing_pane_only: false,
@@ -9424,9 +9469,16 @@ fn handle_editor_route_rpc(
             payload.route_key.as_deref().unwrap_or("none"),
         ),
     );
+    let mut output = result.output;
+    if let Some(warning) = supervisor_stale_warning {
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str(&warning);
+    }
     Ok(ControllerEditorRouteResult {
         exit_code: result.exit_code,
-        output: result.output,
+        output,
     })
 }
 
@@ -10128,6 +10180,134 @@ fn empty_controller_request(command: &str) -> ControllerRequest {
 /// the pane effect is still reactive.
 fn tmux_layout_command_applied(receipt: &ControllerTmuxLayoutSyncReceipt) -> bool {
     receipt.applied || receipt.reason == "projection_published"
+}
+
+/// Render published layout columns for an operator-facing refusal.
+fn editor_route_columns_display(columns: &[String]) -> String {
+    if columns.is_empty() {
+        return "none".to_string();
+    }
+    columns
+        .iter()
+        .map(|column| format!("`{column}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Membership with the layout's own column semantics: a column may stack
+/// several comma-separated documents (see `invocation_columns_contain_document`,
+/// which the route-readiness projection already uses).
+fn editor_route_receipt_columns_contain(
+    receipt: &ControllerTmuxLayoutSyncReceipt,
+    document: &str,
+) -> bool {
+    receipt
+        .columns
+        .iter()
+        .flat_map(|column| column.split(','))
+        .map(str::trim)
+        .any(|candidate| candidate == document)
+}
+
+/// GH #110 gate 1: the layout focus must be the routed document. Runs before any
+/// publication, so there is no receipt yet; name both documents and the
+/// requested columns instead.
+fn editor_route_focus_refusal(
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+    routed_document: &str,
+) -> Option<String> {
+    if invocation.focus.as_deref() == Some(routed_document) {
+        return None;
+    }
+    Some(format!(
+        "editor route refused before layout publication: focused document `{}` does not match routed document `{}` (reason=no_layout_published, requested columns: {})",
+        invocation.focus.as_deref().unwrap_or("none"),
+        routed_document,
+        editor_route_columns_display(&invocation.columns),
+    ))
+}
+
+/// GH #110: a refused layout gate, with whether waiting can change the answer.
+#[derive(Debug, PartialEq, Eq)]
+struct EditorRouteLayoutRefusal {
+    retryable: bool,
+    message: String,
+}
+
+/// GH #110 gates 2 and 3 over one layout receipt. `None` means dispatch may
+/// proceed. Each refusal names the routed document, the receipt `reason`, and
+/// the published columns so the message describes its real predicate.
+fn editor_route_layout_refusal(
+    receipt: &ControllerTmuxLayoutSyncReceipt,
+    routed_document: &str,
+) -> Option<EditorRouteLayoutRefusal> {
+    let columns = editor_route_columns_display(&receipt.columns);
+    if !tmux_layout_command_applied(receipt) {
+        return Some(EditorRouteLayoutRefusal {
+            // An operator-owned layout is a terminal refusal: waiting longer
+            // would only fight the operator for the panes.
+            retryable: receipt.reason != "operator_owned_layout",
+            message: format!(
+                "editor route layout did not converge before dispatch: reason={} for routed document `{}` (published columns: {})",
+                receipt.reason, routed_document, columns,
+            ),
+        });
+    }
+    if !editor_route_receipt_columns_contain(receipt, routed_document) {
+        return Some(EditorRouteLayoutRefusal {
+            retryable: true,
+            message: format!(
+                "editor route refused: routed document `{}` is not one of the published layout columns ({}) (reason={})",
+                routed_document, columns, receipt.reason,
+            ),
+        });
+    }
+    None
+}
+
+/// GH #110: hold the layout gates open on re-observations of the route's one
+/// publication until they pass, a refusal is terminal, or `deadline` (the
+/// route's `--wait-for-ready` budget) passes.
+///
+/// The first observation already awaited semantic route readiness, so an effect
+/// still in flight is absorbed there. What reaches this loop is a projection the
+/// route cannot use *yet*: superseded by a newer layout without the routed
+/// document, a receipt whose columns momentarily lack it, or the budget running
+/// out mid-effect. `reobserve(refusal, remaining)` blocks on the next change to
+/// the pane-layout projection (bounded by `remaining`) and returns the receipt
+/// for the current projection. It never republishes, so a newer layout that
+/// keeps the document out still refuses — only later than before, and only
+/// within the operator's budget.
+///
+/// Returns the converged receipt and the number of observations it took.
+fn await_editor_route_layout_gates(
+    routed_document: &str,
+    deadline: Instant,
+    first: ControllerTmuxLayoutSyncReceipt,
+    mut reobserve: impl FnMut(&str, Duration) -> Result<ControllerTmuxLayoutSyncReceipt>,
+) -> Result<(ControllerTmuxLayoutSyncReceipt, u32)> {
+    let mut observations: u32 = 1;
+    let mut receipt = first;
+    loop {
+        let Some(refusal) = editor_route_layout_refusal(&receipt, routed_document) else {
+            return Ok((receipt, observations));
+        };
+        if !refusal.retryable {
+            anyhow::bail!(
+                "{} after {observations} layout observation(s); this refusal is terminal and the --wait-for-ready budget does not retry it",
+                refusal.message
+            );
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!(
+                "{} after {observations} layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted",
+                refusal.message
+            );
+        }
+        receipt = reobserve(&refusal.message, remaining)?;
+        observations += 1;
+    }
 }
 
 fn dispatch_command_submit_payload(
@@ -23424,16 +23604,29 @@ pub(crate) fn handle_sync_tmux_layout(
     request: ControllerRequest,
 ) -> Result<ControllerTmuxLayoutSyncReceipt> {
     let (desired, invocation) = publish_pane_layout_desired(bootstrap, runtime, request)?;
-    await_sync_tmux_layout_projection(bootstrap, runtime, desired, invocation)
+    await_sync_tmux_layout_projection(
+        bootstrap,
+        runtime,
+        desired,
+        invocation,
+        PANE_LAYOUT_COMMAND_AWAIT,
+    )
 }
 
+/// Publish one fresh editor-route layout intent and await its projection.
+///
+/// GH #110: `await_timeout` is the route's remaining `--wait-for-ready` budget,
+/// not the fixed manual-sync await, so layout convergence and harness readiness
+/// share one operator-supplied deadline.
 fn handle_editor_route_layout<'a>(
     bootstrap: &ControllerBootstrap,
     runtime: &'a ControllerRuntime,
     invocation: ControllerTmuxLayoutSyncInvocation,
+    await_timeout: Duration,
 ) -> Result<(
     ControllerTmuxLayoutSyncReceipt,
     PaneLayoutRouteLeaseGuard<'a>,
+    EditorRoutePublishedLayout,
 )> {
     let (desired, invocation) = publish_pane_layout_desired_invocation(
         bootstrap,
@@ -23446,8 +23639,24 @@ fn handle_editor_route_layout<'a>(
         runtime,
         generation: desired.generation,
     };
-    let receipt = await_sync_tmux_layout_projection(bootstrap, runtime, desired, invocation)?;
-    Ok((receipt, lease))
+    let published = EditorRoutePublishedLayout {
+        generation: desired.generation,
+        document: invocation.focus.clone().unwrap_or_default(),
+        invocation: invocation.clone(),
+    };
+    let receipt =
+        await_sync_tmux_layout_projection(bootstrap, runtime, desired, invocation, await_timeout)?;
+    Ok((receipt, lease, published))
+}
+
+/// What one editor-route publication put on the layout graph, kept so the GH
+/// #110 gates can re-observe it without publishing again.
+struct EditorRoutePublishedLayout {
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    generation: u64,
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    document: String,
+    invocation: ControllerTmuxLayoutSyncInvocation,
 }
 
 struct PaneLayoutRouteLeaseGuard<'a> {
@@ -23467,10 +23676,11 @@ fn await_sync_tmux_layout_projection(
     runtime: &ControllerRuntime,
     desired: PaneLayoutDesired,
     invocation: ControllerTmuxLayoutSyncInvocation,
+    await_timeout: Duration,
 ) -> Result<ControllerTmuxLayoutSyncReceipt> {
     #[cfg(any(test, feature = "test-support"))]
     {
-        let _ = &desired;
+        let _ = (&desired, await_timeout);
         let mut invocation = invocation;
         invocation.actor_bindings = runtime.pane_layout_actor_bindings();
         return runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation);
@@ -23495,49 +23705,122 @@ fn await_sync_tmux_layout_projection(
         // Re-observe before awaiting so an identical desired Source cannot reuse
         // a stale Converged projection after pane focus or geometry drift.
         refresh_pane_layout_observation_before_await(bootstrap, runtime, &desired);
-        let route_document = (invocation.caller_kind == "editor_route")
-            .then_some(invocation.focus.as_deref())
-            .flatten();
-        let projection = if let Some(document) = route_document {
-            runtime.await_pane_layout_route_document(document, PANE_LAYOUT_COMMAND_AWAIT)
-        } else {
-            runtime.await_pane_layout_generation(desired.generation, PANE_LAYOUT_COMMAND_AWAIT)
-        };
-        let (applied, reason) = if let Some(document) = route_document {
-            pane_layout_route_await_outcome(&projection, document)
-        } else {
-            pane_layout_await_outcome(&projection, desired.generation)
-        };
-        let receipt_invocation = route_document
-            .and_then(|document| {
-                pane_layout_projection_desired(&projection).filter(|current| {
-                    current
-                        .invocation
-                        .columns
-                        .iter()
-                        .flat_map(|column| column.split(','))
-                        .map(str::trim)
-                        .any(|candidate| candidate == document)
-                })
-            })
-            .map(|current| current.invocation.clone())
-            .unwrap_or(invocation);
-        let routes_created_panes = receipt_invocation.routes_created_panes();
+        if invocation.caller_kind == "editor_route"
+            && let Some(document) = invocation.focus.clone()
+        {
+            return Ok(editor_route_layout_receipt(
+                runtime,
+                desired.generation,
+                invocation,
+                &document,
+                await_timeout,
+            ));
+        }
+        let projection = runtime.await_pane_layout_generation(desired.generation, await_timeout);
+        let (applied, reason) = pane_layout_await_outcome(&projection, desired.generation);
         let receipt_generation = pane_layout_projection_desired(&projection)
             .map(|current| current.generation)
             .unwrap_or(desired.generation);
-        let receipt = ControllerTmuxLayoutSyncReceipt {
+        let routes_created_panes = invocation.routes_created_panes();
+        Ok(ControllerTmuxLayoutSyncReceipt {
             applied,
             reason: reason.to_string(),
-            columns: receipt_invocation.columns,
-            window: receipt_invocation.window,
-            focus: receipt_invocation.focus,
-            no_autostart: receipt_invocation.no_autostart,
-            exact_visible: receipt_invocation.exact_visible,
+            columns: invocation.columns,
+            window: invocation.window,
+            focus: invocation.focus,
+            no_autostart: invocation.no_autostart,
+            exact_visible: invocation.exact_visible,
             routes_created_panes,
             file_panes: runtime.pane_layout_effect_file_panes(receipt_generation),
-        };
-        Ok(receipt)
+        })
+    }
+}
+
+/// Await semantic route readiness for `document` on the pane-layout graph and
+/// fold the projection into a receipt. Shared by the route's single publication
+/// and its GH #110 re-observations, which must not publish again.
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn editor_route_layout_receipt(
+    runtime: &ControllerRuntime,
+    published_generation: u64,
+    invocation: ControllerTmuxLayoutSyncInvocation,
+    document: &str,
+    await_timeout: Duration,
+) -> ControllerTmuxLayoutSyncReceipt {
+    let projection = runtime.await_pane_layout_route_document(document, await_timeout);
+    let (applied, reason) = pane_layout_route_await_outcome(&projection, document);
+    let receipt_invocation = pane_layout_projection_desired(&projection)
+        .filter(|current| {
+            current
+                .invocation
+                .columns
+                .iter()
+                .flat_map(|column| column.split(','))
+                .map(str::trim)
+                .any(|candidate| candidate == document)
+        })
+        .map(|current| current.invocation.clone())
+        .unwrap_or(invocation);
+    let routes_created_panes = receipt_invocation.routes_created_panes();
+    let receipt_generation = pane_layout_projection_desired(&projection)
+        .map(|current| current.generation)
+        .unwrap_or(published_generation);
+    ControllerTmuxLayoutSyncReceipt {
+        applied,
+        reason: reason.to_string(),
+        columns: receipt_invocation.columns,
+        window: receipt_invocation.window,
+        focus: receipt_invocation.focus,
+        no_autostart: receipt_invocation.no_autostart,
+        exact_visible: receipt_invocation.exact_visible,
+        routes_created_panes,
+        file_panes: runtime.pane_layout_effect_file_panes(receipt_generation),
+    }
+}
+
+/// GH #110: re-observe an editor route's ALREADY-PUBLISHED layout, without
+/// publishing it again (`the_editor_route_handler_publishes_layout_once`:
+/// supersession is the layout graph's to resolve, never an RPC republish race).
+///
+/// If the current projection still refuses the routed document, block until it
+/// changes — a newer desired layout, a tmux observation, or an effect receipt
+/// all notify the graph's waiters — or `timeout` passes; the comparison is
+/// against the projection just read, so a change that lands before the wait
+/// starts is not missed. Then fold the current projection into a fresh receipt
+/// (which itself waits through a pending effect). There is no timer poll: if
+/// nothing changes, the wait runs out the remaining `--wait-for-ready` budget.
+fn reobserve_editor_route_layout(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    published: &EditorRoutePublishedLayout,
+    timeout: Duration,
+) -> Result<ControllerTmuxLayoutSyncReceipt> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        // The test runtime has no tmux effect worker, so the fake adapter is
+        // the observation (as in `await_sync_tmux_layout_projection`).
+        let _ = timeout;
+        let mut invocation = published.invocation.clone();
+        invocation.actor_bindings = runtime.pane_layout_actor_bindings();
+        runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation)
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        let _ = bootstrap;
+        let deadline = Instant::now() + timeout;
+        let current = runtime.pane_layout_projection();
+        if crate::project_controller::pane_layout_route_readiness(&current, &published.document)
+            == PaneLayoutRouteReadiness::Refused
+        {
+            runtime.await_pane_layout_projection_change(&current, timeout);
+        }
+        Ok(editor_route_layout_receipt(
+            runtime,
+            published.generation,
+            published.invocation.clone(),
+            &published.document,
+            deadline.saturating_duration_since(Instant::now()),
+        ))
     }
 }
 
@@ -27801,6 +28084,298 @@ mod tests {
         let second = runtime.pane_layout_desired().unwrap();
         assert!(second.generation > first.generation);
         assert_eq!(second.invocation, first.invocation);
+    }
+
+    fn gh110_receipt(
+        applied: bool,
+        reason: &str,
+        columns: &[&str],
+    ) -> ControllerTmuxLayoutSyncReceipt {
+        ControllerTmuxLayoutSyncReceipt {
+            applied,
+            reason: reason.to_string(),
+            columns: columns.iter().map(|column| column.to_string()).collect(),
+            window: None,
+            focus: None,
+            no_autostart: false,
+            exact_visible: true,
+            routes_created_panes: false,
+            file_panes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn gh110_focus_gate_names_focus_routed_document_and_columns() {
+        let invocation = ControllerTmuxLayoutSyncInvocation {
+            columns: vec![
+                "/repo/a.md".to_string(),
+                "/repo/b.md,/repo/c.md".to_string(),
+            ],
+            window: None,
+            focus: Some("/repo/a.md".to_string()),
+            no_autostart: false,
+            exact_visible: true,
+            caller_kind: "editor_route".to_string(),
+            actor_bindings: Vec::new(),
+        };
+        assert_eq!(editor_route_focus_refusal(&invocation, "/repo/a.md"), None);
+        let refusal = editor_route_focus_refusal(&invocation, "/repo/z.md").unwrap();
+        assert!(
+            refusal.contains("focused document `/repo/a.md`"),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains("routed document `/repo/z.md`"),
+            "{refusal}"
+        );
+        assert!(refusal.contains("reason=no_layout_published"), "{refusal}");
+        assert!(
+            refusal.contains("`/repo/a.md`, `/repo/b.md,/repo/c.md`"),
+            "{refusal}"
+        );
+    }
+
+    #[test]
+    fn gh110_editor_route_focus_refusal_reaches_the_rpc_caller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let other = dir.path().join("other.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: plan\nagent: codex\n---\n# plan\n",
+        )
+        .unwrap();
+        std::fs::write(&other, "# other\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        let mut request = empty_controller_request("editor_route");
+        request.file = Some(file.clone());
+        request.diagnostic_payload = Some(
+            serde_json::json!({
+                "relative_path": "plan.md",
+                // `plan.md` is not visible and there is no focused slot to take.
+                "layout_args": ["--col", other.display().to_string()],
+                "wait_for_ready_secs": 1
+            })
+            .to_string(),
+        );
+
+        let error = handle_editor_route_rpc(&bootstrap, runtime.as_ref(), request)
+            .unwrap_err()
+            .to_string();
+        let routed = file.canonicalize().unwrap().display().to_string();
+        assert!(error.contains("focused document `none`"), "{error}");
+        assert!(
+            error.contains(&format!("routed document `{routed}`")),
+            "{error}"
+        );
+        assert!(error.contains("requested columns:"), "{error}");
+        assert!(
+            runtime.pane_layout_desired().is_none(),
+            "refused before publication"
+        );
+    }
+
+    #[test]
+    fn gh110_convergence_gate_names_reason_document_and_columns() {
+        let receipt = gh110_receipt(false, "projection_effect_in_flight", &["/repo/a.md"]);
+        let refusal = editor_route_layout_refusal(&receipt, "/repo/a.md").unwrap();
+        assert!(refusal.retryable);
+        assert!(
+            refusal
+                .message
+                .starts_with("editor route layout did not converge before dispatch"),
+            "{}",
+            refusal.message
+        );
+        assert!(
+            refusal
+                .message
+                .contains("reason=projection_effect_in_flight")
+        );
+        assert!(refusal.message.contains("routed document `/repo/a.md`"));
+        assert!(refusal.message.contains("published columns: `/repo/a.md`"));
+
+        let owned = gh110_receipt(false, "operator_owned_layout", &["/repo/a.md"]);
+        assert!(
+            !editor_route_layout_refusal(&owned, "/repo/a.md")
+                .unwrap()
+                .retryable
+        );
+        // `projection_published` is a successful command-plane terminal.
+        let published = gh110_receipt(false, "projection_published", &["/repo/a.md"]);
+        assert_eq!(editor_route_layout_refusal(&published, "/repo/a.md"), None);
+    }
+
+    #[test]
+    fn gh110_column_gate_describes_membership_not_exact_layout() {
+        let receipt = gh110_receipt(true, "observed_convergence", &["/repo/a.md", "/repo/b.md"]);
+        let refusal = editor_route_layout_refusal(&receipt, "/repo/z.md").unwrap();
+        assert!(refusal.retryable);
+        assert!(
+            refusal.message.contains(
+                "routed document `/repo/z.md` is not one of the published layout columns (`/repo/a.md`, `/repo/b.md`)"
+            ),
+            "{}",
+            refusal.message
+        );
+        assert!(refusal.message.contains("reason=observed_convergence"));
+        assert!(
+            !refusal.message.contains("exact visible"),
+            "{}",
+            refusal.message
+        );
+
+        let empty = gh110_receipt(true, "observed_convergence", &[]);
+        let refusal = editor_route_layout_refusal(&empty, "/repo/z.md").unwrap();
+        assert!(refusal.message.contains("published layout columns (none)"));
+
+        // A stacked column is membership too, matching route readiness.
+        let stacked = gh110_receipt(true, "observed_convergence", &["/repo/a.md, /repo/z.md"]);
+        assert_eq!(editor_route_layout_refusal(&stacked, "/repo/z.md"), None);
+    }
+
+    #[test]
+    fn gh110_layout_gates_absorb_a_transient_unconverged_receipt() {
+        let mut reobserved = Vec::new();
+        let (receipt, observations) = await_editor_route_layout_gates(
+            "/repo/a.md",
+            Instant::now() + Duration::from_secs(5),
+            gh110_receipt(
+                false,
+                "superseded_by_newer_layout_state",
+                &["/repo/other.md"],
+            ),
+            |refusal, remaining| {
+                reobserved.push((refusal.to_string(), remaining));
+                Ok(gh110_receipt(true, "observed_convergence", &["/repo/a.md"]))
+            },
+        )
+        .unwrap();
+        assert_eq!(observations, 2);
+        assert_eq!(receipt.reason, "observed_convergence");
+        assert_eq!(reobserved.len(), 1);
+        assert!(
+            reobserved[0]
+                .0
+                .contains("reason=superseded_by_newer_layout_state")
+        );
+        assert!(
+            reobserved[0].1 > Duration::ZERO && reobserved[0].1 <= Duration::from_secs(5),
+            "re-observation is bounded by the remaining budget: {:?}",
+            reobserved[0].1
+        );
+    }
+
+    #[test]
+    fn gh110_layout_gates_absorb_a_momentarily_missing_column() {
+        let (receipt, observations) = await_editor_route_layout_gates(
+            "/repo/a.md",
+            Instant::now() + Duration::from_secs(5),
+            gh110_receipt(true, "observed_convergence", &["/repo/other.md"]),
+            |_, _| Ok(gh110_receipt(true, "observed_convergence", &["/repo/a.md"])),
+        )
+        .unwrap();
+        assert_eq!(observations, 2);
+        assert_eq!(receipt.columns, vec!["/repo/a.md".to_string()]);
+    }
+
+    #[test]
+    fn gh110_layout_gates_fail_informatively_when_the_budget_is_exhausted() {
+        let started = Instant::now();
+        let budget = Duration::from_millis(400);
+        let missing = || gh110_receipt(true, "observed_convergence", &["/repo/other.md"]);
+        let mut observed = 1;
+        let error = await_editor_route_layout_gates(
+            "/repo/a.md",
+            started + budget,
+            missing(),
+            |_, remaining| {
+                // Stand-in for blocking on the next projection change.
+                std::thread::sleep(remaining.min(Duration::from_millis(100)));
+                observed += 1;
+                Ok(missing())
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= budget,
+            "kept re-observing until the deadline: {elapsed:?}"
+        );
+        assert!(
+            elapsed < budget + Duration::from_secs(2),
+            "bounded: {elapsed:?}"
+        );
+        assert!(observed >= 2, "re-observed at least once: {observed}");
+        assert!(
+            error.contains(
+                "routed document `/repo/a.md` is not one of the published layout columns (`/repo/other.md`)"
+            ),
+            "{error}"
+        );
+        assert!(error.contains("reason=observed_convergence"), "{error}");
+        assert!(
+            error.contains(&format!("after {observed} layout observation(s)")),
+            "{error}"
+        );
+        assert!(error.contains("--wait-for-ready budget"), "{error}");
+        assert!(error.contains("exhausted"), "{error}");
+    }
+
+    #[test]
+    fn gh110_layout_gates_with_zero_budget_observe_exactly_once() {
+        let error = await_editor_route_layout_gates(
+            "/repo/a.md",
+            Instant::now(),
+            gh110_receipt(false, "projection_effect_in_flight", &["/repo/a.md"]),
+            |_, _| panic!("no budget left to re-observe"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("did not converge before dispatch"),
+            "{error}"
+        );
+        assert!(
+            error.contains("reason=projection_effect_in_flight"),
+            "{error}"
+        );
+        assert!(error.contains("after 1 layout observation(s)"), "{error}");
+        assert!(error.contains("exhausted"), "{error}");
+    }
+
+    #[test]
+    fn gh110_operator_owned_layout_is_terminal_not_retried() {
+        let error = await_editor_route_layout_gates(
+            "/repo/a.md",
+            Instant::now() + Duration::from_secs(5),
+            gh110_receipt(false, "operator_owned_layout", &["/repo/a.md"]),
+            |_, _| panic!("operator-owned layout must not be re-observed"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("reason=operator_owned_layout"), "{error}");
+        assert!(error.contains("terminal"), "{error}");
+    }
+
+    #[test]
+    fn gh110_layout_gates_propagate_a_reobservation_error() {
+        let error = await_editor_route_layout_gates(
+            "/repo/a.md",
+            Instant::now() + Duration::from_secs(5),
+            gh110_receipt(
+                false,
+                "superseded_by_newer_layout_state",
+                &["/repo/other.md"],
+            ),
+            |_, _| Err(anyhow::anyhow!("tmux observation failed")),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("tmux observation failed"), "{error}");
     }
 
     #[test]

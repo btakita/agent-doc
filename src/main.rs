@@ -2373,13 +2373,17 @@ enum Commands {
         /// Wait for typing to settle before routing (milliseconds, 0 = no debounce)
         #[arg(long, default_value_t = 500)]
         debounce: u64,
-        /// Override the bounded wait for the authoritative actor to become
-        /// dispatch-ready (seconds). When the actor is still in `starting`
-        /// state, route normally fails closed after a harness-specific
-        /// timeout (e.g. 10s for claude). User-initiated dispatches —
-        /// especially the JB plugin's `Run Agent Doc` — can pass a longer
-        /// wait (e.g. 60) so the user does not have to manually rerun while
-        /// the supervisor is still booting. Capped at 600s.
+        /// Total readiness budget in seconds, capped at 600. When the route
+        /// goes through the controller editor route (`cp:editor_route`, as the
+        /// editor plugins do), the budget covers layout convergence first —
+        /// the published layout is re-observed until it converges and contains
+        /// the routed document — and the harness gets only the remainder to
+        /// become dispatch-ready. For a direct route it is the wait for the
+        /// authoritative actor to become dispatch-ready: when the actor is
+        /// still `starting`, route normally fails closed after a
+        /// harness-specific timeout (e.g. 10s for claude), and user-initiated
+        /// dispatches can pass a longer wait (e.g. 60) so the user does not
+        /// have to rerun while the supervisor is still booting.
         #[arg(long)]
         wait_for_ready: Option<u64>,
         /// Bypass editor convergence and write route-owned document mutations

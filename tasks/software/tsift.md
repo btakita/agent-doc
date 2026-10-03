@@ -20,7 +20,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -313,23 +312,39 @@ The exchange is now 203 lines, but the queue is active, so I'm not compacting.
 - **CI:** the [run](https://github.com/btakita/tsift/actions) on `709cd35` was still in progress at closeout. The previous run, on `bc55362` (`#jaicrate`), passed.
 
 `#graphrefreshperf` is still running in its subagent. `#jaicratepublish` is waiting for operator approval. The exchange is 250 lines, but the queue is active, so I'm not compacting.
+
+### Re: #graphrefreshperf done — opus-5.5 · 2026-10-03T04:01-04:00
+
+> **Queue prompt:** do [#graphrefreshperf]
+
+**Done.** The subagent pushed `103ba2e` to `main` without force. `make check` exit 0. Installed with `--features all-languages`. The root haiven-sdk refresh now **finishes in about 22 s cold, and 126 ms on an immediate re-run**. Before the fix it was killed after 180 s, and had once run 13 minutes without finishing.
+- **Root cause: an infinite loop, not slowness.** A C++17 nested namespace (`namespace haiven::wire {}`) produces two namespace spans over the same bytes, and each became the other's parent. `link_ast_navigation_edges` climbs the parent chain looking for the nearest enclosing module. With no module in that pair, it went round them forever. The libc time in the profile was the string compares from the map lookups in that loop.
+  - There were 279 such cycles, in the generated Unreal `Vocabulary/` headers `ErrorCode.h`, `WsErrorCode.h` and `MessageType.h`.
+  - Finding each span's parent was also quadratic per file, which made the large generated headers slow.
+- **Fix** (`packages/tsift-cli/src/lib.rs`):
+  - The climb stops when it revisits a span. A cyclic span gets no `enclosing_module` edge.
+  - Parents are found from one sort of each file's spans instead of comparing every pair. Files with crossing spans keep the old pairwise check. Entries are borrowed instead of cloned.
+- **Output proven unchanged:** on two corpora the old code can finish, the sorted edge and node dumps are byte-identical between the old and new binaries.
+  - haiven-sdk without `sdks/unreal`: 75,826 edges.
+  - tsift's own source: 123,157 edges, including 1,737 `enclosing_module` edges.
+- **Tests:** a perf-gate budget, `AST_NAVIGATION_LINK_BUDGET_MICROS = 2_000_000`, with a timed test on a synthetic corpus shaped like the failing case. The other new tests:
+  - one comparing the new parent lookup with the old pairwise one on 600 randomized cases;
+  - one checking that the nested-namespace cycle terminates.
+
+  Each was shown to catch its bug by breaking the code on purpose. Going back to the pairwise lookup took 3.9 s against the 2 s budget, removing the cycle guard hung the test until its timeout, and breaking the lookup made the comparison test fail.
+- **Docs:** `specs/graph.md` and VERSIONS.
+
+**Follow-ups:**
+- **`#sdktraceroot` is ungated,** because the root refresh now finishes. It can import into the root graph so that SDK declarations join by `path:line`.
+- **New item `#kotlinsymclash`:** tsift links two Kotlin grammars, `tree-sitter-kotlin-ng` from tsift-graph and `tree-sitter-kotlin-sg` from ast-grep. Both export the C symbol `tree_sitter_kotlin`, so link order decides which one is used. The subagent hit three Kotlin test failures when it declared its new module first, and worked around it with module order. Release binaries are currently correct.
+
+The exchange is 277 lines, but the queue is active, so I'm not compacting.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#jaicrate]~~
-- ~~do [#xsdcontract]~~
-- ~~do [#wsdlcontract]~~
-- ~~do [#releasepublishbindings]~~
-- ~~#subagent: Add C bindings~~
-- ~~#subagent: Add Odin bindings~~
-- ~~#subagent: Add Jai bindings~~
-- ~~#subagent: [#sdktsiftedges]~~
-- do [#graphrefreshperf]
-- ~~do [#neighborhoodlimit0]~~
-- ~~do [#sdktraceroot]~~
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -338,13 +353,13 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#graphrefreshperf] Root-scope graph-db refresh over the haiven-sdk tree (sdk-ruff worktree of the feat/codegen-trace branch) ran >13 min without finishing; ~50% of samples in link_ast_navigation_edges plus heavy libc. Profile, fix the hot path, add a perf-gate case.
+- [ ] [#sdktraceroot] [recommended] After #graphrefreshperf: import haiven-sdk codegen/trace.json into the ROOT graph so per-language declarations join by path:line, and investigate unjoined trace nodes (8/51 contracts, 10/23 events, 56/195 REST ops, 50 components); check for a contracts-revision mismatch vs the trace pin.
+- [ ] [#kotlinsymclash] tsift links two Kotlin grammars that both export the C symbol tree_sitter_kotlin: tree-sitter-kotlin-ng (tsift-graph) and tree-sitter-kotlin-sg (via ast-grep). Which one resolves depends on link order; declaring a new module at the top of tsift-cli lib.rs flipped it and 3 Kotlin tests failed with Invalid field name name. 103ba2e worked around it by module order. Fix for real: link one Kotlin grammar (align ast-grep and tsift-graph on the same crate, or feature-gate one), and add a test that pins the expected grammar.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#sdktraceroot] [recommended] After #graphrefreshperf: import haiven-sdk codegen/trace.json into the ROOT graph so per-language declarations join by path:line, and investigate unjoined trace nodes (8/51 contracts, 10/23 events, 56/195 REST ops, 50 components); check for a contracts-revision mismatch vs the trace pin.
 - [/] [#jaicratepublish] [operator-verify] Before the next tsift release: publish tsift-tree-sitter-jai 0.1.102 to crates.io once by hand with a token (cargo publish -p tsift-tree-sitter-jai, token in passage), then register the btakita/tsift release.yml trusted publisher for the crate on crates.io. The release publish job uses OIDC trusted publishing, which only works for crates that already exist, so without this the next release fails at this crate before tsift-graph. Gated on operator approval of the publish and the crates.io settings change.
 <!-- /agent:review -->
 

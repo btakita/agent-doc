@@ -161,6 +161,17 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
   - If the new binary fails, the upgrade fails with it. If the new binary can't be launched, the reconcile falls back to the old one with a warning. `--auto` keeps using the upgraded binary for later cycles.
 - **Merge:** combined with #114's per-target summary, which now prints from the new image too.
 - **Limitation:** this only helps upgrades *from* a release that contains it, and the hidden flags are now a contract between releases.
+
+### Re: GH #114 — upgrade summary wording — opus-5.5 · 2026-10-02T23:58-04:00
+
+> **Queue prompt:** #subagents #gh-fix https://github.com/btakita/agent-doc/issues/114
+
+**Fixed in a subagent, merged, installed, pushed, closed** (agent-doc `7287cec74`; [GH #114](https://github.com/btakita/agent-doc/issues/114) closed).
+
+- **Fix:** the upgrade summary is now built from per-target outcomes (hot-upgraded / installed / staged / restart-required / unchanged), so a staged target is no longer counted as "updated".
+- **Permanent decline:** on a build where agent-doc declines the restart-free upgrade, the summary says `Restart <IDE> to load plugin vX; restart-free upgrade is unavailable on this build` with no "on its own" hedge. A note says the native library reloads by itself and only the plugin needs the restart. The summary is also logged to ops.log as `plugin_upgrade_summary`.
+- **Merge:** resolved against #113, so the auto watcher reports from the new binary's per-target outcomes.
+- **Exchange size:** this document's exchange is now 131 lines across 8 responses. I'm not compacting mid-drain without the explicit opt-in.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -177,7 +188,7 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/111~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/112~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/113~~
-- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/114
+- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/114~~
 - #subagents #gh-fix https://github.com/btakita/agent-doc/issues/115
 - #subagents do [#preflightdeadline]
 - changes to the queue & the exchange should immediately be picked up once done as steering

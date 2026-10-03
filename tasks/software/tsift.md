@@ -20,6 +20,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -43,6 +44,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 25 response topic(s): recovered response; Should we release + publish?; #releasepublishbindings; 22 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): #ciwalflakeregress; Response; release + publish; 1 more
+
+### Re: [#haivenrootsync] dispatched to a subagent — opus-5-5 · 2026-10-03T16:52-04:00
+
+> **Queue prompt:** do [#haivenrootsync]
+
+I claimed this queue item and started a background subagent on it. The queue's `#subagents` preset asks for that.
+
+Another live session owns the haiven-sdk root checkout. It is on `feat/unreal-conformance-runner` at `8ff7e2f`, with uncommitted edits to `AGENTS.md` and `haiven-contracts`. So the subagent will:
+- leave that checkout alone (read-only git commands only);
+- build the integration in a worktree outside agent-loop: the `57dd11c` generated files from `feat/codegen-trace`, plus the `haiven-contracts` gitlink moved to `1ce0581`;
+- run haiven-sdk's own checks, then push a new integration branch without force (not `main`, and not the owner's branch);
+- re-import `trace.json` against its worktree under a separate source id, expecting about 1,612/1,616;
+- find the session document that owns haiven-sdk and write out the commands that session needs to adopt the change.
+
+I'll close the item when it reports back.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 

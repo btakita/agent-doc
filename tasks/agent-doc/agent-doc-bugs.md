@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -510,6 +511,45 @@ The review item from the last response, `#steergatenamodata`, was archived as "d
 ### Re: review item restored under a new id — opus-5.5 · 2026-10-03T13:17-04:00
 
 The restore above landed in git, but the next preflight removed it again, this time on purpose. `#steergatenamodata` still exists in the done archive, and an open item that reuses a done id is treated as a stale duplicate. So it's back under a fresh id, `#steergatemodelrerun`, with the same gate and the same next step. The old id stays in the archive as history.
+
+### Re: Is the perceptron currently working? — opus-5.5 · 2026-10-03T14:07-04:00
+
+> **Queue prompt:**
+>
+> do [#perceptroncurrentlyworki]
+
+
+> **Queue prompt:** Is the perceptron currently working?
+
+**It was running but not learning. That was a bug, now fixed and installed (`636f1f2c1`).**
+
+**What was working:**
+- The learned gate is on and decides every mid-turn steering delivery.
+- Its one logged decision (12:44 today, your `do [#steergatenamo]` edit) scored 0.881, so it sent.
+- Its weights were still the seed, so it decided exactly like the deterministic gate. That part is by design until it trains.
+
+**What was broken:**
+- `agent-doc steering --explain` showed **0 labelled updates**.
+- That 12:44 decision still had no label more than three hours later, against a 45-second label window.
+
+**Why:**
+- A decision gets its label (premature, on time or late) from the *next* observation of the document. When you don't edit during a turn, that next observation is the closeout write, often 20 minutes later.
+- That observation runs in a fresh hook process, which reloaded only the last ~6.75 minutes of rows. So the old row never loaded, never got a label, and never trained the weights.
+
+**The fix:**
+- Loading now also pulls in every row of the document that still has no label, whatever its age (the newest 500).
+- The next observation labels those rows, and each label trains the model once.
+- Two regression tests cover it: the store query, and old-row labelling and training.
+- `make check` passed: 10661 tests, none failed.
+- Installed with `make install` and pushed. CI for `636f1f2c1` was queued; the previous two runs were green.
+
+**Two limits to know about:**
+- **It only sees mid-turn edits.** Text you type while no turn is running is picked up by preflight at the start of the next turn, and the gate is never consulted for it. That's why only one decision has been logged since it shipped. The `#steergatemodelrerun` gate of 200 labelled rows will take a while to reach.
+- **It is personal per operator, per project.** The weights are stored under `steering_gate_model:<operator>` in each project's `.agent-doc/state.db`. The operator name comes from `$AGENT_DOC_OPERATOR`, falling back to `$USER`. So two people on one machine train separate models, and the same person starts fresh in each project. No weights row exists for you yet, because nothing had trained.
+
+The two `semantic_completion_match` warnings this turn are false positives. `#steergatemodelrerun` is the restored copy of the reaped item, and this question has nothing to do with `#pypiquotafix`.
+
+Your steering test reached me at 14:07; it runs next in the queue.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -518,7 +558,9 @@ The restore above landed in git, but the next preflight removed it again, this t
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#perceptroncurrentlyworki]~~
+- This is a test to see if the real-time steering works. Do you see it right now? Tell me when you see it. 13:59:17 ET
 <!-- /agent:queue -->
 
 

@@ -179,6 +179,14 @@ has moved to another i3 window, editor-origin focus is suppressed. Automatic
 layout reconciliation may still repair pane placement, but its focus target is
 stripped at the effect boundary so it cannot surface `stash` after the editor
 loses desktop focus.
+- A `focus_only` refusal the selection lane cannot repair (`actor_pane_not_visible`,
+`outside_agent_doc_window`) escalates to the structural layout owner. With no
+editor columns it may republish the retained desired layout **unchanged**, and
+only when that layout already covers the document. It must never append the
+asking document as a new column (GH #106): the escalation's output is its own
+next input, so appending grew the column count by one per tab switch. An
+uncovered document fails closed with
+`controller_editor_surface_focus_escalation_skipped cause=document_outside_retained_layout`.
 - Explicit `--pane` remains a direct tmux selection escape hatch. `--blocking`
   keeps the legacy synchronous local actor/registry resolver and may surface a
   stashed pane before returning.

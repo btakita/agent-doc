@@ -19719,16 +19719,25 @@ fn focus_refusal_requires_structural_layout(reason: &str) -> bool {
 ///
 /// The structural layout is already retained in the pane layout graph, which is
 /// the owner this hand-off is addressed to, so fall back to its columns and let
-/// the caller move the focus onto `document`. A document the retained layout
-/// does not cover gets its own column: `exact_visible` would otherwise hide the
-/// very pane the escalation exists to un-stash.
+/// the caller move the focus onto `document`.
+///
+/// GH #106: the fallback must republish the retained layout *unchanged* or not
+/// at all. It used to append an uncovered `document` as a new column, and since
+/// the escalation publishes its result as the next desired layout, its output
+/// became its own next input: four documents asking in one second grew the
+/// column count 1→2→3→4, in the order they asked rather than their editor
+/// split position, for a surface that never reported more than one column.
+/// Appending encodes "I do not know where this goes" as a structural claim, so
+/// an uncovered document fails closed (`cause=document_outside_retained_layout`)
+/// like the empty-layout case. Republishing a covered layout as-is is a fixed
+/// point — the column set can never exceed what the editor last observed.
 fn focus_escalation_columns(
     runtime: &ControllerRuntime,
     document: &str,
     columns: &[SurfaceColumn],
-) -> Option<(Vec<String>, &'static str)> {
+) -> std::result::Result<(Vec<String>, &'static str), &'static str> {
     if !columns.is_empty() {
-        return Some((
+        return Ok((
             columns
                 .iter()
                 .map(|column| column.files.join(","))
@@ -19736,17 +19745,20 @@ fn focus_escalation_columns(
             "editor_surface",
         ));
     }
-    let mut retained = runtime.pane_layout_desired()?.invocation.columns;
+    let retained = runtime
+        .pane_layout_desired()
+        .map(|desired| desired.invocation.columns)
+        .unwrap_or_default();
     if retained.is_empty() {
-        return None;
+        return Err("no_editor_columns");
     }
     if !retained
         .iter()
         .any(|column| column.split(',').any(|file| file == document))
     {
-        retained.push(document.to_string());
+        return Err("document_outside_retained_layout");
     }
-    Some((retained, "retained_layout"))
+    Ok((retained, "retained_layout"))
 }
 
 /// Hand a `Focus` intent the selection lane could not apply to the structural
@@ -19766,14 +19778,17 @@ fn escalate_focus_to_structural_layout(
     columns: &[SurfaceColumn],
     reason: &str,
 ) {
-    let Some((columns, source)) = focus_escalation_columns(runtime, document, columns) else {
-        agent_doc_ops_log_io::log_op(
-            &bootstrap.project_root,
-            &format!(
-                "controller_editor_surface_focus_escalation_skipped document={document} reason={reason} cause=no_editor_columns"
-            ),
-        );
-        return;
+    let (columns, source) = match focus_escalation_columns(runtime, document, columns) {
+        Ok(escalation) => escalation,
+        Err(cause) => {
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "controller_editor_surface_focus_escalation_skipped document={document} reason={reason} cause={cause}"
+                ),
+            );
+            return;
+        }
     };
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
@@ -26377,7 +26392,8 @@ mod tests {
     /// observation's own columns therefore skipped the escalation every time it
     /// mattered — 47 `cause=no_editor_columns` lines and zero escalations on
     /// agent-loop, with the pane still stashed. The retained structural layout
-    /// is the fallback, and the document must survive `exact_visible`.
+    /// is the fallback when it already covers the document (GH #106: it is
+    /// republished unchanged, never grown).
     #[test]
     fn a_focus_only_switch_escalates_from_the_retained_structural_layout() {
         let dir = tempfile::tempdir().unwrap();
@@ -26393,7 +26409,6 @@ mod tests {
         };
         let ledger = path("payments-ledger.md");
         let infra = path("infra.md");
-        let treasury = path("treasury.md");
 
         // A layout-changing switch converges a structural layout first; that is
         // the state a later focus-only switch escalates against.
@@ -26424,16 +26439,6 @@ mod tests {
             &[],
             "actor_pane_not_visible",
         );
-        // A document the retained layout does not cover still has to reach the
-        // layout owner, or `exact_visible` hides the pane being un-stashed.
-        escalate_focus_to_structural_layout(
-            &bootstrap,
-            runtime.as_ref(),
-            &treasury,
-            &[],
-            "outside_agent_doc_window",
-        );
-
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
@@ -26451,23 +26456,80 @@ mod tests {
             )),
             "the retained layout must be republished as-is when it covers the document: {ops_log}"
         );
-        assert!(
-            ops_log.contains(&format!(
-                "controller_editor_surface_focus_escalated document={treasury} \
-                 reason=outside_agent_doc_window columns=3 source=retained_layout"
-            )),
-            "an uncovered document must be added to the republished layout: {ops_log}"
-        );
 
         let desired = runtime.pane_layout_desired().unwrap();
         assert_eq!(
             desired.invocation.focus.as_deref(),
-            Some(treasury.as_str()),
+            Some(infra.as_str()),
             "the escalation's whole point is moving the focus onto the switched-to document"
         );
         assert!(
-            desired.invocation.columns.contains(&treasury),
+            desired.invocation.columns.contains(&infra),
             "the focused document must be visible in the layout it is focused in: {desired:?}"
+        );
+    }
+
+    /// GH #106: the retained-layout fallback was a feedback loop. It appended
+    /// every uncovered asking document to the last published layout and
+    /// republished the result, so four documents switching in one second grew
+    /// the columns 1→2→3→4. An uncovered document must fail closed, and no
+    /// sequence of focus-only escalations may grow the retained column set.
+    #[test]
+    fn focus_only_escalations_never_grow_the_retained_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let path = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+            path.canonicalize().unwrap().display().to_string()
+        };
+        let ledger = path("payments-ledger.md");
+        let others = [path("infra.md"), path("treasury.md"), path("audit.md")];
+
+        // One observed column, as a single-document editor surface reports.
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &ledger,
+            &[SurfaceColumn {
+                files: vec![ledger.clone()],
+            }],
+            "actor_pane_not_visible",
+        );
+        let observed = runtime.pane_layout_desired().unwrap().invocation.columns;
+        assert_eq!(observed, vec![ledger.clone()]);
+
+        for other in &others {
+            escalate_focus_to_structural_layout(
+                &bootstrap,
+                runtime.as_ref(),
+                other,
+                &[],
+                "actor_pane_not_visible",
+            );
+            let desired = runtime.pane_layout_desired().unwrap();
+            assert_eq!(
+                desired.invocation.columns, observed,
+                "a focus-only escalation must never grow the published layout: {desired:?}"
+            );
+        }
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        for other in &others {
+            assert!(
+                ops_log.contains(&format!(
+                    "controller_editor_surface_focus_escalation_skipped document={other} \
+                     reason=actor_pane_not_visible cause=document_outside_retained_layout"
+                )),
+                "an uncovered document must fail closed with a named cause: {ops_log}"
+            );
+        }
+        assert!(
+            !ops_log.contains("source=retained_layout"),
+            "no uncovered document may be escalated from the retained layout: {ops_log}"
         );
     }
 

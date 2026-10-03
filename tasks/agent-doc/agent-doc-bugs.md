@@ -19,7 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -283,6 +283,41 @@ The commit path already has a late-strike reconciler (`late_answered_free_text_s
 > **Operator note:** also fix in subagent (lazily.md repeated no-op preflight)
 
 A background subagent is working on this in its own worktree outside agent-loop. The report shows preflight finding no changes 4 times in 30 minutes while the operator was editing, and telling the operator to "save the file". I'll report its root cause and fix when it finishes.
+
+### Re: remove `queue: stop` — opus-5.5 · 2026-10-03T02:08-04:00
+
+> **Queue prompt:** We need to remove `queue: stop` entirely. This is too confusing.
+
+Done in agent-doc `8aec612ec` (pushed and installed; the superproject pointer is `3537aaf30e`).
+
+**The new model (`#queuestopremove`):** a queue is either **running** or **held**.
+- **Running:** no control, `go`, or `start`. No control is the default `go`.
+- **Held:** `queue: pause`, the only hold. Delete the line, or write `go` on the marker, to run it.
+
+**What changed:**
+- **Drains and halts** now clear the control. Nothing writes `stop`, and `merge_queue_control` refuses it. This was the lazily.md bug: a halt wrote `queue: stop` and `do [#lzwiremodel]` sat there with no visible reason.
+- **Holds the binary has to keep** now write `queue: pause` through the new `merge_queue_hold`: an operator `--- stop` fence it consumed, a wedged owner pane, and an operator command that preempts a drain. When that command finishes, the preempted queue goes back to the default `go`.
+- **Legacy input is migrated, never honored as a hold:**
+  - Frontmatter `queue: stop` and a lone `queue_active: false` read as no control and disappear on the next write.
+  - A `stop` token on the `agent:queue` marker is your hold gesture, so it reads as `pause`.
+- **What happens to the 20 tracked docs still carrying `queue: stop`:** only `tasks/software/lazily.md` has a live head. `do [#lzwiremodel]` will now run when that document's next preflight runs. None of the 20 mirror their backlog into the queue.
+- **Related fixes:**
+  - Frontmatter parsing now accepts an empty `---`/`---` block. Clearing the only key leaves exactly that, and it used to be rejected.
+  - The no-changes guidance from `#noopnamefault` now says "held (`queue: pause`) — delete that line".
+  - The specs and README describe `pause` as the one hold. The `--- stop` queue fence still exists; only the `queue:` control value is gone.
+
+**Verification:**
+- I updated about 60 tests to the new contract. Fixtures that meant "an inactive queue" now use `pause`, and drain tests now expect no control.
+- New regression test: `run_queue_maintenance_legacy_queue_stop_with_head_runs_and_drops_stop`, which reproduces the lazily.md case. With the legacy normalization disabled it fails.
+- `make check`: 10586 passed, exit 0. CI run 37101890374 was still in progress when I checked.
+
+**Housekeeping:**
+- My `rustfmt` run also reformatted six files I hadn't edited, through their parent modules. I reverted them, so they're not in the commit.
+- The other session's uncommitted `agent-doc-start-runtime-io/src/lib.rs` is still uncommitted. `make install` built with it.
+
+**Your question about `presets`:** today `prompt_presets` has no alias, and unknown frontmatter keys are silently ignored, so a `presets:` block does nothing. You've already queued the alias; it runs next, followed by release + publish.
+
+The exchange is past the size warning (285+ lines). I'll keep draining rather than stop to compact.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -291,7 +326,11 @@ A background subagent is working on this in its own worktree outside agent-loop.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~We need to remove `queue: stop` entirely. This is too confusing.~~
+- #subagents: Add `presets` as an alias to `prompt_presents`.
+- #subagents: tsift.md missed part the queue item that I wrote: `> **Queue prompt:** Should we release + publish the`
+- release + publish
 <!-- /agent:queue -->
 
 

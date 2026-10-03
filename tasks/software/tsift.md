@@ -507,15 +507,39 @@ I claimed each queue item and started it in its own background subagent and work
 - **Contracts-lock warning.** If that warning belongs in tsift's importer rather than in haiven-sdk codegen, the haiven-sdk agent reports the exact change instead of editing tsift. I'll queue it from that report.
 
 Each claim is released when its subagent reports back, and the item closes in that cycle.
+
+### Re: [#haivensdkfollow] done — haiven-sdk trace naming — opus-5-5 · 2026-10-03T15:12-04:00
+
+> **Queue prompt:** #subagent: do [#haivensdkfollow]
+
+The subagent pushed `57dd11c` to PR #62 (`feat/codegen-trace`) without force; the PR isn't merged. `make check` (run with `rtk proxy` so RTK couldn't hide failures) exited 0, and the 16 trace tests passed.
+
+**New fields in `trace.json`:**
+- **Vocabularies:** each vocabulary now carries its contract's `title` and `id`, read from the pinned contracts (`1ce0581`) rather than hard-coded. A test pins the three mappings: `ErrorCode`→`RestErrorCodeV0`, `MessageType`→`WsMessageTypeV0`, `WsErrorCode`→`WsErrorCodeV0`.
+- **WebSocket events:** every event now carries `message`, its AsyncAPI message key, plus `operation` when a send operation sends it. Three events have no operation: `chat.message` (`chat.send.event`), `chat.message.updated` (`chat.edit.event`) and `chat.typing` (`chat.typing.event`).
+- **Fail-fast checks:** generation now fails on a vocabulary schema with no `$id` or `title`, and on an event published under two message keys.
+- **Docs:** `codegen/README.md` documents the new fields.
+
+Running the generator changed only `trace.json`; `model.json` and every generated SDK file are unchanged.
+
+**The contracts-lock warning belongs in tsift.** The SDK always generates from `codegen/contracts.lock`, so its own output can't drift from that commit. Only tsift's importer knows which contracts checkout it indexed. The subagent didn't edit tsift, because two other subagents are pushing to it. I queued the change as `#tracelockjoin`; it also changes the importer to use the new fields.
+
+**Open risks:**
+- **`chat.typing` is joined wrongly today.** tsift's name-based join links the event to the client operation of the same name. `#tracelockjoin` fixes this.
+- **One tsift comment is wrong.** It says `model.json`'s `ws.requests` is keyed by operation; it's actually keyed by wire type. This is harmless today, and `#tracelockjoin` corrects it.
+- **Checks that didn't run locally:** tsc is missing, and the C# checks need .NET 10.0.400 (10.0.112 is installed). The conformance runners need a `../haiven-api` checkout. CI on the PR hasn't been checked.
+
+`#tsiftindexesinvalidate` and `#projectlevelopt` are still running in their subagents.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - #subagent: do [#tsiftindexesinvalidate]
 - #subagent: do [#haivensdkfollow]
 - #subagent: do [#projectlevelopt]
+- do [#tracelockjoin]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -524,8 +548,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tracelockjoin] (sdktracenaming) tsift graph-db haiven-trace importer, in packages/tsift-cli/src/graph_import.rs: (1) read the sibling codegen/contracts.lock commit and store it on the import-source node; (2) after refresh, compare it with the HEAD of the indexed haiven-contracts checkout (the submodule beside codegen/, else an indexed repo whose remote ends in haiven-contracts) and warn on mismatch, never fail; (3) join vocabularies on the new trace title (fall back to name), and join ws.events on operation, else the AsyncAPI message key; this fixes chat.typing, which today joins to the client chat.typing operation; (4) tests: mismatched lock warns, matching lock is silent, event with no operation joins by message key. Also fix the comment that says model.json ws.requests is keyed by operation; it is keyed by wire type. Needs haiven-sdk 57dd11c (PR 62).
 - [ ] [#tsiftindexesinvalidate] (extractorversion) tsift indexes do not invalidate when extractors change: after installing daac4fe a plain tsift index skipped unchanged files, so new TS method / C++ namespace var / C# using-alias symbols appeared only after index --rebuild. Record an extractor/schema version per indexed file (or per index) and re-extract on mismatch; add a regression test.
-- [ ] [#haivensdkfollow] [recommended] (sdktracenaming) haiven-sdk PR 62 follow-ups (other repo, not tsift): carry the schema id/title for vocabularies (MessageType->WsMessageTypeV0, WsErrorCode->WsErrorCodeV0, ErrorCode ambiguous vs RestErrorCodeV0) and the AsyncAPI message key for operationless events (chat.message, chat.message.updated) in trace.json; have the trace import warn when codegen/contracts.lock differs from the indexed contracts submodule.
 - [ ] [#projectlevelopt] [recommended] (luaulegacy) Project-level opt-in to index .lua files as Luau (Roblox/Rojo legacy projects keep Luau in .lua); today only .luau maps to Luau. Also consider declare/type function once tree-sitter-luau supports them.
 <!-- /agent:backlog -->
 

@@ -794,7 +794,16 @@ pub struct Frontmatter {
     ///     Today is 2026-04-25.
     ///     Keep the work tree clean.
     /// ```
-    #[serde(default, skip_serializing_if = "PromptPresets::is_empty")]
+    ///
+    /// `presets:` is an alias (`#presetsalias`). [`write_preserving`] writes the
+    /// map back under the spelling the operator used. When a document carries
+    /// BOTH keys, the two maps are merged and `prompt_presets` wins on a name
+    /// collision (see [`fold_presets_alias`]).
+    #[serde(
+        default,
+        skip_serializing_if = "PromptPresets::is_empty",
+        alias = "presets"
+    )]
     pub prompt_presets: PromptPresets,
     /// How free-text work admitted from `agent:exchange` or `agent:queue` should be
     /// executed after the binary creates backlog items. Values: `auto`, `goal`,
@@ -1369,9 +1378,64 @@ pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
     let Some((yaml, body)) = split_frontmatter(content)? else {
         return Ok((Frontmatter::default(), content));
     };
-    let mut fm: Frontmatter = serde_yaml::from_str(yaml)?;
+    let mut fm = deserialize_frontmatter_yaml(yaml)?;
     normalize_queue_control(&mut fm);
     Ok((fm, body))
+}
+
+/// Canonical frontmatter key for prompt presets.
+pub const PROMPT_PRESETS_KEY: &str = "prompt_presets";
+/// Operator-facing alias for [`PROMPT_PRESETS_KEY`] (`#presetsalias`).
+pub const PROMPT_PRESETS_ALIAS_KEY: &str = "presets";
+
+/// Deserialize a raw frontmatter YAML region (no `---` fences) into the typed
+/// [`Frontmatter`], folding the `presets:` alias into `prompt_presets:` when a
+/// document spells both. Serde's `alias` alone rejects that as a duplicate field,
+/// which would make the WHOLE document unreadable over a preset spelling.
+pub fn deserialize_frontmatter_yaml(yaml: &str) -> Result<Frontmatter, serde_yaml::Error> {
+    match serde_yaml::from_str::<Frontmatter>(yaml) {
+        Ok(fm) => Ok(fm),
+        Err(err) => match fold_presets_alias(yaml) {
+            Some(folded) => serde_yaml::from_value(folded),
+            None => Err(err),
+        },
+    }
+}
+
+/// `#presetsalias`: when a frontmatter mapping carries both `prompt_presets:` and
+/// its alias `presets:`, merge them into one `prompt_presets` map.
+///
+/// Decision: `prompt_presets` wins. Its entries come first, in document order,
+/// and on a name collision its value is kept. `presets` entries with names not
+/// already present are appended after them. A `presets:` value that is not a
+/// mapping (null while being typed, or a scalar) adds nothing. Returns `None`
+/// when the region is not a mapping or does not carry both keys.
+pub fn fold_presets_alias(yaml: &str) -> Option<serde_yaml::Value> {
+    let serde_yaml::Value::Mapping(mut map) =
+        serde_yaml::from_str::<serde_yaml::Value>(yaml).ok()?
+    else {
+        return None;
+    };
+    let canonical_key = serde_yaml::Value::from(PROMPT_PRESETS_KEY);
+    let alias_key = serde_yaml::Value::from(PROMPT_PRESETS_ALIAS_KEY);
+    if !map.contains_key(&canonical_key) || !map.contains_key(&alias_key) {
+        return None;
+    }
+    let alias = map.remove(&alias_key)?;
+    let canonical = map.get_mut(&canonical_key)?;
+    if canonical.is_null() {
+        *canonical = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+    }
+    if let (serde_yaml::Value::Mapping(canonical), serde_yaml::Value::Mapping(alias)) =
+        (canonical, alias)
+    {
+        for (name, value) in alias {
+            if !canonical.contains_key(&name) {
+                canonical.insert(name, value);
+            }
+        }
+    }
+    Some(serde_yaml::Value::Mapping(map))
 }
 
 /// Return whether document content resolves to the CRDT write strategy.
@@ -1409,7 +1473,7 @@ pub fn session_id_from_content(content: &str) -> Option<String> {
 /// differs from the input; `None` when nothing safe recovered it (the caller then
 /// surfaces a user-facing message via [`contextualize_parse_error`]).
 pub fn repair_frontmatter_yaml(yaml: &str) -> Option<String> {
-    if serde_yaml::from_str::<Frontmatter>(yaml).is_ok() {
+    if deserialize_frontmatter_yaml(yaml).is_ok() {
         return None; // already valid — nothing to repair
     }
     let mut repaired = String::with_capacity(yaml.len());
@@ -1429,7 +1493,7 @@ pub fn repair_frontmatter_yaml(yaml: &str) -> Option<String> {
         }
         repaired.push('\n');
     }
-    if repaired != yaml && serde_yaml::from_str::<Frontmatter>(&repaired).is_ok() {
+    if repaired != yaml && deserialize_frontmatter_yaml(&repaired).is_ok() {
         Some(repaired)
     } else {
         None
@@ -1469,7 +1533,7 @@ pub fn parse_for_startup(file_display: &str, content: &str) -> StartupFrontmatte
                 };
             };
             match repair_frontmatter_yaml(yaml) {
-                Some(repaired_yaml) => match serde_yaml::from_str::<Frontmatter>(&repaired_yaml) {
+                Some(repaired_yaml) => match deserialize_frontmatter_yaml(&repaired_yaml) {
                     Ok(mut fm) => {
                         normalize_queue_control(&mut fm);
                         StartupFrontmatter::Repaired {
@@ -1634,7 +1698,7 @@ struct FrontmatterBlock {
 fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String> {
     let old_yaml = raw_frontmatter_yaml(original)?;
     let canonical = canonical_for_write(fm);
-    let new_map = match serde_yaml::to_value(canonical.as_ref()).ok()? {
+    let mut new_map = match serde_yaml::to_value(canonical.as_ref()).ok()? {
         serde_yaml::Value::Mapping(m) => m,
         _ => return None,
     };
@@ -1662,6 +1726,8 @@ fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String
         }
     };
 
+    let keep_verbatim = presets_alias_spelling(original, &blocks, fm, &mut new_map)?;
+
     let mut out: Vec<String> = Vec::with_capacity(blocks.len() + new_map.len());
     let mut emitted: Vec<String> = Vec::with_capacity(blocks.len());
     for block in blocks {
@@ -1669,6 +1735,11 @@ fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String
             out.push(block.text);
             continue;
         };
+        if keep_verbatim.contains(&key) {
+            out.push(block.text);
+            emitted.push(key);
+            continue;
+        }
         let key_value = serde_yaml::Value::String(key.clone());
         match new_map.get(&key_value) {
             // Unchanged — keep the operator's bytes exactly as typed.
@@ -1691,6 +1762,48 @@ fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String
         return Some(String::new());
     }
     Some(format!("{}\n", out.join("\n")))
+}
+
+/// `#presetsalias`: keep the operator's spelling of the prompt-presets key.
+///
+/// The typed [`Frontmatter`] always serialises the map as `prompt_presets`, so
+/// without this a document written with `presets:` would have that block dropped
+/// as "retired" and a `prompt_presets:` copy appended on the first unrelated
+/// write. Only acts when the original carries a top-level `presets:` block:
+/// - presets unchanged by the write → every presets block (`presets`, and
+///   `prompt_presets` when both are spelled) keeps its original bytes; the
+///   returned keys are emitted verbatim;
+/// - presets changed, only `presets:` spelled → the new map is written under
+///   `presets`, in place;
+/// - presets changed, both spelled → the merged map is written under
+///   `prompt_presets` and the `presets` block is retired (one key, no ambiguity).
+///
+/// Returns `None` (fall back to [`write`]) when the original no longer parses.
+fn presets_alias_spelling(
+    original: &str,
+    blocks: &[FrontmatterBlock],
+    fm: &Frontmatter,
+    new_map: &mut serde_yaml::Mapping,
+) -> Option<Vec<String>> {
+    let has_block = |name: &str| blocks.iter().any(|b| b.key.as_deref() == Some(name));
+    if !has_block(PROMPT_PRESETS_ALIAS_KEY) {
+        return Some(Vec::new());
+    }
+    let has_canonical = has_block(PROMPT_PRESETS_KEY);
+    let canonical_key = serde_yaml::Value::from(PROMPT_PRESETS_KEY);
+    let (old_fm, _) = parse(original).ok()?;
+    if old_fm.prompt_presets == fm.prompt_presets {
+        new_map.remove(&canonical_key);
+        let mut keep = vec![PROMPT_PRESETS_ALIAS_KEY.to_string()];
+        if has_canonical {
+            keep.push(PROMPT_PRESETS_KEY.to_string());
+        }
+        return Some(keep);
+    }
+    if !has_canonical && let Some(value) = new_map.remove(&canonical_key) {
+        new_map.insert(serde_yaml::Value::from(PROMPT_PRESETS_ALIAS_KEY), value);
+    }
+    Some(Vec::new())
 }
 
 /// Serialise a single `key: value` pair as YAML lines (no trailing newline).
@@ -2131,7 +2244,8 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                     fm.auto_done = Some(enabled);
                 }
             }
-            "prompt_presets" => {
+            // `#presetsalias`: a patch may spell the map either way.
+            "prompt_presets" | "presets" => {
                 // `#presetnullblank`: parse through `PromptPresets` so a key the
                 // operator has declared but not yet given a value stays a null and
                 // is written back as one. Coercing it to `""` here is what made the
@@ -4839,5 +4953,129 @@ mod tests {
 
         let (aliased, _) = parse("---\ndogfood_mode: false\n---\n").unwrap();
         assert_eq!(aliased.dogfood_mode, Some(false));
+    }
+
+    /// `#presetsalias`: `presets:` parses exactly like `prompt_presets:`.
+    #[test]
+    fn presets_alias_parses_like_prompt_presets() {
+        let aliased = "---\npresets:\n  '#ship': run checks then push\n  plain: do it\n---\nBody\n";
+        let canonical =
+            "---\nprompt_presets:\n  '#ship': run checks then push\n  plain: do it\n---\nBody\n";
+        let (a, _) = parse(aliased).unwrap();
+        let (c, _) = parse(canonical).unwrap();
+        assert_eq!(a.prompt_presets, c.prompt_presets);
+        assert_eq!(
+            a.prompt_presets.get("#ship").map(String::as_str),
+            Some("run checks then push")
+        );
+        assert_eq!(
+            resolve_prompt_preset_key(&a.prompt_presets, "ship").as_deref(),
+            Some("#ship")
+        );
+        // A patch may spell the key either way too.
+        let patched =
+            merge_fields("---\nagent: claude\n---\nBody\n", "presets:\n  '#x': y\n").unwrap();
+        let (p, _) = parse(&patched).unwrap();
+        assert_eq!(p.prompt_presets.get("#x").map(String::as_str), Some("y"));
+    }
+
+    /// `#presetsalias`: a write that changes ANOTHER key keeps the operator's
+    /// `presets:` block byte-for-byte — no rename to `prompt_presets:`, no
+    /// duplicate key appended.
+    #[test]
+    fn presets_alias_spelling_survives_an_unrelated_frontmatter_write() {
+        let content = concat!(
+            "---\n",
+            "agent: 'claude'\n",
+            "presets:\n",
+            "  '#ship': \"run checks then push\"\n",
+            "  '#half':\n",
+            "queue: start\n",
+            "---\n",
+            "Body\n",
+        );
+        for updated in [
+            merge_queue_control(content, "go").unwrap(),
+            clear_queue_control(content).unwrap(),
+            set_session_id(content, "abc-123").unwrap(),
+        ] {
+            assert!(
+                updated.contains("presets:\n  '#ship': \"run checks then push\"\n  '#half':\n"),
+                "{updated}"
+            );
+            assert!(!updated.contains("prompt_presets"), "{updated}");
+            assert_eq!(updated.matches("presets:").count(), 1, "{updated}");
+            assert!(updated.contains("agent: 'claude'\n"), "{updated}");
+        }
+    }
+
+    /// `#presetsalias`: when the presets map itself changes, the new map is
+    /// written under the operator's `presets:` spelling, in place.
+    #[test]
+    fn presets_alias_spelling_survives_a_presets_change() {
+        let content = "---\npresets:\n  '#a': one\nagent: claude\n---\nBody\n";
+        let updated = merge_fields(content, "prompt_presets:\n  '#a': one\n  '#b': two\n").unwrap();
+        assert!(!updated.contains("prompt_presets"), "{updated}");
+        assert!(updated.starts_with("---\npresets:\n"), "{updated}");
+        let (fm, _) = parse(&updated).unwrap();
+        assert_eq!(fm.prompt_presets.get("#b").map(String::as_str), Some("two"));
+    }
+
+    /// `#presetsalias` decision: both keys present is NOT a parse error (serde's
+    /// bare `alias` rejects it as a duplicate field, which would make the whole
+    /// document unreadable). The maps merge; `prompt_presets` wins a name
+    /// collision; alias-only names are appended. An unrelated write keeps both
+    /// blocks verbatim.
+    #[test]
+    fn presets_and_prompt_presets_both_present_merge_with_prompt_presets_winning() {
+        let content = concat!(
+            "---\n",
+            "prompt_presets:\n",
+            "  '#shared': canonical body\n",
+            "  '#only-canonical': c\n",
+            "presets:\n",
+            "  '#shared': alias body\n",
+            "  '#only-alias': a\n",
+            "queue: start\n",
+            "---\n",
+            "Body\n",
+        );
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(
+            fm.prompt_presets.keys().collect::<Vec<_>>(),
+            vec!["#shared", "#only-canonical", "#only-alias"]
+        );
+        assert_eq!(
+            fm.prompt_presets.get("#shared").map(String::as_str),
+            Some("canonical body")
+        );
+        assert!(matches!(
+            parse_for_startup("doc.md", content),
+            StartupFrontmatter::Ok(_)
+        ));
+        // A null `presets:` (still being typed) contributes nothing.
+        let (half, _) = parse("---\nprompt_presets:\n  '#a': x\npresets:\n---\n").unwrap();
+        assert_eq!(half.prompt_presets.len(), 1);
+
+        let updated = merge_queue_control(content, "go").unwrap();
+        assert!(
+            updated.contains(concat!(
+                "prompt_presets:\n",
+                "  '#shared': canonical body\n",
+                "  '#only-canonical': c\n",
+                "presets:\n",
+                "  '#shared': alias body\n",
+                "  '#only-alias': a\n",
+            )),
+            "{updated}"
+        );
+
+        // Changing the presets collapses both spellings into the canonical key.
+        let changed = merge_fields(content, "prompt_presets:\n  '#new': n\n").unwrap();
+        assert_eq!(changed.matches("presets:").count(), 1, "{changed}");
+        assert!(
+            changed.contains("prompt_presets:\n  '#new': n\n"),
+            "{changed}"
+        );
     }
 }

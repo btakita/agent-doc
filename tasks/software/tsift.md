@@ -561,13 +561,44 @@ detect_rojo = true   # optional, off by default
 **agent-doc defect:** the mid-turn steering hook delivered this session's "dispatch now" items to the subagent's own tool calls. The subagent ignored them. I filed it as `steeringleaksubagent` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 `#tsiftindexesinvalidate` and `#tracelockjoin` are still running.
+
+### Re: [#tsiftindexesinvalidate] done — extractor versions — opus-5-5 · 2026-10-03T15:25-04:00
+
+> **Queue prompt:** #subagent: do [#tsiftindexesinvalidate]
+
+Pushed `be24057` to tsift `main` without force, on top of the Luau opt-in. Rebasing onto it hit a conflict at the same comparison in `index.rs`, which the subagent resolved. `make check` exited 0 after the rebase, and `tsift 0.1.102` is installed with `--features all-languages`.
+
+**What changed:** each indexed file now records the extractor version that produced its rows. Before, a plain `tsift index` skipped files whose mtime hadn't changed, so a new extractor's symbols only appeared after `--rebuild`. Now a version mismatch also counts as modified, so a plain index re-extracts those files.
+- **Format:** the version is a `<schema>.<language>` stamp in a new `file_state.extractor_version` column. The values live in `packages/tsift-graph/src/extractor_version.rs`.
+- **Re-extract rule:** a file is re-extracted when its mtime, its language (from the Luau opt-in) or its extractor version changed.
+- **Older indexes:** indexes with no version re-extract fully once on upgrade, and `index --check` and `status` read them without failing.
+
+**What a future extractor change has to do:**
+- **One language's output changed:** bump its entry in `LANGUAGE_EXTRACTOR_VERSIONS`; only that language's files re-extract. `typescript`/`tsx` and `javascript`/`jsx` share an extractor, and a test makes sure each pair is bumped together.
+- **Shared output changed** (edge resolution, FTS rows, columns): bump `EXTRACTOR_SCHEMA_VERSION`, and everything re-extracts.
+- **New language:** nothing to bump.
+
+**Tests:**
+- `plain_index_reextracts_files_from_an_older_extractor_version` is the regression test. It recreates a pre-`daac4fe` index and checks that the TS method comes back.
+- `extractor_version_bump_reextracts_only_that_language` and `index_from_before_extractor_versions_reextracts_once` cover the per-language bump and the upgrade from an index with no version.
+- All three fail with the fix removed.
+- A `--prune` test was also added. It passes without the fix too, because `--prune` never skips directories.
+
+An end-to-end run with the installed binary reported `mod:1` and restored the method. A second run reported `unch:1`.
+
+**Risks:**
+- **Bumps are manual.** An extractor change that forgets the bump goes stale again, and no test catches it.
+- **Upgrade cost:** the first index on each existing repo re-extracts everything.
+- **Community-detection cache:** its key, `source_snapshot_parts`, doesn't include the version. An extractor change that leaves the symbol and edge counts the same would not refresh it.
+
+`#tracelockjoin` is still running.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- #subagent: do [#tsiftindexesinvalidate]
+- ~~#subagent: do [#tsiftindexesinvalidate]~~
 - ~~#subagent: do [#haivensdkfollow]~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#subagent: do [#projectlevelopt]~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#tracelockjoin]
@@ -580,7 +611,6 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#tracelockjoin] (sdktracenaming) tsift graph-db haiven-trace importer, in packages/tsift-cli/src/graph_import.rs: (1) read the sibling codegen/contracts.lock commit and store it on the import-source node; (2) after refresh, compare it with the HEAD of the indexed haiven-contracts checkout (the submodule beside codegen/, else an indexed repo whose remote ends in haiven-contracts) and warn on mismatch, never fail; (3) join vocabularies on the new trace title (fall back to name), and join ws.events on operation, else the AsyncAPI message key; this fixes chat.typing, which today joins to the client chat.typing operation; (4) tests: mismatched lock warns, matching lock is silent, event with no operation joins by message key. Also fix the comment that says model.json ws.requests is keyed by operation; it is keyed by wire type. Needs haiven-sdk 57dd11c (PR 62).
-- [ ] [#tsiftindexesinvalidate] (extractorversion) tsift indexes do not invalidate when extractors change: after installing daac4fe a plain tsift index skipped unchanged files, so new TS method / C++ namespace var / C# using-alias symbols appeared only after index --rebuild. Record an extractor/schema version per indexed file (or per index) and re-extract on mismatch; add a regression test.
 <!-- /agent:backlog -->
 
 ## Review

@@ -2,6 +2,46 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.443
+
+- **Mid-turn operator steering.** A Claude Code / Codex `PostToolUse` hook
+  (`agent-doc hook steering-post-tool-use`) delivers settled queue and exchange edits to the running
+  turn verbatim, once, and debounced (`agent_doc_steering_debounce_ms`, default 2500; half-typed
+  lines are held). Each item is routed `address_now` (exchange prompt, or an edit/removal of the
+  current queue item), `drain_after_current` (other queue additions, kept in queue order), or
+  `subagent` (`#subagents` intent). Closeout (`respond`/`write --commit`/post-commit
+  `session-check`) prints anything the hook missed, `agent-doc steering [--follow]` keeps reporting
+  after a cycle closes, and preflight lists new `#subagents` items under `queue_subagent_dispatch`.
+- **Queue claims and a non-error Stop hook.** `agent-doc queue claim|release|claims` marks a queue
+  head as in flight (for example handed to a subagent); claimed heads are not selected, not counted
+  as drainable, and the Stop hook stops forcing re-entry for them. Claims expire after two hours.
+  The Claude Code continuation now uses `hookSpecificOutput.additionalContext`, so it renders as
+  hook feedback instead of a "Stop hook error". `--item #id` matches `#subagents do [#id]` heads.
+- **Annotated queue heads are steering.** Text the operator appends to a `do [#id]` head is surfaced
+  in preflight (`queue_head_annotations`) and must be answered under `> **Operator note:**`;
+  closeout refuses to strike an unanswered note, or re-queues it verbatim once a response is
+  captured.
+- **Preflight admission deadline (#preflightdeadline).** Every bounded wait in preflight is clamped
+  to the hook budget's remaining time, and an overrun refuses at a phase boundary with a typed,
+  retryable `cycle contract UNAVAILABLE` naming the phase. Preflight shares one turn-scoped document
+  projection instead of resolving it per guard.
+- **Layout routing (GH #109-#112).** Route gate refusals name the routed document, published
+  columns and receipt reason, and layout convergence shares the `--wait-for-ready` budget (GH #110).
+  Route `--col` gained `layout_mode` (`exact`/`ensure`); a single-`--col` focus route no longer
+  collapses a retained multi-column layout (GH #111). Publications carry `column_order`, so focus
+  never reorders columns when the editor order is unknown (GH #112). Column panes are audited after
+  layout: stale-supervisor panes get a safe-boundary recycle and stash promotions are logged
+  (GH #109). Projection lines record their publisher.
+- **Plugin upgrade (GH #113-#115).** `agent-doc upgrade` reconciles editor plugins in the newly
+  installed binary (GH #113) and summarizes per-target outcomes, naming targets that need a restart
+  (GH #114). JetBrains staging writes one validated, uniquely named delete+unzip block under a lock,
+  so a repeated staging can no longer delete the plugin without reinstalling it; preflight and
+  `plugin list` report a destroyed or doomed staging (GH #115).
+- **Clear Session Context no longer crashes the session.** A supervisor hot-reload refuses to carry
+  an already-exited or condemned child across `execve`, so a clear racing an install restarts fresh
+  instead of reporting a crash.
+- JetBrains plugin 0.2.484.
+
 ## 0.35.442
 
 - **JetBrains upgrade reporting tells the truth about the asynchronous-retirement guard (GH #108).**

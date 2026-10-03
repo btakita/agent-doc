@@ -690,12 +690,12 @@ As each subagent reports back, I'll rebase its push onto main, verify it, and ru
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~do [#qsubattr1]~~
 - ~~do [#qsubattr2]~~
-- do [#qsubattr3]
+- ⏭️ do [#qsubattr3]
 - do [#qsubattr4]
 - do [#qsubattr5]
 - #subagents: https://github.com/btakita/agent-doc/issues/120
-- ~~#subagents: https://github.com/btakita/agent-doc/issues/121~~ — auto-struck: answered this cycle (#ftstrike)
-- #subagents: https://github.com/btakita/agent-doc/issues/122
+- ~~#subagents: https://github.com/btakita/agent-doc/issues/121~~
+- 🚧 #subagents: https://github.com/btakita/agent-doc/issues/122
 <!-- /agent:queue -->
 
 

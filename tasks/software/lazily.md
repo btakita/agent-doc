@@ -16,7 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -143,20 +143,75 @@ Saw the frontmatter change `agent: codex` → `agent: claude`. This session is n
 You removed the `do [#lazilyintermediatelangua]` queue head while this turn was starting, so I stopped before doing any work on it. No repo changes were made. The backlog item `#lazilyintermediatelangua` stays open and unchanged.
 
 Your edited queue prompt, "Should lazily have an intermediate language and use code generation?", is next in the queue. I'll answer it on the next drain cycle with the `#spec-test-commit-push` preset.
+
+### Re: should lazily have an intermediate language + code generation? — opus-5-5 · 2026-10-03T01:08-04:00
+
+> **Queue prompt:**
+>
+> do [#lazilyintermediatelangua]
+
+
+> **Queue prompt:** Should lazily have an intermediate language and use code generation? See sdk.md.
+
+**Short answer: split lazily in two.** The data plane should get a shared intermediate model with generated code. The reactive kernel should stay hand-written in each language. This is the same split haiven-sdk ended up with (`codegen/ir.py` → `ContractModel` → one `Backend` per language, `#sdkcodegenir`). But only half of lazily looks like an SDK, so only that half should copy the approach.
+
+**Why sdk.md's answer carries over only partly.** haiven-sdk is almost entirely a *contract surface*: types, vocabularies, and REST/WebSocket operations taken from schemas the SDK doesn't own. Its runtime parts (session, handshake) stayed hand-written on purpose. lazily is the reverse. Most of its value is runtime semantics:
+
+| Layer | What it is | Same in every language? | Generate it? |
+|---|---|---|---|
+| **Kernel**: `Source`/`Computed`/`Effect`, invalidation, batching, teardown scopes, the edge index | how updates propagate | the *rules* are the same, but the *code* depends on ownership, GC, threads, and async in each language | **no** |
+| **Data plane**: msgpack/protobuf codecs, receipts, reliable-sync and durable envelopes, delta formats, error/operation vocabularies | bytes on the wire | yes, by definition | **yes** |
+| **Conformance harness**: fixture loaders, step dispatch, assertion-block decoding | test plumbing | mostly the same | **yes, the scaffolding** |
+
+**Why not generate the kernel.** A lazily IL that compiles the kernel into ten languages would fail three ways:
+
+1. **Every binding's hard bugs were language-specific, not semantic.** Examples:
+   - go's map data race (`#v0.23.2`), where reads ran off the context lock;
+   - the lazily-py mypyc `.so` shadowing;
+   - zig's posix moves;
+   - GDScript's rule that `ctx.scope()` must be the *only* strong owner of effects;
+   - the "invalidate outside the storage lock" rule in the queue family.
+
+   Each of these is a lowering decision per language. An IL can't make that decision for you; it only moves it into a backend template that is harder to read than the code it replaces. ThingML's conclusion, cited in sdk.md, applies directly: generated code earns trust only if it is readable and fully customizable.
+2. **Being idiomatic is the product.** Every binding exists so that people working in that language get native types, native async, and native ownership. A shared kernel template tends to produce the same code in every language.
+3. **You already have the semantic layer that matters, and it isn't an IL.** `lazily-spec` (`cell-model.md`, the schemas) defines the rules. `lazily-formal` (Lean) proves them. The 222-file conformance corpus checks every binding against them. An IL would be a fourth description of the kernel, and the three you have are already hard to keep in step (see the `#lazilyspec` notes on fixtures reddening all nine bindings).
+
+**Why the data plane should be generated.** Every binding hand-writes the same wire code today:
+- rs: `protobuf.rs`, `receipt.rs`, `reliable_sync.rs`
+- js: `msgpack-codec.js`, `protobuf-graph-boundary.js`
+- go: `msgpack_codec.go`, `causal_receipts.go`, `reliable_sync.go`
+- kt: `MsgpackCodec.kt`, `ProtobufGraphBoundary.kt`
+- cpp: `codec.hpp`, `msgpack_codec.hpp`, `receipt.hpp`
+- zig, dart, cs: their own equivalents
+
+That's roughly 9 copies of the same schema-shaped code, the exact case where sdk.md applies TeaDSL's "M gateways × N languages → M + N" argument. The defects I've recorded in this area are the kind a shared model catches once instead of nine times:
+- a >2^53 value that a JSON fixture can't carry as a number (wire as text/hex, expect as decimal);
+- the rung-0 bind ledger's "declare from the bytes, never stringify";
+- object-valued assertion keys that live only in `expect` blocks.
+
+**What I'd build** (filed as recommended `#lzwiremodel`, appended to the queue):
+- One language-neutral model in `lazily-spec`, built from `schemas/*.json` and `proto/`. It needs the type kinds the wire actually has: scalar, list, record, open enum, optional vs absent, and u64-as-text.
+- The model committed as a golden `model.json`. Then a schema change shows up as one readable diff before any binding is touched (the same idea as haiven-sdk's `#sdkirsnapshot`).
+- Thin per-binding backends for codec types, vocabularies, and fixture-loader scaffolding. Hand-written code calls into what they generate.
+- **A small first step, not a rewrite:** one surface (receipts or the graph-boundary proto) in two bindings (rs plus one GC binding). It passes if conformance results are byte-identical and a generated file replaces a hand-written one. Grow it only if that removes more code than it adds.
+- Keep the generator in Python inside `lazily-spec`, which already runs Python for provenance and inventory checks.
+
+**When to revisit the kernel-IL question:** if a new binding turns into a mechanical port of an existing one (lazily-gd is 1.8k lines next to roughly 25–65k elsewhere), that's the moment to see whether a *template* of an existing binding is cheaper. Even then I'd generate a starting point and keep the result hand-maintained, not regenerate it on every change.
+
+No repo changes this cycle; it was a design question. I marked `#lazilyintermediatelangua` done because this answers it.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lazilyintermediatelangua]
-- Should lazily have an intermediate language and use code generation? See sdk.md.
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+- do [#lzwiremodel]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lazilyintermediatelangua] Should lazily have an intermediate language and use code generation?
+- [ ] [#lzwiremodel] [recommended, lazily-spec] Shared wire model + per-binding codec generation: one language-neutral model in lazily-spec (record/scalar/list/open-enum/optional-vs-absent/u64-as-text) built from schemas/*.json + proto/, committed as a golden model.json, with thin backends that generate the msgpack/protobuf/receipt/reliable-sync wire types, error/op vocabularies, and fixture-loader scaffolding for each binding. Start with ONE surface (receipts or the graph-boundary proto) in TWO bindings (rs + one GC binding), acceptance = byte-identical conformance results and a generated file that replaces a hand-written one. Kernel (Source/Computed/Effect, scheduling, scopes) stays hand-written.
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

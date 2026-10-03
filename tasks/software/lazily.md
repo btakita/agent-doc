@@ -16,7 +16,6 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: go
 ---
 
 ## Status
@@ -244,20 +243,84 @@ No repo changes this cycle; it was a design question. I marked `#lazilyintermedi
 All three are in the new recommended `#lzwiremodel2`, appended to the backlog.
 
 The exchange is 171 lines, over the 160-line warning point. I'm not stopping the queue for it; it can be compacted whenever you want.
+
+### Re: #lzwiremodel2, Python backend, Rust receipt replay, strict decoding — opus-5-5 · 2026-10-03T17:58-04:00
+
+> **Queue prompt:**
+>
+> do [#lzwiremodel2]
+
+**Done.** The item had three parts, all completed. On the fourth, I decided not to grow the generator yet. Pushed to every repo; lazily-spec went last, because its CI checks each binding's published `main`.
+
+| Repo | Commit | What changed |
+|---|---|---|
+| lazily-py | `77150de` | `_receipts_wire_gen.py` (generated) replaces the hand-written `ReceiptOutcome` / `CausalReceipt` / `CausalReceipts`; their non-wire behaviour moved to `_receipt_semantics.py` |
+| lazily-rs | `e5564bd`, `549b95d` | Rust replay of `receipts/causal_receipts.json`, plus strict decoding |
+| lazily-go | `c186ff0` | strict decoding |
+| lazily-spec | `f3699e8` | Python backend, strict decoding in all three backends, CI fix, coverage, docs |
+| 11 bindings | coverage sync | Rust's Causal receipts mark: `~` → ✅ |
+
+**1. Python is the third binding on the receipts surface.**
+- **Exports unchanged.** The generated types are still exported from `lazily` and `lazily.ipc`.
+- **Behaviour.** Python can't add methods to a generated class from another module the way Rust `impl` blocks and Go methods can. So the generator makes each generated class inherit from a hand-written mixin, named in `surfaces.json`. That's where `is_terminal`, `group_by_causation`, `encode_json` and `decode_json` now live.
+- **Envelope.** Python's frame type has always carried the `{"CausalReceipts": …}` tag itself, so the single-variant envelope lowers onto that record and its API is unchanged.
+- **Size.** lazily-py `ipc.py` lost 141 hand-written lines. In their place are 81 lines of hand-written behaviour and 171 generated lines.
+
+**2. Rust now replays `causal_receipts.json`.** A subagent did this in its own worktree.
+- **What it checks.** The test decodes the fixture through `ReceiptMessage` and fails unless re-encoding gives back the same JSON. It then folds every receipt through the real `ReceiptProjection`, and checks each assertion key against the projection's own results.
+- **Coverage.** The fixture left `KNOWN_UNCOVERED`; lazily-rs now opens 157 of 162 fixtures (was 156).
+- **Not vacuous.** Breaking the stale-generation rule made the test fail. So did each of 7 changes to the fixture.
+- **Floor pins.** No pin needed a new number: the guards derive their counts from the corpus at run time.
+- **Coverage mark.** The coverage-claims guard then flagged Rust's `~` mark as indistinguishable from shipped, so I promoted it to ✅ and synced the coverage table into all 11 sibling repos.
+
+**3. Decode strictness: I decided for strict, in every generated decoder.** A closed record now rejects an unknown key, and a required field must be present even when its value is `null`.
+
+*Why strict:*
+- Every receipt in the corpus has exactly the 7 schema keys, so no fixture changes.
+- Every binding's encoder always emits `reason` and `payload_hash`.
+- The spec already ruled this way for the blob `backend` discriminator (`#lzblobbackendstrict`): rejecting is conforming, and the lenient "forward-compat" decoders were the defect.
+
+*How each backend does it:*
+- **Rust:** `serde(deny_unknown_fields)`, plus a `required_nullable` deserializer, because a bare `Option` silently defaults a missing key to `None`.
+- **Go:** a generated `UnmarshalJSON` checks the exact key set first. `encoding/json` on its own ignores unknown keys and matches keys case-insensitively, so `"Reason"` used to be accepted.
+- **Python:** `from_wire` checks the key set and each value's JSON type, and range-checks `generation` as a u64.
+
+*Behaviour change for callers:* Python used to accept a frame with no `receipts` list, and Rust and Go used to accept a missing `reason` or `payload_hash`; all of these now fail. It's recorded in the lazily-go and lazily-py changelogs.
+
+**4. No second surface yet.** The rule was to grow only if the generator removes more code than it adds.
+- **The count so far:** about 960 generator lines in total, against about 310 hand-written lines removed across Rust, Go and Python.
+- **No cheap candidate.** I ran each candidate schema through the model. None lowers today:
+  - `reliable-sync` and `delta` need multi-variant tagged unions.
+  - `message-passing` needs newtype aliases.
+  - `snapshot` lacks descriptions.
+- **The better next step** is a fourth binding on receipts, which needs only a new backend. I filed it as recommended `#lzwiremodel3`, appended to the backlog. The full analysis is in `docs/wire-codegen.md` under "When to add a surface".
+
+**CI fix found on the way.** lazily-spec CI clones lazily-py with only `scripts/` checked out. The generated-file check would have reported the Python file as missing and turned the build red. I added `src/lazily` to the sparse checkout and replayed that CI step against all three published `main`s: exit 0.
+
+**Verification:**
+- **Full `make check`, all exit 0:**
+  - lazily-spec: run again after the CI and coverage edits.
+  - lazily-py: 1178 passed, run again on the commit as rebased onto the remote's 0.42.0 release prep.
+  - lazily-go: green.
+  - lazily-rs: 7223 passed, 0 failed, with the replay and strict decoding together.
+- **Strictness tests fail without strictness.** In Rust, Go and Python, I removed the strict check and confirmed the new tests failed, then restored it.
+- **CI:** the lazily-spec, lazily-rs, lazily-py and lazily-go runs were queued or in progress at closeout.
+
+**Shared working trees.** I committed only my own paths, and moved the shared checkouts forward only after confirming that each overlapping local edit was byte-identical to the remote. Where a checkout couldn't fast-forward (gd and zig, which held other sessions' changes, and kt, which has an unpushed local commit), I pushed the one-line coverage change from a scratch worktree at `origin/main`. Those three local histories are untouched.
+
+The exchange is now about 280 lines. I'm not stopping the queue for it.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
-- 🚧 do [#lzwiremodel2]
-do [#lzwiremodel2]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzwiremodel2] [recommended, lazily-spec] Second wire-model step: lower the receipts surface into one GC binding (py or js), and add a Rust replay of receipts/causal_receipts.json so it leaves lazily-rs KNOWN_UNCOVERED (update the corpus-floor pins with it). Then decide whether generated decoders should enforce the schema's closed records and required-nullable fields: today rs and go both accept unknown keys and absent reason/payload_hash, and enforcing that changes decode behavior. Grow to a second surface (graph-boundary proto or reliable-sync) only if the generator removes more hand-written code than it adds. Design: src/lazily-spec/docs/wire-codegen.md.
+- [ ] [#lzwiremodel3] [recommended, lazily-spec] Third wire-model step: lower the receipts surface into a fourth binding (js or kt), replacing its hand-written receipt codec and making its decoder strict, like rs/go/py. Do this before any second surface; a second surface first needs multi-variant tagged unions modelled (delta DeltaOp, reliable-sync), plus newtype aliases (message-passing CommandId). Design: src/lazily-spec/docs/wire-codegen.md (When to add a surface).
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

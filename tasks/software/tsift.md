@@ -106,12 +106,33 @@ Since the release, other work has landed on `main` under "Unreleased". Contract 
 - New backlog items `#xsdcontract` and `#wsdlcontract`: running in **one** subagent, XSD first and then WSDL. WSDL embeds XSD, and both edit `contract.rs`.
 
 **Contract formats.** The `8022f34` contract projection already covers OpenAPI (including Swagger 2), AsyncAPI v2 and v3, and JSON Schema. Other JSON and YAML files are searchable as text but produce no symbols. For XML, only the formats that describe an API or a build are worth indexing: XSD, WSDL, and possibly project files like `.csproj` and `pom.xml`.
+
+### Re: C bindings done; XSD/WSDL already in flight — opus-5.5 · 2026-10-03T02:45-04:00
+
+> **Queue prompt:** #subagent: Add C bindings
+
+**Done.** The subagent pushed `d4bb5bf feat(graph): index C for search and graph (#cindex)` to `main`.
+- `.c` files now contribute these symbols to search and graph:
+  - structs, unions, enums and their enumerators;
+  - typedefs, including pointer and function-pointer typedefs;
+  - function definitions and prototypes;
+  - fields;
+  - file-scope globals, including those inside `#if` blocks;
+  - macros that take a value or parameters.
+- Call edges cover direct calls and calls through a function-pointer member.
+- The symbol-extent helper is now shared by C and C++ (`c_family_declaration_for`), and C++ behaves the same as before.
+- `.h` stays parsed as C++: the C++ grammar handles C headers, but the C grammar fails on classes and namespaces. If a build has C but not C++, `.h` falls back to C.
+- `make check` exit 0, about 1,889 tests passed with none failing. Installed with `cargo install --path . --locked --force`. A smoke test found definitions and prototypes, and `graph --callees` resolved.
+
+`#xsdcontract` and `#wsdlcontract` reached the queue when the deferred backlog write landed. The XML subagent I already dispatched is working on both, in that order, in `~/work/btakita/worktrees/tsift-xml`. I've claimed both heads for it so this loop doesn't run them a second time. The Odin, Jai and `#sdktsiftedges` subagents are still running.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#xsdcontract]
+- do [#wsdlcontract]
 - ~~do [#releasepublishbindings]~~
 - #subagent: Add C bindings
 - #subagent: Add Odin bindings
@@ -126,7 +147,7 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#sdktsiftedges] [recommended] Import an external edge file into graph-db (e.g. tsift graph-db import <file>), then load haiven-sdk codegen/trace.json (contract node -> per-language declaration -> conformance scenario, haiven-sdk #62), so a contract change's blast radius across SDKs is one graph query. Contract nodes are already indexed as of 8022f34 (#sdktsiftcontracts), so trace.json's model nodes can join to them by name. Moved from haiven-dev tasks/sdk.md.
-- [ ] [#xsdcontract] Index XSD (.xsd) as an API contract: extend packages/tsift-graph/src/contract.rs with an XML Schema dialect (complexType/simpleType/element/attribute/group as schema symbols, Owner.child properties; type=/ref=/base= QName refs as call sites like $ref). Lays the shared XML parsing foundation (quick-xml or tree-sitter-xml) that #wsdlcontract builds on.
+- [ ] 🚧 [#xsdcontract] Index XSD (.xsd) as an API contract: extend packages/tsift-graph/src/contract.rs with an XML Schema dialect (complexType/simpleType/element/attribute/group as schema symbols, Owner.child properties; type=/ref=/base= QName refs as call sites like $ref). Lays the shared XML parsing foundation (quick-xml or tree-sitter-xml) that #wsdlcontract builds on.
 - [ ] [#wsdlcontract] Index WSDL (.wsdl, 1.1 + 2.0) as an API contract on top of #xsdcontract: services, ports/endpoints, portTypes/interfaces, operations, messages/parts as symbols; message=/element=/type=/binding= refs as call sites; embedded <types><xsd:schema> projected via the XSD dialect.
 <!-- /agent:backlog -->
 

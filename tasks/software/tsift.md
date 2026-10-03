@@ -393,7 +393,7 @@ The exchange is 304 lines, but the queue is active, so I'm not compacting.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - #subagents: [#sdktraceroot]
-- #subagents: [#kotlinsymclash]
+- ~~#subagents: [#kotlinsymclash]~~ — auto-struck: answered this cycle (#ftstrike)
 - #subagents: Add tsift support for the Luau (Roblox) language.
 <!-- /agent:queue -->
 <!--

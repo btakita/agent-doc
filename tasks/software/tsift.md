@@ -20,7 +20,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -412,15 +411,50 @@ The exchange is 304 lines, but the queue is active, so I'm not compacting.
 **Follow-up filed:** `#luaulegacy` [recommended], a project-level option to index `.lua` as Luau for older Roblox/Rojo projects. Calls are matched by bare name, as in every other language, so methods named `new` in different classes run together in the graph.
 
 `#sdktraceroot` is still running.
+
+### Re: #sdktraceroot done — opus-5.5 · 2026-10-03T05:15-04:00
+
+> **Queue prompt:** #subagents: [#sdktraceroot]
+
+**Done.** Most unjoined trace nodes came from importing the trace into a checkout at the wrong revision. Indexing at the trace's own revision also turned up four tsift defects, now fixed in `daac4fe`. CI is green, `make check` exited 0, and it is installed.
+
+| Graph | joined | unmatched |
+|---|---|---|
+| Earlier import, `haiven-contracts` scope | 309 | 1,307 |
+| haiven-sdk root, operator checkout, fixed tsift | 435 | 1,181 |
+| Snapshot at the trace's revision, old tsift | 1,359 | 257 |
+| Snapshot at the trace's revision, fixed tsift | **1,612** | **4** |
+
+- **Revision mismatch, the main cause:**
+  - The trace pins haiven-contracts `1ce0581` (2026-10-03). The checkout's submodule is at `f634a0f`, 48 commits behind.
+  - The operator checkout is also on `feat/unreal-conformance-runner`, not `feat/codegen-trace`, so 1,051 of the declarations the trace points to aren't in that tree.
+  - At the trace's revision, every contract, REST operation and component joins, and 21 of 23 events do.
+- **tsift defects fixed in `daac4fe`:**
+  - TypeScript class methods weren't indexed (227 nodes: the generated REST and WebSocket client methods).
+  - C++ variables at file or namespace scope weren't indexed (22: the Unreal SDK's event wire names).
+  - C# `using X = Y;` aliases weren't indexed (4).
+  - `model.json`'s `ws.requests` object was ignored, which dropped `carried_by` links. They went from 23 to 29.
+
+  Four regression tests were added, and the three language tests fail when their fixes are removed.
+- **The last 4 are haiven-sdk naming gaps:**
+  - The `MessageType` and `WsErrorCode` vocabularies don't carry their schema ids, and `ErrorCode` matches three schemas instead of one.
+  - The `chat.message` and `chat.message.updated` events have no AsyncAPI operation.
+
+**Follow-ups filed:**
+- **`#extractorversion`:** existing indexes don't re-extract after an extractor change, so the new symbols appear only after `tsift index --rebuild`. Until it's fixed, other indexed repos need `--rebuild`.
+- **`#sdktracenaming`** [recommended]: changes for haiven-sdk PR #62. Add schema ids and message keys to the trace, and have the import warn when the contracts pin differs from the indexed submodule.
+
+**Left in place:**
+- The haiven-sdk root `.tsift/` was rebuilt, and its trace import refreshed.
+- The scratch snapshot is at `worktrees/haiven-sdk-codegen-trace`.
+
+The queue is drained: all three subagent items are closed.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- #subagents: [#sdktraceroot]
-- ~~#subagents: [#kotlinsymclash]~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#subagents: Add tsift support for the Luau (Roblox) language.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -429,8 +463,9 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tsiftindexesinvalidate] [extractorversion] tsift indexes do not invalidate when extractors change: after installing daac4fe a plain tsift index skipped unchanged files, so new TS method / C++ namespace var / C# using-alias symbols appeared only after index --rebuild. Record an extractor/schema version per indexed file (or per index) and re-extract on mismatch; add a regression test.
+- [ ] [#haivensdkfollow] [sdktracenaming] [recommended] haiven-sdk PR 62 follow-ups (other repo, not tsift): carry the schema id/title for vocabularies (MessageType->WsMessageTypeV0, WsErrorCode->WsErrorCodeV0, ErrorCode ambiguous vs RestErrorCodeV0) and the AsyncAPI message key for operationless events (chat.message, chat.message.updated) in trace.json; have the trace import warn when codegen/contracts.lock differs from the indexed contracts submodule.
 - [ ] [#projectlevelopt] [recommended] (luaulegacy) Project-level opt-in to index .lua files as Luau (Roblox/Rojo legacy projects keep Luau in .lua); today only .luau maps to Luau. Also consider declare/type function once tree-sitter-luau supports them.
-- [ ] [#sdktraceroot] [recommended] After #graphrefreshperf: import haiven-sdk codegen/trace.json into the ROOT graph so per-language declarations join by path:line, and investigate unjoined trace nodes (8/51 contracts, 10/23 events, 56/195 REST ops, 50 components); check for a contracts-revision mismatch vs the trace pin.
 <!-- /agent:backlog -->
 
 ## Review

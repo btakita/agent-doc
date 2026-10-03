@@ -28,6 +28,26 @@ rule. This runbook carries the rest.
   your current turn — continue with `agent-doc <FILE>`. Do NOT re-run respond/finalize on
   the prior response, do NOT `--force-disk` (it clobbers the operator's live
   edits), and do NOT re-answer a prompt already committed in HEAD.
+- **Mid-turn steering (`#midturn-steering`):** steering no longer waits for
+  closeout. After every tool call the PostToolUse hook (Claude Code, Codex)
+  hands the running turn new operator edits as `[agent-doc] operator steering
+  arrived mid-turn`, each item verbatim with a typed `dispatch`. Edits settle
+  first (`agent_doc_steering_debounce_ms`, default 2500), so half-typed lines
+  are held, and each item is surfaced exactly once.
+  - `address_now`: a new exchange prompt, or an edit/removal of the queue item
+    this turn is executing (shown as `previous` → `verbatim`). Address it in the
+    current turn: adjust the in-progress work, or stop/wrap up for a removal.
+  - `drain_after_current`: a new or edited queue item. It runs in operator queue
+    order AFTER the current item closes. Acknowledge it; do not interrupt,
+    interleave, or start it now.
+  - `subagent`: a queue item with subagent intent (`#subagents` on the line, a
+    preset expanding to "run … in subagents", or such a preset at queue or cycle
+    scope). Spawn a background subagent for it immediately, one per item; when it
+    touches a repo give it its own worktree outside the IDE-watched project and
+    never run two subagents against one repo checkout. Keep working the current
+    item yourself and record the dispatch in your response.
+  OpenCode and other hook-less harnesses poll `agent-doc steering <FILE>`
+  (`--json` for the typed form) between long-running steps.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay

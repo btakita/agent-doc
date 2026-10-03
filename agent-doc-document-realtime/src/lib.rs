@@ -17,6 +17,7 @@ pub mod editor_contract;
 pub mod editor_identity;
 pub mod editor_open_docs;
 pub mod ipc_corruption;
+pub mod midturn_steering;
 pub mod native_save_gate;
 pub mod not_serving_proof;
 pub mod read_authority;

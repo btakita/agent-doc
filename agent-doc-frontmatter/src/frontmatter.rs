@@ -648,6 +648,16 @@ pub struct Frontmatter {
         rename = "agent_doc_clear_threshold"
     )]
     pub clear_threshold: Option<u8>,
+    /// Quiet period in milliseconds before a mid-turn operator edit counts as
+    /// settled steering (`#midturn-steering`). Resolution: this frontmatter
+    /// value, then the project config `agent_doc_steering_debounce_ms`, then
+    /// the built-in default of 2500.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_steering_debounce_ms"
+    )]
+    pub steering_debounce_ms: Option<u64>,
     /// Explicit per-document opt-in/opt-out for supervisor auto-recycle
     /// (`#ctlrecycle` R3 / `#suprecyclequeue`). When the route-owned supervisor
     /// detects it is running a stale binary at an idle / inter-queue-item
@@ -3456,6 +3466,7 @@ mod tests {
             per_component_convergence: None,
             gate_autoverify: None,
             clear_threshold: None,
+            steering_debounce_ms: None,
             supervisor_auto_recycle: None,
             agent_change_restart: None,
             supervisor_auto_install: None,

@@ -1,0 +1,104 @@
+//! `agent-doc steering <FILE>` — poll or follow mid-turn operator steering
+//! (`#midturn-steering`).
+//!
+//! The in-turn delivery path is the `PostToolUse` hook
+//! (`agent-doc hook steering-post-tool-use`). This command is the same core
+//! for harnesses without a post-tool hook (OpenCode) and for monitors: a
+//! one-shot poll prints the settled steering since this consumer's last
+//! poll; `--follow` watches the document (filesystem events, per
+//! `#reactive-boundary-ingress`) and prints one JSON line per settled batch.
+//! Each mode keeps its own watermark, so polling never steals steering from
+//! the hook.
+
+use std::path::Path;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+
+use agent_doc_session_check_io::midturn_steering::{
+    self as steering, CONSUMER_CLI, CONSUMER_FOLLOW, SteeringReport,
+};
+
+fn print_report(report: Option<SteeringReport>, json: bool) -> Result<()> {
+    if json {
+        let value = match report {
+            Some(report) => serde_json::to_value(&report)?,
+            None => serde_json::json!({ "items": [], "pending": 0 }),
+        };
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+    match report.as_ref().and_then(SteeringReport::render) {
+        Some(context) => println!("{context}"),
+        None => {
+            let pending = report.map(|report| report.pending).unwrap_or(0);
+            if pending > 0 {
+                println!(
+                    "[agent-doc] no settled steering yet; {pending} item(s) still being typed"
+                );
+            } else {
+                println!("[agent-doc] no new operator steering");
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn run(file: &Path, json: bool, peek: bool, follow: bool) -> Result<()> {
+    anyhow::ensure!(file.is_file(), "document not found: {}", file.display());
+    if !follow {
+        let report = steering::observe(file, CONSUMER_CLI, !peek)?;
+        return print_report(report, json);
+    }
+    follow_document(file)
+}
+
+/// Stream settled steering as JSON lines until interrupted.
+///
+/// Filesystem events wake the loop; the bounded timeout exists only so an
+/// item held by the debounce is re-evaluated once its quiet period elapses
+/// (no further event will arrive for a settled document).
+fn follow_document(file: &Path) -> Result<()> {
+    use ::notify::{RecursiveMode, Watcher};
+
+    let canonical = file
+        .canonicalize()
+        .with_context(|| format!("canonicalize {}", file.display()))?;
+    let parent = canonical
+        .parent()
+        .context("document has no parent directory")?
+        .to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let target = canonical.clone();
+    let mut watcher =
+        ::notify::recommended_watcher(move |res: ::notify::Result<::notify::Event>| match res {
+            Ok(event) if event.paths.iter().any(|path| path == &target) => {
+                if tx.send(()).is_err() {
+                    eprintln!("[agent-doc] steering follow: receiver closed");
+                }
+            }
+            Ok(_) => {}
+            Err(err) => eprintln!("[agent-doc] steering follow watch error: {err}"),
+        })?;
+    watcher.watch(&parent, RecursiveMode::NonRecursive)?;
+    let mut pending = 0usize;
+    loop {
+        if let Some(report) = steering::observe(&canonical, CONSUMER_FOLLOW, true)? {
+            pending = report.pending;
+            if !report.items.is_empty() {
+                println!("{}", serde_json::to_string(&report)?);
+            }
+        }
+        let wait = if pending > 0 {
+            Duration::from_millis(500)
+        } else {
+            Duration::from_secs(30)
+        };
+        match rx.recv_timeout(wait) {
+            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                anyhow::bail!("steering follow: file watcher stopped")
+            }
+        }
+    }
+}

@@ -523,6 +523,7 @@ object TerminalUtil {
                         attemptId = attempt?.id,
                         routeKey = attempt?.routeKey,
                         columnOrder = SyncLayoutAction.syncColumnOrder(editorLayout),
+                        layoutMode = routeLayoutMode(editorLayout),
                     )
                     val output = routeResult.output
                     val exitCode = routeResult.exitCode
@@ -659,6 +660,23 @@ object TerminalUtil {
             RUN_ROUTE_WAIT_FOR_READY_SECONDS.toString(),
             relativePath,
         )
+
+    /**
+     * GH #111: what the route's `--col` arguments assert. Only a detected
+     * multi-column layout is a positive observation of the whole visible layout
+     * (`exact`). The undetected fallback (Remote Dev reports one selected file)
+     * names just the documents it can see, so it only asks that each one has a
+     * column (`ensure`) and the controller keeps the retained layout around it.
+     */
+    internal fun routeLayoutMode(editorLayout: EditorLayout?): String =
+        if (editorLayout != null && editorLayout.columns.size > 1) {
+            ROUTE_LAYOUT_MODE_EXACT
+        } else {
+            ROUTE_LAYOUT_MODE_ENSURE
+        }
+
+    internal const val ROUTE_LAYOUT_MODE_EXACT = "exact"
+    internal const val ROUTE_LAYOUT_MODE_ENSURE = "ensure"
 
     internal fun buildRouteLayoutArgs(
         visibleMdFiles: List<String>,

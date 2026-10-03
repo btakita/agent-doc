@@ -8467,6 +8467,12 @@ struct ControllerEditorRoutePayload {
     /// split-order observation. Absent keeps the pre-#112 `editor` meaning.
     #[serde(default)]
     column_order: agent_doc_tmux::LayoutColumnOrder,
+    /// GH #111: what the route's `--col` arguments mean. `exact` is a positive
+    /// observation of the whole visible layout; `ensure` asks only that each
+    /// named document has a column. Absent (older editors) is inferred from
+    /// the column count by [`EditorRouteLayoutMode::resolve`].
+    #[serde(default)]
+    layout_mode: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -9400,6 +9406,30 @@ fn handle_editor_route_rpc(
             ),
         );
     }
+    let layout_mode = EditorRouteLayoutMode::resolve(
+        payload.layout_mode.as_deref(),
+        layout_invocation.columns.len(),
+    )?;
+    let retained_columns = runtime
+        .pane_layout_desired()
+        .map(|desired| desired.invocation.columns)
+        .unwrap_or_default();
+    let (merged_columns, layout_merge) =
+        merge_editor_route_columns(layout_mode, &retained_columns, &layout_invocation.columns);
+    layout_invocation.columns = merged_columns;
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "controller_editor_route_layout_mode file={} mode={} explicit={} merge={} route_columns={} retained_columns={} published_columns={}",
+            canonical.display(),
+            layout_mode.label(),
+            payload.layout_mode.is_some(),
+            layout_merge.label(),
+            layout_merge.route_columns,
+            retained_columns.len(),
+            layout_invocation.columns.len(),
+        ),
+    );
     if let Some(refusal) = editor_route_focus_refusal(&layout_invocation, &routed_document) {
         anyhow::bail!(refusal);
     }
@@ -10583,6 +10613,139 @@ fn editor_route_layout_invocation(
         column_order: Default::default(),
         actor_bindings: Vec::new(),
     })
+}
+
+/// What an editor route's `--col` arguments assert (GH #111).
+///
+/// The JetBrains plugin routes on every focus change. When its layout detector
+/// cannot prove a split set (Remote Dev reports `unknown` with one selected
+/// file) it falls back to a single `--col` naming only the focused document.
+/// Read as an exact layout, that one column replaced the retained two-column
+/// layout and collapsed the tmux window on every focus switch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditorRouteLayoutMode {
+    /// The columns are a positive observation of the whole visible layout and
+    /// replace the retained one, including narrowing it.
+    Exact,
+    /// Each named document must have a column. Documents the retained layout
+    /// already covers are focus-only; others are added to the retained column
+    /// set. The retained layout is never narrowed.
+    Ensure,
+}
+
+impl EditorRouteLayoutMode {
+    /// Resolve the explicit `layout_mode`, or infer it for editors that predate
+    /// the field: two or more columns can only come from a positive multi-column
+    /// observation, so they stay exact; a single column carries no claim about
+    /// the rest of the layout and must not collapse it.
+    fn resolve(explicit: Option<&str>, route_columns: usize) -> Result<Self> {
+        match explicit.map(str::trim) {
+            Some("exact") => Ok(Self::Exact),
+            Some("ensure") => Ok(Self::Ensure),
+            Some(other) => anyhow::bail!(
+                "unsupported editor route layout_mode `{other}` (expected `exact` or `ensure`)"
+            ),
+            None if route_columns >= 2 => Ok(Self::Exact),
+            None => Ok(Self::Ensure),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Ensure => "ensure",
+        }
+    }
+}
+
+/// How [`apply_editor_route_layout_mode`] combined the route's columns with the
+/// retained desired layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditorRouteLayoutMergeKind {
+    /// `exact`: the route's columns replace the retained layout.
+    Exact,
+    /// `ensure` with no retained layout: the route's columns seed it.
+    Seeded,
+    /// `ensure` and every routed document already has a retained column: the
+    /// retained structure is republished unchanged and only focus moves.
+    FocusOnly,
+    /// `ensure` and some routed documents were missing: they were appended to
+    /// the retained column set.
+    Added,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EditorRouteLayoutMerge {
+    kind: EditorRouteLayoutMergeKind,
+    route_columns: usize,
+    added_columns: usize,
+}
+
+impl EditorRouteLayoutMerge {
+    fn label(&self) -> String {
+        match self.kind {
+            EditorRouteLayoutMergeKind::Exact => "exact".to_string(),
+            EditorRouteLayoutMergeKind::Seeded => "seeded".to_string(),
+            EditorRouteLayoutMergeKind::FocusOnly => "focus_only".to_string(),
+            EditorRouteLayoutMergeKind::Added => format!("added:{}", self.added_columns),
+        }
+    }
+}
+
+/// Merge a route publication's columns with the retained desired layout
+/// (GH #111). Pure: no I/O and no graph access, so it can become the body of a
+/// `Computed` over the retained-layout and route-intent Sources unchanged.
+///
+/// `retained` is the pane layout graph's current desired columns — the same
+/// source of truth GH #106's focus escalation (`focus_escalation_columns`)
+/// republishes. In `ensure` mode the result always starts from the retained
+/// columns in their order, so a route can widen the structural layout but never
+/// narrow it; the routed document stays a column, which the post-publication
+/// route gate requires.
+fn merge_editor_route_columns(
+    mode: EditorRouteLayoutMode,
+    retained: &[String],
+    route: &[String],
+) -> (Vec<String>, EditorRouteLayoutMerge) {
+    let merge = |kind, added_columns| EditorRouteLayoutMerge {
+        kind,
+        route_columns: route.len(),
+        added_columns,
+    };
+    if mode == EditorRouteLayoutMode::Exact {
+        return (route.to_vec(), merge(EditorRouteLayoutMergeKind::Exact, 0));
+    }
+    if retained.is_empty() {
+        return (route.to_vec(), merge(EditorRouteLayoutMergeKind::Seeded, 0));
+    }
+    let column_documents = |column: &str| {
+        column
+            .split(',')
+            .map(str::trim)
+            .filter(|document| !document.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let mut merged = retained.to_vec();
+    let mut added_columns = 0;
+    for column in route {
+        let documents = column_documents(column);
+        let covered = documents.iter().any(|document| {
+            merged
+                .iter()
+                .any(|existing| column_documents(existing).contains(document))
+        });
+        if !covered && !documents.is_empty() {
+            merged.push(column.clone());
+            added_columns += 1;
+        }
+    }
+    let kind = if added_columns == 0 {
+        EditorRouteLayoutMergeKind::FocusOnly
+    } else {
+        EditorRouteLayoutMergeKind::Added
+    };
+    (merged, merge(kind, added_columns))
 }
 
 /// How an editor route moved its layout focus onto the routed document.
@@ -20017,6 +20180,7 @@ fn escalate_focus_to_structural_layout(
         invocation,
         None,
         PaneLayoutPublication::CoalesceIdentical,
+        PaneLayoutPublisher::Escalation,
     ) {
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
@@ -20317,13 +20481,21 @@ fn handle_editor_surface_observe(
             } => {
                 let invocation =
                     automatic_editor_surface_sync_invocation(&columns, &document, preserve_focus);
-                let _ = publish_pane_layout_desired_invocation(
+                if let Err(error) = publish_pane_layout_desired_invocation(
                     bootstrap,
                     runtime,
                     invocation,
                     None,
                     PaneLayoutPublication::CoalesceIdentical,
-                );
+                    PaneLayoutPublisher::EditorSurface,
+                ) {
+                    agent_doc_ops_log_io::log_op(
+                        &bootstrap.project_root,
+                        &format!(
+                            "controller_editor_surface_sync_publication_failed document={document} error={error:#}"
+                        ),
+                    );
+                }
             }
             // A tab switch within the same layout resolves + `select-pane`s the
             // target pane directly — a single tmux command, no socket round-trip.
@@ -21342,6 +21514,7 @@ fn pane_layout_desired_projection_worker(
                 invocation,
                 Some(frame.plane_version),
                 publication,
+                PaneLayoutPublisher::PluginPublication,
             )?;
             Ok(bootstrap)
         });
@@ -21825,8 +21998,11 @@ fn pane_layout_effect_worker(
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
-                        "pane_layout_projection generation={} attempt={} phase=operator_owned operator_owned_documents={:?}",
-                        desired.generation, attempt, operator_owned_documents,
+                        "pane_layout_projection generation={} attempt={} {} phase=operator_owned operator_owned_documents={:?}",
+                        desired.generation,
+                        attempt,
+                        pane_layout_projection_provenance(&desired),
+                        operator_owned_documents,
                     ),
                 );
                 match pane_layout_effect_worker_complete(
@@ -21967,9 +22143,10 @@ fn pane_layout_effect_worker(
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
-                        "pane_layout_projection generation={} attempt={} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
+                        "pane_layout_projection generation={} attempt={} {} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
                         desired.generation,
                         attempt,
+                        pane_layout_projection_provenance(&desired),
                         focus_reason,
                         logged_expected_documents,
                         logged_actual_documents,
@@ -22199,9 +22376,10 @@ fn pane_layout_effect_worker(
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
+                "pane_layout_projection generation={} attempt={} {} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
                 desired.generation,
                 attempt,
+                pane_layout_projection_provenance(&desired),
                 if synced { "converged" } else { "retry_pending" },
                 observation_reason,
                 effect_reason,
@@ -23513,6 +23691,7 @@ fn publish_pane_layout_desired(
         invocation.clone(),
         None,
         pane_layout_publication_for_invocation(&invocation),
+        PaneLayoutPublisher::Command,
     )
 }
 
@@ -23558,6 +23737,7 @@ fn publish_pane_layout_desired_invocation(
     mut invocation: ControllerTmuxLayoutSyncInvocation,
     source_plane_version: Option<u64>,
     publication: PaneLayoutPublication,
+    publisher: PaneLayoutPublisher,
 ) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
     if bootstrap.handoff_state != ControllerHandoffState::Stable {
         anyhow::bail!(
@@ -23595,8 +23775,12 @@ fn publish_pane_layout_desired_invocation(
     invocation.columns = ordered.columns;
     invocation.column_order = ordered.order;
 
-    let desired =
-        runtime.set_pane_layout_desired(invocation.clone(), source_plane_version, publication);
+    let desired = runtime.set_pane_layout_desired(
+        invocation.clone(),
+        source_plane_version,
+        publication,
+        publisher,
+    );
     log_pane_layout_desired_publication(
         &bootstrap.project_root,
         retained.as_ref().map(|retained| retained.generation),
@@ -23604,6 +23788,9 @@ fn publish_pane_layout_desired_invocation(
         &desired_columns,
         ordered.reordered,
     );
+    if retained.as_ref().map(|retained| retained.generation) != Some(desired.generation) {
+        log_pane_layout_narrowed(&bootstrap.project_root, &desired);
+    }
     publish_pane_layout_status(runtime);
     Ok((desired, invocation))
 }
@@ -23638,6 +23825,51 @@ fn log_pane_layout_desired_publication(
             incoming_columns,
             desired.invocation.columns,
             desired.invocation.focus.as_deref().unwrap_or("none"),
+        ),
+    );
+}
+
+/// The publisher fields every `pane_layout_projection` line carries (GH #111).
+///
+/// `publisher` names which plane produced the generation (`route`,
+/// `plugin_publication`, `escalation`, `editor_surface`, `command`),
+/// `plane_version` the editor state-plane frame it came from when there was
+/// one, and `columns` / `retained_columns` / `observed_panes` the applied
+/// column count against the retained layout and last tmux observation it
+/// replaced.
+fn pane_layout_projection_provenance(desired: &PaneLayoutDesired) -> String {
+    format!(
+        "publisher={} plane_version={} columns={} retained_columns={} observed_panes={}",
+        desired.provenance.publisher.label(),
+        desired
+            .source_plane_version
+            .map_or_else(|| "none".to_string(), |version| version.to_string()),
+        desired.invocation.columns.len(),
+        desired.provenance.retained_columns,
+        desired
+            .provenance
+            .observed_panes
+            .map_or_else(|| "unknown".to_string(), |panes| panes.to_string()),
+    )
+}
+
+/// GH #111: a distinct, greppable event for a generation that applies fewer
+/// columns than the retained layout it replaced. Narrowing is legitimate after
+/// a positive observation (a closed split), so this does not refuse; it makes
+/// the event attributable instead of something reconstructed by position.
+fn log_pane_layout_narrowed(project_root: &Path, desired: &PaneLayoutDesired) {
+    if !desired.provenance.narrows(desired.invocation.columns.len()) {
+        return;
+    }
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "pane_layout_projection_narrowed generation={} {} caller_kind={} focus={} applied={:?}",
+            desired.generation,
+            pane_layout_projection_provenance(desired),
+            desired.invocation.caller_kind,
+            desired.invocation.focus.as_deref().unwrap_or("none"),
+            desired.invocation.columns,
         ),
     );
 }
@@ -23724,9 +23956,11 @@ fn handle_editor_route_layout<'a>(
         invocation,
         None,
         PaneLayoutPublication::FreshRouteIntent,
+        PaneLayoutPublisher::Route,
     )?;
     let lease = PaneLayoutRouteLeaseGuard {
         runtime,
+        project_root: bootstrap.project_root.clone(),
         generation: desired.generation,
     };
     let published = EditorRoutePublishedLayout {
@@ -23751,13 +23985,21 @@ struct EditorRoutePublishedLayout {
 
 struct PaneLayoutRouteLeaseGuard<'a> {
     runtime: &'a ControllerRuntime,
+    project_root: PathBuf,
     generation: u64,
 }
 
 impl Drop for PaneLayoutRouteLeaseGuard<'_> {
     fn drop(&mut self) {
-        self.runtime
-            .release_pane_layout_route_lease(self.generation);
+        // The passive publication a route lease deferred lands here, outside
+        // `publish_pane_layout_desired_invocation`, so it reports its own
+        // narrowing (GH #111).
+        if let Some(released) = self
+            .runtime
+            .release_pane_layout_route_lease(self.generation)
+        {
+            log_pane_layout_narrowed(&self.project_root, &released);
+        }
     }
 }
 
@@ -24542,6 +24784,7 @@ mod pane_layout_projection_dispatch_tests {
             generation: 7,
             source_plane_version: None,
             invocation: invocation("automatic", false),
+            provenance: PaneLayoutProvenance::default(),
         };
 
         assert_eq!(
@@ -26892,6 +27135,7 @@ mod tests {
                 plugin_unknown_order_publication(&[focus, other], focus),
                 None,
                 PaneLayoutPublication::FreshIntent,
+                PaneLayoutPublisher::PluginPublication,
             )
             .unwrap();
             assert_eq!(
@@ -26956,6 +27200,7 @@ mod tests {
             plugin_unknown_order_publication(&[&ad, &mr], &ad),
             None,
             PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
         )
         .unwrap();
         publish_pane_layout_desired_invocation(
@@ -26964,6 +27209,7 @@ mod tests {
             plugin_unknown_order_publication(&[&mr, &ad], &mr),
             None,
             PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
         )
         .unwrap();
         escalate_focus_to_structural_layout(
@@ -27011,6 +27257,7 @@ mod tests {
             plugin_unknown_order_publication(&[&ad, &mr], &ad),
             None,
             PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
         )
         .unwrap();
         let (desired, _) = publish_pane_layout_desired_invocation(
@@ -27019,6 +27266,7 @@ mod tests {
             plugin_unknown_order_publication(&[&infra, &mr, &ad], &infra),
             None,
             PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
         )
         .unwrap();
         assert_eq!(
@@ -27046,6 +27294,7 @@ mod tests {
             plugin_unknown_order_publication(&[&ad, &mr], &ad),
             None,
             PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
         )
         .unwrap();
         // A pre-#112 publisher sends no `column_order` at all.
@@ -27067,6 +27316,7 @@ mod tests {
             legacy,
             None,
             PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
         )
         .unwrap();
         assert_eq!(desired.invocation.columns, vec![mr.clone(), ad.clone()]);
@@ -27094,6 +27344,7 @@ mod tests {
             ),
             None,
             PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::EditorSurface,
         )
         .unwrap();
         assert_eq!(desired.invocation.columns, vec![ad.clone(), mr.clone()]);
@@ -28461,6 +28712,354 @@ mod tests {
         assert_eq!(second.invocation, first.invocation);
     }
 
+    /// GH #111 fixture: agent documents in one project plus a route request
+    /// builder shaped like the JetBrains plugin's `cp:editor_route` payload.
+    struct RouteLayoutFixture {
+        dir: tempfile::TempDir,
+        bootstrap: ControllerBootstrap,
+        runtime: Arc<ControllerRuntime>,
+    }
+
+    impl RouteLayoutFixture {
+        fn new(documents: &[&str]) -> Self {
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            for name in documents {
+                std::fs::write(
+                    dir.path().join(format!("{name}.md")),
+                    format!("---\nagent_doc_session: {name}\nagent: codex\n---\n# {name}\n"),
+                )
+                .unwrap();
+            }
+            let bootstrap = test_bootstrap(&dir);
+            let runtime = test_controller_runtime(&bootstrap);
+            Self {
+                dir,
+                bootstrap,
+                runtime,
+            }
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.dir.path().join(format!("{name}.md"))
+        }
+
+        fn id(&self, name: &str) -> String {
+            self.path(name)
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string()
+        }
+
+        /// Route `focus` with one `--col` per entry of `columns`, as the plugin
+        /// does; `layout_mode: None` is an editor that predates the field.
+        fn route(
+            &self,
+            focus: &str,
+            columns: &[&str],
+            layout_mode: Option<&str>,
+        ) -> Result<ControllerEditorRouteResult> {
+            let mut layout_args = Vec::new();
+            for column in columns {
+                layout_args.push("--col".to_string());
+                layout_args.push(self.path(column).display().to_string());
+            }
+            layout_args.push("--focus".to_string());
+            layout_args.push(self.path(focus).display().to_string());
+            let mut payload = serde_json::json!({
+                "relative_path": format!("{focus}.md"),
+                "layout_args": layout_args,
+                "dispatch_only": true,
+                "plain_trigger": true,
+            });
+            if let Some(mode) = layout_mode {
+                payload["layout_mode"] = serde_json::Value::String(mode.to_string());
+            }
+            let request = ControllerRequest {
+                command: "editor_route".to_string(),
+                file: Some(self.path(focus)),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(payload.to_string()),
+            };
+            handle_editor_route_rpc(&self.bootstrap, self.runtime.as_ref(), request)
+        }
+
+        fn desired_columns(&self) -> Vec<String> {
+            self.runtime
+                .pane_layout_desired()
+                .unwrap()
+                .invocation
+                .columns
+        }
+
+        fn desired_focus(&self) -> Option<String> {
+            self.runtime.pane_layout_desired().unwrap().invocation.focus
+        }
+
+        fn ops_log(&self) -> String {
+            std::fs::read_to_string(self.dir.path().join(".agent-doc/logs/ops.log"))
+                .unwrap_or_default()
+        }
+    }
+
+    #[test]
+    fn gh111_route_focus_switch_keeps_the_retained_two_column_layout() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+        let both = vec![fixture.id("alpha"), fixture.id("beta")];
+        // A positive two-column observation establishes the retained layout.
+        let seeded = fixture
+            .route("alpha", &["alpha", "beta"], Some("exact"))
+            .unwrap();
+        assert_eq!(seeded.exit_code, 0);
+        assert_eq!(fixture.desired_columns(), both);
+
+        // Every focus change routes with a single `--col` naming only the
+        // focused document. Switching back and forth must keep both columns.
+        for focus in ["beta", "alpha", "beta"] {
+            let routed = fixture.route(focus, &[focus], Some("ensure")).unwrap();
+            assert_eq!(routed.exit_code, 0);
+            assert_eq!(
+                fixture.desired_columns(),
+                both,
+                "a focus route must not narrow the retained layout"
+            );
+            assert_eq!(fixture.desired_focus(), Some(fixture.id(focus)));
+            let desired = fixture.runtime.pane_layout_desired().unwrap();
+            assert_eq!(desired.provenance.publisher, PaneLayoutPublisher::Route);
+            assert_eq!(desired.provenance.retained_columns, 2);
+        }
+
+        let ops = fixture.ops_log();
+        assert_eq!(
+            ops.matches("mode=ensure explicit=true merge=focus_only route_columns=1 retained_columns=2 published_columns=2")
+                .count(),
+            3,
+            "{ops}"
+        );
+        assert!(!ops.contains("pane_layout_projection_narrowed"), "{ops}");
+    }
+
+    #[test]
+    fn gh111_route_for_a_document_outside_the_retained_layout_adds_a_column() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
+        fixture
+            .route("alpha", &["alpha", "beta"], Some("exact"))
+            .unwrap();
+
+        let routed = fixture.route("gamma", &["gamma"], Some("ensure")).unwrap();
+        assert_eq!(routed.exit_code, 0);
+        assert_eq!(
+            fixture.desired_columns(),
+            vec![fixture.id("alpha"), fixture.id("beta"), fixture.id("gamma")],
+            "the routed document joins the retained column set instead of replacing it"
+        );
+        assert_eq!(fixture.desired_focus(), Some(fixture.id("gamma")));
+        assert!(
+            fixture
+                .ops_log()
+                .contains("mode=ensure explicit=true merge=added:1 route_columns=1 retained_columns=2 published_columns=3"),
+            "{}",
+            fixture.ops_log()
+        );
+    }
+
+    #[test]
+    fn gh111_old_plugin_single_col_route_does_not_collapse_the_layout() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+        // An older editor sends no `layout_mode`; two columns stay exact.
+        fixture.route("alpha", &["alpha", "beta"], None).unwrap();
+        assert_eq!(
+            fixture.desired_columns(),
+            vec![fixture.id("alpha"), fixture.id("beta")]
+        );
+
+        // Its single-`--col` focus route infers `ensure`.
+        let routed = fixture.route("beta", &["beta"], None).unwrap();
+        assert_eq!(routed.exit_code, 0);
+        assert_eq!(
+            fixture.desired_columns(),
+            vec![fixture.id("alpha"), fixture.id("beta")]
+        );
+        assert_eq!(fixture.desired_focus(), Some(fixture.id("beta")));
+        let ops = fixture.ops_log();
+        assert!(
+            ops.contains("mode=exact explicit=false merge=exact route_columns=2"),
+            "{ops}"
+        );
+        assert!(
+            ops.contains("mode=ensure explicit=false merge=focus_only route_columns=1 retained_columns=2 published_columns=2"),
+            "{ops}"
+        );
+        assert!(!ops.contains("pane_layout_projection_narrowed"), "{ops}");
+    }
+
+    #[test]
+    fn gh111_first_route_seeds_the_layout_and_exact_routes_may_narrow_it() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
+        fixture.route("alpha", &["alpha"], Some("ensure")).unwrap();
+        assert_eq!(fixture.desired_columns(), vec![fixture.id("alpha")]);
+        assert!(fixture.ops_log().contains("merge=seeded"));
+
+        fixture
+            .route("alpha", &["alpha", "beta", "gamma"], Some("exact"))
+            .unwrap();
+        assert_eq!(fixture.desired_columns().len(), 3);
+
+        // A positive multi-column observation is allowed to narrow, and the
+        // narrowing is a distinct, attributable event.
+        fixture
+            .route("beta", &["alpha", "beta"], Some("exact"))
+            .unwrap();
+        assert_eq!(
+            fixture.desired_columns(),
+            vec![fixture.id("alpha"), fixture.id("beta")]
+        );
+        let generation = fixture.runtime.pane_layout_desired().unwrap().generation;
+        let ops = fixture.ops_log();
+        let narrowed = ops
+            .lines()
+            .filter(|line| line.contains("pane_layout_projection_narrowed"))
+            .collect::<Vec<_>>();
+        assert_eq!(narrowed.len(), 1, "{ops}");
+        assert!(
+            narrowed[0].contains(&format!(
+                "pane_layout_projection_narrowed generation={generation} publisher=route plane_version=none columns=2 retained_columns=3 observed_panes=unknown caller_kind=editor_route"
+            )),
+            "{}",
+            narrowed[0]
+        );
+    }
+
+    #[test]
+    fn gh111_route_column_merge_is_a_pure_function_of_retained_and_route() {
+        let retained = vec!["/p/a.md".to_string(), "/p/b.md".to_string()];
+        let (columns, merge) = merge_editor_route_columns(
+            EditorRouteLayoutMode::Ensure,
+            &retained,
+            &["/p/b.md".to_string()],
+        );
+        assert_eq!(columns, retained);
+        assert_eq!(merge.kind, EditorRouteLayoutMergeKind::FocusOnly);
+
+        let (columns, merge) = merge_editor_route_columns(
+            EditorRouteLayoutMode::Ensure,
+            &retained,
+            &["/p/notes.md,/p/c.md".to_string(), "/p/a.md".to_string()],
+        );
+        assert_eq!(columns, vec!["/p/a.md", "/p/b.md", "/p/notes.md,/p/c.md"]);
+        assert_eq!(merge.label(), "added:1");
+
+        let (columns, merge) = merge_editor_route_columns(
+            EditorRouteLayoutMode::Ensure,
+            &[],
+            &["/p/c.md".to_string()],
+        );
+        assert_eq!(columns, vec!["/p/c.md"]);
+        assert_eq!(merge.kind, EditorRouteLayoutMergeKind::Seeded);
+
+        let (columns, merge) = merge_editor_route_columns(
+            EditorRouteLayoutMode::Exact,
+            &retained,
+            &["/p/a.md".to_string()],
+        );
+        assert_eq!(columns, vec!["/p/a.md"]);
+        assert_eq!(merge.kind, EditorRouteLayoutMergeKind::Exact);
+    }
+
+    #[test]
+    fn gh111_route_layout_mode_resolution_is_explicit_or_inferred() {
+        assert_eq!(
+            EditorRouteLayoutMode::resolve(Some("exact"), 1).unwrap(),
+            EditorRouteLayoutMode::Exact
+        );
+        assert_eq!(
+            EditorRouteLayoutMode::resolve(Some("ensure"), 3).unwrap(),
+            EditorRouteLayoutMode::Ensure
+        );
+        assert_eq!(
+            EditorRouteLayoutMode::resolve(None, 1).unwrap(),
+            EditorRouteLayoutMode::Ensure
+        );
+        assert_eq!(
+            EditorRouteLayoutMode::resolve(None, 2).unwrap(),
+            EditorRouteLayoutMode::Exact
+        );
+        let error = EditorRouteLayoutMode::resolve(Some("replace"), 1).unwrap_err();
+        assert!(format!("{error:#}").contains("unsupported editor route layout_mode `replace`"));
+
+        let fixture = RouteLayoutFixture::new(&["alpha"]);
+        let refused = fixture.route("alpha", &["alpha"], Some("replace"));
+        assert!(refused.is_err(), "an unknown mode must fail closed");
+        assert!(fixture.runtime.pane_layout_desired().is_none());
+    }
+
+    #[test]
+    fn gh111_pane_layout_provenance_names_publisher_and_plane_version() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+        let invocation = automatic_layout_sync_invocation(
+            vec![fixture.id("alpha"), fixture.id("beta")],
+            &fixture.id("alpha"),
+            false,
+        );
+        let (desired, _) = publish_pane_layout_desired_invocation(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            invocation,
+            Some(115_964_117_044),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(
+            pane_layout_projection_provenance(&desired),
+            "publisher=plugin_publication plane_version=115964117044 columns=2 retained_columns=0 observed_panes=unknown"
+        );
+
+        // A one-column plugin publication over the retained two-column layout
+        // still publishes (a positive observation may narrow) but is logged.
+        let narrow =
+            automatic_layout_sync_invocation(vec![fixture.id("beta")], &fixture.id("beta"), false);
+        let (narrowed, _) = publish_pane_layout_desired_invocation(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            narrow,
+            Some(115_964_117_045),
+            PaneLayoutPublication::CoalesceIdentical,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+        assert_eq!(narrowed.provenance.retained_columns, 2);
+        assert!(fixture.ops_log().contains(&format!(
+            "pane_layout_projection_narrowed generation={} publisher=plugin_publication plane_version=115964117045 columns=1 retained_columns=2",
+            narrowed.generation
+        )));
+    }
+
+    #[test]
+    fn gh111_every_pane_layout_projection_line_carries_its_provenance() {
+        let source = include_str!("rpc.rs");
+        let attributed = format!(
+            "{}{}",
+            "\"pane_layout_projection generation={} attempt={} {} ", "phase="
+        );
+        let unattributed = format!(
+            "{}{}",
+            "\"pane_layout_projection generation={} attempt={} ", "phase="
+        );
+        assert_eq!(source.matches(&attributed).count(), 3);
+        assert_eq!(source.matches(&unattributed).count(), 0);
+    }
+
     fn gh110_receipt(
         applied: bool,
         reason: &str,
@@ -29201,6 +29800,7 @@ mod tests {
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
             },
+            provenance: PaneLayoutProvenance::default(),
         };
 
         assert_eq!(

@@ -139,6 +139,57 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `CP editor route request carries the GH 111 layout mode only when given`() {
+        val payloadOf = { layoutMode: String? ->
+            val request = CpRouteClient.editorRouteRequest(
+                filePath = "/repo/tasks/root.md",
+                relativePath = "tasks/root.md",
+                layoutArgs = listOf("--col", "/repo/tasks/root.md", "--focus", "/repo/tasks/root.md"),
+                waitForReadySeconds = 15,
+                attemptId = null,
+                routeKey = null,
+                layoutMode = layoutMode,
+            )
+            com.google.gson.JsonParser.parseString(
+                request.get("diagnostic_payload").asString,
+            ).asJsonObject
+        }
+
+        assertEquals("ensure", payloadOf("ensure").get("layout_mode").asString)
+        assertEquals("exact", payloadOf("exact").get("layout_mode").asString)
+        assertFalse(payloadOf(null).has("layout_mode"))
+    }
+
+    @Test
+    fun `route layout mode is exact only for a detected multi column layout`() {
+        assertEquals(TerminalUtil.ROUTE_LAYOUT_MODE_ENSURE, TerminalUtil.routeLayoutMode(null))
+        assertEquals(
+            TerminalUtil.ROUTE_LAYOUT_MODE_ENSURE,
+            TerminalUtil.routeLayoutMode(EditorLayout(listOf(LayoutColumn(listOf("/repo/a.md"))))),
+        )
+        assertEquals(
+            TerminalUtil.ROUTE_LAYOUT_MODE_EXACT,
+            TerminalUtil.routeLayoutMode(
+                EditorLayout(
+                    listOf(
+                        LayoutColumn(listOf("/repo/a.md")),
+                        LayoutColumn(listOf("/repo/b.md")),
+                    )
+                )
+            ),
+        )
+    }
+
+    @Test
+    fun `run agent doc passes the route layout mode to the controller`() {
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+        ).toFile().readText()
+
+        assertTrue(source.contains("layoutMode = routeLayoutMode(editorLayout)"))
+    }
+
+    @Test
     fun `restart agent action records ops log menu invocation marker before restart`() {
         val source = Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/RestartAgentAction.kt"

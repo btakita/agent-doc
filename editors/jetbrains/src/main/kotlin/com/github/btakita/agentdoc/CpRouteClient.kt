@@ -545,6 +545,7 @@ internal object CpRouteClient {
         attemptId: String?,
         routeKey: String?,
         columnOrder: String? = null,
+        layoutMode: String? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         if (commandPlaneEnabled()) {
@@ -556,6 +557,7 @@ internal object CpRouteClient {
                 waitForReadySeconds = waitForReadySeconds,
             attemptId = attemptId,
             routeKey = routeKey,
+                layoutMode = layoutMode,
                 commandId = commandId,
                 controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
                 columnOrder = columnOrder,
@@ -605,6 +607,7 @@ internal object CpRouteClient {
             attemptId = attemptId,
             routeKey = routeKey,
             columnOrder = columnOrder,
+            layoutMode = layoutMode,
         )
         return try {
             sendToSocket(socket, request)
@@ -783,6 +786,10 @@ internal object CpRouteClient {
 
     // The `agent-doc.editor_route.v1` payload the controller consumes, shared by
     // the classic `editor_route` request and the command-plane submit.
+    //
+    // GH #111: `layout_mode` says what the `--col` arguments assert — `exact` for a
+    // positive observation of the whole visible layout, `ensure` for "this document
+    // needs a column". Controllers that predate the field ignore it.
     internal fun editorRoutePayload(
         relativePath: String,
         layoutArgs: List<String>,
@@ -790,6 +797,7 @@ internal object CpRouteClient {
         attemptId: String?,
         routeKey: String?,
         columnOrder: String? = null,
+        layoutMode: String? = null,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("source", "jetbrains_plugin")
@@ -805,6 +813,7 @@ internal object CpRouteClient {
         // GH #112: name whether the `--col` order is a positive editor split
         // observation. An older controller ignores the unknown field.
         columnOrder?.let { payload.addProperty("column_order", it) }
+        layoutMode?.let { payload.addProperty("layout_mode", it) }
         return payload
     }
 
@@ -816,6 +825,7 @@ internal object CpRouteClient {
         attemptId: String?,
         routeKey: String?,
         columnOrder: String? = null,
+        layoutMode: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -824,6 +834,7 @@ internal object CpRouteClient {
             attemptId,
             routeKey,
             columnOrder,
+            layoutMode,
         )
         val request = JsonObject()
         request.addProperty("command", EditorCommandName.EditorRoute.token)
@@ -855,6 +866,7 @@ internal object CpRouteClient {
         commandId: String,
         controllerCommand: String = "editor_command_submit",
         columnOrder: String? = null,
+        layoutMode: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -863,6 +875,7 @@ internal object CpRouteClient {
             attemptId,
             routeKey,
             columnOrder,
+            layoutMode,
         )
         return commandSubmitRequest(
             filePath = filePath,

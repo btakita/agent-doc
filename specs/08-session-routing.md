@@ -138,6 +138,27 @@ the observation/effect receipt for that intent so a prior terminal
 `operator_owned` projection cannot wedge repeated Run actions; automatic editor
 surface observations still coalesce identical values.
 
+**Route layout mode (GH #111):** the route payload's `layout_mode` says what
+its `--col` arguments assert. `exact` is a positive observation of the whole
+visible layout and replaces the retained desired layout, including narrowing
+it. `ensure` asks only that each named document has a column: the controller
+starts from the retained desired columns (the pane layout graph's current
+desired value, the same source the `#focusstashescalate` retained-layout
+fallback republishes), keeps them in order, and appends only route columns
+none of whose documents is already covered. A route whose documents are all
+covered is therefore focus-only and never narrows the structural layout. When
+the field is absent (editors that predate it), two or more columns infer
+`exact` and a single column infers `ensure`; an unknown value fails closed
+before publication. The JetBrains plugin sends `exact` only for a detected
+multi-column layout and `ensure` for its undetected single-file fallback.
+`controller_editor_route_layout_mode` logs the mode, whether it was explicit,
+the merge (`exact`, `seeded`, `focus_only`, `added:N`) and the route, retained
+and published column counts. Every `pane_layout_projection` line carries
+`publisher=` (`route`, `plugin_publication`, `escalation`, `editor_surface`,
+`command`), `plane_version=`, `columns=`, `retained_columns=` and
+`observed_panes=`; a generation that applies fewer columns than the retained
+layout it replaced also logs `pane_layout_projection_narrowed`.
+
 **Cross-document child-route boundary:** A route with no layout columns that is
 invoked from explicit live tmux process context inside a pane owned by another
 document is background work, not a new editor-surface intent. It may reuse and

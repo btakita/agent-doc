@@ -577,6 +577,38 @@ impl PreflightResponseContract {
     }
 }
 
+/// One queue line the cycle must dispatch to a subagent (`#closeout-steering`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueSubagentDispatch {
+    /// The queue line, verbatim (markers stripped).
+    pub item: String,
+    /// The claim to run BEFORE dispatching.
+    pub claim_command: String,
+}
+
+/// Build the `queue_subagent_dispatch` contract entries for `file`.
+pub fn queue_subagent_dispatch_entries(
+    file: &Path,
+    items: &[String],
+) -> Vec<QueueSubagentDispatch> {
+    let document = file.display().to_string();
+    items
+        .iter()
+        .map(|item| QueueSubagentDispatch {
+            item: item.clone(),
+            claim_command: agent_doc_queue_io::subagent_dispatch::claim_command(&document, item),
+        })
+        .collect()
+}
+
+/// Guidance for a non-empty `queue_subagent_dispatch`.
+pub const QUEUE_SUBAGENT_DISPATCH_GUIDANCE: &str = "The operator added these queue items with \
+subagent intent. For EACH: run its `claim_command` (fill in `<label>`), then dispatch it NOW to \
+its own background subagent (its own git worktree outside the IDE-watched project if it touches \
+a repository). Do NOT execute them inline in queue order; they are excluded from \
+`selected_queue_prompts`. Run `agent-doc queue release <FILE> --item <item>` when a subagent \
+reports back, then close the item normally.";
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
     /// Non-blocking warnings the skill should surface before responding.
@@ -714,6 +746,16 @@ pub struct PreflightOutput {
     /// Realtime-selected active queue prompts for this cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_queue_prompts: Vec<String>,
+    /// `#closeout-steering`: new queue lines with subagent intent (`#subagents`
+    /// tag or a preset expanding to subagent work) that no worker has claimed.
+    /// They are NOT in `selected_queue_prompts`: claim each with its
+    /// `claim_command`, then dispatch it to its own background subagent
+    /// instead of executing it inline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queue_subagent_dispatch: Vec<QueueSubagentDispatch>,
+    /// How to handle `queue_subagent_dispatch`; present only when non-empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_subagent_dispatch_guidance: Option<String>,
     /// `#qheadannotation`: operator text attached to a selected id-backed head
     /// (`do [#id]: <question>`), separated from the canonical directive. Each
     /// annotation is an operator directive to answer in this turn alongside the
@@ -2695,6 +2737,29 @@ fn publish_reactive_state_event(
 /// This intentionally does not run queue convergence, backlog mirroring,
 /// in-progress marker updates, journals, or snapshot/frontmatter writes. It only
 /// computes the queue facts needed for preflight JSON from the current document.
+/// Queue entries minus heads the in-session loop must not select: claimed
+/// heads (`#queueclaim`) and new subagent-dispatch lines (`#closeout-steering`).
+fn entries_without_out_of_loop_heads(
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+    claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+    dispatch: &[String],
+) -> Vec<agent_doc_queue::document_queue::QueueEntry> {
+    entries
+        .iter()
+        .filter(|entry| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                !claimed.claims(&prompt.text)
+                    && !agent_doc_queue_io::subagent_dispatch::is_dispatch_item(
+                        dispatch,
+                        &prompt.text,
+                    )
+            }
+            _ => true,
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     let content = match std::fs::read_to_string(file) {
         Ok(content) => content,
@@ -2832,6 +2897,11 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     } else {
         agent_doc_queue::queue_claim::ClaimedQueueItems::none()
     };
+    let subagent_dispatch = if activation.active {
+        agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(file, &content)
+    } else {
+        Vec::new()
+    };
     let queue_drainable_head_count = if activation.active {
         agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
             &drainability_content,
@@ -2854,10 +2924,15 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             .map(|state| state.skipped_queue_head_ids.into_iter().collect())
             .unwrap_or_default();
     let projected_in_progress_queue_heads = load_projected_in_progress_queue_heads(file);
+    let projection_entries = entries_without_out_of_loop_heads(
+        &activation.entries_after,
+        &claimed_queue_items,
+        &subagent_dispatch,
+    );
     let selected_queue_prompts = if activation.active {
         agent_doc_queue::queue_projection::active_queue_prompt_projection(
             &drainability_content,
-            &activation.entries_after,
+            &projection_entries,
             &agent_doc_queue::backlog_sync::collect_after_deps(&components, &content),
             agent_doc_queue::queue_projection::in_progress_marker_retarget_requested(
                 diff,
@@ -2870,6 +2945,11 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         .prompts
         .into_iter()
         .filter(|prompt| !claimed_queue_items.claims(prompt))
+        // `#closeout-steering`: a new subagent-intent line is dispatched, not
+        // drained inline (`queue_subagent_dispatch`).
+        .filter(|prompt| {
+            !agent_doc_queue_io::subagent_dispatch::is_dispatch_item(&subagent_dispatch, prompt)
+        })
         .collect()
     } else {
         Vec::new()
@@ -5001,11 +5081,35 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     }
 
     let mut in_progress_markers_changed = false;
+    // `#queueclaim`: a head claimed by a worker outside the in-session loop (a
+    // dispatched subagent) is in flight; this cycle must not select, mark, or
+    // consume it. `#closeout-steering`: likewise a new subagent-intent line
+    // the cycle must dispatch (`queue_subagent_dispatch`). Both leave the
+    // projection BEFORE it picks heads, so the next head runs inline instead
+    // of the cycle selecting nothing.
+    let claimed_queue_items = if activation.active {
+        agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &current_content)
+    } else {
+        agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+    };
+    let subagent_dispatch = if activation.active {
+        agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
+            file,
+            &current_content,
+        )
+    } else {
+        Vec::new()
+    };
+    let projection_entries = entries_without_out_of_loop_heads(
+        &activation.entries_after,
+        &claimed_queue_items,
+        &subagent_dispatch,
+    );
     let active_queue_projection = if activation.active {
         let current_components = agent_doc_element::element::parse(&current_content)?;
         agent_doc_queue::queue_projection::active_queue_prompt_projection(
             &current_content,
-            &activation.entries_after,
+            &projection_entries,
             &agent_doc_queue::backlog_sync::collect_after_deps(
                 &current_components,
                 &current_content,
@@ -5053,18 +5157,13 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             active_harness: None,
         });
     }
-    // `#queueclaim`: a head claimed by a worker outside the in-session loop (a
-    // dispatched subagent) is in flight; this cycle must not select, mark, or
-    // consume it.
-    let claimed_queue_items = if activation.active {
-        agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &current_content)
-    } else {
-        agent_doc_queue::queue_claim::ClaimedQueueItems::none()
-    };
     let active_queue_prompt_texts: Vec<String> = active_queue_projection
         .prompts
         .into_iter()
         .filter(|prompt| !claimed_queue_items.claims(prompt))
+        .filter(|prompt| {
+            !agent_doc_queue_io::subagent_dispatch::is_dispatch_item(&subagent_dispatch, prompt)
+        })
         .collect();
     if activation.active
         && let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
@@ -7479,6 +7578,100 @@ mod tests {
         assert_eq!(updated, content);
         assert!(state.queue_prompts.is_empty());
         assert_eq!(state.queue_active, None);
+    }
+
+    /// `#closeout-steering`: a `#subagents` queue line added since the
+    /// previous cycle's steering seed is dispatched, not selected inline; a
+    /// claimed one is neither listed nor selected.
+    #[test]
+    fn run_queue_maintenance_does_not_select_a_new_subagent_dispatch_item() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let head = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent: codex\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+        );
+        let previous = format!("{head}- do something\n<!-- /agent:queue -->\n");
+        let content = format!(
+            "{head}- #subagents do [#preflightdeadline]\n- do something\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        // The previous cycle's steering seed did not have the line.
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            &agent_doc_queue_io::subagent_dispatch::midturn_steering_state_key("base", &doc),
+            &serde_json::json!({
+                "cycle_id": "cycle-previous",
+                "baseline": previous,
+                "acknowledged_queue": ["do something"],
+            })
+            .to_string(),
+            1,
+        )
+        .unwrap();
+
+        let dispatch = agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
+            &doc, &content,
+        );
+        assert_eq!(
+            dispatch,
+            vec!["#subagents do [#preflightdeadline]".to_string()]
+        );
+        let entries = queue_subagent_dispatch_entries(&doc, &dispatch);
+        assert!(
+            entries[0]
+                .claim_command
+                .contains("--item '#preflightdeadline'"),
+            "{entries:?}"
+        );
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            state.selected_queue_prompts,
+            vec!["do something".to_string()],
+            "the next head still runs inline"
+        );
+        assert!(
+            !state
+                .selected_queue_prompts
+                .iter()
+                .any(|prompt| prompt.contains("preflightdeadline")),
+            "a subagent dispatch item must not be selected inline: {:?}",
+            state.selected_queue_prompts
+        );
+        let inspected = inspect_queue_state(&doc, None).unwrap();
+        assert!(
+            !inspected
+                .selected_queue_prompts
+                .iter()
+                .any(|prompt| prompt.contains("preflightdeadline")),
+            "{:?}",
+            inspected.selected_queue_prompts
+        );
+
+        agent_doc_queue_io::queue_claim::claim(&doc, "#preflightdeadline", "subagent:pd", 600)
+            .unwrap();
+        let live = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(&doc, &live)
+                .is_empty(),
+            "a claimed item is already dispatched"
+        );
     }
 
     #[test]

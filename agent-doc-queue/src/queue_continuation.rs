@@ -797,6 +797,17 @@ pub fn live_queue_head_identities(
     )
 }
 
+/// Texts of the live queue heads, in queue order (`None` when no queue parses).
+pub fn live_queue_head_texts(content: &str) -> Option<Vec<String>> {
+    let (_, entries) = queue_component_entries(content)?;
+    Some(
+        document_queue::prompts(&entries)
+            .into_iter()
+            .map(|prompt| prompt.text.trim().to_string())
+            .collect(),
+    )
+}
+
 /// Count active queue entries that are predicate-proven non-drainable noise.
 pub fn queue_stale_noise_lines(content: &str) -> usize {
     let Some((queue_facts, entries)) = queue_component_entries(content) else {

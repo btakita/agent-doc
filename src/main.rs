@@ -4483,9 +4483,18 @@ fn main() -> ExitCode {
     }
 }
 
+/// A usage error with its own specific remedy (e.g. a `queue claim --item`
+/// that names no live head). It is not an Agent Doc turn failure, so the
+/// generic dogfood "did not complete this turn" notice must not bury it.
+fn is_operator_usage_error(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| cause.is::<agent_doc_queue::queue_claim::QueueClaimMiss>())
+}
+
 fn print_terminal_error_report(err: &anyhow::Error) {
     let mut report = format!("Error: {err:?}");
-    if let Some(file) = dogfood_document_argument()
+    if !is_operator_usage_error(err)
+        && let Some(file) = dogfood_document_argument()
         && agent_doc_controller_io::project_controller::dogfood_agent_doc_crate_root(&file)
             .is_some()
     {
@@ -5225,6 +5234,7 @@ fn try_main() -> anyhow::Result<()> {
             agent_doc_write_runtime_io::checkpoint_salient_response(&file, &response)
         }
         Commands::Write { args, commit } => {
+            let closeout_file = commit.then(|| args.file.clone());
             let lint_override = match args.lint.as_deref() {
                 None => None,
                 Some(s) => Some(
@@ -5282,9 +5292,19 @@ fn try_main() -> anyhow::Result<()> {
                 } else {
                     agent_doc_write_command_io::CommitMode::None
                 },
-            )
+            )?;
+            // `#closeout-steering`: the terminal report carries any operator
+            // steering no mid-turn hook delivered.
+            if let Some(file) = closeout_file {
+                agent_doc_session_check_io::midturn_steering::emit_closeout_steering(
+                    &file,
+                    &mut std::io::stdout().lock(),
+                );
+            }
+            Ok(())
         }
         Commands::Finalize { args } => {
+            let closeout_file = args.file.clone();
             let lint_override = match args.lint.as_deref() {
                 None => None,
                 Some(s) => Some(
@@ -5338,7 +5358,15 @@ fn try_main() -> anyhow::Result<()> {
                     commit_sibling_message: args.commit_sibling_message,
                 },
                 agent_doc_write_command_io::CommitMode::Required,
-            )
+            )?;
+            // `#closeout-steering`: the terminal report carries any operator
+            // steering no mid-turn hook delivered, before the loop schedules
+            // its next re-entry.
+            agent_doc_session_check_io::midturn_steering::emit_closeout_steering(
+                &closeout_file,
+                &mut std::io::stdout().lock(),
+            );
+            Ok(())
         }
         Commands::Stream {
             file,
@@ -7447,5 +7475,26 @@ mod recycle_force_tests {
         // NEGATIVE — an unrelated error must not escalate.
         let unrelated = anyhow::anyhow!("failed to read /repo/plan.md");
         assert!(!session_error_is_missing_supervisor(&unrelated));
+    }
+}
+
+#[cfg(test)]
+mod usage_error_report_tests {
+    use super::*;
+
+    /// A `queue claim` miss is a usage error with its own remedy, so the
+    /// terminal report must not append the generic dogfood turn-failure
+    /// notice; a real failure still gets it.
+    #[test]
+    fn queue_claim_miss_is_an_operator_usage_error() {
+        let miss = agent_doc_queue::queue_claim::resolve_claim_target(
+            "#nosuch",
+            &["#subagents do [#preflightdeadline]".to_string()],
+        )
+        .unwrap_err();
+        let err = anyhow::Error::new(miss).context("queue claim");
+        assert!(is_operator_usage_error(&err));
+        assert!(format!("{err:#}").contains("no live queue head matches \"#nosuch\"; live heads: "));
+        assert!(!is_operator_usage_error(&anyhow::anyhow!("closeout failed")));
     }
 }

@@ -8,7 +8,8 @@
 //! poll; `--follow` watches the document (filesystem events, per
 //! `#reactive-boundary-ingress`) and prints one JSON line per settled batch.
 //! Each mode keeps its own watermark, so polling never steals steering from
-//! the hook.
+//! the hook. Polls keep reporting unsurfaced changes after the cycle closes,
+//! until the next preflight re-seeds (`#closeout-steering`).
 
 use std::path::Path;
 use std::time::Duration;

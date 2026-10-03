@@ -31,8 +31,6 @@ use agent_doc_document_realtime::midturn_steering::{
     self as core, DEFAULT_STEERING_DEBOUNCE_MS, ObserveContext, SteeringItem, SteeringWatermark,
 };
 
-const KEY_PREFIX: &str = "midturn_steering";
-
 /// The in-turn harness hook consumer.
 pub const CONSUMER_HOOK: &str = "hook";
 /// `agent-doc steering <FILE>` polling consumer.
@@ -47,22 +45,25 @@ pub struct SteeringReport {
     pub cycle_id: String,
     pub items: Vec<SteeringItem>,
     pub pending: usize,
+    /// Observed at/after the turn boundary (the cycle no longer accepts
+    /// mid-turn steering): items are framed for the next cycle.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub after_close: bool,
 }
 
 impl SteeringReport {
     /// Agent-facing context, `None` when nothing is ready.
     pub fn render(&self) -> Option<String> {
-        core::render_steering_context(&self.document, &self.items, self.pending)
+        if self.after_close {
+            core::render_closeout_steering_context(&self.document, &self.items, self.pending)
+        } else {
+            core::render_steering_context(&self.document, &self.items, self.pending)
+        }
     }
 }
 
-fn document_key(file: &Path) -> String {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    agent_doc_hash::content_hash(&canonical.display().to_string())
-}
-
 fn state_key(kind: &str, file: &Path) -> String {
-    format!("{KEY_PREFIX}:{kind}:{}", document_key(file))
+    agent_doc_queue_io::subagent_dispatch::midturn_steering_state_key(kind, file)
 }
 
 fn now_ms() -> u64 {
@@ -93,8 +94,16 @@ pub fn seed_for_cycle(
     let Some(root) = project_root(file) else {
         return Ok(());
     };
-    let watermark = SteeringWatermark::seed(cycle_id, baseline, current_item, session_presets);
+    let mut watermark = SteeringWatermark::seed(cycle_id, baseline, current_item, session_presets);
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    // Keep the previous cycle's seed queue for `queue_subagent_dispatch`: a
+    // re-entrant preflight of the same cycle inherits it, a new cycle takes
+    // the outgoing base's queue.
+    watermark.prior_cycle_queue = match load_watermark(&conn, &state_key("base", file))? {
+        Some(existing) if existing.cycle_id == cycle_id => existing.prior_cycle_queue,
+        Some(existing) => Some(existing.acknowledged_queue),
+        None => None,
+    };
     agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
         &conn,
         &state_key("base", file),
@@ -168,12 +177,96 @@ fn binary_owned_ids(cycle: &agent_doc_cycle_state_io::CycleState) -> BTreeSet<St
         .collect()
 }
 
-/// Observe `file` for `consumer`. Returns `Ok(None)` when there is no active
-/// cycle watermark, the cycle closed, or the document is unchanged; otherwise
-/// a report (possibly with zero ready items while edits are still settling).
+/// A computed, not-yet-persisted observation for one consumer.
 ///
-/// When `advance` is false the watermark is not written (a peek).
-pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<SteeringReport>> {
+/// Splitting compute from persist is what lets the turn-boundary report
+/// advance the watermark only after the report actually carried the items.
+#[derive(Debug, Clone)]
+pub struct PreparedObservation {
+    consumer: String,
+    consumer_key: String,
+    root: PathBuf,
+    next: Option<SteeringWatermark>,
+    /// The report, `None` when there is nothing to say.
+    pub report: Option<SteeringReport>,
+    /// The observation happened at/after the turn boundary.
+    pub boundary: bool,
+}
+
+impl PreparedObservation {
+    /// Persist the advanced watermark (and log what surfaced).
+    pub fn acknowledge(&self, file: &Path) -> Result<()> {
+        let Some(next) = &self.next else {
+            return Ok(());
+        };
+        let conn = agent_doc_sqlite::state_store::open_state_db(&self.root)?;
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            &self.consumer_key,
+            &serde_json::to_string(next)?,
+            now_ms(),
+        )?;
+        if let Some(report) = self
+            .report
+            .as_ref()
+            .filter(|report| !report.items.is_empty())
+        {
+            let dispatches = report
+                .items
+                .iter()
+                .map(|item| item.dispatch.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "midturn_steering_surfaced file={} consumer={} cycle={} count={} pending={} dispatch={dispatches} boundary={}",
+                    file.display(),
+                    self.consumer,
+                    next.cycle_id,
+                    report.items.len(),
+                    report.pending,
+                    self.boundary,
+                ),
+            );
+        }
+        Ok(())
+    }
+}
+
+/// How an observation treats a cycle that no longer accepts mid-turn steering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClosedCyclePolicy {
+    /// The in-turn hook: a closed cycle silences the watermark for good.
+    Silence,
+    /// Polls (`agent-doc steering`): after close, keep reporting unsurfaced
+    /// queue/exchange changes in boundary mode until the next preflight.
+    Boundary,
+    /// The turn-boundary report itself: always boundary mode, no debounce.
+    ForceBoundary,
+}
+
+/// Fallback base when no seeded watermark describes the latest cycle: the
+/// last committed baseline, so a poll after close still reports items added
+/// since the last commit.
+fn committed_baseline_watermark(file: &Path) -> Result<Option<SteeringWatermark>> {
+    Ok(
+        agent_doc_snapshot_io::load_document_baseline(file)?.map(|baseline| {
+            SteeringWatermark::seed(
+                &format!("committed:{}", core::content_hash(&baseline)),
+                &baseline,
+                None,
+                Vec::new(),
+            )
+        }),
+    )
+}
+
+fn prepare(
+    file: &Path,
+    consumer: &str,
+    policy: ClosedCyclePolicy,
+) -> Result<Option<PreparedObservation>> {
     let Some(root) = project_root(file) else {
         return Ok(None);
     };
@@ -181,8 +274,33 @@ pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<Stee
         return Ok(None);
     }
     let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-    let Some(base) = load_watermark(&conn, &state_key("base", file))? else {
+    let stored_base = load_watermark(&conn, &state_key("base", file))?;
+    // Boundary-capable consumers need the cycle up front to pick the base;
+    // the hook keeps its rare-path cycle lookup.
+    let cycle = if policy == ClosedCyclePolicy::Silence {
+        None
+    } else {
+        agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+    };
+    // The boundary report speaks for a committed turn; a closeout that
+    // deferred (cycle still open) reports at the later session-check.
+    if policy == ClosedCyclePolicy::ForceBoundary && cycle.as_ref().is_some_and(|c| c.is_open()) {
         return Ok(None);
+    }
+    let base_describes_cycle = |base: &SteeringWatermark| {
+        cycle
+            .as_ref()
+            .is_none_or(|cycle| cycle.cycle_id == base.cycle_id)
+    };
+    let base = match stored_base {
+        Some(base) if policy == ClosedCyclePolicy::Silence || base_describes_cycle(&base) => base,
+        // No seed for the latest cycle (or none at all): compare with the
+        // last committed baseline.
+        _ if policy != ClosedCyclePolicy::Silence => match committed_baseline_watermark(file)? {
+            Some(base) => base,
+            None => return Ok(None),
+        },
+        _ => return Ok(None),
     };
     let consumer_key = state_key(consumer, file);
     let mut watermark = match load_watermark(&conn, &consumer_key)? {
@@ -193,19 +311,30 @@ pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<Stee
         }
         _ => base,
     };
+    let cycle_open = cycle
+        .as_ref()
+        .is_some_and(|cycle| cycle_accepts_steering(cycle, &watermark.cycle_id));
+    let boundary = match policy {
+        ClosedCyclePolicy::Silence => false,
+        ClosedCyclePolicy::Boundary => !cycle_open,
+        ClosedCyclePolicy::ForceBoundary => true,
+    };
     if watermark.closed {
-        return Ok(None);
-    }
-    let persist = |watermark: &SteeringWatermark| -> Result<()> {
-        if advance {
-            agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
-                &conn,
-                &consumer_key,
-                &serde_json::to_string(watermark)?,
-                now_ms(),
-            )?;
+        if policy == ClosedCyclePolicy::Silence {
+            return Ok(None);
         }
-        Ok(())
+        // A hook-silenced watermark still owes the boundary report.
+        watermark.closed = false;
+    }
+    let prepared = |next: Option<SteeringWatermark>, report: Option<SteeringReport>| {
+        Ok(Some(PreparedObservation {
+            consumer: consumer.to_string(),
+            consumer_key: consumer_key.clone(),
+            root: root.clone(),
+            next,
+            report,
+            boundary,
+        }))
     };
 
     // Hot-path gate: unchanged file stat and nothing settling → no read.
@@ -214,7 +343,7 @@ pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<Stee
     if watermark.pending.is_empty()
         && watermark.last_observed_stat.as_deref() == Some(fingerprint.as_str())
     {
-        return Ok(None);
+        return prepared(None, None);
     }
     let content =
         std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
@@ -223,23 +352,37 @@ pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<Stee
             == Some(core::content_hash(&content).as_str())
     {
         watermark.last_observed_stat = Some(fingerprint);
-        persist(&watermark)?;
-        return Ok(None);
+        return prepared(Some(watermark), None);
     }
 
-    let debounce_ms = debounce_ms_for(file, &content);
+    // The turn boundary is the last chance before the loop re-enters: an
+    // item that is complete surfaces now rather than waiting out the window.
+    let debounce_ms = if policy == ClosedCyclePolicy::ForceBoundary {
+        0
+    } else {
+        debounce_ms_for(file, &content)
+    };
+    let mode = if boundary {
+        core::ObserveMode::Boundary
+    } else {
+        core::ObserveMode::InTurn
+    };
     let empty = BTreeSet::new();
+    let owned = cycle.as_ref().map(binary_owned_ids).unwrap_or_default();
     let ctx = ObserveContext {
         now_ms: now_ms(),
         document_changed_ms: mtime_ms(&meta),
         debounce_ms,
-        binary_owned_queue_ids: &empty,
+        binary_owned_queue_ids: if boundary { &owned } else { &empty },
     };
-    let mut observation = core::observe(&watermark, &content, &ctx);
-    if !observation.ready.is_empty() {
+    let mut observation = core::observe_with_mode(&watermark, &content, &ctx, mode);
+    if !boundary && !observation.ready.is_empty() {
         // Rare path: confirm the cycle is still open before handing anything
         // to the agent, and exclude this cycle's own queue bookkeeping.
-        let cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+        let cycle = match cycle {
+            Some(cycle) => Some(cycle),
+            None => agent_doc_cycle_state_io::load_with_closeout_projection(file)?,
+        };
         match cycle {
             Some(cycle) if cycle_accepts_steering(&cycle, &watermark.cycle_id) => {
                 let owned = binary_owned_ids(&cycle);
@@ -256,38 +399,94 @@ pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<Stee
             }
             _ => {
                 watermark.closed = true;
-                persist(&watermark)?;
-                return Ok(None);
+                return prepared(Some(watermark), None);
             }
         }
     }
     let mut next = observation.next;
     next.last_observed_stat = Some(fingerprint);
-    persist(&next)?;
-    if advance && !observation.ready.is_empty() {
-        let dispatches = observation
-            .ready
-            .iter()
-            .map(|item| item.dispatch.as_str())
-            .collect::<Vec<_>>()
-            .join(",");
+    let report = SteeringReport {
+        document: file.display().to_string(),
+        cycle_id: next.cycle_id.clone(),
+        items: observation.ready,
+        pending: observation.pending,
+        after_close: boundary,
+    };
+    prepared(Some(next), Some(report))
+}
+
+/// Observe `file` for `consumer`. Returns `Ok(None)` when there is no active
+/// cycle watermark, the cycle closed (hook only), or the document is
+/// unchanged; otherwise a report (possibly with zero ready items while edits
+/// are still settling).
+///
+/// The hook consumer goes silent once the cycle closes. Poll consumers
+/// (`cli`, `follow`) keep reporting unsurfaced changes after close, in
+/// boundary mode, until the next preflight re-seeds (`#closeout-steering`).
+///
+/// When `advance` is false the watermark is not written (a peek).
+pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<SteeringReport>> {
+    let policy = if consumer == CONSUMER_HOOK {
+        ClosedCyclePolicy::Silence
+    } else {
+        ClosedCyclePolicy::Boundary
+    };
+    let Some(prepared) = prepare(file, consumer, policy)? else {
+        return Ok(None);
+    };
+    if advance {
+        prepared.acknowledge(file)?;
+    }
+    Ok(prepared.report)
+}
+
+/// The turn-boundary observation for the in-turn agent channel: unsurfaced
+/// steering relative to the hook consumer's watermark (so nothing the hook
+/// already delivered repeats), in boundary mode, with no debounce. The caller
+/// renders it, emits it, and only then calls
+/// [`PreparedObservation::acknowledge`].
+pub fn prepare_closeout(file: &Path) -> Result<Option<PreparedObservation>> {
+    prepare(file, CONSUMER_HOOK, ClosedCyclePolicy::ForceBoundary)
+}
+
+/// Render a report for the turn-boundary surface.
+pub fn render_closeout(report: &SteeringReport) -> Option<String> {
+    core::render_closeout_steering_context(&report.document, &report.items, report.pending)
+}
+
+/// Emit unsurfaced steering into the terminal report of `respond` /
+/// `write --commit` / post-commit `session-check` (`#closeout-steering`).
+///
+/// The watermark advances only after `writer` accepted the rendered report.
+/// Failures are reported (stderr + ops.log) and never fail the already-
+/// committed closeout.
+pub fn emit_closeout_steering(file: &Path, writer: &mut impl std::io::Write) {
+    let outcome = (|| -> Result<bool> {
+        let Some(prepared) = prepare_closeout(file)? else {
+            return Ok(false);
+        };
+        let rendered = prepared.report.as_ref().and_then(render_closeout);
+        if let Some(text) = &rendered {
+            writeln!(writer, "{text}").context("write closeout steering report")?;
+            writer.flush().context("flush closeout steering report")?;
+        }
+        prepared.acknowledge(file)?;
+        Ok(rendered.is_some())
+    })();
+    if let Err(err) = outcome {
+        eprintln!(
+            "[agent-doc] WARNING: closeout steering report failed for {}; run `agent-doc steering {}` to read operator edits made during the turn: {err:#}",
+            file.display(),
+            file.display()
+        );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "midturn_steering_surfaced file={} consumer={consumer} cycle={} count={} pending={} dispatch={dispatches}",
-                file.display(),
-                next.cycle_id,
-                observation.ready.len(),
-                observation.pending,
+                "midturn_steering_closeout_error file={} error={err:#}",
+                file.display()
             ),
         );
     }
-    Ok(Some(SteeringReport {
-        document: file.display().to_string(),
-        cycle_id: next.cycle_id,
-        items: observation.ready,
-        pending: observation.pending,
-    }))
 }
 
 /// Harness `PostToolUse` payload fields this hook reads. Claude Code and Codex
@@ -410,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn seeded_cycle_surfaces_once_then_stays_silent() {
+    fn seeded_watermark_without_an_open_cycle_reports_once_to_polls_only() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
@@ -418,19 +617,157 @@ mod tests {
         std::fs::write(&file, baseline).unwrap();
         seed_for_cycle(&file, "cycle-1", baseline, Some("current task"), Vec::new()).unwrap();
 
-        // Unchanged document: silent, no cycle lookup needed.
+        // Unchanged document: silent.
         assert_eq!(observe(&file, CONSUMER_CLI, true).unwrap(), None);
 
-        // A peek at a change never needs the cycle when nothing is ready yet;
-        // with a ready item and no open cycle the watermark closes silently.
         std::fs::write(
             &file,
             baseline.replace("- current task\n", "- current task\n- new work\n"),
         )
         .unwrap();
-        assert_eq!(observe(&file, CONSUMER_CLI, true).unwrap(), None);
-        // Closed watermark stays silent afterwards.
-        assert_eq!(observe(&file, CONSUMER_CLI, true).unwrap(), None);
+        // The hook needs an open cycle: with none it silences for good.
+        assert_eq!(observe(&file, CONSUMER_HOOK, true).unwrap(), None);
+        assert_eq!(observe(&file, CONSUMER_HOOK, true).unwrap(), None);
+        // A poll reports the unsurfaced addition after close, once.
+        let report = observe(&file, CONSUMER_CLI, true).unwrap().expect("report");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        assert!(report.after_close);
+        assert_eq!(report.items[0].verbatim, "new work");
+        let rerun = observe(&file, CONSUMER_CLI, true).unwrap();
+        assert!(
+            rerun.as_ref().is_none_or(|report| report.items.is_empty()),
+            "{rerun:?}"
+        );
+    }
+
+    fn close_cycle(file: &Path, content: &str) {
+        agent_doc_cycle_state_io::mark_committed(file, "test_commit", Some(content), Some(content))
+            .unwrap();
+    }
+
+    /// The operator report: a `#subagents` queue addition made after the seed,
+    /// with no PostToolUse hook ever running, must reach the agent in the
+    /// `respond` terminal report exactly once, as a dispatch directive; a
+    /// `steering` poll after close must still show it.
+    #[test]
+    fn closeout_report_carries_a_hookless_subagent_addition_exactly_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 600000\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        // The closeout consumed the current head; the operator's line stays.
+        let closed = baseline.replace("- current task\n", "- #subagents do [#preflightdeadline]\n");
+        std::fs::write(&file, &closed).unwrap();
+        // A closeout that deferred (cycle still open) does not report yet and
+        // does not advance the watermark.
+        let mut deferred = Vec::new();
+        emit_closeout_steering(&file, &mut deferred);
+        assert!(
+            deferred.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&deferred)
+        );
+        close_cycle(&file, &closed);
+
+        let mut out = Vec::new();
+        emit_closeout_steering(&file, &mut out);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.starts_with(core::CLOSEOUT_STEERING_MARKER), "{text}");
+        assert!(text.contains("dispatch=subagent"), "{text}");
+        assert!(
+            text.contains("verbatim: #subagents do [#preflightdeadline]"),
+            "{text}"
+        );
+        assert!(text.contains("DISPATCH NOW"), "{text}");
+        assert!(
+            text.contains("agent-doc queue claim") && text.contains("--item '#preflightdeadline'"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("REMOVED the queue item"),
+            "consuming the finished head is not steering: {text}"
+        );
+        assert_eq!(text.matches("[steering ").count(), 1, "{text}");
+
+        // Exactly once on the agent channel: a second closeout (e.g. the
+        // post-commit session-check) is silent.
+        let mut again = Vec::new();
+        emit_closeout_steering(&file, &mut again);
+        assert!(again.is_empty(), "{}", String::from_utf8_lossy(&again));
+
+        // A steering poll after close still shows it (its own consumer) once
+        // the operator's edit is quiet for the debounce window.
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+            .unwrap();
+        let peek = observe(&file, CONSUMER_CLI, false).unwrap().expect("peek");
+        assert_eq!(peek.items.len(), 1, "{peek:?}");
+        assert!(peek.after_close);
+        assert_eq!(peek.items[0].dispatch, core::SteeringDispatch::Subagent);
+        assert!(peek.render().unwrap().contains("DISPATCH NOW"));
+        // Peek never advances.
+        assert_eq!(
+            observe(&file, CONSUMER_CLI, true)
+                .unwrap()
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn closeout_report_skips_what_the_hook_already_surfaced() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let mid = baseline.replace("- current task\n", "- current task\n- first addition\n");
+        std::fs::write(&file, &mid).unwrap();
+        assert_eq!(
+            observe(&file, CONSUMER_HOOK, true)
+                .unwrap()
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
+        let late = mid.replace("- first addition\n", "- first addition\n- late addition\n");
+        std::fs::write(&file, &late).unwrap();
+        close_cycle(&file, &late);
+        let mut out = Vec::new();
+        emit_closeout_steering(&file, &mut out);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("verbatim: late addition"), "{text}");
+        assert!(!text.contains("first addition"), "{text}");
+        assert!(text.contains("dispatch=drain_after_current"), "{text}");
     }
 
     #[test]

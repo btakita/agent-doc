@@ -134,7 +134,7 @@ Since the release, other work has landed on `main` under "Unreleased". Contract 
 - 🚧 do [#xsdcontract]
 - do [#wsdlcontract]
 - ~~do [#releasepublishbindings]~~
-- #subagent: Add C bindings
+- ~~#subagent: Add C bindings~~ — auto-struck: answered this cycle (#ftstrike)
 - #subagent: Add Odin bindings
 - #subagent: Add Jai bindings
 - #subagent: [#sdktsiftedges]

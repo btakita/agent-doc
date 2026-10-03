@@ -370,6 +370,29 @@ Fixed in `8a5ebaf5b`, and the issue is closed:
 - Test runs in a worktree started a stray `agent-doc controller serve` against that worktree. It looks like a hook recreates `.agent-doc/state.db` under any path named in a Bash command.
 
 The exchange is past the size warning (288 lines). I'm continuing the queue.
+
+### Re: GH #118 — opus-5.5 · 2026-10-03T03:45-04:00
+
+> **Queue prompt:** #subagent: https://github.com/btakita/agent-doc/issues/118
+
+Fixed in agent-doc `c8ab9659d` (installed; superproject pointer `16a45ffc51`). The issue is closed.
+
+**Root cause:** two separate checks, and recoveries that could swallow a prompt.
+- Preflight and session-check each decided on their own whether a turn could continue, and they could see different snapshots.
+- The recovery they suggested ignored unanswered steering. Its "is this real content?" check skips the queue, so a queue-item edit looked like metadata and the suggestion became `reset --from-current`. That folds the prompt into history.
+
+**Fix (`#admissionsteeringagree`):**
+- **One decision function** (`agent-doc-turn/src/turn_admission.rs`), backed by one detector for unanswered steering. Preflight, session-check, the recovery hint and `reset` all call it.
+- **No recovery can absorb a pending prompt.** While a prompt is unanswered, the suggested recovery is `agent-doc <FILE>`. In addition:
+  - `commit` keeps the existing snapshot.
+  - `repair --apply-recovery` holds back its snapshot recoveries.
+  - `reset --from-current` needs a new `--absorb-steering` flag.
+- **The refusal message** now names the last cycle and its state.
+- **Tests:** an agreement suite, guard tests that every site calls the shared function, and recovery regression tests. `make check`: 10638 passed.
+
+**Caveat:** the document and cycle named in the issue aren't in any log on this machine. The fix is based on reading the code plus a local example of the same refusal from 2026-10-01. The issue's "possibly related" note isn't covered: a committed cycle that left no response and didn't strike its queue item.
+
+Next: `release + publish`.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -384,7 +407,7 @@ The exchange is past the size warning (288 lines). I'm continuing the queue.
 - ~~#subagent: tsift.md missed part the queue item that I wrote: `> **Queue prompt:** Should we release + publish the`~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#subagent: https://github.com/btakita/agent-doc/issues/116~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#subagent: https://github.com/btakita/agent-doc/issues/117~~ — auto-struck: answered this cycle (#ftstrike)
-- #subagent: https://github.com/btakita/agent-doc/issues/118
+- ~~#subagent: https://github.com/btakita/agent-doc/issues/118~~ — auto-struck: answered this cycle (#ftstrike)
 - release + publish
 <!-- /agent:queue -->
 

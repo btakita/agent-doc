@@ -25,7 +25,7 @@ import java.io.File
  *     (equivalent to Ctrl+Alt+Y / Synchronize), so externally written skill
  *     files are visible to all registered VirtualFileListeners.
  *
- * Triggered via the Alt+Space popup menu or Ctrl+Shift+Alt+R.
+ * Triggered via the Agent Doc Actions popup (Ctrl+Shift+Alt+D) or Ctrl+Shift+Alt+R.
  */
 class RefreshEnvironmentAction : AnAction(), DumbAware {
 

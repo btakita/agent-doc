@@ -75,8 +75,8 @@ Automatic tab-to-pane sync is **reported, not planned** (`#jbsurfaceswap` / `#jb
 
 ## 6. Popup Menu
 
-- **Trigger:** `Alt+Enter` on a `.md` file.
-- **Behavior:** Show numbered popup with Run, Claim, Compact Exchange, Sync Layout, Show Session Status, Recycle Supervisor, Restart Agent, Clear Session Context, Interrupt and Clear Session Context, and Copy Session Diagnostics actions. Lower-frequency operator actions such as Run with Junie and Force Claim stay available from a non-numbered overflow path instead of consuming top-level numeric shortcuts.
+- **Trigger:** a `.md` file is focused and the editor's popup shortcut is pressed — VS Code `Alt+Enter`; JetBrains `Ctrl+Shift+Alt+D` (also Tools menu and editor context menu → Agent Doc Actions). The default must be a keystroke that Windows, macOS, and Linux all deliver to the editor: never `Alt+Space` (Windows window system menu), `Alt+F4`, or `Alt+Tab`. The shortcut stays user-rebindable through the editor's keymap settings.
+- **Behavior:** Show numbered popup with Run, Claim, Compact Exchange, Sync Layout, Show Session Status, Recycle Supervisor, Restart Agent, Clear Session Context, Interrupt and Clear Session Context, and Copy Session Diagnostics actions. Every editor action that can be invoked on the document must be reachable from the popup (top level or overflow). Lower-frequency operator actions such as Run with Junie and Force Claim stay available from a non-numbered overflow path instead of consuming top-level numeric shortcuts.
 
 ## 6a. Session Operator Actions
 

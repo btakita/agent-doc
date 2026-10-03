@@ -331,9 +331,10 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - JetBrains turn-state projection is event-driven, cached, and read from the Project Controller `state_subscribe` Lazily projection. It does not read filesystem state for ordinary turn-state UI. If the Project Controller request fails, the status bar shows `agent-doc: Project Controller disconnected`, with no fallback authority. Projection drains cap each work slice and yield between backlog slices so bursts cannot monopolize a plugin worker or indirectly starve the UI.
 - Prompt steering is Project Controller-owned. JetBrains must not treat stale supervisor freshness as a local editor-IPC apply/receipt/repair veto; supervisor recycle is only an explicit session action.
 
-### Action Promoter
+### Agent Doc Actions popup
 
-- `AgentDocActionPromoter` ensures `AgentDocPopupAction` (Alt+Enter) takes priority over the built-in `ShowIntentionActions`.
+- `AgentDocPopupAction` (`AgentDoc.Popup`) defaults to `Ctrl+Shift+Alt+D`. It never uses `Alt+Space` (`#gh116`: Windows consumes it for the window system menu, so the IDE never receives it) and installs no `ActionPromoter`, so native `Alt+Enter` intentions stay intact. The popup is also in the Tools menu and editor context menu, and like every `AgentDoc.*` action it can be rebound under Settings > Keymap.
+- Every declared `AgentDoc.*` action is listed in the popup's primary or More Actions group; `AgentDocPopupActionTest` enforces this and rejects OS-reserved default keystrokes.
 
 ### Logging
 
@@ -367,10 +368,12 @@ Binary auto-start forensics also land in `/tmp/agent-doc-sync.log` and the per-d
 | Fix Document | none |
 | Claim | `Ctrl+Shift+Alt+C` |
 | Sync Layout | `Ctrl+Shift+Alt+L` |
-| Popup Menu | `Alt+Enter` |
-| Prompt Select | `Alt+1..9` |
-| Prompt Toggle | `Alt+Esc` |
-| Prompt Dismiss | `Esc` |
+| Agent Doc Actions popup | `Ctrl+Shift+Alt+D` |
+| Run with Junie | `Ctrl+Shift+Alt+J` |
+| Load Tmux Window | `Ctrl+Shift+Alt+W` |
+| Refresh Environment | `Ctrl+Shift+Alt+R` |
+
+All defaults are registered in the `$default` keymap and can be changed under Settings > Keymap (search "Agent Doc").
 
 ## Context Menu
 

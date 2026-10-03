@@ -48,7 +48,13 @@
                 class="com.github.btakita.agentdoc.AgentDocPopupAction"
                 text="Agent Doc Actions"
                 description="Show Agent Doc actions for the current markdown file">
-            <keyboard-shortcut first-keystroke="alt SPACE" keymap="$default"/>
+            <!-- #gh116: never `alt SPACE` — Windows consumes it for the window
+                 system menu, so the IDE never receives it. `ctrl shift alt D`
+                 is unbound in every bundled keymap and joins the plugin's
+                 existing `ctrl shift alt` family. Rebind under Settings > Keymap. -->
+            <keyboard-shortcut first-keystroke="ctrl shift alt D" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.Submit"
                 class="com.github.btakita.agentdoc.SubmitAction"

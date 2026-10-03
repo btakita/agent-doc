@@ -13,7 +13,7 @@ internal class DumbAwareGroup(name: String? = null, popup: Boolean = false) :
     DefaultActionGroup(name, popup), DumbAware
 
 /**
- * Shows a popup menu with Agent Doc commands when Alt+Enter is pressed in a .md file.
+ * Shows a popup menu with Agent Doc commands when Ctrl+Shift+Alt+D (rebindable) is pressed in a .md file.
  */
 class AgentDocPopupAction : AnAction(), DumbAware {
     companion object {
@@ -43,6 +43,9 @@ class AgentDocPopupAction : AnAction(), DumbAware {
             "AgentDoc.InterruptClearSessionContext",
             "AgentDoc.ResyncFixSessions",
             "AgentDoc.GcStaleSessions",
+            // #gh116: every declared AgentDoc.* action is reachable from the popup.
+            "AgentDoc.StopAgent",
+            "AgentDoc.KillSupervisor",
         )
     }
 

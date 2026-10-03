@@ -100,6 +100,20 @@ git -C haiven-contracts apply /tmp/contracts-dirty.patch
 tsift graph-db --path . import codegen/trace.json --source haiven-sdk/codegen/trace.json --format haiven-trace
 ```
 The worktree at `/home/brian/work/btakita/worktrees/haiven-sdk-haivenrootsync` is clean and can be deleted once the change is adopted.
+
+### Re: [#jaicratepublish] approved — dispatched to a subagent — opus-5-5 · 2026-10-03T17:20-04:00
+
+> **Queue prompt:** [#jaicratepublish]: I approve
+
+> **Operator note:** I approve
+
+Thanks for approving. I claimed this item and started a background subagent on it. It works in a clean tsift worktree outside agent-loop, made from `origin/main`. It will:
+- **Check first:** confirm the version (expected 0.1.102), confirm the crate isn't on crates.io yet, confirm its dependencies are already published, and review the `cargo package --list` contents and a `--dry-run`.
+- **Publish:** run `cargo publish -p tsift-tree-sitter-jai` with the token from passage `btak/CARGO_REGISTRY_TOKEN`. The token is used only inside a subshell and never printed.
+- **Register the trusted publisher:** add `btakita/tsift:release.yml` (no environment) through the logged-in crates.io browser session, then read the config back to verify it. If that browser session isn't logged in, it stops and reports what you need to do instead.
+- **Check the release workflow:** confirm `release.yml` publishes this crate before the crates that depend on it. It changes and pushes `release.yml` only if that's wrong.
+
+I'll close the item when it reports back.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 

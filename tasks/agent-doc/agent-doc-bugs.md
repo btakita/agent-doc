@@ -678,7 +678,7 @@ Done, with the spec/test/build/install/commit/push preset. agent-doc commit `be4
 - do [#qsubattr4]
 - do [#qsubattr5]
 - #subagents: https://github.com/btakita/agent-doc/issues/120
-- #subagents: https://github.com/btakita/agent-doc/issues/121
+- ~~#subagents: https://github.com/btakita/agent-doc/issues/121~~ — auto-struck: answered this cycle (#ftstrike)
 - #subagents: https://github.com/btakita/agent-doc/issues/122
 <!-- /agent:queue -->
 

@@ -429,7 +429,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#projectlevelopt] [luaulegacy] [recommended] Project-level opt-in to index .lua files as Luau (Roblox/Rojo legacy projects keep Luau in .lua); today only .luau maps to Luau. Also consider declare/type function once tree-sitter-luau supports them.
+- [ ] [#projectlevelopt] [recommended] (luaulegacy) Project-level opt-in to index .lua files as Luau (Roblox/Rojo legacy projects keep Luau in .lua); today only .luau maps to Luau. Also consider declare/type function once tree-sitter-luau supports them.
 - [ ] [#sdktraceroot] [recommended] After #graphrefreshperf: import haiven-sdk codegen/trace.json into the ROOT graph so per-language declarations join by path:line, and investigate unjoined trace nodes (8/51 contracts, 10/23 events, 56/195 REST ops, 50 components); check for a contracts-revision mismatch vs the trace pin.
 <!-- /agent:backlog -->
 

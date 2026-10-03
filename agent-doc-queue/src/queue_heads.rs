@@ -366,6 +366,42 @@ pub fn committed_queue_contains_free_text_head(content: &str, head: &str) -> boo
         })
 }
 
+/// True when the committed queue still holds a free-text prompt that *extends*
+/// `head`: the recorded head is a strict prefix of a longer queued prompt
+/// (`#qheadcomposing`).
+///
+/// This is the shape of a head preflight recorded while the operator was still
+/// typing it: the operator finished the line after the cycle started, so the
+/// recorded fragment no longer matches any queued prompt exactly. The item was
+/// not removed and the fragment's answer did not consume it; it stays queued.
+pub fn committed_queue_extends_free_text_head(content: &str, head: &str) -> bool {
+    let target = free_text_queue_head_identity(head);
+    if target.is_empty() {
+        return false;
+    }
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return false;
+    };
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    let Ok(entries) = crate::document_queue::parse(queue.content(content)) else {
+        return false;
+    };
+    crate::document_queue::prompts(&entries)
+        .into_iter()
+        .any(|prompt| {
+            let text = prompt.text.trim();
+            let identity = free_text_queue_head_identity(text);
+            queue_prompt_text_is_free_text(content, text)
+                && identity.len() > target.len()
+                && identity.starts_with(&target)
+        })
+}
+
 /// True when a non-recurring free-text queue head is still queued even though
 /// committed exchange text contains a queue-prompt response echo for it.
 pub fn free_text_queue_head_is_completed_residue(

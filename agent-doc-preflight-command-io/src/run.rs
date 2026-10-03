@@ -968,6 +968,10 @@ fn run_with_options_to_writer_in_pass(
     // Default: 2000ms (configurable via `agent_doc_debounce` frontmatter field).
     if !options.probe {
         agent_doc_preflight_io::debounce::wait_for_lazily_current_observation(file);
+        // `#qheadcomposing`: a converged cut is not a finished prompt. When an
+        // edit landed since preflight's initial read, wait for the operator to
+        // pause so the diff does not admit a half-typed queue item.
+        agent_doc_preflight_io::debounce::wait_for_operator_edit_quiescence(file, &content);
     }
 
     crate::progress::enter("related_documents")?;

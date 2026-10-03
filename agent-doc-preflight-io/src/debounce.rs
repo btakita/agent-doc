@@ -2,7 +2,7 @@ use agent_doc_crdt_relay_io::CrdtReplicaEventReason;
 use agent_doc_debounce::{SettleAction, SettleBudget, SettleDeferReason, SettleTimers};
 use anyhow::Result;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Poll cadence inherited from the document's configured debounce budget.
 /// Debounce is no longer an editor-authority signal; Lazily current state is.
@@ -385,11 +385,132 @@ pub fn wait_for_lazily_current_observation(file: &Path) {
     }
 }
 
+/// How an operator-edit quiescence wait ended (`#qheadcomposing`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OperatorEditQuiescence {
+    /// The coherent current text still equals what preflight admitted: no
+    /// operator edit landed during preflight, so no wait was spent.
+    Unchanged,
+    /// No coherent current text could be observed (detached / pending); the
+    /// earlier Lazily-current observation owns that state.
+    Unobservable,
+    /// The text changed during preflight and then stayed unchanged for the
+    /// quiet window.
+    Settled { waited: Duration, changes: usize },
+    /// The text kept changing until the bounded ceiling; preflight proceeds.
+    CeilingReached { waited: Duration, changes: usize },
+}
+
+/// `#qheadcomposing`: wait for an operator who is still typing to pause before
+/// preflight computes the diff and selects the queue head.
+///
+/// A converged Lazily current cut only proves that every keystroke delivered so
+/// far is visible; it says nothing about whether the operator has finished the
+/// line. Operator-reported 2026-10-03 (`tasks/software/tsift.md`): a restart
+/// auto-trigger dispatched one second after the operator started typing a queue
+/// item, preflight admitted `- Should we release + publish the ` (note the
+/// trailing space of a word boundary just typed), and the response answered
+/// that fragment while the operator finished `... the C++ bindings?`.
+///
+/// The evidence is the authoritative current text itself, never a filesystem
+/// typing marker: when the text differs from the `admitted` read taken at the
+/// start of preflight, an edit landed during preflight, so the wait requires the
+/// text to stay unchanged for the document's debounce window before admitting
+/// it. When nothing changed the wait returns at once, so an idle document pays
+/// no latency.
+pub fn wait_for_operator_edit_quiescence(file: &Path, admitted: &str) -> OperatorEditQuiescence {
+    let settle_ms = authority_settle_ms(file);
+    let quiet = Duration::from_millis(settle_ms);
+    let ceiling = agent_doc_debounce::admission_deadline::clamp(
+        agent_doc_debounce::authority_settle_max_wait(settle_ms)
+            .saturating_mul(agent_doc_debounce::PROGRESS_WAIT_CEILING_MULTIPLIER),
+    );
+    let outcome = await_operator_edit_quiescence(
+        admitted,
+        quiet,
+        ceiling,
+        || {
+            match agent_doc_controller_io::project_controller::current_text_via_controller_model_for_doc(
+                file,
+                "preflight_operator_edit_quiescence",
+            ) {
+                Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => Some(text),
+                _ => None,
+            }
+        },
+        Instant::now,
+        |wait| std::thread::sleep(agent_doc_debounce::admission_deadline::clamp(wait)),
+    );
+    match &outcome {
+        OperatorEditQuiescence::Settled { waited, changes }
+        | OperatorEditQuiescence::CeilingReached { waited, changes } => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_operator_edit_quiescence file={} outcome={} waited_ms={} changes={} quiet_ms={} (#qheadcomposing)",
+                    file.display(),
+                    if matches!(outcome, OperatorEditQuiescence::Settled { .. }) {
+                        "settled"
+                    } else {
+                        "ceiling_reached"
+                    },
+                    waited.as_millis(),
+                    changes,
+                    quiet.as_millis(),
+                ),
+            );
+        }
+        OperatorEditQuiescence::Unchanged | OperatorEditQuiescence::Unobservable => {}
+    }
+    outcome
+}
+
+fn await_operator_edit_quiescence<Observe, Now, Sleep>(
+    admitted: &str,
+    quiet: Duration,
+    ceiling: Duration,
+    mut observe: Observe,
+    mut now: Now,
+    mut sleep: Sleep,
+) -> OperatorEditQuiescence
+where
+    Observe: FnMut() -> Option<String>,
+    Now: FnMut() -> Instant,
+    Sleep: FnMut(Duration),
+{
+    let start = now();
+    let Some(mut last) = observe() else {
+        return OperatorEditQuiescence::Unobservable;
+    };
+    if last == admitted {
+        return OperatorEditQuiescence::Unchanged;
+    }
+    let mut changes = 1usize;
+    let mut last_change = start;
+    loop {
+        let at = now();
+        let waited = at.saturating_duration_since(start);
+        if at.saturating_duration_since(last_change) >= quiet {
+            return OperatorEditQuiescence::Settled { waited, changes };
+        }
+        if waited >= ceiling {
+            return OperatorEditQuiescence::CeilingReached { waited, changes };
+        }
+        sleep(agent_doc_debounce::SETTLE_POLL_INTERVAL);
+        if let Some(text) = observe()
+            && text != last
+        {
+            last = text;
+            last_change = now();
+            changes += 1;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
-    use std::time::Duration;
 
     fn pending(text: &str, live_editors: usize) -> Observation {
         Observation {
@@ -691,5 +812,148 @@ mod tests {
             |_file, _reason, _targets| Ok(()),
         );
         assert!(outcome.is_ok(), "{outcome:?}");
+    }
+
+    /// `#qheadcomposing` fixture: the tsift.md session document with `line` as
+    /// the only queue item, as the operator was typing it on 2026-10-03.
+    fn tsift_queue_doc(line: &str) -> String {
+        let item = if line.is_empty() {
+            String::new()
+        } else {
+            format!("{line}\n")
+        };
+        format!(
+            "---\nagent_doc_session: tsift-v0.1\nagent_doc_format: template\n---\n\n\
+             ## Exchange\n\n<!-- agent:exchange -->\nPrior answer.\n<!-- /agent:exchange -->\n\n\
+             ## Queue\n\n<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" priority -->\n\
+             {item}<!-- /agent:queue -->\n"
+        )
+    }
+
+    /// Drive [`await_operator_edit_quiescence`] on a fake clock against a typing
+    /// timeline of `(offset_ms, queue line)` keystroke states. Returns the
+    /// outcome, the text preflight would admit, and the number of sleeps.
+    fn run_typing_timeline(
+        admitted: &str,
+        timeline: &[(u64, &str)],
+        quiet: Duration,
+        ceiling: Duration,
+    ) -> (OperatorEditQuiescence, String, usize) {
+        let origin = Instant::now();
+        let clock = Cell::new(origin);
+        let last_seen = RefCell::new(String::new());
+        let sleeps = Cell::new(0usize);
+        let outcome = await_operator_edit_quiescence(
+            admitted,
+            quiet,
+            ceiling,
+            || {
+                let elapsed = clock.get().duration_since(origin).as_millis() as u64;
+                let line = timeline
+                    .iter()
+                    .rev()
+                    .find(|(at, _)| *at <= elapsed)
+                    .map(|(_, line)| *line)
+                    .unwrap_or("");
+                let text = tsift_queue_doc(line);
+                *last_seen.borrow_mut() = text.clone();
+                Some(text)
+            },
+            || clock.get(),
+            |wait| {
+                sleeps.set(sleeps.get() + 1);
+                clock.set(clock.get() + wait);
+            },
+        );
+        (outcome, last_seen.into_inner(), sleeps.get())
+    }
+
+    fn admitted_queue_head(text: &str) -> String {
+        agent_doc_queue::queue_consume::next_queue_head_selection(text)
+            .unwrap()
+            .expect("queue head")
+            .head_text
+    }
+
+    /// `#qheadcomposing` regression (operator-reported 2026-10-03, tsift.md): a
+    /// restart auto-trigger dispatched while the operator was typing a queue
+    /// item. Preflight read `- Should we re`, and by the diff the line was
+    /// `- Should we release + publish the ` — the response quoted that fragment
+    /// as its `> **Queue prompt:**`. Preflight must wait for the line to stop
+    /// changing and admit the whole item.
+    #[test]
+    fn preflight_waits_for_a_queue_item_the_operator_is_still_typing() {
+        let admitted = tsift_queue_doc("- Should we re");
+        let timeline = [
+            (0, "- Should we release + publish the "),
+            (900, "- Should we release + publish the C"),
+            (1_800, "- Should we release + publish the C++"),
+            (3_400, "- Should we release + publish the C++ bindings"),
+            (4_500, "- Should we release + publish the C++ bindings?"),
+        ];
+        let (outcome, admitted_text, _) = run_typing_timeline(
+            &admitted,
+            &timeline,
+            Duration::from_millis(2_000),
+            Duration::from_secs(18),
+        );
+        let OperatorEditQuiescence::Settled { waited, changes } = outcome else {
+            panic!("expected the typing to settle, got {outcome:?}");
+        };
+        assert!(waited >= Duration::from_millis(6_500), "{waited:?}");
+        assert_eq!(changes, timeline.len());
+        assert_eq!(
+            admitted_queue_head(&admitted_text),
+            "Should we release + publish the C++ bindings?",
+            "preflight must admit the finished queue item, not the fragment"
+        );
+    }
+
+    #[test]
+    fn preflight_pays_no_wait_when_nothing_changed_during_preflight() {
+        let admitted = tsift_queue_doc("- Should we release + publish the C++ bindings?");
+        let timeline = [(0, "- Should we release + publish the C++ bindings?")];
+        let (outcome, _, sleeps) = run_typing_timeline(
+            &admitted,
+            &timeline,
+            Duration::from_millis(2_000),
+            Duration::from_secs(18),
+        );
+        assert_eq!(outcome, OperatorEditQuiescence::Unchanged);
+        assert_eq!(sleeps, 0, "an idle document must not pay the quiet window");
+    }
+
+    #[test]
+    fn preflight_edit_quiescence_is_bounded_when_typing_never_pauses() {
+        let admitted = tsift_queue_doc("- before preflight");
+        let lines: Vec<String> = (0..400).map(|n| format!("- a{}", "b".repeat(n))).collect();
+        let timeline: Vec<(u64, &str)> = lines
+            .iter()
+            .enumerate()
+            .map(|(n, line)| (n as u64 * 500, line.as_str()))
+            .collect();
+        let (outcome, _, _) = run_typing_timeline(
+            &admitted,
+            &timeline,
+            Duration::from_millis(2_000),
+            Duration::from_secs(5),
+        );
+        let OperatorEditQuiescence::CeilingReached { waited, .. } = outcome else {
+            panic!("expected the ceiling to bound the wait, got {outcome:?}");
+        };
+        assert!(waited >= Duration::from_secs(5) && waited < Duration::from_secs(6));
+    }
+
+    #[test]
+    fn preflight_edit_quiescence_defers_to_the_observation_wait_without_a_current_cut() {
+        let outcome = await_operator_edit_quiescence(
+            "anything",
+            Duration::from_millis(2_000),
+            Duration::from_secs(18),
+            || None,
+            Instant::now,
+            |_| panic!("an unobservable document must not wait"),
+        );
+        assert_eq!(outcome, OperatorEditQuiescence::Unobservable);
     }
 }

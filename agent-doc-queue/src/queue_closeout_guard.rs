@@ -457,6 +457,12 @@ pub fn free_text_queue_head_provenance_decision(
         if queue_heads::committed_queue_contains_free_text_head(content, &head) {
             continue;
         }
+        // `#qheadcomposing`: the operator finished typing the head after the
+        // cycle recorded it. It is still queued, so it was neither removed nor
+        // answered by a response to the fragment.
+        if queue_heads::committed_queue_extends_free_text_head(content, &head) {
+            continue;
+        }
         if queue_response::free_text_head_answered_by_response(current_cycle_response, &head)
             || response_head_plausibly_answers(current_cycle_response, &head)
         {
@@ -879,6 +885,62 @@ mod tests {
             ]
         );
         assert_eq!(decision.unresolved, vec!["missing response".to_string()]);
+    }
+
+    /// `#qheadcomposing` regression (operator-reported 2026-10-03, tsift.md):
+    /// the cycle recorded the queue head while the operator was still typing it
+    /// and the response quoted only the fragment. Closeout logged
+    /// `free_text_queue_head_provenance_proof removed="Should we release +
+    /// publish the C++"` although the finished item was still queued. The
+    /// extended head is still queued, not removed; and the fragment echo must
+    /// not consume the finished item.
+    #[test]
+    fn free_text_head_the_operator_finished_typing_is_still_queued_not_removed() {
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: Should we release + publish? — opus-5.5\n\n",
+            "> **Queue prompt:** Should we release + publish the\n\n",
+            "The question was cut off.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue preset=\"#spec-test-build-install-commit-push\" priority -->\n",
+            "- Should we release + publish the C++ bindings?\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: Should we release + publish? — opus-5.5\n\n",
+            "> **Queue prompt:** Should we release + publish the\n\n",
+            "The question was cut off. Release the C++ indexing commit once CI passes.\n",
+        );
+        let heads = vec![
+            "Should we release + publish the C++".to_string(),
+            "Should we release + publish the".to_string(),
+        ];
+
+        let decision =
+            free_text_queue_head_provenance_decision(&heads, content, Some(response)).unwrap();
+
+        assert!(
+            decision.response_proven_removed.is_empty(),
+            "a head the operator extended was not removed: {:?}",
+            decision.response_proven_removed
+        );
+        assert!(decision.unresolved.is_empty(), "{:?}", decision.unresolved);
+        assert!(decision.completed_residue.is_empty());
+        assert!(
+            !crate::queue_consume::queue_consumption_allowed_for_response(
+                std::path::Path::new("tsift.md"),
+                None,
+                content,
+                response,
+                &[],
+            )
+            .unwrap(),
+            "a fragment echo must not consume the finished queue item"
+        );
+        assert!(!queue_heads::committed_queue_extends_free_text_head(
+            content,
+            "Should we release + publish the C++ bindings?"
+        ));
     }
 
     #[test]

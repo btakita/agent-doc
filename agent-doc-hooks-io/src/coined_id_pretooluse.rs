@@ -621,6 +621,7 @@ mod tests {
         assert_eq!(commit_scan_text("grep -r 'git commit' ."), None);
     }
 
+    #[test]
     fn an_edit_writing_a_coined_id_into_source_is_blocked() {
         let input = json!({
             "file_path": "/repo/src/rpc.rs",

@@ -8,7 +8,7 @@ version = "0.35.443"
 description = "Interactive document sessions with AI agents"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.8"
+requires-python = ">=3.8"  # also the syntax floor for every tracked *.py; enforced by `make python-compat-check`
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

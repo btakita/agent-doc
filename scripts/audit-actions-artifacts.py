@@ -414,7 +414,9 @@ def report_markdown(
         ]
     )
     for reason, group in sorted(reasons.items(), key=lambda item: (-len(item[1]), item[0])):
-        lines.append(f"| {reason.replace('|', '\\|')} | {len(group):,} | {sum(row['size_bytes'] for row in group):,} |")
+        cell = reason.replace("|", "\\|")
+        total = sum(row["size_bytes"] for row in group)
+        lines.append(f"| {cell} | {len(group):,} | {total:,} |")
 
     lines.extend(
         [

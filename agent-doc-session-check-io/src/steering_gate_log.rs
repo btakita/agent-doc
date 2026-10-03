@@ -956,8 +956,12 @@ fn sink_pending(
     }
 }
 
-/// How far back a process hydrates a document's rows: anything older has
-/// either been labelled or will never be.
+/// Most unlabelled rows a process hydrates per document, whatever their age.
+const HYDRATE_UNLABELLED_MAX: usize = 500;
+
+/// How far back a process hydrates a document's recent rows. Unlabelled rows
+/// load regardless (`HYDRATE_UNLABELLED_MAX`): the next observation of the
+/// document can come long after this horizon.
 fn hydration_horizon_ms(label_window_ms: u64, max_hold_ms: u64) -> u64 {
     label_window_ms
         .saturating_add(max_hold_ms)
@@ -979,7 +983,18 @@ fn hydrate(
         log.tracking().label_window_ms,
         max_hold_ms,
     ));
-    let rows = store::load_gate_rows_since(&conn, document, since)?
+    // Recent rows (re-edit detection, the pause profile) plus every row still
+    // owed a label, whatever its age: with only the recent horizon, a delivery
+    // whose next observation was the closeout write was never labelled, so the
+    // learned gate never trained.
+    let mut stored = store::load_gate_rows_since(&conn, document, since)?;
+    let recent: BTreeSet<String> = stored.iter().map(|row| row.row_key.clone()).collect();
+    stored.extend(
+        store::load_unlabelled_gate_rows(&conn, document, HYDRATE_UNLABELLED_MAX)?
+            .into_iter()
+            .filter(|row| !recent.contains(&row.row_key)),
+    );
+    let rows = stored
         .iter()
         .filter_map(|stored| GateRow::from_stored(stored).ok())
         .collect();
@@ -1269,6 +1284,38 @@ mod tests {
         recheck_after_ms: 1_000,
     };
 
+    /// A delivery whose next observation arrives long after the recent
+    /// hydration horizon (no mid-turn edit; the closeout write is next) is
+    /// still labelled by it and trains the learned gate. Before, a fresh hook
+    /// process never loaded the row, so nothing ever trained.
+    #[test]
+    fn an_old_unlabelled_hydrated_delivery_is_labelled_and_trains() {
+        let decided = fold(&[observed(
+            3_000,
+            2_000,
+            vec![decision("v1", None, SettleDecision::Settled, 2_000)],
+        )]);
+        let old = row(&decided, "v1", GatePhase::Delivered).clone();
+        assert_eq!(old.label, None);
+
+        // A fresh process, 20 minutes later.
+        let later = 3_000 + 20 * 60_000;
+        let state = fold(&[
+            GateLogEvent::Hydrated {
+                document: "plan.md".into(),
+                rows: vec![old],
+                profile: None,
+                weights: None,
+            },
+            observed(later, later - 1_000, vec![]),
+        ]);
+        assert_eq!(
+            row(&state, "v1", GatePhase::Delivered).label,
+            Some(GateLabel::OnTime)
+        );
+        assert_eq!(state.weights.updates, 1, "the label trained the gate once");
+    }
+
     /// `#steergatenamo`: each row keeps the text tail it was decided on, so a
     /// text classifier can be scored offline on the real pause points; it
     /// survives storage, and rows logged before the field existed still load.
@@ -1291,7 +1338,10 @@ mod tests {
             row_json: legacy.to_string(),
             ..stored
         };
-        assert_eq!(GateRow::from_stored(&legacy_stored).unwrap().text_tail, None);
+        assert_eq!(
+            GateRow::from_stored(&legacy_stored).unwrap().text_tail,
+            None
+        );
     }
 
     /// Delivered, then re-edited inside the window: premature. The superseded

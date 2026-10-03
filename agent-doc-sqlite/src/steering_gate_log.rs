@@ -140,6 +140,27 @@ pub fn load_gate_rows_since(
     Ok(rows)
 }
 
+/// Rows for `document` that still have no label, the newest `limit` of them,
+/// oldest first. Cold hydration loads them whatever their age: a delivery is
+/// labelled by the NEXT observation of its document, and when no operator
+/// edit arrives mid-turn that is the closeout write, long after the recent
+/// horizon. Without them the row is never labelled and never trains the gate.
+pub fn load_unlabelled_gate_rows(
+    conn: &Connection,
+    document: &str,
+    limit: usize,
+) -> Result<Vec<StoredGateRow>> {
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM (SELECT {COLUMNS} FROM steering_gate_log \
+         WHERE document = ?1 AND label IS NULL ORDER BY id DESC LIMIT ?2) ORDER BY id"
+    ))?;
+    let rows = stmt
+        .query_map(params![document, limit], read_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 /// Rows for export, oldest first. `document` filters to one document;
 /// `after_id` continues a previous page.
 pub fn list_gate_rows(
@@ -232,6 +253,33 @@ mod tests {
             list_gate_rows(&conn, Some("other.md"), 0, 10)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    /// An old unlabelled row hydrates whatever its age; labelled rows do not.
+    #[test]
+    fn unlabelled_rows_load_regardless_of_age_newest_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::state_store::open_state_db(dir.path()).unwrap();
+        merge_gate_row(&conn, &row("old", 10)).unwrap();
+        let mut labelled = row("done", 20);
+        labelled.label = Some("on_time".to_string());
+        merge_gate_row(&conn, &labelled).unwrap();
+        merge_gate_row(&conn, &row("newer", 30)).unwrap();
+        let keys =
+            |rows: Vec<StoredGateRow>| rows.into_iter().map(|r| r.row_key).collect::<Vec<_>>();
+        assert!(
+            load_gate_rows_since(&conn, "plan.md", 1_000)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            keys(load_unlabelled_gate_rows(&conn, "plan.md", 10).unwrap()),
+            vec!["old", "newer"]
+        );
+        assert_eq!(
+            keys(load_unlabelled_gate_rows(&conn, "plan.md", 1).unwrap()),
+            vec!["newer"]
         );
     }
 }

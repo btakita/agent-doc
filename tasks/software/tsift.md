@@ -569,7 +569,7 @@ detect_rojo = true   # optional, off by default
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - #subagent: do [#tsiftindexesinvalidate]
 - ~~#subagent: do [#haivensdkfollow]~~ — auto-struck: answered this cycle (#ftstrike)
-- #subagent: do [#projectlevelopt]
+- ~~#subagent: do [#projectlevelopt]~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#tracelockjoin]
 <!-- /agent:queue -->
 <!--

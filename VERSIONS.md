@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.441
+
+- **The focus escalation no longer grows the layout it republishes (GH #106).** A focus-only tab
+  switch whose pane is stashed falls back to the retained desired layout only when that layout
+  already covers the document, and republishes it unchanged. It used to append the asking document
+  as a new column and publish the result as the next desired layout, so its output became its own
+  next input and four documents switching in one second grew the columns 1→2→3→4. An uncovered
+  document now fails closed with `cause=document_outside_retained_layout`.
+- **`agent-doc upgrade` reconciles installed editor plugins (GH #107).** The one-shot path now runs
+  the same plugin reconciliation as `--auto`, after a binary upgrade and also when the binary is
+  already current, so a workspace left skewed by an earlier binary-only upgrade is repaired by
+  re-running it. A failed plugin step exits non-zero and says the release is not fully installed.
+
 ## 0.35.440
 
 - **Unknown editor layouts are structurally inert (GH #105).** An editor observation that cannot

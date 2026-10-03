@@ -680,6 +680,7 @@ dependencies = [
 name = "agent-doc-document-realtime"
 version = "0.35.443"
 dependencies = [
+ "agent-doc-debounce",
  "agent-doc-diff",
  "agent-doc-document",
  "agent-doc-element",

@@ -6,6 +6,7 @@
 //! state; the agent-doc state ledger owns durable transition facts.
 
 pub mod admission_deadline;
+pub mod edit_settle;
 
 /// Maximum time a command may observe a pending Lazily current transition
 /// before returning control to the durable recovery state machine.

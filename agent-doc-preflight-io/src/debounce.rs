@@ -490,7 +490,12 @@ where
     loop {
         let at = now();
         let waited = at.saturating_duration_since(start);
-        if at.saturating_duration_since(last_change) >= quiet {
+        // `#steeringtypinggate`: quiet is not finished. The shared gate also
+        // holds a quiet line that plainly is not done (`… publish the`), up
+        // to this wait's ceiling, which plays the max-hold role here.
+        if at.saturating_duration_since(last_change) >= quiet
+            && agent_doc_debounce::edit_settle::added_lines_look_finished(admitted, &last)
+        {
             return OperatorEditQuiescence::Settled { waited, changes };
         }
         if waited >= ceiling {
@@ -906,6 +911,45 @@ mod tests {
             admitted_queue_head(&admitted_text),
             "Should we release + publish the C++ bindings?",
             "preflight must admit the finished queue item, not the fragment"
+        );
+    }
+
+    /// `#steeringtypinggate`: quiet is not finished. An operator who paused
+    /// mid-sentence for longer than the quiet window (`... publish the`) does
+    /// not get the fragment admitted; preflight keeps waiting for the shared
+    /// gate's structural signal, and once the line is finished it settles.
+    #[test]
+    fn preflight_keeps_waiting_through_a_quiet_but_unfinished_line() {
+        let admitted = tsift_queue_doc("- Should we re");
+        let timeline = [
+            (0, "- Should we release + publish the "),
+            // A 5s pause mid-sentence: longer than the 2s quiet window.
+            (5_000, "- Should we release + publish the C++ bindings?"),
+        ];
+        let (outcome, admitted_text, _) = run_typing_timeline(
+            &admitted,
+            &timeline,
+            Duration::from_millis(2_000),
+            Duration::from_secs(18),
+        );
+        let OperatorEditQuiescence::Settled { waited, .. } = outcome else {
+            panic!("expected the finished line to settle, got {outcome:?}");
+        };
+        assert!(waited >= Duration::from_millis(7_000), "{waited:?}");
+        assert_eq!(
+            admitted_queue_head(&admitted_text),
+            "Should we release + publish the C++ bindings?"
+        );
+        // Abandoned for good: the ceiling (this wait's max-hold) still ends it.
+        let (abandoned, _, _) = run_typing_timeline(
+            &admitted,
+            &[(0, "- Should we release + publish the ")],
+            Duration::from_millis(2_000),
+            Duration::from_secs(18),
+        );
+        assert!(
+            matches!(abandoned, OperatorEditQuiescence::CeilingReached { .. }),
+            "{abandoned:?}"
         );
     }
 

@@ -26,12 +26,19 @@
 //! surfaces once as `previous → verbatim`. Exchange steering is tracked by the
 //! identity of every surfaced directive (`RealtimeSteering::identity`).
 //!
-//! Settle detection (debounce): the operator may be mid-keystroke when a hook
-//! fires. An item surfaces only once it is quiet for `debounce_ms` (the
-//! document has not changed for that long, or the item's own content has been
-//! observed unchanged for that long) and does not look plainly incomplete
-//! (`looks_incomplete`). Held items stay in `pending` and surface on a later
-//! observation.
+//! Settle detection (`#steeringtypinggate`): the operator may be
+//! mid-keystroke when a hook fires. Each candidate goes through the shared
+//! operator-edit gate, `agent_doc_debounce::edit_settle::settle_decision`, the
+//! same decision preflight admission reads: structural completion
+//! (`completion_signal`: a trailing article or function word, an unbalanced
+//! delimiter, or a dangling connector is unfinished; terminal punctuation, a
+//! closed `[#id]`, or a URL is finished), adaptive quiescence (finished text
+//! settles after half the debounce window, inconclusive text after the full
+//! window, unfinished text never on quiescence alone), and a hard max-hold
+//! after which the item is delivered anyway, flagged `possibly_partial`. Held
+//! items stay in `pending` (with the deadline at which the decision can next
+//! change) and surface on a later observation; a re-edit before delivery
+//! supersedes the held version.
 //!
 //! Exchange extraction reuses `baseline_comparison::exchange_steering_set_between`
 //! (the same `all_unstarted_prompt_bearing_changes_from_diff` path closeout
@@ -123,6 +130,10 @@ pub struct SteeringItem {
     pub previous: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presets: Vec<PresetIntent>,
+    /// Delivered by the max-hold, not because it settled: the operator may
+    /// still have been typing it (`#steeringtypinggate`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub possibly_partial: bool,
 }
 
 /// A held (unsettled) candidate observation.
@@ -201,6 +212,11 @@ impl SteeringWatermark {
 /// Inputs that are not part of the document text.
 #[derive(Debug, Clone, Copy)]
 pub struct ObserveContext<'a> {
+    /// Hard max-hold: past this, an unsettled item is delivered anyway,
+    /// flagged `possibly_partial` (`#steeringtypinggate`).
+    pub max_hold_ms: u64,
+    /// Optional cached completion verdicts; `DeterministicOnly` by default.
+    pub classifier: &'a dyn agent_doc_debounce::edit_settle::CompletionClassifier,
     pub now_ms: u64,
     /// When the document last changed (file mtime / editor edit time).
     /// `None` means unknown: only per-item stability can settle an item.
@@ -216,6 +232,9 @@ pub struct Observation {
     pub ready: Vec<SteeringItem>,
     /// Candidates still being typed (held by the debounce).
     pub pending: usize,
+    /// When the earliest held candidate's decision can next change, in ms
+    /// from `now_ms`. Callers schedule one re-observation instead of polling.
+    pub recheck_after_ms: Option<u64>,
     pub next: SteeringWatermark,
 }
 
@@ -257,23 +276,49 @@ pub fn observe_with_mode(
     let queue = queue_alignment(watermark, current, ctx.binary_owned_queue_ids, boundary);
     candidates.extend(queue.candidates.iter().cloned());
 
-    let doc_quiet = ctx
+    use agent_doc_debounce::edit_settle::{
+        CompletionSignal, SettleDecision, SettleInputs, completion_signal, settle_decision,
+    };
+    let quiet_for_ms = ctx
         .document_changed_ms
-        .is_some_and(|changed| ctx.now_ms.saturating_sub(changed) >= ctx.debounce_ms);
+        .map(|changed| ctx.now_ms.saturating_sub(changed));
     let mut ready_keys = BTreeSet::new();
+    let mut partial_keys = BTreeSet::new();
     let mut next_pending = BTreeMap::new();
+    let mut recheck_after_ms: Option<u64> = None;
     for candidate in &candidates {
         let prior = watermark
             .pending
             .get(&candidate.key)
             .filter(|prior| prior.content_hash == candidate.content_hash);
-        let stable = prior
-            .is_some_and(|prior| ctx.now_ms.saturating_sub(prior.first_seen_ms) >= ctx.debounce_ms);
-        let incomplete = candidate.item.change != SteeringChange::Deleted
-            && looks_incomplete(&candidate.item.verbatim);
-        if !incomplete && (doc_quiet || stable) {
-            ready_keys.insert(candidate.key.clone());
+        let stable_for_ms = prior.map(|prior| ctx.now_ms.saturating_sub(prior.first_seen_ms));
+        let signal = if candidate.item.change == SteeringChange::Deleted {
+            // A removal has no text left to finish.
+            CompletionSignal::Complete
         } else {
+            completion_signal(&candidate.item.verbatim)
+        };
+        let decision = settle_decision(SettleInputs {
+            quiet_for_ms,
+            stable_for_ms,
+            held_for_ms: stable_for_ms.unwrap_or(0),
+            debounce_ms: ctx.debounce_ms,
+            max_hold_ms: ctx.max_hold_ms,
+            signal,
+            verdict: ctx.classifier.cached_verdict(&candidate.content_hash),
+        });
+        if decision.deliver() {
+            ready_keys.insert(candidate.key.clone());
+            if decision == SettleDecision::MaxHoldExpired {
+                partial_keys.insert(candidate.key.clone());
+            }
+        } else {
+            if let SettleDecision::Held {
+                recheck_after_ms: after,
+            } = decision
+            {
+                recheck_after_ms = Some(recheck_after_ms.map_or(after, |prev| prev.min(after)));
+            }
             next_pending.insert(
                 candidate.key.clone(),
                 PendingObservation {
@@ -296,7 +341,9 @@ pub fn observe_with_mode(
             next.surfaced_exchange
                 .insert(identity.clone(), candidate.item.verbatim.clone());
         }
-        ready.push(candidate.item.clone());
+        let mut item = candidate.item.clone();
+        item.possibly_partial = partial_keys.contains(&candidate.key);
+        ready.push(item);
     }
 
     // Rebuild the acknowledged queue: settled changes become what the agent
@@ -336,6 +383,7 @@ pub fn observe_with_mode(
 
     Observation {
         pending: next.pending.len(),
+        recheck_after_ms,
         ready,
         next,
     }
@@ -420,6 +468,7 @@ fn exchange_candidates(
                 verbatim,
                 previous,
                 presets: Vec::new(),
+                possibly_partial: false,
             },
         });
     }
@@ -580,6 +629,7 @@ fn queue_alignment(
                 verbatim: item.raw.clone(),
                 previous: None,
                 presets: intents,
+                possibly_partial: false,
             },
         });
         alignment.events.push(QueueEvent::Insert {
@@ -613,6 +663,7 @@ fn queue_alignment(
                 verbatim: item.raw.clone(),
                 previous: Some(previous.clone()),
                 presets: intents,
+                possibly_partial: false,
             },
         });
         alignment.events.push(QueueEvent::Edit {
@@ -644,6 +695,7 @@ fn queue_alignment(
                 verbatim: previous.clone(),
                 previous: None,
                 presets: Vec::new(),
+                possibly_partial: false,
             },
         });
         alignment.events.push(QueueEvent::Delete {
@@ -849,10 +901,15 @@ pub fn preset_requests_subagents(name: &str, body: &str) -> bool {
         || agent_doc_queue::subagent_intent::text_requests_subagents(body)
 }
 
-/// Conservative "the operator is plainly still typing this" shapes: an
-/// unbalanced code fence, a trailing `#` (or an unclosed `[#…`) with no id yet,
-/// or an empty trailing bullet.
+/// "The operator is plainly still typing this": the shared gate's structural
+/// signal (`#steeringtypinggate`) or one of the original conservative shapes.
 pub fn looks_incomplete(text: &str) -> bool {
+    agent_doc_debounce::edit_settle::completion_signal(text)
+        == agent_doc_debounce::edit_settle::CompletionSignal::Incomplete
+        || looks_incomplete_legacy(text)
+}
+
+fn looks_incomplete_legacy(text: &str) -> bool {
     let trimmed = text.trim_end();
     if trimmed.trim().is_empty() {
         return true;
@@ -939,6 +996,13 @@ pub fn render_steering_context(
             "verbatim"
         };
         out.push_str(&format!("\n{label}: {}", item.verbatim));
+        if item.possibly_partial {
+            out.push_str(
+                "\npossibly_partial: true (delivered by the max-hold, not because it settled; \
+                 the operator may still be typing it. Act on what is unambiguous and re-read it \
+                 with `agent-doc steering --peek` before relying on its ending.)",
+            );
+        }
         if !item.presets.is_empty() {
             let names = item
                 .presets
@@ -1087,6 +1151,13 @@ pub fn render_closeout_steering_context(
             "verbatim"
         };
         out.push_str(&format!("\n{label}: {}", item.verbatim));
+        if item.possibly_partial {
+            out.push_str(
+                "\npossibly_partial: true (delivered by the max-hold, not because it settled; \
+                 the operator may still be typing it. Act on what is unambiguous and re-read it \
+                 with `agent-doc steering --peek` before relying on its ending.)",
+            );
+        }
         let action = match (item.dispatch, item.source) {
             (SteeringDispatch::Subagent, _) => format!(
                 "DISPATCH NOW to a NEW background subagent (one per item). Claim it first with \
@@ -1159,6 +1230,8 @@ mod tests {
             document_changed_ms: Some(0),
             debounce_ms: DEFAULT_STEERING_DEBOUNCE_MS,
             binary_owned_queue_ids: owned,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+            classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
         }
     }
 
@@ -1441,6 +1514,8 @@ mod tests {
             document_changed_ms: Some(9_500),
             debounce_ms: 2_000,
             binary_owned_queue_ids: &owned,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+            classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
         };
         let held = observe(&wm, &current, &typing);
         assert!(held.ready.is_empty());
@@ -1473,13 +1548,60 @@ mod tests {
         let owned = BTreeSet::new();
         let baseline = doc("- current task\n", EX);
         let current = doc("- current task\n- do [#fi\n", EX);
-        let obs = observe(
-            &seeded(&baseline, Some("current task")),
-            &current,
-            &quiet_ctx(&owned),
-        );
+        // Quiet well past the debounce window, but inside the max-hold.
+        let quiet = ObserveContext {
+            now_ms: 30_000,
+            ..quiet_ctx(&owned)
+        };
+        let obs = observe(&seeded(&baseline, Some("current task")), &current, &quiet);
         assert!(obs.ready.is_empty(), "{:?}", obs.ready);
         assert_eq!(obs.pending, 1);
+        assert!(obs.recheck_after_ms.is_some());
+    }
+
+    /// `#steeringtypinggate` real case (tasks/software/tsift.md, 2026-10-03):
+    /// the deterministic gate must not deliver the fragment as settled, the
+    /// max-hold must still deliver it (flagged), and the finished line
+    /// supersedes the held fragment.
+    #[test]
+    fn tsift_fragment_is_held_then_max_hold_delivers_it_flagged() {
+        let owned = BTreeSet::new();
+        let baseline = doc("- current task\n", EX);
+        let fragment = doc("- current task\n- Should we release + publish the\n", EX);
+        let wm = seeded(&baseline, Some("current task"));
+        let quiet_10s = ObserveContext {
+            now_ms: 10_000,
+            document_changed_ms: Some(0),
+            ..quiet_ctx(&owned)
+        };
+        let held = observe(&wm, &fragment, &quiet_10s);
+        assert!(held.ready.is_empty(), "{:?}", held.ready);
+        assert_eq!(held.pending, 1);
+
+        // Finishing the line supersedes the held fragment and settles it.
+        let finished = doc(
+            "- current task\n- Should we release + publish the C++ bindings?\n",
+            EX,
+        );
+        let settled = observe(&held.next, &finished, &quiet_10s);
+        assert_eq!(settled.ready.len(), 1, "{:?}", settled.ready);
+        assert_eq!(
+            settled.ready[0].verbatim,
+            "Should we release + publish the C++ bindings?"
+        );
+        assert!(!settled.ready[0].possibly_partial);
+
+        // Abandoned mid-word: the max-hold delivers it anyway, flagged.
+        let past_max_hold = ObserveContext {
+            now_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS + 1,
+            document_changed_ms: Some(0),
+            ..quiet_ctx(&owned)
+        };
+        let partial = observe(&held.next, &fragment, &past_max_hold);
+        assert_eq!(partial.ready.len(), 1, "{:?}", partial.ready);
+        assert!(partial.ready[0].possibly_partial);
+        let rendered = render_steering_context("plan.md", &partial.ready, 0).unwrap();
+        assert!(rendered.contains("possibly_partial: true"), "{rendered}");
     }
 
     #[test]
@@ -1520,6 +1642,8 @@ mod tests {
             document_changed_ms: Some(1_000),
             debounce_ms,
             binary_owned_queue_ids: &owned,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+            classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
         };
         assert_eq!(observe(&wm, &current, &ctx(3_000)).ready.len(), 1);
         assert!(observe(&wm, &current, &ctx(10_000)).ready.is_empty());
@@ -1575,6 +1699,7 @@ mod tests {
             verbatim: "#subagents do [#preflightdeadline]".to_string(),
             previous: None,
             presets: Vec::new(),
+            possibly_partial: false,
         };
         let text = render_closeout_steering_context("tasks/bugs.md", &[item], 0).unwrap();
         assert!(text.starts_with(CLOSEOUT_STEERING_MARKER), "{text}");

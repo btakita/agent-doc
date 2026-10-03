@@ -366,6 +366,12 @@ pub struct ProjectConfig {
     /// here too, the built-in default of 2500 applies.
     #[serde(default, alias = "steering_debounce_ms")]
     pub agent_doc_steering_debounce_ms: Option<u64>,
+    /// Project-default hard max-hold in milliseconds for the steering
+    /// typing-completion gate (`#steeringtypinggate`): an item that has not
+    /// settled by then is delivered anyway, flagged `possibly_partial`.
+    /// Absent, `agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS` applies.
+    #[serde(default, alias = "steering_max_hold_ms")]
+    pub agent_doc_steering_max_hold_ms: Option<u64>,
     /// Project-default age in seconds past which an active agent turn is
     /// reported as a runaway (`#runawayturnsurfaced`). Absent, the built-in
     /// `agent_doc_harness::DEFAULT_RUNAWAY_TURN_SECS` applies; `0` disables the

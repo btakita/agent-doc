@@ -31,9 +31,18 @@ rule. This runbook carries the rest.
 - **Mid-turn steering (`#midturn-steering`):** steering no longer waits for
   closeout. After every tool call the PostToolUse hook (Claude Code, Codex)
   hands the running turn new operator edits as `[agent-doc] operator steering
-  arrived mid-turn`, each item verbatim with a typed `dispatch`. Edits settle
-  first (`agent_doc_steering_debounce_ms`, default 2500), so half-typed lines
-  are held, and each item is surfaced exactly once.
+  arrived mid-turn`, each item verbatim with a typed `dispatch`. Edits pass the
+  typing gate first (`#steeringtypinggate`, shared with preflight admission):
+  a line ending in an article or function word (`… publish the`), an
+  unbalanced backtick, quote, or bracket, or a dangling `,` `:` `+` is held;
+  finished-looking text (terminal punctuation, a closed `[#id]`, a URL)
+  settles after half the quiet window (`agent_doc_steering_debounce_ms`,
+  default 2500) and anything else after the full window. A hard max-hold
+  (`agent_doc_steering_max_hold_ms` in `.agent-doc/config.toml`, default
+  45000) releases a stuck item anyway, marked `possibly_partial: true`: act
+  only on its unambiguous part and re-read it before relying on its ending.
+  Each item is surfaced exactly once; a re-edit before delivery replaces the
+  held version.
   - `address_now`: a new exchange prompt, or an edit/removal of the queue item
     this turn is executing (shown as `previous` → `verbatim`). Address it in the
     current turn: adjust the in-progress work, or stop/wrap up for a removal.

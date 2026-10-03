@@ -49,6 +49,9 @@ pub struct SteeringReport {
     /// mid-turn steering): items are framed for the next cycle.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub after_close: bool,
+    /// When a held item's settle decision can next change (ms from now).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recheck_after_ms: Option<u64>,
 }
 
 impl SteeringReport {
@@ -147,6 +150,14 @@ pub fn debounce_ms_for(file: &Path, content: &str) -> u64 {
         frontmatter,
         agent_doc_project_config_io::load_project_for_doc(file).agent_doc_steering_debounce_ms,
     )
+}
+
+/// The steering max-hold (`#steeringtypinggate`): project config, else the
+/// shared default.
+pub fn max_hold_ms_for(file: &Path) -> u64 {
+    agent_doc_project_config_io::load_project_for_doc(file)
+        .agent_doc_steering_max_hold_ms
+        .unwrap_or(agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS)
 }
 
 /// Pure precedence for [`debounce_ms_for`].
@@ -392,6 +403,8 @@ fn prepare_with_gate(
         document_changed_ms: mtime_ms(&meta),
         debounce_ms,
         binary_owned_queue_ids: if boundary { &owned } else { &empty },
+        max_hold_ms: max_hold_ms_for(file),
+        classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
     };
     let mut observation = core::observe_with_mode(&watermark, &content, &ctx, mode);
     if !boundary && !observation.ready.is_empty() {
@@ -441,6 +454,7 @@ fn prepare_with_gate(
         items: observation.ready,
         pending: observation.pending,
         after_close: boundary,
+        recheck_after_ms: observation.recheck_after_ms,
     };
     prepared(Some(next), Some(report), boundary)
 }
@@ -551,16 +565,7 @@ pub fn observe_for_wake(file: &Path) -> Result<WakeObservation> {
         core::content_hash(&basis)
     };
     let pending = hook_report.pending;
-    let recheck_after_ms = (pending > 0).then(|| {
-        let debounce = debounce_ms_for(file, &content);
-        let quiet_for = std::fs::metadata(file)
-            .ok()
-            .as_ref()
-            .and_then(mtime_ms)
-            .map(|changed| now_ms().saturating_sub(changed))
-            .unwrap_or(0);
-        debounce.saturating_sub(quiet_for).max(250)
-    });
+    let recheck_after_ms = hook_report.recheck_after_ms;
     Ok(WakeObservation {
         items,
         fingerprint,

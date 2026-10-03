@@ -5,6 +5,8 @@
 //! does not maintain a parallel editor-buffer model. Lazily owns live current
 //! state; the agent-doc state ledger owns durable transition facts.
 
+pub mod admission_deadline;
+
 /// Maximum time a command may observe a pending Lazily current transition
 /// before returning control to the durable recovery state machine.
 pub fn authority_settle_max_wait(settle_ms: u64) -> std::time::Duration {
@@ -53,6 +55,17 @@ impl SettleBudget {
             no_progress,
             progress_ceiling: no_progress.saturating_mul(PROGRESS_WAIT_CEILING_MULTIPLIER),
             urgent_drain_interval: URGENT_DRAIN_RETRY_INTERVAL,
+        }
+    }
+
+    /// Shorten both deadlines to the installed preflight admission deadline
+    /// (`#preflightdeadline`), so a settle wait can never outlive it. Unchanged
+    /// when no admission deadline is installed.
+    pub fn clamped_to_admission_deadline(self) -> Self {
+        Self {
+            no_progress: admission_deadline::clamp(self.no_progress),
+            progress_ceiling: admission_deadline::clamp(self.progress_ceiling),
+            urgent_drain_interval: self.urgent_drain_interval,
         }
     }
 }

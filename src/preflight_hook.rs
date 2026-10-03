@@ -177,7 +177,47 @@ fn tracking_recognized_trigger(prompt: &str) -> bool {
 /// own stderr diagnostic for the operator's hook log, because the stderr copy is
 /// wanted even for prompts that never reach this function.
 fn emit_admission_failure(target: &str, err: &anyhow::Error) {
-    emit_user_prompt_submit_context(&admission_failure_payload(target, &format!("{err:#}")));
+    emit_user_prompt_submit_context(&admission_failure_payload_for_error(target, err));
+}
+
+/// The refusal payload for `err`: a preflight the admission deadline stopped
+/// (`#preflightdeadline`) gets a remedy that says the refusal is retryable;
+/// every other failure keeps the generic remedy.
+fn admission_failure_payload_for_error(target: &str, err: &anyhow::Error) -> String {
+    let reason = format!("{err:#}");
+    match err.downcast_ref::<agent_doc_preflight_command_io::progress::PreflightAdmissionRefused>()
+    {
+        Some(refusal) => admission_deadline_refusal_payload(target, &reason, refusal.phase()),
+        None => admission_failure_payload(target, &reason),
+    }
+}
+
+/// `#preflightdeadline`: the payload for a run the admission deadline stopped.
+///
+/// Same marker, `document:`, `reason:` and `pending:` lines as every refusal,
+/// so the agent's three-state read is unchanged; only the remedy differs. The
+/// run stopped at a step boundary (or at a wait clamped to the deadline), not
+/// at a verdict, so re-triggering is the recovery — the generic remedy's
+/// "report and stop" would wrongly read as terminal.
+fn admission_deadline_refusal_payload(target: &str, reason: &str, phase: &str) -> String {
+    format!(
+        "{ADMISSION_FAILURE_MARKER}\n\
+         document: {target}\n\
+         reason: {reason}\n\
+         pending: operator steering may be waiting unanswered -- this refused turn read no \
+         document changes. `agent-doc session-check {target}` is a permitted follow-up: it lists \
+         any unreconciled operator prompt verbatim without starting a response.\n\
+         remedy: retryable -- the preflight admission deadline stopped this run at phase \
+         `{phase}`, before the hook budget could abandon it mid-step; no controller or document \
+         refused this turn. Re-send `agent-doc {target}` to retry admission: the next preflight \
+         starts afresh, and a `preflight_started` cycle this run opened is closed by its \
+         recovery. Do NOT shell `agent-doc preflight` to recreate admission, and do not start a \
+         response or write the document this turn. Tell the operator admission timed out in \
+         phase `{phase}` and can be retried, run `agent-doc session-check {target}` and relay \
+         any pending operator prompt it lists, then stop. If retries keep stopping at `{phase}`, \
+         that phase is the work to move off the admission path, or raise the budget with \
+         {HOOK_ADMISSION_BUDGET_ENV}=<seconds>."
+    )
 }
 
 /// `#refusalsteering` (GH #71): the refusal payload. A refused turn is the one
@@ -543,16 +583,26 @@ where
     F: FnOnce() -> anyhow::Result<T> + Send + 'static,
 {
     let (tx, rx) = std::sync::mpsc::channel();
-    let progress = agent_doc_preflight_command_io::progress::PreflightProgress::new();
+    // `#preflightdeadline`: the run carries an admission deadline (the budget
+    // minus a margin). Installing it clamps every bounded wait beneath preflight
+    // to the time remaining, and each phase boundary refuses by name once it has
+    // passed, so the backstop timeout below is reached only by a step that
+    // blocks outside every clamped wait.
+    let progress =
+        agent_doc_preflight_command_io::progress::PreflightProgress::with_admission_deadline(
+            budget,
+        );
     let worker_progress = progress.clone();
     let worker = std::thread::Builder::new()
         .name("agent-doc-preflight-hook".to_string())
         .spawn(move || {
-            let _phases = agent_doc_preflight_command_io::progress::install(worker_progress);
-            let outcome = work();
+            let _phases =
+                agent_doc_preflight_command_io::progress::install(worker_progress.clone());
+            // Classify before `_phases` drops, while the running phase is recorded.
+            let outcome = work().map_err(|err| worker_progress.refuse_failed_run(err));
             // The receiver is gone on a budget overrun; the send failing there is
             // the expected shape, not a swallowed error.
-            let _send_after_overrun = tx.send(outcome.map_err(|err| format!("{err:#}")));
+            let _send_after_overrun = tx.send(outcome);
         })?;
 
     match rx.recv_timeout(budget) {
@@ -562,9 +612,14 @@ where
             worker.join().ok();
             Ok(value)
         }
-        Ok(Err(message)) => {
+        Ok(Err(err)) => {
             worker.join().ok();
-            Err(anyhow::anyhow!(message))
+            if let Some(refusal) = err
+                .downcast_ref::<agent_doc_preflight_command_io::progress::PreflightAdmissionRefused>()
+            {
+                report_deadline_refusal(file, refusal);
+            }
+            Err(err)
         }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
             let snapshot = progress.snapshot();
@@ -653,6 +708,41 @@ fn report_overrun_phases(
             "-".to_string()
         } else {
             snapshot.breakdown()
+        },
+    );
+    eprintln!("[perf] {line}");
+    agent_doc_ops_log_io::log_op(file, &line);
+}
+
+/// Record a deadline refusal where an operator reads after the fact. The phase
+/// it names is the evidence `#preflightdeadline` step 3 waits for: the work to
+/// move off the admission path.
+fn report_deadline_refusal(
+    file: &Path,
+    refusal: &agent_doc_preflight_command_io::progress::PreflightAdmissionRefused,
+) {
+    use agent_doc_preflight_command_io::progress::RefusalPoint;
+    let point = match refusal.point {
+        RefusalPoint::BeforePhase(_) => "before_phase",
+        RefusalPoint::DuringPhase(_) => "during_phase",
+    };
+    let line = format!(
+        "preflight_admission_deadline_refused file={} phase={} point={} elapsed_ms={} \
+         deadline_ms={} budget_ms={} previous={} completed={} (#preflightdeadline)",
+        file.display(),
+        refusal.phase(),
+        point,
+        refusal.elapsed.as_millis(),
+        refusal.deadline_after.as_millis(),
+        refusal.budget.as_millis(),
+        refusal
+            .previous
+            .map(|(label, took)| format!("{label}:{}ms", took.as_millis()))
+            .unwrap_or_else(|| "-".to_string()),
+        if refusal.completed.is_empty() {
+            "-"
+        } else {
+            refusal.completed.as_str()
         },
     );
     eprintln!("[perf] {line}");
@@ -1007,13 +1097,16 @@ mod tests {
         let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_release = std::sync::Arc::clone(&release);
 
+        // 200ms budget => 150ms admission deadline, comfortably after both
+        // phase boundaries below, so this exercises the backstop (a step that
+        // blocks outside every clamped wait), not the deadline refusal.
         let err = run_within_budget(
             Path::new("/nonexistent/agent-doc-budget-probe.md"),
-            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(200),
             move || {
-                agent_doc_preflight_command_io::progress::enter("resolve_initial_document");
+                agent_doc_preflight_command_io::progress::enter("resolve_initial_document")?;
                 std::thread::sleep(std::time::Duration::from_millis(2));
-                agent_doc_preflight_command_io::progress::enter("settle_debounce");
+                agent_doc_preflight_command_io::progress::enter("settle_debounce")?;
                 while !worker_release.load(std::sync::atomic::Ordering::SeqCst) {
                     std::thread::sleep(std::time::Duration::from_millis(5));
                 }
@@ -1053,6 +1146,101 @@ mod tests {
         assert!(
             message.contains("stops when this hook process exits"),
             "the refusal must say what happens to the abandoned worker: {message}"
+        );
+    }
+
+    /// `#preflightdeadline` (2): a run that crosses its admission deadline
+    /// between phases stops at that boundary with the typed refusal naming the
+    /// phase — before the backstop could abandon it — and the hook maps that
+    /// refusal to the UNAVAILABLE output with a reason and a retryable remedy.
+    #[test]
+    fn crossing_the_deadline_at_a_phase_boundary_refuses_by_name_before_the_backstop() {
+        use agent_doc_preflight_command_io::progress::{PreflightAdmissionRefused, RefusalPoint};
+        // 2s budget => 1.5s deadline: the 1.6s phase crosses it, and the
+        // refusal lands ~0.4s before the backstop would have fired.
+        let started = std::time::Instant::now();
+        let err = run_within_budget(
+            Path::new("/nonexistent/agent-doc-deadline-probe.md"),
+            std::time::Duration::from_secs(2),
+            || -> anyhow::Result<()> {
+                agent_doc_preflight_command_io::progress::enter("commit_previous_cycle")?;
+                std::thread::sleep(std::time::Duration::from_millis(1600));
+                agent_doc_preflight_command_io::progress::enter("settle_debounce")?;
+                panic!("the phase after the deadline must never start");
+            },
+        )
+        .expect_err("a run past its deadline cannot admit");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+
+        let refusal = err
+            .downcast_ref::<PreflightAdmissionRefused>()
+            .unwrap_or_else(|| panic!("the refusal must stay typed: {err:#}"));
+        assert_eq!(refusal.point, RefusalPoint::BeforePhase("settle_debounce"));
+
+        let payload =
+            admission_failure_payload_for_error("/nonexistent/agent-doc-deadline-probe.md", &err);
+        assert!(payload.starts_with(ADMISSION_FAILURE_MARKER), "{payload}");
+        assert!(
+            payload.contains(
+                "reason: preflight admission deadline reached at the boundary before phase \
+                 `settle_debounce`"
+            ),
+            "{payload}"
+        );
+        assert!(
+            payload.contains("the last phase, `commit_previous_cycle`"),
+            "{payload}"
+        );
+        assert!(
+            payload.contains("remedy: retryable") && payload.contains("phase `settle_debounce`"),
+            "{payload}"
+        );
+        assert!(
+            payload.contains("Do NOT shell `agent-doc preflight`"),
+            "{payload}"
+        );
+        assert!(
+            !payload.contains("was abandoned"),
+            "a boundary refusal is not the backstop overrun: {payload}"
+        );
+        assert!(!payload.contains(CONTRACT_MARKER), "{payload}");
+    }
+
+    /// `#preflightdeadline` (1): a bounded wait inside a phase is clamped to
+    /// the time remaining, so a 30s local bound ends at the deadline, and the
+    /// error it ends with becomes the refusal naming the running phase.
+    #[test]
+    fn a_bounded_wait_is_clamped_to_the_deadline_and_refuses_in_its_phase() {
+        use agent_doc_preflight_command_io::progress::{PreflightAdmissionRefused, RefusalPoint};
+        let started = std::time::Instant::now();
+        let err = run_within_budget(
+            Path::new("/nonexistent/agent-doc-deadline-probe.md"),
+            std::time::Duration::from_millis(800),
+            || {
+                agent_doc_preflight_command_io::progress::enter("pre_mutation_debounce")?;
+                let bound = agent_doc_debounce::admission_deadline::clamp(
+                    std::time::Duration::from_secs(30),
+                );
+                assert!(bound <= std::time::Duration::from_millis(600), "{bound:?}");
+                std::thread::sleep(bound);
+                Err::<(), _>(anyhow::anyhow!(
+                    "preflight deferred: Lazily current authority remained delivery_pending"
+                ))
+            },
+        )
+        .expect_err("a wait that hit the deadline cannot admit");
+        assert!(started.elapsed() < std::time::Duration::from_millis(800));
+        let refusal = err
+            .downcast_ref::<PreflightAdmissionRefused>()
+            .unwrap_or_else(|| panic!("the refusal must stay typed: {err:#}"));
+        assert_eq!(
+            refusal.point,
+            RefusalPoint::DuringPhase("pre_mutation_debounce")
+        );
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("delivery_pending"),
+            "the cause is kept: {message}"
         );
     }
 

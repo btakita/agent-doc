@@ -108,7 +108,9 @@ where
     Signal: FnMut(&Path, CrdtReplicaEventReason, usize) -> Result<()>,
 {
     let poll = agent_doc_debounce::SETTLE_POLL_INTERVAL;
-    let budget = SettleBudget::from_no_progress(max_wait);
+    // `#preflightdeadline`: the settle window is clamped to the preflight
+    // admission deadline, so this wait can never be the one that outlives it.
+    let budget = SettleBudget::from_no_progress(max_wait).clamped_to_admission_deadline();
     let start = Instant::now();
     let mut last_progress = Instant::now();
     let mut last_observed: Option<String> = None;
@@ -117,6 +119,27 @@ where
 
     loop {
         let observation = observe(file, "preflight_visible_mutation");
+
+        // `#preflightdeadline`: the clamped budget bounds one settle window, but
+        // the re-register and progress branches below grant further windows.
+        // Once the admission deadline is spent, a still-pending transition ends
+        // this wait with the typed refusal instead of another window.
+        if !observation.ready
+            && let Err(exhausted) = agent_doc_debounce::admission_deadline::ensure_remaining(
+                "preflight_visible_mutation_settle",
+            )
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_visible_mutation_admission_deadline file={} state={} waited_ms={} (#preflightdeadline)",
+                    file.display(),
+                    observation.state,
+                    start.elapsed().as_millis(),
+                ),
+            );
+            return Err(exhausted.into());
+        }
 
         if observation.text.is_some() && observation.text != last_observed {
             if last_observed.is_some() {
@@ -287,13 +310,16 @@ const DELIVERY_SETTLE_AWAIT_SLICE: std::time::Duration = std::time::Duration::fr
 /// to the old cadence keeps this strictly fail-open, since the loop's budget and
 /// deferral semantics are unchanged either way.
 fn wait_one_settle_slice(file: &Path, state: &str, poll: std::time::Duration) {
-    if state != "delivery_pending" {
+    // `#preflightdeadline`: no slice parks past the admission deadline.
+    let poll = agent_doc_debounce::admission_deadline::clamp(poll);
+    let await_slice = agent_doc_debounce::admission_deadline::clamp(DELIVERY_SETTLE_AWAIT_SLICE);
+    if state != "delivery_pending" || await_slice.is_zero() {
         std::thread::sleep(poll);
         return;
     }
     match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
         file,
-        DELIVERY_SETTLE_AWAIT_SLICE,
+        await_slice,
     ) {
         // Observed: the await already consumed up to its slice, returning early only
         // when convergence landed. Loop straight back to the authoritative observation.
@@ -322,8 +348,11 @@ fn wait_one_settle_slice(file: &Path, state: &str, poll: std::time::Duration) {
 /// this read-only observation remains bounded and lets later CAS checks decide.
 pub fn wait_for_lazily_current_observation(file: &Path) {
     let settle_ms = authority_settle_ms(file);
-    let max_wait = agent_doc_debounce::authority_settle_max_wait(settle_ms);
-    let poll = std::time::Duration::from_millis(100);
+    // `#preflightdeadline`: an observation wait never outlives the admission
+    // deadline; the next phase boundary then refuses by name.
+    let max_wait = agent_doc_debounce::admission_deadline::clamp(
+        agent_doc_debounce::authority_settle_max_wait(settle_ms),
+    );
     let start = std::time::Instant::now();
 
     loop {
@@ -350,7 +379,9 @@ pub fn wait_for_lazily_current_observation(file: &Path) {
             authority_state = observation.state,
             "preflight Lazily current pending"
         );
-        std::thread::sleep(poll);
+        std::thread::sleep(agent_doc_debounce::admission_deadline::clamp(
+            agent_doc_debounce::SETTLE_POLL_INTERVAL,
+        ));
     }
 }
 
@@ -605,5 +636,60 @@ mod tests {
             "convergence already visible at the defer boundary must be admitted: {outcome:?}"
         );
         assert_eq!(observations.get(), 2);
+    }
+
+    fn deadline_in(left: Duration) -> agent_doc_debounce::admission_deadline::DeadlineGuard {
+        agent_doc_debounce::admission_deadline::install(
+            agent_doc_debounce::admission_deadline::AdmissionDeadline {
+                at: std::time::Instant::now() + left,
+                budget: Duration::from_secs(90),
+            },
+        )
+    }
+
+    /// `#preflightdeadline`: the settle wait's own window (here 30s, and up to
+    /// three more re-register windows) is clamped to the admission deadline, and
+    /// a transition still pending when it passes ends with the typed refusal.
+    #[test]
+    fn preflight_mutation_wait_is_clamped_to_the_admission_deadline() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let _deadline = deadline_in(Duration::from_millis(300));
+
+        let started = std::time::Instant::now();
+        let outcome = wait_for_lazily_current_before_mutation_with_effects(
+            &doc,
+            Duration::from_secs(30),
+            |_file, _source| missing_replica(),
+            |_file, _reason, _targets| Ok(()),
+        );
+
+        let err = outcome.expect_err("a transition pending past the deadline cannot admit");
+        let exhausted = err
+            .downcast_ref::<agent_doc_debounce::admission_deadline::AdmissionDeadlineExhausted>()
+            .unwrap_or_else(|| panic!("the refusal must stay typed: {err:#}"));
+        assert_eq!(exhausted.wait, "preflight_visible_mutation_settle");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the 30s settle window must have been clamped, took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// A transition that is already current is admitted even with the deadline
+    /// spent: the deadline bounds waiting, it never refuses a ready answer.
+    #[test]
+    fn preflight_mutation_wait_admits_a_ready_transition_at_a_spent_deadline() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let _deadline = deadline_in(Duration::ZERO);
+
+        let outcome = wait_for_lazily_current_before_mutation_with_effects(
+            &doc,
+            Duration::from_secs(30),
+            |_file, _source| converged(),
+            |_file, _reason, _targets| Ok(()),
+        );
+        assert!(outcome.is_ok(), "{outcome:?}");
     }
 }

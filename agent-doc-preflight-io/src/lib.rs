@@ -7686,6 +7686,111 @@ mod tests {
         );
     }
 
+    /// Move every stored claim on `doc` to an already-lapsed TTL, writing the
+    /// ledger row directly so expiry is deterministic (no sleeping).
+    fn expire_queue_claims(root: &Path, doc: &Path) {
+        let mut ledger = agent_doc_queue_io::queue_claim::load_ledger(doc).unwrap();
+        assert!(!ledger.claims.is_empty());
+        for claim in &mut ledger.claims {
+            claim.claimed_at_secs = 1;
+            claim.expires_at_secs = 2;
+        }
+        let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash: agent_doc_hash::path_hash(doc).unwrap(),
+                state_kind: "queue_claims".to_string(),
+                canonical_path: doc.canonicalize().unwrap().to_string_lossy().into_owned(),
+                payload_json: serde_json::to_string(&ledger).unwrap(),
+                updated_at_secs: 3,
+            },
+        )
+        .unwrap();
+    }
+
+    /// qsubattr3: under the queue `subagents` attribute, a claim whose TTL
+    /// lapsed (its subagent died or stopped heartbeating) returns the head to
+    /// `queue_subagent_dispatch`, and the head is never selected inline, so the
+    /// in-session loop cannot duplicate work a subagent may still be doing.
+    #[test]
+    fn expired_claim_under_subagents_attribute_redispatches_and_never_drains_inline() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent: codex\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents=1 go -->\n",
+            "- do [#a]\n",
+            "- do [#b]\n",
+            "- check the pane [#c] [inline]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let dispatch = |doc: &Path| {
+            let live = std::fs::read_to_string(doc).unwrap();
+            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(doc, &live)
+        };
+        let selected = |doc: &Path| {
+            inspect_queue_state(doc, None)
+                .unwrap()
+                .selected_queue_prompts
+        };
+
+        assert_eq!(dispatch(&doc), vec!["do [#a]".to_string()]);
+        agent_doc_queue_io::queue_claim::claim(&doc, "#a", "subagent:a", 600).unwrap();
+        // The one slot is in flight: nothing to dispatch, `b` is held, and
+        // only the opt-out head runs inline.
+        assert!(dispatch(&doc).is_empty());
+        assert_eq!(
+            selected(&doc),
+            vec!["check the pane [#c] [inline]".to_string()]
+        );
+
+        // The claim lapses without a release or a refresh.
+        expire_queue_claims(dir.path(), &doc);
+        assert!(
+            agent_doc_queue_io::queue_claim::refresh(&doc, "#a", "subagent:a", 600).is_err(),
+            "a lapsed claim cannot be refreshed back to life"
+        );
+        assert_eq!(
+            dispatch(&doc),
+            vec!["do [#a]".to_string()],
+            "an expired claim makes the head eligible for dispatch again"
+        );
+        let inspected = selected(&doc);
+        assert!(
+            !inspected
+                .iter()
+                .any(|prompt| prompt.contains("[#a]") || prompt.contains("[#b]")),
+            "an expired subagent head must never drain inline: {inspected:?}"
+        );
+        assert_eq!(inspected, vec!["check the pane [#c] [inline]".to_string()]);
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            !state
+                .selected_queue_prompts
+                .iter()
+                .any(|prompt| prompt.contains("[#a]") || prompt.contains("[#b]")),
+            "{:?}",
+            state.selected_queue_prompts
+        );
+    }
+
     #[test]
     fn run_queue_maintenance_keeps_non_actionable_free_text_queue_head() {
         let dir = setup_project();

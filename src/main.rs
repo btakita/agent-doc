@@ -4000,7 +4000,7 @@ enum QueueAction {
     /// (`#queueclaim`), e.g. a dispatched subagent. A claimed head is in flight:
     /// the in-session loop, preflight selection, and the Stop-hook continuation
     /// skip it. The claim ends when the item leaves the queue, on `queue
-    /// release`, or when its TTL expires (re-claim to refresh).
+    /// release`, or when its TTL expires (`--refresh` extends a live claim).
     Claim {
         /// Path to the session document
         file: PathBuf,
@@ -4010,9 +4010,16 @@ enum QueueAction {
         /// Who holds the claim, e.g. `subagent:<label>`
         #[arg(long)]
         owner: String,
-        /// Claim lifetime in seconds (default two hours)
+        /// Claim lifetime in seconds (default two hours). With `--refresh`,
+        /// the new lifetime counted from now.
         #[arg(long, default_value_t = agent_doc_queue::queue_claim::DEFAULT_QUEUE_CLAIM_TTL_SECS)]
         ttl_secs: u64,
+        /// Extend the TTL of the live claim `--owner` already holds on
+        /// `--item` (a heartbeat for a long-running worker). Refuses, without
+        /// creating a claim, when the item is unclaimed, the claim expired, or
+        /// another owner holds it.
+        #[arg(long)]
+        refresh: bool,
     },
     /// Release a queue claim (`#queueclaim`) so the in-session loop can take the
     /// item again, e.g. when its subagent reports back.
@@ -4519,8 +4526,10 @@ fn main() -> ExitCode {
 /// that names no live head). It is not an Agent Doc turn failure, so the
 /// generic dogfood "did not complete this turn" notice must not bury it.
 fn is_operator_usage_error(err: &anyhow::Error) -> bool {
-    err.chain()
-        .any(|cause| cause.is::<agent_doc_queue::queue_claim::QueueClaimMiss>())
+    err.chain().any(|cause| {
+        cause.is::<agent_doc_queue::queue_claim::QueueClaimMiss>()
+            || cause.is::<agent_doc_queue::queue_claim::QueueClaimRefreshRefused>()
+    })
 }
 
 fn print_terminal_error_report(err: &anyhow::Error) {
@@ -6789,7 +6798,17 @@ fn try_main() -> anyhow::Result<()> {
                 item,
                 owner,
                 ttl_secs,
+                refresh,
             } => {
+                if refresh {
+                    let claim =
+                        agent_doc_queue_io::queue_claim::refresh(&file, &item, &owner, ttl_secs)?;
+                    eprintln!(
+                        "[queue] refreshed {:?} for {} until {}",
+                        claim.item_text, claim.owner, claim.expires_at_secs
+                    );
+                    return Ok(());
+                }
                 let (outcome, claim) =
                     agent_doc_queue_io::queue_claim::claim(&file, &item, &owner, ttl_secs)?;
                 eprintln!(
@@ -7564,5 +7583,17 @@ mod usage_error_report_tests {
         assert!(!is_operator_usage_error(&anyhow::anyhow!(
             "closeout failed"
         )));
+    }
+
+    /// A refused `queue claim --refresh` is likewise a usage error.
+    #[test]
+    fn queue_claim_refresh_refusal_is_an_operator_usage_error() {
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        let refused = ledger
+            .refresh("do [#a]", "subagent:a", 100, 60)
+            .unwrap_err();
+        let err = anyhow::Error::new(refused).context("queue claim --refresh");
+        assert!(is_operator_usage_error(&err));
+        assert!(format!("{err:#}").contains("it is not claimed"));
     }
 }

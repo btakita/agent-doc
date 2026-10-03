@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_queue::queue_claim::{
-    ClaimOutcome, ClaimedQueueItems, QueueClaim, QueueClaimLedger, claim_identity,
-    resolve_claim_target,
+    ClaimOutcome, ClaimedQueueItems, QueueClaim, QueueClaimLedger, QueueClaimRefreshRefused,
+    claim_identity, resolve_claim_target,
 };
 use agent_doc_queue::queue_continuation::{live_queue_head_identities, live_queue_head_texts};
 use anyhow::{Context, Result, bail};
@@ -168,6 +168,56 @@ pub fn claim(
         ),
     );
     Ok(result)
+}
+
+/// Extend `owner`'s live claim on `item` to `now + ttl_secs`
+/// (`queue claim --refresh`). Refuses, with a typed
+/// [`QueueClaimRefreshRefused`], when the item is unclaimed, the claim already
+/// expired, or another owner holds it; it never creates a claim.
+pub fn refresh(file: &Path, item: &str, owner: &str, ttl_secs: u64) -> Result<QueueClaim> {
+    refresh_at(file, item, owner, ttl_secs, now_secs())
+}
+
+fn refresh_at(file: &Path, item: &str, owner: &str, ttl_secs: u64, now: u64) -> Result<QueueClaim> {
+    if item.trim().is_empty() {
+        bail!("queue claim --refresh needs a non-empty --item (`#id` or the queue line's text)");
+    }
+    if owner.trim().is_empty() {
+        bail!("queue claim --refresh needs a non-empty --owner (the claim's holder)");
+    }
+    let content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "read {} to validate the refreshed queue item",
+            file.display()
+        )
+    })?;
+    // Same resolution as `claim`, so `--item #id` refreshes a
+    // `#subagents do [#id]` head and a closed head is a typed miss.
+    let target = resolve_claim_target(item, &live_queue_head_texts(&content).unwrap_or_default())?;
+    let outcome = mutate_ledger(file, |ledger| {
+        Ok(ledger.refresh(&target, owner, now, ttl_secs))
+    })?;
+    match &outcome {
+        Ok(claim) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_refresh outcome=refreshed owner={} expires_at={} item_bytes={}",
+                claim.owner,
+                claim.expires_at_secs,
+                item.trim().len()
+            ),
+        ),
+        Err(refused) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_refresh outcome=refused reason={} owner={} item_bytes={}",
+                refused.reason.kind(),
+                refused.owner,
+                item.trim().len()
+            ),
+        ),
+    }
+    outcome.map_err(|refused: QueueClaimRefreshRefused| refused.into())
 }
 
 /// Release the claim on `item`. Returns the released claim, if there was one.
@@ -321,6 +371,65 @@ mod tests {
         assert!(release(&doc, "fix issue 110 now").unwrap().is_some());
         assert!(!claimed_items_for_content(&doc, &content).claims("fix issue 110 now"));
         assert!(release(&doc, "fix issue 110 now").unwrap().is_none());
+    }
+
+    fn refusal(err: &anyhow::Error) -> &agent_doc_queue::queue_claim::RefreshRefusal {
+        &err.downcast_ref::<QueueClaimRefreshRefused>()
+            .unwrap_or_else(|| panic!("expected a typed refresh refusal: {err:#}"))
+            .reason
+    }
+
+    /// `queue claim --refresh` (qsubattr3): the owner's live claim is
+    /// extended in state.db; an unclaimed, expired, or foreign claim is refused
+    /// without creating or moving a claim.
+    #[test]
+    fn refresh_extends_the_owners_live_claim_and_refuses_otherwise() {
+        use agent_doc_queue::queue_claim::RefreshRefusal;
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#a]", "do [#b]"]);
+
+        let unclaimed = refresh(&doc, "#a", "subagent:a", 600).unwrap_err();
+        assert_eq!(refusal(&unclaimed), &RefreshRefusal::Unclaimed);
+        assert!(
+            load_ledger(&doc).unwrap().claims.is_empty(),
+            "a refused refresh must not create a claim"
+        );
+
+        let (_, claimed) = claim(&doc, "#a", "subagent:a", 60).unwrap();
+        let refreshed = refresh(&doc, "#a", "subagent:a", 7200).unwrap();
+        assert!(
+            refreshed.expires_at_secs >= claimed.expires_at_secs + 7000,
+            "{claimed:?} -> {refreshed:?}"
+        );
+        assert_eq!(refreshed.claimed_at_secs, claimed.claimed_at_secs);
+        assert_eq!(load_ledger(&doc).unwrap().claims[0], refreshed);
+
+        let foreign = refresh(&doc, "do [#a]", "subagent:b", 600).unwrap_err();
+        assert_eq!(
+            refusal(&foreign),
+            &RefreshRefusal::OtherOwner {
+                holder: "subagent:a".to_string()
+            }
+        );
+        assert_eq!(load_ledger(&doc).unwrap().claims[0], refreshed);
+
+        // Judged past its expiry, the same owner's refresh is refused and the
+        // stored claim is left as it was (not revived).
+        let expired =
+            refresh_at(&doc, "#a", "subagent:a", 600, refreshed.expires_at_secs).unwrap_err();
+        assert_eq!(refusal(&expired).kind(), "expired");
+        assert_eq!(load_ledger(&doc).unwrap().claims[0], refreshed);
+
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("queue_claim_refresh outcome=refreshed owner=subagent:a"),
+            "{ops}"
+        );
+        assert!(
+            ops.contains("queue_claim_refresh outcome=refused reason=other_owner"),
+            "{ops}"
+        );
     }
 
     #[test]

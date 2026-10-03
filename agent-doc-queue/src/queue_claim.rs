@@ -32,8 +32,12 @@
 //!   claim). A background subagent has no pid or heartbeat agent-doc can
 //!   observe, so a crashed worker can never release its claim. Without a TTL a
 //!   lost subagent would strand the head forever; with one, the queue degrades
-//!   back to ordinary drainability. Re-claiming refreshes the TTL, which lets a
-//!   long-running owner keep its claim alive.
+//!   back to ordinary drainability. `queue claim --refresh`
+//!   ([`QueueClaimLedger::refresh`]) extends the TTL of the owner's own live
+//!   claim, which lets a long-running owner keep its claim alive; it refuses an
+//!   expired, foreign, or missing claim rather than (re)creating one. Under the
+//!   queue-level `subagents` attribute an expired claim returns the head to the
+//!   dispatch set, never to inline drainage.
 //!
 //! This module is pure: no clock, no storage. The caller supplies `now`.
 
@@ -113,6 +117,49 @@ impl QueueClaimLedger {
                 ClaimOutcome::Created
             }
         }
+    }
+
+    /// Extend the TTL of `owner`'s live claim on `item` to `now_secs + ttl_secs`
+    /// (`queue claim --refresh`, the coordinator's heartbeat for a long-running
+    /// subagent). Unlike [`Self::claim`], it never creates or takes over a
+    /// claim: an unclaimed item, an expired claim, or another owner's claim is
+    /// refused, so a heartbeat that arrives after the claim lapsed cannot
+    /// silently re-claim a head another worker may already have taken.
+    /// `claimed_at_secs` is kept; only `expires_at_secs` moves.
+    pub fn refresh(
+        &mut self,
+        item: &str,
+        owner: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+    ) -> Result<QueueClaim, QueueClaimRefreshRefused> {
+        let identity = claim_identity(item);
+        let owner = owner.trim();
+        let refused = |reason| QueueClaimRefreshRefused {
+            item: item.trim().to_string(),
+            owner: owner.to_string(),
+            reason,
+        };
+        let Some(existing) = self
+            .claims
+            .iter_mut()
+            .find(|claim| claim.identity == identity)
+        else {
+            return Err(refused(RefreshRefusal::Unclaimed));
+        };
+        if existing.is_expired(now_secs) {
+            return Err(refused(RefreshRefusal::Expired {
+                holder: existing.owner.clone(),
+                expired_at_secs: existing.expires_at_secs,
+            }));
+        }
+        if existing.owner != owner {
+            return Err(refused(RefreshRefusal::OtherOwner {
+                holder: existing.owner.clone(),
+            }));
+        }
+        existing.expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
+        Ok(existing.clone())
     }
 
     /// Release the claim on `item`. Returns the released claim, if any.
@@ -210,6 +257,71 @@ pub fn referenced_queue_ids(text: &str) -> Vec<String> {
     }
     out
 }
+
+/// Why [`QueueClaimLedger::refresh`] refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefreshRefusal {
+    /// No claim on the item at all.
+    Unclaimed,
+    /// The claim's TTL already lapsed; the head is back in the eligible set.
+    Expired {
+        holder: String,
+        expired_at_secs: u64,
+    },
+    /// A different owner holds the live claim.
+    OtherOwner { holder: String },
+}
+
+impl RefreshRefusal {
+    /// Stable short name for ops-log lines.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Unclaimed => "unclaimed",
+            Self::Expired { .. } => "expired",
+            Self::OtherOwner { .. } => "other_owner",
+        }
+    }
+}
+
+/// A `queue claim --refresh` that has no live claim of its owner to extend.
+/// An operator/agent usage error with a specific remedy, not an Agent Doc
+/// turn failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueClaimRefreshRefused {
+    pub item: String,
+    pub owner: String,
+    pub reason: RefreshRefusal,
+}
+
+impl std::fmt::Display for QueueClaimRefreshRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.reason {
+            RefreshRefusal::Unclaimed => write!(
+                f,
+                "cannot refresh {:?}: it is not claimed. Claim it first with `queue claim` \
+                 (without --refresh).",
+                self.item
+            ),
+            RefreshRefusal::Expired {
+                holder,
+                expired_at_secs,
+            } => write!(
+                f,
+                "cannot refresh {:?}: the claim held by {holder} expired at {expired_at_secs}. \
+                 The head is eligible for dispatch again; claim it anew (without --refresh) only \
+                 if no other worker has taken it.",
+                self.item
+            ),
+            RefreshRefusal::OtherOwner { holder } => write!(
+                f,
+                "cannot refresh {:?} for {}: the live claim is held by {holder}.",
+                self.item, self.owner
+            ),
+        }
+    }
+}
+
+impl std::error::Error for QueueClaimRefreshRefused {}
 
 /// A `queue claim` / `queue release` `--item` that names no live queue head
 /// (or names several). An operator/agent usage error with a specific remedy,
@@ -367,6 +479,46 @@ mod tests {
         assert_eq!(ledger.claims.len(), 1);
         assert_eq!(ledger.release("do [#a]").unwrap().owner, "subagent:b");
         assert!(ledger.release("do [#a]").is_none());
+    }
+
+    #[test]
+    fn refresh_extends_only_the_same_owners_live_claim() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("do [#a]", "subagent:a", 100, 10);
+
+        // Same owner, live claim: the TTL moves, claimed_at does not.
+        let refreshed = ledger.refresh("🚧 [#a]", "subagent:a", 105, 50).unwrap();
+        assert_eq!(refreshed.expires_at_secs, 155);
+        assert_eq!(refreshed.claimed_at_secs, 100);
+        assert_eq!(ledger.claims[0].expires_at_secs, 155);
+
+        // Another owner is refused and the claim is untouched.
+        let other = ledger
+            .refresh("do [#a]", "subagent:b", 106, 50)
+            .unwrap_err();
+        assert_eq!(
+            other.reason,
+            RefreshRefusal::OtherOwner {
+                holder: "subagent:a".to_string()
+            }
+        );
+        assert_eq!(ledger.claims[0].owner, "subagent:a");
+        assert_eq!(ledger.claims[0].expires_at_secs, 155);
+
+        // An expired claim is refused, never revived.
+        let expired = ledger
+            .refresh("do [#a]", "subagent:a", 155, 50)
+            .unwrap_err();
+        assert_eq!(expired.reason.kind(), "expired");
+        assert_eq!(ledger.claims[0].expires_at_secs, 155);
+        assert!(!ledger.claimed_items(155, None).claims("do [#a]"));
+
+        // An unclaimed item is refused and no claim is created.
+        let unclaimed = ledger
+            .refresh("do [#b]", "subagent:a", 106, 50)
+            .unwrap_err();
+        assert_eq!(unclaimed.reason, RefreshRefusal::Unclaimed);
+        assert_eq!(ledger.claims.len(), 1);
     }
 
     #[test]

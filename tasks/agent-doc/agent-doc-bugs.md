@@ -679,6 +679,72 @@ Every remaining queue item is claimed. Nothing in the queue can be drained in th
 | `qsubattr5` (dogfood) | coordinator, held until qsubattr3 and qsubattr4 land and are installed |
 
 As each subagent reports back, I'll rebase its push onto main, verify it, and run one `make install` per integrated batch. Then I'll release its claim and close its queue item.
+
+### Re: batch closeout: queue subagents phases 3–4, GH #120–#124, v0.35.446 — opus-5.5 · 2026-10-03T17:40-04:00
+
+> **Queue prompt:** do [#qsubattr3]
+
+**`qsubattr3` is done** (subagent, `5545268a2`).
+- **New command:** `agent-doc queue claim <FILE> --item <ID> --owner <OWNER> --refresh [--ttl-secs N]` extends the owner's own live claim. It refuses, without touching the ledger, when the item is unclaimed, already expired, or held by another owner. Each attempt logs `queue_claim_refresh outcome=…`.
+- **Expiry:** under `subagents`, an expired claim makes the head eligible for dispatch again. It never drains inline. A preflight test backdates the claim in state.db to prove this.
+- **Tests:** every mutation turned a test red, and the subagent's `make check` passed (10679).
+
+> **Queue prompt:** do [#qsubattr4]
+
+**`qsubattr4` is done** (subagent, `c696f82fb`). The coordinator contract (`#queuesubagents`) is now in the following places:
+- `SKILL.md`, as one sentence.
+- `runbooks/respond.md`, which has the full procedure.
+- `runbooks/planning-dispatch.md`, as rule 8.
+- The copies for every harness, regenerated with `skill install --all`.
+
+A skill test pins the text. The worktree example path is the generic `~/worktrees/<repo>-<label>`, because the runbook ships to every agent-doc user.
+
+> **Queue prompt:** #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/120
+
+**GH #120 is fixed** (`0bb023110`) and closed.
+- **Cause:** the `ensure` merge from GH #111 appended a column for every routed document that wasn't already shown. JetBrains sends `ensure` on every tab switch, so the layout grew 1→2→3 until `plugin_publication` collapsed it.
+- **Fix:** the document now takes over the focus column (or the rightmost free one). An `ensure` route never publishes more columns than it kept.
+- **Not covered:** publisher arbitration and stash-focus are filed as `layoutpublisherarbiter`.
+
+> **Queue prompt:** #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/122
+
+**GH #122 is fixed** (`07af0fd51`) and closed.
+- **Cause:** the async `editor_route` worker refused based on a frozen `Preparing` snapshot. Its retry only wrapped the "accepted" reply, and the budget was 10s against a measured 141s handoff.
+- **Fix:** the worker now waits on live controller authority. A waiting worker holds back the next handoff attempt, and the budget is 180s.
+- **Remainder:** a route admitted just before a handoff that *succeeds* still dies with the old controller. Filed as `handoffrouteforward`.
+
+> **Queue prompt:** https://github.com/btakita/agent-doc/issues/123
+
+**GH #123 is fixed** (`97ece6a5d`) and closed. All three defects came from the pre-commit gate:
+- **Retained writes:** the gate now counts the invocation's own `--backlog-gate`, `--done`, kept-open and `--review-resolve` ids, so a retained write no longer hides them.
+- **Negated completion:** a completion word negated earlier in the same clause ("cannot be verified") no longer counts.
+- **Exit status:** once the response has been written, the gate only warns. A cycle that commits no longer exits with a terminal failure.
+
+> **Queue prompt:** #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/124
+
+**GH #124 is fixed** (`57dc5fc10`) and closed.
+- The #121 focused-pane exception now holds only if admitting the stale pane would not stash a live turn.
+- When every column is excluded, sync keeps the current layout and no longer hands tmux-router an empty set.
+- A pane title now carries one marker: `⚠ STALE SUPERVISOR: turn in progress`.
+- **Remainder:** the claim/dispatch identity mismatch (ask 5) is filed as `claimdispatchidentity`. It also covers a claim being lost when an operator edits a claimed line, which happened today when `#gh-fix` was added.
+
+**Release v0.35.446** (`#gh-fix` = fix then close + release). It includes:
+- queue `subagents` phases 1–3 plus the phase 4 docs;
+- the session-check claim fix;
+- GH #120–#124.
+
+How it went out:
+- **Push:** `main` and the tag were pushed in one `git push --atomic` (`25269f468`). `make release` would push them separately, and twice a subagent push landed during release verification.
+- **Verification:** `make check` passed (10689) on the release commit before the #123/#124 rebase. After the rebase, the version-dependent gates passed: editor parity audit, skill tests, and the touched crates. Each subagent's own full `make check` covered its code.
+- **Publishing:** `install-full` installed `agent-doc 0.35.446`. The GitHub Release and PyPI workflows were still running at closeout.
+- **Process fix:** the first release attempt failed the `editor-parity` gate because 0.35.446 had no `editors/release-parity.tsv` row. I added it.
+
+**Preflight no longer refuses a turn because the operator is still typing** (`c845098c7`, installed after the release, not part of it). This is the fix from your chat request.
+- **Preflight:** it now starts the turn from the controller's current text even when not every editor replica has received the latest edit. It sends one delivery-drain request without blocking on it, and later edits arrive as mid-turn steering. It still refuses when no authoritative text exists at all.
+- **session-check:** it reports operator edits that haven't reached disk yet as `pending-save` (quoting any queue or exchange prompt as steering), not INTERRUPTED. It stays INTERRUPTED only when disk is ahead of or conflicts with the editor text, or when no committed version exists to prove where the difference came from.
+- **Follow-ups filed:** route startup has the same refusal (`routestartupadmit`), and the steering path still exits 1 (`steerinterruptexit`).
+
+**Still running:** the subagent fixing the editor replica being dropped and refused when it re-registers, which kept your sdk.md prompt stuck in the JetBrains buffer (`steerreplicachurn`). `qsubattr5` (dogfood) is now unblocked because phases 3–4 are installed. I'll release my coordinator hold on it so the next cycle runs it.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -690,22 +756,24 @@ As each subagent reports back, I'll rebase its push onto main, verify it, and ru
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~do [#qsubattr1]~~
 - ~~do [#qsubattr2]~~
-- ⏭️ do [#qsubattr3]
-- 🚧 do [#qsubattr4]
+- ~~do [#qsubattr3]~~
+- ~~do [#qsubattr4]~~
 - do [#qsubattr5]
 - #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/120
 - ~~#subagents: https://github.com/btakita/agent-doc/issues/121~~
 - #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/122
 - https://github.com/btakita/agent-doc/issues/123
-  https://github.com/btakita/agent-doc/issues/124#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/123
 - #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/124
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#routestartupadmit] [agent-doc] Route startup has the same delivery_pending refusal that preflight had: agent-doc-route-io/src/startup_debounce.rs defers or refuses on 'delivery_pending' while the controller already holds the operator's text. Apply agent_doc_debounce::current_authority_admission (shipped in c845098c7) to the route startup wait, add SimWorld coverage, make check, install.
+- [ ] [#steerinterruptexit] [agent-doc] session-check's realtime-steering path still exits 1 (INTERRUPTED) for an unanswered operator prompt after a committed cycle, with 'address it in your current turn' guidance. Pending operator steering is not a failure; report it as steering with exit 0 and update the closeout and harness contract that depends on the exit code (follow-up from c845098c7).
+- [ ] [#handoffrouteforward] [agent-doc] A route admitted by a controller that then hands off SUCCESSFULLY is still lost: the old controller stays Preparing and exits after its client connections drain without waiting for async editor_route workers, so the successor never learns of the command (GH #122 remainder, 07af0fd51). Forward the in-flight async route to the successor, or drain workers before exit, and have the plugin accept the result from the successor.
+- [ ] [#layoutpublisherarbiter] [agent-doc] Route and plugin_publication layout publishers still overwrite each other (last writer wins) and the loser is not logged; also never make a pane in a non-active window (1:stash) a focus target (GH #120 asks 2-3, remainder after 0bb023110).
+- [ ] [#claimdispatchidentity] [agent-doc] queue claim and subagent dispatch disagree on what a live queue head is (GH #124 ask 5). Also, editing a claimed free-text queue line changes its claim identity, so the claim silently drops (seen 2026-10-03 when '#gh-fix' was added to claimed lines). Unify the identity and carry a claim across an operator edit of the same line.
 - [ ] [#steerreplicachurn] [agent-doc] Operator queue edits reached the CP only ~4-5 min late, so mid-turn steering could not surface them (2026-10-03, agent-doc-bugs.md): from 19:19:56Z to 19:24:16Z the JetBrains replica deregistered and re-registered every 10-60s with bootstrap_bytes=34 (crdt_replica_register/deregister in ops.log), the CRDT text stayed len=59241, and the edits arrived in one crdt_document_op_delta_ingested of delta_len=7165514 at 19:24:16Z. Find what drives the register churn (a concurrent make install or plugin reload is suspected), make operator ops flush on re-register, and add SimWorld coverage showing an edit made during churn is visible to the midturn hook within seconds.
-- [ ] [#qsubattr3] [agent-doc] Queue subagents attribute, phase 3 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): `queue claim --refresh` heartbeat; under the attr an expired claim makes the head eligible for dispatch again, never inline drain; test for no duplicate work.
-- [ ] 🚧 [#qsubattr4] [agent-doc] Queue subagents attribute, phase 4 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): coordinator contract in SKILL.md + respond/planning-dispatch runbooks for all harnesses (claim/dispatch/refresh, serialized integration, one make install per batch, release then close, orchestrate --mode parallel fallback for harnesses without an Agent tool).
 - [ ] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): dogfood in tasks/software/tsift.md (replace per-line #subagent: prefixes with subagents=3); verify via queue claims + ops.log that each head is dispatched exactly once and none drain inline.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and

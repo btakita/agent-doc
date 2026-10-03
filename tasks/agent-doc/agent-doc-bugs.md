@@ -328,8 +328,11 @@ The exchange is past the size warning (285+ lines). I'll keep draining rather th
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~We need to remove `queue: stop` entirely. This is too confusing.~~
-- #subagents: Add `presets` as an alias to `prompt_presents`.
-- #subagents: tsift.md missed part the queue item that I wrote: `> **Queue prompt:** Should we release + publish the`
+- #subagent: Add `presets` as an alias to `prompt_presents`.
+- #subagent: tsift.md missed part the queue item that I wrote: `> **Queue prompt:** Should we release + publish the`
+- #subagent: https://github.com/btakita/agent-doc/issues/116
+- #subagent: https://github.com/btakita/agent-doc/issues/117
+- #subagent: https://github.com/btakita/agent-doc/issues/118
 - release + publish
 <!-- /agent:queue -->
 
@@ -339,6 +342,9 @@ The exchange is past the size warning (285+ lines). I'll keep draining rather th
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.
 - [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
+- [ ] [#steergatelog] [agent-doc] Steering completion-gate decision log (dataset). For every reactive steering delivery decision, record a feature row + outcome in state.db: trailing-token class (article/conjunction/preposition, ?, ., [id], URL), unbalanced backtick/quote/paren, closed list item, pause vs the operator's median pause, typing speed, time since item start, cursor/focus left component, component (queue/exchange), harness; outcome labels: delivered then re-edited within ~30-60s = premature, held delay with no further edit = late, otherwise on-time. Prerequisite for steergateperceptron and steergatenamo; ships with/after the deterministic gate from the reactive-steering work.
+- [ ] [#steergateperceptron] [agent-doc] Online-learned typing-completion gate: averaged perceptron / online logistic regression over the steergatelog features, ~20 weights in pure Rust, persisted per operator in state.db, seeded from the deterministic rules so day one matches them, updated online from premature/late labels. Three-zone decision (send >=0.8, hold <=0.3, wait between); deterministic rules stay the hard floor (unbalanced delimiters always hold) and max-hold always delivers possibly_partial. Expose weights for inspection (agent-doc steering --explain). Replaces the harness-CLI small-model classifier as the primary path; drop that adapter or keep it optional and off by default. Must work identically across Claude Code, Codex, Cursor, OpenCode, Grok Build (gate lives in the binary). Fake-clock + recorded-edit-stream regression tests, incl. 'Should we release + publish the' held and a bare do [id] / issue URL delivered.
+- [ ] [#steergatenamo] [recommended] [agent-doc] Evaluate a pretrained end-of-turn model as an extra steergateperceptron feature: score videosdk-live/Namo-Turn-Detector-v1 (~66M) and latishab/turnsense offline against the steergatelog dataset; integrate locally (ONNX via the ort crate, no API, no harness) only if it beats the rules+perceptron on held-out data, weighing binary/download size. If close but not sufficient, fine-tune on the logged operator edits. Caveat: these are trained on speech transcripts, not typed technical prompts (backticks, [ids], URLs, #subagent: prefixes).
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

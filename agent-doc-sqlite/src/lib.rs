@@ -11,6 +11,8 @@
 //!   duplicate-detection records in the sole controller `state.db`.
 //! - `op_log` — operation-log tables (actor + causal/Lamport tagging) in the sole
 //!   controller `state.db` for the operation-scoped drift model.
+//! - `steering_gate_log` — the steering typing-completion gate's decision
+//!   dataset (`#steergatelog`) in the sole controller `state.db`.
 //! - `state_store` — project-controller actor/lease/dispatch/queue/cycle/
 //!   diagnostic/admin/recovery/layout SQLite state plus storage-specific status
 //!   records. Actor domain types live in `agent-doc-controller`.
@@ -20,6 +22,7 @@ pub mod context_injection_ledger;
 pub mod op_log;
 pub mod reliable_sync_inbox;
 pub mod state_store;
+pub mod steering_gate_log;
 
 pub use state_store::{
     ActorTransitionStatus, ControlPlaneStoreCounts, DispatchAttemptStatus,

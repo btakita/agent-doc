@@ -2552,9 +2552,12 @@ enum Commands {
     /// (`address_now` | `drain_after_current` | `subagent`). Claude Code and
     /// Codex receive the same steering automatically through the PostToolUse
     /// hook; this command is the poll surface for other harnesses and monitors.
+    #[command(args_conflicts_with_subcommands = true)]
     Steering {
+        #[command(subcommand)]
+        action: Option<SteeringAction>,
         /// Path to the session document
-        file: PathBuf,
+        file: Option<PathBuf>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -3798,6 +3801,26 @@ enum ControllerAction {
         /// directly — use when the controller is spin-wedged / RPC-unreachable.
         #[arg(long)]
         force: bool,
+    },
+}
+
+/// `agent-doc steering` subcommands.
+#[derive(Subcommand)]
+enum SteeringAction {
+    /// Export the steering completion-gate decision dataset (`#steergatelog`):
+    /// one row per settle/delivery decision with its features, tier, outcome
+    /// facts, and label (premature / late / on_time).
+    Dataset {
+        /// Output as JSON (one array of rows)
+        #[arg(long)]
+        json: bool,
+        /// Only rows for this session document (also selects the project);
+        /// otherwise every document in the current directory's project
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Only the most recent N rows
+        #[arg(long)]
+        limit: Option<usize>,
     },
 }
 
@@ -5121,11 +5144,21 @@ fn try_main() -> anyhow::Result<()> {
             }
         }
         Commands::Steering {
+            action: Some(SteeringAction::Dataset { json, file, limit }),
+            ..
+        } => steering_cmd::run_dataset(file.as_deref(), json, limit),
+        Commands::Steering {
+            action: None,
             file,
             json,
             peek,
             follow,
-        } => steering_cmd::run(&file, json, peek, follow),
+        } => {
+            let file = file.context(
+                "agent-doc steering needs a session document: agent-doc steering <FILE>",
+            )?;
+            steering_cmd::run(&file, json, peek, follow)
+        }
         Commands::Outline { file, json } => outline_cmd::run_outline(&file, json),
         Commands::AutoDag { file, json } => auto_dag::run_command(&file, json),
         Commands::Board {
@@ -6755,7 +6788,10 @@ fn try_main() -> anyhow::Result<()> {
             QueueAction::Release { file, item } => {
                 match agent_doc_queue_io::queue_claim::release(&file, &item)? {
                     Some(claim) => {
-                        eprintln!("[queue] released {:?} (owner {})", claim.item_text, claim.owner)
+                        eprintln!(
+                            "[queue] released {:?} (owner {})",
+                            claim.item_text, claim.owner
+                        )
                     }
                     None => eprintln!("[queue] no claim on {item:?}; nothing to release"),
                 }
@@ -7509,7 +7545,11 @@ mod usage_error_report_tests {
         .unwrap_err();
         let err = anyhow::Error::new(miss).context("queue claim");
         assert!(is_operator_usage_error(&err));
-        assert!(format!("{err:#}").contains("no live queue head matches \"#nosuch\"; live heads: "));
-        assert!(!is_operator_usage_error(&anyhow::anyhow!("closeout failed")));
+        assert!(
+            format!("{err:#}").contains("no live queue head matches \"#nosuch\"; live heads: ")
+        );
+        assert!(!is_operator_usage_error(&anyhow::anyhow!(
+            "closeout failed"
+        )));
     }
 }

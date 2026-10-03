@@ -372,6 +372,11 @@ pub struct ProjectConfig {
     /// Absent, `agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS` applies.
     #[serde(default, alias = "steering_max_hold_ms")]
     pub agent_doc_steering_max_hold_ms: Option<u64>,
+    /// Window in milliseconds after a steering delivery in which a re-edit of
+    /// the same item labels the delivery `premature` in the completion-gate
+    /// decision log (`#steergatelog`). Absent, 45000 applies.
+    #[serde(default, alias = "steering_label_window_ms")]
+    pub agent_doc_steering_label_window_ms: Option<u64>,
     /// Project-default age in seconds past which an active agent turn is
     /// reported as a runaway (`#runawayturnsurfaced`). Absent, the built-in
     /// `agent_doc_harness::DEFAULT_RUNAWAY_TURN_SECS` applies; `0` disables the

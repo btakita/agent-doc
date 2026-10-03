@@ -20,6 +20,7 @@ pub mod prompt_bearing;
 pub mod queue_head_guards;
 pub mod queue_head_provenance_guards;
 pub mod response_guards;
+pub mod steering_gate_log;
 pub mod unlandable_capture;
 pub mod write_pending_checks;
 

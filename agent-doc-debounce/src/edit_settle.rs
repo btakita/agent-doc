@@ -260,6 +260,355 @@ pub fn added_lines_look_finished(admitted: &str, current: &str) -> bool {
         .all(|line| completion_signal(line) != CompletionSignal::Incomplete)
 }
 
+// ---------------------------------------------------------------------------
+// Decision features (`#steergatelog`).
+//
+// Every settle decision can be described by a small, fixed set of observable
+// features. The decision log (`agent_doc_session_check_io::steering_gate_log`)
+// persists them with each decision so outcomes observed later (a re-edit right
+// after delivery, a hold nobody needed) can label the decision. They are all
+// pure functions of the text, the settle inputs, and the operator's pause
+// profile, so the same features are computed in every harness.
+// ---------------------------------------------------------------------------
+
+/// Class of the last token of an edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrailingToken {
+    /// Nothing but whitespace.
+    Empty,
+    /// `a`, `an`, `the`.
+    Article,
+    /// `and`, `or`, `but`, `if`, `that`, `which`, ...
+    Conjunction,
+    /// `to`, `of`, `with`, `for`, `in`, ...
+    Preposition,
+    /// Any other dangling function word: auxiliaries, pronouns, `not`.
+    FunctionWord,
+    /// Ends in `?`.
+    Question,
+    /// Ends in `.` or `!`.
+    Terminal,
+    /// A closed `[#id]` reference.
+    IdRef,
+    /// A URL.
+    Url,
+    /// A closed inline code span.
+    CodeSpan,
+    /// A dangling connector (`,` `:` `+` `&` `/` `=` an open bracket, ...).
+    DanglingPunct,
+    /// A closing quote, paren, or bracket that is not an id reference.
+    Closer,
+    /// An ordinary content word.
+    Word,
+}
+
+impl TrailingToken {
+    pub const ALL: [Self; 13] = [
+        Self::Empty,
+        Self::Article,
+        Self::Conjunction,
+        Self::Preposition,
+        Self::FunctionWord,
+        Self::Question,
+        Self::Terminal,
+        Self::IdRef,
+        Self::Url,
+        Self::CodeSpan,
+        Self::DanglingPunct,
+        Self::Closer,
+        Self::Word,
+    ];
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|class| class.as_str() == text)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::Article => "article",
+            Self::Conjunction => "conjunction",
+            Self::Preposition => "preposition",
+            Self::FunctionWord => "function_word",
+            Self::Question => "question",
+            Self::Terminal => "terminal",
+            Self::IdRef => "id_ref",
+            Self::Url => "url",
+            Self::CodeSpan => "code_span",
+            Self::DanglingPunct => "dangling_punct",
+            Self::Closer => "closer",
+            Self::Word => "word",
+        }
+    }
+}
+
+const ARTICLES: &[&str] = &["a", "an", "the"];
+const CONJUNCTIONS: &[&str] = &[
+    "and", "or", "but", "nor", "so", "because", "while", "when", "where", "whether", "if", "then",
+    "than", "that", "which", "who", "whose",
+];
+const PREPOSITIONS: &[&str] = &[
+    "to", "of", "with", "without", "for", "in", "into", "on", "onto", "at", "by", "from", "as",
+    "via", "per",
+];
+
+/// The class of the last token of `text` (`#steergatelog`).
+pub fn trailing_token(text: &str) -> TrailingToken {
+    let trimmed = text.trim_end();
+    if trimmed.trim().is_empty() {
+        return TrailingToken::Empty;
+    }
+    let last_line = trimmed.lines().last().unwrap_or("").trim();
+    if last_line.ends_with('`') && last_line.chars().filter(|&ch| ch == '`').count() % 2 == 0 {
+        return TrailingToken::CodeSpan;
+    }
+    let tail = strip_code_spans(last_line);
+    let tail = tail.trim_end();
+    if tail.ends_with(DANGLING_TAILS) {
+        return TrailingToken::DanglingPunct;
+    }
+    let last_token = tail.split_whitespace().last().unwrap_or("");
+    if last_token.starts_with("http://") || last_token.starts_with("https://") {
+        return TrailingToken::Url;
+    }
+    if last_token.ends_with(']') && last_token.contains("[#") {
+        return TrailingToken::IdRef;
+    }
+    if tail.ends_with('?') {
+        return TrailingToken::Question;
+    }
+    if tail.ends_with(['.', '!']) {
+        return TrailingToken::Terminal;
+    }
+    if tail.ends_with([')', ']', '"', '\'', '>']) {
+        return TrailingToken::Closer;
+    }
+    let word = last_token
+        .trim_matches(|ch: char| !ch.is_alphanumeric())
+        .to_ascii_lowercase();
+    let word = word.as_str();
+    if ARTICLES.contains(&word) {
+        TrailingToken::Article
+    } else if CONJUNCTIONS.contains(&word) {
+        TrailingToken::Conjunction
+    } else if PREPOSITIONS.contains(&word) {
+        TrailingToken::Preposition
+    } else if DANGLING_WORDS.contains(&word) {
+        TrailingToken::FunctionWord
+    } else {
+        TrailingToken::Word
+    }
+}
+
+/// True when `text` leaves a backtick, quote, paren, bracket, brace, or code
+/// fence open. The same balance rules [`completion_signal`] applies.
+pub fn has_unbalanced_delimiters(text: &str) -> bool {
+    let lines: Vec<&str> = text.trim_end().lines().collect();
+    let fence = |line: &str| {
+        let t = line.trim_start();
+        t.starts_with("```") || t.starts_with("~~~")
+    };
+    if lines.iter().filter(|line| fence(line)).count() % 2 == 1 {
+        return true;
+    }
+    let mut prose = String::new();
+    let mut in_fence = false;
+    for line in &lines {
+        if fence(line) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if !in_fence {
+            prose.push_str(line);
+            prose.push('\n');
+        }
+    }
+    if prose.chars().filter(|&ch| ch == '`').count() % 2 == 1 {
+        return true;
+    }
+    let scan = strip_code_spans(&prose);
+    scan.chars().filter(|&ch| ch == '"').count() % 2 == 1
+        || unbalanced(&scan, '(', ')')
+        || unbalanced(&scan, '[', ']')
+        || unbalanced(&scan, '{', '}')
+}
+
+fn starts_list_item(line: &str) -> bool {
+    let t = line.trim_start();
+    if matches!(t, "-" | "*" | "+") || t.starts_with("- ") || t.starts_with("* ") {
+        return true;
+    }
+    if t.starts_with("+ ") {
+        return true;
+    }
+    let digits = t.chars().take_while(char::is_ascii_digit).count();
+    digits > 0 && (t[digits..].starts_with(". ") || t[digits..].starts_with(") "))
+}
+
+/// True when the operator already started another list item after the one
+/// whose text is `verbatim` (`#steergatelog`): moving on to a new bullet is
+/// evidence the previous one is finished.
+pub fn closed_list_item(document: &str, verbatim: &str) -> bool {
+    let Some(last) = verbatim
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+    else {
+        return false;
+    };
+    let lines: Vec<&str> = document.lines().collect();
+    let Some(index) = lines
+        .iter()
+        .rposition(|line| line.trim_end().ends_with(last))
+    else {
+        return false;
+    };
+    lines[index + 1..]
+        .iter()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| starts_list_item(line))
+}
+
+/// The edit's component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateComponent {
+    Queue,
+    Exchange,
+}
+
+impl GateComponent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queue => "queue",
+            Self::Exchange => "exchange",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "queue" => Some(Self::Queue),
+            "exchange" => Some(Self::Exchange),
+            _ => None,
+        }
+    }
+}
+
+impl CompletionSignal {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Inconclusive => "inconclusive",
+            Self::Incomplete => "incomplete",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "complete" => Some(Self::Complete),
+            "inconclusive" => Some(Self::Inconclusive),
+            "incomplete" => Some(Self::Incomplete),
+            _ => None,
+        }
+    }
+}
+
+/// Which deterministic tier produced (or would produce) a decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettleTier {
+    /// Finished-looking text settled after half the quiet window.
+    HalfWindow,
+    /// Inconclusive text settled after the full quiet window.
+    FullWindow,
+    /// Delivered by the hard max-hold, flagged `possibly_partial`.
+    MaxHold,
+    /// Held: the text looks unfinished.
+    HeldUnfinished,
+    /// Held: still inside the window its signal requires.
+    HeldQuiet,
+}
+
+impl SettleTier {
+    pub fn parse(text: &str) -> Option<Self> {
+        [
+            Self::HalfWindow,
+            Self::FullWindow,
+            Self::MaxHold,
+            Self::HeldUnfinished,
+            Self::HeldQuiet,
+        ]
+        .into_iter()
+        .find(|tier| tier.as_str() == text)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HalfWindow => "half_window",
+            Self::FullWindow => "full_window",
+            Self::MaxHold => "max_hold",
+            Self::HeldUnfinished => "held_unfinished",
+            Self::HeldQuiet => "held_quiet",
+        }
+    }
+}
+
+/// The deterministic tier for `inputs` (the classifier verdict is ignored).
+pub fn deterministic_tier(inputs: SettleInputs) -> SettleTier {
+    let decision = settle_decision(SettleInputs {
+        verdict: None,
+        ..inputs
+    });
+    match (decision, inputs.signal) {
+        (SettleDecision::MaxHoldExpired, _) => SettleTier::MaxHold,
+        (SettleDecision::Settled, CompletionSignal::Inconclusive) => SettleTier::FullWindow,
+        (SettleDecision::Settled, _) => SettleTier::HalfWindow,
+        (SettleDecision::Held { .. }, CompletionSignal::Incomplete) => SettleTier::HeldUnfinished,
+        (SettleDecision::Held { .. }, _) => SettleTier::HeldQuiet,
+    }
+}
+
+/// Everything observable about one settle decision (`#steergatelog`).
+///
+/// Integers only, so a feature row compares exactly and round-trips through
+/// storage without float drift. (This crate has no dependencies, so the
+/// serialized form lives with the decision log.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GateFeatures {
+    pub trailing_token: TrailingToken,
+    /// The structural signal the gate used (a removal counts as complete).
+    pub signal: CompletionSignal,
+    pub unbalanced_delimiters: bool,
+    pub closed_list_item: bool,
+    /// How long the edit has been quiet: the larger of document quiet and
+    /// this exact version's stability.
+    pub quiet_ms: u64,
+    /// The operator's rolling median pause between document edits, when known.
+    pub median_pause_ms: Option<u64>,
+    /// Characters typed into this item per minute since it started, when
+    /// more than one observation of the item exists.
+    pub typing_chars_per_min: Option<u32>,
+    /// Time since the item was first observed (any version).
+    pub item_age_ms: u64,
+    pub component: GateComponent,
+    pub debounce_ms: u64,
+    pub max_hold_ms: u64,
+}
+
+impl GateFeatures {
+    /// The current pause relative to the operator's median pause.
+    pub fn pause_ratio(&self) -> Option<f64> {
+        self.median_pause_ms
+            .filter(|median| *median > 0)
+            .map(|median| self.quiet_ms as f64 / median as f64)
+    }
+}
+
+/// Typing speed in characters per minute, `None` without a measurable span.
+pub fn typing_chars_per_min(chars_added: u64, elapsed_ms: u64) -> Option<u32> {
+    (chars_added > 0 && elapsed_ms > 0)
+        .then(|| (chars_added.saturating_mul(60_000) / elapsed_ms).min(u64::from(u32::MAX)) as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,6 +717,78 @@ mod tests {
         typing.verdict = Some(CompletionVerdict::StillTyping);
         assert_eq!(settle_decision(typing), SettleDecision::MaxHoldExpired);
         assert_eq!(DeterministicOnly.cached_verdict("x"), None);
+    }
+
+    #[test]
+    fn trailing_token_classes() {
+        use TrailingToken::*;
+        for (text, class) in [
+            ("", Empty),
+            ("Should we release + publish the", Article),
+            ("this and", Conjunction),
+            ("do it with", Preposition),
+            ("we should", FunctionWord),
+            ("Why does it hang?", Question),
+            ("Fix the bug.", Terminal),
+            ("do [#abc]", IdRef),
+            (
+                "#subagent: https://github.com/btakita/agent-doc/issues/118",
+                Url,
+            ),
+            ("use `foo()`", CodeSpan),
+            ("items:", DanglingPunct),
+            ("release + publish", Word),
+            ("(see above)", Closer),
+        ] {
+            assert_eq!(trailing_token(text), class, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn unbalanced_delimiters_and_closed_list_items() {
+        assert!(has_unbalanced_delimiters("fix the `foo"));
+        assert!(has_unbalanced_delimiters("rename (the helper"));
+        assert!(has_unbalanced_delimiters("```rust\nfn main() {"));
+        assert!(!has_unbalanced_delimiters(
+            "Should we release + publish the"
+        ));
+        assert!(!has_unbalanced_delimiters("use `foo()` (now)"));
+        let doc = "<!-- agent:queue -->\n- first item\n- second\n<!-- /agent:queue -->\n";
+        assert!(closed_list_item(doc, "first item"));
+        assert!(!closed_list_item(doc, "second"));
+        let started = "- first item\n-\n";
+        assert!(closed_list_item(started, "first item"));
+    }
+
+    #[test]
+    fn deterministic_tiers() {
+        use CompletionSignal::*;
+        assert_eq!(
+            deterministic_tier(inputs(Complete, 1000, 1000)),
+            SettleTier::HalfWindow
+        );
+        assert_eq!(
+            deterministic_tier(inputs(Inconclusive, 2000, 2000)),
+            SettleTier::FullWindow
+        );
+        assert_eq!(
+            deterministic_tier(inputs(Inconclusive, 1000, 1000)),
+            SettleTier::HeldQuiet
+        );
+        assert_eq!(
+            deterministic_tier(inputs(Incomplete, 3000, 3000)),
+            SettleTier::HeldUnfinished
+        );
+        assert_eq!(
+            deterministic_tier(inputs(Incomplete, 45_000, 45_000)),
+            SettleTier::MaxHold
+        );
+        assert_eq!(typing_chars_per_min(30, 6_000), Some(300));
+        assert_eq!(typing_chars_per_min(0, 6_000), None);
+        for class in TrailingToken::ALL {
+            assert_eq!(TrailingToken::parse(class.as_str()), Some(class));
+        }
+        assert_eq!(SettleTier::parse("max_hold"), Some(SettleTier::MaxHold));
     }
 
     #[test]

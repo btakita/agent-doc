@@ -993,6 +993,24 @@ ON queue_document_state(state_kind);
             bootstrap_json TEXT NOT NULL,
             updated_at INTEGER NOT NULL
         );
+
+        -- `#steergatelog`: one row per steering settle/delivery decision.
+        -- `row_json` is the decision as made (features, tier) and is never
+        -- rewritten; the outcome facts and label merge in monotonically
+        -- (first observation wins). Bounded by `STEERING_GATE_LOG_MAX_ROWS`.
+        CREATE TABLE IF NOT EXISTS steering_gate_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            row_key TEXT NOT NULL UNIQUE,
+            document TEXT NOT NULL,
+            consumer TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            decided_at_ms INTEGER NOT NULL,
+            row_json TEXT NOT NULL,
+            delivered_at_ms INTEGER,
+            superseded_at_ms INTEGER,
+            re_edited_at_ms INTEGER,
+            label TEXT
+        );
         "#,
     )?;
     Ok(())
@@ -2470,6 +2488,9 @@ fn ensure_canonical_indexes(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS crash_recovery_markers_timestamp
         ON crash_recovery_markers(timestamp);
+
+        CREATE INDEX IF NOT EXISTS steering_gate_log_document_decided
+        ON steering_gate_log(document, decided_at_ms);
         "#,
     )
     .context("ensure canonical indexes")?;

@@ -103,3 +103,63 @@ fn follow_document(file: &Path) -> Result<()> {
         }
     }
 }
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// The project a dataset/explain read targets: `file`'s, else the current
+/// directory's.
+fn gate_log_project(file: Option<&Path>) -> Result<std::path::PathBuf> {
+    let anchor = match file {
+        Some(file) => {
+            anyhow::ensure!(file.is_file(), "document not found: {}", file.display());
+            file.to_path_buf()
+        }
+        None => std::env::current_dir().context("current directory")?,
+    };
+    agent_doc_fs::find_project_root(&anchor).with_context(|| {
+        format!(
+            "no agent-doc project (.agent-doc/) above {}",
+            anchor.display()
+        )
+    })
+}
+
+/// `agent-doc steering dataset [--json] [--file <FILE>] [--limit N]`
+/// (`#steergatelog`): read-only export of the completion-gate decision log.
+pub fn run_dataset(file: Option<&Path>, json: bool, limit: Option<usize>) -> Result<()> {
+    use agent_doc_session_check_io::steering_gate_log::{self as gate_log, GateLabel};
+    let root = gate_log_project(file)?;
+    let document = file.map(|file| gate_log::document_key(&root, file));
+    let window = match file {
+        Some(file) => gate_log::label_window_ms_for(file),
+        None => agent_doc_project_config_io::load_project_for_doc(&root.join("."))
+            .agent_doc_steering_label_window_ms
+            .unwrap_or(gate_log::DEFAULT_LABEL_WINDOW_MS),
+    };
+    let mut rows = gate_log::export_dataset(&root, document.as_deref(), now_ms(), window)?;
+    if let Some(limit) = limit {
+        let skip = rows.len().saturating_sub(limit);
+        rows.drain(..skip);
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
+    let count = |label: Option<GateLabel>| rows.iter().filter(|r| r.row.label == label).count();
+    println!(
+        "[agent-doc] steering gate dataset: {} row(s) in {} — premature={} late={} on_time={} open={}",
+        rows.len(),
+        root.display(),
+        count(Some(GateLabel::Premature)),
+        count(Some(GateLabel::Late)),
+        count(Some(GateLabel::OnTime)),
+        count(None),
+    );
+    println!("[agent-doc] export with `agent-doc steering dataset --json`");
+    Ok(())
+}

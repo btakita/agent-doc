@@ -202,6 +202,10 @@ pub struct PreparedObservation {
     pub report: Option<SteeringReport>,
     /// The observation happened at/after the turn boundary.
     pub boundary: bool,
+    /// The settle decisions behind the report, for the completion-gate
+    /// decision log (`#steergatelog`); recorded only when acknowledged.
+    gate: Option<crate::steering_gate_log::GateObservation>,
+    max_hold_ms: u64,
 }
 
 impl PreparedObservation {
@@ -238,6 +242,22 @@ impl PreparedObservation {
                     report.items.len(),
                     report.pending,
                     self.boundary,
+                ),
+            );
+        }
+        // `#steergatelog`: the decisions this consumer just acted on feed the
+        // decision log's graph; its Effect persists them. A log failure never
+        // fails steering delivery.
+        if let Some(gate) = &self.gate
+            && let Err(err) =
+                crate::steering_gate_log::record(&self.root, file, gate.clone(), self.max_hold_ms)
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "steering_gate_log_failed file={} consumer={} error={err:#} (#steergatelog)",
+                    file.display(),
+                    self.consumer,
                 ),
             );
         }
@@ -352,17 +372,22 @@ fn prepare_with_gate(
     };
     // A silenced watermark still owes the boundary report.
     watermark.closed = false;
-    let prepared =
-        |next: Option<SteeringWatermark>, report: Option<SteeringReport>, boundary: bool| {
-            Ok(Some(PreparedObservation {
-                consumer: consumer.to_string(),
-                consumer_key: consumer_key.clone(),
-                root: root.clone(),
-                next,
-                report,
-                boundary,
-            }))
-        };
+    let max_hold_ms = max_hold_ms_for(file);
+    let prepared = |next: Option<SteeringWatermark>,
+                    report: Option<SteeringReport>,
+                    boundary: bool,
+                    gate: Option<crate::steering_gate_log::GateObservation>| {
+        Ok(Some(PreparedObservation {
+            consumer: consumer.to_string(),
+            consumer_key: consumer_key.clone(),
+            root: root.clone(),
+            next,
+            report,
+            boundary,
+            gate,
+            max_hold_ms,
+        }))
+    };
 
     // Hot-path gate: unchanged file stat and nothing settling → no read.
     let meta = std::fs::metadata(file).with_context(|| format!("stat {}", file.display()))?;
@@ -371,7 +396,7 @@ fn prepare_with_gate(
         && watermark.pending.is_empty()
         && watermark.last_observed_stat.as_deref() == Some(fingerprint.as_str())
     {
-        return prepared(None, None, boundary);
+        return prepared(None, None, boundary, None);
     }
     let content =
         std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
@@ -381,7 +406,7 @@ fn prepare_with_gate(
             == Some(core::content_hash(&content).as_str())
     {
         watermark.last_observed_stat = Some(fingerprint);
-        return prepared(Some(watermark), None, boundary);
+        return prepared(Some(watermark), None, boundary, None);
     }
 
     // The turn boundary is the last chance before the loop re-enters: an
@@ -398,13 +423,22 @@ fn prepare_with_gate(
     };
     let empty = BTreeSet::new();
     let owned = cycle.as_ref().map(binary_owned_ids).unwrap_or_default();
+    let observed_at_ms = now_ms();
+    let document = crate::steering_gate_log::document_key(&root, file);
     let ctx = ObserveContext {
-        now_ms: now_ms(),
+        now_ms: observed_at_ms,
         document_changed_ms: mtime_ms(&meta),
         debounce_ms,
         binary_owned_queue_ids: if boundary { &owned } else { &empty },
-        max_hold_ms: max_hold_ms_for(file),
+        max_hold_ms,
         classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
+        median_pause_ms: crate::steering_gate_log::median_pause_ms(
+            &root,
+            file,
+            &document,
+            observed_at_ms,
+            max_hold_ms,
+        ),
     };
     let mut observation = core::observe_with_mode(&watermark, &content, &ctx, mode);
     if !boundary && !observation.ready.is_empty() {
@@ -446,6 +480,16 @@ fn prepare_with_gate(
             }
         }
     }
+    let gate = crate::steering_gate_log::GateObservation {
+        document,
+        consumer: consumer.to_string(),
+        harness: document_harness(&content),
+        operator: crate::steering_gate_log::operator_id(),
+        now_ms: ctx.now_ms,
+        document_changed_ms: ctx.document_changed_ms,
+        boundary,
+        decisions: std::mem::take(&mut observation.decisions),
+    };
     let mut next = observation.next;
     next.last_observed_stat = Some(fingerprint);
     let report = SteeringReport {
@@ -456,7 +500,19 @@ fn prepare_with_gate(
         after_close: boundary,
         recheck_after_ms: observation.recheck_after_ms,
     };
-    prepared(Some(next), Some(report), boundary)
+    prepared(Some(next), Some(report), boundary, Some(gate))
+}
+
+/// The document's configured harness (frontmatter `agent:`), for the
+/// decision log. The gate itself never reads it: decisions are identical
+/// across harnesses.
+fn document_harness(content: &str) -> String {
+    agent_doc_frontmatter::frontmatter::parse(content)
+        .ok()
+        .and_then(|(fm, _)| fm.agent)
+        .map(|agent| agent.trim().to_ascii_lowercase())
+        .filter(|agent| !agent.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 /// Observe `file` for `consumer`. Returns `Ok(None)` when there is no active
@@ -1178,6 +1234,66 @@ mod tests {
             1
         );
         assert_eq!(observe_for_wake(&file).unwrap().items.len(), 1);
+    }
+
+    /// `#steergatelog`: every consuming observation records its settle
+    /// decisions with features, and the outcome labels attach from what the
+    /// operator does next: the held fragment was right to hold (on time), the
+    /// delivered line the operator immediately re-edited was premature.
+    #[test]
+    fn consuming_observations_log_each_settle_decision_with_its_outcome() {
+        use crate::steering_gate_log::{GateLabel, GatePhase, export_dataset};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent: codex\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        seed_for_cycle(&file, "cycle-1", baseline, Some("current task"), Vec::new()).unwrap();
+        let with = |line: &str| {
+            baseline.replace("- current task\n", &format!("- current task\n- {line}\n"))
+        };
+
+        std::fs::write(&file, with("Should we release + publish the")).unwrap();
+        let held = observe(&file, CONSUMER_CLI, true).unwrap().unwrap();
+        assert!(held.items.is_empty(), "{:?}", held.items);
+        std::fs::write(&file, with("Should we release + publish the C++ bindings?")).unwrap();
+        let delivered = observe(&file, CONSUMER_CLI, true).unwrap().unwrap();
+        assert_eq!(delivered.items.len(), 1, "{:?}", delivered.items);
+        std::fs::write(
+            &file,
+            with("Should we release + publish the C++ bindings? Tag it too."),
+        )
+        .unwrap();
+        observe(&file, CONSUMER_CLI, true).unwrap().unwrap();
+
+        let rows = export_dataset(dir.path(), None, now_ms(), 45_000).unwrap();
+        let fragment = rows
+            .iter()
+            .find(|r| r.row.phase != GatePhase::Delivered)
+            .expect("the held fragment is logged");
+        assert_eq!(fragment.row.document, "plan.md");
+        assert_eq!(fragment.row.consumer, CONSUMER_CLI);
+        assert_eq!(fragment.row.harness, "codex");
+        assert_eq!(
+            fragment.row.features.trailing_token,
+            agent_doc_debounce::edit_settle::TrailingToken::Article
+        );
+        assert_eq!(
+            fragment.row.tier,
+            agent_doc_debounce::edit_settle::SettleTier::HeldUnfinished
+        );
+        assert!(fragment.row.superseded_at_ms.is_some());
+        assert_eq!(fragment.row.label, Some(GateLabel::OnTime));
+        let first_delivery = rows
+            .iter()
+            .find(|r| {
+                r.row.phase == GatePhase::Delivered
+                    && r.row.text_hash
+                        == core::gate_text_hash("Should we release + publish the C++ bindings?")
+            })
+            .expect("the delivery is logged");
+        assert!(first_delivery.row.re_edited_at_ms.is_some());
+        assert_eq!(first_delivery.row.label, Some(GateLabel::Premature));
     }
 
     #[test]

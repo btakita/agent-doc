@@ -141,6 +141,14 @@ pub struct SteeringItem {
 pub struct PendingObservation {
     pub content_hash: String,
     pub first_seen_ms: u64,
+    /// When the item was first observed in any version (`#steergatelog`):
+    /// a re-edit before delivery carries this forward from the superseded
+    /// version, so "time since the item started" survives keystrokes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_started_ms: Option<u64>,
+    /// The item's length in characters at `item_started_ms`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_started_chars: Option<u64>,
 }
 
 /// Per-cycle, per-consumer durable watermark.
@@ -217,6 +225,9 @@ pub struct ObserveContext<'a> {
     pub max_hold_ms: u64,
     /// Optional cached completion verdicts; `DeterministicOnly` by default.
     pub classifier: &'a dyn agent_doc_debounce::edit_settle::CompletionClassifier,
+    /// The operator's rolling median pause between document edits
+    /// (`#steergatelog`), when the decision log has observed enough edits.
+    pub median_pause_ms: Option<u64>,
     pub now_ms: u64,
     /// When the document last changed (file mtime / editor edit time).
     /// `None` means unknown: only per-item stability can settle an item.
@@ -235,7 +246,41 @@ pub struct Observation {
     /// When the earliest held candidate's decision can next change, in ms
     /// from `now_ms`. Callers schedule one re-observation instead of polling.
     pub recheck_after_ms: Option<u64>,
+    /// One settle decision per candidate, with its features (`#steergatelog`).
+    pub decisions: Vec<GateDecision>,
     pub next: SteeringWatermark,
+}
+
+/// One settle decision for one candidate, as the decision log records it
+/// (`#steergatelog`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateDecision {
+    /// The candidate key (changes with every keystroke for additions).
+    pub key: String,
+    /// Hash of the normalized item text: the identity of this version.
+    pub text_hash: String,
+    /// For an edit: hash of the normalized text the agent last knew.
+    pub previous_text_hash: Option<String>,
+    pub source: SteeringSource,
+    pub change: SteeringChange,
+    pub decision: agent_doc_debounce::edit_settle::SettleDecision,
+    /// The deterministic tier, regardless of any classifier verdict.
+    pub tier: agent_doc_debounce::edit_settle::SettleTier,
+    pub features: agent_doc_debounce::edit_settle::GateFeatures,
+}
+
+/// Identity of an item version for the decision log: the hash of its
+/// normalized text, the same for exchange and queue items.
+pub fn gate_text_hash(text: &str) -> String {
+    content_hash(&normalize_queue_text(text))
+}
+
+/// The candidate-key family: versions of one item being typed share it.
+fn candidate_family(key: &str) -> &str {
+    match key.rsplit_once(':') {
+        Some((family, _)) if key.starts_with("queue:") => family,
+        _ => "exchange",
+    }
 }
 
 /// Whether the observation happens inside the running turn or at/after its
@@ -277,8 +322,33 @@ pub fn observe_with_mode(
     candidates.extend(queue.candidates.iter().cloned());
 
     use agent_doc_debounce::edit_settle::{
-        CompletionSignal, SettleDecision, SettleInputs, completion_signal, settle_decision,
+        CompletionSignal, GateComponent, GateFeatures, SettleDecision, SettleInputs,
+        closed_list_item, completion_signal, deterministic_tier, has_unbalanced_delimiters,
+        settle_decision, trailing_token, typing_chars_per_min,
     };
+    // `#steergatelog`: a version that vanished from the candidates was
+    // superseded by a re-edit; its successor in the same family inherits the
+    // item's start.
+    let live_keys: BTreeSet<&str> = candidates.iter().map(|c| c.key.as_str()).collect();
+    let mut superseded_starts: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+    for (key, pending) in &watermark.pending {
+        if live_keys.contains(key.as_str()) {
+            continue;
+        }
+        let start = (
+            pending.item_started_ms.unwrap_or(pending.first_seen_ms),
+            pending.item_started_chars.unwrap_or(0),
+        );
+        superseded_starts
+            .entry(candidate_family(key).to_string())
+            .and_modify(|existing| {
+                if start.0 < existing.0 {
+                    *existing = start;
+                }
+            })
+            .or_insert(start);
+    }
+    let mut decisions = Vec::new();
     let quiet_for_ms = ctx
         .document_changed_ms
         .map(|changed| ctx.now_ms.saturating_sub(changed));
@@ -298,7 +368,7 @@ pub fn observe_with_mode(
         } else {
             completion_signal(&candidate.item.verbatim)
         };
-        let decision = settle_decision(SettleInputs {
+        let settle_inputs = SettleInputs {
             quiet_for_ms,
             stable_for_ms,
             held_for_ms: stable_for_ms.unwrap_or(0),
@@ -306,6 +376,49 @@ pub fn observe_with_mode(
             max_hold_ms: ctx.max_hold_ms,
             signal,
             verdict: ctx.classifier.cached_verdict(&candidate.content_hash),
+        };
+        let decision = settle_decision(settle_inputs);
+        let chars = candidate.item.verbatim.chars().count() as u64;
+        let (item_started_ms, item_started_chars) = match prior {
+            Some(prior) => (
+                prior.item_started_ms.unwrap_or(prior.first_seen_ms),
+                prior.item_started_chars.unwrap_or(chars),
+            ),
+            None => superseded_starts
+                .get(candidate_family(&candidate.key))
+                .copied()
+                .unwrap_or((ctx.now_ms, chars)),
+        };
+        let last_edit_ms = ctx.document_changed_ms.unwrap_or(ctx.now_ms);
+        decisions.push(GateDecision {
+            key: candidate.key.clone(),
+            text_hash: gate_text_hash(&candidate.item.verbatim),
+            previous_text_hash: candidate.item.previous.as_deref().map(gate_text_hash),
+            source: candidate.item.source,
+            change: candidate.item.change,
+            decision,
+            tier: deterministic_tier(settle_inputs),
+            features: GateFeatures {
+                trailing_token: trailing_token(&candidate.item.verbatim),
+                signal,
+                unbalanced_delimiters: candidate.item.change != SteeringChange::Deleted
+                    && has_unbalanced_delimiters(&candidate.item.verbatim),
+                closed_list_item: candidate.item.change != SteeringChange::Deleted
+                    && closed_list_item(current, &candidate.item.verbatim),
+                quiet_ms: quiet_for_ms.max(stable_for_ms).unwrap_or(0),
+                median_pause_ms: ctx.median_pause_ms,
+                typing_chars_per_min: typing_chars_per_min(
+                    chars.saturating_sub(item_started_chars),
+                    last_edit_ms.saturating_sub(item_started_ms),
+                ),
+                item_age_ms: ctx.now_ms.saturating_sub(item_started_ms),
+                component: match candidate.item.source {
+                    SteeringSource::Queue => GateComponent::Queue,
+                    SteeringSource::Exchange => GateComponent::Exchange,
+                },
+                debounce_ms: ctx.debounce_ms,
+                max_hold_ms: ctx.max_hold_ms,
+            },
         });
         if decision.deliver() {
             ready_keys.insert(candidate.key.clone());
@@ -324,6 +437,8 @@ pub fn observe_with_mode(
                 PendingObservation {
                     content_hash: candidate.content_hash.clone(),
                     first_seen_ms: prior.map_or(ctx.now_ms, |prior| prior.first_seen_ms),
+                    item_started_ms: Some(item_started_ms),
+                    item_started_chars: Some(item_started_chars),
                 },
             );
         }
@@ -384,6 +499,7 @@ pub fn observe_with_mode(
     Observation {
         pending: next.pending.len(),
         recheck_after_ms,
+        decisions,
         ready,
         next,
     }
@@ -1232,6 +1348,7 @@ mod tests {
             binary_owned_queue_ids: owned,
             max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
             classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
+            median_pause_ms: None,
         }
     }
 
@@ -1516,6 +1633,7 @@ mod tests {
             binary_owned_queue_ids: &owned,
             max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
             classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
+            median_pause_ms: None,
         };
         let held = observe(&wm, &current, &typing);
         assert!(held.ready.is_empty());
@@ -1644,6 +1762,7 @@ mod tests {
             binary_owned_queue_ids: &owned,
             max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
             classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
+            median_pause_ms: None,
         };
         assert_eq!(observe(&wm, &current, &ctx(3_000)).ready.len(), 1);
         assert!(observe(&wm, &current, &ctx(10_000)).ready.is_empty());

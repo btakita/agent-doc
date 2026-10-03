@@ -691,18 +691,21 @@ As each subagent reports back, I'll rebase its push onto main, verify it, and ru
 - ~~do [#qsubattr1]~~
 - ~~do [#qsubattr2]~~
 - ⏭️ do [#qsubattr3]
-- do [#qsubattr4]
+- 🚧 do [#qsubattr4]
 - do [#qsubattr5]
-- #subagents: https://github.com/btakita/agent-doc/issues/120
+- #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/120
 - ~~#subagents: https://github.com/btakita/agent-doc/issues/121~~
-- 🚧 #subagents: https://github.com/btakita/agent-doc/issues/122
+- #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/122
+- https://github.com/btakita/agent-doc/issues/123
+  https://github.com/btakita/agent-doc/issues/124#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/123
+- #subagents: #gh-fix https://github.com/btakita/agent-doc/issues/124
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
 - [ ] [#steerreplicachurn] [agent-doc] Operator queue edits reached the CP only ~4-5 min late, so mid-turn steering could not surface them (2026-10-03, agent-doc-bugs.md): from 19:19:56Z to 19:24:16Z the JetBrains replica deregistered and re-registered every 10-60s with bootstrap_bytes=34 (crdt_replica_register/deregister in ops.log), the CRDT text stayed len=59241, and the edits arrived in one crdt_document_op_delta_ingested of delta_len=7165514 at 19:24:16Z. Find what drives the register churn (a concurrent make install or plugin reload is suspected), make operator ops flush on re-register, and add SimWorld coverage showing an edit made during churn is visible to the midturn hook within seconds.
 - [ ] [#qsubattr3] [agent-doc] Queue subagents attribute, phase 3 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): `queue claim --refresh` heartbeat; under the attr an expired claim makes the head eligible for dispatch again, never inline drain; test for no duplicate work.
-- [ ] [#qsubattr4] [agent-doc] Queue subagents attribute, phase 4 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): coordinator contract in SKILL.md + respond/planning-dispatch runbooks for all harnesses (claim/dispatch/refresh, serialized integration, one make install per batch, release then close, orchestrate --mode parallel fallback for harnesses without an Agent tool).
+- [ ] 🚧 [#qsubattr4] [agent-doc] Queue subagents attribute, phase 4 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): coordinator contract in SKILL.md + respond/planning-dispatch runbooks for all harnesses (claim/dispatch/refresh, serialized integration, one make install per batch, release then close, orchestrate --mode parallel fallback for harnesses without an Agent tool).
 - [ ] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): dogfood in tasks/software/tsift.md (replace per-line #subagent: prefixes with subagents=3); verify via queue claims + ops.log that each head is dispatched exactly once and none drain inline.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and

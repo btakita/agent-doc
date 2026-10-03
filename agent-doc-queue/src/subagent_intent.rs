@@ -102,6 +102,67 @@ pub fn opts_out_of_queue_subagents(line: &str) -> bool {
         .any(|tag| line.contains(tag))
 }
 
+/// What the queue-level subagents attribute does with the current queue.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct QueueSubagentPlan {
+    /// Heads to dispatch now, in queue order (within the concurrency cap).
+    pub dispatch: Vec<String>,
+    /// Subagent-eligible heads held back, either because the cap is full or
+    /// because an `after=` predecessor is still live in the queue. They are
+    /// neither dispatched nor drained inline; a later cycle offers them once
+    /// a slot frees or the predecessor closes.
+    pub held: Vec<String>,
+}
+
+/// Plan the queue-level subagents attribute over the current queue.
+///
+/// Eligibility comes from the current state, not from "new since the last
+/// seed", so a head whose dispatch was missed is offered again next cycle.
+/// `eligible` are the unclaimed-or-claimed subagent-intent heads in queue
+/// order, `live_heads` every live queue head, `claimed` the worker claims,
+/// and `after_deps` the `after=` / ordered-list predecessors keyed by id.
+pub fn plan_queue_subagent_dispatch(
+    mode: QueueSubagentsMode,
+    eligible: &[String],
+    live_heads: &[String],
+    claimed: &crate::queue_claim::ClaimedQueueItems,
+    after_deps: &std::collections::HashMap<String, Vec<String>>,
+) -> QueueSubagentPlan {
+    let live_ids: std::collections::HashSet<String> = live_heads
+        .iter()
+        .flat_map(|head| crate::queue_claim::referenced_queue_ids(head))
+        .collect();
+    let in_flight = live_heads
+        .iter()
+        .filter(|head| claimed.claims(head))
+        .count();
+    let mut slots = mode.max_concurrent.saturating_sub(in_flight);
+    let mut plan = QueueSubagentPlan::default();
+    for head in eligible {
+        if claimed.claims(head) {
+            continue;
+        }
+        let blocked = crate::queue_claim::referenced_queue_ids(head)
+            .iter()
+            .any(|id| {
+                after_deps.iter().any(|(key, deps)| {
+                    key.trim_start_matches('#').eq_ignore_ascii_case(id)
+                        && deps.iter().any(|dep| {
+                            let dep = dep.trim_start_matches('#').to_ascii_lowercase();
+                            dep != *id && live_ids.contains(&dep)
+                        })
+                })
+            });
+        if blocked || slots == 0 {
+            plan.held.push(head.clone());
+        } else {
+            plan.dispatch.push(head.clone());
+            slots -= 1;
+        }
+    }
+    plan
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,7 +221,58 @@ mod tests {
     #[test]
     fn queue_subagents_opt_out_tags() {
         assert!(opts_out_of_queue_subagents("do [#a] [inline]"));
-        assert!(opts_out_of_queue_subagents("[Operator-Verify] check the pane"));
+        assert!(opts_out_of_queue_subagents(
+            "[Operator-Verify] check the pane"
+        ));
         assert!(!opts_out_of_queue_subagents("do [#a]"));
+    }
+
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn plan_dispatches_within_the_cap_and_holds_the_rest() {
+        let heads = strings(&["do [#a]", "do [#b]", "do [#c]", "do [#d]"]);
+        let claimed = crate::queue_claim::ClaimedQueueItems::from_identities([
+            crate::queue_claim::claim_identity("do [#a]"),
+        ]);
+        let plan = plan_queue_subagent_dispatch(
+            QueueSubagentsMode { max_concurrent: 2 },
+            &heads,
+            &heads,
+            &claimed,
+            &Default::default(),
+        );
+        assert_eq!(plan.dispatch, strings(&["do [#b]"]));
+        assert_eq!(plan.held, strings(&["do [#c]", "do [#d]"]));
+    }
+
+    #[test]
+    fn plan_holds_a_head_whose_predecessor_is_still_queued() {
+        let heads = strings(&["do [#a]", "do [#b]"]);
+        let deps = std::collections::HashMap::from([("b".to_string(), strings(&["a"]))]);
+        let none = crate::queue_claim::ClaimedQueueItems::none();
+        let plan = plan_queue_subagent_dispatch(
+            QueueSubagentsMode { max_concurrent: 3 },
+            &heads,
+            &heads,
+            &none,
+            &deps,
+        );
+        assert_eq!(plan.dispatch, strings(&["do [#a]"]));
+        assert_eq!(plan.held, strings(&["do [#b]"]));
+
+        // Once `a` closes (leaves the queue), `b` is dispatched.
+        let remaining = strings(&["do [#b]"]);
+        let plan = plan_queue_subagent_dispatch(
+            QueueSubagentsMode { max_concurrent: 3 },
+            &remaining,
+            &remaining,
+            &none,
+            &deps,
+        );
+        assert_eq!(plan.dispatch, remaining);
+        assert!(plan.held.is_empty());
     }
 }

@@ -83,6 +83,9 @@ pub fn reference_queue_for_dispatch(file: &Path) -> Result<Option<Vec<String>>> 
 /// Live, unclaimed queue lines with subagent intent that are new since the
 /// previous cycle's seed, in queue order.
 pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Result<Vec<String>> {
+    if let Some(plan) = queue_attr_subagent_plan(file, content) {
+        return Ok(plan.dispatch);
+    }
     let reference = reference_queue_for_dispatch(file)?;
     let heads = core::subagent_dispatch_heads(content, reference.as_deref());
     if heads.is_empty() {
@@ -93,6 +96,30 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
         .into_iter()
         .filter(|head| !claimed.claims(head))
         .collect())
+}
+
+/// The queue-level subagents attribute (`<!-- agent:queue subagents=N -->`)
+/// planned over the current queue against the raw claim ledger: which heads
+/// to dispatch now and which to hold (cap full, or an `after=` predecessor
+/// still queued). `None` when the attribute is absent or invalid.
+pub fn queue_attr_subagent_plan(
+    file: &Path,
+    content: &str,
+) -> Option<agent_doc_queue::subagent_intent::QueueSubagentPlan> {
+    let (mode, eligible, live) = core::queue_attr_subagent_heads(content)?;
+    let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content);
+    let after_deps = agent_doc_element::element::parse(content)
+        .map(|components| agent_doc_queue::backlog_sync::collect_after_deps(&components, content))
+        .unwrap_or_default();
+    Some(
+        agent_doc_queue::subagent_intent::plan_queue_subagent_dispatch(
+            mode,
+            &eligible,
+            &live,
+            &claimed,
+            &after_deps,
+        ),
+    )
 }
 
 /// [`pending_subagent_dispatch_for_content`] that reports a failure and
@@ -192,6 +219,67 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "a claimed item is already dispatched"
+        );
+    }
+
+    fn attr_doc(attr: &str, prompts: &[&str]) -> String {
+        let queue: String = prompts.iter().map(|p| format!("- {p}\n")).collect();
+        format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue {attr} go -->\n{queue}<!-- /agent:queue -->\n"
+        )
+    }
+
+    /// `#planattributeauto` phase 2: under the queue attribute, dispatch is
+    /// state-based (a head already in the seed is still offered), capped by
+    /// `subagents=N` minus live claims, and every held head is out of the
+    /// in-session loop exactly like a claimed one.
+    #[test]
+    fn queue_attr_dispatch_is_state_based_capped_and_holds_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = attr_doc(
+            "subagents=2",
+            &["do [#a]", "do [#b]", "do [#c] [inline]", "do [#d]"],
+        );
+        std::fs::write(&file, &content).unwrap();
+        // The previous cycle already saw every line: the per-item tag path
+        // would offer nothing; the attribute still offers them.
+        seed(&file, "cycle-prev", &content);
+
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec!["do [#a]".to_string(), "do [#b]".to_string()]
+        );
+        let excluded = crate::queue_claim::claimed_items_for_content(&file, &content);
+        assert!(excluded.claims("do [#d]"), "over-cap head is held");
+        assert!(!excluded.claims("do [#a]"), "dispatch heads stay visible");
+        assert!(
+            !excluded.claims("do [#c] [inline]"),
+            "opt-out drains inline"
+        );
+
+        // A claimed head occupies a slot: one left, so `d` is still held.
+        crate::queue_claim::claim(&file, "#a", "subagent:a", 600).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec!["do [#b]".to_string()]
+        );
+        // Both slots full: nothing more to dispatch, and `d` stays held.
+        crate::queue_claim::claim(&file, "#b", "subagent:b", 600).unwrap();
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap()
+                .is_empty()
+        );
+        let excluded = crate::queue_claim::claimed_items_for_content(&file, &content);
+        assert!(excluded.claims("do [#d]"));
+        assert_eq!(
+            agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+                &content, &excluded
+            ),
+            1,
+            "only the [inline] head is drainable in the session"
         );
     }
 }

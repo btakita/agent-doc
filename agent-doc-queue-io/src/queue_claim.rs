@@ -223,6 +223,19 @@ pub fn active_claims_for_content(file: &Path, content: &str) -> Result<Vec<Queue
 /// failure direction is the pre-claim behaviour (the head stays drainable),
 /// never a stranded queue.
 pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    let claimed = ledger_claimed_items_for_content(file, content);
+    // The queue-level subagents attribute holds heads back (cap full, or an
+    // `after=` predecessor still queued). A held head is out of the in-session
+    // loop exactly like a claimed one: never drained inline, never counted.
+    match crate::subagent_dispatch::queue_attr_subagent_plan(file, content) {
+        Some(plan) if !plan.held.is_empty() => claimed.with_heads(&plan.held),
+        _ => claimed,
+    }
+}
+
+/// Only the worker claims recorded in the ledger, without heads the queue
+/// subagents attribute holds back.
+pub fn ledger_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
     match load_ledger(file) {
         Ok(ledger) if ledger.claims.is_empty() => ClaimedQueueItems::none(),
         Ok(ledger) => {

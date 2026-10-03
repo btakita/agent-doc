@@ -317,6 +317,14 @@ impl ClaimedQueueItems {
         self.0.len()
     }
 
+    /// These claims plus `heads` (by identity): the in-session exclusion set
+    /// once the queue-level subagents attribute holds heads back.
+    pub fn with_heads<'a>(mut self, heads: impl IntoIterator<Item = &'a String>) -> Self {
+        self.0
+            .extend(heads.into_iter().map(|head| claim_identity(head)));
+        self
+    }
+
     /// Whether the queue head `prompt_text` is claimed.
     pub fn claims(&self, prompt_text: &str) -> bool {
         !self.0.is_empty() && self.0.contains(&claim_identity(prompt_text))

@@ -1337,6 +1337,31 @@ pub fn render_closeout_steering_context(
     Some(out)
 }
 
+/// The queue-level subagents attribute applied to the current queue:
+/// `(mode, eligible heads, live heads)`, or `None` when the queue marker has
+/// no valid `subagents` / `fan-out` attribute. Eligible heads are every live
+/// line classified `subagent` (no "new since seed" filter), in queue order.
+pub fn queue_attr_subagent_heads(
+    content: &str,
+) -> Option<(
+    agent_doc_queue::subagent_intent::QueueSubagentsMode,
+    Vec<String>,
+    Vec<String>,
+)> {
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let queue = components.iter().find(|c| c.name == "queue")?;
+    let mode = agent_doc_queue::subagent_intent::queue_subagents_mode(&queue.attrs)?;
+    let presets = PresetContext::new(content, &[]);
+    let items = queue_items(content);
+    let eligible = items
+        .iter()
+        .filter(|item| presets.classify(&item.raw).0 == SteeringDispatch::Subagent)
+        .map(|item| item.norm.clone())
+        .collect();
+    let live = items.into_iter().map(|item| item.norm).collect();
+    Some((mode, eligible, live))
+}
+
 /// Live queue lines with item- or queue-scoped subagent intent that are NEW
 /// relative to `reference_queue` (normalized queue texts as of the previous
 /// cycle's seed). `None` means no reference exists, so every subagent-intent

@@ -11708,8 +11708,11 @@ mod tests {
 
         let started = std::time::Instant::now();
         let err = atomic_write_through_authority(&file, target).unwrap_err();
+        // Same fail-fast bound as the sibling stale-path tests: 1s flaked at
+        // 1.28s under a loaded parallel `make check`, while the path itself
+        // takes ~0.03s.
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(1),
+            started.elapsed() < std::time::Duration::from_secs(3),
             "a stale component must fail fast instead of burning the ACK deadline",
         );
         let message = format!("{err:#}");

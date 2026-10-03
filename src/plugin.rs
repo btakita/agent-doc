@@ -5,7 +5,7 @@
 //! - `install(editor)` — fetches the latest GitHub Release for `btakita/agent-doc`, selects the appropriate asset (signed variant preferred), downloads it, and installs it.
 //! - `install_local(editor)` — installs from a locally built artifact found by walking up from CWD to locate an `editors/` directory.
 //! - `update(editor)` — for JetBrains, skips re-install if the installed plugin version matches the latest package asset; for VS Code, reinstalls through the editor CLI.
-//! - `update_all_installed()` — release-watcher entry point that updates every existing agent-doc JetBrains/VS Code installation without installing into a new editor.
+//! - `update_all_installed()` — release-watcher entry point that updates every existing agent-doc JetBrains/VS Code installation without installing into a new editor. Returns a `PluginReconcileReport` with one `PluginTargetOutcome` per target (GH #114), from which `PluginReconcileReport::summary` derives the upgrade's closing lines: separate hot-upgraded / installed / staged / restart-required / unchanged counts, each target that needs a restart by name, and no "if it does not reload on its own" hedge where a reload is known not to happen.
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
@@ -17,6 +17,7 @@
 //! - `install_local(editor)` — returns `Err` if no `editors/` directory is found or no artifact exists.
 //! - `update(editor)` — returns `Ok(())` early (no-op) when the JetBrains plugin is already at the latest version.
 //! - `update_all_installed()` attempts editor families independently and reports all failures after the remaining installed targets have been attempted.
+//! - A staged target is never counted as updated: it needs an IDE restart, and when agent-doc declined the restart-free upgrade on that JetBrains build the summary says the restart-free path is unavailable there (GH #114).
 //! - `list()` — always returns `Ok(())`; emits a stderr message when no plugins are found.
 //! - Unrecognized `editor` strings return `Err` with a list of supported values.
 //! - Byte-identical local JetBrains packages are true no-ops: the installed tree is not
@@ -490,7 +491,10 @@ fn choose_plugins_dir(dirs: &[PathBuf], explicit: Option<&Path>) -> Result<PathB
     choose_plugins_dir_with_interactivity(dirs, explicit, io::stdin().is_terminal())
 }
 
-fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<()> {
+fn install_jetbrains_into(
+    release: &Value,
+    target_dir: &Path,
+) -> Result<JetbrainsLocalInstallOutcome> {
     let asset = find_asset(release, "agent-doc-jetbrains", "zip")?;
     eprintln!("Found asset: {}", asset.name);
     fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
@@ -505,7 +509,7 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<()> {
         eprintln!(
             "Installed JetBrains plugin v{installed_version} is newer than release asset v{expected_version}; refusing downgrade and keeping the installed generation. Use `agent-doc plugin install jetbrains --local` for the current checkout build."
         );
-        return Ok(());
+        return Ok(JetbrainsLocalInstallOutcome::Unchanged);
     }
     let outcome = install_jetbrains_zip_into(tmp.path(), target_dir, &expected_version)?;
 
@@ -513,8 +517,8 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<()> {
         "{}",
         jetbrains_install_result_message(target_dir, &outcome, &expected_version)?
     );
-    print_jetbrains_activation_outcome(outcome);
-    Ok(())
+    print_jetbrains_activation_outcome(outcome.clone());
+    Ok(outcome)
 }
 
 /// GH #108: the headline for a finished release install. A staged package left
@@ -553,7 +557,7 @@ fn jetbrains_install_success_message(target_dir: &Path) -> Result<String> {
 fn install_jetbrains(release: &Value, plugins_dir: Option<&Path>) -> Result<()> {
     let dirs = jetbrains_plugin_dirs();
     let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
-    install_jetbrains_into(release, &target_dir)
+    install_jetbrains_into(release, &target_dir).map(|_| ())
 }
 
 // --- VS Code ---
@@ -1822,7 +1826,7 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
                 eprintln!("JetBrains plugin is already at v{version}.");
                 return Ok(());
             }
-            install_jetbrains_into(&release, &target_dir)
+            install_jetbrains_into(&release, &target_dir).map(|_| ())
         }
         "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
             if plugins_dir.is_some() {
@@ -1836,18 +1840,219 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
     }
 }
 
+/// GH #114: which editor family a reconciled plugin target belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginEditorFamily {
+    JetBrains,
+    VsCode,
+}
+
+/// GH #114: what reconciliation did to one installed editor plugin target.
+/// A bare "updated" count flattened these, so a staged target (nothing
+/// installed until the IDE restarts) used to be reported as updated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginTargetOutcome {
+    /// Written to disk with no live editor holding the previous generation
+    /// (JetBrains), or handed to the editor's own extension manager (VS Code).
+    Installed,
+    /// A live JetBrains IDE swapped the plugin without a restart.
+    HotUpgraded,
+    /// Already at (or ahead of) the release; nothing was written.
+    Unchanged,
+    /// A live IDE staged the package for its next start; the plugin tree still
+    /// holds the previous generation. `permanent`: agent-doc declined the
+    /// restart-free upgrade on this JetBrains build, so no retry can avoid the
+    /// restart there.
+    StagedForRestart { permanent: bool },
+    /// The files were replaced on disk while a live IDE keeps the previous
+    /// generation loaded.
+    RestartRequired,
+}
+
+impl PluginTargetOutcome {
+    fn from_jetbrains(outcome: &JetbrainsLocalInstallOutcome) -> Self {
+        match outcome {
+            JetbrainsLocalInstallOutcome::Installed => Self::Installed,
+            JetbrainsLocalInstallOutcome::HotUpgraded { .. } => Self::HotUpgraded,
+            JetbrainsLocalInstallOutcome::Unchanged => Self::Unchanged,
+            JetbrainsLocalInstallOutcome::StagedForRestart { reason } => Self::StagedForRestart {
+                permanent: agent_doc_declined_dynamic_upgrade(reason),
+            },
+            JetbrainsLocalInstallOutcome::RestartRequired { .. } => Self::RestartRequired,
+        }
+    }
+
+    fn needs_restart(&self) -> bool {
+        matches!(self, Self::StagedForRestart { .. } | Self::RestartRequired)
+    }
+}
+
+/// GH #114: one reconciled target. `label` names it for the operator (the
+/// JetBrains IDE data directory, e.g. `IntelliJIdea2026.3`, or the VS Code CLI);
+/// `version` is the plugin package version it was reconciled against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginTargetReport {
+    pub family: PluginEditorFamily,
+    pub label: String,
+    pub version: String,
+    pub outcome: PluginTargetOutcome,
+}
+
+/// GH #114: the per-target result of `update_all_installed`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PluginReconcileReport {
+    pub targets: Vec<PluginTargetReport>,
+}
+
+impl PluginReconcileReport {
+    fn count(&self, predicate: impl Fn(&PluginTargetOutcome) -> bool) -> usize {
+        self.targets
+            .iter()
+            .filter(|target| predicate(&target.outcome))
+            .count()
+    }
+
+    /// Targets whose bytes or staged package changed in this reconciliation.
+    pub fn changed(&self) -> usize {
+        self.count(|outcome| *outcome != PluginTargetOutcome::Unchanged)
+    }
+
+    fn counts(&self) -> [(usize, &'static str, &'static str); 5] {
+        use PluginTargetOutcome as O;
+        [
+            (
+                self.count(|o| *o == O::HotUpgraded),
+                "hot-upgraded",
+                "hot_upgraded",
+            ),
+            (self.count(|o| *o == O::Installed), "installed", "installed"),
+            (
+                self.count(|o| matches!(o, O::StagedForRestart { .. })),
+                "staged for restart",
+                "staged_for_restart",
+            ),
+            (
+                self.count(|o| *o == O::RestartRequired),
+                "replaced under a live IDE",
+                "restart_required",
+            ),
+            (self.count(|o| *o == O::Unchanged), "unchanged", "unchanged"),
+        ]
+    }
+
+    /// The closing lines of a plugin reconciliation, derived only from the
+    /// per-target outcomes. A restart the code knows is needed is stated as an
+    /// instruction; the conditional "if it does not pick it up on its own" is
+    /// kept for VS Code, whose running window may genuinely reload by itself.
+    pub fn summary(&self, release: &str) -> String {
+        if self.changed() == 0 {
+            return format!("Installed editor plugins already match v{release}.");
+        }
+        let counts = self
+            .counts()
+            .iter()
+            .filter(|(count, _, _)| *count > 0)
+            .map(|(count, label, _)| format!("{count} {label}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut lines = vec![format!(
+            "Editor plugins reconciled with the v{release} release: {counts}."
+        )];
+        for target in &self.targets {
+            let (label, version) = (&target.label, &target.version);
+            let line = match (target.family, &target.outcome) {
+                (_, PluginTargetOutcome::StagedForRestart { permanent: true }) => format!(
+                    "Restart {label} to load plugin v{version}; restart-free upgrade is unavailable on this build."
+                ),
+                (_, PluginTargetOutcome::StagedForRestart { permanent: false }) => format!(
+                    "Restart {label} to load plugin v{version}; the restart-free upgrade did not complete, so it was staged for the next start."
+                ),
+                (_, PluginTargetOutcome::RestartRequired) => format!(
+                    "Restart {label} to load plugin v{version}; the running IDE keeps the previous plugin until then."
+                ),
+                (PluginEditorFamily::JetBrains, PluginTargetOutcome::Installed) => format!(
+                    "{label}: plugin v{version} installed; no live IDE held it, so its next start loads it."
+                ),
+                (PluginEditorFamily::VsCode, PluginTargetOutcome::Installed) => format!(
+                    "{label}: extension v{version} installed; reload the editor window if it does not pick it up on its own."
+                ),
+                (_, PluginTargetOutcome::HotUpgraded | PluginTargetOutcome::Unchanged) => continue,
+            };
+            lines.push(line);
+        }
+        if self.targets.iter().any(|target| {
+            target.family == PluginEditorFamily::JetBrains && target.outcome.needs_restart()
+        }) {
+            // The plugin reloads `libagent_doc` itself when the file's mtime
+            // changes; this process has no receipt of that reload, so the line
+            // describes the mechanism rather than claiming it happened.
+            lines.push(
+                "The native library is reloaded by the running IDE when its file changes; only the plugin needs the restart."
+                    .to_string(),
+            );
+        }
+        lines.join("\n")
+    }
+
+    /// One `ops.log` record of the reconciliation outcome.
+    pub fn ops_log_line(&self, release: &str) -> String {
+        let counts = self
+            .counts()
+            .iter()
+            .map(|(count, _, key)| format!("{key}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let restart_targets = self
+            .targets
+            .iter()
+            .filter(|target| target.outcome.needs_restart())
+            .map(|target| format!("{}@{}", target.label, target.version))
+            .collect::<Vec<_>>()
+            .join(",");
+        let permanent = self.targets.iter().any(|target| {
+            target.outcome == PluginTargetOutcome::StagedForRestart { permanent: true }
+        });
+        format!(
+            "plugin_upgrade_summary release={release} {counts} restart_targets={restart_targets:?} restart_free_unavailable={permanent}"
+        )
+    }
+}
+
+/// GH #114: print the reconciliation summary and record it in `ops.log`
+/// (best-effort, like the per-install upgrade decision).
+pub fn report_reconcile_summary(report: &PluginReconcileReport, release: &str) {
+    eprintln!("{}", report.summary(release));
+    if !report.targets.is_empty() {
+        log_jetbrains_upgrade_decision(&report.ops_log_line(release));
+    }
+}
+
+/// The operator-facing name of a JetBrains plugins directory: the IDE data
+/// directory (`IntelliJIdea2026.3`) rather than its `plugins` child.
+fn jetbrains_target_label(target_dir: &Path) -> String {
+    let named = if target_dir.file_name().is_some_and(|name| name == "plugins") {
+        target_dir.parent()
+    } else {
+        Some(target_dir)
+    };
+    named
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| target_dir.display().to_string())
+}
+
 /// Update every already-installed editor plugin without installing into a new IDE.
 ///
 /// Used by the release watcher. Each editor family is attempted independently so
 /// one broken target cannot prevent the others from converging.
-pub fn update_all_installed() -> Result<usize> {
+pub fn update_all_installed() -> Result<PluginReconcileReport> {
     let jetbrains_targets = existing_jetbrains_agent_doc_dirs(&jetbrains_plugin_dirs());
     let (vscode_targets, mut errors) = installed_vscode_extensions();
+    let mut report = PluginReconcileReport::default();
     if jetbrains_targets.is_empty() && vscode_targets.is_empty() && errors.is_empty() {
-        return Ok(0);
+        return Ok(report);
     }
 
-    let mut updated = 0usize;
     if !jetbrains_targets.is_empty() {
         match fetch_release_for_asset("agent-doc-jetbrains", "zip") {
             Ok(release) => {
@@ -1857,9 +2062,20 @@ pub fn update_all_installed() -> Result<usize> {
                 }) {
                     Ok(version) => {
                         for target in jetbrains_targets {
+                            let mut record = |outcome| {
+                                report.targets.push(PluginTargetReport {
+                                    family: PluginEditorFamily::JetBrains,
+                                    label: jetbrains_target_label(&target),
+                                    version: version.clone(),
+                                    outcome,
+                                })
+                            };
                             if let Some(installed) = installed_jetbrains_plugin_version(&target) {
                                 match jetbrains_version_cmp(&installed, &version) {
-                                    Ok(CmpOrdering::Equal | CmpOrdering::Greater) => continue,
+                                    Ok(CmpOrdering::Equal | CmpOrdering::Greater) => {
+                                        record(PluginTargetOutcome::Unchanged);
+                                        continue;
+                                    }
                                     Ok(CmpOrdering::Less) => {}
                                     Err(error) => {
                                         errors.push(format!("{}: {error:#}", target.display()));
@@ -1868,7 +2084,9 @@ pub fn update_all_installed() -> Result<usize> {
                                 }
                             }
                             match install_jetbrains_into(&release, &target) {
-                                Ok(()) => updated += 1,
+                                Ok(outcome) => {
+                                    record(PluginTargetOutcome::from_jetbrains(&outcome))
+                                }
                                 Err(error) => {
                                     errors.push(format!("{}: {error:#}", target.display()))
                                 }
@@ -1888,19 +2106,37 @@ pub fn update_all_installed() -> Result<usize> {
                 packaged_plugin_version(asset.name, "agent-doc-", ".vsix")
                     .context("VS Code release asset has no valid package version")
             }) {
-                Ok(version) => match (
-                    numeric_dot_version(&installed_version),
-                    numeric_dot_version(&version),
-                ) {
-                    (Some(installed), Some(available)) if installed >= available => {}
-                    (Some(_), Some(_)) => match install_vscode_with_cmd(&release, code) {
-                        Ok(()) => updated += 1,
-                        Err(error) => errors.push(format!("{code}: {error:#}")),
-                    },
-                    _ => errors.push(format!(
-                        "{code}: invalid installed or packaged version ({installed_version:?}, {version:?})"
-                    )),
-                },
+                Ok(version) => {
+                    let outcome = match (
+                        numeric_dot_version(&installed_version),
+                        numeric_dot_version(&version),
+                    ) {
+                        (Some(installed), Some(available)) if installed >= available => {
+                            Some(PluginTargetOutcome::Unchanged)
+                        }
+                        (Some(_), Some(_)) => match install_vscode_with_cmd(&release, code) {
+                            Ok(()) => Some(PluginTargetOutcome::Installed),
+                            Err(error) => {
+                                errors.push(format!("{code}: {error:#}"));
+                                None
+                            }
+                        },
+                        _ => {
+                            errors.push(format!(
+                                "{code}: invalid installed or packaged version ({installed_version:?}, {version:?})"
+                            ));
+                            None
+                        }
+                    };
+                    if let Some(outcome) = outcome {
+                        report.targets.push(PluginTargetReport {
+                            family: PluginEditorFamily::VsCode,
+                            label: code.to_string(),
+                            version,
+                            outcome,
+                        });
+                    }
+                }
                 Err(error) => errors.push(format!("{code}: {error:#}")),
             },
             Err(error) => errors.push(format!("{code}: {error:#}")),
@@ -1908,7 +2144,7 @@ pub fn update_all_installed() -> Result<usize> {
     }
 
     if errors.is_empty() {
-        Ok(updated)
+        Ok(report)
     } else {
         bail!(
             "one or more installed plugins failed to update:\n{}",
@@ -3158,6 +3394,239 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert!(
             super::jetbrains_convergence_restart_summary(0, 0)
                 .contains("no installed plugin bytes changed")
+        );
+    }
+
+    fn reconcile_target(
+        family: super::PluginEditorFamily,
+        label: &str,
+        version: &str,
+        outcome: super::PluginTargetOutcome,
+    ) -> super::PluginTargetReport {
+        super::PluginTargetReport {
+            family,
+            label: label.to_string(),
+            version: version.to_string(),
+            outcome,
+        }
+    }
+
+    /// GH #114: the reported 441 -> 442 run — one direct install, one target
+    /// staged behind a JVM where agent-doc declined the restart-free upgrade.
+    #[test]
+    fn reconcile_summary_names_permanent_staged_restart_without_hedging() {
+        use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
+        let report = super::PluginReconcileReport {
+            targets: vec![
+                reconcile_target(JetBrains, "IntelliJIdea2026.2", "0.2.481", O::Installed),
+                reconcile_target(
+                    JetBrains,
+                    "IntelliJIdea2026.3",
+                    "0.2.481",
+                    O::StagedForRestart { permanent: true },
+                ),
+            ],
+        };
+        let summary = report.summary("0.35.442");
+        assert!(
+            summary.starts_with(
+                "Editor plugins reconciled with the v0.35.442 release: 1 installed, 1 staged for restart."
+            ),
+            "{summary}"
+        );
+        assert!(
+            summary.contains(
+                "Restart IntelliJIdea2026.3 to load plugin v0.2.481; restart-free upgrade is unavailable on this build."
+            ),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("IntelliJIdea2026.2: plugin v0.2.481 installed; no live IDE held it"),
+            "{summary}"
+        );
+        assert!(!summary.contains("on its own"), "{summary}");
+        assert!(!summary.contains("Updated 2"), "{summary}");
+        assert!(
+            summary.contains("only the plugin needs the restart"),
+            "{summary}"
+        );
+        assert_eq!(report.changed(), 2);
+
+        super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow_mut().clear());
+        super::report_reconcile_summary(&report, "0.35.442");
+        let logged = super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow().clone());
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert!(
+            logged[0].contains("restart_targets=\"IntelliJIdea2026.3@0.2.481\"")
+                && logged[0].contains("restart_free_unavailable=true"),
+            "{logged:?}"
+        );
+    }
+
+    #[test]
+    fn reconcile_summary_counts_mixed_outcomes_and_restart_targets() {
+        use super::{
+            PluginEditorFamily::{JetBrains, VsCode},
+            PluginTargetOutcome as O,
+        };
+        let report = super::PluginReconcileReport {
+            targets: vec![
+                reconcile_target(JetBrains, "IntelliJIdea2026.1", "0.2.481", O::HotUpgraded),
+                reconcile_target(JetBrains, "PyCharm2026.2", "0.2.481", O::HotUpgraded),
+                reconcile_target(JetBrains, "GoLand2026.2", "0.2.481", O::Unchanged),
+                reconcile_target(JetBrains, "RustRover2026.2", "0.2.481", O::RestartRequired),
+                reconcile_target(
+                    JetBrains,
+                    "WebStorm2026.2",
+                    "0.2.481",
+                    O::StagedForRestart { permanent: false },
+                ),
+                reconcile_target(VsCode, "code", "0.35.442", O::Installed),
+            ],
+        };
+        let summary = report.summary("0.35.442");
+        assert!(
+            summary.starts_with(
+                "Editor plugins reconciled with the v0.35.442 release: 2 hot-upgraded, 1 installed, 1 staged for restart, 1 replaced under a live IDE, 1 unchanged."
+            ),
+            "{summary}"
+        );
+        assert_eq!(report.changed(), 5);
+        // A transient decline still needs a restart now, but must not claim the
+        // restart-free path is gone for good.
+        assert!(
+            summary.contains("Restart WebStorm2026.2 to load plugin v0.2.481; the restart-free upgrade did not complete"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("Restart RustRover2026.2 to load plugin v0.2.481; the running IDE keeps the previous plugin until then."),
+            "{summary}"
+        );
+        assert!(!summary.contains("unavailable on this build"), "{summary}");
+        // Hot-upgraded and unchanged targets need no action line.
+        assert!(!summary.contains("IntelliJIdea2026.1"), "{summary}");
+        assert!(!summary.contains("GoLand2026.2"), "{summary}");
+        // The conditional wording survives only where a reload may still land.
+        let hedged = summary
+            .lines()
+            .filter(|line| line.contains("on its own"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hedged,
+            vec![
+                "code: extension v0.35.442 installed; reload the editor window if it does not pick it up on its own."
+            ],
+            "{summary}"
+        );
+
+        let logged = report.ops_log_line("0.35.442");
+        for field in [
+            "plugin_upgrade_summary release=0.35.442",
+            "hot_upgraded=2",
+            "installed=1",
+            "staged_for_restart=1",
+            "restart_required=1",
+            "unchanged=1",
+            "restart_targets=\"RustRover2026.2@0.2.481,WebStorm2026.2@0.2.481\"",
+            "restart_free_unavailable=false",
+        ] {
+            assert!(logged.contains(field), "missing {field}: {logged}");
+        }
+    }
+
+    #[test]
+    fn reconcile_summary_all_unchanged_has_no_restart_text() {
+        use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
+        let report = super::PluginReconcileReport {
+            targets: vec![
+                reconcile_target(JetBrains, "IntelliJIdea2026.2", "0.2.481", O::Unchanged),
+                reconcile_target(JetBrains, "IntelliJIdea2026.3", "0.2.481", O::Unchanged),
+            ],
+        };
+        let summary = report.summary("0.35.442");
+        assert_eq!(summary, "Installed editor plugins already match v0.35.442.");
+        assert_eq!(report.changed(), 0);
+        assert_eq!(
+            super::PluginReconcileReport::default().summary("0.35.442"),
+            summary
+        );
+    }
+
+    #[test]
+    fn hot_upgrade_only_summary_has_no_restart_or_native_library_line() {
+        use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
+        let report = super::PluginReconcileReport {
+            targets: vec![reconcile_target(
+                JetBrains,
+                "IntelliJIdea2026.3",
+                "0.2.481",
+                O::HotUpgraded,
+            )],
+        };
+        let summary = report.summary("0.35.442");
+        assert_eq!(
+            summary,
+            "Editor plugins reconciled with the v0.35.442 release: 1 hot-upgraded."
+        );
+    }
+
+    /// GH #114: the per-target outcome is derived from the install's real
+    /// result, and only agent-doc's own decline is marked permanent.
+    #[test]
+    fn staged_install_outcome_carries_permanence_into_the_reconcile_report() {
+        for (reason, permanent) in [
+            (
+                "pid 1: agent-doc declined the restart-free upgrade: async",
+                true,
+            ),
+            ("pid 1: plugin cannot unload dynamically: busy", false),
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let target = tmp.path().join("plugins");
+            let zip = tmp.path().join("agent-doc-jetbrains-0.2.481.zip");
+            write_test_jetbrains_zip(&zip, "0.2.481", b"new");
+            let outcome = install_jetbrains_package_bytes(
+                &zip,
+                &target,
+                "0.2.481",
+                true,
+                || {
+                    Ok(Some(super::JetbrainsHotUpgrade::StagedForRestart {
+                        reason: reason.to_string(),
+                    }))
+                },
+                || panic!("the dynamic path does not enumerate pids"),
+            )
+            .unwrap();
+            assert_eq!(
+                super::PluginTargetOutcome::from_jetbrains(&outcome),
+                super::PluginTargetOutcome::StagedForRestart { permanent },
+                "{reason}"
+            );
+        }
+        assert_eq!(
+            super::PluginTargetOutcome::from_jetbrains(
+                &JetbrainsLocalInstallOutcome::RestartRequired {
+                    reason: "x".to_string()
+                }
+            ),
+            super::PluginTargetOutcome::RestartRequired
+        );
+    }
+
+    #[test]
+    fn jetbrains_target_label_names_the_ide_data_directory() {
+        assert_eq!(
+            super::jetbrains_target_label(Path::new(
+                "/h/.local/share/JetBrains/IntelliJIdea2026.3/plugins"
+            )),
+            "IntelliJIdea2026.3"
+        );
+        assert_eq!(
+            super::jetbrains_target_label(Path::new(
+                "/h/.local/share/JetBrains/IntelliJIdea2026.3"
+            )),
+            "IntelliJIdea2026.3"
         );
     }
 }

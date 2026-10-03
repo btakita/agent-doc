@@ -252,6 +252,37 @@ Next: `release + publish` (claim released) cuts **v0.35.443**.
 - The release ran anyway, because it was the only remaining head.
 
 **Exchange size:** 195 lines across 12 responses. I won't compact without the explicit `agent_doc_auto_compact` opt-in.
+
+### Re: #closeoutstrandedmsg — opus-5.5 · 2026-10-03T01:12-04:00
+
+> **Queue prompt:**
+>
+> do [#closeoutstrandedmsg]
+
+
+Fixed in agent-doc `562ee6b68` (pushed). The fix is installed, and the superproject pointer is at `393b2004f7`.
+
+**Root cause (from ops.log, cycle-1791001397823).** The closeout's two queue strikes arrived after its own commit:
+- `--done` struck `#subagents do [#preflightdeadline]` with a plain `~~…~~` (+4 bytes).
+- `#ftstrike` struck the steering note with its annotation (+53 bytes).
+- Both were projections deferred until editor delivery. The commit ran at 04:30:17 against the 28197-byte snapshot, and the strikes landed at 04:30:19–20.
+
+The commit path already has a late-strike reconciler (`late_answered_free_text_strike_capture`). It only accepted HEAD + the *all-annotated* `#ftstrike` projection (+106 bytes), so the real +57 mix never matched. The retry commit therefore refused the binary's own strikes as STRANDED operator drift. `respond` then reported "committed" and quoted that STRANDED remedy in the same message. The strikes stayed out of HEAD, and the next preflight read them as `user_intent_prompt_changes`.
+
+**Fix:**
+1. `agent-doc-queue`: new `matches_answered_strike_in_any_projection_shape`. It accepts HEAD with exactly the answered nodes struck, each either plain or `#ftstrike`-annotated. A strike of an unanswered head, a new prompt, or a missing strike is still refused.
+2. `agent-doc-commit-io`: the late-strike reconciler uses it, so the binary's own late strikes commit forward with the `commit_reconciled_late_answered_free_text_strike` proof.
+3. `agent-doc-repair-command-io`: a settled closeout now prints only `[respond] closeout committed: …`. The superseded error and its remedy go to ops.log only (`strict_closeout_error_settled_committed`).
+
+**Verification:**
+- New tests: `commit_recovers_late_mixed_done_and_free_text_strikes` (commit-io), `answered_strike_accepts_plain_and_annotated_mix_only` (queue), `recovered_closeout_report_states_terminal_outcome_only` (repair-command-io).
+- With the fix disabled, the commit test fails with the exact incident refusal, so it guards the fix.
+- `make check`: 10576 passed, exit 0. `make install` done.
+- CI run 37098921991 was in progress at closeout.
+
+> **Operator note:** also fix in subagent (lazily.md repeated no-op preflight)
+
+A background subagent is working on this in its own worktree outside agent-loop. The report shows preflight finding no changes 4 times in 30 minutes while the operator was editing, and telling the operator to "save the file". I'll report its root cause and fix when it finishes.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -260,12 +291,11 @@ Next: `release + publish` (claim released) cuts **v0.35.443**.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#closeoutstrandedmsg] [agent-doc] A successful closeout printed a self-contradictory report and left its own queue strikes out of the snapshot (2026-10-03 00:30, cycle-1791001397823). respond printed 'closeout error recovered: the retained closeout committed cycle ... on its own after: refusing to close ... visible edits are STRANDED ... Run agent-doc commit', while session-check said committed (commit_success). The next preflight saw the closeout's own #ftstrike strikes of '#subagents do [#preflightdeadline]' and the steering note as snapshot drift, classified them as user_intent_prompt_changes, and suppressed queue continuation with no head selected. Fix: (1) the recovered-closeout report must state the terminal outcome only, not quote the superseded STRANDED remedy; (2) a closeout's binary-authored queue strikes and backlog --done must land in the committed snapshot, or be recognized as binary-owned by the next preflight and never count as operator intent. Repro context: respond with --done <id> plus two quoted free-text heads while the queue mutation projection was retained.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

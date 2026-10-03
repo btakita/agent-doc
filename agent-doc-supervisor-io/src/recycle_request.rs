@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_state_backbone::{StateEvent, StateFact, SupervisorRecyclePhase};
 use agent_doc_supervisor::recycle_request::{
-    RecycleRequest, recycle_request, recycle_request_is_fresh,
+    RecycleRequest, recycle_request, recycle_request_is_fresh, recycle_request_is_live,
 };
 use anyhow::{Context, Result};
 
@@ -102,6 +102,18 @@ pub fn read_recycle_request(file: &str) -> Option<RecycleRequest> {
 pub fn fresh_recycle_request(file: &str, now: u64) -> Option<RecycleRequest> {
     let request = read_recycle_request(file)?;
     recycle_request_is_fresh(&request, now).then_some(request)
+}
+
+/// GH #121: the request the owning supervisor should act on now — fresh, or a
+/// lapsed stale-supervisor request while `supervisor_stale` still holds. See
+/// [`agent_doc_supervisor::recycle_request::recycle_request_is_live`].
+pub fn live_recycle_request(
+    file: &str,
+    now: u64,
+    supervisor_stale: bool,
+) -> Option<RecycleRequest> {
+    let request = read_recycle_request(file)?;
+    recycle_request_is_live(&request, now, supervisor_stale).then_some(request)
 }
 
 /// Convenience boolean: is a fresh recycle-request pending for `file`?
@@ -265,6 +277,32 @@ mod tests {
         assert!(
             fresh_recycle_request(&file, request.requested_secs + 10_000_000).is_none(),
             "an old request must not force a stale-forever recycle"
+        );
+    }
+
+    #[test]
+    fn stale_supervisor_request_stays_live_past_the_ttl_until_consumed() {
+        // GH #121: the layout path's stale-column recycle request lapsed while
+        // the supervisor's cycle stayed open, so it never executed.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let file = file.to_string_lossy().to_string();
+        request_recycle(
+            &file,
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE,
+        )
+        .unwrap();
+        let request = read_recycle_request(&file).unwrap();
+        let hours_later = request.requested_secs + 2 * 3_600;
+        assert!(fresh_recycle_request(&file, hours_later).is_none());
+        assert!(live_recycle_request(&file, hours_later, true).is_some());
+        assert!(live_recycle_request(&file, hours_later, false).is_none());
+        clear_recycle_request(&file);
+        assert!(
+            live_recycle_request(&file, hours_later, true).is_none(),
+            "consuming the request settles it"
         );
     }
 

@@ -9,25 +9,31 @@
 //! `1:stash` into the visible window with no log line naming why it was chosen
 //! or that it was stale.
 //!
-//! This module owns three things:
+//! This module owns four things:
 //!
 //! 1. [`pane_supervisor_freshness`] — the reusable "does this pane's supervisor
-//!    run the installed build?" predicate. It reuses the same directional
-//!    `#supdirstale` rule as preflight (`host_supervisor_pid_binary_is_stale`)
-//!    and consults agent-doc's own `⚠ STALE SUPERVISOR` title only as a fallback
-//!    witness when the binary identity cannot be observed.
-//! 2. [`audit_layout_column_panes`] — run once after `tmux_router` realises the
+//!    run replaced bytes?" predicate. GH #121: the only witness is the
+//!    supervisor's own `/proc/<pid>/exe` naming an unlinked file. The #109
+//!    version compared against the observer's resolved binary and fed back
+//!    agent-doc's own `⚠ STALE SUPERVISOR` title, and called two healthy
+//!    supervisors stale; the title is now diagnostic only.
+//! 2. [`gate_stale_column_panes`] — GH #121 (GH #105 ask 2 / GH #109 ask 4):
+//!    runs BEFORE `tmux_router`. A column whose own pane is stale is removed
+//!    from the router's arguments, so the pane is never selected or promoted out
+//!    of the stash, and its safe-boundary recycle is requested. The focused
+//!    document is the one exception: its pane is that document's only harness,
+//!    so it is admitted under `layout_column_pane_stale_focus_admitted`.
+//! 3. [`audit_layout_column_panes`] — run once after `tmux_router` realises the
 //!    layout. Every column whose pane moved windows (a stash → layout promotion
-//!    in particular), whose pane runs another document, or whose supervisor is
-//!    stale gets one `layout_column_pane_selected` line naming the candidates
-//!    and why the winner was chosen.
-//! 3. The stale-supervisor consequence: the pane is the document's own live
-//!    harness, so it is neither excluded (which would leave the document's
-//!    column unrealised or provision a second owner) nor reaped. Instead the
-//!    existing safe-boundary recycle is requested — the supervisor re-execs onto
-//!    the installed build at its next idle boundary, preserving the harness
-//!    child and the pane id — and a distinct `layout_column_pane_supervisor_stale`
-//!    diagnostic is written.
+//!    in particular) or whose pane runs another document gets one
+//!    `layout_column_pane_selected` line naming the candidates and why the
+//!    winner was chosen. A stale pane that still reached a column is recorded as
+//!    `layout_column_pane_stale_admitted`, never as a plain selection.
+//! 4. The stale-supervisor consequence: the pane is neither killed nor reaped.
+//!    The existing safe-boundary recycle is requested — the supervisor re-execs
+//!    onto the installed build at its next idle boundary, preserving the harness
+//!    child and the pane id — and the request now stays live past its TTL while
+//!    the supervisor is still stale, so a long open cycle cannot make it lapse.
 
 use crate::sync::{PaneOccupant, pane_occupant_for_document};
 use agent_doc_controller::dispatch::is_stash_window_name;
@@ -111,31 +117,36 @@ pub fn title_has_stale_supervisor_marker(title: &str) -> bool {
 
 /// Pure freshness decision over the observed facts.
 ///
-/// `binary_stale` is the directional binary-identity verdict for
-/// `supervisor_pid` (`None` = unobservable). The binary identity is the
-/// authority; the title marker — agent-doc's own earlier diagnosis — only
-/// decides when the binary cannot be observed.
+/// GH #121: `binary_replaced` is whether the supervisor's `/proc/<pid>/exe`
+/// names an unlinked file (`None` = unobservable) — the bytes it runs were
+/// replaced on disk by an install. That is the only witness this path acts on:
+///
+/// - It is observer-independent. The #109 predicate compared the running inode
+///   against the *observer's* resolved binary (`current_exe` first), so a layout
+///   sync running a different launchable copy (`.bin` shim → `target/release`,
+///   a PyPI wheel, …) called every supervisor on `~/.cargo/bin` stale — two of the
+///   three panes it fired on mapped the installed inode with zero `deleted` maps.
+/// - It is exactly what a recycle repairs: the supervisor re-execs onto the file
+///   now at its launch path. A linked copy that merely differs from the
+///   observer's copy would re-exec onto itself, so "requesting" it never has an
+///   effect.
+///
+/// `title_marker` is agent-doc's OWN earlier verdict written into the pane title;
+/// feeding it back in let one bad call persist as self-confirming evidence after
+/// the condition cleared. It is recorded for diagnostics only and never decides.
 pub fn classify_pane_supervisor_freshness(
     supervisor_pid: Option<u32>,
-    binary_stale: Option<bool>,
+    binary_replaced: Option<bool>,
     title_marker: bool,
 ) -> PaneSupervisorFreshness {
-    match (supervisor_pid, binary_stale) {
+    match (supervisor_pid, binary_replaced) {
         (Some(pid), Some(true)) => PaneSupervisorFreshness::Stale {
             supervisor_pid: Some(pid),
-            evidence: if title_marker {
-                "binary_identity+title_marker"
-            } else {
-                "binary_identity"
-            },
+            evidence: "binary_replaced",
         },
         (Some(pid), Some(false)) => PaneSupervisorFreshness::Current {
             supervisor_pid: pid,
             title_marker,
-        },
-        (pid, _) if title_marker => PaneSupervisorFreshness::Stale {
-            supervisor_pid: pid,
-            evidence: "title_marker",
         },
         (None, _) => PaneSupervisorFreshness::Unknown {
             reason: "no_supervisor_process",
@@ -144,6 +155,12 @@ pub fn classify_pane_supervisor_freshness(
             reason: "binary_identity_unobservable",
         },
     }
+}
+
+/// GH #121: whether `pid` runs bytes that were replaced (unlinked) on disk.
+/// `None` when `/proc/<pid>/exe` cannot be read.
+pub fn supervisor_binary_replaced(pid: u32) -> Option<bool> {
+    agent_doc_fs::running_exe_build_for_pid(pid).map(|build| build.unlinked)
 }
 
 /// Reusable IO predicate: the freshness of the agent-doc supervisor serving
@@ -170,9 +187,8 @@ pub fn pane_supervisor_freshness(
         )
         .and_then(|pid| pid.trim().parse::<u32>().ok())
     });
-    let binary_stale = supervisor_pid
-        .and_then(agent_doc_controller_io::project_controller::host_supervisor_pid_binary_is_stale);
-    classify_pane_supervisor_freshness(supervisor_pid, binary_stale, title_marker)
+    let binary_replaced = supervisor_pid.and_then(supervisor_binary_replaced);
+    classify_pane_supervisor_freshness(supervisor_pid, binary_replaced, title_marker)
 }
 
 /// Where the pane that realised a column came from.
@@ -276,6 +292,204 @@ fn claim_stale_column_recycle(ledger_key: &str, now: Instant) -> bool {
     true
 }
 
+/// GH #121: what the pre-selection gate does with one column's candidate pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnAdmission {
+    /// The pane may realise the column.
+    Admit,
+    /// The pane's supervisor runs replaced bytes: it is ineligible to satisfy
+    /// this column until its recycle lands. The column is left unrealised for
+    /// this pass (the pane stays wherever it is, typically the stash).
+    ExcludeStale,
+    /// The stale pane serves the FOCUSED document. It is that document's only
+    /// harness, so excluding it would hide the document the operator just
+    /// navigated to; it is admitted under a distinct, auditable record and
+    /// never as a plain `layout_column_pane_selected`.
+    AdmitStaleFocused,
+}
+
+/// Pure admission rule. Only the column's OWN pane is gated here — a pane bound
+/// to another document is the foreign-binding audit's concern, not staleness.
+pub fn column_admission(
+    freshness: &PaneSupervisorFreshness,
+    own_pane: bool,
+    is_focus: bool,
+) -> ColumnAdmission {
+    if !own_pane || !freshness.is_stale() {
+        ColumnAdmission::Admit
+    } else if is_focus {
+        ColumnAdmission::AdmitStaleFocused
+    } else {
+        ColumnAdmission::ExcludeStale
+    }
+}
+
+fn path_identity(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Pure: drop `excluded` documents from the `--col` arguments (each arg is a
+/// comma-separated column), matching on canonical identity so absolute and
+/// root-relative spellings agree. A column left empty is dropped.
+pub fn col_args_without(col_args: &[String], excluded: &[PathBuf]) -> Vec<String> {
+    if excluded.is_empty() {
+        return col_args.to_vec();
+    }
+    let excluded: Vec<PathBuf> = excluded.iter().map(|path| path_identity(path)).collect();
+    col_args
+        .iter()
+        .filter_map(|arg| {
+            let kept: Vec<&str> = arg
+                .split(',')
+                .map(str::trim)
+                .filter(|file| !file.is_empty())
+                .filter(|file| !excluded.contains(&path_identity(Path::new(file))))
+                .collect();
+            (!kept.is_empty()).then(|| kept.join(","))
+        })
+        .collect()
+}
+
+/// Pure: the `prior_request=` token describing the recycle request already on
+/// the document's ledger, so a re-request says whether the last one was ever
+/// consumed instead of repeating `requested` with no outcome (GH #121 ask 4).
+pub fn prior_recycle_request_token(prior: Option<(&str, u64)>, now_secs: u64) -> String {
+    match prior {
+        None => "none".to_string(),
+        Some((reason, marked_secs)) => format!(
+            "unconsumed:reason={reason}:age_secs={}",
+            now_secs.saturating_sub(marked_secs)
+        ),
+    }
+}
+
+fn now_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Request (de-duplicated) the safe-boundary recycle of a stale column
+/// supervisor and return the `action=…` log fragment.
+fn request_stale_column_recycle(
+    file: &Path,
+    pane: &str,
+    freshness: &PaneSupervisorFreshness,
+    source: &str,
+) -> Option<String> {
+    let PaneSupervisorFreshness::Stale { supervisor_pid, .. } = freshness else {
+        return None;
+    };
+    let ledger_key = supervisor_pid
+        .map(|pid| format!("pid:{pid}"))
+        .unwrap_or_else(|| format!("pane:{pane}"));
+    if !claim_stale_column_recycle(&ledger_key, Instant::now()) {
+        return Some("safe_boundary_recycle_already_requested".to_string());
+    }
+    let prior =
+        agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy());
+    let prior_token = prior_recycle_request_token(
+        prior
+            .as_ref()
+            .map(|request| (request.reason.as_str(), request.requested_secs)),
+        now_epoch_secs(),
+    );
+    let status = agent_doc_controller_io::project_controller::schedule_stale_supervisor_cp_recycle(
+        file, source,
+    );
+    Some(format!(
+        "safe_boundary_recycle_requested prior_request={prior_token} recycle_status={status}"
+    ))
+}
+
+/// Inputs for the pre-selection gate.
+pub struct StaleColumnGateInput<'a> {
+    /// The `--col` arguments sync is about to hand tmux-router.
+    pub col_args: &'a [String],
+    /// The focused document, when the caller named one.
+    pub focus: Option<&'a str>,
+    /// Panes sync proved and is about to hand to tmux-router.
+    pub pre_resolved: &'a HashMap<PathBuf, String>,
+    /// Durable-registry pane per file, as tmux-router would look it up.
+    pub registry_pane: &'a dyn Fn(&Path) -> Option<String>,
+    /// Pane → window/title before tmux-router runs.
+    pub before: &'a HashMap<String, PaneWindowSnapshot>,
+}
+
+/// GH #121 (GH #105 ask 2 / GH #109 ask 4): make the staleness verdict a
+/// precondition of column selection rather than a postscript to it.
+///
+/// Runs BEFORE tmux-router realises the layout. A column whose own pane runs a
+/// replaced supervisor binary is removed from the arguments handed to the
+/// router (so the pane is never selected, promoted out of the stash, or counted
+/// as a column) and its safe-boundary recycle is requested; once the recycle
+/// lands the pane reads fresh and the next sync admits it. The focused document
+/// is the one exception (see [`ColumnAdmission::AdmitStaleFocused`]).
+///
+/// Returns the column arguments tmux-router should realise. Never moves, kills,
+/// or reaps a pane.
+pub fn gate_stale_column_panes(tmux: &Tmux, input: &StaleColumnGateInput<'_>) -> Vec<String> {
+    let _observations = agent_doc_process_owner_io::begin_process_observation_scope();
+    let focus = input.focus.map(|focus| path_identity(Path::new(focus)));
+    let mut excluded: Vec<PathBuf> = Vec::new();
+    for file in agent_doc_tmux::auto_start_candidate_files(input.col_args) {
+        let pre_resolved = input.pre_resolved.get(&file).cloned();
+        let Some(pane) = pre_resolved
+            .clone()
+            .or_else(|| (input.registry_pane)(&file))
+        else {
+            continue;
+        };
+        let own_pane = pane_occupant_for_document(tmux, &pane, &file) == PaneOccupant::Free;
+        if !own_pane {
+            continue;
+        }
+        let before = input.before.get(&pane);
+        let title = before.map(|snapshot| snapshot.title.as_str());
+        let freshness = pane_supervisor_freshness(tmux, &pane, &file, title);
+        let is_focus = focus.as_ref() == Some(&path_identity(&file));
+        let admission = column_admission(&freshness, own_pane, is_focus);
+        let (record, admission_token) = match admission {
+            ColumnAdmission::Admit => continue,
+            ColumnAdmission::ExcludeStale => {
+                excluded.push(file.clone());
+                ("layout_column_pane_excluded", "excluded")
+            }
+            ColumnAdmission::AdmitStaleFocused => (
+                "layout_column_pane_stale_focus_admitted",
+                "admitted_focused_document_sole_owner",
+            ),
+        };
+        let source = if pre_resolved.as_deref() == Some(pane.as_str()) {
+            ColumnPaneSource::PreResolved
+        } else {
+            ColumnPaneSource::Registry
+        };
+        let action = request_stale_column_recycle(&file, &pane, &freshness, "layout_column_gate")
+            .unwrap_or_else(|| "none".to_string());
+        let line = format!(
+            "{record} file={} pane={} source={} window={} supervisor={} admission={admission_token} reason=stale_supervisor action={action} (GH #121)",
+            file.display(),
+            pane,
+            source.as_str(),
+            before
+                .map(|snapshot| snapshot.window_name.as_str())
+                .unwrap_or("unknown"),
+            freshness.log_token(),
+        );
+        // Every pass records the decision in the sync log; the per-document
+        // ops log and stderr get it only when the recycle is (re)requested, so a
+        // tab-switch storm cannot flood them with the same verdict.
+        crate::append_sync_log(&line);
+        if action.starts_with("safe_boundary_recycle_requested") {
+            eprintln!("[sync] warning: {line}");
+            agent_doc_ops_log_io::log_op(&file, &line);
+        }
+    }
+    col_args_without(input.col_args, &excluded)
+}
+
 /// One tmux pane's window and title, captured in a single `list-panes -a`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PaneWindowSnapshot {
@@ -327,6 +541,8 @@ pub struct LayoutColumnAuditInput<'a> {
     pub before: &'a HashMap<String, PaneWindowSnapshot>,
     /// Pane → window/title after tmux-router ran.
     pub after: &'a HashMap<String, PaneWindowSnapshot>,
+    /// The focused document, when the caller named one.
+    pub focus: Option<&'a str>,
 }
 
 /// GH #109: validate and attribute every realised layout column.
@@ -338,6 +554,7 @@ pub struct LayoutColumnAuditInput<'a> {
 pub fn audit_layout_column_panes(tmux: &Tmux, input: &LayoutColumnAuditInput<'_>) {
     // One `/proc` walk serves every column's ownership and supervisor lookup.
     let _observations = agent_doc_process_owner_io::begin_process_observation_scope();
+    let focus = input.focus.map(|focus| path_identity(Path::new(focus)));
     for (file, pane) in input.file_panes {
         let before = input.before.get(pane);
         let after = input.after.get(pane);
@@ -354,19 +571,16 @@ pub fn audit_layout_column_panes(tmux: &Tmux, input: &LayoutColumnAuditInput<'_>
                 reason: "not_document_owner",
             }
         };
-        // A stale supervisor is notable when its recycle is (re)requested this
-        // pass; between requests a column that stayed put stays quiet, so a
-        // tab-switch storm cannot flood ops.log with the same diagnosis.
-        let stale_recycle_due = match &freshness {
-            PaneSupervisorFreshness::Stale { supervisor_pid, .. } => {
-                let ledger_key = supervisor_pid
-                    .map(|pid| format!("pid:{pid}"))
-                    .unwrap_or_else(|| format!("pane:{pane}"));
-                claim_stale_column_recycle(&ledger_key, Instant::now())
-            }
-            _ => false,
-        };
-        let notable_freshness = if freshness.is_stale() && !stale_recycle_due {
+        // GH #121: the pre-selection gate already excluded every stale own pane
+        // except the focused document's. Whatever stale pane still reached a
+        // column is recorded under its own name — never as a plain selection —
+        // and its recycle request is de-duplicated with the gate's.
+        let recycle_action =
+            request_stale_column_recycle(file, pane, &freshness, "layout_column_selection");
+        let recycle_requested_now = recycle_action
+            .as_deref()
+            .is_some_and(|action| action.starts_with("safe_boundary_recycle_requested"));
+        let notable_freshness = if freshness.is_stale() && !recycle_requested_now {
             &PaneSupervisorFreshness::Unknown {
                 reason: "stale_recycle_already_requested",
             }
@@ -380,8 +594,21 @@ pub fn audit_layout_column_panes(tmux: &Tmux, input: &LayoutColumnAuditInput<'_>
         let registry = (input.registry_pane)(file);
         let source = classify_column_pane_source(pane, pre_resolved, registry.as_deref());
         let promoted = promoted_from_stash(origin_window, final_window);
+        let is_focus = focus.as_ref() == Some(&path_identity(file));
+        let record = if freshness.is_stale() {
+            "layout_column_pane_stale_admitted"
+        } else {
+            "layout_column_pane_selected"
+        };
+        let admission = if !freshness.is_stale() {
+            ""
+        } else if is_focus {
+            " admission=focused_document_sole_owner"
+        } else {
+            " admission=ungated_router_choice"
+        };
         let selection = format!(
-            "layout_column_pane_selected file={} pane={} source={} origin_window={} window={} promoted_from_stash={} binding={} supervisor={} candidates=pre_resolved:{},registry:{} (GH #109)",
+            "{record} file={} pane={} source={} origin_window={} window={} promoted_from_stash={} binding={} supervisor={}{admission} candidates=pre_resolved:{},registry:{} (GH #109)",
             file.display(),
             pane,
             source.as_str(),
@@ -416,18 +643,6 @@ pub fn audit_layout_column_panes(tmux: &Tmux, input: &LayoutColumnAuditInput<'_>
             evidence,
         } = &freshness
         {
-            // De-duplicated above on the supervisor process when it is known,
-            // and on the pane when only the title witnessed the staleness.
-            let recycle = if stale_recycle_due {
-                let status =
-                    agent_doc_controller_io::project_controller::schedule_stale_supervisor_cp_recycle(
-                        file,
-                        "layout_column_selection",
-                    );
-                format!("safe_boundary_recycle_requested recycle_status={status}")
-            } else {
-                "safe_boundary_recycle_already_requested".to_string()
-            };
             let stale = format!(
                 "layout_column_pane_supervisor_stale file={} pane={} supervisor_pid={} evidence={} promoted_from_stash={} source={} action={} pane_effect=none harness_effect=none (GH #109)",
                 file.display(),
@@ -438,7 +653,7 @@ pub fn audit_layout_column_panes(tmux: &Tmux, input: &LayoutColumnAuditInput<'_>
                 evidence,
                 promoted,
                 source.as_str(),
-                recycle,
+                recycle_action.as_deref().unwrap_or("none"),
             );
             eprintln!("[sync] warning: {stale}");
             crate::append_sync_log(&stale);
@@ -452,46 +667,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn binary_identity_outranks_a_lagging_title_marker() {
+    fn replaced_binary_is_the_only_staleness_witness() {
         assert_eq!(
             classify_pane_supervisor_freshness(Some(42), Some(false), true),
             PaneSupervisorFreshness::Current {
                 supervisor_pid: 42,
                 title_marker: true
             },
-            "an in-place re-exec maps the installed inode before the title refresh clears the marker"
+            "a lagging `⚠ STALE SUPERVISOR` title never outranks the mapped binary"
         );
         assert_eq!(
             classify_pane_supervisor_freshness(Some(42), Some(true), false),
             PaneSupervisorFreshness::Stale {
                 supervisor_pid: Some(42),
-                evidence: "binary_identity"
+                evidence: "binary_replaced"
             }
         );
         assert_eq!(
             classify_pane_supervisor_freshness(Some(42), Some(true), true),
             PaneSupervisorFreshness::Stale {
                 supervisor_pid: Some(42),
-                evidence: "binary_identity+title_marker"
-            }
+                evidence: "binary_replaced"
+            },
+            "the self-written title adds no independent evidence"
         );
     }
 
     #[test]
-    fn title_marker_decides_only_when_binary_identity_is_unobservable() {
-        // GH #105 ask 2 / GH #109 ask 4: agent-doc's own diagnosis is consulted.
+    fn title_marker_is_never_evidence_of_staleness() {
+        // GH #121 ask 3: agent-doc wrote that title from an earlier verdict;
+        // reading it back made one bad call self-confirming.
         assert_eq!(
             classify_pane_supervisor_freshness(Some(7), None, true),
-            PaneSupervisorFreshness::Stale {
-                supervisor_pid: Some(7),
-                evidence: "title_marker"
+            PaneSupervisorFreshness::Unknown {
+                reason: "binary_identity_unobservable"
             }
         );
         assert_eq!(
             classify_pane_supervisor_freshness(None, None, true),
-            PaneSupervisorFreshness::Stale {
-                supervisor_pid: None,
-                evidence: "title_marker"
+            PaneSupervisorFreshness::Unknown {
+                reason: "no_supervisor_process"
             }
         );
         // Missing evidence is never "fresh".
@@ -506,6 +721,168 @@ mod tests {
             PaneSupervisorFreshness::Unknown {
                 reason: "no_supervisor_process"
             }
+        );
+    }
+
+    /// Spawn a long-lived process from a private copy of `sleep`, so the test
+    /// controls whether its executable is later unlinked.
+    #[cfg(target_os = "linux")]
+    fn spawn_private_sleep(dir: &Path) -> (std::process::Child, PathBuf) {
+        let sleep = ["/usr/bin/sleep", "/bin/sleep"]
+            .into_iter()
+            .map(PathBuf::from)
+            .find(|path| path.is_file())
+            .expect("a sleep binary");
+        let copy = dir.join("agent-doc");
+        std::fs::copy(&sleep, &copy).unwrap();
+        // An OLDER build than whatever copy the observer resolves: the #109
+        // predicate's directional rule called exactly this shape stale even
+        // though the supervisor's own bytes were never replaced.
+        std::fs::File::options()
+            .write(true)
+            .open(&copy)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(946_684_800))
+            .unwrap();
+        let child = std::process::Command::new(&copy).arg("30").spawn().unwrap();
+        (child, copy)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn supervisor_mapping_the_installed_inode_reads_fresh_whatever_the_observer_runs() {
+        // GH #121 ask 2: `%32`/`%430` mapped the installed inode with zero
+        // `deleted` maps and were still called stale, because the verdict was
+        // taken against the OBSERVER's own launchable copy. The predicate now
+        // looks only at the supervisor's own mapping.
+        let dir = tempfile::TempDir::new().unwrap();
+        let (mut child, copy) = spawn_private_sleep(dir.path());
+        let pid = child.id();
+        let replaced_before = supervisor_binary_replaced(pid);
+        // `%33`: an install replaced the bytes it runs (`/proc/pid/exe … (deleted)`).
+        std::fs::remove_file(&copy).unwrap();
+        let replaced_after = supervisor_binary_replaced(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(replaced_before, Some(false));
+        assert_eq!(
+            classify_pane_supervisor_freshness(Some(pid), replaced_before, true),
+            PaneSupervisorFreshness::Current {
+                supervisor_pid: pid,
+                title_marker: true
+            }
+        );
+        assert_eq!(replaced_after, Some(true));
+        assert!(classify_pane_supervisor_freshness(Some(pid), replaced_after, false).is_stale());
+    }
+
+    #[test]
+    fn stale_own_pane_is_excluded_before_selection_except_for_the_focused_document() {
+        // GH #121 ask 1 / GH #105 ask 2 / GH #109 ask 4.
+        let stale = classify_pane_supervisor_freshness(Some(3303445), Some(true), true);
+        let fresh = classify_pane_supervisor_freshness(Some(2062923), Some(false), false);
+        let unknown = classify_pane_supervisor_freshness(Some(1), None, true);
+        assert_eq!(
+            column_admission(&stale, true, false),
+            ColumnAdmission::ExcludeStale
+        );
+        assert_eq!(
+            column_admission(&stale, true, true),
+            ColumnAdmission::AdmitStaleFocused
+        );
+        assert_eq!(
+            column_admission(&fresh, true, false),
+            ColumnAdmission::Admit
+        );
+        assert_eq!(
+            column_admission(&unknown, true, false),
+            ColumnAdmission::Admit,
+            "missing evidence never excludes a column"
+        );
+        assert_eq!(
+            column_admission(&stale, false, false),
+            ColumnAdmission::Admit,
+            "a pane bound to another document is the foreign-binding audit's concern"
+        );
+    }
+
+    #[test]
+    fn issue_121_three_panes_only_the_replaced_one_is_excluded() {
+        // The measured session: `%33` maps an unlinked inode; `%32` and `%430`
+        // map the installed inode with zero deleted maps. All three carried a
+        // `⚠ STALE SUPERVISOR` title verdict at some point.
+        let panes = [
+            ("%33", "tasks/pmt2/mr/1061.md", 3303445, true),
+            ("%32", "tasks/laptop/laptop.md", 2062923, false),
+            ("%430", "tasks/pmt2/tickets/2222.md", 3868191, false),
+        ];
+        let mut excluded = Vec::new();
+        for (_pane, file, pid, replaced) in panes {
+            let freshness = classify_pane_supervisor_freshness(Some(pid), Some(replaced), true);
+            match column_admission(&freshness, true, false) {
+                ColumnAdmission::ExcludeStale => excluded.push(PathBuf::from(file)),
+                ColumnAdmission::Admit => assert!(
+                    !freshness.log_token().starts_with("stale:"),
+                    "an admitted column must never carry supervisor=stale: {}",
+                    freshness.log_token()
+                ),
+                ColumnAdmission::AdmitStaleFocused => unreachable!(),
+            }
+        }
+        assert_eq!(excluded, vec![PathBuf::from("tasks/pmt2/mr/1061.md")]);
+        let col_args = vec![
+            "tasks/pmt2/mr/1061.md".to_string(),
+            "tasks/laptop/laptop.md,tasks/pmt2/tickets/2222.md".to_string(),
+        ];
+        assert_eq!(
+            col_args_without(&col_args, &excluded),
+            vec!["tasks/laptop/laptop.md,tasks/pmt2/tickets/2222.md".to_string()],
+            "the stale pane's column is never handed to tmux-router"
+        );
+    }
+
+    #[test]
+    fn sync_gates_stale_columns_before_tmux_router_selects_and_realises_them() {
+        // GH #121: the #109 audit selected the pane and diagnosed it one second
+        // later. The gate's filtered column set must be what the router realises.
+        let sync = include_str!("sync.rs");
+        let gate = sync
+            .find("crate::layout_column_audit::gate_stale_column_panes(")
+            .expect("sync must gate stale column panes");
+        let router = sync
+            .find("tmux_router::sync_with_options(")
+            .expect("sync calls tmux-router");
+        let rebind = sync
+            .find("let col_args: &[String] = &router_col_args;")
+            .expect("the router must receive the gated column set");
+        assert!(gate < rebind && rebind < router);
+    }
+
+    #[test]
+    fn col_args_without_matches_canonical_spellings_and_drops_empty_columns() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let a = dir.path().join("a.md");
+        let b = dir.path().join("b.md");
+        std::fs::write(&a, "").unwrap();
+        std::fs::write(&b, "").unwrap();
+        let dotted = dir.path().join(".").join("a.md");
+        let col_args = vec![
+            format!("{},{}", a.display(), b.display()),
+            dotted.display().to_string(),
+        ];
+        assert_eq!(
+            col_args_without(&col_args, &[a.clone()]),
+            vec![b.display().to_string()]
+        );
+        assert_eq!(col_args_without(&col_args, &[]), col_args);
+    }
+
+    #[test]
+    fn prior_request_token_names_an_unconsumed_request() {
+        assert_eq!(prior_recycle_request_token(None, 100), "none");
+        assert_eq!(
+            prior_recycle_request_token(Some(("stale_supervisor_turn_stage", 40)), 8_320),
+            "unconsumed:reason=stale_supervisor_turn_stage:age_secs=8280"
         );
     }
 
@@ -544,7 +921,7 @@ mod tests {
         assert!(freshness.is_stale());
         assert_eq!(
             freshness.log_token(),
-            "stale:pid=1245655:evidence=binary_identity+title_marker"
+            "stale:pid=1245655:evidence=binary_replaced"
         );
         assert!(column_selection_is_notable(
             origin,

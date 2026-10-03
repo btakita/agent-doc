@@ -4649,6 +4649,36 @@ fn run_with_options_internal_at_root(
     // stash and why it was the one chosen.
     let pane_windows_before_router = crate::layout_column_audit::snapshot_pane_windows(tmux);
 
+    // GH #121: staleness is a precondition of selection, not a postscript to
+    // it. A column whose own pane runs a replaced supervisor binary is removed
+    // from what tmux-router realises (the focused document excepted) and its
+    // safe-boundary recycle is requested; the next sync after the recycle
+    // admits the now-fresh pane.
+    let router_col_args = {
+        let gate_session_keys: HashMap<PathBuf, String> = session_files
+            .borrow()
+            .iter()
+            .map(|(key, file)| (file.clone(), key.clone()))
+            .collect();
+        let gate_registry_pane = |file: &Path| -> Option<String> {
+            let key = gate_session_keys.get(file)?;
+            tmux_router::registry::lookup(tmux_router_registry_path, key)
+                .ok()
+                .flatten()
+        };
+        crate::layout_column_audit::gate_stale_column_panes(
+            tmux,
+            &crate::layout_column_audit::StaleColumnGateInput {
+                col_args,
+                focus,
+                pre_resolved: &pre_resolved_panes,
+                registry_pane: &gate_registry_pane,
+                before: &pane_windows_before_router,
+            },
+        )
+    };
+    let col_args: &[String] = &router_col_args;
+
     // Open-cycle panes are logged during DETACH, but they are not kept visible.
     // Stashing preserves the process and avoids recurring 3-pane projections.
     let router_start = Instant::now();
@@ -4706,6 +4736,7 @@ fn run_with_options_internal_at_root(
                 registry_pane: &registry_pane,
                 before: &pane_windows_before_router,
                 after: &pane_windows_after_router,
+                focus,
             },
         );
     }
@@ -7305,8 +7336,8 @@ mod tests {
         // must never realise document B's column, however live it is; it stays
         // eligible for A's own column. Also pins the reusable freshness predicate
         // on real panes: the column's own supervisor is found in the pane tree,
-        // and agent-doc's `⚠ STALE SUPERVISOR` title is consulted when no
-        // supervisor process can be observed.
+        // and agent-doc's `⚠ STALE SUPERVISOR` title alone never reads as stale
+        // (GH #121).
         let tmp = tempfile::TempDir::new().unwrap();
         let doc_a = tmp.path().join("tasks").join("1102.md");
         let doc_b = tmp.path().join("tasks").join("agent-doc.ad.md");
@@ -7381,11 +7412,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             crate::layout_column_audit::pane_supervisor_freshness(&iso, &shell_pane, &doc_a, None),
-            crate::layout_column_audit::PaneSupervisorFreshness::Stale {
-                supervisor_pid: None,
-                evidence: "title_marker"
+            crate::layout_column_audit::PaneSupervisorFreshness::Unknown {
+                reason: "no_supervisor_process"
             },
-            "agent-doc's own stale-supervisor title is evidence when no process proof exists"
+            "GH #121: agent-doc's own stale-supervisor title is never evidence of staleness"
         );
     }
 

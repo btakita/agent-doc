@@ -3584,10 +3584,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // `RecycleImmediate` whether or not the running binary reads stale. The
                 // marker is cleared immediately before the `execve` below so the fresh
                 // process does not re-loop on it.
+                // GH #121: a stale-supervisor request does not lapse while this
+                // supervisor still runs replaced bytes; it used to expire during a
+                // long open cycle and the requested recycle never executed.
+                let own_binary_replaced =
+                    agent_doc_fs::running_exe_build_for_pid(std::process::id())
+                        .is_some_and(|build| build.unlinked);
                 let recycle_request =
-                    agent_doc_supervisor_io::recycle_request::fresh_recycle_request(
+                    agent_doc_supervisor_io::recycle_request::live_recycle_request(
                         &file,
                         current_epoch_secs(),
+                        supervisor_stale || own_binary_replaced,
                     );
                 let recycle_requested = recycle_request.is_some();
                 let stale_editor_replica_requested = recycle_request.as_ref().is_some_and(|request| {

@@ -55,6 +55,21 @@ pub fn recycle_request_is_fresh(request: &RecycleRequest, now: u64) -> bool {
     agent_doc_lease::timestamp_is_fresh(request.requested_secs, now, recycle_request_ttl())
 }
 
+/// GH #121: whether the owning supervisor should still honour `request`.
+///
+/// The TTL keeps an install fan-out or editor-replica request from firing long
+/// after its cause. A `stale_supervisor_turn_stage` request is different: its
+/// cause is the supervisor running superseded bytes, which is still true for as
+/// long as `supervisor_stale` holds. A supervisor whose document cycle stayed
+/// open past the TTL (a long turn) used to let the request lapse silently, so
+/// the layout path's "safe-boundary recycle requested" never executed — five
+/// requests, zero recycles, one pid for three days. Honour it until the
+/// supervisor is no longer stale; consuming it settles the request.
+pub fn recycle_request_is_live(request: &RecycleRequest, now: u64, supervisor_stale: bool) -> bool {
+    recycle_request_is_fresh(request, now)
+        || (supervisor_stale && request.reason == RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,6 +80,24 @@ mod tests {
 
         assert_eq!(request.reason, RECYCLE_REQUEST_INSTALL_FANOUT);
         assert_eq!(request.requested_secs, 42);
+    }
+
+    #[test]
+    fn stale_supervisor_request_outlives_the_ttl_only_while_the_supervisor_is_stale() {
+        // GH #121: a request made at 16:16 for a supervisor whose cycle stayed
+        // open for longer than the TTL must still fire at the next boundary.
+        let stale = recycle_request(RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE, 1_000);
+        let long_after = 1_000 + 2 * 3_600;
+        assert!(!recycle_request_is_fresh(&stale, long_after));
+        assert!(recycle_request_is_live(&stale, long_after, true));
+        assert!(
+            !recycle_request_is_live(&stale, long_after, false),
+            "once the supervisor is fresh the lapsed request has nothing to repair"
+        );
+        // Other reasons keep the TTL regardless of staleness.
+        let fanout = recycle_request(RECYCLE_REQUEST_INSTALL_FANOUT, 1_000);
+        assert!(!recycle_request_is_live(&fanout, long_after, true));
+        assert!(recycle_request_is_live(&fanout, 1_000, false));
     }
 
     #[test]

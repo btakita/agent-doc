@@ -1191,6 +1191,63 @@ pub fn project_answered_free_text_strike(
     }))
 }
 
+/// `#closeoutstrandedmsg`: whether `current` is `committed` with exactly the
+/// answered queue nodes `node_keys` struck, each in EITHER binary-authored
+/// shape — the plain `~~text~~` of the `--done` completion projection or the
+/// `#ftstrike`-annotated strike — and every other byte unchanged.
+///
+/// One closeout can strike the same answered head through two projections:
+/// `#subagents do [#preflightdeadline]` landed plain via `--done` while the
+/// free-text note beside it landed annotated, both after the commit. The
+/// all-annotated [`project_answered_free_text_strike`] target then never
+/// matched the live document, so the binary's own strikes read as operator
+/// drift. Only the annotation suffix is normalized; which nodes are struck, and
+/// everything outside them, must match exactly.
+pub fn matches_answered_strike_in_any_projection_shape(
+    committed: &str,
+    current: &str,
+    node_keys: &[String],
+) -> Result<bool> {
+    if node_keys.is_empty() {
+        return Ok(false);
+    }
+    let plain = consume_queue_nodes_by_key(committed, node_keys)?;
+    if plain == committed {
+        return Ok(false);
+    }
+    Ok(strip_struck_free_text_annotations(&plain)? == strip_struck_free_text_annotations(current)?)
+}
+
+/// Remove the fixed `#ftstrike` annotation ([`annotate_struck_free_text_line`])
+/// from struck `agent:queue` lines, leaving the `~~text~~` strike itself.
+fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
+    let components = element::parse(content)?;
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(content.to_string());
+    };
+    let suffix = format!(
+        "~~{}{STRUCK_FREE_TEXT_NOTE}",
+        agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
+    );
+    let body = queue
+        .content(content)
+        .split_inclusive('\n')
+        .map(|line| {
+            let (core, newline) = line
+                .strip_suffix('\n')
+                .map_or((line, ""), |core| (core, "\n"));
+            match core.trim_end().strip_suffix(suffix.as_str()) {
+                Some(head) => format!("{head}~~{newline}"),
+                None => line.to_string(),
+            }
+        })
+        .collect::<String>();
+    Ok(queue.replace_content(content, &body))
+}
+
 /// Project completion of every live queue prompt matching `done_ids` into the
 /// supplied document bytes without performing IO.
 ///
@@ -1650,6 +1707,87 @@ mod tests {
 
     fn queue_doc(body: &str) -> String {
         format!("<!-- agent:queue -->\n{body}<!-- /agent:queue -->\n")
+    }
+
+    /// `#closeoutstrandedmsg`: the observed late shape — the id head struck
+    /// plain by `--done`, the free-text note struck with `#ftstrike` — is the
+    /// binary's own strike of the answered nodes; anything else is not.
+    #[test]
+    fn answered_strike_accepts_plain_and_annotated_mix_only() {
+        let response = "### Re: x\n\n> **Queue prompt:** #subagents do [#preflightdeadline]\n\n> **Queue prompt:** pick up steering\n\nDone.\n";
+        let committed = doc_with_queue_and_exchange(
+            "- #subagents do [#preflightdeadline]\n- pick up steering\n- later work",
+            response,
+        )
+        .replacen("queue_active: true", "queue: go", 1);
+        let projection = project_answered_free_text_strike(&committed, response, None)
+            .unwrap()
+            .expect("response answers both heads");
+        assert_eq!(projection.node_keys.len(), 2);
+        let note = format!(
+            "{}{STRUCK_FREE_TEXT_NOTE}",
+            agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
+        );
+        let mixed = committed
+            .replace(
+                "- #subagents do [#preflightdeadline]\n",
+                "- ~~#subagents do [#preflightdeadline]~~\n",
+            )
+            .replace(
+                "- pick up steering\n",
+                &format!("- ~~pick up steering~~{note}\n"),
+            );
+        assert_ne!(mixed, projection.target_content);
+        assert!(
+            matches_answered_strike_in_any_projection_shape(
+                &committed,
+                &mixed,
+                &projection.node_keys
+            )
+            .unwrap()
+        );
+        assert!(
+            matches_answered_strike_in_any_projection_shape(
+                &committed,
+                &projection.target_content,
+                &projection.node_keys
+            )
+            .unwrap()
+        );
+
+        let extra_strike = mixed.replace("- later work", "- ~~later work~~");
+        assert!(
+            !matches_answered_strike_in_any_projection_shape(
+                &committed,
+                &extra_strike,
+                &projection.node_keys
+            )
+            .unwrap(),
+            "a strike of an unanswered head is operator intent"
+        );
+        let new_prompt = mixed.replace("- later work", "- later work\n- new operator prompt");
+        assert!(
+            !matches_answered_strike_in_any_projection_shape(
+                &committed,
+                &new_prompt,
+                &projection.node_keys
+            )
+            .unwrap(),
+            "a new queue prompt is operator intent"
+        );
+        let half = committed.replace(
+            "- pick up steering\n",
+            &format!("- ~~pick up steering~~{note}\n"),
+        );
+        assert!(
+            !matches_answered_strike_in_any_projection_shape(
+                &committed,
+                &half,
+                &projection.node_keys
+            )
+            .unwrap(),
+            "every answered node must be struck"
+        );
     }
 
     #[test]

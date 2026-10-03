@@ -258,7 +258,17 @@ fn late_answered_free_text_strike_capture(
         )?;
         exact_or_response_separator_equivalent(&reaped, current_content, &response_body)
     };
-    if exact_struck_target || exact_reaped_target {
+    // `#closeoutstrandedmsg`: the `--done` projection may strike an answered
+    // head plain while `#ftstrike` annotates its neighbour; that mix is still
+    // exactly the binary's own strike of these nodes.
+    let exact_mixed_target = !exact_struck_target
+        && !exact_reaped_target
+        && agent_doc_queue::queue_consume::matches_answered_strike_in_any_projection_shape(
+            committed_content,
+            current_content,
+            &projection.node_keys,
+        )?;
+    if exact_struck_target || exact_reaped_target || exact_mixed_target {
         return Ok(Some(LateAnsweredFreeTextStrike::Exact(capture_id)));
     }
     let recurring = answered_free_text_head_recurs(

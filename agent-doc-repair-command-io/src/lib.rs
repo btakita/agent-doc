@@ -100,10 +100,11 @@ fn settle_failed_strict_closeout(
     if !failed_closeout_settled(closing, settled.as_ref()) {
         return Err(error);
     }
-    eprintln!(
-        "[respond] closeout error recovered: the retained closeout committed cycle `{}` on its own after: {error:#}",
-        closing.cycle_id
-    );
+    // `#closeoutstrandedmsg`: report the terminal outcome only. The superseded
+    // error carries its own remedy ("STRANDED ... Run agent-doc commit"), and
+    // quoting it beside "committed" told the agent to repair a turn that had
+    // already closed. The full error stays in ops.log below.
+    eprintln!("{}", recovered_closeout_report(&closing.cycle_id));
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -114,6 +115,14 @@ fn settle_failed_strict_closeout(
         ),
     );
     Ok(())
+}
+
+fn recovered_closeout_report(cycle_id: &str) -> String {
+    format!(
+        "[respond] closeout committed: the retained closeout committed cycle `{cycle_id}`; \
+         an earlier transient closeout error was superseded and needs no action \
+         (detail: strict_closeout_error_settled_committed in ops.log)"
+    )
 }
 
 const RESPOND_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(500);
@@ -1040,6 +1049,17 @@ fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResu
 #[cfg(test)]
 mod captured_finalize_resume_tests {
     use super::*;
+
+    /// `#closeoutstrandedmsg`: a settled closeout reports only its terminal
+    /// outcome, never the superseded error's STRANDED / `agent-doc commit` remedy.
+    #[test]
+    fn recovered_closeout_report_states_terminal_outcome_only() {
+        let report = recovered_closeout_report("cycle-1");
+        assert!(report.contains("committed cycle `cycle-1`"));
+        for stale in ["STRANDED", "refusing", "Run agent-doc", "agent-doc commit"] {
+            assert!(!report.contains(stale), "{stale} leaked into: {report}");
+        }
+    }
 
     #[test]
     fn convergence_failures_wait_for_a_state_edge() {

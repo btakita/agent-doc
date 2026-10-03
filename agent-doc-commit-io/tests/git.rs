@@ -2714,7 +2714,10 @@ Duplicate replay should stay live.
         // every pass — the shape the live trace ran in a loop.
         fs::write(
             &doc,
-            head.replace("- [ ] [#next] next work", "- [ ] [#next] next work, revised"),
+            head.replace(
+                "- [ ] [#next] next work",
+                "- [ ] [#next] next work, revised",
+            ),
         )
         .unwrap();
 
@@ -2915,6 +2918,96 @@ Duplicate replay should stay live.
             log.contains("commit_reconciled_late_answered_free_text_strike")
                 && log.contains(&capture.capture_id),
             "recovery must record the capture-scoped exact proof:\n{log}"
+        );
+    }
+
+    /// `#closeoutstrandedmsg` (agent-doc-bugs.md 2026-10-03 00:30): the commit
+    /// landed before its own queue strikes; the `--done` projection then struck
+    /// the id head plain while `#ftstrike` annotated the free-text head. That
+    /// mix must commit forward, not be refused as STRANDED operator drift.
+    #[test]
+    fn commit_recovers_late_mixed_done_and_free_text_strikes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let response = concat!(
+            "### Re: deadline — gpt-5\n\n",
+            "> **Queue prompt:** #subagents do [#deadline]\n\n",
+            "> **Queue prompt:** pick up steering\n\n",
+            "Finished and verified.\n",
+        );
+        let committed = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nqueue: go\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n- #subagents do [#deadline]\n- pick up steering\n- later work\n<!-- /agent:queue -->\n",
+            ),
+            response,
+        );
+        commit_file(
+            root,
+            "session.md",
+            &committed,
+            "response before late strikes",
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+            .unwrap();
+        let captured_response =
+            format!("<!-- patch:exchange -->\n{response}<!-- /patch:exchange -->\n");
+        let capture = agent_doc_capture_io::capture_response(&doc, &captured_response).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+
+        let mixed = committed
+            .replace(
+                "- #subagents do [#deadline]\n",
+                "- ~~#subagents do [#deadline]~~\n",
+            )
+            .replace(
+                "- pick up steering\n",
+                "- ~~pick up steering~~ — auto-struck: answered this cycle (#ftstrike)\n",
+            );
+        fs::write(&doc, &mixed).unwrap();
+
+        let did_commit = commit(&doc).expect("the binary's own late strikes must commit forward");
+        assert!(did_commit);
+        let landed = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed document");
+        assert!(
+            landed.contains("~~#subagents do [#deadline]~~")
+                && landed.contains("~~pick up steering~~")
+                && landed.contains("- later work"),
+            "HEAD must carry both binary strikes:\n{landed}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_reconciled_late_answered_free_text_strike")
+                && log.contains(&capture.capture_id),
+            "recovery must record the capture-scoped proof:\n{log}"
         );
     }
 

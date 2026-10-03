@@ -199,20 +199,63 @@ The `#sdktsiftedges` and XSD/WSDL subagents are still running.
 Upstream: opening an issue on constantitus/tree-sitter-jai, to offer the `scanner.c` fix and offer to publish `tree-sitter-jai` with them as owner, is waiting on the operator's go-ahead.
 
 `#sdktsiftedges` is still running. The exchange is long (132 lines), but the queue is active, so I'm not compacting.
+
+### Re: #sdktsiftedges done — opus-5.5 · 2026-10-03T03:14-04:00
+
+> **Queue prompt:** #subagent: [#sdktsiftedges]
+
+**Done.** The subagent pushed two commits to `main` without force, rebased over C, Odin, Jai, XSD and WSDL. `make check` exit 0, and the build is installed.
+- `5bc504c feat(graph-db): import external edge files (#sdktsiftedges)`
+- `c05c7af fix(graph-db): match trace REST operations by METHOD /path first, then operationId`. haiven's OpenAPI files have no `operationId`, so matches went from 0/195 to 139/195.
+
+**Command.** `tsift graph-db [--path P] [--scope S] import <FILE> [--source ID] [--format auto|edges|haiven-trace]`, plus `import --list` and `import --remove (--source ID | FILE)`.
+- **Format (`tsift-graph-edges/v1`):** `{format?, source?, nodes?: [{id, kind?, label?, join?, properties?}], edges: [{from, to, kind, properties?}]}`.
+- **Joins:** a node's `join` links it to an existing indexed node:
+  - by name, optionally narrowed by `languages` or `path`, with fallback `aliases`;
+  - by `path` + `line` (the declaration site);
+  - by `path` alone, for a file node.
+
+  A name that matches 2 to 8 nodes links to all of them; more than 8 links to none.
+- **Unmatched endpoints:** an undeclared endpoint that matches nothing becomes an `external` node. These are counted, not treated as errors.
+- **Storage and re-import:** imports are stored under `graph-imports/` and re-applied on every refresh, so they survive `refresh --rebuild`. Re-importing the same `source` replaces that source's rows.
+- **trace.json:** recognised automatically. The sibling `model.json` adds `carried_by` links (contract → event or request) and `used_by` links (REST component → operation).
+- **Docs:** specified in `specs/graph.md` under "External Edge Import", with updates to `SPEC.md`, the README and VERSIONS.
+
+**Real import.** `trace.json` exists only on the unmerged haiven-sdk branch `feat/codegen-trace` (PR #62). The subagent read it there and did not modify it. It then re-indexed the `haiven-contracts` scope to pick up the 3,216 JSON symbols and imported the trace. Only `.tsift/` state was written.
+- **Loaded:** 1,640 nodes and 1,762 edges.
+- **Matched:** 309 nodes matched indexed ones, 81 of them to more than one.
+- **Unmatched:** 1,307, mostly SDK declaration sites whose files aren't in this scope. 0 `external` endpoints.
+- **Blast radius** from `ChatMessageV0` with `neighborhood --depth 2`:
+  - its declarations in TypeScript, C#, C++ and GDScript;
+  - the events that carry it: `chat.message`, `chat.message.updated` and `chat.message.deleted`;
+  - its nested record type;
+  - the conformance scenario `gaming/v0#an-event-carries-no-correlation`.
+
+**Follow-ups filed:**
+- `#graphrefreshperf`: a root-scope refresh over the SDK tree ran over 13 minutes, about half of it in `link_ast_navigation_edges`. This slowness already existed and is what blocked the root-graph import.
+- `#neighborhoodlimit0`: the default output budget hid 11 declarations, and `--limit 0` doesn't lift it.
+- `#sdktraceroot` [recommended]: after the refresh fix, import into the root graph and investigate the unmatched trace nodes.
+
+Worth knowing: the trace links only 1 of 228 operations to a scenario. That's a gap in haiven-sdk's trace data, not in tsift.
+
+`#jaicrate` is still running. The exchange is long (163 lines), but the queue is active, so I'm not compacting.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#jaicrate]
-- ~~⏭️ do [#xsdcontract]~~
+- ⏭️ do [#jaicrate]
+- ~~do [#xsdcontract]~~
 - ~~do [#wsdlcontract]~~
 - ~~do [#releasepublishbindings]~~
 - ~~#subagent: Add C bindings~~
 - ~~#subagent: Add Odin bindings~~
 - ~~#subagent: Add Jai bindings~~
-- #subagent: [#sdktsiftedges]
+- ~~#subagent: [#sdktsiftedges]~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#graphrefreshperf]
+- do [#neighborhoodlimit0]
+- do [#sdktraceroot]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -221,8 +264,10 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#sdktsiftedges] [recommended] Import an external edge file into graph-db (e.g. tsift graph-db import <file>), then load haiven-sdk codegen/trace.json (contract node -> per-language declaration -> conformance scenario, haiven-sdk #62), so a contract change's blast radius across SDKs is one graph query. Contract nodes are already indexed as of 8022f34 (#sdktsiftcontracts), so trace.json's model nodes can join to them by name. Moved from haiven-dev tasks/sdk.md.
-- [ ] 🚧 [#jaicrate] Move the vendored Jai grammar into a new workspace crate tsift-tree-sitter-jai (standard tree-sitter grammar crate API: LANGUAGE LanguageFn + NODE_TYPES; MIT-0 LICENSE + upstream constantitus/tree-sitter-jai@96440b0 provenance), make lang-jai opt-in (off by default) and depend on it, build release binaries with --features all-languages, publish the new crate before tsift-graph. Keeps the 29 MB parser.c out of default tsift downloads.
+- [ ] [#jaicrate] Move the vendored Jai grammar into a new workspace crate tsift-tree-sitter-jai (standard tree-sitter grammar crate API: LANGUAGE LanguageFn + NODE_TYPES; MIT-0 LICENSE + upstream constantitus/tree-sitter-jai@96440b0 provenance), make lang-jai opt-in (off by default) and depend on it, build release binaries with --features all-languages, publish the new crate before tsift-graph. Keeps the 29 MB parser.c out of default tsift downloads.
+- [ ] [#graphrefreshperf] Root-scope graph-db refresh over the haiven-sdk tree (sdk-ruff worktree of the feat/codegen-trace branch) ran >13 min without finishing; ~50% of samples in link_ast_navigation_edges plus heavy libc. Profile, fix the hot path, add a perf-gate case.
+- [ ] [#neighborhoodlimit0] graph-db neighborhood: the default output budget drops nodes per kind (11 ChatMessageV0 declarations hidden) and --limit 0 does not lift it. Make --limit 0 mean unlimited (or add --all), and report the dropped counts in the envelope.
+- [ ] [#sdktraceroot] [recommended] After #graphrefreshperf: import haiven-sdk codegen/trace.json into the ROOT graph so per-language declarations join by path:line, and investigate unjoined trace nodes (8/51 contracts, 10/23 events, 56/195 REST ops, 50 components); check for a contracts-revision mismatch vs the trace pin.
 <!-- /agent:backlog -->
 
 ## Review

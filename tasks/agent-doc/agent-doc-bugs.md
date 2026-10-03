@@ -623,6 +623,46 @@ Done, and the `#spec-test-build-install-commit-push` pipeline ran. agent-doc com
 **Caveat until phase 2:** dispatch is still offered only for lines added since the last cycle. With `subagents` on the marker, a line that was already queued drains inline, which is the problem `qsubattr2` fixes.
 
 `agent-doc-start-runtime-io/src/lib.rs` has an uncommitted change from another session. I left it untouched and didn't commit it. Running `make check` built that file too, and it stayed green.
+
+### Re: qsubattr2 (eligibility from current state + cap) and GH #121 — opus-5.5 · 2026-10-03T16:11-04:00
+
+> **Queue prompt:** do [#qsubattr2]
+
+Done, with the spec/test/build/install/commit/push preset. agent-doc commit `be4e3893c` is pushed, `make install` succeeded, and the superproject is at `9608a31c1c`.
+
+**What changed**
+- **Dispatch is decided from the current queue.** Under `<!-- agent:queue subagents=N -->`, preflight lists every unclaimed eligible head in queue order, up to N minus the live claims. Before, it listed only lines that were new since the last seed. A head whose claim was missed is now offered again instead of draining inline, which fixes weakness 1 in the plan.
+- **Held heads.** These are heads over the cap, or behind an `after=` / ordered-list predecessor that is still queued. `claimed_items_for_content` adds them to the exclusion set. That set is the one every consumer already reads: selection, drainable count, continuation, the Stop hook and the supervisor. So a held head is treated exactly like a claimed one, and the turn ends quietly when only claimed and held heads remain. `ledger_claimed_items_for_content` keeps the raw ledger claims for counting the cap.
+- **Code:** a pure planner, `plan_queue_subagent_dispatch`, in `agent_doc_queue::subagent_intent`; `queue_attr_subagent_heads` in realtime; and `queue_attr_subagent_plan` in queue-io.
+- **Spec:** §queue attributes in `specs/02-document-format.md` now describes eligibility from the current queue, the cap and held heads.
+
+**Tests**
+- Pure tests cover the cap together with existing claims, and holding a head on its `after=` predecessor until that predecessor closes.
+- An end-to-end queue-io test with a real state.db and claim ledger checks four things: a seeded head is still offered, `[inline]` drains in the session, live claims count against the cap, and the held head is excluded from the drainable count.
+- Two mutations were each checked and both fail that test: removing the current-queue path, and removing the held-head exclusion.
+- `make check` exited 0, with all 10668 tests passing (262 skipped).
+
+**Two load-sensitive failures, fixed rather than waived.** The machine load average reached about 80–128 while the three subagents ran `make check`.
+- `compact_replays_pending_queue_delete_before_rewrite…`: the editor-cut clear ran past its 250ms limit while the epoch was still present, so compact logged `clear_failed` and left the epoch unconsumed. That could happen in production too. Compact now retries the clear up to 3 times with a short backoff before reporting failure.
+- `stale_delivery_worker_retains_target…`: its "under 1s" fail-fast bound took 1.28s under load, while the path itself runs in about 0.03s. I aligned it to the 3s bound its sibling tests already use.
+
+> **Queue prompt:** #subagents: https://github.com/btakita/agent-doc/issues/121
+
+**GH #121 is fixed by a subagent**, commit `f64c32d53`, pushed as a fast-forward. The issue is closed and its claim is released.
+- **Root cause:** the #109 stale check ran *after* tmux-router had already chosen the column pane, so it only logged and requested a recycle.
+- **False stale verdicts:** staleness was judged against the checking process's own binary instead of the supervisor's, and the agent-written `⚠ STALE SUPERVISOR` title counted as evidence of staleness.
+- **Recycle never ran:** recycle requests expired after 900s while a cycle stayed open.
+- **The fix:**
+  - A gate excludes stale column panes before the router selects one. The focused document's own pane is still admitted, and that is logged.
+  - A supervisor is stale only when its `/proc/<pid>/exe` points at a deleted file.
+  - The title no longer counts as evidence.
+  - A stale recycle request stays live until it is consumed.
+  - Seven mutations were checked and all fail the tests. The subagent's `make check` was green, and this `make install` includes the fix.
+- **Not addressed:** the issue's ask 5 (one window shared across documents) is a design question that overlaps #120.
+
+**Mid-turn steering arrived late.** I filed this as `steerreplicachurn` at the top of the backlog. Your three queue lines sat in the JetBrains buffer for about 4–5 minutes. During that time the editor replica kept deregistering and re-registering with a 34-byte bootstrap. The edits reached the controller in one 7 MB delta at 19:24:16Z. The hook did report them as soon as they arrived; the delay was in delivery, not in the hook.
+
+#120 and #122 are still running in their subagents. Their claims are held, and both items stay queued until they report back.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -633,7 +673,7 @@ Done, and the `#spec-test-build-install-commit-push` pipeline ran. agent-doc com
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~do [#qsubattr1]~~
-- do [#qsubattr2]
+- ~~do [#qsubattr2]~~
 - do [#qsubattr3]
 - do [#qsubattr4]
 - do [#qsubattr5]
@@ -644,7 +684,7 @@ Done, and the `#spec-test-build-install-commit-push` pipeline ran. agent-doc com
 
 
 <!-- agent:backlog priority -->
-- [ ] [#qsubattr2] [agent-doc] Queue subagents attribute, phase 2 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): under the attr, dispatch eligibility comes from current state (drop the new-since-seed filter), with a concurrency cap of N-active_claims and ordering dependencies; capped/claimed heads are not inline-drainable; SimWorld tests for missed claim re-offered, cap, and after-A-do-B.
+- [ ] [#steerreplicachurn] [agent-doc] Operator queue edits reached the CP only ~4-5 min late, so mid-turn steering could not surface them (2026-10-03, agent-doc-bugs.md): from 19:19:56Z to 19:24:16Z the JetBrains replica deregistered and re-registered every 10-60s with bootstrap_bytes=34 (crdt_replica_register/deregister in ops.log), the CRDT text stayed len=59241, and the edits arrived in one crdt_document_op_delta_ingested of delta_len=7165514 at 19:24:16Z. Find what drives the register churn (a concurrent make install or plugin reload is suspected), make operator ops flush on re-register, and add SimWorld coverage showing an edit made during churn is visible to the midturn hook within seconds.
 - [ ] [#qsubattr3] [agent-doc] Queue subagents attribute, phase 3 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): `queue claim --refresh` heartbeat; under the attr an expired claim makes the head eligible for dispatch again, never inline drain; test for no duplicate work.
 - [ ] [#qsubattr4] [agent-doc] Queue subagents attribute, phase 4 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): coordinator contract in SKILL.md + respond/planning-dispatch runbooks for all harnesses (claim/dispatch/refresh, serialized integration, one make install per batch, release then close, orchestrate --mode parallel fallback for harnesses without an Agent tool).
 - [ ] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): dogfood in tasks/software/tsift.md (replace per-line #subagent: prefixes with subagents=3); verify via queue claims + ops.log that each head is dispatched exactly once and none drain inline.

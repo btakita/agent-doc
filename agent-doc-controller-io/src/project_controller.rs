@@ -461,12 +461,261 @@ pub(crate) struct PaneLayoutProvenance {
     /// Pane count of the last tmux observation before this generation, when
     /// one had been recorded.
     pub observed_panes: Option<usize>,
+    /// The editor state-plane version this generation is ordered after
+    /// (`layoutpublisherarbiter`). A plugin publication's basis is its own
+    /// plane version; a route's is the newest `pane_layout_desired` frame on
+    /// the plane when the route published, so every frame at or below it
+    /// predates the route's intent. Other publishers inherit the basis of the
+    /// generation they replaced. `None` means no plane frame has been seen.
+    pub plane_basis: Option<u64>,
+    /// The publisher whose positive observation fixed this generation's column
+    /// *count*. An `ensure` route and a focus escalation only re-place columns
+    /// inside the structure they derived from, so they inherit it; a plugin
+    /// publication and an `exact` route own the structure they publish.
+    pub structure_owner: PaneLayoutPublisher,
 }
 
 impl PaneLayoutProvenance {
     /// True when applying `applied_columns` would narrow the retained layout.
     pub(crate) fn narrows(&self, applied_columns: usize) -> bool {
         applied_columns < self.retained_columns
+    }
+}
+
+/// How an editor route asked for its columns, as far as publication
+/// arbitration is concerned (`layoutpublisherarbiter`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PaneLayoutRouteClaim {
+    /// `layout_mode=exact`: a detected split, so the route owns the structure.
+    Exact,
+    /// `layout_mode=ensure`: a focus fallback that re-places columns inside
+    /// the retained structure and never owns it.
+    Ensure,
+}
+
+/// What a publication claims, beyond its invocation, when it is arbitrated
+/// against the generation it would replace (`layoutpublisherarbiter`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PaneLayoutClaim {
+    pub publisher: PaneLayoutPublisher,
+    /// Set for `PaneLayoutPublisher::Route` only.
+    pub route: Option<PaneLayoutRouteClaim>,
+    /// A route's plane basis: the newest `pane_layout_desired` frame version on
+    /// the plane when it published. `None` inherits the replaced basis.
+    pub plane_basis: Option<u64>,
+}
+
+impl From<PaneLayoutPublisher> for PaneLayoutClaim {
+    fn from(publisher: PaneLayoutPublisher) -> Self {
+        Self {
+            publisher,
+            route: None,
+            plane_basis: None,
+        }
+    }
+}
+
+impl PaneLayoutClaim {
+    pub(crate) fn route(route: PaneLayoutRouteClaim, plane_basis: Option<u64>) -> Self {
+        Self {
+            publisher: PaneLayoutPublisher::Route,
+            route: Some(route),
+            plane_basis,
+        }
+    }
+}
+
+/// One publication displaced by another (`layoutpublisherarbiter`). Logged as
+/// `pane_layout_publication_superseded`; nothing about a route/plugin conflict
+/// is resolved silently any more.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PaneLayoutSupersession {
+    pub winner: PaneLayoutPublisher,
+    pub loser: PaneLayoutPublisher,
+    pub reason: &'static str,
+    /// The generation that won, when it is a published generation.
+    pub winner_generation: Option<u64>,
+    /// The generation that lost, when it had been published (a refused
+    /// incoming publication never gets one).
+    pub loser_generation: Option<u64>,
+    pub winner_plane_basis: Option<u64>,
+    pub loser_plane_basis: Option<u64>,
+    pub winner_columns: Vec<String>,
+    pub loser_columns: Vec<String>,
+}
+
+impl PaneLayoutSupersession {
+    pub(crate) fn log_line(&self) -> String {
+        let version =
+            |value: Option<u64>| value.map_or_else(|| "none".to_string(), |v| v.to_string());
+        format!(
+            "pane_layout_publication_superseded winner={} loser={} reason={} winner_generation={} loser_generation={} winner_plane_basis={} loser_plane_basis={} winner_columns={} loser_columns={} winner={:?} loser={:?}",
+            self.winner.label(),
+            self.loser.label(),
+            self.reason,
+            version(self.winner_generation),
+            version(self.loser_generation),
+            version(self.winner_plane_basis),
+            version(self.loser_plane_basis),
+            self.winner_columns.len(),
+            self.loser_columns.len(),
+            self.winner_columns,
+            self.loser_columns,
+        )
+    }
+}
+
+/// The arbiter's verdict on one incoming publication.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PaneLayoutArbitration {
+    /// Publish. `displaced` names the replaced publication when it came from
+    /// the other publisher and its column set changes.
+    Accept {
+        plane_basis: Option<u64>,
+        structure_owner: PaneLayoutPublisher,
+        displaced: Option<PaneLayoutSupersession>,
+    },
+    /// Do not publish; the retained generation stays. The supersession names
+    /// the incoming publication as the loser.
+    Refuse(PaneLayoutSupersession),
+}
+
+/// Arbitrate a route publication against a plugin publication, and every
+/// other publication pair, deterministically (`layoutpublisherarbiter`).
+///
+/// The route layout publisher and `plugin_publication` both publish the one
+/// retained desired layout. They used to be applied in arrival order, so
+/// which of two disagreeing layouts tmux showed was a function of thread
+/// timing, and the losing layout left no trace (GH #120 asks 2-3). The rule:
+///
+/// 1. **Order is the editor state plane's, not arrival.** Every generation
+///    carries a `plane_basis`. A plugin publication newer than the route it
+///    would replace (`plane_version > basis`) is a newer operator observation
+///    of the visible split and wins; one at or below the basis was already on
+///    the plane when the route published, so the route is the newer operator
+///    intent and the plugin frame is refused.
+/// 2. **The visible split owns the column count; an `ensure` route does not.**
+///    An `ensure` route is the editor's single-file focus fallback: it can
+///    move focus and put its document in the focus column, but it inherits
+///    the structure owner of what it replaced and (in the route merge) may not
+///    widen a split a plugin publication owns.
+/// 3. **An `exact` route is a detected split** — explicit, newer operator
+///    intent — and replaces a plugin publication it disagrees with.
+///
+/// Publications between any other pair, or from one publisher replacing its
+/// own generation, are accepted unchanged. A displacement is logged only when
+/// the column set changes; a focus move inside the same columns displaces no
+/// layout.
+pub(crate) fn arbitrate_pane_layout_publication(
+    current: Option<&PaneLayoutDesired>,
+    incoming_columns: &[String],
+    incoming_plane_version: Option<u64>,
+    claim: PaneLayoutClaim,
+) -> PaneLayoutArbitration {
+    let inherited_basis = current.and_then(|current| current.provenance.plane_basis);
+    let plane_basis = match claim.publisher {
+        PaneLayoutPublisher::PluginPublication => incoming_plane_version.or(inherited_basis),
+        PaneLayoutPublisher::Route => claim.plane_basis.max(inherited_basis),
+        _ => inherited_basis,
+    };
+    let inherited_owner = current
+        .map(|current| current.provenance.structure_owner)
+        .filter(|owner| *owner != PaneLayoutPublisher::Unattributed);
+    let structure_owner = match (claim.publisher, claim.route) {
+        (PaneLayoutPublisher::Route, Some(PaneLayoutRouteClaim::Ensure))
+        | (PaneLayoutPublisher::Escalation, _) => {
+            // Re-placing columns inside a structure keeps its owner, unless
+            // the publication changed the count.
+            match current {
+                Some(current) if current.invocation.columns.len() == incoming_columns.len() => {
+                    inherited_owner.unwrap_or(claim.publisher)
+                }
+                _ => claim.publisher,
+            }
+        }
+        (publisher, _) => publisher,
+    };
+    let accept = |displaced| PaneLayoutArbitration::Accept {
+        plane_basis,
+        structure_owner,
+        displaced,
+    };
+    let Some(current) = current else {
+        return accept(None);
+    };
+    let current_publisher = current.provenance.publisher;
+    let columns_change = current.invocation.columns.as_slice() != incoming_columns;
+    let supersession = |winner, loser, reason, incoming_wins: bool| {
+        let (winner_generation, loser_generation) = if incoming_wins {
+            (None, Some(current.generation))
+        } else {
+            (Some(current.generation), None)
+        };
+        let (winner_plane_basis, loser_plane_basis) = if incoming_wins {
+            (plane_basis, current.provenance.plane_basis)
+        } else {
+            (current.provenance.plane_basis, incoming_plane_version)
+        };
+        let (winner_columns, loser_columns) = if incoming_wins {
+            (
+                incoming_columns.to_vec(),
+                current.invocation.columns.clone(),
+            )
+        } else {
+            (
+                current.invocation.columns.clone(),
+                incoming_columns.to_vec(),
+            )
+        };
+        PaneLayoutSupersession {
+            winner,
+            loser,
+            reason,
+            winner_generation,
+            loser_generation,
+            winner_plane_basis,
+            loser_plane_basis,
+            winner_columns,
+            loser_columns,
+        }
+    };
+    match (claim.publisher, current_publisher) {
+        (PaneLayoutPublisher::PluginPublication, PaneLayoutPublisher::Route) => {
+            let route_basis = current.provenance.plane_basis.unwrap_or(0);
+            match incoming_plane_version {
+                Some(version) if version <= route_basis => {
+                    PaneLayoutArbitration::Refuse(supersession(
+                        PaneLayoutPublisher::Route,
+                        PaneLayoutPublisher::PluginPublication,
+                        "plane_version_predates_route",
+                        false,
+                    ))
+                }
+                _ => accept(columns_change.then(|| {
+                    supersession(
+                        PaneLayoutPublisher::PluginPublication,
+                        PaneLayoutPublisher::Route,
+                        "newer_plane_version",
+                        true,
+                    )
+                })),
+            }
+        }
+        (PaneLayoutPublisher::Route, PaneLayoutPublisher::PluginPublication) => {
+            let reason = match claim.route {
+                Some(PaneLayoutRouteClaim::Exact) => "exact_route_intent",
+                _ => "ensure_route_focus_column",
+            };
+            accept(columns_change.then(|| {
+                supersession(
+                    PaneLayoutPublisher::Route,
+                    PaneLayoutPublisher::PluginPublication,
+                    reason,
+                    true,
+                )
+            }))
+        }
+        _ => accept(None),
     }
 }
 
@@ -971,6 +1220,15 @@ struct ControllerPaneLayoutGraph {
     sink_ready: Source<bool>,
     next_generation: AtomicU64,
     publication_state: Mutex<PaneLayoutPublicationState>,
+    /// Publications the arbiter displaced or refused, drained and logged by
+    /// whichever caller publishes next (`layoutpublisherarbiter`). A queue,
+    /// not a slot, so no displacement is lost to a concurrent publisher.
+    supersessions: Mutex<Vec<PaneLayoutSupersession>>,
+    /// The newest editor state-plane version any publication has carried in,
+    /// whatever its verdict (applied, deferred, coalesced or refused). A route
+    /// waits for this to reach the plane's newest frame before it merges, so
+    /// the frames ordered before it are what it merges over.
+    plane_seen: AtomicU64,
     /// The latest generation published by `set_desired`. The structural-effect
     /// worker binds its own generation against this so the sync body can bail
     /// early when a newer layout supersedes the one it is applying.
@@ -1006,7 +1264,7 @@ struct PaneLayoutRouteLease {
 struct PendingPaneLayoutPublication {
     invocation: ControllerTmuxLayoutSyncInvocation,
     source_plane_version: Option<u64>,
-    publisher: PaneLayoutPublisher,
+    claim: PaneLayoutClaim,
 }
 
 impl ControllerPaneLayoutGraph {
@@ -1121,6 +1379,8 @@ impl ControllerPaneLayoutGraph {
             sink_ready,
             next_generation: AtomicU64::new(1),
             publication_state: Mutex::new(PaneLayoutPublicationState::default()),
+            supersessions: Mutex::new(Vec::new()),
+            plane_seen: AtomicU64::new(0),
             published_generation: Arc::new(AtomicU64::new(0)),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
@@ -1196,12 +1456,22 @@ impl ControllerPaneLayoutGraph {
         mut invocation: ControllerTmuxLayoutSyncInvocation,
         source_plane_version: Option<u64>,
         publication: PaneLayoutPublication,
-        publisher: PaneLayoutPublisher,
+        claim: impl Into<PaneLayoutClaim>,
     ) -> PaneLayoutDesired {
+        let claim = claim.into();
         if invocation.caller_kind.is_empty() {
             invocation.caller_kind = "projection".to_string();
         }
         let mut publication_state = self.publication_state.lock();
+        if let Some(version) = source_plane_version {
+            // A deferred or refused frame still counts as seen; wake a route
+            // awaiting plane catch-up even when no generation is minted. The
+            // store happens under `wait_lock` so the wake-up cannot fall
+            // between the waiter's check and its wait.
+            let _wait = self.wait_lock.lock();
+            self.plane_seen.fetch_max(version, Ordering::SeqCst);
+            self.waiters.notify_all();
+        }
         if let Some(active_route) = &publication_state.active_route {
             if publication == PaneLayoutPublication::CoalesceIdentical
                 && invocation.caller_kind == "automatic"
@@ -1210,7 +1480,7 @@ impl ControllerPaneLayoutGraph {
                     publication_state.pending_passive = Some(PendingPaneLayoutPublication {
                         invocation,
                         source_plane_version,
-                        publisher,
+                        claim,
                     });
                     return self
                         .ctx
@@ -1228,9 +1498,9 @@ impl ControllerPaneLayoutGraph {
                 publication_state.pending_passive = None;
             }
         }
-        let desired =
-            self.publish_desired(invocation, source_plane_version, publication, publisher);
+        let desired = self.publish_desired(invocation, source_plane_version, publication, claim);
         if publication == PaneLayoutPublication::FreshRouteIntent
+            && desired.provenance.publisher == claim.publisher
             && let Some(document) = desired.invocation.focus.clone()
         {
             publication_state.active_route = Some(PaneLayoutRouteLease {
@@ -1246,8 +1516,9 @@ impl ControllerPaneLayoutGraph {
         invocation: ControllerTmuxLayoutSyncInvocation,
         source_plane_version: Option<u64>,
         publication: PaneLayoutPublication,
-        publisher: PaneLayoutPublisher,
+        claim: PaneLayoutClaim,
     ) -> PaneLayoutDesired {
+        let publisher = claim.publisher;
         if publication == PaneLayoutPublication::CoalesceIdentical
             && let Some(mut current) = self.ctx.get(&self.desired)
             && current.invocation == invocation
@@ -1262,7 +1533,32 @@ impl ControllerPaneLayoutGraph {
             self.waiters.notify_all();
             return current;
         }
+        // `layoutpublisherarbiter`: decide against the generation this would
+        // replace before minting a generation, so a refused publication never
+        // supersedes an in-flight effect.
+        let current = self.ctx.get(&self.desired);
+        let (plane_basis, structure_owner, displaced) = match arbitrate_pane_layout_publication(
+            current.as_ref(),
+            &invocation.columns,
+            source_plane_version,
+            claim,
+        ) {
+            PaneLayoutArbitration::Refuse(refused) => {
+                self.supersessions.lock().push(refused);
+                self.waiters.notify_all();
+                return current.expect("a refused publication always has a retained generation");
+            }
+            PaneLayoutArbitration::Accept {
+                plane_basis,
+                structure_owner,
+                displaced,
+            } => (plane_basis, structure_owner, displaced),
+        };
         let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
+        if let Some(mut displaced) = displaced {
+            displaced.winner_generation = Some(generation);
+            self.supersessions.lock().push(displaced);
+        }
         // Publish the new generation so an in-flight structural effect for an
         // older generation can detect supersession and bail early.
         self.published_generation
@@ -1280,6 +1576,8 @@ impl ControllerPaneLayoutGraph {
                 .ctx
                 .get(&self.observed)
                 .map(|observation| observation.report.panes.len()),
+            plane_basis,
+            structure_owner,
         };
         let desired = PaneLayoutDesired {
             generation,
@@ -1319,9 +1617,32 @@ impl ControllerPaneLayoutGraph {
                 pending.invocation,
                 pending.source_plane_version,
                 PaneLayoutPublication::CoalesceIdentical,
-                pending.publisher,
+                pending.claim,
             )
         })
+    }
+
+    /// Take every publication the arbiter displaced or refused since the last
+    /// drain, oldest first (`layoutpublisherarbiter`).
+    fn drain_supersessions(&self) -> Vec<PaneLayoutSupersession> {
+        std::mem::take(&mut *self.supersessions.lock())
+    }
+
+    /// Wait until a publication carrying editor state-plane version `target`
+    /// or newer has been seen, for at most `timeout`. True when it was.
+    fn await_plane_seen(&self, target: u64, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut guard = self.wait_lock.lock();
+        loop {
+            if self.plane_seen.load(Ordering::SeqCst) >= target {
+                return true;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            self.waiters.wait_for(&mut guard, deadline - now);
+        }
     }
 
     fn actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
@@ -1687,6 +2008,16 @@ impl ControllerStatePlaneGraph {
             }
         });
         effects.insert(channel, effect);
+    }
+
+    /// The plane version of the newest frame retained on `channel`.
+    fn latest_plane_version(&self, channel: &str) -> Option<u64> {
+        if !self.histories.is_present(&channel.to_string()) {
+            return None;
+        }
+        self.histories
+            .observe(&self.ctx, &channel.to_string())
+            .and_then(|frames| frames.last().map(|frame| frame.plane_version))
     }
 
     fn channel_dependency(&self, channel: &str) -> Arc<ControllerStatePlaneChannelDependency> {
@@ -6609,14 +6940,32 @@ impl ControllerRuntime {
         invocation: ControllerTmuxLayoutSyncInvocation,
         source_plane_version: Option<u64>,
         publication: PaneLayoutPublication,
-        publisher: PaneLayoutPublisher,
+        claim: impl Into<PaneLayoutClaim>,
     ) -> PaneLayoutDesired {
         self.pane_layout_graph.set_desired_attributed(
             invocation,
             source_plane_version,
             publication,
-            publisher,
+            claim,
         )
+    }
+
+    /// Publications the layout arbiter displaced or refused since the last
+    /// drain (`layoutpublisherarbiter`).
+    fn drain_pane_layout_supersessions(&self) -> Vec<PaneLayoutSupersession> {
+        self.pane_layout_graph.drain_supersessions()
+    }
+
+    /// The newest `pane_layout_desired` frame version on the editor state
+    /// plane, whether or not it has been projected yet.
+    fn pane_layout_plane_head(&self) -> Option<u64> {
+        self.state_plane_graph
+            .latest_plane_version(PANE_LAYOUT_DESIRED_STATE_CHANNEL)
+    }
+
+    /// Wait (bounded) until the layout graph has seen plane version `target`.
+    fn await_pane_layout_plane_seen(&self, target: u64, timeout: Duration) -> bool {
+        self.pane_layout_graph.await_plane_seen(target, timeout)
     }
 
     fn pane_layout_desired(&self) -> Option<PaneLayoutDesired> {

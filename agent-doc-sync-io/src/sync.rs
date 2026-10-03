@@ -2322,7 +2322,9 @@ pub fn pane_process_tree_owns_document(tmux: &Tmux, pane_id: &str, file: &Path) 
 /// Returns `Ok(true)` when the pane was reparented, `Ok(false)` when no
 /// promotion was needed (pane not alive, window unresolved, or not a stash
 /// window) or the move could not be completed. Best-effort: a failed move is
-/// logged and reported as `Ok(false)` so focus still selects the pane in place.
+/// logged and reported as `Ok(false)`; focus then re-observes the pane and
+/// refuses to select it while it is still in the stash, because a pane in a
+/// non-active window is never a focus target (`layoutpublisherarbiter`).
 pub fn promote_pane_to_agent_doc_window(tmux: &Tmux, pane_id: &str) -> Result<bool> {
     if !tmux.pane_alive(pane_id) {
         return Ok(false);

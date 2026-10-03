@@ -303,6 +303,18 @@ thread or in a detached periodic timer.
   ordered pane list is not a visible column and must not satisfy a layout slot or
   stand in as `expected_focus_pane`, so a stashed pane never counts toward
   `observation=synced`.
+- A pane in a non-active window is never a layout focus target
+  (`layoutpublisherarbiter`, GH #120). The focus effect reads the candidate
+  pane's `#{window_id}`, `#{window_active}` and `#{window_name}` in one tmux
+  query. A `stash`/`stash-*` window is refused by name
+  (`focus_pane_stashed:...`) whether or not the layout window resolved; a known
+  layout window refuses every other window by the drift rule above; and when
+  the layout window is unresolved, a pane whose window is not its session's
+  active window is refused as
+  `focus_pane_window_inactive:<file>:<pane>:live_window=<w>:live_window_name=<n>`,
+  because the tmux selection also runs `select-window` and would switch the
+  operator's client to a window they did not pick. An unknown activity answer
+  is never a refusal.
 - A focus request for a document this controller does not own is re-addressed,
   not refused (`#focuscrossroot`). Each project controller answers focus from
   its own actor store, keyed on its own `project_root`. An IDE rooted at the
@@ -361,8 +373,12 @@ thread or in a detached periodic timer.
   that pane is parked in a `stash` window it best-effort reparents the pane into
   the session's `agent-doc` window before selection, not merely selecting it in
   place inside the stash. Promotion is single-pane scoped
-  (`sync::promote_pane_to_agent_doc_window`): a failed move is logged and focus
-  still selects the pane in place. It does not run full stash consolidation.
+  (`sync::promote_pane_to_agent_doc_window`): a failed or declined move is
+  logged, focus re-observes the pane, and while it is still in a `stash` window
+  focus refuses to select it (`layoutpublisherarbiter`, GH #120) — a pane in a
+  non-active window is never a focus target, and `select-pane` there would also
+  `select-window` the operator onto the invisible stash. It does not run full
+  stash consolidation.
   Keep this aligned in `focus.rs`, `sync.rs`, and this spec.
 - Editor automatic tab-to-pane sync must not use `focus` as a substitute for
   the retained exact-visible layout projection; beyond the selected-pane

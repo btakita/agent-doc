@@ -199,6 +199,27 @@ fn promote_and_select(
     pane: &str,
     defer_stash_promote: bool,
 ) -> Result<()> {
+    promote_and_select_with(effects, tmux, pane, defer_stash_promote, |pane| {
+        tmux.select_pane(pane)
+    })
+}
+
+/// [`promote_and_select`] with the `select-pane` effect injected.
+///
+/// `layoutpublisherarbiter` (GH #120): a pane in the stash window is never a
+/// focus target. `Tmux::select_pane` also runs `select-window`, so selecting a
+/// pane the promotion left in the stash switches the operator's client to the
+/// invisible `1:stash` window. The blocking path used to do exactly that
+/// whenever the promotion failed or declined (`Ok(false)`); it now re-observes
+/// the pane after promoting and refuses to select it while it is still
+/// stashed, the same refusal the deferred path makes before promoting.
+fn promote_and_select_with(
+    effects: &impl FocusEffects,
+    tmux: &Tmux,
+    pane: &str,
+    defer_stash_promote: bool,
+    select_pane: impl FnOnce(&str) -> Result<()>,
+) -> Result<()> {
     if defer_stash_promote {
         // Editor-navigation focus defers stash reparenting to the sync
         // reconciler (`#jb-nav-3pane-promote-swap`) so the additive promote does
@@ -215,12 +236,19 @@ fn promote_and_select(
             );
             return Ok(());
         }
-        return tmux.select_pane(pane);
+        return select_pane(pane);
     }
     if let Err(e) = effects.promote_pane_to_agent_doc_window(tmux, pane) {
         eprintln!("[focus] stash promotion check failed for {}: {}", pane, e);
     }
-    tmux.select_pane(pane)
+    if effects.pane_in_stash_window(tmux, pane) {
+        eprintln!(
+            "[focus] pane {} is still stashed after promotion; refusing to select a pane in a non-active window",
+            pane
+        );
+        return Ok(());
+    }
+    select_pane(pane)
 }
 
 pub fn run_with_tmux(
@@ -421,6 +449,85 @@ mod tests {
 
         fn promote_pane_to_agent_doc_window(&self, _tmux: &Tmux, _pane: &str) -> Result<bool> {
             Ok(false)
+        }
+    }
+
+    /// A pane parked in the stash; `promotes` says whether promotion moves it.
+    struct StashedPane {
+        stashed: std::cell::Cell<bool>,
+        promotes: Option<bool>,
+    }
+
+    impl FocusEffects for StashedPane {
+        fn focus_or_resume_document_via_controller(&self, _file: &Path) -> Result<()> {
+            Ok(())
+        }
+
+        fn find_live_owner_pane_quiet(
+            &self,
+            _tmux: &Tmux,
+            _file: &Path,
+            _session_id: &str,
+        ) -> Option<String> {
+            None
+        }
+
+        fn local_actor_record_pane_for_document(
+            &self,
+            _file: &Path,
+            _session_id: &str,
+            _tmux: &Tmux,
+        ) -> Option<String> {
+            None
+        }
+
+        fn pane_in_stash_window(&self, _tmux: &Tmux, _pane: &str) -> bool {
+            self.stashed.get()
+        }
+
+        fn pane_still_owns_document(&self, _tmux: &Tmux, _pane: &str, _file: &Path) -> bool {
+            true
+        }
+
+        fn promote_pane_to_agent_doc_window(&self, _tmux: &Tmux, _pane: &str) -> Result<bool> {
+            match self.promotes {
+                Some(true) => {
+                    self.stashed.set(false);
+                    Ok(true)
+                }
+                Some(false) => Ok(false),
+                None => anyhow::bail!("join-pane failed"),
+            }
+        }
+    }
+
+    /// `layoutpublisherarbiter` (GH #120): a pane in a non-active window
+    /// (`1:stash`) is never a focus target. The blocking focus path promoted
+    /// best-effort and then selected unconditionally, so a failed or declined
+    /// promotion ran `select-window` + `select-pane` on the stash.
+    #[test]
+    fn blocking_focus_never_selects_a_pane_left_in_the_stash() {
+        let tmux = agent_doc_tmux_io::configured_tmux();
+        for (promotes, selectable) in [(None, false), (Some(false), false), (Some(true), true)] {
+            for defer in [false, true] {
+                let effects = StashedPane {
+                    stashed: std::cell::Cell::new(true),
+                    promotes,
+                };
+                let mut selected = None;
+                promote_and_select_with(&effects, &tmux, "%33", defer, |pane| {
+                    selected = Some(pane.to_string());
+                    Ok(())
+                })
+                .unwrap();
+                // The deferred path never promotes, so it never selects a
+                // stashed pane either.
+                let expect = (!defer && selectable).then(|| "%33".to_string());
+                assert_eq!(
+                    selected, expect,
+                    "promotes={promotes:?} defer={defer}: a stashed pane must never be selected"
+                );
+            }
         }
     }
 

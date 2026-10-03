@@ -158,12 +158,55 @@ the field is absent (editors that predate it), two or more columns infer
 before publication. The JetBrains plugin sends `exact` only for a detected
 multi-column layout and `ensure` for its undetected single-file fallback.
 `controller_editor_route_layout_mode` logs the mode, whether it was explicit,
-the merge (`exact`, `seeded`, `focus_only`, `replaced:N`, `added:N+replaced:M`) and the route, retained
+the merge (`exact`, `seeded`, `focus_only`, `replaced:N`, `added:N+replaced:M`,
+`dropped:N+replaced:M`) and the route, retained
 and published column counts. Every `pane_layout_projection` line carries
 `publisher=` (`route`, `plugin_publication`, `escalation`, `editor_surface`,
 `command`), `plane_version=`, `columns=`, `retained_columns=` and
 `observed_panes=`; a generation that applies fewer columns than the retained
 layout it replaced also logs `pane_layout_projection_narrowed`.
+
+**Layout publisher arbitration (`layoutpublisherarbiter`, GH #120 asks 2-3):**
+the route publisher and `plugin_publication` both publish the one retained
+desired layout. They were applied last-writer-wins with the loser unlogged, so
+which of two disagreeing layouts tmux showed was a function of thread timing
+and the window swung between them (the 1 → 3 → 1 class). Every publication is
+now arbitrated, under the layout graph's publication lock, against the
+generation it would replace (`arbitrate_pane_layout_publication`, a pure
+function of publisher, route mode and plane order):
+
+1. *Order is the editor state plane's, not arrival.* Each generation carries a
+   `plane_basis`: a plugin publication's is its own plane version; a route's is
+   the newest `agent-doc/pane-layout/desired/v1` frame on the plane when the
+   route published. Before merging, a route waits (bounded by 500 ms and its
+   `--wait-for-ready` budget; `controller_editor_route_plane_catch_up_timed_out`
+   on expiry) until the layout graph has seen that frame, so it merges over
+   every frame ordered before it. A plugin publication whose plane version is
+   above the route's basis is a newer operator observation of the visible split
+   and wins (`newer_plane_version`); one at or below it was already on the
+   plane when the route published, so the route is the newer intent and the
+   frame is refused (`plane_version_predates_route`) and its columns are not
+   left in the durable layout memory.
+2. *The visible split owns the column count; an `ensure` route does not.* Each
+   generation names a `structure_owner`: a plugin publication and an `exact`
+   route own the structure they publish; an `ensure` route and a focus
+   escalation that keep the count inherit it. An `ensure` route over a
+   plugin-owned structure may move focus and put its document in a column
+   (`ensure_route_focus_column`), but route columns it cannot place are
+   dropped, never appended (merge `dropped:N+replaced:M`,
+   `ensure_route_cannot_widen_plugin_split`). The routed document's column is
+   placed first, so it is never the one dropped.
+3. *An `exact` route is a detected split* — explicit, newer operator intent —
+   and replaces a plugin publication it disagrees with (`exact_route_intent`).
+
+Every displaced or refused publication is logged as
+`pane_layout_publication_superseded winner=<publisher> loser=<publisher>
+reason=<reason>` with both generations, plane bases, column counts and column
+sets. A displacement is a column-set change between the two publishers; a focus
+move inside the same columns, or a publisher replacing its own generation, is
+not one. A route lease's deferred plugin publication is arbitrated and logged
+when the lease releases. The width can therefore change only through a newer
+plugin publication or an `exact` route, each attributable from one log line.
 
 **Cross-document child-route boundary:** A route with no layout columns that is
 invoked from explicit live tmux process context inside a pane owned by another

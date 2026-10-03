@@ -9429,16 +9429,45 @@ fn handle_editor_route_rpc(
         payload.layout_mode.as_deref(),
         layout_invocation.columns.len(),
     )?;
-    let (retained_columns, retained_focus) = runtime
+    // `layoutpublisherarbiter`: merge over every editor state-plane frame
+    // ordered before this route, then stamp the route with that plane head.
+    let plane_basis = await_editor_route_plane_catch_up(&canonical, runtime, route_deadline);
+    let (retained_columns, retained_focus, retained_owner) = runtime
         .pane_layout_desired()
-        .map(|desired| (desired.invocation.columns, desired.invocation.focus))
+        .map(|desired| {
+            (
+                desired.invocation.columns,
+                desired.invocation.focus,
+                desired.provenance.structure_owner,
+            )
+        })
         .unwrap_or_default();
-    let (merged_columns, layout_merge) = merge_editor_route_columns(
+    let (merged_columns, layout_merge, dropped_columns) = merge_editor_route_columns_within(
         layout_mode,
         &retained_columns,
         retained_focus.as_deref(),
         &layout_invocation.columns,
+        Some(routed_document.as_str()),
+        EnsureRouteWidening::for_structure_owner(retained_owner),
     );
+    if !dropped_columns.is_empty() {
+        log_pane_layout_supersessions(
+            &bootstrap.project_root,
+            &[PaneLayoutSupersession {
+                winner: PaneLayoutPublisher::PluginPublication,
+                loser: PaneLayoutPublisher::Route,
+                reason: "ensure_route_cannot_widen_plugin_split",
+                winner_generation: runtime.pane_layout_desired().map(|d| d.generation),
+                loser_generation: None,
+                winner_plane_basis: runtime
+                    .pane_layout_desired()
+                    .and_then(|d| d.provenance.plane_basis),
+                loser_plane_basis: plane_basis,
+                winner_columns: retained_columns.clone(),
+                loser_columns: dropped_columns,
+            }],
+        );
+    }
     layout_invocation.columns = merged_columns;
     agent_doc_ops_log_io::log_op(
         &canonical,
@@ -9462,6 +9491,7 @@ fn handle_editor_route_rpc(
         bootstrap,
         runtime,
         layout_invocation,
+        PaneLayoutClaim::route(layout_mode.claim(), plane_basis),
         route_deadline.saturating_duration_since(Instant::now()),
     )?;
     let (layout_receipt, layout_observations) = await_editor_route_layout_gates(
@@ -10988,6 +11018,47 @@ impl EditorRouteLayoutMode {
             Self::Ensure => "ensure",
         }
     }
+
+    fn claim(self) -> PaneLayoutRouteClaim {
+        match self {
+            Self::Exact => PaneLayoutRouteClaim::Exact,
+            Self::Ensure => PaneLayoutRouteClaim::Ensure,
+        }
+    }
+}
+
+/// Upper bound on how long an editor route waits for the layout graph to see
+/// the editor state-plane frames already published ahead of it.
+const EDITOR_ROUTE_PLANE_CATCH_UP_MAX: Duration = Duration::from_millis(500);
+
+/// `layoutpublisherarbiter`: a plugin publication and the route RPC that
+/// follows it travel separately, and the plane projector applies the frame on
+/// its own thread. Without this wait, whether a route merged over that frame
+/// — and so which layout won — depended on which thread ran first. Returns
+/// the plane head the route is ordered after; a frame at or below it that the
+/// projector delivers late loses to the route
+/// (`plane_version_predates_route`). Bounded so a wedged projector delays a
+/// route by at most [`EDITOR_ROUTE_PLANE_CATCH_UP_MAX`].
+fn await_editor_route_plane_catch_up(
+    canonical: &Path,
+    runtime: &ControllerRuntime,
+    route_deadline: Instant,
+) -> Option<u64> {
+    let head = runtime.pane_layout_plane_head()?;
+    let budget = route_deadline
+        .saturating_duration_since(Instant::now())
+        .min(EDITOR_ROUTE_PLANE_CATCH_UP_MAX);
+    if !runtime.await_pane_layout_plane_seen(head, budget) {
+        agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "controller_editor_route_plane_catch_up_timed_out file={} plane_head={head} waited_ms={}",
+                canonical.display(),
+                budget.as_millis(),
+            ),
+        );
+    }
+    Some(head)
 }
 
 /// How [`apply_editor_route_layout_mode`] combined the route's columns with the
@@ -11009,6 +11080,11 @@ enum EditorRouteLayoutMergeKind {
     /// layout had columns to replace: the excess was appended. The published
     /// width never exceeds the wider of the two observations.
     Added,
+    /// `ensure` over a split a plugin publication owns, and the route named
+    /// more uncovered columns than it had columns to replace: the excess was
+    /// dropped, because only the visible split may change the column count
+    /// (`layoutpublisherarbiter`).
+    Dropped,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11017,6 +11093,7 @@ struct EditorRouteLayoutMerge {
     route_columns: usize,
     replaced_columns: usize,
     added_columns: usize,
+    dropped_columns: usize,
 }
 
 impl EditorRouteLayoutMerge {
@@ -11031,6 +11108,10 @@ impl EditorRouteLayoutMerge {
             EditorRouteLayoutMergeKind::Added => format!(
                 "added:{}+replaced:{}",
                 self.added_columns, self.replaced_columns
+            ),
+            EditorRouteLayoutMergeKind::Dropped => format!(
+                "dropped:{}+replaced:{}",
+                self.dropped_columns, self.replaced_columns
             ),
         }
     }
@@ -11058,28 +11139,78 @@ impl EditorRouteLayoutMerge {
 /// claims. Only when the route itself names more uncovered columns than there
 /// are unclaimed retained columns is the excess appended, so the published
 /// width is at most `max(retained.len(), route.len())`.
+#[cfg(test)]
 fn merge_editor_route_columns(
     mode: EditorRouteLayoutMode,
     retained: &[String],
     retained_focus: Option<&str>,
     route: &[String],
 ) -> (Vec<String>, EditorRouteLayoutMerge) {
-    let merge = |kind, replaced_columns, added_columns| EditorRouteLayoutMerge {
+    let (columns, merge, _) = merge_editor_route_columns_within(
+        mode,
+        retained,
+        retained_focus,
+        route,
+        None,
+        EnsureRouteWidening::Allowed,
+    );
+    (columns, merge)
+}
+
+/// Whether an `ensure` route may append columns the retained layout cannot
+/// place (`layoutpublisherarbiter`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EnsureRouteWidening {
+    /// The retained structure came from a route or another publisher: the
+    /// GH #120 `max(retained, route)` bound applies.
+    Allowed,
+    /// The retained structure is owned by a plugin publication of the visible
+    /// split. Only a newer plugin publication or an `exact` route may change
+    /// its column count, so excess route columns are dropped, never appended.
+    PluginSplitHolds,
+}
+
+impl EnsureRouteWidening {
+    fn for_structure_owner(owner: PaneLayoutPublisher) -> Self {
+        if owner == PaneLayoutPublisher::PluginPublication {
+            Self::PluginSplitHolds
+        } else {
+            Self::Allowed
+        }
+    }
+}
+
+/// [`merge_editor_route_columns`] with the arbitration inputs: `route_focus` is
+/// the routed document (its column is placed first, so it is never the one
+/// dropped) and `widening` whether excess columns may be appended. Returns the
+/// dropped route columns as the third element.
+fn merge_editor_route_columns_within(
+    mode: EditorRouteLayoutMode,
+    retained: &[String],
+    retained_focus: Option<&str>,
+    route: &[String],
+    route_focus: Option<&str>,
+    widening: EnsureRouteWidening,
+) -> (Vec<String>, EditorRouteLayoutMerge, Vec<String>) {
+    let merge = |kind, replaced_columns, added_columns, dropped_columns| EditorRouteLayoutMerge {
         kind,
         route_columns: route.len(),
         replaced_columns,
         added_columns,
+        dropped_columns,
     };
     if mode == EditorRouteLayoutMode::Exact {
         return (
             route.to_vec(),
-            merge(EditorRouteLayoutMergeKind::Exact, 0, 0),
+            merge(EditorRouteLayoutMergeKind::Exact, 0, 0, 0),
+            Vec::new(),
         );
     }
     if retained.is_empty() {
         return (
             route.to_vec(),
-            merge(EditorRouteLayoutMergeKind::Seeded, 0, 0),
+            merge(EditorRouteLayoutMergeKind::Seeded, 0, 0, 0),
+            Vec::new(),
         );
     }
     let column_documents = |column: &str| {
@@ -11116,34 +11247,58 @@ fn merge_editor_route_columns(
             }
         }
     }
+    // The routed document's column is placed first: when columns must be
+    // dropped, it is never one of them (the route gate requires it).
+    let holds_focus = |column: &String| {
+        route_focus.is_some_and(|focus| column_documents(column).iter().any(|d| d == focus))
+    };
+    uncovered.sort_by_key(|column| !holds_focus(column));
     let mut merged = retained.to_vec();
     let mut replaced_columns = 0;
     let mut added_columns = 0;
+    let mut dropped = Vec::new();
     let focus_index = retained_focus.and_then(|focus| covering_column(retained, focus));
     for column in uncovered {
-        let target = focus_index
+        let mut target = focus_index
             .filter(|index| !claimed[*index])
             .or_else(|| (0..retained.len()).rev().find(|index| !claimed[*index]));
-        match target {
-            Some(index) => {
+        if target.is_none()
+            && widening == EnsureRouteWidening::PluginSplitHolds
+            && holds_focus(&column)
+        {
+            // Every retained column is claimed by another route column, but
+            // the routed document must still have one: it takes the retained
+            // focus column (else the rightmost) and that route column is lost.
+            target = focus_index.or(Some(retained.len() - 1));
+        }
+        match (target, widening) {
+            (Some(index), _) => {
                 merged[index] = column;
                 claimed[index] = true;
                 replaced_columns += 1;
             }
-            None => {
+            (None, EnsureRouteWidening::Allowed) => {
                 merged.push(column);
                 added_columns += 1;
             }
+            (None, EnsureRouteWidening::PluginSplitHolds) => dropped.push(column),
         }
     }
     let kind = if added_columns > 0 {
         EditorRouteLayoutMergeKind::Added
+    } else if !dropped.is_empty() {
+        EditorRouteLayoutMergeKind::Dropped
     } else if replaced_columns > 0 {
         EditorRouteLayoutMergeKind::Replaced
     } else {
         EditorRouteLayoutMergeKind::FocusOnly
     };
-    (merged, merge(kind, replaced_columns, added_columns))
+    let dropped_columns = dropped.len();
+    (
+        merged,
+        merge(kind, replaced_columns, added_columns, dropped_columns),
+        dropped,
+    )
 }
 
 /// How an editor route moved its layout focus onto the routed document.
@@ -22179,8 +22334,50 @@ fn pane_layout_projection_converged(
 ///
 /// `#stashfocusleg`: the NAME half is what lets the focus guard refuse a stashed
 /// pane without first resolving the layout's target window.
-fn observe_pane_window_id(tmux: &tmux_router::Tmux, pane_id: &str) -> Option<(String, String)> {
-    observed_pane_window(tmux.pane_window_identity(pane_id))
+fn observe_pane_window_id(tmux: &tmux_router::Tmux, pane_id: &str) -> Option<LivePaneWindow> {
+    observed_live_pane_window(tmux.raw_cmd(&[
+        "display-message",
+        "-t",
+        pane_id,
+        "-p",
+        "#{window_id}\t#{window_active}\t#{window_name}",
+    ]))
+}
+
+/// One live tmux observation of the window a pane is in: id, name and
+/// whether it is its session's active window (`None` when tmux did not say).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LivePaneWindow {
+    id: String,
+    name: String,
+    active: Option<bool>,
+}
+
+impl From<(String, String)> for LivePaneWindow {
+    fn from((id, name): (String, String)) -> Self {
+        Self {
+            id,
+            name,
+            active: None,
+        }
+    }
+}
+
+/// Parse a `#{window_id}\t#{window_active}\t#{window_name}` read, read in one
+/// query so the three halves cannot disagree across a concurrent
+/// `move-window`. The id/name normalization is [`observed_pane_window`]'s.
+fn observed_live_pane_window(line: Result<String>) -> Option<LivePaneWindow> {
+    let line = line.ok()?;
+    let mut fields = line.trim_end_matches(['\r', '\n']).splitn(3, '\t');
+    let id = fields.next().unwrap_or_default().to_string();
+    let active = match fields.next().map(str::trim) {
+        Some("1") => Some(true),
+        Some("0") => Some(false),
+        _ => None,
+    };
+    let name = fields.next().unwrap_or_default().to_string();
+    let (id, name) = observed_pane_window(Ok((id, name)))?;
+    Some(LivePaneWindow { id, name, active })
 }
 
 /// Normalize a `pane_window_identity` read into the guard's observation.
@@ -22217,10 +22414,11 @@ fn pane_layout_target_window_id(
 /// The co-visibility inputs of the pane-layout focus effect (`#panewindowdrift`):
 /// the window this layout generation is arranging its columns in, plus the live
 /// `#{window_id}` observation for a candidate pane.
-struct PaneLayoutFocusCoVisibility<'a, F: FnOnce(&str) -> Option<(String, String)>> {
+struct PaneLayoutFocusCoVisibility<'a, F: FnOnce(&str) -> Option<LivePaneWindow>> {
     layout_window: Option<&'a str>,
-    /// Live `(window_id, window_name)` for a candidate pane, read in one query
-    /// so the two halves cannot disagree across a concurrent `move-window`.
+    /// Live window observation for a candidate pane (id, name, activity),
+    /// read in one query so its halves cannot disagree across a concurrent
+    /// `move-window`.
     observe_pane_window: F,
 }
 
@@ -22248,7 +22446,7 @@ fn apply_pane_layout_focus_effect(
     focus: Option<&str>,
     focus_suppressed: bool,
     file_panes: &[(String, String)],
-    co_visibility: PaneLayoutFocusCoVisibility<'_, impl FnOnce(&str) -> Option<(String, String)>>,
+    co_visibility: PaneLayoutFocusCoVisibility<'_, impl FnOnce(&str) -> Option<LivePaneWindow>>,
     select_pane: impl FnOnce(&str) -> Result<()>,
 ) -> PaneLayoutFocusEffectReceipt {
     let PaneLayoutFocusCoVisibility {
@@ -22286,9 +22484,11 @@ fn apply_pane_layout_focus_effect(
     // which is exactly when this guard used to be skipped altogether and focus
     // landed on a stashed pane.
     let live = observe_pane_window(pane);
-    let (live_window, live_window_name) = match &live {
-        Some((id, name)) => (Some(id.as_str()), Some(name.as_str())),
-        None => (None, None),
+    let (live_window, live_window_name, live_window_active) = match &live {
+        Some(LivePaneWindow { id, name, active }) => {
+            (Some(id.as_str()), Some(name.as_str()), *active)
+        }
+        None => (None, None, None),
     };
     if agent_doc_controller::pane_layout::pane_is_stashed(live_window_name) {
         return PaneLayoutFocusEffectReceipt {
@@ -22300,7 +22500,26 @@ fn apply_pane_layout_focus_effect(
             ),
         };
     }
-    if let Some(layout_window) = layout_window.map(str::trim).filter(|w| !w.is_empty())
+    let layout_window = layout_window.map(str::trim).filter(|w| !w.is_empty());
+    // `layoutpublisherarbiter` (GH #120): a pane in a non-active window is
+    // never a focus target. `select_pane` also runs `select-window`, so
+    // selecting a pane outside the layout window switches the operator's
+    // client to a window they did not pick. With a known layout window the
+    // drift leg below already refuses any other window; without one, the only
+    // proof the pane is in the working window is that its window is the
+    // session's active window. An unknown activity answer is never a refusal.
+    if layout_window.is_none() && live_window_active == Some(false) {
+        return PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: false,
+            reason: format!(
+                "focus_pane_window_inactive:{focus}:{pane}:live_window={}:live_window_name={}",
+                live_window.unwrap_or_default(),
+                live_window_name.unwrap_or_default()
+            ),
+        };
+    }
+    if let Some(layout_window) = layout_window
         && agent_doc_controller::pane_layout::pane_window_binding_drifted(
             layout_window,
             live_window,
@@ -24196,8 +24415,9 @@ fn publish_pane_layout_desired_invocation(
     mut invocation: ControllerTmuxLayoutSyncInvocation,
     source_plane_version: Option<u64>,
     publication: PaneLayoutPublication,
-    publisher: PaneLayoutPublisher,
+    claim: impl Into<PaneLayoutClaim>,
 ) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
+    let claim = claim.into();
     if bootstrap.handoff_state != ControllerHandoffState::Stable {
         anyhow::bail!(
             "pane layout observation refused: controller not authoritative (handoff_state={:?})",
@@ -24238,8 +24458,23 @@ fn publish_pane_layout_desired_invocation(
         invocation.clone(),
         source_plane_version,
         publication,
-        publisher,
+        claim,
     );
+    let supersessions = runtime.drain_pane_layout_supersessions();
+    let refused = supersessions.iter().any(|supersession| {
+        supersession.loser == claim.publisher
+            && supersession.loser_generation.is_none()
+            && supersession.loser_columns == invocation.columns
+    });
+    log_pane_layout_supersessions(&bootstrap.project_root, &supersessions);
+    if refused {
+        // `layoutpublisherarbiter`: the durable column memory was written
+        // ahead of the graph; a refused publication must not leave its
+        // columns there in place of the retained generation's.
+        store_layout_state(&bootstrap.project_root, &desired.invocation.columns)?;
+        publish_pane_layout_status(runtime);
+        return Ok((desired, invocation));
+    }
     log_pane_layout_desired_publication(
         &bootstrap.project_root,
         retained.as_ref().map(|retained| retained.generation),
@@ -24252,6 +24487,15 @@ fn publish_pane_layout_desired_invocation(
     }
     publish_pane_layout_status(runtime);
     Ok((desired, invocation))
+}
+
+/// `layoutpublisherarbiter`: one `pane_layout_publication_superseded` line per
+/// publication the arbiter displaced or refused. The route publisher and
+/// `plugin_publication` used to overwrite each other with the loser unlogged.
+fn log_pane_layout_supersessions(project_root: &Path, supersessions: &[PaneLayoutSupersession]) {
+    for supersession in supersessions {
+        agent_doc_ops_log_io::log_op(project_root, &supersession.log_line());
+    }
 }
 
 /// GH #112 ask 2: one line per new desired generation naming the publisher
@@ -24403,6 +24647,7 @@ fn handle_editor_route_layout<'a>(
     bootstrap: &ControllerBootstrap,
     runtime: &'a ControllerRuntime,
     invocation: ControllerTmuxLayoutSyncInvocation,
+    claim: PaneLayoutClaim,
     await_timeout: Duration,
 ) -> Result<(
     ControllerTmuxLayoutSyncReceipt,
@@ -24415,7 +24660,7 @@ fn handle_editor_route_layout<'a>(
         invocation,
         None,
         PaneLayoutPublication::FreshRouteIntent,
-        PaneLayoutPublisher::Route,
+        claim,
     )?;
     let lease = PaneLayoutRouteLeaseGuard {
         runtime,
@@ -24459,6 +24704,12 @@ impl Drop for PaneLayoutRouteLeaseGuard<'_> {
         {
             log_pane_layout_narrowed(&self.project_root, &released);
         }
+        // `layoutpublisherarbiter`: a deferred plugin publication that now
+        // displaces the route is logged here too.
+        log_pane_layout_supersessions(
+            &self.project_root,
+            &self.runtime.drain_pane_layout_supersessions(),
+        );
     }
 }
 
@@ -24864,7 +25115,12 @@ mod pane_layout_projection_dispatch_tests {
             &file_panes,
             PaneLayoutFocusCoVisibility {
                 layout_window: Some("@894"),
-                observe_pane_window: |_| Some(("@894".to_string(), "agent-doc".to_string())),
+                observe_pane_window: |_| {
+                    Some(LivePaneWindow::from((
+                        "@894".to_string(),
+                        "agent-doc".to_string(),
+                    )))
+                },
             },
             |pane| {
                 selected = Some(pane.to_string());
@@ -24903,7 +25159,10 @@ mod pane_layout_projection_dispatch_tests {
                 layout_window: Some("@894"),
                 observe_pane_window: |pane| {
                     assert_eq!(pane, "%76");
-                    Some(("@904".to_string(), "agent-doc".to_string()))
+                    Some(LivePaneWindow::from((
+                        "@904".to_string(),
+                        "agent-doc".to_string(),
+                    )))
                 },
             },
             |pane| {
@@ -24984,7 +25243,10 @@ mod pane_layout_projection_dispatch_tests {
                     layout_window: None,
                     observe_pane_window: |pane| {
                         assert_eq!(pane, "%21");
-                        Some(("@904".to_string(), window_name.to_string()))
+                        Some(LivePaneWindow::from((
+                            "@904".to_string(),
+                            window_name.to_string(),
+                        )))
                     },
                 },
                 |pane| {
@@ -25014,6 +25276,95 @@ mod pane_layout_projection_dispatch_tests {
     /// The stash leg must not swallow ordinary windows. `stashed` is not
     /// `stash`, and a pane in the layout window is focused normally even when
     /// the layout window is unknown.
+    /// `layoutpublisherarbiter` (GH #120): a pane in a non-active window is
+    /// never a focus target. With no resolvable layout window the stash-name
+    /// leg alone let a pane in any other inactive window through, and
+    /// `select_pane` runs `select-window`, switching the operator's client to
+    /// it. An active window, or an unknown activity answer, is not refused.
+    #[test]
+    fn focus_is_refused_for_a_pane_in_an_inactive_window_with_no_layout_window() {
+        for (active, refused) in [(Some(false), true), (Some(true), false), (None, false)] {
+            let state = Mutex::new(
+                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+            );
+            assert!(state.lock().schedule(7));
+            let file_panes = vec![("/tasks/sample-session.md".to_string(), "%21".to_string())];
+            let mut selected = None;
+
+            let receipt = apply_pane_layout_focus_effect(
+                &state,
+                7,
+                Some("/tasks/sample-session.md"),
+                false,
+                &file_panes,
+                PaneLayoutFocusCoVisibility {
+                    layout_window: None,
+                    observe_pane_window: |_| {
+                        Some(LivePaneWindow {
+                            id: "@904".to_string(),
+                            name: "parked".to_string(),
+                            active,
+                        })
+                    },
+                },
+                |pane| {
+                    selected = Some(pane.to_string());
+                    Ok(())
+                },
+            );
+
+            if refused {
+                assert!(
+                    selected.is_none(),
+                    "an inactive window's pane must never be selected"
+                );
+                assert!(receipt.required);
+                assert!(!receipt.applied);
+                assert_eq!(
+                    receipt.reason,
+                    "focus_pane_window_inactive:/tasks/sample-session.md:%21:live_window=@904:live_window_name=parked"
+                );
+            } else {
+                assert_eq!(selected.as_deref(), Some("%21"), "active={active:?}");
+                assert!(receipt.applied);
+            }
+        }
+    }
+
+    /// The production read carries activity, and a malformed answer is
+    /// "unknown", never "inactive".
+    #[test]
+    fn live_pane_window_observation_parses_window_activity() {
+        assert_eq!(
+            observed_live_pane_window(Ok("@9\t0\tstash".to_string())),
+            Some(LivePaneWindow {
+                id: "@9".to_string(),
+                name: "stash".to_string(),
+                active: Some(false),
+            })
+        );
+        assert_eq!(
+            observed_live_pane_window(Ok("@3\t1\tagent doc".to_string())),
+            Some(LivePaneWindow {
+                id: "@3".to_string(),
+                name: "agent doc".to_string(),
+                active: Some(true),
+            })
+        );
+        assert_eq!(
+            observed_live_pane_window(Ok("@3".to_string())).map(|w| w.active),
+            Some(None)
+        );
+        assert_eq!(
+            observed_live_pane_window(Ok("\t1\tstash".to_string())),
+            None
+        );
+        assert_eq!(
+            observed_live_pane_window(Err(anyhow::anyhow!("no server"))),
+            None
+        );
+    }
+
     #[test]
     fn focus_is_applied_for_a_non_stash_window_with_no_layout_window() {
         for window_name in ["agent-doc", "stashed", "claude", ""] {
@@ -25032,7 +25383,12 @@ mod pane_layout_projection_dispatch_tests {
                 &file_panes,
                 PaneLayoutFocusCoVisibility {
                     layout_window: None,
-                    observe_pane_window: |_| Some(("@904".to_string(), window_name.to_string())),
+                    observe_pane_window: |_| {
+                        Some(LivePaneWindow::from((
+                            "@904".to_string(),
+                            window_name.to_string(),
+                        )))
+                    },
                 },
                 |pane| {
                     selected = Some(pane.to_string());
@@ -25068,7 +25424,12 @@ mod pane_layout_projection_dispatch_tests {
             &file_panes,
             PaneLayoutFocusCoVisibility {
                 layout_window: Some("@894"),
-                observe_pane_window: |_| Some(("@894".to_string(), "stash".to_string())),
+                observe_pane_window: |_| {
+                    Some(LivePaneWindow::from((
+                        "@894".to_string(),
+                        "stash".to_string(),
+                    )))
+                },
             },
             |pane| {
                 selected = Some(pane.to_string());
@@ -25115,7 +25476,7 @@ mod pane_layout_projection_dispatch_tests {
                 &file_panes,
                 PaneLayoutFocusCoVisibility {
                     layout_window,
-                    observe_pane_window: |_| live_window.clone(),
+                    observe_pane_window: |_| live_window.clone().map(LivePaneWindow::from),
                 },
                 |pane| {
                     selected = Some(pane.to_string());
@@ -25223,7 +25584,12 @@ mod pane_layout_projection_dispatch_tests {
             &file_panes,
             PaneLayoutFocusCoVisibility {
                 layout_window: Some("@894"),
-                observe_pane_window: |_| Some(("@894".to_string(), "agent-doc".to_string())),
+                observe_pane_window: |_| {
+                    Some(LivePaneWindow::from((
+                        "@894".to_string(),
+                        "agent-doc".to_string(),
+                    )))
+                },
             },
             |_| {
                 selected = true;
@@ -29373,6 +29739,248 @@ mod tests {
         let ops = fixture.ops_log();
         assert!(!ops.contains("merge=added"), "{ops}");
         assert!(!ops.contains("pane_layout_projection_narrowed"), "{ops}");
+    }
+
+    impl RouteLayoutFixture {
+        /// Publish a `pane_layout_desired` frame as the plane projector does.
+        fn plugin(&self, columns: &[&str], focus: &str, plane_version: u64) -> PaneLayoutDesired {
+            let invocation = automatic_layout_sync_invocation(
+                columns.iter().map(|name| self.id(name)).collect(),
+                &self.id(focus),
+                false,
+            );
+            publish_pane_layout_desired_invocation(
+                &self.bootstrap,
+                self.runtime.as_ref(),
+                invocation,
+                Some(plane_version),
+                PaneLayoutPublication::CoalesceIdentical,
+                PaneLayoutPublisher::PluginPublication,
+            )
+            .unwrap()
+            .0
+        }
+
+        fn superseded_lines(&self) -> Vec<String> {
+            self.ops_log()
+                .lines()
+                .filter(|line| line.contains("pane_layout_publication_superseded"))
+                .map(str::to_string)
+                .collect()
+        }
+    }
+
+    /// `layoutpublisherarbiter` (GH #120 asks 2-3): the route publisher and
+    /// `plugin_publication` overwrote each other last-writer-wins with the
+    /// loser unlogged, and an `ensure` route could widen the plugin's visible
+    /// split, so the window swung between the plugin's one column and the
+    /// route's wider set. Alternate the two publishers: the plugin's split
+    /// holds the width, every displaced publication is logged with its winner
+    /// and reason, and a stale plugin frame cannot undo a newer route.
+    #[test]
+    fn layoutpublisherarbiter_alternating_route_and_plugin_publications_converge_and_log_the_loser()
+    {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma", "delta"]);
+        let mut widths = Vec::new();
+        let mut plane_version = 100;
+        fixture.plugin(&["alpha"], "alpha", plane_version);
+        widths.push(fixture.desired_columns().len());
+
+        for (focus, other) in [("gamma", "beta"), ("delta", "gamma"), ("beta", "delta")] {
+            // An `ensure` route naming two uncovered columns over the plugin's
+            // one-column split: before the arbiter it appended the second.
+            let routed = fixture
+                .route(focus, &[focus, other], Some("ensure"))
+                .unwrap();
+            assert_eq!(routed.exit_code, 0);
+            assert_eq!(
+                fixture.desired_columns(),
+                vec![fixture.id(focus)],
+                "an ensure route may re-place the plugin split's column, never widen it"
+            );
+            let desired = fixture.runtime.pane_layout_desired().unwrap();
+            assert_eq!(desired.provenance.publisher, PaneLayoutPublisher::Route);
+            assert_eq!(
+                desired.provenance.structure_owner,
+                PaneLayoutPublisher::PluginPublication
+            );
+            assert_eq!(desired.provenance.plane_basis, Some(plane_version));
+            widths.push(fixture.desired_columns().len());
+
+            // The plugin frame the projector delivers late (already on the
+            // plane when the route published) predates the route: refused.
+            let route_generation = desired.generation;
+            let late = fixture.plugin(&["alpha"], "alpha", plane_version);
+            assert_eq!(late.generation, route_generation);
+            assert_eq!(fixture.desired_columns(), vec![fixture.id(focus)]);
+
+            // The next plugin frame is a newer observation of the visible
+            // split: it wins and the route is the logged loser.
+            plane_version += 1;
+            let newer = fixture.plugin(&["alpha"], "alpha", plane_version);
+            assert!(newer.generation > route_generation);
+            assert_eq!(fixture.desired_columns(), vec![fixture.id("alpha")]);
+            widths.push(fixture.desired_columns().len());
+        }
+        assert!(
+            widths.iter().all(|width| *width == 1),
+            "the width must hold at the plugin's one column: {widths:?}"
+        );
+
+        let lines = fixture.superseded_lines();
+        let count = |needle: &str| lines.iter().filter(|line| line.contains(needle)).count();
+        assert_eq!(
+            count(
+                "winner=plugin_publication loser=route reason=ensure_route_cannot_widen_plugin_split"
+            ),
+            3,
+            "{lines:#?}"
+        );
+        assert_eq!(
+            count("winner=route loser=plugin_publication reason=ensure_route_focus_column"),
+            3,
+            "{lines:#?}"
+        );
+        assert_eq!(
+            count("winner=route loser=plugin_publication reason=plane_version_predates_route"),
+            3,
+            "{lines:#?}"
+        );
+        assert_eq!(
+            count("winner=plugin_publication loser=route reason=newer_plane_version"),
+            3,
+            "{lines:#?}"
+        );
+        assert_eq!(lines.len(), 12, "{lines:#?}");
+        let ops = fixture.ops_log();
+        assert!(
+            ops.contains("mode=ensure explicit=true merge=dropped:1+replaced:1 route_columns=2 retained_columns=1 published_columns=1"),
+            "{ops}"
+        );
+        assert!(!ops.contains("merge=added"), "{ops}");
+
+        // An `exact` route is a detected split: newer operator intent that
+        // replaces the plugin's split, logged as such.
+        fixture
+            .route("alpha", &["alpha", "beta"], Some("exact"))
+            .unwrap();
+        assert_eq!(
+            fixture.desired_columns(),
+            vec![fixture.id("alpha"), fixture.id("beta")]
+        );
+        assert_eq!(
+            fixture
+                .runtime
+                .pane_layout_desired()
+                .unwrap()
+                .provenance
+                .structure_owner,
+            PaneLayoutPublisher::Route
+        );
+        assert!(
+            fixture
+                .superseded_lines()
+                .last()
+                .unwrap()
+                .contains("winner=route loser=plugin_publication reason=exact_route_intent"),
+            "{:#?}",
+            fixture.superseded_lines()
+        );
+    }
+
+    /// `layoutpublisherarbiter`: the arbiter is a pure function of publisher,
+    /// route mode and plane order, never of arrival order.
+    #[test]
+    fn layoutpublisherarbiter_verdicts_depend_only_on_publisher_mode_and_plane_order() {
+        let desired = |publisher, plane_basis, columns: &[&str]| PaneLayoutDesired {
+            generation: 9,
+            source_plane_version: None,
+            invocation: automatic_layout_sync_invocation(
+                columns.iter().map(|c| c.to_string()).collect(),
+                columns[0],
+                false,
+            ),
+            provenance: PaneLayoutProvenance {
+                publisher,
+                plane_basis,
+                structure_owner: publisher,
+                ..PaneLayoutProvenance::default()
+            },
+        };
+        let one = vec!["/p/a.md".to_string()];
+        let route = desired(PaneLayoutPublisher::Route, Some(40), &["/p/b.md"]);
+        let plugin = desired(
+            PaneLayoutPublisher::PluginPublication,
+            Some(40),
+            &["/p/a.md"],
+        );
+
+        for (version, refused) in [
+            (Some(39), true),
+            (Some(40), true),
+            (Some(41), false),
+            (None, false),
+        ] {
+            let verdict = arbitrate_pane_layout_publication(
+                Some(&route),
+                &one,
+                version,
+                PaneLayoutPublisher::PluginPublication.into(),
+            );
+            assert_eq!(
+                matches!(verdict, PaneLayoutArbitration::Refuse(_)),
+                refused,
+                "plugin v={version:?} against a route ordered after 40: {verdict:?}"
+            );
+        }
+
+        let ensure = arbitrate_pane_layout_publication(
+            Some(&plugin),
+            &["/p/b.md".to_string()],
+            None,
+            PaneLayoutClaim::route(PaneLayoutRouteClaim::Ensure, Some(40)),
+        );
+        let PaneLayoutArbitration::Accept {
+            plane_basis,
+            structure_owner,
+            displaced: Some(displaced),
+        } = ensure
+        else {
+            panic!("an ensure route over a plugin split is accepted and logged: {ensure:?}");
+        };
+        assert_eq!(plane_basis, Some(40));
+        assert_eq!(structure_owner, PaneLayoutPublisher::PluginPublication);
+        assert_eq!(displaced.reason, "ensure_route_focus_column");
+
+        // A focus move inside the same columns displaces no layout.
+        let focus_only = arbitrate_pane_layout_publication(
+            Some(&plugin),
+            &one,
+            None,
+            PaneLayoutClaim::route(PaneLayoutRouteClaim::Ensure, Some(40)),
+        );
+        assert!(matches!(
+            focus_only,
+            PaneLayoutArbitration::Accept {
+                displaced: None,
+                ..
+            }
+        ));
+
+        // Same-publisher replacement is never a cross-publisher displacement.
+        let own = arbitrate_pane_layout_publication(
+            Some(&plugin),
+            &["/p/z.md".to_string()],
+            Some(41),
+            PaneLayoutPublisher::PluginPublication.into(),
+        );
+        assert!(matches!(
+            own,
+            PaneLayoutArbitration::Accept {
+                displaced: None,
+                ..
+            }
+        ));
     }
 
     #[test]

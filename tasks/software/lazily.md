@@ -16,6 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
+queue: go
 ---
 
 ## Status
@@ -249,12 +250,14 @@ The exchange is 171 lines, over the 160-line warning point. I'm not stopping the
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+- 🚧 do [#lzwiremodel2]
+do [#lzwiremodel2]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwiremodel2] [recommended, lazily-spec] Second wire-model step: lower the receipts surface into one GC binding (py or js), and add a Rust replay of receipts/causal_receipts.json so it leaves lazily-rs KNOWN_UNCOVERED (update the corpus-floor pins with it). Then decide whether generated decoders should enforce the schema's closed records and required-nullable fields: today rs and go both accept unknown keys and absent reason/payload_hash, and enforcing that changes decode behavior. Grow to a second surface (graph-boundary proto or reliable-sync) only if the generator removes more hand-written code than it adds. Design: src/lazily-spec/docs/wire-codegen.md.
+- [ ] 🚧 [#lzwiremodel2] [recommended, lazily-spec] Second wire-model step: lower the receipts surface into one GC binding (py or js), and add a Rust replay of receipts/causal_receipts.json so it leaves lazily-rs KNOWN_UNCOVERED (update the corpus-floor pins with it). Then decide whether generated decoders should enforce the schema's closed records and required-nullable fields: today rs and go both accept unknown keys and absent reason/payload_hash, and enforcing that changes decode behavior. Grow to a second surface (graph-boundary proto or reliable-sync) only if the generator removes more hand-written code than it adds. Design: src/lazily-spec/docs/wire-codegen.md.
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

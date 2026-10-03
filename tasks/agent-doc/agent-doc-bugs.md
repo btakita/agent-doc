@@ -172,6 +172,19 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - **Permanent decline:** on a build where agent-doc declines the restart-free upgrade, the summary says `Restart <IDE> to load plugin vX; restart-free upgrade is unavailable on this build` with no "on its own" hedge. A note says the native library reloads by itself and only the plugin needs the restart. The summary is also logged to ops.log as `plugin_upgrade_summary`.
 - **Merge:** resolved against #113, so the auto watcher reports from the new binary's per-target outcomes.
 - **Exchange size:** this document's exchange is now 131 lines across 8 responses. I'm not compacting mid-drain without the explicit opt-in.
+
+### Re: GH #115 — staged upgrade deleted the plugin — opus-5.5 · 2026-10-03T00:01-04:00
+
+> **Queue prompt:** #subagents #gh-fix https://github.com/btakita/agent-doc/issues/115
+
+**Fixed in a subagent, merged, installed, pushed, closed** (agent-doc `267f84f16`; [GH #115](https://github.com/btakita/agent-doc/issues/115) closed).
+
+- **Root cause** (confirmed from the platform bytecode): each `installAfterRestart` appends its own delete/delete/unzip/delete block, and agent-doc staged a zip with a fixed name. The second staging, at 22:15, appended a block whose plugin-dir delete runs *after* block 1 had installed the plugin and deleted the shared zip.
+- **Fix:**
+  - **Staging:** the staged zip gets a unique name and is validated before an atomic rename. agent-doc writes one delete+unzip+cleanup block under the platform's script lock, replacing any earlier agent-doc staging. A file lock serializes staging into one plugins directory, and an identical pending staging is reused.
+  - **After restart:** preflight and `plugin list` detect `jetbrains_plugin_install_destroyed` and `jetbrains_plugin_staging_doomed`, and the marker is kept instead of retired. `plugin update` and `agent-doc upgrade` repair a destroyed install. Plugin 0.2.484.
+- **Recovery for the affected IntelliJIdea2026.3** (paths under `/home/btakita`, not run from here): `agent-doc plugin update jetbrains --plugins-dir /home/btakita/.local/share/JetBrains/IntelliJIdea2026.3`, then restart the IDE. Check first whether it was already reinstalled.
+- **Verification:** the subagent's `make check` passed 10549 tests. The merge was a fast-forward. `make install` hot-upgraded the live IDE.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -189,7 +202,7 @@ I also fixed two remedy messages in preflight and plugin_jar that still said the
 - ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/112~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/113~~
 - ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/114~~
-- #subagents #gh-fix https://github.com/btakita/agent-doc/issues/115
+- ~~#subagents #gh-fix https://github.com/btakita/agent-doc/issues/115~~
 - #subagents do [#preflightdeadline]
 - changes to the queue & the exchange should immediately be picked up once done as steering
 - release + publish

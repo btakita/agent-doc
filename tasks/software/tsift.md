@@ -20,7 +20,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -643,14 +642,37 @@ The subagent pushed `0122b21` to tsift `main` without force. `make check` exited
 - **Tests still catch the bug:** suppressing the hint failed both tests. So did building the diagnosis before the barrier. Each mutation was restored from a scratch copy and verified with `cmp`; `git checkout` was never used.
 
 **Installed binary:** this install replaced the one `#tracejoinremeasure`'s subagent had installed. That subagent is still running and re-installs if it changes tsift.
+
+### Re: [#tracejoinremeasure] done — real-checkout trace joins — opus-5-5 · 2026-10-03T16:16-04:00
+
+> **Queue prompt:** do [#tracejoinremeasure]
+
+The new trace joins **439** and leaves **1,177** unmatched on the real haiven-sdk root checkout, up from 435 / 1,181. Every remaining unmatched join comes from what that checkout is missing, not from tsift matching wrongly.
+
+| Kind | Unmatched | Cause |
+|---|---|---|
+| `sdk_declaration` | 1,055 | Root branch `feat/unreal-conformance-runner` (`8ff7e2f`) lacks the `57dd11c` generated files |
+| `rest_operation` / `rest_component` / `contract` / `ws_event` | 56 / 50 / 8 / 8 | Added to contracts after the indexed submodule's `f634a0f`; the trace pins `1ce0581` |
+
+**Spot checks pass:**
+- `MessageType` → `WsMessageTypeV0`.
+- `chat.typing` → `chat.typing.event`; it no longer lands on the client operation.
+- All vocabularies and WebSocket requests join.
+
+**tsift bug found and fixed (`92f6bb1`, pushed to `main` without force):** the pin warning didn't fire. When `trace.json` sits outside the indexed root, the check used the trace's own sibling haiven-contracts, which happened to be at the pinned commit. It now uses that sibling only when it lies under the root, and otherwise the root's own contracts checkout. With the fix, the warning reports `1ce0581` pinned vs `f634a0f` indexed.
+- **Tests:** regression test `contracts_pin_checks_the_root_scope_not_an_outside_traces_sibling` fails with the check disabled.
+- **Spec:** `specs/graph.md` has the dated counts table and the pin state.
+- **Checks:** `make check` exited 0 on the second run. The first run failed only on the old search-timeout flake, before rebasing onto its fix `0122b21`. The binary installed now is `92f6bb1`.
+
+**Data handling:** the operator checkout's files, branch and submodules are untouched. The import replaced the earlier one under the same source id. A first try under a new id briefly doubled the edges and was removed.
+
+**Follow-up (`#haivenrootsync`, recommended):** getting back to about 1,612/1,616 needs the `57dd11c` files in the root checkout and its contracts submodule moved to `1ce0581`. Both belong to the other session's checkout.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#tracejoinremeasure]
-- ~~do [#searchtimeoutflake]~~
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -659,7 +681,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tracejoinremeasure] (sdktracenaming) Re-measure haiven-trace joins on the real haiven-sdk root checkout with tsift 78bb7f4 and haiven-sdk 57dd11c, with no scratch copies under a shared tsift root. Record the new joined/unmatched counts in specs/graph.md next to the historical 1,612/1,616 figure, and confirm the contracts-pin warning fires against the f634a0f submodule.
+- [ ] [#haivenrootsync] [recommended] (sdktracenaming) Restore haiven-sdk trace join coverage on the operator root checkout (src/haiven-dev/src/haiven-sdk; owned by another session, so coordinate there). Bring in feat/codegen-trace / 57dd11c generated SDK files, which account for 1,055 unmatched sdk_declaration joins. Move the haiven-contracts submodule f634a0f to the trace pin 1ce0581, which accounts for 122 unmatched contract-side joins. Then re-import trace.json and expect about 1,612/1,616.
 <!-- /agent:backlog -->
 
 ## Review

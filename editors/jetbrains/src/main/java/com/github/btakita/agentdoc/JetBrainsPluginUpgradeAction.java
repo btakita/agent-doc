@@ -668,14 +668,21 @@ public final class JetBrainsPluginUpgradeAction {
      * reconfiguration caller, then raises a restart notification up to twenty seconds later.
      * There is therefore no synchronous retirement receipt on which agent-doc can safely swap
      * the live jars. Detect that strategy before even probing unloadability and stage instead.
+     *
+     * <p>GH #108: this is agent-doc declining, not the platform refusing -- the IDE is never
+     * asked. The reason therefore carries {@link #DYNAMIC_UPGRADE_DECLINED}, never
+     * {@link #DYNAMIC_UNLOAD_REFUSED}, and says the loss is permanent for this build so an
+     * operator stops retrying the restart-free path.
      */
     static String dynamicUpgradeBlockerReason(boolean asyncPostReconfigurationAwait) {
         if (!asyncPostReconfigurationAwait) {
             return null;
         }
-        return DYNAMIC_UNLOAD_REFUSED
-            + ": this JetBrains build verifies the outgoing classloader only after loading the replacement; "
-            + "agent-doc staged the update before touching the live plugin generation";
+        return DYNAMIC_UPGRADE_DECLINED
+            + ": this JetBrains build retires plugin classloaders asynchronously ("
+            + ASYNC_CLASSLOADER_AWAIT_STRATEGY.substring(ASYNC_CLASSLOADER_AWAIT_STRATEGY.lastIndexOf('.') + 1)
+            + "), so there is no safe synchronous swap point; restart-free upgrade is permanently "
+            + "unavailable on this build, and the update was staged before touching the live plugin generation";
     }
 
     private static boolean asyncPostReconfigurationClassloaderAwaitIsPresent(ClassLoader platformLoader) {
@@ -689,6 +696,12 @@ public final class JetBrainsPluginUpgradeAction {
 
     /** Stable prefix the launcher and preflight key on to record a refused dynamic unload. */
     static final String DYNAMIC_UNLOAD_REFUSED = "plugin cannot unload dynamically";
+
+    /**
+     * GH #108: stable prefix for agent-doc's own decision not to attempt the restart-free
+     * upgrade. The launcher keys on it to attribute the refusal to agent-doc, not the IDE.
+     */
+    static final String DYNAMIC_UPGRADE_DECLINED = "agent-doc declined the restart-free upgrade";
 
     static boolean sameInstallRoot(Path actual, Path expected) {
         return actual.toAbsolutePath().normalize().equals(expected.toAbsolutePath().normalize());

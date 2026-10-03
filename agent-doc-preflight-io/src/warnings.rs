@@ -361,7 +361,7 @@ pub fn stale_plugin_message(
             if staged_for_restart && installed.is_none_or(|v| v.trim() != expected) =>
         {
             format!(
-                "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The {expected} build is ALREADY STAGED for the next IDE start (the IDE refused the restart-free upgrade, so the install was queued instead), so do not reinstall: restart the IDE and it installs {expected} as it starts. `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot replace Kotlin/TypeScript plugin code or change the reported plugin version. A later live registration at {expected} or newer supersedes this warning."
+                "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The {expected} build is ALREADY STAGED for the next IDE start (the restart-free upgrade did not run in that IDE, so the install was queued instead), so do not reinstall: restart the IDE and it installs {expected} as it starts. `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot replace Kotlin/TypeScript plugin code or change the reported plugin version. A later live registration at {expected} or newer supersedes this warning."
             )
         }
         Some(StaleGenerationSide::Plugin) if installed.is_some_and(|v| v.trim() == expected) => {

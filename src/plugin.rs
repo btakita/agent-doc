@@ -509,9 +509,32 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<()> {
     }
     let outcome = install_jetbrains_zip_into(tmp.path(), target_dir, &expected_version)?;
 
-    eprintln!("{}", jetbrains_install_success_message(target_dir)?);
+    eprintln!(
+        "{}",
+        jetbrains_install_result_message(target_dir, &outcome, &expected_version)?
+    );
     print_jetbrains_activation_outcome(outcome);
     Ok(())
+}
+
+/// GH #108: the headline for a finished release install. A staged package left
+/// the plugin tree untouched by design, so it must not read "Plugin installed"
+/// stamped with the on-disk (old) version; it names the staged version instead.
+fn jetbrains_install_result_message(
+    target_dir: &Path,
+    outcome: &JetbrainsLocalInstallOutcome,
+    staged_version: &str,
+) -> Result<String> {
+    if !matches!(outcome, JetbrainsLocalInstallOutcome::StagedForRestart { .. }) {
+        return jetbrains_install_success_message(target_dir);
+    }
+    let kept = installed_jetbrains_plugin_version(target_dir)
+        .map(|version| format!("v{version}"))
+        .unwrap_or_else(|| "the previous generation".to_string());
+    Ok(format!(
+        "Plugin v{staged_version} staged (not installed) for the next IDE start; {} still holds {kept}, which stays loaded until the IDE restarts.",
+        target_dir.display()
+    ))
 }
 
 fn jetbrains_install_success_message(target_dir: &Path) -> Result<String> {
@@ -924,8 +947,13 @@ fn restart_required_message(target_dir: &Path, reason: &str) -> String {
 }
 
 fn staged_for_restart_message(target_dir: &Path, reason: &str) -> String {
+    let cause = if agent_doc_declined_dynamic_upgrade(reason) {
+        "agent-doc declined the restart-free upgrade on this JetBrains build"
+    } else {
+        "The restart-free upgrade failed"
+    };
     format!(
-        "The restart-free upgrade failed, so the running IDE staged the new plugin for its next start and the plugin files in {} were left in place ({reason}). Restart the IDE to load the new plugin.",
+        "{cause}, so the running IDE staged the new plugin for its next start and the plugin files in {} were left in place ({reason}). Restart the IDE to load the new plugin.",
         target_dir.display()
     )
 }
@@ -1333,6 +1361,10 @@ fn install_jetbrains_package_bytes(
         match hot_upgrade() {
             Ok(Some(JetbrainsHotUpgrade::Upgraded { processes })) => {
                 clear_restart_required_marker(&restart_marker);
+                log_jetbrains_upgrade_decision(&format!(
+                    "plugin_dynamic_upgrade outcome=hot_upgraded processes={processes} version={expected_version} target={}",
+                    target_dir.display()
+                ));
                 return Ok(JetbrainsLocalInstallOutcome::HotUpgraded { processes });
             }
             Ok(Some(JetbrainsHotUpgrade::StagedForRestart { reason })) => {
@@ -1341,11 +1373,16 @@ fn install_jetbrains_package_bytes(
                 // preflight advises a restart rather than another install.
                 eprintln!(
                     "WARNING: {}",
-                    dynamic_upgrade_fallback_warning(&reason).replace(
-                        "replacing the plugin files instead",
-                        "staged it for the next IDE start instead"
-                    )
+                    dynamic_upgrade_fallback_warning(&reason, "staged it for the next IDE start instead")
                 );
+                if agent_doc_declined_dynamic_upgrade(&reason) {
+                    print_permanent_dynamic_upgrade_loss_once();
+                }
+                log_jetbrains_upgrade_decision(&format!(
+                    "plugin_dynamic_upgrade outcome=staged_for_restart declined_by={} staged_version={expected_version} target={} reason={reason:?}",
+                    dynamic_upgrade_decliner(&reason),
+                    target_dir.display()
+                ));
                 let reason = format!("dynamic upgrade unavailable, staged for restart: {reason}");
                 // GH #87: name the staged version so preflight can tell a staged
                 // install (restart is the remedy) from a plain stale one. Use the
@@ -1359,7 +1396,15 @@ fn install_jetbrains_package_bytes(
             Err(error) => {
                 // GH #67: the reason is printed once, in the final restart message.
                 let reason = format!("{error:#}");
-                eprintln!("WARNING: {}", dynamic_upgrade_fallback_warning(&reason));
+                eprintln!(
+                    "WARNING: {}",
+                    dynamic_upgrade_fallback_warning(&reason, "replacing the plugin files instead")
+                );
+                log_jetbrains_upgrade_decision(&format!(
+                    "plugin_dynamic_upgrade outcome=restart_required declined_by={} version={expected_version} target={} reason={reason:?}",
+                    dynamic_upgrade_decliner(&reason),
+                    target_dir.display()
+                ));
                 Some(format!("dynamic upgrade unavailable: {reason}"))
             }
         }
@@ -1396,16 +1441,94 @@ fn install_jetbrains_package_bytes(
 /// (`JetBrainsPluginUpgradeAction.DYNAMIC_UNLOAD_REFUSED`).
 const JETBRAINS_DYNAMIC_UNLOAD_REFUSED: &str = "plugin cannot unload dynamically";
 
+/// GH #108: stable prefix the JetBrains upgrade action puts on agent-doc's own
+/// decision not to attempt the swap (`JetBrainsPluginUpgradeAction.DYNAMIC_UPGRADE_DECLINED`).
+const JETBRAINS_DYNAMIC_UPGRADE_DECLINED: &str = "agent-doc declined the restart-free upgrade";
+
+/// GH #108: the same decline as emitted by the 0.35.435-0.35.441 upgrader, which
+/// wore the platform-refusal prefix although the IDE was never asked. Kept so a
+/// launcher from an older package is still attributed correctly.
+const LEGACY_ASYNC_RETIREMENT_DECLINE: &str =
+    "verifies the outgoing classloader only after loading the replacement";
+
+/// GH #108: did agent-doc itself decline the restart-free upgrade (an
+/// asynchronous classloader-retirement platform), rather than the IDE refusing it?
+fn agent_doc_declined_dynamic_upgrade(reason: &str) -> bool {
+    reason.contains(JETBRAINS_DYNAMIC_UPGRADE_DECLINED)
+        || reason.contains(LEGACY_ASYNC_RETIREMENT_DECLINE)
+}
+
+/// Who stopped the restart-free upgrade, as an `ops.log` field value.
+fn dynamic_upgrade_decliner(reason: &str) -> &'static str {
+    if agent_doc_declined_dynamic_upgrade(reason) {
+        "agent-doc"
+    } else if reason.contains(JETBRAINS_DYNAMIC_UNLOAD_REFUSED) {
+        "ide"
+    } else {
+        "upgrader_failure"
+    }
+}
+
 /// GH #80: say whether the platform declined the unload or the upgrade never
 /// reached it. "Refused" used to cover both, so an upgrader that could not even
 /// link `DynamicPlugins$UnloadPluginOptions` read as a platform policy -- the one
-/// outcome where accepting the restart is the right conclusion.
-fn dynamic_upgrade_fallback_warning(reason: &str) -> &'static str {
-    if reason.contains(JETBRAINS_DYNAMIC_UNLOAD_REFUSED) {
-        "the IDE refused the restart-free upgrade; replacing the plugin files instead."
+/// outcome where accepting the restart is the right conclusion. GH #108: a
+/// decline agent-doc took before consulting the IDE names agent-doc.
+fn dynamic_upgrade_fallback_warning(reason: &str, fallback: &str) -> String {
+    let cause = if agent_doc_declined_dynamic_upgrade(reason) {
+        "agent-doc declined the restart-free upgrade: this JetBrains build retires plugin classloaders asynchronously, so there is no safe synchronous swap point"
+    } else if reason.contains(JETBRAINS_DYNAMIC_UNLOAD_REFUSED) {
+        "the IDE refused the restart-free upgrade"
     } else {
-        "the restart-free upgrade failed before the IDE could accept or refuse it; replacing the plugin files instead."
+        "the restart-free upgrade failed before the IDE could accept or refuse it"
+    };
+    format!("{cause}; {fallback}.")
+}
+
+/// GH #108: printed once per process, because the decline is a property of the
+/// JetBrains build, not of this attempt -- retrying can never succeed there.
+fn permanent_dynamic_upgrade_loss_note() -> &'static str {
+    "NOTE: restart-free plugin upgrade is permanently unavailable on this JetBrains build (it retires plugin classloaders asynchronously); every future install will stage the same way. Use `agent-doc upgrade` (or the plugin install) and then restart the IDE; re-running the install will not load the plugin without a restart."
+}
+
+fn print_permanent_dynamic_upgrade_loss_once() {
+    static PRINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !PRINTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("{}", permanent_dynamic_upgrade_loss_note());
     }
+}
+
+/// GH #108: the plugin-upgrade decision is the one path in the install flow
+/// whose only record used to be terminal output. Write one durable `ops.log`
+/// line for the project owning the working directory (best-effort).
+#[cfg(not(test))]
+fn log_jetbrains_upgrade_decision(message: &str) {
+    let Some(root) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| agent_doc_project_root_io::project_root_containing(&cwd))
+    else {
+        return;
+    };
+    let _ = agent_doc_ops_log_io::append_ops_log_at_project(
+        &root,
+        message,
+        agent_doc_ops_log_io::OpsLogTracking {
+            doc_stem: None,
+            session_id: None,
+            turn_id: None,
+        },
+    );
+}
+
+#[cfg(test)]
+thread_local! {
+    static LOGGED_UPGRADE_DECISIONS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn log_jetbrains_upgrade_decision(message: &str) {
+    LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow_mut().push(message.to_string()));
 }
 
 /// The first line is the refusal reason; a staged install adds a
@@ -2730,14 +2853,102 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
              java.lang.IllegalStateException: error:java.lang.IllegalStateException:\
              agent-doc upgrader could not call the platform: java.lang.NoClassDefFoundError: \
              com/intellij/ide/plugins/DynamicPlugins$UnloadPluginOptions";
-        let warning = super::dynamic_upgrade_fallback_warning(linkage);
+        let warning = super::dynamic_upgrade_fallback_warning(linkage, "replacing the plugin files instead");
         assert!(warning.contains("failed before the IDE"), "{warning}");
         assert!(!warning.contains("refused"), "{warning}");
 
         let refused = "JetBrains dynamic upgrade failed for pid 1: error:java.lang.IllegalStateException:\
              plugin cannot unload dynamically (the platform reported the plugin cannot unload without a restart)";
-        let warning = super::dynamic_upgrade_fallback_warning(refused);
+        let warning = super::dynamic_upgrade_fallback_warning(refused, "replacing the plugin files instead");
         assert!(warning.contains("IDE refused"), "{warning}");
+        assert!(warning.ends_with("replacing the plugin files instead."), "{warning}");
+    }
+
+    /// GH #108: the asynchronous-classloader guard is agent-doc declining before
+    /// the IDE is consulted -- both as the current upgrader words it and as the
+    /// 0.35.435-0.35.441 upgrader did under the platform-refusal prefix.
+    #[test]
+    fn async_retirement_decline_is_attributed_to_agent_doc_not_the_ide() {
+        let current = "pid 427146: agent-doc declined the restart-free upgrade: this JetBrains build retires \
+             plugin classloaders asynchronously (AwaitClassloaderUnloadAsyncPostReconfiguration), so there is \
+             no safe synchronous swap point; restart-free upgrade is permanently unavailable on this build";
+        let legacy = "pid 427146: plugin cannot unload dynamically: this JetBrains build verifies the outgoing \
+             classloader only after loading the replacement; agent-doc staged the update before touching \
+             the live plugin generation";
+        for reason in [current, legacy] {
+            let warning = super::dynamic_upgrade_fallback_warning(
+                reason,
+                "staged it for the next IDE start instead",
+            );
+            assert!(warning.starts_with("agent-doc declined"), "{warning}");
+            assert!(!warning.contains("IDE refused"), "{warning}");
+            assert!(warning.ends_with("staged it for the next IDE start instead."), "{warning}");
+            assert_eq!(super::dynamic_upgrade_decliner(reason), "agent-doc");
+            let staged = super::staged_for_restart_message(Path::new("/p"), reason);
+            assert!(staged.starts_with("agent-doc declined"), "{staged}");
+            assert!(!staged.contains("upgrade failed"), "{staged}");
+        }
+        assert_eq!(
+            super::dynamic_upgrade_decliner("plugin cannot unload dynamically: x"),
+            "ide"
+        );
+        assert_eq!(super::dynamic_upgrade_decliner("NoClassDefFoundError"), "upgrader_failure");
+        assert!(super::permanent_dynamic_upgrade_loss_note().contains("permanently unavailable"));
+    }
+
+    /// GH #108: a staged install must not print "Plugin installed (v<old>)"; it
+    /// names the staged version and the generation that stays loaded, and its
+    /// decision reaches `ops.log` with pid, decliner, staged version and outcome.
+    #[test]
+    fn staged_install_reports_the_staged_version_and_logs_the_decision() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("agent-doc-jetbrains-0.2.479.jar"), b"live").unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.480.zip");
+        write_test_jetbrains_zip(&zip, "0.2.480", b"new");
+        super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow_mut().clear());
+
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            "0.2.480",
+            true,
+            || {
+                Ok(Some(super::JetbrainsHotUpgrade::StagedForRestart {
+                    reason: "pid 427146: agent-doc declined the restart-free upgrade: async".to_string(),
+                }))
+            },
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+
+        let headline = super::jetbrains_install_result_message(&target, &outcome, "0.2.480").unwrap();
+        assert!(!headline.contains("Plugin installed"), "{headline}");
+        assert!(headline.contains("v0.2.480 staged (not installed)"), "{headline}");
+        assert!(headline.contains("v0.2.479"), "{headline}");
+
+        let logged = super::LOGGED_UPGRADE_DECISIONS.with(|log| log.borrow().clone());
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        let line = &logged[0];
+        for field in [
+            "plugin_dynamic_upgrade",
+            "outcome=staged_for_restart",
+            "declined_by=agent-doc",
+            "staged_version=0.2.480",
+            "pid 427146",
+        ] {
+            assert!(line.contains(field), "missing {field}: {line}");
+        }
+
+        let installed = super::jetbrains_install_result_message(
+            &target,
+            &JetbrainsLocalInstallOutcome::Installed,
+            "0.2.480",
+        )
+        .unwrap();
+        assert!(installed.starts_with("Plugin installed (v0.2.479)"), "{installed}");
     }
 
     #[test]

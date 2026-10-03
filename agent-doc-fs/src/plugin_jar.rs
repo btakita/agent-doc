@@ -217,7 +217,7 @@ pub fn superseded_mapping_detail(mapped: &MappedPluginJar) -> Option<String> {
 pub fn superseded_editor_remedy(restart_verdict: Option<&str>) -> String {
     match restart_verdict {
         Some(reason) => format!(
-            "The last install already recorded that this process refused the restart-free \
+            "The last install already recorded that this process cannot take the restart-free \
              upgrade ({}), so another install cannot converge: the plugin files on disk are \
              current. Restart the editor to load them.",
             reason.trim()

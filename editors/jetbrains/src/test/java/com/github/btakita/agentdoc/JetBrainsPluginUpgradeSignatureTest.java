@@ -129,8 +129,12 @@ public class JetBrainsPluginUpgradeSignatureTest {
     public void asynchronousClassloaderRetirementStagesBeforeTouchingTheLiveGeneration() {
         assertNull(JetBrainsPluginUpgradeAction.dynamicUpgradeBlockerReason(false));
         String blocker = JetBrainsPluginUpgradeAction.dynamicUpgradeBlockerReason(true);
-        assertTrue(blocker, blocker.startsWith("plugin cannot unload dynamically:"));
-        assertTrue(blocker, blocker.contains("only after loading the replacement"));
+        // GH #108: agent-doc declines here; the IDE was never asked, so the reason must not
+        // wear the platform-refusal prefix the launcher reports as "the IDE refused".
+        assertTrue(blocker, blocker.startsWith("agent-doc declined the restart-free upgrade:"));
+        assertTrue(blocker, !blocker.contains("plugin cannot unload dynamically"));
+        assertTrue(blocker, blocker.contains("AwaitClassloaderUnloadAsyncPostReconfiguration"));
+        assertTrue(blocker, blocker.contains("permanently unavailable on this build"));
         assertTrue(blocker, blocker.contains("before touching the live plugin generation"));
     }
 

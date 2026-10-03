@@ -360,6 +360,32 @@ Each item is claimed in the queue and running in its own background subagent. Ea
   - Check for a duplicate grammar symbol before linking.
 
 The exchange is 304 lines, but the queue is active, so I'm not compacting.
+
+### Re: #kotlinsymclash done — opus-5.5 · 2026-10-03T04:45-04:00
+
+> **Queue prompt:** #subagents: [#kotlinsymclash]
+
+**Done.** The fix is `247cbc3`, pushed to `main` without force and installed with `--features all-languages`.
+
+- **Root cause:** `tsift-astgrep`'s `lang-kotlin` feature turned on ast-grep's own Kotlin support, which pulled in `tree-sitter-kotlin-sg` next to tsift-graph's `tree-sitter-kotlin-ng`. Both export `tree_sitter_kotlin`, so link order picked which grammar both the indexer and the structural engine used.
+- **Fix:**
+  - `lang-kotlin` now depends on kotlin-ng directly.
+  - A new `EngineLang` (`packages/tsift-astgrep/src/lang.rs`) binds Kotlin to kotlin-ng and passes every other language through to ast-grep.
+  - Structural Kotlin patterns now use the same grammar as the index.
+  - The module-order workaround from `103ba2e` is gone.
+- **Proof:**
+  - `tree-sitter-kotlin-sg` is no longer in `Cargo.lock`.
+  - `nm` over all 34 linked grammar archives defines each of the 188 `tree_sitter_*` symbols once, and the installed binary has one `T tree_sitter_kotlin`.
+  - No other language has the same clash.
+- **Tests:** `kotlin_grammar_link_tests.rs` checks the grammar shape through the indexer and the structural engine. It also fails if `Cargo.lock` holds two versions of any `tree-sitter-*` crate, or two Kotlin grammar crates, because that check doesn't depend on link order.
+  - Putting ast-grep's Kotlin support back fails all the new tests.
+  - With 103ba2e's module order restored, only the `Cargo.lock` check catches it.
+- **`make check`:** exit 0.
+- **Not yet checked:**
+  - CI for `247cbc3` was still running when the subagent finished.
+  - `lang.rs` wasn't rustfmt-clean before this change and was left as is.
+
+`#sdktraceroot` and Luau are still running.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -378,7 +404,6 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:backlog priority queue -->
 - [ ] [#sdktraceroot] [recommended] After #graphrefreshperf: import haiven-sdk codegen/trace.json into the ROOT graph so per-language declarations join by path:line, and investigate unjoined trace nodes (8/51 contracts, 10/23 events, 56/195 REST ops, 50 components); check for a contracts-revision mismatch vs the trace pin.
-- [ ] [#kotlinsymclash] tsift links two Kotlin grammars that both export the C symbol tree_sitter_kotlin: tree-sitter-kotlin-ng (tsift-graph) and tree-sitter-kotlin-sg (via ast-grep). Which one resolves depends on link order; declaring a new module at the top of tsift-cli lib.rs flipped it and 3 Kotlin tests failed with Invalid field name name. 103ba2e worked around it by module order. Fix for real: link one Kotlin grammar (align ast-grep and tsift-graph on the same crate, or feature-gate one), and add a test that pins the expected grammar.
 <!-- /agent:backlog -->
 
 ## Review

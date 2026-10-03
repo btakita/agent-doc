@@ -59,6 +59,29 @@ Compacted content:
 - `make release` re-ran the full suite, tagged and pushed `v0.35.441`, and ran `install-full`. `agent-doc --version` now reports 0.35.441.
 - GH #106 and #107 are closed by their commits.
 - The Release, PyPI and CI workflows were still running when I checked. The Book workflow passed.
+
+### Re: GH #108: JetBrains upgrade reporting — opus-5.5 · 2026-10-02T21:33-04:00
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/108
+
+Fixed in `cf4d7eb1d` (agent-doc) and pushed. GH #108 is closed. The guard itself is unchanged; it still refuses as designed. The fixes are to how its decision is reported:
+
+1. **The message now names agent-doc, not the IDE.** The upgrader's reason now starts with `agent-doc declined the restart-free upgrade: this JetBrains build retires plugin classloaders asynchronously (AwaitClassloaderUnloadAsyncPostReconfiguration), so there is no safe synchronous swap point; …`. The launcher (`src/plugin.rs`) also recognises the 0.35.435–0.35.441 wording, so a launcher from an older package still blames agent-doc. "The IDE refused" now appears only when the platform actually refused.
+2. **A staged install no longer prints a false success line.** It used to print `Plugin installed (v<old>)`. It now prints `Plugin v0.2.480 staged (not installed) for the next IDE start; <dir> still holds v0.2.479, which stays loaded until the IDE restarts.`
+3. **It says once that the loss is permanent.** A one-time NOTE states that restart-free upgrade is permanently unavailable on that build, and that the workflow is upgrade + restart, not retrying.
+4. **Decisions are written to `ops.log`.** Each attempt logs a `plugin_dynamic_upgrade outcome=hot_upgraded|staged_for_restart|restart_required declined_by=agent-doc|ide|upgrader_failure` line with the version, target, and a reason that includes the pid. This ran live during `make install`: `plugin_dynamic_upgrade outcome=hot_upgraded processes=1 version=0.2.481`.
+5. **The stale marker is now removed.** `retire_satisfied_restart_marker` (agent-doc-fs) deletes the staged-restart marker once an installed jar at `staged_version` is at least as new as the marker, which proves the IDE start applied it. This runs on every preflight staged check. A same-version jar older than the marker does not count, and a marker without a staged version is never touched.
+6. Ask 6 (wait for the async restart notification instead of refusing) is **not done**. The report itself marked it as unestablished.
+
+I also fixed two remedy messages in preflight and plugin_jar that still said the IDE "refused". JetBrains plugin bumped to 0.2.481.
+
+**Verification:**
+- New Rust regression tests: attribution (current and legacy wording), the staged headline plus its `ops.log` fields, and marker retirement (all three cases).
+- Updated Java test `asynchronousClassloaderRetirementStagesBeforeTouchingTheLiveGeneration`.
+- `make check` exit 0: nextest ran 10440 tests, all passed.
+- JetBrains gradle tests, run fresh: 14 passed, 0 failed.
+- `make install` hot-upgraded the live IDE.
+- CI for `cf4d7eb1d` was still in progress when last checked.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -68,7 +91,7 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do https://github.com/btakita/agent-doc/issues/108
+- ~~do https://github.com/btakita/agent-doc/issues/108~~
 - release + publish
 <!-- /agent:queue -->
 

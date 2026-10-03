@@ -4666,6 +4666,19 @@ fn run_with_options_internal_at_root(
                 .ok()
                 .flatten()
         };
+        // GH #124: a live agent pane is never stashed in favour of a stale
+        // supervisor pane, so the focused-document exception needs to know
+        // which panes in the target window are mid-turn.
+        let gate_live_turn_window_panes = || -> Vec<String> {
+            let Some(window) = window else {
+                return Vec::new();
+            };
+            tmux.list_window_panes(window)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|pane| agent_doc_turn_status_io::turn_active_for_pane(project_root, pane))
+                .collect()
+        };
         crate::layout_column_audit::gate_stale_column_panes(
             tmux,
             &crate::layout_column_audit::StaleColumnGateInput {
@@ -4674,9 +4687,21 @@ fn run_with_options_internal_at_root(
                 pre_resolved: &pre_resolved_panes,
                 registry_pane: &gate_registry_pane,
                 before: &pane_windows_before_router,
+                live_turn_window_panes: &gate_live_turn_window_panes,
             },
         )
     };
+    if router_col_args.is_empty() && !col_args.is_empty() {
+        // GH #124: every column was gated out (stale, or a stale focused pane
+        // that would have stashed a live turn). tmux-router refuses an empty
+        // column set, and realising nothing must not mean stashing everything:
+        // keep the current layout until a recycle admits a fresh pane.
+        let message = "[sync] every layout column was excluded as stale; preserving the current tmux layout (GH #124)";
+        eprintln!("{message}");
+        mark_sync_layout_preserved(message);
+        sync_log("layout_preserved_all_columns_stale_excluded (GH #124)");
+        return Ok(());
+    }
     let col_args: &[String] = &router_col_args;
 
     // Open-cycle panes are logged during DETACH, but they are not kept visible.

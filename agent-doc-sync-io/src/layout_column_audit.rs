@@ -306,6 +306,39 @@ pub enum ColumnAdmission {
     /// navigated to; it is admitted under a distinct, auditable record and
     /// never as a plain `layout_column_pane_selected`.
     AdmitStaleFocused,
+    /// GH #124: the stale pane serves the focused document, but realising it
+    /// would stash a pane that is running a live turn. A live agent pane is
+    /// never stashed in favour of a stale-supervisor pane, so the focus
+    /// exception does not apply: the column is excluded like any stale column
+    /// and the next sync after the recycle (or after the turn) admits it.
+    ExcludeStaleFocusedLiveTurn,
+}
+
+/// GH #124: panes running a live turn that the layout would stash — live-turn
+/// panes currently in the target window that realise none of the columns.
+pub fn live_turn_panes_displaced(
+    live_turn_window_panes: &[String],
+    column_panes: &[String],
+) -> Vec<String> {
+    live_turn_window_panes
+        .iter()
+        .filter(|pane| !column_panes.contains(pane))
+        .cloned()
+        .collect()
+}
+
+/// GH #124: the focus exception never displaces a live turn. A stale focused
+/// pane is admitted only when no live-turn pane would be stashed for it.
+pub fn protect_live_turn_from_stale_focus(
+    admission: ColumnAdmission,
+    displaced_live_turn_panes: &[String],
+) -> ColumnAdmission {
+    match admission {
+        ColumnAdmission::AdmitStaleFocused if !displaced_live_turn_panes.is_empty() => {
+            ColumnAdmission::ExcludeStaleFocusedLiveTurn
+        }
+        other => other,
+    }
 }
 
 /// Pure admission rule. Only the column's OWN pane is gated here — a pane bound
@@ -322,6 +355,74 @@ pub fn column_admission(
     } else {
         ColumnAdmission::ExcludeStale
     }
+}
+
+/// The observed facts for one column's candidate pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnGateFacts {
+    pub file: PathBuf,
+    pub pane: String,
+    pub freshness: PaneSupervisorFreshness,
+    /// The pane is the column's own (not bound to another document).
+    pub own_pane: bool,
+    pub is_focus: bool,
+}
+
+/// Pure gate plan: one admission (plus the live-turn panes it would have
+/// displaced) per column fact, in order.
+///
+/// GH #124: the focused-document exception is decided LAST, against the panes
+/// the layout will actually realise. A stale focused pane is admitted only when
+/// no pane in the target window running a live turn would be stashed for it —
+/// a live agent pane is never stashed in favour of a stale-supervisor pane.
+/// `live_turn_window_panes` is consulted only when a stale focused column exists.
+pub fn plan_column_admissions(
+    facts: &[ColumnGateFacts],
+    live_turn_window_panes: &dyn Fn() -> Vec<String>,
+) -> Vec<(ColumnAdmission, Vec<String>)> {
+    let base: Vec<ColumnAdmission> = facts
+        .iter()
+        .map(|fact| column_admission(&fact.freshness, fact.own_pane, fact.is_focus))
+        .collect();
+    if !base.contains(&ColumnAdmission::AdmitStaleFocused) {
+        return base.into_iter().map(|admission| (admission, Vec::new())).collect();
+    }
+    let live = live_turn_window_panes();
+    let realised: Vec<String> = facts
+        .iter()
+        .zip(&base)
+        .filter(|(_, admission)| {
+            matches!(
+                admission,
+                ColumnAdmission::Admit | ColumnAdmission::AdmitStaleFocused
+            )
+        })
+        .map(|(fact, _)| fact.pane.clone())
+        .collect();
+    facts
+        .iter()
+        .zip(base)
+        .map(|(fact, admission)| {
+            if admission != ColumnAdmission::AdmitStaleFocused {
+                return (admission, Vec::new());
+            }
+            let others: Vec<String> = realised
+                .iter()
+                .filter(|pane| **pane != fact.pane)
+                .cloned()
+                .collect();
+            let live_elsewhere: Vec<String> = live
+                .iter()
+                .filter(|pane| **pane != fact.pane)
+                .cloned()
+                .collect();
+            let displaced = live_turn_panes_displaced(&live_elsewhere, &others);
+            (
+                protect_live_turn_from_stale_focus(admission, &displaced),
+                displaced,
+            )
+        })
+        .collect()
 }
 
 fn path_identity(path: &Path) -> PathBuf {
@@ -415,6 +516,9 @@ pub struct StaleColumnGateInput<'a> {
     pub registry_pane: &'a dyn Fn(&Path) -> Option<String>,
     /// Pane → window/title before tmux-router runs.
     pub before: &'a HashMap<String, PaneWindowSnapshot>,
+    /// GH #124: panes in the target window running a live turn (fresh
+    /// turn-active lease). Evaluated only when a stale focused column needs it.
+    pub live_turn_window_panes: &'a dyn Fn() -> Vec<String>,
 }
 
 /// GH #121 (GH #105 ask 2 / GH #109 ask 4): make the staleness verdict a
@@ -433,6 +537,8 @@ pub fn gate_stale_column_panes(tmux: &Tmux, input: &StaleColumnGateInput<'_>) ->
     let _observations = agent_doc_process_owner_io::begin_process_observation_scope();
     let focus = input.focus.map(|focus| path_identity(Path::new(focus)));
     let mut excluded: Vec<PathBuf> = Vec::new();
+    let mut facts: Vec<ColumnGateFacts> = Vec::new();
+    let mut sources: Vec<Option<String>> = Vec::new();
     for file in agent_doc_tmux::auto_start_candidate_files(input.col_args) {
         let pre_resolved = input.pre_resolved.get(&file).cloned();
         let Some(pane) = pre_resolved
@@ -442,31 +548,55 @@ pub fn gate_stale_column_panes(tmux: &Tmux, input: &StaleColumnGateInput<'_>) ->
             continue;
         };
         let own_pane = pane_occupant_for_document(tmux, &pane, &file) == PaneOccupant::Free;
-        if !own_pane {
-            continue;
-        }
-        let before = input.before.get(&pane);
-        let title = before.map(|snapshot| snapshot.title.as_str());
-        let freshness = pane_supervisor_freshness(tmux, &pane, &file, title);
+        let freshness = if own_pane {
+            let title = input.before.get(&pane).map(|snapshot| snapshot.title.as_str());
+            pane_supervisor_freshness(tmux, &pane, &file, title)
+        } else {
+            PaneSupervisorFreshness::Unknown {
+                reason: "not_document_owner",
+            }
+        };
         let is_focus = focus.as_ref() == Some(&path_identity(&file));
-        let admission = column_admission(&freshness, own_pane, is_focus);
+        facts.push(ColumnGateFacts {
+            file,
+            pane,
+            freshness,
+            own_pane,
+            is_focus,
+        });
+        sources.push(pre_resolved);
+    }
+    let plan = plan_column_admissions(&facts, input.live_turn_window_panes);
+    for ((fact, pre_resolved), (admission, displaced)) in facts.iter().zip(sources).zip(plan) {
+        let (file, pane, freshness) = (&fact.file, &fact.pane, &fact.freshness);
+        let before = input.before.get(pane);
         let (record, admission_token) = match admission {
             ColumnAdmission::Admit => continue,
             ColumnAdmission::ExcludeStale => {
                 excluded.push(file.clone());
-                ("layout_column_pane_excluded", "excluded")
+                ("layout_column_pane_excluded", "excluded".to_string())
             }
             ColumnAdmission::AdmitStaleFocused => (
                 "layout_column_pane_stale_focus_admitted",
-                "admitted_focused_document_sole_owner",
+                "admitted_focused_document_sole_owner".to_string(),
             ),
+            ColumnAdmission::ExcludeStaleFocusedLiveTurn => {
+                excluded.push(file.clone());
+                (
+                    "layout_column_pane_excluded",
+                    format!(
+                        "excluded_focused_live_turn_protected:{}",
+                        displaced.join("+")
+                    ),
+                )
+            }
         };
         let source = if pre_resolved.as_deref() == Some(pane.as_str()) {
             ColumnPaneSource::PreResolved
         } else {
             ColumnPaneSource::Registry
         };
-        let action = request_stale_column_recycle(&file, &pane, &freshness, "layout_column_gate")
+        let action = request_stale_column_recycle(file, pane, freshness, "layout_column_gate")
             .unwrap_or_else(|| "none".to_string());
         let line = format!(
             "{record} file={} pane={} source={} window={} supervisor={} admission={admission_token} reason=stale_supervisor action={action} (GH #121)",
@@ -484,7 +614,7 @@ pub fn gate_stale_column_panes(tmux: &Tmux, input: &StaleColumnGateInput<'_>) ->
         crate::append_sync_log(&line);
         if action.starts_with("safe_boundary_recycle_requested") {
             eprintln!("[sync] warning: {line}");
-            agent_doc_ops_log_io::log_op(&file, &line);
+            agent_doc_ops_log_io::log_op(file, &line);
         }
     }
     col_args_without(input.col_args, &excluded)
@@ -806,6 +936,215 @@ mod tests {
         );
     }
 
+    /// GH #124 SimWorld: the measured tmux state, the gate plan, and a model of
+    /// tmux-router realising the gated columns (column panes join the window,
+    /// every other window pane is stashed, the focused column's pane is active).
+    struct Gh124World {
+        /// pane -> (document, supervisor replaced on disk)
+        panes: Vec<(&'static str, &'static str, bool)>,
+        window: Vec<&'static str>,
+        live_turn: Vec<&'static str>,
+    }
+
+    struct Gh124Outcome {
+        window: Vec<String>,
+        stashed: Vec<String>,
+        active: Option<String>,
+        live_turn_queried: usize,
+    }
+
+    impl Gh124World {
+        fn issue_124() -> Self {
+            // `%434` is the agent running the live turn, visible in `agent-doc`;
+            // `%33` (1061.md) maps an unlinked binary; `%32` (laptop.md) is fresh.
+            Self {
+                panes: vec![
+                    ("%434", "tasks/agent-doc/bugs.md", false),
+                    ("%33", "tasks/pmt2/mr/1061.md", true),
+                    ("%32", "tasks/laptop/laptop.md", false),
+                ],
+                window: vec!["%434"],
+                live_turn: vec!["%434"],
+            }
+        }
+
+        fn pane_for(&self, doc: &str) -> &'static str {
+            self.panes.iter().find(|(_, d, _)| *d == doc).unwrap().0
+        }
+
+        fn sync(&self, col_args: &[String], focus: &str) -> Gh124Outcome {
+            let facts: Vec<ColumnGateFacts> = col_args
+                .iter()
+                .flat_map(|arg| arg.split(','))
+                .map(|doc| {
+                    let (pane, _, replaced) =
+                        *self.panes.iter().find(|(_, d, _)| *d == doc).unwrap();
+                    ColumnGateFacts {
+                        file: PathBuf::from(doc),
+                        pane: pane.to_string(),
+                        freshness: classify_pane_supervisor_freshness(
+                            Some(1),
+                            Some(replaced),
+                            false,
+                        ),
+                        own_pane: true,
+                        is_focus: doc == focus,
+                    }
+                })
+                .collect();
+            let queried = std::cell::Cell::new(0usize);
+            let live = || {
+                queried.set(queried.get() + 1);
+                self.window
+                    .iter()
+                    .filter(|pane| self.live_turn.contains(pane))
+                    .map(|pane| pane.to_string())
+                    .collect()
+            };
+            let plan = plan_column_admissions(&facts, &live);
+            let excluded: Vec<PathBuf> = facts
+                .iter()
+                .zip(&plan)
+                .filter(|(_, (admission, _))| {
+                    matches!(
+                        admission,
+                        ColumnAdmission::ExcludeStale
+                            | ColumnAdmission::ExcludeStaleFocusedLiveTurn
+                    )
+                })
+                .map(|(fact, _)| fact.file.clone())
+                .collect();
+            let gated = col_args_without(col_args, &excluded);
+            if gated.is_empty() {
+                // sync.rs preserves the current layout when every column is gated.
+                return Gh124Outcome {
+                    window: self.window.iter().map(|p| p.to_string()).collect(),
+                    stashed: Vec::new(),
+                    active: self.window.first().map(|p| p.to_string()),
+                    live_turn_queried: queried.get(),
+                };
+            }
+            let window: Vec<String> = gated
+                .iter()
+                .flat_map(|arg| arg.split(','))
+                .map(|doc| self.pane_for(doc).to_string())
+                .collect();
+            let stashed = self
+                .window
+                .iter()
+                .map(|pane| pane.to_string())
+                .filter(|pane| !window.contains(pane))
+                .collect();
+            let focus_pane = self.pane_for(focus).to_string();
+            let active = window
+                .contains(&focus_pane)
+                .then_some(focus_pane)
+                .or_else(|| window.first().cloned());
+            Gh124Outcome {
+                window,
+                stashed,
+                active,
+                live_turn_queried: queried.get(),
+            }
+        }
+
+        fn stale(&self, pane: &str) -> bool {
+            self.panes.iter().any(|(p, _, replaced)| *p == pane && *replaced)
+        }
+    }
+
+    #[test]
+    fn gh124_live_turn_pane_is_never_stashed_in_favour_of_a_stale_focused_pane() {
+        let world = Gh124World::issue_124();
+        // The operator focuses 1061.md, whose only pane runs a stale supervisor.
+        let outcome = world.sync(&["tasks/pmt2/mr/1061.md".to_string()], "tasks/pmt2/mr/1061.md");
+        assert!(
+            !outcome.stashed.contains(&"%434".to_string()),
+            "the live agent pane was stashed for a stale pane: window={:?} stashed={:?}",
+            outcome.window,
+            outcome.stashed
+        );
+        assert!(outcome.window.contains(&"%434".to_string()));
+        assert!(
+            !outcome.window.iter().any(|pane| world.stale(pane)),
+            "no stale-supervisor pane is realised while a live turn would be displaced: {:?}",
+            outcome.window
+        );
+        assert!(
+            !outcome.active.as_deref().is_some_and(|pane| world.stale(pane)),
+            "a stale-supervisor pane must not be the active pane: {:?}",
+            outcome.active
+        );
+    }
+
+    #[test]
+    fn gh124_two_column_layout_never_admits_the_stale_pane_over_a_live_turn() {
+        // The measured end state: `0:agent-doc` = laptop `%32` + stale `%33`,
+        // `%434` stashed. The stale column must not be the one displacing it.
+        let world = Gh124World::issue_124();
+        let col_args = vec![
+            "tasks/laptop/laptop.md".to_string(),
+            "tasks/pmt2/mr/1061.md".to_string(),
+        ];
+        let outcome = world.sync(&col_args, "tasks/pmt2/mr/1061.md");
+        assert_eq!(outcome.window, vec!["%32".to_string()]);
+        assert!(!outcome.window.contains(&"%33".to_string()));
+        assert_eq!(outcome.active.as_deref(), Some("%32"));
+    }
+
+    #[test]
+    fn gh124_focus_exception_still_admits_a_stale_pane_when_no_live_turn_is_displaced() {
+        // No live turn anywhere: the GH #121 focus exception is unchanged.
+        let mut world = Gh124World::issue_124();
+        world.live_turn.clear();
+        let outcome = world.sync(&["tasks/pmt2/mr/1061.md".to_string()], "tasks/pmt2/mr/1061.md");
+        assert_eq!(outcome.window, vec!["%33".to_string()]);
+        // The live turn runs in a pane that is itself a realised column.
+        let mut world = Gh124World::issue_124();
+        world.window = vec!["%434", "%32"];
+        world.live_turn = vec!["%32"];
+        let col_args = vec![
+            "tasks/laptop/laptop.md".to_string(),
+            "tasks/pmt2/mr/1061.md".to_string(),
+        ];
+        let outcome = world.sync(&col_args, "tasks/pmt2/mr/1061.md");
+        assert_eq!(outcome.window, vec!["%32".to_string(), "%33".to_string()]);
+        // The live turn is in the stale pane itself.
+        let mut world = Gh124World::issue_124();
+        world.window = vec!["%434", "%33"];
+        world.live_turn = vec!["%33"];
+        let outcome = world.sync(&["tasks/pmt2/mr/1061.md".to_string()], "tasks/pmt2/mr/1061.md");
+        assert_eq!(outcome.window, vec!["%33".to_string()]);
+    }
+
+    #[test]
+    fn gh124_live_turn_facts_are_read_only_for_a_stale_focused_column() {
+        let world = Gh124World::issue_124();
+        let outcome = world.sync(
+            &["tasks/laptop/laptop.md".to_string()],
+            "tasks/laptop/laptop.md",
+        );
+        assert_eq!(outcome.live_turn_queried, 0);
+        let outcome = world.sync(&["tasks/pmt2/mr/1061.md".to_string()], "tasks/pmt2/mr/1061.md");
+        assert_eq!(outcome.live_turn_queried, 1);
+    }
+
+    #[test]
+    fn sync_preserves_the_layout_when_every_column_is_gated_out() {
+        // GH #124: tmux-router bails on an empty column set; an all-excluded
+        // pass must return before the router instead of erroring or stashing.
+        let sync = include_str!("sync.rs");
+        let rebind = sync
+            .find("let col_args: &[String] = &router_col_args;")
+            .expect("the router must receive the gated column set");
+        let guard = sync
+            .find("if router_col_args.is_empty() && !col_args.is_empty() {")
+            .expect("sync must guard an all-excluded column set");
+        let router = sync.find("tmux_router::sync_with_options(").unwrap();
+        assert!(guard < rebind && rebind < router);
+        assert!(sync[guard..rebind].contains("return Ok(());"));
+    }
+
     #[test]
     fn issue_121_three_panes_only_the_replaced_one_is_excluded() {
         // The measured session: `%33` maps an unlinked inode; `%32` and `%430`
@@ -826,7 +1165,8 @@ mod tests {
                     "an admitted column must never carry supervisor=stale: {}",
                     freshness.log_token()
                 ),
-                ColumnAdmission::AdmitStaleFocused => unreachable!(),
+                ColumnAdmission::AdmitStaleFocused
+                | ColumnAdmission::ExcludeStaleFocusedLiveTurn => unreachable!(),
             }
         }
         assert_eq!(excluded, vec![PathBuf::from("tasks/pmt2/mr/1061.md")]);

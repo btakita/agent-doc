@@ -39,28 +39,52 @@ pub fn pane_title_for_state(active: bool) -> &'static str {
     if active { TURN_ACTIVE_PANE_TITLE } else { "" }
 }
 
+/// Single-marker title for a busy pane whose supervisor is stale (GH #124).
+///
+/// A pane title holds ONE marker. The pre-#124 composition welded the stale
+/// marker onto the busy marker (`⚠ STALE SUPERVISOR ⟳ agent-doc: turn in
+/// progress`), so a stale pane carried the live turn's own `⟳` marker as well
+/// as the warning. The stale verdict replaces the busy glyph instead: the title
+/// leads with the one warning marker and names the busy state as plain text.
+pub const STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE: &str = "⚠ STALE SUPERVISOR: turn in progress";
+
 /// Compose the pane-border title for a turn state, decorated with the stale
-/// supervisor marker when `stale` is true.
+/// supervisor marker when `stale` is true. Always exactly one marker.
 pub fn pane_title_for_status(active: bool, stale: bool) -> String {
-    let base = pane_title_for_state(active);
-    match (stale, base.is_empty()) {
+    compose_pane_title(pane_title_for_state(active), stale)
+}
+
+/// The undecorated title under any stale-supervisor decoration: the busy title,
+/// empty (idle), or an operator-owned custom title. Reads every shape agent-doc
+/// has written, including the pre-#124 welded `⚠ STALE SUPERVISOR ⟳ …` form.
+pub fn undecorated_pane_title(title: &str) -> &str {
+    if title == STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE {
+        return TURN_ACTIVE_PANE_TITLE;
+    }
+    match title.strip_prefix(STALE_SUPERVISOR_PANE_MARKER) {
+        Some(rest) => rest.strip_prefix(' ').unwrap_or(rest),
+        None => title,
+    }
+}
+
+fn compose_pane_title(base: &str, stale: bool) -> String {
+    match (stale, base) {
         (false, _) => base.to_string(),
-        (true, true) => STALE_SUPERVISOR_PANE_MARKER.to_string(),
-        (true, false) => format!("{STALE_SUPERVISOR_PANE_MARKER} {base}"),
+        (true, "") => STALE_SUPERVISOR_PANE_MARKER.to_string(),
+        (true, TURN_ACTIVE_PANE_TITLE) => STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE.to_string(),
+        (true, custom) => format!("{STALE_SUPERVISOR_PANE_MARKER} {custom}"),
     }
 }
 
 /// Refresh only the supervisor decoration; adoption must preserve the child turn title.
 pub fn pane_title_with_freshness(title: &str, stale: bool) -> String {
-    let base = title
-        .strip_prefix(STALE_SUPERVISOR_PANE_MARKER)
-        .map(|title| title.strip_prefix(' ').unwrap_or(title))
-        .unwrap_or(title);
-    match (stale, base.is_empty()) {
-        (false, _) => base.to_string(),
-        (true, true) => STALE_SUPERVISOR_PANE_MARKER.to_string(),
-        (true, false) => format!("{STALE_SUPERVISOR_PANE_MARKER} {base}"),
-    }
+    compose_pane_title(undecorated_pane_title(title), stale)
+}
+
+/// Number of agent-doc status markers (`⚠` stale, `⟳` busy) in a pane title.
+/// GH #124: an agent-doc-composed title carries at most one.
+pub fn pane_title_status_marker_count(title: &str) -> usize {
+    title.matches('⚠').count() + title.matches('⟳').count()
 }
 
 #[cfg(test)]
@@ -128,6 +152,37 @@ mod tests {
         assert!(
             title.starts_with(STALE_SUPERVISOR_PANE_MARKER),
             "warning must lead the title: {title}"
+        );
+    }
+
+    #[test]
+    fn gh124_stale_busy_title_holds_exactly_one_marker() {
+        // A pane already carrying the stale marker that goes busy must not weld
+        // the busy marker on (`⚠ STALE SUPERVISOR ⟳ agent-doc: turn in progress`).
+        let busy_on_stale = pane_title_for_status(true, true);
+        assert_eq!(pane_title_status_marker_count(&busy_on_stale), 1, "{busy_on_stale}");
+        assert!(!busy_on_stale.contains(TURN_ACTIVE_PANE_TITLE), "{busy_on_stale}");
+        let refreshed = pane_title_with_freshness(STALE_SUPERVISOR_PANE_MARKER, true);
+        assert_eq!(pane_title_status_marker_count(&refreshed), 1, "{refreshed}");
+        for active in [true, false] {
+            for stale in [true, false] {
+                let title = pane_title_for_status(active, stale);
+                assert!(pane_title_status_marker_count(&title) <= 1, "{title}");
+            }
+        }
+    }
+
+    #[test]
+    fn gh124_legacy_welded_title_normalises_to_one_marker() {
+        let welded = format!("{STALE_SUPERVISOR_PANE_MARKER} {TURN_ACTIVE_PANE_TITLE}");
+        assert_eq!(undecorated_pane_title(&welded), TURN_ACTIVE_PANE_TITLE);
+        let stale = pane_title_with_freshness(&welded, true);
+        assert_eq!(stale, STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE);
+        assert_eq!(pane_title_status_marker_count(&stale), 1);
+        assert_eq!(pane_title_with_freshness(&welded, false), TURN_ACTIVE_PANE_TITLE);
+        assert_eq!(
+            pane_title_with_freshness(STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE, false),
+            TURN_ACTIVE_PANE_TITLE
         );
     }
 

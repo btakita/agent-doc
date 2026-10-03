@@ -195,12 +195,18 @@ whose route-owned supervisor maps a superseded binary gets one
 `registry`, `router_ephemeral`), origin and final window, binding, supervisor
 freshness, and the candidates. A pane bound to another document is reported as
 `layout_column_pane_foreign_document` and never touched. A stale supervisor in
-the column's own pane is not excluded (that would leave the document's column
-unrealised or provision a second owner) and is never reaped: the layout path
-requests the existing safe-boundary recycle, at most once per supervisor per
-ten minutes, and logs `layout_column_pane_supervisor_stale`. Binary identity
-(`#supdirstale`) is the staleness authority; agent-doc's own
-`⚠ STALE SUPERVISOR` title decides only when the binary cannot be observed.
+the column's own pane (its `/proc/<pid>/exe` names an unlinked file) is gated
+out BEFORE tmux-router selects it (GH #121, `layout_column_pane_excluded`) and
+is never reaped: the layout path requests the existing safe-boundary recycle, at
+most once per supervisor per ten minutes. The focused document's stale pane is
+admitted (`layout_column_pane_stale_focus_admitted`) only when realising it
+stashes no pane in the target window that holds a fresh turn-active lease — a
+live agent pane is never stashed in favour of a stale-supervisor pane (GH #124,
+`admission=excluded_focused_live_turn_protected:<panes>`). When every column is
+gated out the current layout is preserved. agent-doc's own `⚠ STALE SUPERVISOR`
+title is diagnostic only, never evidence. A pane title carries one status
+marker: a busy stale pane reads `⚠ STALE SUPERVISOR: turn in progress`, never the
+busy `⟳` marker welded behind the warning.
 - Explicit `--pane` remains a direct tmux selection escape hatch. `--blocking`
   keeps the legacy synchronous local actor/registry resolver and may surface a
   stashed pane before returning.

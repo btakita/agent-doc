@@ -2567,6 +2567,7 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-tmux-io",
  "agent-doc-turn",
+ "agent-doc-turn-status-io",
  "agent-doc-workflow-io",
  "anyhow",
  "fs2",

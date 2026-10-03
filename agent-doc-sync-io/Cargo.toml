@@ -46,6 +46,7 @@ agent-doc-sync = { path = "../agent-doc-sync", version = "0.35.445" }
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.445" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.445" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.445" }
+agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.445" }
 agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.445" }
 anyhow = "1"
 lazily = "0.57.1"

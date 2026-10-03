@@ -338,7 +338,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [/] [#jaicratepublish] [operator-verify] Before the next tsift release: publish tsift-tree-sitter-jai 0.1.102 to crates.io once by hand with a token (cargo publish -p tsift-tree-sitter-jai, token in passage), then register the btakita/tsift release.yml trusted publisher for the crate on crates.io. The release publish job uses OIDC trusted publishing, which only works for crates that already exist, so without this the next release fails at this crate before tsift-graph. Gated on operator approval of the publish and the crates.io settings change.
 - [ ] [#graphrefreshperf] Root-scope graph-db refresh over the haiven-sdk tree (sdk-ruff worktree of the feat/codegen-trace branch) ran >13 min without finishing; ~50% of samples in link_ast_navigation_edges plus heavy libc. Profile, fix the hot path, add a perf-gate case.
 <!-- /agent:backlog -->
 
@@ -346,6 +345,7 @@ https://github.com/chopratejas/headroom
 
 <!-- agent:review -->
 - [/] [#sdktraceroot] [recommended] After #graphrefreshperf: import haiven-sdk codegen/trace.json into the ROOT graph so per-language declarations join by path:line, and investigate unjoined trace nodes (8/51 contracts, 10/23 events, 56/195 REST ops, 50 components); check for a contracts-revision mismatch vs the trace pin.
+- [/] [#jaicratepublish] [operator-verify] Before the next tsift release: publish tsift-tree-sitter-jai 0.1.102 to crates.io once by hand with a token (cargo publish -p tsift-tree-sitter-jai, token in passage), then register the btakita/tsift release.yml trusted publisher for the crate on crates.io. The release publish job uses OIDC trusted publishing, which only works for crates that already exist, so without this the next release fails at this crate before tsift-graph. Gated on operator approval of the publish and the crates.io settings change.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

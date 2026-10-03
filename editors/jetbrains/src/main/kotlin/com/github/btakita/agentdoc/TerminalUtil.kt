@@ -522,6 +522,7 @@ object TerminalUtil {
                         waitForReadySeconds = RUN_ROUTE_WAIT_FOR_READY_SECONDS,
                         attemptId = attempt?.id,
                         routeKey = attempt?.routeKey,
+                        columnOrder = SyncLayoutAction.syncColumnOrder(editorLayout),
                     )
                     val output = routeResult.output
                     val exitCode = routeResult.exitCode

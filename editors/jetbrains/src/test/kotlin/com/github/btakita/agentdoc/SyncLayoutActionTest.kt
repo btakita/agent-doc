@@ -557,4 +557,34 @@ class SyncLayoutActionTest {
             TerminalUtil.buildRouteLayoutArgs(emptyList(), null, null),
         )
     }
+
+    /**
+     * GH #112: only a detected multi-column split carries a left-to-right order.
+     * The undetected fallback is `selectedFiles` order (focused window first), so
+     * it is published as `unknown` and the controller keeps the retained order.
+     */
+    @Test
+    fun `only a detected multi-column split publishes an editor column order`() {
+        assertEquals("unknown", SyncLayoutAction.syncColumnOrder(null))
+        assertEquals(
+            "unknown",
+            SyncLayoutAction.syncColumnOrder(EditorLayout(listOf(LayoutColumn(listOf("/repo/a.md"))))),
+        )
+        assertEquals(
+            "editor",
+            SyncLayoutAction.syncColumnOrder(
+                EditorLayout(
+                    listOf(LayoutColumn(listOf("/repo/a.md")), LayoutColumn(listOf("/repo/b.md"))),
+                ),
+            ),
+        )
+        val source = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt",
+        ).toFile().readText()
+        assertTrue(source.contains("columnOrder = syncColumnOrder(editorLayout)"))
+        val route = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt",
+        ).toFile().readText()
+        assertTrue(route.contains("columnOrder = SyncLayoutAction.syncColumnOrder(editorLayout)"))
+    }
 }

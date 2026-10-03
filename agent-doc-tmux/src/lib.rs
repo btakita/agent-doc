@@ -870,6 +870,137 @@ pub fn build_layout_state(
         .collect()
 }
 
+/// Where the left-to-right order of a desired pane layout came from (GH #112).
+///
+/// `Editor` is a positive split-order observation (local multi-window
+/// geometry, or an explicit operator `--col` list). `Unknown` means the
+/// publisher had membership but no order: on a JetBrains Remote Dev backend the
+/// detector reports `unknown`, and the plugin's fallback lists the visible
+/// documents in `FileEditorManager.selectedFiles` order, which puts the
+/// focused editor's selection first. `Retained` is the resolved label once an
+/// `Unknown` order has been replaced by the order already retained for those
+/// documents.
+///
+/// The serde default is `Editor` so an older publisher that never names an
+/// order keeps its previous (authoritative) meaning.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutColumnOrder {
+    #[default]
+    Editor,
+    Unknown,
+    Retained,
+}
+
+impl LayoutColumnOrder {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Editor => "editor",
+            Self::Unknown => "unknown",
+            Self::Retained => "retained",
+        }
+    }
+
+    pub fn is_editor(self) -> bool {
+        matches!(self, Self::Editor)
+    }
+}
+
+impl fmt::Display for LayoutColumnOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// The columns a publication resolves to, and the order source that decided it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct OrderedLayoutColumns {
+    pub columns: Vec<String>,
+    pub order: LayoutColumnOrder,
+    /// `true` when the incoming column vector was permuted.
+    pub reordered: bool,
+}
+
+/// Resolve the left-to-right order of a desired pane layout (GH #112).
+///
+/// Pure: no IO, no graph access, so it can be the body of a `Computed` over
+/// per-publisher layout Sources unchanged. Membership is always the incoming
+/// publication's; this only decides ORDER.
+///
+/// - An `Editor` order is authoritative and passes through untouched.
+/// - Otherwise (`Unknown`, or a caller that already labelled its merge
+///   `Retained`) the incoming columns are sorted by the earliest position any
+///   of their documents holds in `retained`. Columns with no retained document
+///   keep their relative incoming order and are appended after the retained
+///   ones, so a newly visible document joins at the end instead of jumping to
+///   the front. Focus never participates: it is a focus effect, not a
+///   structural input.
+/// - With no document in common with `retained` there is no order to keep, and
+///   the incoming order is used as-is, still labelled `Unknown`.
+///
+/// Documents are compared by trimmed identity; callers pass canonical ids.
+/// Idempotent: resolving an already-resolved vector against the same
+/// `retained` returns it unchanged.
+pub fn order_layout_columns(
+    retained: &[String],
+    incoming: &[String],
+    incoming_order: LayoutColumnOrder,
+) -> OrderedLayoutColumns {
+    if incoming_order.is_editor() {
+        return OrderedLayoutColumns {
+            columns: incoming.to_vec(),
+            order: LayoutColumnOrder::Editor,
+            reordered: false,
+        };
+    }
+    let retained_documents: Vec<&str> = retained
+        .iter()
+        .flat_map(|column| column.split(','))
+        .map(str::trim)
+        .filter(|document| !document.is_empty())
+        .collect();
+    let retained_rank = |column: &str| {
+        column
+            .split(',')
+            .map(str::trim)
+            .filter(|document| !document.is_empty())
+            .filter_map(|document| {
+                retained_documents
+                    .iter()
+                    .position(|retained| *retained == document)
+            })
+            .min()
+    };
+    let ranked: Vec<(Option<usize>, usize, &String)> = incoming
+        .iter()
+        .enumerate()
+        .map(|(index, column)| (retained_rank(column), index, column))
+        .collect();
+    if ranked.iter().all(|(rank, _, _)| rank.is_none()) {
+        return OrderedLayoutColumns {
+            columns: incoming.to_vec(),
+            order: LayoutColumnOrder::Unknown,
+            reordered: false,
+        };
+    }
+    let mut sorted = ranked;
+    // `None` sorts after every `Some`, and the incoming index breaks ties, so
+    // new columns append in the order they arrived.
+    sorted.sort_by_key(|(rank, index, _)| (rank.is_none(), rank.unwrap_or(0), *index));
+    let reordered = sorted
+        .iter()
+        .enumerate()
+        .any(|(position, (_, index, _))| position != *index);
+    OrderedLayoutColumns {
+        columns: sorted
+            .into_iter()
+            .map(|(_, _, column)| column.clone())
+            .collect(),
+        order: LayoutColumnOrder::Retained,
+        reordered,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TmuxFocusOnlyExpansionMode {
@@ -2237,5 +2368,105 @@ distinct, identical ones still dedupe"
         ];
         let targets = stash_ttl_prune_targets(&candidates, 300);
         assert_eq!(targets, vec!["%idle-old".to_string()]);
+    }
+
+    fn cols(columns: &[&str]) -> Vec<String> {
+        columns.iter().map(|column| column.to_string()).collect()
+    }
+
+    /// GH #112: the issue's two documents, published focus-first on every
+    /// focus toggle. Once an order is retained, toggling focus must not flip it.
+    #[test]
+    fn unknown_order_keeps_the_retained_order_across_focus_toggles() {
+        let ad = "/w/tasks/agent-doc/agent-doc.ad.md";
+        let mr = "/w/tasks/pmt2/mr/1102.md";
+        let mut retained = Vec::new();
+        let mut seen = Vec::new();
+        for incoming in [
+            cols(&[ad, mr]),
+            cols(&[mr, ad]),
+            cols(&[ad, mr]),
+            cols(&[mr, ad]),
+        ] {
+            let ordered = order_layout_columns(&retained, &incoming, LayoutColumnOrder::Unknown);
+            retained = ordered.columns.clone();
+            seen.push(ordered);
+        }
+        for ordered in &seen {
+            assert_eq!(ordered.columns, cols(&[ad, mr]), "{seen:?}");
+        }
+        assert_eq!(seen[0].order, LayoutColumnOrder::Unknown, "no basis yet");
+        assert!(!seen[0].reordered);
+        assert_eq!(seen[1].order, LayoutColumnOrder::Retained);
+        assert!(seen[1].reordered, "the focus-first flip was undone");
+        assert!(!seen[2].reordered);
+    }
+
+    #[test]
+    fn unknown_order_appends_a_new_document_instead_of_promoting_it() {
+        let ordered = order_layout_columns(
+            &cols(&["a.md", "b.md"]),
+            &cols(&["c.md", "b.md", "a.md"]),
+            LayoutColumnOrder::Unknown,
+        );
+        assert_eq!(ordered.columns, cols(&["a.md", "b.md", "c.md"]));
+        assert_eq!(ordered.order, LayoutColumnOrder::Retained);
+        // Two new documents keep their arrival order after the retained ones.
+        let ordered = order_layout_columns(
+            &cols(&["a.md"]),
+            &cols(&["d.md", "c.md", "a.md"]),
+            LayoutColumnOrder::Unknown,
+        );
+        assert_eq!(ordered.columns, cols(&["a.md", "d.md", "c.md"]));
+    }
+
+    #[test]
+    fn unknown_order_follows_document_position_inside_stacked_retained_columns() {
+        // Retained one stacked column `a,b`; the publisher split them focus-first.
+        let ordered = order_layout_columns(
+            &cols(&["a.md,b.md", "c.md"]),
+            &cols(&["c.md", "b.md", "a.md"]),
+            LayoutColumnOrder::Unknown,
+        );
+        assert_eq!(ordered.columns, cols(&["a.md", "b.md", "c.md"]));
+        // Dropped documents do not disturb the survivors' relative order.
+        let ordered = order_layout_columns(
+            &cols(&["a.md", "b.md", "c.md"]),
+            &cols(&["c.md", "a.md"]),
+            LayoutColumnOrder::Unknown,
+        );
+        assert_eq!(ordered.columns, cols(&["a.md", "c.md"]));
+    }
+
+    #[test]
+    fn an_authoritative_editor_order_always_wins() {
+        let ordered = order_layout_columns(
+            &cols(&["a.md", "b.md"]),
+            &cols(&["b.md", "a.md"]),
+            LayoutColumnOrder::Editor,
+        );
+        assert_eq!(ordered.columns, cols(&["b.md", "a.md"]));
+        assert_eq!(ordered.order, LayoutColumnOrder::Editor);
+        assert!(!ordered.reordered);
+    }
+
+    #[test]
+    fn a_retained_labelled_merge_is_restabilized_idempotently() {
+        let retained = cols(&["a.md", "b.md"]);
+        let once = order_layout_columns(
+            &retained,
+            &cols(&["b.md", "a.md"]),
+            LayoutColumnOrder::Retained,
+        );
+        let twice = order_layout_columns(&retained, &once.columns, once.order);
+        assert_eq!(once.columns, cols(&["a.md", "b.md"]));
+        assert_eq!(twice.columns, once.columns);
+        assert!(!twice.reordered);
+    }
+
+    #[test]
+    fn layout_column_order_defaults_to_editor() {
+        assert_eq!(LayoutColumnOrder::default(), LayoutColumnOrder::Editor);
+        assert_eq!(LayoutColumnOrder::Retained.to_string(), "retained");
     }
 }

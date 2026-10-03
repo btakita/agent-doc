@@ -3455,6 +3455,7 @@ pub unsafe extern "C" fn agent_doc_sync_tmux_layout_json(
                 } else {
                     "manual".to_string()
                 },
+                column_order: Default::default(),
                 actor_bindings: Vec::new(),
             },
         )

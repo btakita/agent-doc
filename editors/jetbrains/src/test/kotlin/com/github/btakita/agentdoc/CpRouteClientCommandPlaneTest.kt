@@ -267,6 +267,46 @@ class CpRouteClientCommandPlaneTest {
     }
 
     @Test
+    fun `pane layout desired publication names an unknown column order only when asked`() {
+        fun desiredOf(request: com.google.gson.JsonObject): com.google.gson.JsonObject {
+            val publication =
+                JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+            val message = IpcMessage.decodeJson(publication.get("message_json").asString)
+            val node = (message as IpcMessage.SnapshotMessage).snapshot.nodes.single()
+            return JsonParser.parseString(
+                String((node.state as NodeState.Payload).toByteArray(), Charsets.UTF_8),
+            ).asJsonObject
+        }
+        val unknown = desiredOf(
+            CpRouteClient.paneLayoutDesiredStatePublishRequest(
+                projectRoot = "/proj",
+                columnsJson = """["/proj/tasks/two.md","/proj/tasks/one.md"]""",
+                window = null,
+                focus = "/proj/tasks/two.md",
+                noAutostart = false,
+                exactVisible = true,
+                producerId = "jetbrains-test",
+                epoch = 43,
+                columnOrder = "unknown",
+            ),
+        )
+        assertEquals("unknown", unknown.get("column_order").asString)
+        val legacy = desiredOf(
+            CpRouteClient.paneLayoutDesiredStatePublishRequest(
+                projectRoot = "/proj",
+                columnsJson = """["/proj/tasks/one.md"]""",
+                window = null,
+                focus = "/proj/tasks/one.md",
+                noAutostart = false,
+                exactVisible = true,
+                producerId = "jetbrains-test",
+                epoch = 44,
+            ),
+        )
+        assertFalse(legacy.has("column_order"))
+    }
+
+    @Test
     fun `state plane subscription carries a monotonic resume cursor`() {
         val request = CpRouteClient.statePlaneSubscribeRequest(
             channel = "agent-doc/pane-layout/status/v1",

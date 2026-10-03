@@ -544,6 +544,7 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
+        columnOrder: String? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         if (commandPlaneEnabled()) {
@@ -557,6 +558,7 @@ internal object CpRouteClient {
             routeKey = routeKey,
                 commandId = commandId,
                 controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
+                columnOrder = columnOrder,
             )
             return try {
                 replayIdempotentControllerCommandOnce(
@@ -602,6 +604,7 @@ internal object CpRouteClient {
             waitForReadySeconds = waitForReadySeconds,
             attemptId = attemptId,
             routeKey = routeKey,
+            columnOrder = columnOrder,
         )
         return try {
             sendToSocket(socket, request)
@@ -622,6 +625,7 @@ internal object CpRouteClient {
         noAutostart: Boolean,
         exactVisible: Boolean,
         callerKind: String,
+        columnOrder: String? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         val request = paneLayoutDesiredStatePublishRequest(
@@ -632,6 +636,7 @@ internal object CpRouteClient {
             noAutostart = noAutostart,
             exactVisible = exactVisible,
             callerKind = callerKind,
+            columnOrder = columnOrder,
         )
         return try {
             val data = sendOperatorRequestDataToSocket(socket, request)
@@ -784,6 +789,7 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
+        columnOrder: String? = null,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("source", "jetbrains_plugin")
@@ -796,6 +802,9 @@ internal object CpRouteClient {
         })
         attemptId?.let { payload.addProperty("attempt_id", it) }
         routeKey?.let { payload.addProperty("route_key", it) }
+        // GH #112: name whether the `--col` order is a positive editor split
+        // observation. An older controller ignores the unknown field.
+        columnOrder?.let { payload.addProperty("column_order", it) }
         return payload
     }
 
@@ -806,6 +815,7 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
+        columnOrder: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -813,6 +823,7 @@ internal object CpRouteClient {
             waitForReadySeconds,
             attemptId,
             routeKey,
+            columnOrder,
         )
         val request = JsonObject()
         request.addProperty("command", EditorCommandName.EditorRoute.token)
@@ -843,6 +854,7 @@ internal object CpRouteClient {
         routeKey: String?,
         commandId: String,
         controllerCommand: String = "editor_command_submit",
+        columnOrder: String? = null,
     ): JsonObject {
         val payload = editorRoutePayload(
             relativePath,
@@ -850,6 +862,7 @@ internal object CpRouteClient {
             waitForReadySeconds,
             attemptId,
             routeKey,
+            columnOrder,
         )
         return commandSubmitRequest(
             filePath = filePath,
@@ -906,6 +919,7 @@ internal fun editorCommandAwaitRequest(
         callerKind: String = "manual",
         producerId: String = statePlaneProducerId,
         epoch: Long = statePlaneEpoch.incrementAndGet(),
+        columnOrder: String? = null,
     ): JsonObject {
         val desired = JsonObject()
         desired.addProperty("project_root", projectRoot)
@@ -915,6 +929,8 @@ internal fun editorCommandAwaitRequest(
         desired.addProperty("no_autostart", noAutostart)
         desired.addProperty("exact_visible", exactVisible)
         desired.addProperty("caller_kind", callerKind)
+        // GH #112: `unknown` asks the controller to keep the retained order.
+        columnOrder?.let { desired.addProperty("column_order", it) }
         val node = NodeSnapshot.payload(
             node = 1L,
             typeTag = PANE_LAYOUT_DESIRED_TYPE_TAG,

@@ -3059,6 +3059,7 @@ fn automatic_layout_sync_invocation(
         no_autostart: false,
         exact_visible: true,
         caller_kind: "automatic".to_string(),
+        column_order: Default::default(),
         actor_bindings: Vec::new(),
     }
 }
@@ -8444,6 +8445,10 @@ struct ControllerEditorRoutePayload {
     route_key: Option<String>,
     #[serde(default)]
     source: Option<String>,
+    /// GH #112: whether `layout_args`' `--col` order is a positive editor
+    /// split-order observation. Absent keeps the pre-#112 `editor` meaning.
+    #[serde(default)]
+    column_order: agent_doc_tmux::LayoutColumnOrder,
 }
 
 #[derive(Debug, Serialize)]
@@ -9355,6 +9360,7 @@ fn handle_editor_route_rpc(
 
     let mut layout_invocation =
         editor_route_layout_invocation(&bootstrap.project_root, &layout_args)?;
+    layout_invocation.column_order = payload.column_order;
     let routed_document = canonical
         .canonicalize()
         .unwrap_or_else(|_| canonical.clone())
@@ -10379,6 +10385,7 @@ fn editor_route_layout_invocation(
         no_autostart: false,
         exact_visible: true,
         caller_kind: "editor_route".to_string(),
+        column_order: Default::default(),
         actor_bindings: Vec::new(),
     })
 }
@@ -19799,7 +19806,16 @@ fn escalate_focus_to_structural_layout(
     );
     // The intent is "select this document", so the republished layout must carry
     // the focus rather than preserve whatever tmux happens to have selected.
-    let invocation = automatic_layout_sync_invocation(columns, document, false);
+    let mut invocation = automatic_layout_sync_invocation(columns, document, false);
+    if source == "retained_layout" {
+        // GH #112: republishing the retained layout keeps its order source, so
+        // an unchanged layout still coalesces instead of relabelling a
+        // `retained` order as `editor` and minting a new generation.
+        invocation.column_order = runtime
+            .pane_layout_desired()
+            .map(|desired| desired.invocation.column_order)
+            .unwrap_or_default();
+    }
     if let Err(error) = publish_pane_layout_desired_invocation(
         bootstrap,
         runtime,
@@ -21756,7 +21772,7 @@ fn pane_layout_effect_worker(
                 agent_doc_ops_log_io::log_op(
                     &bootstrap.project_root,
                     &format!(
-                        "pane_layout_projection generation={} attempt={} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?} expected_focus_pane={:?} active_pane={:?}",
+                        "pane_layout_projection generation={} attempt={} phase=converged observation=reused_structural_layout effect=focus_only focus={} expected={:?} actual={:?} panes={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
                         desired.generation,
                         attempt,
                         focus_reason,
@@ -21765,6 +21781,8 @@ fn pane_layout_effect_worker(
                         logged_panes,
                         logged_expected_focus_pane,
                         logged_active_pane,
+                        desired.invocation.caller_kind,
+                        desired.invocation.column_order,
                     ),
                 );
                 match pane_layout_effect_worker_complete(
@@ -21986,7 +22004,7 @@ fn pane_layout_effect_worker(
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
             &format!(
-                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?} expected_focus_pane={:?} active_pane={:?}",
+                "pane_layout_projection generation={} attempt={} phase={} observation={} effect={} focus={} expected={:?} actual={:?} expected_panes={:?} panes={:?} operator_owned_documents={:?} expected_focus_pane={:?} active_pane={:?} caller_kind={} column_order={}",
                 desired.generation,
                 attempt,
                 if synced { "converged" } else { "retry_pending" },
@@ -22000,6 +22018,8 @@ fn pane_layout_effect_worker(
                 logged_operator_owned_documents,
                 logged_expected_focus_pane,
                 logged_active_pane,
+                desired.invocation.caller_kind,
+                desired.invocation.column_order,
             ),
         );
         if let Some((session, window)) = geometry_target {
@@ -23098,6 +23118,7 @@ mod desktop_editor_focus_tests {
             no_autostart: true,
             exact_visible: true,
             caller_kind: "automatic".to_string(),
+            column_order: Default::default(),
             actor_bindings: Vec::new(),
         };
         assert!(suppress_inactive_automatic_layout_focus(
@@ -23361,15 +23382,69 @@ fn publish_pane_layout_desired_invocation(
         !desired_columns.is_empty(),
         "sync_tmux_layout refused: desired pane layout is empty"
     );
+    // GH #112: a publisher without a positive split-order observation (Remote
+    // Dev `unknown`) lists documents focus-first, so its order is resolved
+    // against the retained desired layout instead of being applied verbatim.
+    let retained = runtime.pane_layout_desired();
+    let ordered = agent_doc_tmux::order_layout_columns(
+        retained
+            .as_ref()
+            .map(|desired| desired.invocation.columns.as_slice())
+            .unwrap_or_default(),
+        &desired_columns,
+        invocation.column_order,
+    );
     // The desired Lazily fact is durable before the effect graph sees it.
     // Tmux and crash-state sidecars are projections, never fallback inputs.
-    store_layout_state(&bootstrap.project_root, &desired_columns)?;
-    invocation.columns = desired_columns;
+    store_layout_state(&bootstrap.project_root, &ordered.columns)?;
+    invocation.columns = ordered.columns;
+    invocation.column_order = ordered.order;
 
     let desired =
         runtime.set_pane_layout_desired(invocation.clone(), source_plane_version, publication);
+    log_pane_layout_desired_publication(
+        &bootstrap.project_root,
+        retained.as_ref().map(|retained| retained.generation),
+        &desired,
+        &desired_columns,
+        ordered.reordered,
+    );
     publish_pane_layout_status(runtime);
     Ok((desired, invocation))
+}
+
+/// GH #112 ask 2: one line per new desired generation naming the publisher
+/// (`caller_kind`, plus `plane_version` for editor state-plane frames), the
+/// columns exactly as received, and the columns as resolved with their order
+/// source. Both downstream stages are order-preserving, so this line is where
+/// any column order is decided. A coalesced republish of the same generation is
+/// silent unless its order was rewritten.
+fn log_pane_layout_desired_publication(
+    project_root: &Path,
+    previous_generation: Option<u64>,
+    desired: &PaneLayoutDesired,
+    incoming_columns: &[String],
+    reordered: bool,
+) {
+    if previous_generation == Some(desired.generation) && !reordered {
+        return;
+    }
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "pane_layout_desired_published generation={} caller_kind={} plane_version={} column_order={} reordered={} incoming={:?} columns={:?} focus={}",
+            desired.generation,
+            desired.invocation.caller_kind,
+            desired
+                .source_plane_version
+                .map_or_else(|| "none".to_string(), |version| version.to_string()),
+            desired.invocation.column_order,
+            reordered,
+            incoming_columns,
+            desired.invocation.columns,
+            desired.invocation.focus.as_deref().unwrap_or("none"),
+        ),
+    );
 }
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -23637,6 +23712,7 @@ mod pane_layout_projection_dispatch_tests {
             no_autostart,
             exact_visible: true,
             caller_kind: caller_kind.to_string(),
+            column_order: Default::default(),
             actor_bindings: Vec::new(),
         }
     }
@@ -26469,6 +26545,289 @@ mod tests {
         );
     }
 
+    /// The JetBrains plugin's undetected-layout publication (`Sync Tmux Pane`,
+    /// claim, resync, and the editor route's `--col` list) on a Remote Dev
+    /// backend: one column per visible document, listed focus-first.
+    fn plugin_unknown_order_publication(
+        columns: &[&str],
+        focus: &str,
+    ) -> ControllerTmuxLayoutSyncInvocation {
+        ControllerTmuxLayoutSyncInvocation {
+            columns: columns.iter().map(|column| column.to_string()).collect(),
+            window: None,
+            focus: Some(focus.to_string()),
+            no_autostart: false,
+            exact_visible: true,
+            caller_kind: "manual".to_string(),
+            column_order: agent_doc_tmux::LayoutColumnOrder::Unknown,
+            actor_bindings: Vec::new(),
+        }
+    }
+
+    fn session_document(dir: &tempfile::TempDir, name: &str) -> String {
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+        path.canonicalize().unwrap().display().to_string()
+    }
+
+    /// GH #112: consecutive converged two-column projections for the same two
+    /// documents alternated their column order, placing the focused document
+    /// first, because the publisher's order was focus-first and nothing
+    /// upstream of the order-preserving stages questioned it. An `unknown`
+    /// order must resolve to the retained one, so focus toggles move focus only.
+    #[test]
+    fn unknown_order_publications_keep_the_retained_column_order_across_focus_toggles() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let ad = session_document(&dir, "tasks/agent-doc/agent-doc.ad.md");
+        let mr = session_document(&dir, "tasks/pmt2/mr/1102.md");
+
+        let mut generations = Vec::new();
+        for focus in [&ad, &mr, &ad, &mr] {
+            let other = if focus == &ad { &mr } else { &ad };
+            let (desired, _) = publish_pane_layout_desired_invocation(
+                &bootstrap,
+                runtime.as_ref(),
+                plugin_unknown_order_publication(&[focus, other], focus),
+                None,
+                PaneLayoutPublication::FreshIntent,
+            )
+            .unwrap();
+            assert_eq!(
+                desired.invocation.columns,
+                vec![ad.clone(), mr.clone()],
+                "focus on {focus} must not reorder the retained columns"
+            );
+            assert_eq!(desired.invocation.focus.as_deref(), Some(focus.as_str()));
+            generations.push(desired.generation);
+        }
+        assert_eq!(
+            runtime
+                .pane_layout_desired()
+                .unwrap()
+                .invocation
+                .column_order,
+            agent_doc_tmux::LayoutColumnOrder::Retained
+        );
+        assert_eq!(
+            load_layout_state(&bootstrap.project_root).unwrap_or_default(),
+            vec![ad.clone(), mr.clone()],
+            "the durable column memory must hold the resolved order, not the incoming one"
+        );
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains(&format!(
+                "pane_layout_desired_published generation={} caller_kind=manual plane_version=none \
+                 column_order=unknown reordered=false incoming={:?}",
+                generations[0],
+                [&ad, &mr]
+            )),
+            "the first publication has no retained basis and must say so: {ops_log}"
+        );
+        assert!(
+            ops_log.contains(&format!(
+                "pane_layout_desired_published generation={} caller_kind=manual plane_version=none \
+                 column_order=retained reordered=true incoming={:?} columns={:?}",
+                generations[1],
+                [&mr, &ad],
+                [&ad, &mr]
+            )),
+            "the publisher and both the received and resolved order must be logged: {ops_log}"
+        );
+    }
+
+    /// GH #112: a focus escalation that republishes a `retained`-order layout
+    /// keeps that label, so the unchanged layout coalesces rather than minting
+    /// a new generation per tab switch.
+    #[test]
+    fn a_retained_layout_escalation_keeps_its_order_label_and_coalesces() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let ad = session_document(&dir, "ad.md");
+        let mr = session_document(&dir, "mr.md");
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&ad, &mr], &ad),
+            None,
+            PaneLayoutPublication::FreshIntent,
+        )
+        .unwrap();
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&mr, &ad], &mr),
+            None,
+            PaneLayoutPublication::FreshIntent,
+        )
+        .unwrap();
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &ad,
+            &[],
+            "actor_pane_not_visible",
+        );
+        let first = runtime.pane_layout_desired().unwrap();
+        assert_eq!(first.invocation.columns, vec![ad.clone(), mr.clone()]);
+        assert_eq!(
+            first.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Retained
+        );
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &ad,
+            &[],
+            "actor_pane_not_visible",
+        );
+        assert_eq!(
+            runtime.pane_layout_desired().unwrap().generation,
+            first.generation,
+            "an identical retained escalation must coalesce"
+        );
+    }
+
+    /// GH #112: a newly visible document joins at the end of a retained
+    /// unknown-order layout instead of jumping to the front as the focus.
+    #[test]
+    fn unknown_order_publication_appends_a_new_focused_document() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let ad = session_document(&dir, "ad.md");
+        let mr = session_document(&dir, "mr.md");
+        let infra = session_document(&dir, "infra.md");
+
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&ad, &mr], &ad),
+            None,
+            PaneLayoutPublication::FreshIntent,
+        )
+        .unwrap();
+        let (desired, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&infra, &mr, &ad], &infra),
+            None,
+            PaneLayoutPublication::FreshIntent,
+        )
+        .unwrap();
+        assert_eq!(
+            desired.invocation.columns,
+            vec![ad.clone(), mr.clone(), infra.clone()]
+        );
+        assert_eq!(desired.invocation.focus.as_deref(), Some(infra.as_str()));
+    }
+
+    /// GH #112: a positive editor split order (local multi-window geometry, or
+    /// a publisher that predates `column_order`) is still authoritative and
+    /// replaces the retained order.
+    #[test]
+    fn an_editor_sourced_column_order_still_wins_over_the_retained_order() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let ad = session_document(&dir, "ad.md");
+        let mr = session_document(&dir, "mr.md");
+
+        publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            plugin_unknown_order_publication(&[&ad, &mr], &ad),
+            None,
+            PaneLayoutPublication::FreshIntent,
+        )
+        .unwrap();
+        // A pre-#112 publisher sends no `column_order` at all.
+        let legacy: ControllerTmuxLayoutSyncInvocation =
+            serde_json::from_value(serde_json::json!({
+                "columns": [mr, ad],
+                "focus": mr,
+                "exact_visible": true,
+                "caller_kind": "manual",
+            }))
+            .unwrap();
+        assert_eq!(
+            legacy.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        );
+        let (desired, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            legacy,
+            None,
+            PaneLayoutPublication::FreshIntent,
+        )
+        .unwrap();
+        assert_eq!(desired.invocation.columns, vec![mr.clone(), ad.clone()]);
+        assert_eq!(
+            desired.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        );
+
+        // And the automatic editor-surface `Sync` path, which only carries
+        // detected columns, is editor-sourced as well.
+        let (desired, _) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            automatic_editor_surface_sync_invocation(
+                &[
+                    SurfaceColumn {
+                        files: vec![ad.clone()],
+                    },
+                    SurfaceColumn {
+                        files: vec![mr.clone()],
+                    },
+                ],
+                &mr,
+                false,
+            ),
+            None,
+            PaneLayoutPublication::CoalesceIdentical,
+        )
+        .unwrap();
+        assert_eq!(desired.invocation.columns, vec![ad.clone(), mr.clone()]);
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains(
+                "caller_kind=automatic plane_version=none column_order=editor reordered=false"
+            ),
+            "{ops_log}"
+        );
+    }
+
+    /// GH #112: the editor-route payload names its `--col` order source; an
+    /// older plugin that omits it keeps the authoritative meaning.
+    #[test]
+    fn editor_route_payload_carries_an_optional_column_order() {
+        let payload: ControllerEditorRoutePayload =
+            serde_json::from_str(r#"{"layout_args":["--col","a.md"],"column_order":"unknown"}"#)
+                .unwrap();
+        assert_eq!(
+            payload.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Unknown
+        );
+        let legacy: ControllerEditorRoutePayload =
+            serde_json::from_str(r#"{"layout_args":["--col","a.md"]}"#).unwrap();
+        assert_eq!(
+            legacy.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        );
+    }
+
     /// GH #106: the retained-layout fallback was a feedback loop. It appended
     /// every uncovered asking document to the last published layout and
     /// republished the result, so four documents switching in one second grew
@@ -27286,6 +27645,7 @@ mod tests {
             no_autostart: false,
             exact_visible: true,
             caller_kind: "projection".to_string(),
+            column_order: Default::default(),
             actor_bindings: Vec::new(),
         };
         let message_json = state_plane_snapshot_message_json(
@@ -28247,6 +28607,7 @@ mod tests {
                 no_autostart: false,
                 exact_visible: true,
                 caller_kind: "automatic".to_string(),
+                column_order: Default::default(),
                 actor_bindings: Vec::new(),
             },
         };
@@ -29331,6 +29692,7 @@ mod tests {
             no_autostart: false,
             exact_visible: true,
             caller_kind: "automatic".into(),
+            column_order: Default::default(),
             actor_bindings: Vec::new(),
         };
         let old = graph.set_desired(invocation.clone(), None);
@@ -29604,6 +29966,7 @@ mod tests {
                     no_autostart: false,
                     exact_visible: false,
                     caller_kind: "manual".to_string(),
+                    column_order: Default::default(),
                     actor_bindings: Vec::new(),
                 })
                 .unwrap(),

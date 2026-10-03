@@ -668,6 +668,39 @@ pub fn record_terminal_closeout_proof(
         );
     };
     let mut state = state;
+    if state.phase == agent_doc_turn::CyclePhase::Abandoned {
+        // GH #119: `abandoned` is terminal and is NOT a commit. The
+        // regression repair below exists for a lagging `committed` replica; it
+        // must never promote an abandoned cycle, which used to report
+        // `committed (terminal_proof_phase_repair)` to `session-check` while
+        // this same closeout then failed on a HEAD blob that cannot exist.
+        if state.last_event == agent_doc_cycle_state_io::COMMIT_REFUSED_IGNORED_PATH_EVENT {
+            // A `.gitignore`-matched document never has a HEAD blob, so there is
+            // nothing to prove against: the response is on disk, the commit
+            // was refused by design, and the cycle is closed. End the turn
+            // successfully so this command agrees with `session-check`.
+            eprintln!(
+                "[commit] {} is ignored by .gitignore: response written to disk, no git commit (cycle `{}` closed as `abandoned`)",
+                file.display(),
+                state.cycle_id
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "terminal_proof_skipped_ignored_path file={} cycle={} phase=abandoned",
+                    file.display(),
+                    state.cycle_id
+                ),
+            );
+            return Ok(());
+        }
+        anyhow::bail!(
+            "terminal proof cannot record closeout for {}: cycle `{}` was abandoned ({}), not committed",
+            file.display(),
+            state.cycle_id,
+            state.last_event
+        );
+    }
     if state.phase != agent_doc_turn::CyclePhase::Committed {
         // `#terminalproofphaseregress`: a phase is monotone, so a re-read below
         // what this same closeout already proved is a lagging replica — not a

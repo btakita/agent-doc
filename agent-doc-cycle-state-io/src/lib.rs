@@ -361,6 +361,13 @@ pub struct AdmitOutput {
     pub file_hash: Option<String>,
 }
 
+/// `last_event` stamped on a cycle closed because its document is an untracked
+/// path `.gitignore` matches (`#ignoredpathwedge`): the write is on disk, the
+/// commit is unreachable by design, and the cycle is `abandoned`, not
+/// `committed`. Closeout reads it to end the turn successfully without a HEAD
+/// proof that can never exist (GH #119).
+pub const COMMIT_REFUSED_IGNORED_PATH_EVENT: &str = "commit_refused_ignored_path";
+
 /// `#suprecyclespin` — seconds an open cycle may sit untouched (no IPC advisory
 /// connection in flight) at a harness turn boundary before the supervisor
 /// recycle/restart defer path force-closes it as abandoned. Bounded so a

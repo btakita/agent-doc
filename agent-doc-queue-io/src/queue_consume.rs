@@ -806,6 +806,13 @@ pub fn record_queue_consumption_proofs(
 }
 
 pub fn observe_authoritative_queue_state(file: &Path, content: &str) -> Result<usize> {
+    // GH #96 (second site) / GH #119: a document without an `agent:queue`
+    // component has no queue lifecycle to project. The controller projection
+    // would fail with "component `queue` was not found" and every commit of
+    // such a document printed a spurious authority-projection warning.
+    if !has_queue_component(content) {
+        return Ok(0);
+    }
     let canonical = file.canonicalize().with_context(|| {
         format!(
             "queue authority observation: failed to canonicalize {}",
@@ -824,6 +831,14 @@ pub fn observe_authoritative_queue_state(file: &Path, content: &str) -> Result<u
         &canonical,
         content,
     )
+}
+
+fn has_queue_component(content: &str) -> bool {
+    agent_doc_element::element::parse(content)
+        .map(|components| components.iter().any(|component| component.name == "queue"))
+        // An unparseable document still goes to the controller, which reports
+        // the real parse error instead of this guard hiding it.
+        .unwrap_or(true)
 }
 
 fn now_millis() -> u64 {

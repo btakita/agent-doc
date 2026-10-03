@@ -245,10 +245,25 @@ fn finalize_skips_ignored_untracked_session_doc() {
             "<!-- patch:exchange -->\n### Re: ignored doc — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .failure()
+        // GH #119: the cycle is terminal (`abandoned`, commit refused by
+        // design), so the closeout boundary must exit 0 — it used to exit 1
+        // with `terminal proof: missing HEAD` while `session-check` reported
+        // the same cycle `committed (terminal_proof_phase_repair)`.
+        .success()
         .stderr(predicates::str::contains(
             "skipped ignored untracked path scratch/session.md",
-        ));
+        ))
+        .stderr(predicates::str::contains("is ignored by .gitignore"))
+        .stderr(predicates::str::contains("missing HEAD").not())
+        // GH #96 second site: a queue-less document has no queue lifecycle to
+        // project, so the commit must not warn that the projection failed.
+        .stderr(predicates::str::contains("authority projection failed").not());
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("### Re: ignored doc"),
+        "the response must still land on disk"
+    );
 
     let show = ProcessCommand::new("git")
         .current_dir(tmp.path())
@@ -268,8 +283,12 @@ fn finalize_skips_ignored_untracked_session_doc() {
         .current_dir(tmp.path())
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
+        .success()
         .stdout(predicates::str::contains("INTERRUPTED").not())
-        .stdout(predicates::str::contains("write_applied").not());
+        .stdout(predicates::str::contains("write_applied").not())
+        // GH #119: an abandoned cycle must never be promoted to `committed`;
+        // nothing was committed.
+        .stdout(predicates::str::contains("terminal_proof_phase_repair").not());
 }
 
 #[test]

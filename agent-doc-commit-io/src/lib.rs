@@ -2820,7 +2820,7 @@ where
                     // committed.
                     if let Err(abandon_error) = agent_doc_cycle_state_io::mark_abandoned(
                         file,
-                        "commit_refused_ignored_path",
+                        agent_doc_cycle_state_io::COMMIT_REFUSED_IGNORED_PATH_EVENT,
                         None,
                         None,
                     ) {

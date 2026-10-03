@@ -1,6 +1,7 @@
 //! Binary and installed-editor-plugin release upgrades.
 //!
-//! Manual mode checks once. Auto mode is a foreground watcher that checks
+//! Manual mode checks once and reconciles installed editor plugins on every
+//! run (GH #107), failing loudly when they cannot be updated. Auto mode is a foreground watcher that checks
 //! immediately, polls stable GitHub releases, retries transient failures, and
 //! uses a per-user PID lock so only one watcher runs. Release archives are
 //! installed only after verification against the release's `SHA256SUMS`.
@@ -96,15 +97,48 @@ fn run_once() -> Result<()> {
             return Ok(());
         }
     };
-    if !version_is_newer(&latest, CURRENT_VERSION) {
+    if version_is_newer(&latest, CURRENT_VERSION) {
+        eprintln!("New version available: v{latest} (current: v{CURRENT_VERSION})");
+        if !upgrade_binary(&latest) {
+            // Never move plugins ahead of a binary that stayed behind.
+            print_manual_upgrade_instructions();
+            return Ok(());
+        }
+    } else {
         eprintln!("You are already on the latest version (v{CURRENT_VERSION}).");
-        return Ok(());
     }
-    eprintln!("New version available: v{latest} (current: v{CURRENT_VERSION})");
-    if !upgrade_binary(&latest) {
-        print_manual_upgrade_instructions();
+    // GH #107: a release can split one fix across the binary and the editor
+    // plugin, so the one-shot path reconciles installed plugins exactly like
+    // `--auto` does — including when the binary is already current, which is
+    // how a workspace left skewed by an older one-shot upgrade gets repaired.
+    reconcile_installed_plugins_once(&latest, crate::plugin::update_all_installed)
+}
+
+/// Reconcile installed editor plugins for a one-shot upgrade and fail loudly
+/// when they cannot be brought to `latest`, so a partially delivered release
+/// never reports success (GH #107).
+fn reconcile_installed_plugins_once(
+    latest: &str,
+    reconcile: impl FnOnce() -> Result<usize>,
+) -> Result<()> {
+    match reconcile() {
+        Ok(0) => {
+            eprintln!("Installed editor plugins already match v{latest}.");
+            Ok(())
+        }
+        Ok(updated) => {
+            eprintln!(
+                "Updated {updated} installed editor plugin target(s) to the v{latest} release. \
+                 Restart the editor if it does not reload the plugin on its own."
+            );
+            Ok(())
+        }
+        Err(error) => bail!(
+            "v{latest} is NOT fully installed: installed editor plugin reconciliation failed: \
+             {error:#}. The binary and plugin are now skewed; re-run `agent-doc upgrade` to retry \
+             the plugin step, or install manually with `agent-doc plugin install <editor>`."
+        ),
     }
-    Ok(())
 }
 
 fn run_auto(interval_seconds: u64) -> Result<()> {
@@ -480,6 +514,35 @@ fn version_is_newer(latest: &str, current: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_shot_plugin_reconciliation_fails_loudly_on_error() {
+        let error = reconcile_installed_plugins_once("0.35.441", || {
+            Err(anyhow::anyhow!("JetBrains: download refused"))
+        })
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("v0.35.441 is NOT fully installed"),
+            "{message}"
+        );
+        assert!(message.contains("JetBrains: download refused"), "{message}");
+    }
+
+    #[test]
+    fn one_shot_plugin_reconciliation_runs_and_succeeds() {
+        let mut called = false;
+        reconcile_installed_plugins_once("0.35.441", || {
+            called = true;
+            Ok(1)
+        })
+        .unwrap();
+        assert!(
+            called,
+            "the one-shot upgrade must reconcile installed plugins"
+        );
+        reconcile_installed_plugins_once("0.35.441", || Ok(0)).unwrap();
+    }
 
     #[test]
     fn version_comparison_orders_semver_triples() {

@@ -322,7 +322,15 @@ Mac hardware, and blocking the build on hardware would redden unrelated changes.
 `agent-doc upgrade` checks GitHub Releases for a newer stable version and upgrades
 through the prebuilt GitHub binary / `pip` cascade. A prebuilt archive is installed
 only after its bytes match the release's `SHA256SUMS` entry. The agent-doc Rust
-workspace is private and is not a crates.io upgrade source.
+workspace is private and is not a crates.io upgrade source. The one-shot path
+also reconciles every already-installed JetBrains and VS Code-family plugin to
+the latest release (GH #107) — after a successful binary upgrade, and also when
+the binary is already current, so a workspace skewed by an earlier binary-only
+upgrade is repaired by re-running it. A release can split one fix across the
+binary and the plugin, so a failed plugin reconciliation exits non-zero and says
+the release is not fully installed; it never reports success over a skew. When
+the binary upgrade itself fails, plugins are left alone rather than moved ahead
+of the binary.
 
 `agent-doc upgrade --auto [--interval-seconds N]` is a foreground release watcher.
 It checks immediately and then polls every 900 seconds by default; the interval

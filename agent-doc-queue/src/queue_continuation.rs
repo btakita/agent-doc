@@ -1010,12 +1010,28 @@ fn head_is_drainable(
 
 /// `#presetargdedup`: normalized `#id`s whose ONLY active meaning in the
 /// document is a prompt preset -- no backlog/review/icebox item carries them.
+///
+/// `#subagentintent`: the built-in subagent-intent tags (`#subagent`,
+/// `#subagents`, ...) are preset-only too unless a tracked item really carries
+/// that id. They mean "dispatch to a subagent" whether or not the document
+/// registers them, and reading `#subagent: <url>` as a reference to a missing
+/// backlog item made every such head non-drainable.
 pub fn preset_only_identity_ids(content: &str) -> HashSet<String> {
-    backlog::document_active_identities(content)
-        .into_iter()
+    let identities = backlog::document_active_identities(content);
+    let mut ids: HashSet<String> = identities
+        .iter()
         .filter(|(_, sources)| sources.iter().all(|source| source == "prompt_presets"))
-        .map(|(id, _)| id)
-        .collect()
+        .map(|(id, _)| id.clone())
+        .collect();
+    for tag in crate::subagent_intent::SUBAGENT_INTENT_TAGS {
+        let tracked = identities
+            .get(tag)
+            .is_some_and(|sources| sources.iter().any(|source| source != "prompt_presets"));
+        if !tracked {
+            ids.insert(tag.to_string());
+        }
+    }
+    ids
 }
 
 /// `#presetargdedup`: the tracked-item id a head references, or `None` when
@@ -1979,6 +1995,48 @@ mod tests {
             tracked_head_id("#c3d4 do it", &preset_only_identity_ids(content)).as_deref(),
             Some("c3d4")
         );
+    }
+
+    /// `#subagentintent` (live, agent-doc-bugs.md 2026-10-03): the document
+    /// registered only `'#subagents'`; the operator queued `#subagent: <url>`
+    /// heads. They were read as references to a missing backlog item
+    /// `#subagent`, so drainability was zero and the idle supervisor never woke
+    /// the session for them.
+    #[test]
+    fn singular_subagent_tag_heads_are_drainable_like_the_registered_plural() {
+        let content = concat!(
+            "---\n",
+            "prompt_presets:\n",
+            "  '#subagents': 'run the remaining items in subagents'\n",
+            "---\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- #subagent: https://github.com/btakita/agent-doc/issues/116\n",
+            "- #subagents: https://github.com/btakita/agent-doc/issues/117\n",
+            "- #sub-agent https://github.com/btakita/agent-doc/issues/118\n",
+            "- release + publish\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#c3d4] Other\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(drainable_head_count(content), 4);
+        for scope in [DrainScope::InSessionLoop, DrainScope::Supervisor] {
+            assert_eq!(
+                live_drainable_continuation_head(content, scope).as_deref(),
+                Some("#subagent: https://github.com/btakita/agent-doc/issues/116"),
+                "{scope:?}"
+            );
+        }
+        // Without any registered preset the tag still carries its meaning.
+        let unregistered = content.replace(
+            "prompt_presets:\n  '#subagents': 'run the remaining items in subagents'\n",
+            "session: sid\n",
+        );
+        assert_eq!(drainable_head_count(&unregistered), 4);
+        // A tracked item that really is named `#subagent` stays id-backed.
+        let tracked = content.replace("[#c3d4] Other", "[#subagent] real tracked item");
+        assert!(!preset_only_identity_ids(&tracked).contains("subagent"));
+        assert!(preset_only_identity_ids(&tracked).contains("subagents"));
     }
 
     #[test]

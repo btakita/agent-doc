@@ -825,10 +825,8 @@ impl<'a> PresetContext<'a> {
                     scope: PresetScope::Item,
                 })
                 .collect();
-        let literal_subagent_tag = raw
-            .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
-            .filter(|token| token.starts_with('#'))
-            .any(|token| preset_requests_subagents(token, ""));
+        let literal_subagent_tag =
+            agent_doc_queue::subagent_intent::carries_subagent_intent_tag(raw);
         intents.extend(self.inherited.iter().cloned());
         let subagent = literal_subagent_tag
             || intents
@@ -844,18 +842,11 @@ impl<'a> PresetContext<'a> {
 }
 
 /// True when a preset (by name or expansion body) asks for subagent dispatch.
+/// The vocabulary is shared with queue drainability
+/// (`agent_doc_queue::subagent_intent`, `#subagentintent`).
 pub fn preset_requests_subagents(name: &str, body: &str) -> bool {
-    let name = name.trim().trim_start_matches('#').to_ascii_lowercase();
-    if matches!(
-        name.as_str(),
-        "subagents" | "subagent" | "sub-agents" | "sub-agent"
-    ) {
-        return true;
-    }
-    let body = body.to_ascii_lowercase();
-    ["subagent", "sub-agent", "sub agent"]
-        .iter()
-        .any(|needle| body.contains(needle))
+    agent_doc_queue::subagent_intent::is_subagent_intent_tag(name)
+        || agent_doc_queue::subagent_intent::text_requests_subagents(body)
 }
 
 /// Conservative "the operator is plainly still typing this" shapes: an

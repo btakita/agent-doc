@@ -20,7 +20,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -592,16 +591,37 @@ An end-to-end run with the installed binary reported `mod:1` and restored the me
 - **Community-detection cache:** its key, `source_snapshot_parts`, doesn't include the version. An extractor change that leaves the symbol and edge counts the same would not refresh it.
 
 `#tracelockjoin` is still running.
+
+### Re: [#tracelockjoin] done — contracts pin check + trace joins — opus-5-5 · 2026-10-03T15:45-04:00
+
+> **Queue prompt:** do [#tracelockjoin]
+
+Pushed `78bb7f4` to tsift `main` as a fast-forward on `be24057`, without force. The binary is installed with `--features all-languages`. The push's CI run was still pending.
+
+**Changes to the importer (`graph_import.rs`):**
+- **Contracts pin check:** the import reads the sibling `contracts.lock` and stores its commit and repository on the import-source node. After the refresh it finds the contracts checkout: a sibling `../haiven-contracts` when that is its own git work tree, otherwise a scope whose remote ends in the lock's repository name. A different HEAD prints the mismatch warning word for word. A missing lock, missing checkout or unreadable HEAD gives a one-line note, and the import never fails.
+- **Vocabularies** join on `title`, falling back to the name.
+- **`ws.events`** join on `operation`, then `message`, then the name. `chat.typing` now lands on `chat.typing.event` instead of the client operation.
+- **`ws.requests`** is documented as keyed by wire type, and the request's own `operation` names its frame.
+- **Older traces** without the new fields still import using the name-based joins.
+
+**Spec and changelog:** `specs/graph.md` has a new "Contracts pin check" section and updated join rules. `VERSIONS.md` has an Unreleased entry; its rebase conflict with the other two agents' entries was resolved by keeping all three.
+
+**Tests:** 6 unit tests in `graph_import.rs` and 2 new integration tests (mismatch warns, match is silent, and an import with no lock still works) all pass. The final full `make check` exited 0.
+
+**Flaky test:** the first `make check` after the rebase exited 2. The failure was a search-timeout test unrelated to the import code. It then passed three times alone and on a full re-run. Queued as `#searchtimeoutflake`.
+
+**Real-trace check:** the subagent imported a scratch copy of the trace against haiven-contracts at the locked commit (`1ce0581`). The lock commit landed on the source node, and the joins were correct: `MessageType`→`WsMessageTypeV0`, `chat.typing`→`chat.typing.event`, and `motd`→`motd`. A clean joined count wasn't possible, because the scratch directory sat under a shared tsift root that also indexes other copies of haiven-contracts. Queued as `#tracejoinremeasure`.
+
+All four queued subagent items are closed.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~#subagent: do [#tsiftindexesinvalidate]~~
-- ~~#subagent: do [#haivensdkfollow]~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#subagent: do [#projectlevelopt]~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#tracelockjoin]
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+- do [#tracejoinremeasure]
+- do [#searchtimeoutflake]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -610,7 +630,8 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tracelockjoin] (sdktracenaming) tsift graph-db haiven-trace importer, in packages/tsift-cli/src/graph_import.rs: (1) read the sibling codegen/contracts.lock commit and store it on the import-source node; (2) after refresh, compare it with the HEAD of the indexed haiven-contracts checkout (the submodule beside codegen/, else an indexed repo whose remote ends in haiven-contracts) and warn on mismatch, never fail; (3) join vocabularies on the new trace title (fall back to name), and join ws.events on operation, else the AsyncAPI message key; this fixes chat.typing, which today joins to the client chat.typing operation; (4) tests: mismatched lock warns, matching lock is silent, event with no operation joins by message key. Also fix the comment that says model.json ws.requests is keyed by operation; it is keyed by wire type. Needs haiven-sdk 57dd11c (PR 62).
+- [ ] [#tracejoinremeasure] (sdktracenaming) Re-measure haiven-trace joins on the real haiven-sdk root checkout with tsift 78bb7f4 and haiven-sdk 57dd11c, with no scratch copies under a shared tsift root. Record the new joined/unmatched counts in specs/graph.md next to the historical 1,612/1,616 figure, and confirm the contracts-pin warning fires against the f634a0f submodule.
+- [ ] [#searchtimeoutflake] The tsift test exit_code::search_timeout_reports_reindex_when_index_disappears_during_worker_run failed once in the all-languages make check pass (2026-10-03, during the 78bb7f4 rebase), then passed three times alone and on a full re-run. Find the timing race and make it deterministic.
 <!-- /agent:backlog -->
 
 ## Review

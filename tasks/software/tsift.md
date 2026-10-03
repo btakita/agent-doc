@@ -153,7 +153,7 @@ The Jai, `#sdktsiftedges` and XSD/WSDL subagents are still running, and their he
 - do [#wsdlcontract]
 - ~~do [#releasepublishbindings]~~
 - ~~#subagent: Add C bindings~~
-- 🚧 #subagent: Add Odin bindings
+- ~~#subagent: Add Odin bindings~~ — auto-struck: answered this cycle (#ftstrike)
 - #subagent: Add Jai bindings
 - #subagent: [#sdktsiftedges]
 <!-- /agent:queue -->

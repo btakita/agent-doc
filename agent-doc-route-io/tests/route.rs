@@ -73,11 +73,11 @@
 //!   acceptance polling, dispatch-start proof, or Enter resubmission. Prompt-aware routes keep
 //!   the stronger acceptance and dispatch-start proof behavior.
 //! - **`await_idle(file, debounce)`**: Polls Lazily's current-document authority every
-//!   100ms. Detached documents dispatch immediately; attached documents wait for the
-//!   canonical delivery frontier to converge. The first retained delivery observation
-//!   requests one urgent editor drain so route startup does not depend on a background
-//!   retry timer. Missing, pending, or unavailable authority fails closed after the
-//!   `10 × debounce` safety cap expires.
+//!   100ms. Detached documents dispatch immediately; attached documents dispatch as soon
+//!   as the authoritative canonical text exists (`#routestartupadmit`). A pending replica
+//!   delivery does not hold dispatch: route admits on the current authority and fires one
+//!   urgent editor drain without awaiting it. Missing, pending, or unavailable authority
+//!   fails closed after the `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every
 //!   `AGENT_READY_POLL_INTERVAL`
 //!   looking for the agent's idle prompt (per `harness.prompt_patterns`). Returns true when

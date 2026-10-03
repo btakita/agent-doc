@@ -1,29 +1,30 @@
 //! Route startup Lazily-current transition wait.
 
 use agent_doc_crdt_relay_io::{CrdtReplicaEventReason, CurrentText};
+use agent_doc_debounce::{
+    CurrentAuthorityAdmission, SettleAction, SettleBudget, SettleDeferReason, SettleTimers,
+};
 use anyhow::Result;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-/// `#crdtpushdrain` / `#routeprogresswait` policy is shared with the preflight
-/// pre-mutation wait so both paths pull a pending delivery and reset their
-/// no-progress deadline on an advancing frontier. See `agent_doc_debounce`.
+/// Wait for Lazily's current-document authority before route dispatch.
 ///
-/// The JetBrains `Run Agent Doc` action writes its prompt marker into the
-/// document *first* (`active_exchange_prompt_marker ... status=applied_ack_pending`),
-/// so route then waits for the convergence of a write the same action just
-/// issued. Under load that ACK round trip can exceed a flat `debounce * 10`
-/// (5000ms), and route deferred with "Lazily current transition remained
-/// delivery_pending for 5000ms" even though the frontier was converging normally.
-use agent_doc_debounce::{SettleAction, SettleBudget, SettleDeferReason, SettleTimers};
-
-#[cfg(test)]
-const URGENT_DRAIN_RETRY_INTERVAL: Duration = agent_doc_debounce::URGENT_DRAIN_RETRY_INTERVAL;
-
-/// Wait for Lazily's current-document transition to settle.
+/// Admission follows the same pure policy as preflight
+/// (`agent_doc_debounce::current_authority_admission`, `#routestartupadmit`):
+/// route waits for the authoritative text to EXIST, never for every editor
+/// replica to acknowledge it. A `delivery_pending` observation already carries
+/// the controller's canonical text — the operator's prompt included (the
+/// JetBrains `Run Agent Doc` action writes its prompt marker before routing) —
+/// and `delivery_converged` is an availability fact, not a receipt. Waiting on
+/// it delayed or deferred dispatch (`route deferred ...: Lazily current
+/// transition remained delivery_pending for 5000ms`) over a write the controller
+/// already held. Route admits on that text immediately and fires one urgent
+/// delivery drain without awaiting it (`#crdtpushdrain`).
 ///
-/// Route fails closed instead of dispatching through an incomplete current
-/// transition. Disk mtime and filesystem typing markers are not authority.
+/// States with no authoritative text (`missing_replica`, `current_pending`,
+/// `authority_unavailable`) still wait and fail closed at the no-progress
+/// budget. Disk mtime and filesystem typing markers are never authority.
 pub fn await_idle(file: &Path, debounce: Duration) -> Result<()> {
     await_idle_with_max_wait(file, debounce, debounce * 10)
 }
@@ -56,48 +57,38 @@ where
     let poll_interval = agent_doc_debounce::SETTLE_POLL_INTERVAL;
     let start = Instant::now();
     let _ = debounce;
-    let mut last_urgent_drain: Option<Instant> = None;
-    // `#routeprogresswait`: the no-progress deadline restarts whenever the
-    // observed frontier advances, so a converging transition is not deferred on
-    // wall-clock alone.
-    let mut last_progress = Instant::now();
-    let mut last_observed: Option<String> = None;
     let budget = SettleBudget::from_no_progress(max_wait);
 
     loop {
         let current = observe(file, "route_startup_current_transition");
-        let observed_text = match &current {
-            Ok(Some(CurrentText::Current { text, .. })) => Some(text.clone()),
-            _ => None,
-        };
-        let (ready, state, drain_targets) = match current {
-            Ok(None | Some(CurrentText::Detached)) => (true, "detached", None),
-            Ok(Some(CurrentText::Current {
-                delivery_converged: true,
-                ..
-            })) => (true, "lazily_current", None),
+        let (ready, state) = match current {
+            Ok(None | Some(CurrentText::Detached)) => (true, "detached"),
             Ok(Some(CurrentText::Current {
                 live_editors,
-                delivery_converged: false,
+                delivery_converged,
                 ..
-            })) => (false, "delivery_pending", Some(live_editors)),
-            Ok(Some(CurrentText::EditorAttachedMissingReplica)) => (false, "missing_replica", None),
-            Ok(Some(CurrentText::EditorSyncPending)) => (false, "current_pending", None),
-            Err(_) => (false, "authority_unavailable", None),
+            })) => match agent_doc_debounce::current_authority_admission(true, delivery_converged)
+            {
+                CurrentAuthorityAdmission::Admit => (true, "lazily_current"),
+                CurrentAuthorityAdmission::AdmitWhileDeliveryPending => {
+                    admit_while_delivery_pending(file, live_editors, start, &mut signal);
+                    return Ok(());
+                }
+                CurrentAuthorityAdmission::WaitForAuthority => (false, "authority_unavailable"),
+            },
+            Ok(Some(CurrentText::EditorAttachedMissingReplica)) => (false, "missing_replica"),
+            Ok(Some(CurrentText::EditorSyncPending)) => (false, "current_pending"),
+            Err(_) => (false, "authority_unavailable"),
         };
-        if observed_text.is_some() && observed_text != last_observed {
-            if last_observed.is_some() {
-                last_progress = Instant::now();
-            }
-            last_observed = observed_text;
-        }
 
+        // No authoritative text means no frontier to observe advancing: the
+        // whole wait is one no-progress window.
         let timers = SettleTimers {
-            stalled_for: last_progress.elapsed(),
+            stalled_for: start.elapsed(),
             total_elapsed: start.elapsed(),
-            since_last_urgent_drain: last_urgent_drain.map(|last| last.elapsed()),
+            since_last_urgent_drain: None,
         };
-        match agent_doc_debounce::settle_step(ready, drain_targets.is_some(), timers, budget) {
+        match agent_doc_debounce::settle_step(ready, false, timers, budget) {
             SettleAction::Ready => {
                 eprintln!("[route] Lazily current transition settled ({state})");
                 return Ok(());
@@ -105,7 +96,7 @@ where
             SettleAction::Defer { reason } => {
                 let detail = match reason {
                     SettleDeferReason::ProgressCeiling => format!(
-                        "kept advancing without converging for {}ms (progress ceiling)",
+                        "did not settle within {}ms (progress ceiling)",
                         timers.total_elapsed.as_millis()
                     ),
                     SettleDeferReason::NoProgress => {
@@ -122,41 +113,59 @@ where
                     detail
                 );
             }
-            SettleAction::Wait {
-                request_urgent_drain,
-            } => {
-                // #crdtpushdrain: re-request on a bounded cadence rather than once. A single
-                // urgent drain can legitimately apply nothing — `drainRemoteUpdatesFor`
-                // returns early while the path has pending local edits or is mid editor
-                // apply, and the forwarder may not be registered yet. Its only follow-up is
-                // the *gated* `requestRemoteDrain`, which an idle document's escalated no-op
-                // backoff suppresses, so a one-shot latch left the remaining budget polling a
-                // frontier nobody would pull and route deferred at `max_wait`.
-                if let Some(targets) = drain_targets.filter(|_| request_urgent_drain) {
-                    last_urgent_drain = Some(Instant::now());
-                    let reason = CrdtReplicaEventReason::CanonicalProjection;
-                    match signal(file, reason, targets) {
-                        Ok(()) => eprintln!(
-                            "[route] requested urgent CRDT delivery drain (reason={} targets={targets})",
-                            reason.token()
-                        ),
-                        Err(error) => eprintln!(
-                            "[route] urgent CRDT delivery drain request failed (reason={} targets={targets} error={error:#})",
-                            reason.token()
-                        ),
-                    }
-                }
-            }
+            SettleAction::Wait { .. } => {}
         }
 
         std::thread::sleep(poll_interval);
     }
 }
 
+/// `#routestartupadmit`: admit route dispatch on the current authority while
+/// replica delivery is pending. The urgent drain is fire-and-forget — its
+/// outcome is logged, never awaited, and a failed request does not defer.
+fn admit_while_delivery_pending<Signal>(
+    file: &Path,
+    live_editors: usize,
+    start: Instant,
+    signal: &mut Signal,
+) where
+    Signal: FnMut(&Path, CrdtReplicaEventReason, usize) -> Result<()>,
+{
+    let reason = CrdtReplicaEventReason::CanonicalProjection;
+    let drain = match signal(file, reason, live_editors) {
+        Ok(()) => "requested".to_string(),
+        Err(error) => format!("failed:{error:#}").replace('\n', " "),
+    };
+    eprintln!(
+        "[route] admitted on current authority while delivery is pending (live_editors={live_editors} urgent_drain={drain} reason={})",
+        reason.token()
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_startup_admitted_on_current_authority file={} state=delivery_pending live_editors={} waited_ms={} urgent_drain={} (#routestartupadmit)",
+            file.display(),
+            live_editors,
+            start.elapsed().as_millis(),
+            drain,
+        ),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
+
+    fn current(text: &str, live_editors: usize, delivery_converged: bool) -> CurrentText {
+        CurrentText::Current {
+            text: text.to_owned(),
+            live_editors,
+            delivery_converged,
+            delivery_version: 1,
+            semantics: None,
+        }
+    }
 
     #[test]
     fn route_dispatches_immediately_when_lazily_is_detached() {
@@ -176,164 +185,48 @@ mod tests {
     }
 
     #[test]
-    fn route_startup_requests_urgent_delivery_drain_before_waiting() {
+    fn route_startup_admits_a_converged_authority_without_a_drain() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
-        let observations = Cell::new(0usize);
         let signals = RefCell::new(Vec::new());
 
         await_idle_with_max_wait_and_effects(
             &doc,
             Duration::from_millis(10),
-            Duration::from_secs(1),
-            |_file, _source| {
-                let observation = observations.get();
-                observations.set(observation + 1);
-                if observation < 3 {
-                    Ok(Some(CurrentText::Current {
-                        text: "prompt".to_owned(),
-                        live_editors: 1,
-                        delivery_converged: false,
-                        delivery_version: 1,
-                        semantics: None,
-                    }))
-                } else {
-                    Ok(Some(CurrentText::Current {
-                        text: "prompt".to_owned(),
-                        live_editors: 1,
-                        delivery_converged: true,
-                        delivery_version: 2,
-                        semantics: None,
-                    }))
-                }
-            },
+            Duration::from_secs(5),
+            |_file, _source| Ok(Some(current("prompt", 1, true))),
             |_file, reason, targets| {
                 signals.borrow_mut().push((reason, targets));
                 Ok(())
             },
         )
         .unwrap();
-
-        assert_eq!(
-            signals.into_inner(),
-            vec![(CrdtReplicaEventReason::CanonicalProjection, 1)]
-        );
-        assert!(observations.get() >= 4);
+        assert!(signals.into_inner().is_empty());
     }
 
-    /// `#routeprogresswait`: regression for the recurring
-    /// `route deferred ...: Lazily current transition remained delivery_pending for
-    /// 5000ms`. The JetBrains `Run Agent Doc` action writes its prompt marker into
-    /// the document first, so route waits on the convergence of a write that same
-    /// action just issued. Under load that ACK round trip can outlast a flat
-    /// `debounce * 10`, and route deferred a transition that was converging
-    /// normally. An advancing frontier must reset the no-progress deadline.
+    /// `#routestartupadmit` regression for the recurring
+    /// `route deferred ...: Lazily current transition remained delivery_pending
+    /// for 5000ms`. The JetBrains `Run Agent Doc` action writes its prompt marker
+    /// first, so route observed the controller already holding that text while a
+    /// replica had not acknowledged it — and waited on the acknowledgement. A
+    /// pending delivery carries the authoritative text: route must admit on the
+    /// FIRST observation, with exactly one fire-and-forget urgent drain.
     #[test]
-    fn route_startup_does_not_defer_a_frontier_that_keeps_advancing() {
+    fn route_startup_admits_a_pending_delivery_on_the_current_authority() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
         let observations = Cell::new(0usize);
-
-        let started = Instant::now();
-        let outcome = await_idle_with_max_wait_and_effects(
-            &doc,
-            Duration::from_millis(10),
-            // A no-progress budget far shorter than the total time this
-            // transition takes: without progress tracking it would defer.
-            Duration::from_millis(300),
-            |_file, _source| {
-                let n = observations.get();
-                observations.set(n + 1);
-                if n < 12 {
-                    // Text advances on every poll — actively converging.
-                    Ok(Some(CurrentText::Current {
-                        text: format!("prompt {n}"),
-                        live_editors: 1,
-                        delivery_converged: false,
-                        delivery_version: n as u64,
-                        semantics: None,
-                    }))
-                } else {
-                    Ok(Some(CurrentText::Current {
-                        text: "prompt final".to_owned(),
-                        live_editors: 1,
-                        delivery_converged: true,
-                        delivery_version: n as u64,
-                        semantics: None,
-                    }))
-                }
-            },
-            |_file, _reason, _targets| Ok(()),
-        );
-
-        assert!(
-            outcome.is_ok(),
-            "an advancing frontier must not be deferred: {outcome:?}"
-        );
-        assert!(
-            started.elapsed() >= Duration::from_millis(300),
-            "the fixture must actually outlast the no-progress budget"
-        );
-    }
-
-    /// The progress reset is not a blank cheque: a frontier that is genuinely
-    /// stuck (identical text every poll) still defers at the no-progress budget.
-    #[test]
-    fn route_startup_still_defers_a_stalled_frontier() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let doc = dir.path().join("session.md");
-
-        let outcome = await_idle_with_max_wait_and_effects(
-            &doc,
-            Duration::from_millis(10),
-            Duration::from_millis(300),
-            |_file, _source| {
-                Ok(Some(CurrentText::Current {
-                    text: "frozen".to_owned(),
-                    live_editors: 1,
-                    delivery_converged: false,
-                    delivery_version: 1,
-                    semantics: None,
-                }))
-            },
-            |_file, _reason, _targets| Ok(()),
-        );
-
-        assert!(
-            outcome.is_err(),
-            "a stalled frontier must still fail closed"
-        );
-        let message = format!("{:#}", outcome.unwrap_err());
-        assert!(
-            message.contains("delivery_pending"),
-            "the stall reason should still be reported: {message}"
-        );
-    }
-
-    /// `#crdtpushdrain`: regression for the reported
-    /// `route deferred ...: Lazily current transition remained delivery_pending for
-    /// 5000ms`. A single urgent drain can apply nothing (pending local edits, a
-    /// mid-apply path, an unregistered forwarder), and its only follow-up is the
-    /// *gated* drain that an idle document's escalated no-op backoff suppresses. A
-    /// one-shot latch therefore burned the whole budget on a frontier nobody pulled.
-    #[test]
-    fn route_startup_retries_urgent_delivery_drain_while_delivery_stays_pending() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let doc = dir.path().join("session.md");
         let signals = RefCell::new(Vec::new());
 
+        // A long budget: the old behaviour waited (and re-polled) here, then
+        // deferred once it expired.
         let outcome = await_idle_with_max_wait_and_effects(
             &doc,
             Duration::from_millis(10),
-            URGENT_DRAIN_RETRY_INTERVAL * 3,
+            Duration::from_secs(5),
             |_file, _source| {
-                Ok(Some(CurrentText::Current {
-                    text: "prompt".to_owned(),
-                    live_editors: 2,
-                    delivery_converged: false,
-                    delivery_version: 1,
-                    semantics: None,
-                }))
+                observations.set(observations.get() + 1);
+                Ok(Some(current("operator prompt in flight", 2, false)))
             },
             |_file, reason, targets| {
                 signals.borrow_mut().push((reason, targets));
@@ -342,21 +235,196 @@ mod tests {
         );
 
         assert!(
-            outcome.is_err(),
-            "a never-converging delivery must still fail closed at max_wait"
+            outcome.is_ok(),
+            "a pending delivery must not defer route: {outcome:?}"
         );
-        let signals = signals.into_inner();
+        assert_eq!(
+            observations.get(),
+            1,
+            "route must admit on the first observation, not poll for delivery convergence"
+        );
+        assert_eq!(
+            signals.into_inner(),
+            vec![(CrdtReplicaEventReason::CanonicalProjection, 2)],
+            "route still asks the relay once to push the delivery on"
+        );
+    }
+
+    /// The urgent drain is fire-and-forget: a failed request is logged, never a
+    /// reason to wait or defer.
+    #[test]
+    fn route_startup_admits_when_the_urgent_drain_request_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let signals = Cell::new(0usize);
+
+        let outcome = await_idle_with_max_wait_and_effects(
+            &doc,
+            Duration::from_millis(10),
+            Duration::from_secs(5),
+            |_file, _source| Ok(Some(current("prompt", 1, false))),
+            |_file, _reason, _targets| {
+                signals.set(signals.get() + 1);
+                anyhow::bail!("relay socket unavailable")
+            },
+        );
+
+        assert!(outcome.is_ok(), "{outcome:?}");
+        assert_eq!(signals.get(), 1);
+    }
+
+    /// States with no authoritative text still wait and fail closed, and never
+    /// request a drain (there is no delivery to push).
+    #[test]
+    fn route_startup_still_fails_closed_without_authoritative_text() {
+        let cases: [(&str, fn() -> Result<Option<CurrentText>>); 3] = [
+            ("missing_replica", || {
+                Ok(Some(CurrentText::EditorAttachedMissingReplica))
+            }),
+            ("current_pending", || Ok(Some(CurrentText::EditorSyncPending))),
+            ("authority_unavailable", || {
+                anyhow::bail!("controller unreachable")
+            }),
+        ];
+        for (state, observation) in cases {
+            let dir = tempfile::TempDir::new().unwrap();
+            let doc = dir.path().join("session.md");
+            let observations = Cell::new(0usize);
+            let signals = Cell::new(0usize);
+
+            let outcome = await_idle_with_max_wait_and_effects(
+                &doc,
+                Duration::from_millis(10),
+                Duration::from_millis(300),
+                |_file, _source| {
+                    observations.set(observations.get() + 1);
+                    observation()
+                },
+                |_file, _reason, _targets| {
+                    signals.set(signals.get() + 1);
+                    Ok(())
+                },
+            );
+
+            let message = format!("{:#}", outcome.expect_err(state));
+            assert!(
+                message.contains(&format!("remained {state}")),
+                "{state}: {message}"
+            );
+            assert!(
+                observations.get() > 1,
+                "{state}: route must keep waiting for authority before failing closed"
+            );
+            assert_eq!(signals.get(), 0, "{state}: nothing to drain");
+        }
+    }
+
+    /// A missing authority that appears within the budget is admitted.
+    #[test]
+    fn route_startup_admits_once_authority_appears() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let observations = Cell::new(0usize);
+
+        await_idle_with_max_wait_and_effects(
+            &doc,
+            Duration::from_millis(10),
+            Duration::from_secs(5),
+            |_file, _source| {
+                let n = observations.get();
+                observations.set(n + 1);
+                if n < 2 {
+                    Ok(Some(CurrentText::EditorSyncPending))
+                } else {
+                    Ok(Some(current("prompt", 1, false)))
+                }
+            },
+            |_file, _reason, _targets| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(observations.get(), 3);
+    }
+
+    /// `#routestartupadmit` SimWorld: the operator types a prompt into the
+    /// exchange and fires `Run Agent Doc`. The relay hub already holds the edit
+    /// in its canonical text, but a second live replica has not acknowledged it.
+    /// Route must dispatch on that canonical text at once — the urgent drain is
+    /// requested but not awaited — and delivery still converges afterwards.
+    #[test]
+    fn simworld_operator_prompt_in_flight_is_admitted_by_route_startup() {
+        use agent_doc_document_realtime::crdt_relay::RelayHub;
+        use agent_doc_merge::crdt_sync::ReplicaState;
+
+        fn drain(hub: &mut RelayHub, client: u64) {
+            for update in hub.pending_updates(client).unwrap() {
+                hub.ack_delivery(client, &update.patch_id, update.generation)
+                    .unwrap();
+            }
+        }
+
+        let committed = "# Session\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap(); // the operator's editor
+        hub.register(3).unwrap(); // a second live replica
+        hub.apply_canonical_replace("", committed).unwrap();
+        drain(&mut hub, 2);
+        drain(&mut hub, 3);
+        assert!(hub.delivery_converged());
+
+        // The operator's prompt reaches the canonical authority from replica 2.
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let anchor = "<!-- agent:exchange -->\n";
+        let offset = editor.text().find(anchor).unwrap() + anchor.len();
+        editor.apply_local_edit(offset as u32, 0, "please fix the route wait\n");
+        let update = editor.diff(&ReplicaState::new(99).state_vector()).unwrap();
+        hub.relay_update(2, &update).unwrap();
         assert!(
-            signals.len() >= 3,
-            "route must keep re-requesting the urgent drain while delivery is pending, \
-             not latch after one attempt (got {} request(s))",
-            signals.len()
+            !hub.delivery_converged(),
+            "the fixture must hold delivery pending"
         );
+
+        let hub = RefCell::new(hub);
+        let admitted = RefCell::new(None::<String>);
+        let drains = RefCell::new(Vec::new());
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+
+        await_idle_with_max_wait_and_effects(
+            &doc,
+            Duration::from_millis(10),
+            Duration::from_secs(5),
+            |_file, _source| {
+                let hub = hub.borrow();
+                let text = hub.canonical_text();
+                *admitted.borrow_mut() = Some(text.clone());
+                Ok(Some(CurrentText::Current {
+                    text,
+                    live_editors: hub.live_count(),
+                    delivery_converged: hub.delivery_converged(),
+                    delivery_version: 1,
+                    semantics: None,
+                }))
+            },
+            // Fire-and-forget: record the request, deliver nothing yet.
+            |_file, reason, targets| {
+                drains.borrow_mut().push((reason, targets));
+                Ok(())
+            },
+        )
+        .expect("route must admit an operator prompt the controller already holds");
+
+        let admitted = admitted.into_inner().unwrap();
+        assert!(admitted.contains("please fix the route wait\n"));
+        let mut hub = hub.into_inner();
         assert!(
-            signals.iter().all(|(reason, targets)| *reason
-                == CrdtReplicaEventReason::CanonicalProjection
-                && *targets == 2),
-            "every retry must carry the same force-refresh reason and live target count"
+            !hub.delivery_converged(),
+            "route admitted while delivery was still pending"
         );
+        assert_eq!(drains.into_inner().len(), 1);
+
+        // The relay delivers the edit afterwards; the admitted text was final.
+        drain(&mut hub, 3);
+        assert!(hub.delivery_converged());
+        assert_eq!(hub.canonical_text(), admitted);
     }
 }

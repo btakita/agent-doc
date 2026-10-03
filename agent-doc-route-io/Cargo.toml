@@ -75,6 +75,7 @@ tracing = "0.1"
 [dev-dependencies]
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.446" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.446" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.446" }
 agent-doc-repair-command-io = { path = "../agent-doc-repair-command-io", version = "0.35.446" }
 agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.446" }
 agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35.446" }

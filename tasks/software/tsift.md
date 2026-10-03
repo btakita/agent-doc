@@ -20,7 +20,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -59,13 +58,54 @@ Another live session owns the haiven-sdk root checkout. It is on `feat/unreal-co
 - find the session document that owns haiven-sdk and write out the commands that session needs to adopt the change.
 
 I'll close the item when it reports back.
+
+### Re: [#haivenrootsync] done — 1,616/1,616 joins on the integration branch — opus-5-5 · 2026-10-03T17:05-04:00
+
+> **Queue prompt:** do [#haivenrootsync]
+
+The integration branch is pushed. In the subagent's worktree, the trace joins **1,616 of 1,616, with 0 unmatched**. The earlier estimate was 1,612. The haiven-sdk root checkout is untouched, and the root import there still reads 439 / 1,177 until its owning session adopts the change.
+
+**Branch: `integrate/codegen-trace-on-unreal-runner` at `57dd11c`**, pushed to haiven-sdk origin as a new branch without force.
+- No new commits were needed. `origin/feat/unreal-conformance-runner` (`80dc531`) is already an ancestor of `57dd11c`, so this is a plain fast-forward.
+- `57dd11c` already pins `haiven-contracts` at `1ce0581`.
+- CI on `57dd11c` is green (check, Python, Godot, Unreal 5.8.2 and 5.6.1).
+- `mise exec -- make check` exits 0 in the worktree. The Godot, .NET and conformance checks are skipped locally because of toolchain pins and a missing `haiven-api` checkout; CI runs them.
+- **Risk:** `57dd11c` is the tip of draft PR #62, near the top of a 32-PR stack that hasn't reached `main` yet. Adopting it brings that whole unmerged stack into the root checkout.
+- `1ce0581` exists only on contracts feature branches, not on contracts `main`. The current pin `f634a0f` isn't on `main` either.
+
+**The root's local branch is stale.** `8ff7e2f` was never pushed, and it is 40 ahead and 32 behind its upstream. Its unique commits were squashed upstream (PR #39, PR #22 and others). Moving to origin loses nothing.
+
+**Measurement:**
+```
+tsift graph-db --path . import codegen/trace.json --source haivenrootsync --format haiven-trace
+→ joined_nodes=1616 unmatched_joins=0 ambiguous_joins=99 edges=1841
+```
+- This ran with installed tsift `92f6bb1`, and no contracts-pin warning fired.
+- The 99 ambiguous joins are counted in the 1,616. Each one has 2 or 3 candidates because the contracts declare the same thing twice: 48 REST operations, 48 REST components, and 3 WebSocket events. That's a contracts fact, not a tsift bug.
+- Making them unambiguous would mean the trace recording which document each operation comes from, which would be a haiven-sdk change.
+- No tsift bug turned up.
+
+**Handoff:** I added `adopttraceinteg` to the backlog of the session that owns haiven-sdk, `src/haiven-dev/tasks/sdk.md`. These are the adoption commands, run from `src/haiven-dev/src/haiven-sdk`. They keep the uncommitted `AGENTS.md` and `haiven-contracts` edits; the subagent tested the 3-way apply of the root `AGENTS.md` patch:
+```
+git diff AGENTS.md > /tmp/root-agents.patch
+git -C haiven-contracts diff > /tmp/contracts-dirty.patch
+git checkout -- AGENTS.md
+git -C haiven-contracts checkout -- .
+git fetch origin
+git switch feat/unreal-conformance-runner
+git reset --keep origin/integrate/codegen-trace-on-unreal-runner
+git submodule update --init haiven-contracts
+git apply -3 /tmp/root-agents.patch
+git -C haiven-contracts apply /tmp/contracts-dirty.patch
+tsift graph-db --path . import codegen/trace.json --source haiven-sdk/codegen/trace.json --format haiven-trace
+```
+The worktree at `/home/brian/work/btakita/worktrees/haiven-sdk-haivenrootsync` is clean and can be deleted once the change is adopted.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
-- do [#haivenrootsync]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -74,7 +114,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#haivenrootsync] [recommended] (sdktracenaming) Restore haiven-sdk trace join coverage on the operator root checkout (src/haiven-dev/src/haiven-sdk; owned by another session, so coordinate there). Bring in feat/codegen-trace / 57dd11c generated SDK files, which account for 1,055 unmatched sdk_declaration joins. Move the haiven-contracts submodule f634a0f to the trace pin 1ce0581, which accounts for 122 unmatched contract-side joins. Then re-import trace.json and expect about 1,612/1,616.
 <!-- /agent:backlog -->
 
 ## Review

@@ -11,6 +11,7 @@ pub mod dispatch_item;
 pub mod document_queue;
 pub mod free_text_admission;
 pub mod idle_drain;
+pub mod no_changes_explanation;
 pub mod queue;
 pub mod queue_claim;
 pub mod queue_closeout_guard;

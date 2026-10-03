@@ -54,7 +54,7 @@ Detect subcommands before the normal workflow:
 
 **Admission is binary-owned:** call connected `agent_doc_admit` before answering each live prompt. Proceed only if admitted; report refusals without recreating admission or shelling preflight. Read with `agent-doc read <FILE>` and use `agent-doc plan <FILE>` for the execution contract.
 
-- If `no_changes: true` → tell the user nothing changed and stop.
+- If `no_changes: true` → tell the user nothing changed and stop. Relay `no_changes_explanation.guidance` (which source preflight read, and any `waiting_queue_items` in a stopped queue) instead of guessing a cause; never tell the operator to save when `read_source` is `live_editor`.
 - Surface any `warnings`; they are advisory and do not stop the cycle. For `harness_mismatch`, note that the document-declared agent differs from the active harness and continue with the active harness attribution/closeout path. For `stale_install`, continue the document task without rebuilding; only the cycle that owns development/release of this repository runs `make install`, and the supervisor owns the safe recycle.
 - Print any `claims` to the console as a record.
 - The cycle baseline is binary-owned: preflight captures it into `state.db` cycle state at a stable post-commit point, and `respond` / `write --commit` read it from there. There is no `--baseline-file` flag on any response-persistence command — do NOT pass one, and do NOT save your own baseline.

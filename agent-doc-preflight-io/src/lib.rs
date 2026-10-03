@@ -635,6 +635,13 @@ pub struct PreflightOutput {
     pub diff: Option<String>,
     /// True when the snapshot matches the document (no new user input).
     pub no_changes: bool,
+    /// `#noopnamefault`: on a `no_changes` cycle, which source preflight read
+    /// (live editor buffer or disk), any items waiting in a stopped
+    /// `agent:queue`, and the guidance to relay. Agents relay this instead of
+    /// inventing a cause such as "save the file".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_changes_explanation:
+        Option<agent_doc_queue::no_changes_explanation::NoChangesExplanation>,
     /// Changes detected in linked documents since last cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_changes: Vec<RelatedDocChange>,

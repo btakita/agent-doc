@@ -19,6 +19,9 @@ use agent_doc_preflight_runtime_io::{
     resolve_current_preflight_document,
 };
 use agent_doc_prompt_contract::{push_unique_prompt_bearing_changes, push_unique_strings};
+use agent_doc_queue::no_changes_explanation::{
+    NoChangesFacts, NoChangesReadSource, explain_no_changes,
+};
 use agent_doc_queue::queue_convergence::{
     queue_body_diff_is_non_selected_future_state, realign_baseline_to_converged_queue,
 };
@@ -2297,6 +2300,28 @@ fn run_with_options_to_writer_in_pass(
     // head as a typed directive instead of leaving it buried in the head string.
     let queue_head_annotations =
         agent_doc_queue::queue_head_annotation::queue_head_annotations(&selected_queue_prompts);
+    // `#noopnamefault`: a bare `no_changes: true` left the agent to guess why
+    // nothing ran, and it told an operator with a live, synced editor to "save
+    // the file". Name the source preflight read and any stopped-queue items.
+    let no_changes_explanation = no_changes.then(|| {
+        let read_source =
+            match agent_doc_document_realtime_io::try_resolve_current_doc_from_file_with_source(
+                file,
+                "no_changes_explanation",
+            ) {
+                Ok(read) => NoChangesReadSource::from_read(
+                    read.authority == agent_doc_document_realtime::DocAuthority::EditorBuffer,
+                    read.reason,
+                ),
+                Err(_) => NoChangesReadSource::Disk,
+            };
+        explain_no_changes(NoChangesFacts {
+            read_source,
+            content: &diff_result_with_current.current,
+            queue_runs: preflight_read_projection.queue.active == Some(true)
+                || preflight_read_projection.queue.deferred,
+        })
+    });
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -2306,6 +2331,7 @@ fn run_with_options_to_writer_in_pass(
         claims: preflight_read_projection.claims.clone(),
         diff: preflight_read_projection.diff.clone(),
         no_changes,
+        no_changes_explanation,
         linked_changes: projected_linked_changes,
         diff_type: diff_type_str.clone(),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
@@ -2732,6 +2758,64 @@ mod tests {
         run(&doc).unwrap();
         // If run() returns Ok(()), the JSON was printed to stdout without error.
         // The test verifies no panic and no error return.
+    }
+
+    #[test]
+    fn no_changes_preflight_names_the_stopped_queue_item_instead_of_staying_silent() {
+        // `#noopnamefault`: tasks/software/lazily.md, 2026-10-03. The operator
+        // re-ran the document four times in 30 minutes; every preflight returned
+        // a bare `no_changes: true`, `queue_active: false`,
+        // `queue_drainable_head_count: 0`, and the agent guessed "save the file
+        // in the editor". The document matched HEAD everywhere (editor buffer,
+        // relay, disk); what the operator was waiting on was `do [#lzwiremodel]`
+        // in a stopped queue. The no-changes contract must name that item.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue: stop\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — test\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue priority -->\n",
+            "- do [#lzwiremodel]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#lzwiremodel] [recommended] Shared wire model\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions::default(), &mut output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+        assert_eq!(parsed["no_changes"], true, "{parsed:#}");
+        let explanation = &parsed["no_changes_explanation"];
+        assert_eq!(explanation["read_source"], "disk", "{parsed:#}");
+        assert_eq!(
+            explanation["waiting_queue_items"],
+            serde_json::json!(["do [#lzwiremodel]"]),
+            "{parsed:#}"
+        );
+        let guidance = explanation["guidance"].as_str().unwrap();
+        assert!(
+            guidance.contains("`do [#lzwiremodel]`") && guidance.contains("`go`"),
+            "{guidance}"
+        );
     }
 
     #[test]

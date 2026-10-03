@@ -16,9 +16,11 @@ prompt_presets:
   '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
   '#mermaid': Include explanatory mermaid diagram(s).
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#subagent': 'run in a subagent'
+  '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -78,13 +80,43 @@ A local file needs cleanup before any release from this checkout:
 - This edit should be discarded (`git checkout -- VERSIONS.md`) before the next release. If it were kept, the changelog would say the guard is unreleased, and the edit would conflict when pulling `c902e41`. I left it as is because this turn didn't create it.
 
 If you meant something other than the C++ indexing commit, finish the sentence. Otherwise reply `go`, and the next cycle will discard the stale edit, pull to `c902e41`, wait for CI to pass, then bump to 0.1.102, tag and push. Pushing the tag publishes to GitHub Releases, crates.io and npm.
+
+### Re: #releasepublishbindings — opus-5.5 · 2026-10-03T03:05-04:00
+
+> **Queue prompt:** do [#releasepublishbindings]
+
+Released **tsift v0.1.102**, which adds C++ indexing (`#cppindex`, `c902e41`).
+
+- First I discarded the stale local VERSIONS.md edit. It listed the swap-thrash guard as unreleased, but that guard already shipped in 0.1.101. Then I fast-forwarded to `c902e41`, whose [CI](https://github.com/btakita/tsift/actions/runs/37101600385) had passed.
+- The version bump touched the same files as the 0.1.101 release: workspace and package `Cargo.toml`, `Cargo.lock`, skill and runbook version stamps, the OpenCode command files and `package.json`, `specs/search-navigation.md`, and a fixture's projection version. No `0.1.101` remains outside the VERSIONS.md history.
+- `make check` exit 0: **1879 passed, 0 failed**. The npm pack check produced `opencode-tsift-0.1.102.tgz`.
+- `33bc48f chore: release v0.1.102` was pushed to `main`, along with tag `v0.1.102`.
+- [Release workflow](https://github.com/btakita/tsift/actions/runs/37102150648): all 7 jobs passed.
+  - [GitHub release](https://github.com/btakita/tsift/releases/tag/v0.1.102): published with Linux, Windows and macOS (arm64) assets.
+  - crates.io `tsift-cli`: `0.1.102`.
+  - npm `opencode-tsift`: `0.1.102`.
+
+Since the release, other work has landed on `main` under "Unreleased". Contract indexing is in (`8022f34`, from another session), and C indexing (`d4bb5bf`, from a subagent here) is pushed but its queue item isn't closed yet.
+
+**Queue items dispatched to subagents.** Each is claimed in the queue and has its own worktree under `~/work/btakita/worktrees/`. Each pushes to `main` without force.
+- `#subagent: Add C bindings`: **done**, `d4bb5bf feat(graph): index C for search and graph (#cindex)`. `make check` passed, and it is installed. `.h` files stay parsed as C++, since the C++ grammar also handles C headers but the C grammar fails on C++ headers.
+- `#subagent: Add Odin bindings`: running.
+- `#subagent: Add Jai bindings`: running. Whether a usable tree-sitter grammar exists is the main risk.
+- `#subagent: [#sdktsiftedges]`: running. It is building `graph-db` edge-file import plus loading haiven-sdk's `trace.json`.
+- New backlog items `#xsdcontract` and `#wsdlcontract`: running in **one** subagent, XSD first and then WSDL. WSDL embeds XSD, and both edit `contract.rs`.
+
+**Contract formats.** The `8022f34` contract projection already covers OpenAPI (including Swagger 2), AsyncAPI v2 and v3, and JSON Schema. Other JSON and YAML files are searchable as text but produce no symbols. For XML, only the formats that describe an API or a build are worth indexing: XSD, WSDL, and possibly project files like `.csproj` and `pom.xml`.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- Should we release + publish the C++ bindings?
+- ~~do [#releasepublishbindings]~~
+- #subagent: Add C bindings
+- #subagent: Add Odin bindings
+- #subagent: Add Jai bindings
+- #subagent: [#sdktsiftedges]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -93,6 +125,9 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#sdktsiftedges] [recommended] Import an external edge file into graph-db (e.g. tsift graph-db import <file>), then load haiven-sdk codegen/trace.json (contract node -> per-language declaration -> conformance scenario, haiven-sdk #62), so a contract change's blast radius across SDKs is one graph query. Contract nodes are already indexed as of 8022f34 (#sdktsiftcontracts), so trace.json's model nodes can join to them by name. Moved from haiven-dev tasks/sdk.md.
+- [ ] [#xsdcontract] Index XSD (.xsd) as an API contract: extend packages/tsift-graph/src/contract.rs with an XML Schema dialect (complexType/simpleType/element/attribute/group as schema symbols, Owner.child properties; type=/ref=/base= QName refs as call sites like $ref). Lays the shared XML parsing foundation (quick-xml or tree-sitter-xml) that #wsdlcontract builds on.
+- [ ] [#wsdlcontract] Index WSDL (.wsdl, 1.1 + 2.0) as an API contract on top of #xsdcontract: services, ports/endpoints, portTypes/interfaces, operations, messages/parts as symbols; message=/element=/type=/binding= refs as call sites; embedded <types><xsd:schema> projected via the XSD dialect.
 <!-- /agent:backlog -->
 
 ## Review

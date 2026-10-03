@@ -537,7 +537,7 @@ Running the generator changed only `trace.json`; `model.json` and every generate
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - #subagent: do [#tsiftindexesinvalidate]
-- #subagent: do [#haivensdkfollow]
+- ~~#subagent: do [#haivensdkfollow]~~ — auto-struck: answered this cycle (#ftstrike)
 - #subagent: do [#projectlevelopt]
 - do [#tracelockjoin]
 <!-- /agent:queue -->

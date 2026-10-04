@@ -124,7 +124,10 @@ public final class JetBrainsPluginUpgradeAction {
 
         IdeaPluginDescriptor descriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
         if (!(descriptor instanceof IdeaPluginDescriptorImpl current)) {
-            return "skip:plugin-not-loaded";
+            // `#jbdynamicfalsereport`: name the plugins directory this IDE loads from, so the
+            // installer can tell "this live IDE owns the target and runs no agent-doc
+            // generation" (a fresh install that only a restart loads) from an unrelated IDE.
+            return "skip:plugin-not-loaded" + idePluginsPathField();
         }
         Path expectedRoot = pluginsDir.resolve("agent-doc-jetbrains").toAbsolutePath().normalize();
         if (!sameInstallRoot(current.getPluginPath(), expectedRoot)) {
@@ -243,6 +246,21 @@ public final class JetBrainsPluginUpgradeAction {
             throw stagingFailure;
         }
         return String.join("; ", notes);
+    }
+
+    /** {@code :plugins-path=<dir>} for a skip receipt, or empty when the platform hides it. */
+    private static String idePluginsPathField() {
+        try {
+            Class<?> pathManager = Class.forName("com.intellij.openapi.application.PathManager");
+            Object path = pathManager.getMethod("getPluginsPath").invoke(null);
+            if (path == null) {
+                return "";
+            }
+            String value = path.toString().replace('\n', ' ').replace('\r', ' ');
+            return value.isBlank() ? "" : ":plugins-path=" + value;
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            return "";
+        }
     }
 
     private static final String PLUGIN_DIR_NAME = "agent-doc-jetbrains";

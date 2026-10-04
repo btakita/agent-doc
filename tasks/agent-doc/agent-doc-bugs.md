@@ -121,7 +121,22 @@ If Local History no longer reaches 09-29, say so and I'll close `#apimdrevert` a
 - **Publish:** the tag push started the Release workflow (run 37178919405) and CI (run 37178919611); both are still in progress. They publish the GitHub Release and PyPI. `release + publish` arrived mid-turn as a subagent item, but this cycle already did that work, so I didn't dispatch a second release.
 - **#125 on GitHub:** closed, with a comment listing what remains. `recent_noop_closeouts` is unchanged, and the cycle contract itself still says `no_changes: true` when a chat prompt is flagged; only the notice beside it says otherwise.
 - **The agent-doc checkout:** another session's uncommitted edits to `VERSIONS.md` and `agent-doc-start-runtime-io/src/lib.rs` are left byte-for-byte as they were. That `lib.rs` change is compiled into this install.
-<!-- agent:boundary:d3a1b952 -->
+> **Chat prompt (#chatprompt):** Did you get my steering change when I edited the queue item?
+
+### Re: steering edit on the #126 queue head — opus-5-5 · 2026-10-04T01:20-04:00
+
+**Not when you made it. I only saw it after you asked.** Your edit added "note this is in a Coder environment" to the #126 queue line. It was held as a pending `dispatch=subagent` steering item, but nothing delivered it to me:
+- my turn had already ended;
+- the supervisor deliberately doesn't wake the pane for an item that is already claimed by a subagent (`#steeringwake`);
+- so nothing surfaced it until I ran `agent-doc steering --peek` in response to your question.
+
+**What I did with it now:**
+- Sent the note to the #126 subagent while it is still running. The issue happened inside a Coder workspace, with the IDE backend, tmux and the controller in a remote container. So it should check any focus, escalation or stash guard that assumes a local desktop: active or visible window, client attachment, `/proc/<pid>/exe` or pid-namespace checks, tmux socket paths.
+- Consumed the steering item, and re-claimed the edited queue line for the same subagent so the queue loop won't drain it inline.
+- Filed `#claimedsteerwake`: an edit to a claimed queue item should be passed on to its subagent, not held silently.
+
+The `priority -->n` typo is gone, and the queue now reads correctly. "release + publish" is still mine, to run after the #126 fix lands.
+<!-- agent:boundary:6977b070 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -130,10 +145,14 @@ If Local History no longer reaches 09-29, say so and I'll close `#apimdrevert` a
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+- #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
+- Ensure the real-time reactive steering works. When do you get the signal about the document changing?
+- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#claimedsteerwake] [agent-doc] An operator edit to a CLAIMED queue head is held silently: the edit adding 'note this is in a Coder environment' to the claimed #126 head was never surfaced, either by a supervisor wake (claimed subagent items never wake the pane, #steeringwake) or at a turn boundary. It reached the coordinator only because it ran 'agent-doc steering --peek' after the operator asked in chat. Make an edit/annotation to a claimed head wake the idle owning pane (or surface it to the coordinator) so it can be forwarded to the subagent that holds the claim; add a regression test.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

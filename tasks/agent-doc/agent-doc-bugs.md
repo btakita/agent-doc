@@ -240,6 +240,7 @@ Done. After your IDE restart the editor re-registered: 6 live registrations, and
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - do [#jbpluginvanish]
 - do [#jbdynamicfalsereport]
+- #gh-fix https://github.com/btakita/agent-doc/issues/131
 - ~~release + publish~~
 <!-- /agent:queue -->
 

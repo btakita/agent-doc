@@ -32,5 +32,9 @@ action (`gvqv`, `SPEC.md` § 6c) ship in JetBrains and VS Code. Zed is staged fo
 both because its extension is a Markdown language server with no command or menu
 surface; it reports its version through LSP `serverInfo`.
 
+The component outline (folding, gutter markers, structure view; `SPEC.md` § 12,
+GH #19) is likewise editor UI with no capability row: it ships in JetBrains and is
+staged in VS Code and Zed.
+
 Headless native tests prove transport/FFI behavior. IDE UI, VFS wiring, and
 platform-specific terminal behavior still need their documented host smokes.

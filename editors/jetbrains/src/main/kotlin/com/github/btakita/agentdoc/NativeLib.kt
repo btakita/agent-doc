@@ -2333,6 +2333,32 @@ object NativePatching {
         }
     }
 
+    /**
+     * Component boundaries from the shared native parser (`agent_doc_parse_components`), converted
+     * to UTF-16 document offsets. Returns null when the library is unavailable or the document does
+     * not parse (an unclosed marker mid-edit), so callers keep their last valid outline rather than
+     * treating either case as "no components" (GH #19).
+     */
+    fun componentSpansOrNull(doc: String): List<AgentDocComponentOutline.ComponentSpan>? {
+        val lib = AgentDocLib.get() ?: return null
+        val result =
+            try {
+                lib.agent_doc_parse_components(doc)
+            } catch (e: Throwable) {
+                LOG.debug("[native] parse_components unavailable: ${e.message}")
+                return null
+            }
+        val ptr = result.json ?: return null
+        try {
+            return AgentDocComponentOutline.spansFromNativeJson(ptr.getString(0, "UTF-8"), doc)
+        } catch (e: Exception) {
+            LOG.warn("[native] parse_components json error: ${e.message}")
+            return null
+        } finally {
+            lib.agent_doc_free_string(ptr)
+        }
+    }
+
     /** Collect visual token ranges for agent-doc-specific markdown structures. */
     fun visualTokensOrNull(doc: String): List<VisualToken>? {
         val lib = AgentDocLib.get() ?: return null

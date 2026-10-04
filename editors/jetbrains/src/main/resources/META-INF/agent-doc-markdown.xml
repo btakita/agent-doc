@@ -1,0 +1,14 @@
+<idea-plugin>
+    <!-- GH #19 (plugin UX phases 5-7): component folding, gutter markers, and structure view.
+         Optional on the bundled Markdown plugin. Each extension is inert for any Markdown file
+         without a native component outline, i.e. every file that is not an agent-doc session
+         document; outlines are computed off the EDT by VisualHighlighterManager. -->
+    <extensions defaultExtensionNs="com.intellij">
+        <lang.foldingBuilder language="Markdown"
+                             implementationClass="com.github.btakita.agentdoc.AgentDocComponentFoldingBuilder"/>
+        <codeInsight.lineMarkerProvider language="Markdown"
+                                        implementationClass="com.github.btakita.agentdoc.AgentDocComponentLineMarkerProvider"/>
+        <lang.structureViewExtension
+                implementation="com.github.btakita.agentdoc.AgentDocComponentStructureViewExtension"/>
+    </extensions>
+</idea-plugin>

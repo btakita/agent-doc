@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
@@ -23,6 +24,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiDocumentManager
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
@@ -49,7 +51,16 @@ class VisualHighlighterManager private constructor(private val project: Project)
     private data class VisualTokenSnapshot(
         val modificationStamp: Long,
         val tokens: List<NativePatching.VisualToken>,
+        /**
+         * GH #19: native component boundaries for the same text. Empty for a non-session
+         * document (removes its outline); null when the native parse was unavailable or the
+         * document is mid-edit unparseable, which keeps the last tracked outline.
+         */
+        val components: List<AgentDocComponentOutline.ComponentSpan>?,
     )
+
+    /** Component boundaries consumed by folding, gutter markers, and the structure view. */
+    internal val componentOutlines = ComponentOutlineStore()
 
     private val refreshExecutor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "agent-doc-visual-highlighter-events").apply { isDaemon = true }
@@ -205,6 +216,12 @@ class VisualHighlighterManager private constructor(private val project: Project)
                 // the last valid ranges avoids erasing agent-doc highlighting
                 // while a restart-required native generation is recovered.
                 tokens = NativePatching.visualTokensOrNull(snapshot.text) ?: return null,
+                components =
+                    if (isAgentDocDocumentTextUtil(snapshot.text)) {
+                        NativePatching.componentSpansOrNull(snapshot.text)
+                    } else {
+                        emptyList()
+                    },
             )
         } catch (e: Throwable) {
             LOG.debug("[visual] token refresh skipped: ${e.message}")
@@ -216,6 +233,28 @@ class VisualHighlighterManager private constructor(private val project: Project)
         if (!isMarkdown(document)) return
         if (document.modificationStamp != snapshot.modificationStamp) return
         EditorFactory.getInstance().getEditors(document, project).forEach { refreshEditor(it, snapshot.tokens) }
+        snapshot.components?.let { installComponentOutline(document, it) }
+    }
+
+    /**
+     * GH #19: publish the outline and, only when its structure changed, restart the daemon for
+     * this file so folding and gutter markers are rebuilt. Offset drift alone needs no restart:
+     * the store's range markers already track it.
+     */
+    private fun installComponentOutline(
+        document: Document,
+        spans: List<AgentDocComponentOutline.ComponentSpan>,
+    ) {
+        val changed =
+            try {
+                componentOutlines.install(document, spans)
+            } catch (e: Throwable) {
+                LOG.debug("[visual] component outline install skipped: ${e.message}")
+                false
+            }
+        if (!changed) return
+        val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document) ?: return
+        DaemonCodeAnalyzer.getInstance(project).restart(psiFile)
     }
 
     private fun refreshEditor(editor: Editor, tokens: List<NativePatching.VisualToken>) {
@@ -364,6 +403,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
             pendingRefreshes.clear()
             refreshExecutor.shutdownNow()
         }
+        componentOutlines.clear()
         EditorFactory.getInstance().allEditors
             .filter { it.project == project }
             .forEach { clearEditor(it) }
@@ -393,6 +433,9 @@ class VisualHighlighterManager private constructor(private val project: Project)
                 (base.blue * baseRatio + accent.blue * clamped).toInt().coerceIn(0, 255),
             )
         }
+
+        /** The live instance for [project] without creating one (extension callbacks). */
+        fun peek(project: Project): VisualHighlighterManager? = INSTANCES[project]?.takeUnless { it.disposed.get() }
 
         fun getInstance(project: Project): VisualHighlighterManager {
             return INSTANCES.computeIfAbsent(project) { VisualHighlighterManager(it) }

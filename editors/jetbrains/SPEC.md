@@ -343,6 +343,35 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - JetBrains turn-state projection is event-driven, cached, and read from the Project Controller `state_subscribe` Lazily projection. It does not read filesystem state for ordinary turn-state UI. If the Project Controller request fails, the status bar shows `agent-doc: Project Controller disconnected`, with no fallback authority. Projection drains cap each work slice and yield between backlog slices so bursts cannot monopolize a plugin worker or indirectly starve the UI.
 - Prompt steering is Project Controller-owned. JetBrains must not treat stale supervisor freshness as a local editor-IPC apply/receipt/repair veto; supervisor recycle is only an explicit session action.
 
+### Component Folding, Gutter Markers, and Structure View
+
+GH #19 (plugin UX phases 5-7); shared contract in `editors/SPEC.md` § 12.
+
+- Registered in `agent-doc-markdown.xml`, loaded through an optional dependency on the bundled
+  Markdown plugin (`org.intellij.plugins.markdown`): `lang.foldingBuilder` and
+  `codeInsight.lineMarkerProvider` for language `Markdown`, plus a `lang.structureViewExtension`
+  that adds component nodes under the Markdown structure view's file root (the heading outline is
+  kept). Without the Markdown plugin none of them load.
+- Boundaries come from `agent_doc_parse_components` (`NativePatching.componentSpansOrNull`), whose
+  UTF-8 byte offsets `AgentDocComponentOutline` maps to UTF-16 editor offsets. The parse runs on
+  `VisualHighlighterManager`'s debounced (120 ms) background refresh with the same text snapshot
+  as the visual tokens, and only for a session document (`isAgentDocDocumentTextUtil`); a plain
+  Markdown file installs an empty outline, so every extension is inert there.
+- `ComponentOutlineStore` (owned by the project's `VisualHighlighterManager`, weak document keys)
+  keeps each component as open/close `RangeMarker`s, so between refreshes boundaries track edits
+  exactly. The folding builder, line-marker provider, and structure extension read only that store
+  and the live document text: no native call, no disk read, no PSI walk per keystroke. A refresh
+  restarts the daemon for the file only when the installed outline differs from what the markers
+  already track (component added, removed, renamed, or re-bounded). A failed or unavailable native
+  parse (library missing, unclosed marker mid-edit) keeps the last outline. Disposal clears the
+  store and its markers.
+- Folding: each multi-line component folds from its open marker through its close marker to
+  `<!-- agent:NAME · N items -->`; nothing is collapsed by default. Gutter: one
+  `AllIcons.Nodes.Template` icon on the leaf holding each open marker; the tooltip names the
+  component, its item count and inline attributes; clicking toggles that component's fold.
+  Structure view: `agent:NAME` nodes with the item count as location, nested components and
+  items as children, each navigating to its line.
+
 ### Agent Doc Actions popup
 
 - `AgentDocPopupAction` (`AgentDoc.Popup`) defaults to `Ctrl+Shift+Alt+D`. It never uses `Alt+Space` (`#gh116`: Windows consumes it for the window system menu, so the IDE never receives it) and installs no `ActionPromoter`, so native `Alt+Enter` intentions stay intact. The popup is also in the Tools menu and editor context menu, and like every `AgentDoc.*` action it can be rebound under Settings > Keymap.

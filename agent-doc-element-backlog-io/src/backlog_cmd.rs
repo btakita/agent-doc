@@ -1111,6 +1111,111 @@ pub fn icebox_reopen(file: &Path, id: &str, enqueue: bool) -> Result<()> {
     })
 }
 
+/// `GH #129`: restore a live `do [#id]` queue directive for each open backlog id
+/// whose queue head was dropped (`agent-doc backlog <FILE> requeue <id>...`).
+///
+/// This is the binary-owned repair the `#queue-clear-unrun-items` session-check
+/// finding names. It is a tracked-work projection like `done`/`reopen`, so it
+/// needs no admitted cycle and stays legal after a preflight admission-deadline
+/// refusal, which forbids a response write but not a binary repair. Once the
+/// head is back in the queue the guard sees it as still queued; no
+/// `write --commit` follows.
+pub fn requeue(file: &Path, ids: &[String]) -> Result<()> {
+    anyhow::ensure!(!ids.is_empty(), "requeue needs at least one id");
+    with_pending_write_transaction(file, || {
+        let full_content = read_command_document(file, "backlog_requeue")?;
+        let plan = agent_doc_queue::backlog_sync::requeue_open_ids_in_content(&full_content, ids)?;
+        if let Some(target) = plan.content.as_deref() {
+            persist_pending_write(file, &full_content, target)?;
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "backlog_requeue file={} restored={} already_live={} (GH #129)",
+                file.display(),
+                if plan.restored.is_empty() {
+                    "-".to_string()
+                } else {
+                    plan.restored.join(",")
+                },
+                if plan.already_live.is_empty() {
+                    "-".to_string()
+                } else {
+                    plan.already_live.join(",")
+                },
+            ),
+        );
+        for id in &plan.restored {
+            pending_receipt!("[pending] requeued #{} as a live `do [#{}]` head", id, id);
+        }
+        for id in &plan.already_live {
+            pending_receipt!("[pending] #{} already has a live queue head; unchanged", id);
+        }
+        Ok(())
+    })
+}
+
+/// `GH #129`: accept that the operator removed the queue head of each open
+/// backlog id on purpose (`agent-doc backlog <FILE> keep-unqueued <id>...`).
+///
+/// Records the ids as kept open on the last cycle's state — the same lifecycle
+/// proof a closeout's explicit keep-open edit leaves — so the
+/// `#queue-clear-unrun-items` guard stops reporting them. The document is not
+/// written, so this is legal without an admitted cycle. Refuses an id that is
+/// not open backlog or that still has a live queue head (nothing to accept).
+pub fn keep_unqueued(file: &Path, ids: &[String]) -> Result<()> {
+    anyhow::ensure!(!ids.is_empty(), "keep-unqueued needs at least one id");
+    let content = read_command_document(file, "backlog_keep_unqueued")?;
+    let open: std::collections::HashSet<String> = backlog::open_backlog_ids_in_content(&content)
+        .into_iter()
+        .map(|id| backlog::normalize_pending_id(&id))
+        .collect();
+    let live: std::collections::HashSet<String> =
+        agent_doc_queue::queue_closeout_guard::committed_queue_head_ids(&content)
+            .into_iter()
+            .map(|id| backlog::normalize_pending_id(&id))
+            .collect();
+    let mut normalized = Vec::new();
+    for raw in ids {
+        let id = backlog::normalize_pending_id(raw);
+        anyhow::ensure!(!id.is_empty(), "keep-unqueued id must not be empty");
+        anyhow::ensure!(
+            open.contains(&id),
+            "cannot keep #{id} unqueued: it does not name an open agent:backlog item"
+        );
+        anyhow::ensure!(
+            !live.contains(&id),
+            "cannot keep #{id} unqueued: it still has a live agent:queue head"
+        );
+        if !normalized.contains(&id) {
+            normalized.push(id);
+        }
+    }
+    let Some(_) = agent_doc_cycle_state_io::record_pending_kept_open_ids(file, &normalized)? else {
+        anyhow::bail!(
+            "cannot keep {} unqueued: {} has no cycle state, so there is no queue-head removal to accept",
+            normalized
+                .iter()
+                .map(|id| format!("#{id}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            file.display()
+        );
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "backlog_keep_unqueued file={} ids={} (GH #129)",
+            file.display(),
+            normalized.join(",")
+        ),
+    );
+    for id in &normalized {
+        pending_receipt!("[pending] kept #{} open without a queue head", id);
+    }
+    Ok(())
+}
+
 /// Complete and reap tracked-work ids through one authoritative document target.
 ///
 /// Committing closeouts use this operation so `--done` never exposes an

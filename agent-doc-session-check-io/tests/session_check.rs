@@ -6507,6 +6507,177 @@ Body\n\
             other => panic!("expected queue-head-removal interruption, got {other:?}"),
         }
     }
+    /// GH #129: plain disk effects so the binary-owned repair commands can run
+    /// against the fixture exactly as they do from the CLI with no editor.
+    struct Gh129DiskBacklogEffects;
+    static GH129_DISK_BACKLOG_EFFECTS: Gh129DiskBacklogEffects = Gh129DiskBacklogEffects;
+    impl agent_doc_element_backlog_io::BacklogCommandEffects for Gh129DiskBacklogEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+        fn force_disk_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current_content: &str,
+            target_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            fs::write(file, target_content)?;
+            Ok(())
+        }
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+    }
+    fn gh129_run_repair<T>(f: impl FnOnce() -> Result<T>) -> T {
+        agent_doc_element_backlog_io::with_backlog_command_effects(
+            &GH129_DISK_BACKLOG_EFFECTS,
+            || agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(true, f),
+        )
+        .unwrap()
+    }
+    fn gh129_dropped_head_doc(root: &Path) -> std::path::PathBuf {
+        let committed = queue_clear_fixture("- do [#nbapproval]\n");
+        let doc = init_committed_doc_for_queue_guard(root, &committed);
+        let heads: Vec<String> = ["do [#hydroapproval]", "do [#nbapproval]"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        agent_doc_cycle_state_io::record_active_queue_heads(&doc, &heads).unwrap();
+        doc
+    }
+    fn gh129_interruption(doc: &Path) -> String {
+        match inspect(doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => message,
+            other => panic!("expected queue-head-removal interruption, got {other:?}"),
+        }
+    }
+
+    /// GH #129: the finding happens on a COMMITTED cycle, so the repair it
+    /// names must clear it with no admitted cycle and no `write --commit` —
+    /// the exact state a preflight admission-deadline refusal leaves behind.
+    #[test]
+    fn queue_head_removal_repair_clears_the_finding_without_an_admitted_cycle() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = gh129_dropped_head_doc(tmp.path());
+        let message = gh129_interruption(&doc);
+        assert!(message.contains("#hydroapproval"), "{message}");
+        assert!(
+            message.contains(&format!(
+                "agent-doc backlog {} requeue hydroapproval",
+                doc.display()
+            )),
+            "the hint names the binary-owned requeue: {message}"
+        );
+        assert!(
+            !message.contains("re-run `agent-doc write --commit"),
+            "the hint must not prescribe a response write: {message}"
+        );
+        let state_before = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(!state_before.is_open(), "no cycle is admitted");
+
+        gh129_run_repair(|| {
+            agent_doc_element_backlog_io::backlog_cmd::requeue(&doc, &["hydroapproval".to_string()])
+        });
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            content.contains("- do [#nbapproval]\n- do [#hydroapproval]\n"),
+            "requeue restores the dropped head after the live one:\n{content}"
+        );
+        let state_after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(!state_after.is_open(), "the repair opened no cycle");
+        assert_eq!(state_after.cycle_id, state_before.cycle_id);
+        assert!(
+            matches!(inspect(&doc).unwrap(), SessionCheckStatus::Ok(_)),
+            "a requeued head is still queued, so the guard clears without write --commit"
+        );
+
+        // A head that is live again has no removal left to accept.
+        let refused = agent_doc_element_backlog_io::with_backlog_command_effects(
+            &GH129_DISK_BACKLOG_EFFECTS,
+            || {
+                agent_doc_element_backlog_io::backlog_cmd::keep_unqueued(
+                    &doc,
+                    &["hydroapproval".to_string()],
+                )
+            },
+        );
+        assert!(
+            refused
+                .unwrap_err()
+                .to_string()
+                .contains("still has a live agent:queue head")
+        );
+    }
+
+    /// GH #129: an intentional operator removal is accepted by a binary-owned
+    /// command that writes no document, replacing the old
+    /// `<!-- no-queue-removal-guard -->`-in-the-response route, which needed an
+    /// admitted response.
+    #[test]
+    fn queue_head_removal_keep_unqueued_accepts_an_intentional_removal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Both recorded heads dropped, so no live head is left for the
+        // no-response closeout guard to report.
+        let committed = queue_clear_fixture("");
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &committed);
+        let heads: Vec<String> = ["do [#hydroapproval]", "do [#nbapproval]"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        agent_doc_cycle_state_io::record_active_queue_heads(&doc, &heads).unwrap();
+        let message = gh129_interruption(&doc);
+        assert!(
+            message.contains("#hydroapproval, #nbapproval"),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!(
+                "agent-doc backlog {} keep-unqueued hydroapproval nbapproval",
+                doc.display()
+            )),
+            "{message}"
+        );
+        let before = fs::read_to_string(&doc).unwrap();
+
+        // An id that is not open backlog has no removal to accept.
+        let refused = agent_doc_element_backlog_io::with_backlog_command_effects(
+            &GH129_DISK_BACKLOG_EFFECTS,
+            || {
+                agent_doc_element_backlog_io::backlog_cmd::keep_unqueued(
+                    &doc,
+                    &["convqa-rerun".to_string()],
+                )
+            },
+        );
+        assert!(
+            refused
+                .unwrap_err()
+                .to_string()
+                .contains("does not name an open agent:backlog item")
+        );
+
+        gh129_run_repair(|| {
+            agent_doc_element_backlog_io::backlog_cmd::keep_unqueued(
+                &doc,
+                &["#hydroapproval".to_string(), "nbapproval".to_string()],
+            )
+        });
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            before,
+            "keep-unqueued writes no document"
+        );
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(!state.is_open(), "the repair opened no cycle");
+        let status = inspect(&doc).unwrap();
+        assert!(
+            matches!(status, SessionCheckStatus::Ok(_)),
+            "an accepted removal no longer interrupts: {status:?}"
+        );
+    }
     #[test]
     fn queue_head_removal_guard_allows_consumed_head_when_rest_preserved() {
         let tmp = tempfile::TempDir::new().unwrap();

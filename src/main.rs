@@ -3956,6 +3956,22 @@ enum PendingAction {
         #[arg(long)]
         queue: bool,
     },
+    /// Restore a live `do [#id]` queue head for each OPEN backlog id whose head
+    /// was dropped (GH #129, `#queue-clear-unrun-items`). Binary-owned: needs
+    /// no admitted cycle, so it is legal after a preflight admission refusal.
+    Requeue {
+        /// Hash ids (with or without the `#` prefix)
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
+    /// Accept that the operator removed the queue head of each OPEN backlog id
+    /// on purpose (GH #129): records the ids as kept open so session-check's
+    /// `#queue-clear-unrun-items` guard stops reporting them. Writes no document.
+    KeepUnqueued {
+        /// Hash ids (with or without the `#` prefix)
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
     /// Rewrite an item's text, preserving its hash id
     Edit {
         /// Hash id (without the `#` prefix)
@@ -6601,6 +6617,12 @@ fn try_main() -> anyhow::Result<()> {
                         PendingAction::Reopen { id, queue } => {
                             agent_doc_element_backlog_io::backlog_cmd::reopen(&file, &id, queue)
                         }
+                        PendingAction::Requeue { ids } => {
+                            agent_doc_element_backlog_io::backlog_cmd::requeue(&file, &ids)
+                        }
+                        PendingAction::KeepUnqueued { ids } => {
+                            agent_doc_element_backlog_io::backlog_cmd::keep_unqueued(&file, &ids)
+                        }
                         PendingAction::Edit { id, text } => {
                             agent_doc_element_backlog_io::backlog_cmd::edit(&file, &id, &text)
                         }
@@ -6692,6 +6714,11 @@ fn try_main() -> anyhow::Result<()> {
                         PendingAction::Reopen { id, queue } => {
                             agent_doc_element_backlog_io::backlog_cmd::icebox_reopen(
                                 &file, &id, queue,
+                            )
+                        }
+                        PendingAction::Requeue { .. } | PendingAction::KeepUnqueued { .. } => {
+                            anyhow::bail!(
+                                "agent-doc icebox requeue/keep-unqueued is not supported; parked icebox work has no queue head — use `agent-doc backlog <FILE> requeue|keep-unqueued`"
                             )
                         }
                         PendingAction::Edit { id, text } => {

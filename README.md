@@ -32,6 +32,9 @@ curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh |
 # From PyPI
 pip install agent-doc
 
+# From Homebrew (Linux; macOS once the release's Darwin archives are uploaded)
+brew install btakita/tap/agent-doc
+
 # From a local source checkout
 cargo install --path src/agent-doc --force
 

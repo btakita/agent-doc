@@ -263,3 +263,15 @@ jobs:
               --generate-notes \
               artifacts/* editor-packages/*
           fi
+
+  # GH #31: bump `btakita/homebrew-tap` to this tag's archives. Runs after the
+  # release exists because the formula is rendered from the published
+  # `SHA256SUMS`. Darwin archives arrive later (make release-macos-assets), which
+  # dispatches this workflow again for the same tag.
+  homebrew:
+    needs: [release]
+    uses: ./.github/workflows/homebrew.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

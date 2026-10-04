@@ -58,3 +58,11 @@ gh release upload "$tag" \
   --clobber
 
 echo "Uploaded Darwin archives and refreshed SHA256SUMS for $tag"
+
+# GH #31: the tag's Homebrew bump ran before these archives existed, so the tap
+# formula is Linux-only. Re-render it from the refreshed SHA256SUMS.
+if gh workflow run homebrew.yml -f tag="$tag"; then
+  echo "Dispatched the Homebrew formula bump for $tag"
+else
+  echo "warning: could not dispatch homebrew.yml; run: gh workflow run homebrew.yml -f tag=$tag" >&2
+fi

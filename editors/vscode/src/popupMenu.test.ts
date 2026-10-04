@@ -46,6 +46,7 @@ describe('popupMenu', () => {
                 'killSupervisor',
                 'resyncFixSessions',
                 'gcStaleSessions',
+                'about',
             ],
         );
     });

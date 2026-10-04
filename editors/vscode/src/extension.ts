@@ -6,6 +6,14 @@ import * as crypto from 'crypto';
 import * as net from 'net';
 import { execFile } from 'child_process';
 import * as native from './native.js';
+import {
+    aboutMismatches,
+    nativeAboutFacts,
+    parseAgentDocVersionText,
+    parseBuildInfoJson,
+    renderAboutReport,
+    type AgentDocBuildFacts,
+} from './about.js';
 import * as stateMirror from './stateMirror.js';
 import {
     createEditorApplyProof,
@@ -1555,6 +1563,62 @@ async function gcStaleSessionsAction(): Promise<void> {
     await runProjectCleanupCommand('GC Stale Sessions', ['gc']);
 }
 
+// `editoractionmenu`: About Agent Doc. The CLI is the binary every other
+// action runs (`resolveAgentDoc`), queried with `agent-doc version --json`
+// (falling back to `--version` for older binaries). The native library is the
+// one this extension already loaded; About never loads or reloads it.
+async function queryCliBuildFacts(
+    cwd: string,
+): Promise<{ facts: AgentDocBuildFacts | null; note: string | null }> {
+    const bin = resolveAgentDoc();
+    try {
+        const parsed = parseBuildInfoJson(await runCli(['version', '--json'], cwd, { timeoutMs: 10_000 }));
+        if (parsed) return { facts: { ...parsed, executable: parsed.executable ?? bin }, note: null };
+    } catch {
+        // Older binaries have no `version` subcommand; fall through to --version.
+    }
+    try {
+        const output = await runCli(['--version'], cwd, { timeoutMs: 10_000 });
+        const version = parseAgentDocVersionText(output);
+        if (!version) return { facts: null, note: `unrecognized --version output: ${output}` };
+        return {
+            facts: { version, buildId: null, executable: bin, expectedPluginVersion: null },
+            note: 'binary predates `agent-doc version --json`; build id unavailable',
+        };
+    } catch (err: any) {
+        return { facts: null, note: err.message };
+    }
+}
+
+async function aboutAction(): Promise<void> {
+    const cwd = resolveCleanupCwd() ?? os.homedir();
+    const cli = await queryCliBuildFacts(cwd);
+    const snapshot = native.nativeAboutSnapshot();
+    const nativeFacts = nativeAboutFacts(snapshot);
+    const facts = {
+        pluginVersion: native.EDITOR_PLUGIN_VERSION,
+        cliCommand: resolveAgentDoc(),
+        cli: cli.facts,
+        cliNote: cli.note,
+        nativePath: snapshot.path,
+        native: nativeFacts.facts,
+        nativeNote: nativeFacts.note,
+    };
+    const mismatches = aboutMismatches(facts);
+    const report = renderAboutReport(facts, mismatches);
+    console.log(`[agent-doc/about] ${report.replace(/\n/g, ' | ')}`);
+    const choice = mismatches.length > 0
+        ? await vscode.window.showWarningMessage(
+            'About Agent Doc: version mismatch',
+            { modal: true, detail: report },
+            'Copy',
+        )
+        : await vscode.window.showInformationMessage('About Agent Doc', { modal: true, detail: report }, 'Copy');
+    if (choice === 'Copy') {
+        await vscode.env.clipboard.writeText(report);
+    }
+}
+
 async function fixDocumentAction(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return;
@@ -2300,6 +2364,9 @@ async function popupMenuAction(): Promise<void> {
                     break;
                 case 'gcStaleSessions':
                     await gcStaleSessionsAction();
+                    break;
+                case 'about':
+                    await aboutAction();
                     break;
             }
             break;
@@ -3505,6 +3572,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.gcStaleSessions', gcStaleSessionsAction)
+    );
+
+    // `editoractionmenu`: running plugin / CLI / native library versions.
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.about', aboutAction)
     );
 
     // Feature 6: Popup Menu

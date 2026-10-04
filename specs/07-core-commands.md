@@ -266,6 +266,19 @@ read only stdout for this protocol and inherit stderr separately, including
 when an older binary emits an upgrade notice. Rejected candidates report the
 exit code, stdout candidate, and existence check.
 
+`version [--json]` reports the running binary's build identity: `version`, the
+IPC `build_id` (`<version>+<source digest>`, the identity the handshake
+compares), the `executable` path, the sibling native `library` that `lib-path`
+would print (or `null`), and `expected_plugins.{jetbrains,vscode,zed}`, the
+editor package generations this build was compiled against (`null` when that
+manifest was absent at build time). `--json` emits it under the
+`agent-doc-build-info-v1` contract; the text form starts with the same
+`agent-doc <version>` line as `--version`. Like `lib-path`, it skips startup
+update checks and notices. The native library exposes the same report through
+`agent_doc_build_info_json()` (`component = "native_library"`, no paths), so an
+editor's "About Agent Doc" action can prove whether the CLI and the loaded
+library are one build (`editors/SPEC.md` section 6b).
+
 Release artifacts ship the platform cdylib beside the binary
 (`libagent_doc.so` / `.dylib` / `agent_doc.dll` in each release archive, and in
 the wheel's `.data/scripts/` so `pip install` lands it in the same `bin/`).

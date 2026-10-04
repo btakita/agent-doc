@@ -5,7 +5,7 @@
 //! - Top-level struct `Cli` holds a single `Commands` subcommand enum (40+ variants).
 //! - `AgentDocMode` enum (`Append`, `Template`, `Stream`) is a `ValueEnum` used by `Convert`
 //!   and `Mode` subcommands; `Append` maps to inline format, `Template`/`Stream` to CRDT.
-//! - Startup upgrade notices are suppressed for `Upgrade` and the machine-only `LibPath` query.
+//! - Startup upgrade notices are suppressed for `Upgrade` and the machine-only `LibPath` and `Version` queries.
 //! - Loads global config via `agent_doc_config::load()` before dispatching; config is threaded into
 //!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
 //! - Each subcommand delegates immediately to its owning module or focused crate (`agent_doc_run_io::run`, `agent_doc_diff_io::run`, etc.);
@@ -21,6 +21,9 @@
 //!   skill was updated, enabling the caller to take the appropriate reload action.
 //! - `LibPath` prints the platform-appropriate shared library path (`libagent_doc.so/dylib/dll`)
 //!   next to the binary, exiting with code 1 if not found.
+//! - `Version [--json]` prints the binary's build identity (`agent_doc::build_info`):
+//!   version, IPC build id, executable, sibling native library, and expected editor
+//!   plugin generations; like `LibPath`, it skips startup upgrade notices.
 //! - `ListCommands` emits a JSON array of all available subcommand names for plugin autocomplete.
 //!
 //! ## Agentic Contracts
@@ -3212,6 +3215,13 @@ enum Commands {
     },
     /// Print the path to the shared library (libagent_doc.so/dylib/dll)
     LibPath,
+    /// Print this binary's build identity: version, IPC build id, executable,
+    /// paired native library, and the editor plugin versions it expects
+    Version {
+        /// Emit `agent-doc-build-info-v1` JSON (the editor "About Agent Doc" contract)
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove stale versioned shared libraries not in use
     GcLibs {
         /// Target directory (default: directory containing agent-doc binary)
@@ -4668,7 +4678,10 @@ fn try_main() -> anyhow::Result<()> {
 
     // `lib-path` is a machine-only bootstrap query. Neither stream may carry
     // an unrelated upgrade notice (including when called by an older editor).
-    if !matches!(cli.command, Commands::Upgrade { .. } | Commands::LibPath) {
+    if !matches!(
+        cli.command,
+        Commands::Upgrade { .. } | Commands::LibPath | Commands::Version { .. }
+    ) {
         upgrade::warn_if_outdated();
     }
 
@@ -5955,6 +5968,19 @@ fn try_main() -> anyhow::Result<()> {
                     eprintln!("[lib-path] {line}");
                 }
                 std::process::exit(1);
+            }
+            Ok(())
+        }
+        Commands::Version { json } => {
+            // `editoractionmenu`: the editor "About Agent Doc" action reads this
+            // to show which binary is actually running and whether it pairs
+            // with the loaded native library and the plugin generation.
+            let exe = std::env::current_exe().ok();
+            let info = agent_doc::build_info::binary_build_info(exe.as_deref());
+            if json {
+                println!("{}", serde_json::to_string(&info)?);
+            } else {
+                print!("{}", agent_doc::build_info::render_text(&info));
             }
             Ok(())
         }
@@ -7249,6 +7275,18 @@ mod recycle_force_tests {
             .expect("spawn parse thread")
             .join()
             .expect("parse thread")
+    }
+
+    #[test]
+    fn version_subcommand_parses_with_and_without_json() {
+        assert!(matches!(
+            parse(&["agent-doc", "version"]),
+            Commands::Version { json: false }
+        ));
+        assert!(matches!(
+            parse(&["agent-doc", "version", "--json"]),
+            Commands::Version { json: true }
+        ));
     }
 
     #[test]

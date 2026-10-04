@@ -50,6 +50,7 @@ class AgentDocPopupActionTest {
                 "AgentDoc.GcStaleSessions",
                 "AgentDoc.StopAgent",
                 "AgentDoc.KillSupervisor",
+                "AgentDoc.About",
             ),
             AgentDocPopupAction.OVERFLOW_ACTION_IDS,
         )

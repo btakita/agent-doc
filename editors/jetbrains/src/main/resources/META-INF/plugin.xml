@@ -227,5 +227,13 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.About"
+                class="com.github.btakita.agentdoc.AboutAgentDocAction"
+                text="About Agent Doc"
+                description="Show the running Agent Doc plugin, agent-doc CLI, and native library versions, and warn when they do not match">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

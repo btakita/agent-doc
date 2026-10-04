@@ -193,6 +193,12 @@ Plugins report layout and document membership without changing layout. Hidden
 or stashed panes remain registered, while background document delivery remains
 focus-neutral.
 
+`About Agent Doc` is read-only: it queries the resolved binary with
+`agent-doc version --json` and reads the already-loaded native generation's
+`agent_doc_build_info_json()`, then warns when the plugin version, the binary's
+expected plugin version, and the binary/library build ids disagree. It never
+loads or reloads the native library (`editors/SPEC.md` section 6b).
+
 ## 8. Error handling
 
 - Log every rejection with intent id, document, expected/current generation,

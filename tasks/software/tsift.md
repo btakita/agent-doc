@@ -138,12 +138,28 @@ I'll close the item when it reports back.
 **release.yml:** no change needed. `tsift-tree-sitter-jai` already comes just before `tsift-graph` in both the file-check list and the publish list.
 
 The subagent's worktree has been removed. Nothing is left for you to do on this item.
+
+### Re: release + publish — dispatched to a subagent — opus-5-5 · 2026-10-04T00:05-04:00
+
+> **Queue prompt:** release + publish
+
+I claimed this item and started a background subagent on it. It's cutting **tsift 0.1.103**: there are 21 commits on `main` (`92f6bb1`) since `v0.1.102`. It works in a clean worktree outside agent-loop. The steps:
+- **Bump the version** in lockstep across every crate version, the dependency references between crates, `opencode-tsift`, `Cargo.lock` and `VERSIONS.md`.
+- **Check `release.yml`**: every dependency of `tsift-cli` must be in both publish lists, in order.
+- **Run `make check`** and capture its exit status explicitly.
+- **Push** the bump to `main` and the `v0.1.103` tag, both without force.
+- **Watch the Release run** job by job, then check each crate on crates.io directly. A green top-line result isn't proof that anything published.
+- **Install the binary locally** and check that `tsift --version` reports 0.1.103.
+
+This is the first release where `tsift-tree-sitter-jai` publishes through the trusted publisher, so the subagent will confirm that crate specifically.
+
+The closeout flagged #fixhttpsgithub as a possible match for this request. That's an August release, so it isn't this one.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -856,9 +856,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             &doc_content,
             "repair_retained_response_replay_fragments",
         )?;
+        // `#preflightrepairdrift`: baseline the binary-authored target, never
+        // operator edits the settled cut may have rolled the repair over.
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &canonical,
-            &doc_content,
+            &reassembled,
             agent_doc_ops_log_io::log_op,
         )?;
         agent_doc_ops_log_io::log_op(
@@ -1749,16 +1751,22 @@ pub fn repair_template_doc_if_needed(
             }
             None => true,
         };
+        let repair_target = repaired.clone();
         repaired = effects.atomic_write_if_current(
             file,
-            &repaired,
+            &repair_target,
             doc_content,
             "repair_template_normalization",
         )?;
         if save_repaired_snapshot {
+            // `#preflightrepairdrift`: the settled document may be the repair
+            // rolled forward over operator edits typed while it ran. Those
+            // bytes are unanswered steering, so the baseline absorbs only the
+            // binary-authored repair target; the operator's concurrent edit
+            // stays a diff for the turn this repair is admitting.
             agent_doc_snapshot_io::checkpoint_document_baseline(
                 file,
-                &repaired,
+                &repair_target,
                 agent_doc_ops_log_io::log_op,
             )?;
         }
@@ -1868,16 +1876,19 @@ pub fn repair_response_body_prompt_prefixes_if_needed(
         }
         None => true,
     };
+    let repair_target = repaired;
     let repaired = effects.atomic_write_if_current(
         file,
-        &repaired,
+        &repair_target,
         doc_content,
         "repair_response_body_prompt_prefixes",
     )?;
     if save_repaired_snapshot {
+        // `#preflightrepairdrift`: baseline the binary-authored target, never
+        // operator edits the settled cut may have rolled the repair over.
         agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
-            &repaired,
+            &repair_target,
             agent_doc_ops_log_io::log_op,
         )?;
     }
@@ -1916,16 +1927,19 @@ pub fn repair_duplicate_exchange_scaffold_if_needed(
         }
         None => true,
     };
+    let repair_target = repaired;
     let repaired = effects.atomic_write_if_current(
         file,
-        &repaired,
+        &repair_target,
         doc_content,
         "repair_duplicate_exchange_scaffold",
     )?;
     if save_repaired_snapshot {
+        // `#preflightrepairdrift`: baseline the binary-authored target, never
+        // operator edits the settled cut may have rolled the repair over.
         agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
-            &repaired,
+            &repair_target,
             agent_doc_ops_log_io::log_op,
         )?;
     }
@@ -4204,6 +4218,120 @@ mod tests {
         assert!(
             repair_replay_force_disk_with_override(file, Some(true)),
             "only the explicit operator escape hatch may force disk"
+        );
+    }
+
+    /// `#preflightrepairdrift`: the settle path can return the repair rolled
+    /// forward over a queue item the operator typed while preflight's repair
+    /// ran. Those bytes are unanswered steering: the baseline must absorb only
+    /// the binary-authored repair target, so the queue item stays in the diff
+    /// the admitted turn reads instead of being silently baselined away.
+    #[test]
+    fn repair_rebased_over_operator_typing_baselines_only_the_repair_target() {
+        struct RebasingEffects {
+            operator_item: &'static str,
+        }
+        impl RepairTemplateWriteEffects for RebasingEffects {
+            fn atomic_write_if_current(
+                &self,
+                file: &Path,
+                content: &str,
+                _expected_current: &str,
+                _source: &str,
+            ) -> Result<String> {
+                let rebased = content.replacen(
+                    "<!-- agent:queue -->\n",
+                    &format!("<!-- agent:queue -->\n{}", self.operator_item),
+                    1,
+                );
+                std::fs::write(file, &rebased)?;
+                Ok(rebased)
+            }
+            fn repair_response_prompt_order_for_file(
+                &self,
+                _content: &str,
+                _known_response: Option<&str>,
+                _file: &Path,
+                _fallback_snapshot: Option<&str>,
+            ) -> Result<Option<String>> {
+                Ok(None)
+            }
+            fn normalize_template_structure_or_fail_preserving(
+                &self,
+                content: &str,
+                _file: &Path,
+                _prompt_input: Option<&str>,
+            ) -> Result<String> {
+                Ok(content.to_string())
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("session.md");
+        let pre_repair = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "JB `Run Agent Doc` failed on this document.\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, pre_repair).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            pre_repair,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let repair_target =
+            agent_doc_template::repair_duplicate_exchange_close_scaffold(pre_repair)
+                .unwrap()
+                .expect("fixture precondition: the duplicate scaffold repair applies");
+
+        let operator_item = "- operator typed this while preflight repaired\n";
+        let settled = repair_duplicate_exchange_scaffold_if_needed(
+            &RebasingEffects { operator_item },
+            &doc,
+            pre_repair,
+        )
+        .expect("a repair rolled forward over operator typing must not refuse");
+
+        assert!(settled.contains(operator_item), "{settled}");
+        let baseline = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .expect("the repair checkpoints a baseline");
+        assert_eq!(
+            baseline, repair_target,
+            "the baseline is the repair target, never the operator's concurrent bytes",
+        );
+        assert!(
+            !baseline.contains(operator_item),
+            "the operator's queue item must remain a pending diff, not baselined away",
         );
     }
 

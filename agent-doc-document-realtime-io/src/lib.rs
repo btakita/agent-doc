@@ -2713,8 +2713,44 @@ pub fn atomic_repair_write_if_current_through_authority(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AtomicRepairProjectionState {
     Converged,
+    /// `#preflightrepairdrift`: the repair landed, but the controller's
+    /// retained projection rolled it forward over operator edits that arrived
+    /// between the repair's read and its projection. Canonical and disk agree,
+    /// and re-applying the repair's own delta to that cut is a no-op, so the
+    /// repair is fully present and every concurrent operator byte is kept.
+    RebasedOverConcurrentEdits,
     LateEditorAttachment,
     Diverged,
+}
+
+/// `#preflightrepairdrift`: prove a settled cut already carries the repair.
+///
+/// The repair is the binary-authored delta `expected_current -> content`. The
+/// controller rolls retained targets forward over a live operator cut instead
+/// of clobbering it (observed 2026-10-04 on `tasks/sdk.md`: the operator typed
+/// a queue item while preflight's `repair_template_normalization` ran, the
+/// write settled as `canonical == disk == rebase(target, operator cut)`, and
+/// the exact-equality settle refused the turn). That cut is the repair's
+/// correct outcome, not a lost race. It is accepted only when:
+///
+/// - canonical and disk are the same bytes (the projection settled), and
+/// - canonical is neither the target (that is `Converged`) nor the pre-repair
+///   text (the repair never applied), and
+/// - every line hunk of the repair appears verbatim in `expected_current ->
+///   canonical`, and the remaining hunks (the operator's) are disjoint from it
+///   (`agent_doc_merge::repair_proof`). This is deliberately merge-free: the
+///   component merge falls back to "stale base, keep theirs" on dissimilar
+///   texts and would accept a cut that never received the repair.
+fn repair_target_absorbed_by_concurrent_cut(
+    content: &str,
+    expected_current: &str,
+    canonical: &str,
+    disk: &str,
+) -> bool {
+    if canonical != disk || canonical == content || canonical == expected_current {
+        return false;
+    }
+    agent_doc_merge::repair_proof::settled_cut_contains_repair(expected_current, content, canonical)
 }
 
 fn classify_atomic_repair_projection(
@@ -2727,6 +2763,8 @@ fn classify_atomic_repair_projection(
         AtomicRepairProjectionState::Converged
     } else if canonical == expected_current && disk == content {
         AtomicRepairProjectionState::LateEditorAttachment
+    } else if repair_target_absorbed_by_concurrent_cut(content, expected_current, canonical, disk) {
+        AtomicRepairProjectionState::RebasedOverConcurrentEdits
     } else {
         AtomicRepairProjectionState::Diverged
     }
@@ -2753,7 +2791,8 @@ fn classify_atomic_repair_projection(
 /// semantics — only later.
 fn atomic_repair_projection_should_await(state: AtomicRepairProjectionState) -> bool {
     match state {
-        AtomicRepairProjectionState::Converged => false,
+        AtomicRepairProjectionState::Converged
+        | AtomicRepairProjectionState::RebasedOverConcurrentEdits => false,
         AtomicRepairProjectionState::LateEditorAttachment
         | AtomicRepairProjectionState::Diverged => true,
     }
@@ -2827,9 +2866,14 @@ fn await_atomic_repair_projection(
             ))
         },
     )?;
-    if entry_state != AtomicRepairProjectionState::Converged
-        && classify_atomic_repair_projection(content, expected_current, &canonical, &disk)
-            == AtomicRepairProjectionState::Converged
+    let settled_state =
+        classify_atomic_repair_projection(content, expected_current, &canonical, &disk);
+    if entry_state != settled_state
+        && matches!(
+            settled_state,
+            AtomicRepairProjectionState::Converged
+                | AtomicRepairProjectionState::RebasedOverConcurrentEdits
+        )
     {
         agent_doc_ops_log_io::log_op(
             path,
@@ -2889,6 +2933,22 @@ fn settle_atomic_repair_projection(
                 agent_doc_hash::content_hash(&disk),
             ),
         ));
+    }
+
+    if repair_target_absorbed_by_concurrent_cut(content, expected_current, &canonical, &disk) {
+        clear_all_deferred_document_write_intents(path, source)?;
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "repair_projection_rebased_over_concurrent_edits file={} source={} target_hash={} settled_hash={} expected_current_hash={} recovery=accept_settled_rebased_cut operator_action=none (#preflightrepairdrift)",
+                path.display(),
+                source,
+                target_hash,
+                agent_doc_hash::content_hash(&canonical),
+                agent_doc_hash::content_hash(expected_current),
+            ),
+        );
+        return Ok(canonical);
     }
 
     if classify_atomic_repair_projection(content, expected_current, &canonical, &disk)
@@ -11967,6 +12027,117 @@ mod tests {
         assert_eq!(pending.expected_content.as_deref(), Some(baseline));
         assert_eq!(pending.target_content, target);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+    }
+
+    /// `#preflightrepairdrift` fixture: a template document whose exchange
+    /// carries a duplicated prompt-prefix line that the repair removes, while
+    /// the operator types a new queue item into the queue component.
+    fn repair_rebase_fixture() -> (String, String, String) {
+        let pre_repair = concat!(
+            "---\nagent_doc_session: s-repair\n---\n\n",
+            "<!-- agent:queue go -->\n- existing item\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\nDone.\n\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        )
+        .to_string();
+        let repair_target = pre_repair.replacen("Done.\n\nDone.\n", "Done.\n", 1);
+        let rebased = repair_target.replacen(
+            "- existing item\n",
+            "- existing item\n- operator typed this mid-repair\n",
+            1,
+        );
+        (pre_repair, repair_target, rebased)
+    }
+
+    #[test]
+    fn repair_rolled_forward_over_concurrent_operator_edit_settles_to_the_rebased_cut() {
+        let (pre_repair, repair_target, rebased) = repair_rebase_fixture();
+        assert_eq!(
+            rebase_agent_candidate_over_editor_cut(&pre_repair, &repair_target, &rebased).unwrap(),
+            rebased,
+            "fixture precondition: the controller's rebase yields exactly this cut",
+        );
+        let (dir, file, _canonical) = temp_doc(&rebased);
+
+        assert_eq!(
+            classify_atomic_repair_projection(&repair_target, &pre_repair, &rebased, &rebased),
+            AtomicRepairProjectionState::RebasedOverConcurrentEdits,
+        );
+        assert!(!atomic_repair_projection_should_await(
+            AtomicRepairProjectionState::RebasedOverConcurrentEdits
+        ));
+
+        let settled = settle_atomic_repair_projection(
+            &file,
+            &repair_target,
+            &pre_repair,
+            "repair_template_normalization",
+            rebased.clone(),
+            rebased.clone(),
+        )
+        .expect(
+            "a repair the controller rolled forward over operator typing must settle, not \
+             refuse preflight admission with `did not converge exactly`",
+        );
+
+        assert_eq!(
+            settled, rebased,
+            "the settled cut keeps every operator byte"
+        );
+        assert!(settled.contains("- operator typed this mid-repair\n"));
+        assert!(
+            !settled.contains("Done.\n\nDone.\n"),
+            "the repair is present"
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("repair_projection_rebased_over_concurrent_edits"),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn concurrent_operator_cut_without_the_repair_still_fails_closed() {
+        let (pre_repair, repair_target, _rebased) = repair_rebase_fixture();
+        // The operator's edit landed but the repair's delta did not: re-applying
+        // the repair to this cut would change it, so it is NOT absorbed.
+        let operator_only = pre_repair.replacen(
+            "- existing item\n",
+            "- existing item\n- operator typed this mid-repair\n",
+            1,
+        );
+        let (_dir, file, _canonical) = temp_doc(&operator_only);
+
+        assert_eq!(
+            classify_atomic_repair_projection(
+                &repair_target,
+                &pre_repair,
+                &operator_only,
+                &operator_only,
+            ),
+            AtomicRepairProjectionState::Diverged,
+        );
+        let err = settle_atomic_repair_projection(
+            &file,
+            &repair_target,
+            &pre_repair,
+            "repair_template_normalization",
+            operator_only.clone(),
+            operator_only.clone(),
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("did not converge exactly"),
+            "{err:#}"
+        );
+
+        // A rebased canonical that disk has not caught up with is not settled.
+        let (_, _, rebased) = repair_rebase_fixture();
+        assert_eq!(
+            classify_atomic_repair_projection(&repair_target, &pre_repair, &rebased, &pre_repair),
+            AtomicRepairProjectionState::Diverged,
+        );
     }
 
     #[test]

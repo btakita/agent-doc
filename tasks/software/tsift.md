@@ -20,7 +20,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -246,13 +245,38 @@ This item was claimed (`subagent:harnesslinks`) and handed to a background subag
 When it reports back, I'll integrate serially: merge, `make check`, install, then create the personal links with `tsift init --instructions personal --harness …`. After that I'll release the claim and close the item.
 
 Exchange is large (196 lines). The queue is active, so I'm not compacting.
+
+### Re: #tsiftharnesslinks — done — opus-5.5 · 2026-10-04T03:20-04:00
+
+> **Queue prompt:** do [#tsiftharnesslinks]
+
+**Answer: only Claude Code needs a personal link.** Codex, OpenCode and Grok already load `~/.agents/skills/tsift` by themselves, so a link would just add a duplicate entry. OpenCode logs a warning when it sees the same skill name twice. The subagent checked each harness against its docs and the installed binary:
+
+| Harness | User skills directory | Loads `~/.agents/skills`? |
+|---|---|---|
+| Claude | `~/.claude/skills` | **No** (link required; it is in place) |
+| Codex | `$CODEX_HOME/skills` (`~/.codex/skills`) | Yes (documented user scope; listed as a skill root in a Codex 0.160.0 session) |
+| OpenCode | `$OPENCODE_CONFIG_DIR` / `$XDG_CONFIG_HOME/opencode/skills` (`~/.config/opencode/skills`) | Yes, plus `~/.claude/skills` |
+| Grok | `$GROK_HOME/skills` (`~/.grok/skills`) | Yes, plus `~/.claude/skills` (`grok inspect --json` confirms) |
+
+**tsift fix (`5ebe6e3`, pushed to main):**
+- Personal mode now links into each harness's real user directory and honors that harness's override variable. It used to link `~/.opencode/skills` for OpenCode, which was the wrong target.
+- A tsift link left at the old location is removed, so OpenCode won't load the skill twice. `--instructions off` cleans up both locations.
+- There are 4 new regression tests that pin each harness's directory and override.
+- Corrected the claim "no harness scans `.agents/skills/`" in the skill reference, its template, and `specs/search-navigation.md`.
+- **Test hazard fixed:** `off_mode_removes_the_harness_link_but_not_an_unmanaged_one` used the real `$HOME`. During development it deleted `~/.claude/skills/tsift`. The link was recreated and the test now uses a temp directory.
+
+**Verification:** `make check` on main: `EXIT=0`, 0 failures. Installed with `cargo install --path .`. `tsift init --instructions personal --harness claude` reports everything already in place. The installed reference file has the corrected text. CI run 37184931396 on `5ebe6e3` was still in progress at closeout. Superproject commit `dcaffcc961` bumps the submodule and corrects memory `reference_agents_skills_dir_is_not_scanned_by_any_harness`.
+
+**Not changed:** shared mode still links the project's `.codex/skills`. Codex's docs list only `.agents/skills` at project level, so that link is probably unused too. It does no harm, so I'm leaving it.
+
+Exchange is 210 lines. The queue is active, so I'm not compacting.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#tsiftharnesslinks]
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -261,7 +285,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tsiftharnesslinks] [recommended] Decide whether codex, opencode and grok should get personal tsift skill links (tsift init --instructions personal --harness all). First confirm where each harness reads global skills: personal mode links ~/.opencode/skills, but OpenCode documents ~/.config/opencode/skills. If tsift links the wrong directory, fix that in tsift with a regression test.
 <!-- /agent:backlog -->
 
 ## Review

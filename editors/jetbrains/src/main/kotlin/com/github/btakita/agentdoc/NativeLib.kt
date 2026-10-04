@@ -447,6 +447,15 @@ interface AgentDocLib : Library {
         surface_json: String,
     ): FfiJsonResult.ByValue
 
+    /**
+     * GH #134: resolve a Remote Dev backend's split layout from per-client session-document
+     * evidence through the shared native fold. Returns `{ "columns", "source", "reason" }`.
+     */
+    fun agent_doc_editor_surface_resolve_remote_layout_json(
+        project_root: String,
+        evidence_json: String,
+    ): FfiJsonResult.ByValue
+
     /** Validate and enqueue an observation without waiting for tmux work. */
     fun agent_doc_editor_surface_enqueue_json(
         project_root: String,
@@ -1808,6 +1817,33 @@ object NativeAdminControls {
                 return null
             }
         return decodeJsonResult(lib, result, "editor_surface_observe")
+    }
+
+    @Volatile private var remoteLayoutUnavailable = false
+
+    /**
+     * GH #134: Remote Dev split resolution. Returns the resolution JSON, or `null` when the native
+     * library (or this symbol, on an older library) is unavailable so the caller can fall back.
+     */
+    fun resolveRemoteLayout(
+        projectRoot: String,
+        evidenceJson: String,
+    ): String? {
+        if (remoteLayoutUnavailable) return null
+        val lib = AgentDocLib.get() ?: return null
+        val result =
+            try {
+                lib.agent_doc_editor_surface_resolve_remote_layout_json(projectRoot, evidenceJson)
+            } catch (e: UnsatisfiedLinkError) {
+                // An older native library without the symbol: warn once, then fall back quietly.
+                remoteLayoutUnavailable = true
+                LOG.warn("[native] editor_surface_resolve_remote_layout unavailable: ${e.message}")
+                return null
+            } catch (e: Throwable) {
+                LOG.warn("[native] editor_surface_resolve_remote_layout failed: ${e.message}")
+                return null
+            }
+        return decodeJsonResult(lib, result, "editor_surface_resolve_remote_layout")
     }
 
     fun editorSurfaceEnqueue(

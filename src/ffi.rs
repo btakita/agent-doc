@@ -3196,6 +3196,37 @@ pub unsafe extern "C" fn agent_doc_editor_surface_observe_json(
     })())
 }
 
+/// Resolve a Remote Dev backend's editor split layout (GH #134).
+///
+/// A JetBrains Remote Dev backend has no local editor windows, and its
+/// per-client selected files name only the focused document, so a plugin
+/// cannot see the frontend's splits itself. `evidence_json` is a
+/// `RemoteLayoutEvidence`: `{ "clients": [{ "visible": [...], "selected":
+/// [...], "open": [...] }], "focused": [...] }` restricted to session
+/// documents. The native fold keeps the previous resolution per project root,
+/// so a single-selection observation retains a known split instead of
+/// collapsing it to one pane.
+///
+/// Returns `{ "columns": [{ "files": [...] }], "source": "...", "reason": ... }`.
+/// Empty `columns` (`source: "unknown"`) means no structural authority.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_editor_surface_resolve_remote_layout_json(
+    project_root: *const c_char,
+    evidence_json: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root =
+            PathBuf::from(unsafe { required_ffi_string(project_root, "project_root") }?);
+        let evidence_json = unsafe { required_ffi_string(evidence_json, "evidence_json") }?;
+        agent_doc_editor_surface_io::resolve_remote_layout_from_json(&project_root, &evidence_json)
+    })())
+}
+
 /// Validate and enqueue one editor-surface observation without waiting for its
 /// controller probe or tmux consequence.
 ///
@@ -4704,6 +4735,42 @@ mod tests {
 
     fn utf16_len(text: &str) -> usize {
         text.encode_utf16().count()
+    }
+
+    /// GH #134: the Remote Dev shape from the issue (`windows=0`, one remote
+    /// client, one selected file) resolves to two columns once the client's
+    /// visible editors name both splits, and a following single-selection
+    /// observation keeps both instead of handing the controller zero columns.
+    #[test]
+    fn gh134_remote_layout_ffi_resolves_and_retains_split_columns() {
+        let root = CString::new("/tmp/gh134-ffi-remote-layout").unwrap();
+        let split = CString::new(
+            r#"{"clients":[{"visible":["tasks/pmt2/mr/1061.md","tasks/agent-doc/agent-doc.ad.md"],"selected":["tasks/pmt2/mr/1061.md"],"open":["tasks/pmt2/mr/1061.md","tasks/agent-doc/agent-doc.ad.md"]}],"focused":["tasks/pmt2/mr/1061.md"]}"#,
+        )
+        .unwrap();
+        let single = CString::new(
+            r#"{"clients":[{"selected":["tasks/agent-doc/agent-doc.ad.md"],"open":["tasks/pmt2/mr/1061.md","tasks/agent-doc/agent-doc.ad.md"]}],"focused":["tasks/agent-doc/agent-doc.ad.md"]}"#,
+        )
+        .unwrap();
+        let first = ffi_json_value(unsafe {
+            agent_doc_editor_surface_resolve_remote_layout_json(root.as_ptr(), split.as_ptr())
+        });
+        assert_eq!(first["source"], "remote_client_visible_editors");
+        assert_eq!(first["columns"].as_array().unwrap().len(), 2);
+        let second = ffi_json_value(unsafe {
+            agent_doc_editor_surface_resolve_remote_layout_json(root.as_ptr(), single.as_ptr())
+        });
+        assert_eq!(second["source"], "retained_remote_columns");
+        assert_eq!(second["columns"], first["columns"]);
+        let bad = CString::new("not json").unwrap();
+        let result = unsafe {
+            agent_doc_editor_surface_resolve_remote_layout_json(root.as_ptr(), bad.as_ptr())
+        };
+        assert!(
+            result.json.is_null(),
+            "invalid evidence is an error, not columns"
+        );
+        unsafe { agent_doc_free_string(result.error) };
     }
 
     #[test]

@@ -781,6 +781,7 @@ dependencies = [
  "agent-doc-turn",
  "lazily 0.57.1",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

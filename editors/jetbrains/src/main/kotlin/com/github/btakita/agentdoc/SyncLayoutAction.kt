@@ -590,22 +590,38 @@ object LayoutDetector {
                 // focused file in Remote Dev. JetBrains keeps the real per-frontend
                 // selections in client-scoped managers; this is the same service set
                 // FileEditorManagerImpl uses for its own "with remotes" operations.
-                val remoteSelections = remoteClientSelectedSessionFiles(project, sessionDocumentPaths)
-                val selectedSessionFiles = uniqueRemoteSplitSelection(remoteSelections)
-                if (selectedSessionFiles == null) {
-                    val focusedSessionFiles = FileEditorManager.getInstance(project).selectedFiles
-                        .filter { file ->
-                            sessionDocumentPaths?.contains(file.path)
-                                ?: AgentDocSessionFiles.isSessionDocument(file)
-                        }
-                        .map { TerminalUtil.relativePath(project, it) }
-                    logUnknownRemoteLayout(focusedSessionFiles, remoteSelections)
+                // GH #134: those selections are focused-only too, so the visible
+                // split set comes from the Remote Dev editor tracker, and the shared
+                // native fold retains a known split across single-selection
+                // observations instead of answering `unknown` forever.
+                val remoteClients = remoteClientSessionEditors(project, sessionDocumentPaths)
+                val focusedSessionFiles = FileEditorManager.getInstance(project).selectedFiles
+                    .filter { file ->
+                        sessionDocumentPaths?.contains(file.path)
+                            ?: AgentDocSessionFiles.isSessionDocument(file)
+                    }
+                    .map { TerminalUtil.relativePath(project, it) }
+                val resolution = resolveRemoteLayout(project, remoteClients, focusedSessionFiles)
+                if (resolution == null || resolution.columns.isEmpty()) {
+                    logUnknownRemoteLayout(
+                        focusedSessionFiles,
+                        remoteClients.map { it.selected },
+                        visibleSelections = remoteClients.map { it.visible },
+                        reason = resolution?.reason ?: "no_unique_client_split_set",
+                    )
                     return null
                 }
-                val snapshots = headlessSelectionSnapshots(selectedSessionFiles)
-                val columns = buildColumnsFromSnapshots(snapshots)
-                logObservedLayout(0, snapshots, columns, source = "remote_client_selected_files")
-                return EditorLayout(columns)
+                val snapshots = resolution.columns.flatMap { column ->
+                    column.files.map { LayoutWindowSnapshot(x = 0, y = 0, file = it) }
+                }
+                logObservedLayout(
+                    0,
+                    snapshots,
+                    resolution.columns,
+                    source = resolution.source +
+                        (resolution.reason?.let { " reason=$it" } ?: ""),
+                )
+                return EditorLayout(resolution.columns)
             }
             if (windows.size < 2) {
                 val selectedFile = windows.singleOrNull()?.selectedFile
@@ -752,24 +768,120 @@ object LayoutDetector {
         return candidates.singleOrNull()
     }
 
-    private fun remoteClientSelectedSessionFiles(
+    /** GH #134: what one Remote Dev client reports, restricted to session documents. */
+    internal data class RemoteClientSessionEditors(
+        val visible: List<String>,
+        val selected: List<String>,
+        val open: List<String>,
+    )
+
+    /** GH #134: the columns to publish for a backend with no editor windows, and why. */
+    internal data class RemoteLayoutResolution(
+        val columns: List<LayoutColumn>,
+        val source: String,
+        val reason: String?,
+    )
+
+    private fun remoteClientSessionEditors(
         project: com.intellij.openapi.project.Project,
         sessionDocumentPaths: Set<String>?,
-    ): List<List<String>> =
-        project.getServices(ClientFileEditorManager::class.java, ClientKind.REMOTE)
+    ): List<RemoteClientSessionEditors> {
+        val isSession = { file: VirtualFile ->
+            sessionDocumentPaths?.contains(file.path) ?: AgentDocSessionFiles.isSessionDocument(file)
+        }
+        // On a Remote Dev backend the editor tracker is the split-aware
+        // RdServerEditorTracker: its active editors are the frontend text editors
+        // whose visibility the client reported, one per visible split.
+        val activeEditors: Set<com.intellij.openapi.editor.Editor> = try {
+            com.intellij.codeInsight.daemon.impl.EditorTracker.getInstance(project)
+                .activeEditors
+                .toSet()
+        } catch (e: Throwable) {
+            LOG.debug("[layout-detect] editor tracker unavailable: ${e.message}")
+            emptySet()
+        }
+        return project.getServices(ClientFileEditorManager::class.java, ClientKind.REMOTE)
             .mapIndexedNotNull { index, manager ->
                 try {
-                    manager.getSelectedFiles()
-                        .filter { file ->
-                            sessionDocumentPaths?.contains(file.path)
-                                ?: AgentDocSessionFiles.isSessionDocument(file)
+                    val visible = manager.getAllEditors()
+                        .filter { fileEditor ->
+                            val editor = (fileEditor as? com.intellij.openapi.fileEditor.TextEditor)?.editor
+                            editor != null && editor in activeEditors
                         }
+                        .mapNotNull { it.file }
+                        .filter(isSession)
                         .map { TerminalUtil.relativePath(project, it) }
+                        .distinct()
+                    val selected = manager.getSelectedFiles()
+                        .filter(isSession)
+                        .map { TerminalUtil.relativePath(project, it) }
+                    val open = manager.getAllFiles()
+                        .filter(isSession)
+                        .map { TerminalUtil.relativePath(project, it) }
+                    RemoteClientSessionEditors(visible = visible, selected = selected, open = open)
                 } catch (e: Exception) {
                     LOG.warn("[layout-detect] remote client $index selection unavailable", e)
                     null
                 }
             }
+    }
+
+    /**
+     * GH #134: resolve through the shared native fold (`#ffi-first`), which keeps the
+     * previous split per project. Without the native library, fall back to the
+     * memoryless rule: one client's visible/selected set naming 2+ documents.
+     */
+    private fun resolveRemoteLayout(
+        project: com.intellij.openapi.project.Project,
+        clients: List<RemoteClientSessionEditors>,
+        focusedSessionFiles: List<String>,
+    ): RemoteLayoutResolution? {
+        val projectRoot = project.basePath ?: project.locationHash
+        val evidenceJson = remoteLayoutEvidenceJson(clients, focusedSessionFiles)
+        NativeAdminControls.resolveRemoteLayout(projectRoot, evidenceJson)
+            ?.let(::parseRemoteLayoutResolution)
+            ?.let { return it }
+        val fallback = uniqueRemoteSplitSelection(clients.map { (it.visible + it.selected).distinct() })
+            ?: return null
+        return RemoteLayoutResolution(
+            columns = buildColumnsFromSnapshots(headlessSelectionSnapshots(fallback)),
+            source = "remote_client_split_without_native",
+            reason = null,
+        )
+    }
+
+    internal fun remoteLayoutEvidenceJson(
+        clients: List<RemoteClientSessionEditors>,
+        focusedSessionFiles: List<String>,
+    ): String = Gson().toJson(
+        mapOf(
+            "clients" to clients.map {
+                mapOf("visible" to it.visible, "selected" to it.selected, "open" to it.open)
+            },
+            "focused" to focusedSessionFiles,
+        ),
+    )
+
+    internal fun parseRemoteLayoutResolution(json: String): RemoteLayoutResolution? = try {
+        val root = com.google.gson.JsonParser.parseString(json).asJsonObject
+        val columns = root.getAsJsonArray("columns")
+            ?.mapNotNull { column ->
+                column.asJsonObject.getAsJsonArray("files")
+                    ?.map { it.asString }
+                    ?.filter { it.isNotBlank() }
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let(::LayoutColumn)
+            }
+            .orEmpty()
+        RemoteLayoutResolution(
+            columns = columns,
+            source = root.get("source")?.takeIf { !it.isJsonNull }?.asString ?: "unknown",
+            reason = root.get("reason")?.takeIf { !it.isJsonNull }?.asString,
+        )
+    } catch (e: Exception) {
+        LOG.warn("[layout-detect] remote layout resolution unreadable: ${e.message}")
+        null
+    }
 
     /** Log a changed observation, and an unchanged one on every [OBSERVED_LAYOUT_HEARTBEAT]th run. */
     internal fun shouldLogObservedLayout(changed: Boolean, observation: Long): Boolean =
@@ -797,21 +909,29 @@ object LayoutDetector {
     private fun logUnknownRemoteLayout(
         focusedSessionFiles: List<String>,
         remoteSelections: List<List<String>>,
+        visibleSelections: List<List<String>> = emptyList(),
+        reason: String = "no_unique_client_split_set",
     ) {
-        logLayoutObservation(unknownRemoteLayoutLine(focusedSessionFiles, remoteSelections))
+        logLayoutObservation(
+            unknownRemoteLayoutLine(focusedSessionFiles, remoteSelections, visibleSelections, reason),
+        )
     }
 
     internal fun unknownRemoteLayoutLine(
         focusedSessionFiles: List<String>,
         remoteSelections: List<List<String>>,
+        visibleSelections: List<List<String>> = emptyList(),
+        reason: String = "no_unique_client_split_set",
     ): String {
-        val selections = remoteSelections.mapIndexed { index, files ->
+        fun render(perClient: List<List<String>>) = perClient.mapIndexed { index, files ->
             "$index:[${files.joinToString(",").ifEmpty { "<none>" }}]"
-        }
+        }.joinToString(" ")
+        val visible = if (visibleSelections.isEmpty()) "" else "visible=[${render(visibleSelections)}] "
         return "[layout-detect] unknown windows=0 source=remote_client_selected_files " +
             "focused=[${focusedSessionFiles.joinToString(",").ifEmpty { "<none>" }}] " +
-            "remote_clients=${remoteSelections.size} selections=[${selections.joinToString(" ")}] " +
-            "reason=no_unique_client_split_set"
+            "remote_clients=${remoteSelections.size} selections=[${render(remoteSelections)}] " +
+            visible +
+            "reason=$reason"
     }
 
     private fun logLayoutObservation(line: String) {

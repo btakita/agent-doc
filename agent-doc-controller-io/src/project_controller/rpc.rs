@@ -17808,11 +17808,12 @@ fn run_closeout_owner_claim(
         (owner.owner_id != claim.owner_id
             && owner.is_active_at(claim.now_secs)
             && claim.allow_dead_owner_takeover)
-            .then(|| process_is_alive(owner.owner_pid))
+            .then(|| super::closeout_owner_alive(owner))
     });
-    // `#closeoutterminalreactive`: the same derived gate the reactive
-    // `CloseoutGateState` exposes, read here so the live path and the graph
-    // cannot drift. Its value is the *reason* the incumbent stopped blocking.
+    // `#closeoutterminalreactive`: the same derived gate the controller's
+    // reactive `ControllerDocumentGraphs::closeout_gate` computes, fed the same
+    // liveness probe (`closeout_owner_alive`, GH #130), so the live path and the
+    // graph cannot drift. Its value is the *reason* the incumbent stopped blocking.
     let displaced = agent_doc_state_backbone::closeout_gate::closeout_gate(
         current.cycle_id.as_deref(),
         current.owner.as_ref(),
@@ -34908,7 +34909,10 @@ mod tests {
                 owner_id: owner_id.to_string(),
                 owner_pid: std::process::id(),
                 role: "foreground_finalize".to_string(),
-                now_secs: 10,
+                // A real clock: the GH #130 pid-reuse guard reads a claim
+                // recorded before this process started as a recycled pid, which
+                // would release the owner by liveness instead of the release fact.
+                now_secs: timestamp_secs(),
                 lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
                 allow_dead_owner_takeover: true,
             },
@@ -34930,7 +34934,7 @@ mod tests {
                     cycle_id: release_cycle,
                     owner_id: owner_id.to_string(),
                     reason: "request_guard_dropped".to_string(),
-                    released_secs: 11,
+                    released_secs: timestamp_secs(),
                 },
             )
             .unwrap();
@@ -35061,6 +35065,140 @@ mod tests {
             elapsed < Duration::from_secs(3),
             "lease expiry must wake the waiter, not its request deadline ({elapsed:?})"
         );
+    }
+
+    /// Claim the open cycle's closeout for `owner_pid` with a full, still-valid
+    /// lease, so only liveness (or a release fact) can free it.
+    fn gh130_claim_full_lease(
+        dir: &tempfile::TempDir,
+        owner_pid: u32,
+    ) -> (Arc<ControllerRuntime>, String, String) {
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
+            .unwrap();
+        let bootstrap = test_bootstrap(dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let claim = run_closeout_owner_claim(
+            &bootstrap,
+            &runtime,
+            &doc,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle.cycle_id.clone()),
+                owner_id: "foreground-finalize-other".to_string(),
+                owner_pid,
+                role: "foreground_finalize".to_string(),
+                now_secs: timestamp_secs(),
+                lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+        )
+        .unwrap();
+        assert!(matches!(claim, CloseoutOwnerClaimOutcome::Acquired(_)));
+        (
+            runtime,
+            agent_doc_hash::document_id_for_path(&doc),
+            cycle.cycle_id,
+        )
+    }
+
+    /// GH #130: a claimant waiting on a closeout whose owner process is gone
+    /// is released promptly with `OwnerProcessGone`, not by the 300s lease
+    /// stopgap (the lease here is fully valid for the whole test).
+    #[test]
+    fn closeout_cycle_await_releases_dead_owner_by_process_gone_not_lease() {
+        let dead_pid = u32::MAX - 2;
+        assert!(!process_is_alive(dead_pid), "test requires a dead pid");
+        let dir = tempfile::TempDir::new().unwrap();
+        let (runtime, document_hash, cycle_id) = gh130_claim_full_lease(&dir, dead_pid);
+
+        let started = Instant::now();
+        let outcome = runtime.wait_for_closeout_cycle_progress(
+            &document_hash,
+            &cycle_id,
+            Duration::from_secs(30),
+        );
+        let elapsed = started.elapsed();
+
+        assert_eq!(outcome, CloseoutCycleWaitOutcome::OwnerReleased);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "a dead owner must release promptly, not by lease expiry ({elapsed:?})"
+        );
+        let memory = runtime.memory.lock();
+        let closeout = memory
+            .state_projection
+            .document(&document_hash)
+            .map(|document| document.closeout.clone())
+            .unwrap();
+        drop(memory);
+        let gate = runtime.document_graphs.closeout_gate(
+            &document_hash,
+            &closeout,
+            timestamp_secs(),
+            closeout
+                .owner
+                .as_ref()
+                .map(super::super::closeout_owner_alive),
+            true,
+        );
+        assert_eq!(
+            gate.release_reason(),
+            Some(agent_doc_state_backbone::CloseoutOwnerRelease::OwnerProcessGone),
+            "{gate:?}"
+        );
+        assert!(!gate.released_by_stopgap());
+    }
+
+    /// GH #130: the owner dies *while* the claimant waits. A process exit
+    /// appends no state fact, so the wait must re-probe liveness rather than
+    /// sleep to the lease boundary.
+    #[cfg(unix)]
+    #[test]
+    fn closeout_cycle_await_releases_owner_that_dies_mid_wait() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let dir = tempfile::TempDir::new().unwrap();
+        let (runtime, document_hash, cycle_id) = gh130_claim_full_lease(&dir, child.id());
+
+        let killer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            child.kill().unwrap();
+            child.wait().unwrap();
+        });
+        let started = Instant::now();
+        let outcome = runtime.wait_for_closeout_cycle_progress(
+            &document_hash,
+            &cycle_id,
+            Duration::from_secs(30),
+        );
+        let elapsed = started.elapsed();
+        killer.join().unwrap();
+
+        assert_eq!(outcome, CloseoutCycleWaitOutcome::OwnerReleased);
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "owner exit must release the waiter promptly ({elapsed:?})"
+        );
+    }
+
+    /// GH #130: a live same-turn owner with a valid lease still blocks; dead
+    /// owner takeover never steals a live closeout.
+    #[test]
+    fn closeout_cycle_await_still_blocks_on_live_owner() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (runtime, document_hash, cycle_id) = gh130_claim_full_lease(&dir, std::process::id());
+
+        let outcome = runtime.wait_for_closeout_cycle_progress(
+            &document_hash,
+            &cycle_id,
+            Duration::from_millis(1_200),
+        );
+        assert_eq!(outcome, CloseoutCycleWaitOutcome::TimedOut);
     }
 
     /// `#restartstderrbleed` — the auto-install child must NOT inherit the

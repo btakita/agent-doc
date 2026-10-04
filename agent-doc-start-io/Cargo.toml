@@ -40,6 +40,7 @@ agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.452" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.452" }
 agent-doc-supervisor-process-io = { path = "../agent-doc-supervisor-process-io", version = "0.35.452" }
+agent-doc-sync = { path = "../agent-doc-sync", version = "0.35.452" }
 agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.35.452" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.452" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.452" }

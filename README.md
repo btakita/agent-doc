@@ -80,6 +80,11 @@ For Coder, JetBrains Gateway, and VS Code Remote SSH setup, including terminal
 host precedence and headless failure behavior, see the
 [Coder workspace terminal runbook](runbooks/coder-workspace.md).
 
+To manage panes across several tmux sessions from one editor (a session per
+topic or project), list them in `tmux_sessions` and bind documents with
+`tmux_session:` frontmatter; see the
+[multi-session tmux runbook](runbooks/multi-tmux-sessions.md).
+
 ## Feature Taxonomy
 
 agent-doc has a broad feature surface because the README doubles as a user guide and capability ledger. The reader-facing overview is grouped by workflow layer here; the exhaustive feature catalog is kept near the bottom so installation, architecture, editor setup, and security stay easy to scan.

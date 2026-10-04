@@ -562,7 +562,7 @@ pub fn repair_file_state_with_tmux(tmux: &Tmux, file: &Path) -> Result<Vec<Strin
     let mut actions = Vec::new();
 
     let columns = vec![canonical.to_string_lossy().to_string()];
-    if let Some(session_name) = resolve_sync_target_session(tmux, None, &columns, None, &[])
+    if let Some(session_name) = resolve_sync_target_session(tmux, None, &columns, None, &[])?
         && repair_layout(tmux, &session_name, "agent-doc")?.repaired()
     {
         // `#syncdoctorconverged`: report the action only when the pass actually
@@ -2152,6 +2152,89 @@ fn skip_sync_status_updates_for_mode(auto_start_mode: AutoStartMode) -> bool {
     matches!(auto_start_mode, AutoStartMode::SafePassive)
 }
 
+/// Load the multi-session policy (`tmux_sessions`, GH #17) for a project root.
+/// A missing or empty list is the single-session default.
+pub fn tmux_session_policy_for_root(root: &Path) -> agent_doc_sync::TmuxSessionPolicy {
+    let config_path = root.join(".agent-doc").join("config.toml");
+    agent_doc_sync::TmuxSessionPolicy::new(
+        agent_doc_project_config_io::load_project_from(&config_path).tmux_sessions,
+    )
+}
+
+/// Load the multi-session policy that governs a sync/route candidate set: the
+/// `.agent-doc` root shared by the documents, else the focused document's
+/// project, else the cwd project.
+pub fn tmux_session_policy_for_scope(
+    col_args: &[String],
+    focus: Option<&str>,
+) -> agent_doc_sync::TmuxSessionPolicy {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    agent_doc_sync::sync_scope_root(col_args, focus, &cwd)
+        .map(|root| tmux_session_policy_for_root(&root))
+        .unwrap_or_default()
+}
+
+/// A document's own `tmux_session` frontmatter binding, if any.
+pub fn document_tmux_session_binding(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let (fm, _) = frontmatter::parse(&content).ok()?;
+    fm.tmux_session
+        .map(|session| session.trim().to_string())
+        .filter(|session| !session.is_empty())
+}
+
+/// The document binding that participates in session selection: the focused
+/// document's, else the first bound column document's. Always `None` in
+/// single-session mode so default routing is unchanged.
+pub fn scoped_document_tmux_session_binding(
+    policy: &agent_doc_sync::TmuxSessionPolicy,
+    col_args: &[String],
+    focus: Option<&str>,
+) -> Option<String> {
+    if !policy.is_multi_session() {
+        return None;
+    }
+    agent_doc_sync::sync_candidate_files(col_args, focus)
+        .iter()
+        .find_map(|path| document_tmux_session_binding(path))
+}
+
+/// Multi-session sync scope (GH #17): drop layout columns whose documents are
+/// bound to a different allowed session than the one this sync arranges. Each
+/// such document keeps its pane in its own session. No-op in single-session
+/// mode.
+pub fn drop_columns_bound_to_other_sessions(
+    policy: &agent_doc_sync::TmuxSessionPolicy,
+    col_args: Vec<String>,
+    target_session: &str,
+) -> (Vec<String>, Vec<(String, String)>) {
+    if !policy.is_multi_session() {
+        return (col_args, Vec::new());
+    }
+    let mut dropped = Vec::new();
+    let kept = col_args
+        .into_iter()
+        .filter_map(|column| {
+            let files: Vec<&str> = column
+                .split(',')
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .collect();
+            let mut kept_files = Vec::new();
+            for file in files {
+                let binding = document_tmux_session_binding(Path::new(file));
+                if policy.column_bound_to_other_session(binding.as_deref(), target_session) {
+                    dropped.push((file.to_string(), binding.unwrap_or_default()));
+                } else {
+                    kept_files.push(file);
+                }
+            }
+            (!kept_files.is_empty()).then(|| kept_files.join(","))
+        })
+        .collect();
+    (kept, dropped)
+}
+
 pub fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
     let config_path = root.join(".agent-doc").join("config.toml");
     let configured = agent_doc_project_config_io::load_project_from(&config_path).tmux_session;
@@ -2211,7 +2294,19 @@ fn resolve_sync_target_session(
     col_args: &[String],
     focus: Option<&str>,
     actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
-) -> Option<String> {
+) -> Result<Option<String>> {
+    let policy = tmux_session_policy_for_scope(col_args, focus);
+    resolve_sync_target_session_with_policy(tmux, window, col_args, focus, actor_bindings, &policy)
+}
+
+fn resolve_sync_target_session_with_policy(
+    tmux: &Tmux,
+    window: Option<&str>,
+    col_args: &[String],
+    focus: Option<&str>,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+    policy: &agent_doc_sync::TmuxSessionPolicy,
+) -> Result<Option<String>> {
     let explicit = window.and_then(|target| session_name_for_target_window(tmux, target));
     let focused_actor = focused_actor_session_from_bindings(focus, actor_bindings, |pane_id| {
         let session = tmux.pane_session(pane_id).ok()?;
@@ -2227,19 +2322,35 @@ fn resolve_sync_target_session(
     let scoped_project = agent_doc_sync::shared_sync_scope_root(col_args, focus)
         .and_then(|scope_root| configured_session_for_root(tmux, &scope_root));
     let fallback = resolve_preferred_session(tmux, None, "[sync]");
-    let decision =
-        agent_doc_sync::select_layout_session(agent_doc_sync::LayoutSessionCandidates {
+    let document_binding = scoped_document_tmux_session_binding(policy, col_args, focus);
+    let decision = match agent_doc_sync::select_layout_session_with_policy(
+        agent_doc_sync::LayoutSessionCandidates {
             explicit,
             focused_actor,
+            document_binding,
             current_agent_doc,
             scoped_project,
             fallback,
-        })?;
+        },
+        policy,
+    ) {
+        Ok(Some(decision)) => decision,
+        Ok(None) => return Ok(None),
+        Err(refused) => {
+            sync_log(&format!(
+                "layout_session_refused session={} authority={:?} allowed={}",
+                refused.session,
+                refused.authority,
+                refused.allowed.join(",")
+            ));
+            return Err(anyhow::anyhow!("[sync] {refused}"));
+        }
+    };
     sync_log(&format!(
         "layout_session_selected session={} authority={:?}",
         decision.session, decision.authority
     ));
-    Some(decision.session)
+    Ok(Some(decision.session))
 }
 
 fn resolve_agent_doc_window_id(
@@ -2830,8 +2941,25 @@ fn run_with_options_internal_at_root(
     );
     let window_resolution_start = Instant::now();
     let target_session_start = Instant::now();
-    let target_session =
-        resolve_sync_target_session(tmux, window, &col_args, focus, reactive_actor_bindings);
+    let tmux_session_policy = tmux_session_policy_for_scope(&col_args, focus);
+    let target_session = resolve_sync_target_session_with_policy(
+        tmux,
+        window,
+        &col_args,
+        focus,
+        reactive_actor_bindings,
+        &tmux_session_policy,
+    )?;
+    if let Some(session) = target_session.as_deref() {
+        let (kept, dropped) =
+            drop_columns_bound_to_other_sessions(&tmux_session_policy, col_args, session);
+        col_args = kept;
+        for (file, bound_session) in &dropped {
+            sync_log(&format!(
+                "cross_session_layout_dropped file={file} bound_session={bound_session} target_session={session}"
+            ));
+        }
+    }
     log_sync_latency(
         focus,
         "window_target_session",
@@ -6324,10 +6452,8 @@ mod stale_argv_identity_tests {
         ));
 
         // No binding of the claimed document to the pane: the argv owner stands.
-        let other_only = std::collections::HashMap::from([(
-            "a".to_string(),
-            entry("%31", root, "tasks/a.md"),
-        )]);
+        let other_only =
+            std::collections::HashMap::from([("a".to_string(), entry("%31", root, "tasks/a.md"))]);
         assert!(!argv_owner_is_stale_spawn_identity(
             &other_only,
             "%31",
@@ -6335,10 +6461,8 @@ mod stale_argv_identity_tests {
             "tasks/a.md",
             root,
         ));
-        let elsewhere = std::collections::HashMap::from([(
-            "b".to_string(),
-            entry("%7", root, "tasks/b.md"),
-        )]);
+        let elsewhere =
+            std::collections::HashMap::from([("b".to_string(), entry("%7", root, "tasks/b.md"))]);
         assert!(!argv_owner_is_stale_spawn_identity(
             &elsewhere,
             "%31",
@@ -9706,7 +9830,9 @@ mod tests {
             "the current client session should be the most recently created one"
         );
         assert_eq!(
-            resolve_sync_target_session(&iso, None, &[], None, &[]).as_deref(),
+            resolve_sync_target_session(&iso, None, &[], None, &[])
+                .unwrap()
+                .as_deref(),
             Some("0"),
             "windowless sync should keep a live project tmux_session pin when the current session has no agent-doc window"
         );
@@ -9739,9 +9865,52 @@ mod tests {
             "the current client session should be the most recently created one"
         );
         assert_eq!(
-            resolve_sync_target_session(&iso, None, &[], None, &[]).as_deref(),
+            resolve_sync_target_session(&iso, None, &[], None, &[])
+                .unwrap()
+                .as_deref(),
             Some("1"),
             "windowless sync should follow the current live agent-doc window before the configured pin"
+        );
+    }
+
+    #[test]
+    fn multi_session_sync_drops_columns_bound_to_other_sessions() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let write = |name: &str, binding: Option<&str>| {
+            let path = tmp.path().join(name);
+            let binding = binding
+                .map(|session| format!("tmux_session: {session}\n"))
+                .unwrap_or_default();
+            std::fs::write(
+                &path,
+                format!("---\nagent_doc_session: {name}\n{binding}---\n"),
+            )
+            .unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let main_doc = write("ops.md", Some("main"));
+        let research_doc = write("notes.md", Some("research"));
+        let unbound = write("plan.md", None);
+        let columns = vec![main_doc.clone(), format!("{research_doc},{unbound}")];
+
+        let multi = agent_doc_sync::TmuxSessionPolicy::new(["main", "research"]);
+        let (kept, dropped) =
+            drop_columns_bound_to_other_sessions(&multi, columns.clone(), "research");
+        assert_eq!(kept, vec![format!("{research_doc},{unbound}")]);
+        assert_eq!(dropped, vec![(main_doc.clone(), "main".to_string())]);
+        assert_eq!(
+            scoped_document_tmux_session_binding(&multi, &columns, Some(&research_doc)),
+            Some("research".to_string())
+        );
+
+        let single = agent_doc_sync::TmuxSessionPolicy::single_session();
+        let (kept, dropped) =
+            drop_columns_bound_to_other_sessions(&single, columns.clone(), "research");
+        assert_eq!(kept, columns, "single-session sync keeps every column");
+        assert!(dropped.is_empty());
+        assert_eq!(
+            scoped_document_tmux_session_binding(&single, &columns, Some(&research_doc)),
+            None
         );
     }
 
@@ -9848,6 +10017,7 @@ mod tests {
                 Some(&focus),
                 &bindings,
             )
+            .unwrap()
             .as_deref(),
             Some("terminal-owner"),
             "the focused live actor must outrank the recycled controller's ambient tmux session"
@@ -9875,7 +10045,9 @@ mod tests {
             "the live attached session should still be discoverable"
         );
         assert_eq!(
-            resolve_sync_target_session(&iso, None, &[], None, &[]).as_deref(),
+            resolve_sync_target_session(&iso, None, &[], None, &[])
+                .unwrap()
+                .as_deref(),
             Some("1"),
             "a dead project pin should fall back to the current live session"
         );
@@ -9932,6 +10104,7 @@ mod tests {
                 Some(child_doc.to_string_lossy().as_ref()),
                 &[],
             )
+            .unwrap()
             .as_deref(),
             Some("4"),
             "mixed-root windowless sync should stay on the shared workspace root pin instead of the caller cwd or focused child root"

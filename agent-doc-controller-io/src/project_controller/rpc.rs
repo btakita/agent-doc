@@ -20877,16 +20877,35 @@ fn configured_tmux_session_for_project(project_root: &Path) -> Option<String> {
         .filter(|session| !session.trim().is_empty())
 }
 
+/// Whether the project lists allowed tmux sessions (`tmux_sessions`, GH #17),
+/// i.e. one editor manages panes across several tmux sessions.
+fn project_is_multi_tmux_session(project_root: &Path) -> bool {
+    let config_path = project_root.join(".agent-doc").join("config.toml");
+    agent_doc_project_config_io::load_project_from(&config_path)
+        .tmux_sessions
+        .iter()
+        .any(|session| !session.trim().is_empty())
+}
+
+/// The tmux session a pane-layout drift survey observes. Single-session
+/// projects keep the configured pin authoritative; multi-session projects
+/// observe the session the layout's own panes live in, falling back to the pin.
 fn pane_layout_observation_session(
     configured_session: Option<String>,
+    multi_session: bool,
     effect_file_panes: &[(String, String)],
     mut pane_session: impl FnMut(&str) -> Option<String>,
 ) -> Option<String> {
-    configured_session.or_else(|| {
+    let mut from_panes = || {
         effect_file_panes
             .iter()
             .find_map(|(_, pane)| pane_session(pane))
-    })
+    };
+    if multi_session {
+        from_panes().or(configured_session)
+    } else {
+        configured_session.or_else(from_panes)
+    }
 }
 
 fn active_tmux_window_for_session(
@@ -22076,6 +22095,7 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
     let tmux = agent_doc_tmux_io::configured_tmux();
     let Some(configured_session) = pane_layout_observation_session(
         configured_tmux_session_for_project(&bootstrap.project_root),
+        project_is_multi_tmux_session(&bootstrap.project_root),
         effect_file_panes,
         |pane| tmux.pane_session(pane).ok(),
     ) else {
@@ -33253,7 +33273,7 @@ mod tests {
         ];
 
         assert_eq!(
-            pane_layout_observation_session(None, &effect_file_panes, |pane| {
+            pane_layout_observation_session(None, false, &effect_file_panes, |pane| {
                 (pane == "%77").then(|| "0".to_string())
             }),
             Some("0".to_string()),
@@ -33261,10 +33281,36 @@ mod tests {
         assert_eq!(
             pane_layout_observation_session(
                 Some("configured".to_string()),
+                false,
                 &effect_file_panes,
                 |_| panic!("an explicit project session must remain authoritative"),
             ),
             Some("configured".to_string()),
+        );
+    }
+
+    #[test]
+    fn pane_layout_observation_session_follows_layout_panes_in_multi_session_projects() {
+        let effect_file_panes = vec![("/repo/tasks/research.md".to_string(), "%41".to_string())];
+        assert_eq!(
+            pane_layout_observation_session(
+                Some("main".to_string()),
+                true,
+                &effect_file_panes,
+                |pane| (pane == "%41").then(|| "research".to_string()),
+            ),
+            Some("research".to_string()),
+            "GH #17: a multi-session layout is observed in the session its panes live in"
+        );
+        assert_eq!(
+            pane_layout_observation_session(
+                Some("main".to_string()),
+                true,
+                &effect_file_panes,
+                |_| { None }
+            ),
+            Some("main".to_string()),
+            "with no live layout pane the allowed pin remains the fallback"
         );
     }
 

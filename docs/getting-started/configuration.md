@@ -172,6 +172,7 @@ Location: `.agent-doc/config.toml` (relative to project root).
 | Field | Description |
 |-------|-------------|
 | `tmux_session` | Tmux session name bound to this project |
+| `tmux_sessions` | Optional allow-list for multi-session projects (one editor, several tmux sessions); documents bind with `tmux_session:` frontmatter. Empty keeps single-session behavior. See `runbooks/multi-tmux-sessions.md` |
 | `[terminal]` | Project terminal policy; the same fields as global `[terminal]` except session naming remains top-level `tmux_session` |
 | `agent_doc_auto_compact` | Line threshold for automatic compaction opt-in |
 | `agent_doc_supervisor_stderr_log` | Supervisor stderr log path. Relative paths resolve from the project root; absolute paths are used as written. Defaults to `.agent-doc/logs/supervisor-stderr.log` |

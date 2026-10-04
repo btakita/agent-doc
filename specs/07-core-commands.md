@@ -550,6 +550,11 @@ guidance.
   a second session for a document that is already owned.
 - For a cold document, session resolution is explicit `--session`, then project
   `tmux_session`, then `0`.
+- Multi-session projects (`tmux_sessions` non-empty, GH #17): the document's
+  `tmux_session:` frontmatter binding is used before the project pin (resolution
+  `document_binding`). A live registry target is reused only from an allowed
+  session that matches the binding. An explicit `--session`, the binding, or the
+  resolved name outside the allow-list fails closed.
 - Human output reports the session, pane, attach command, creation state,
   resolved terminal host and reason, and whether a tmux client is already
   attached. `--json` additionally reports `terminal_host`,

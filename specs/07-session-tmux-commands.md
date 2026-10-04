@@ -922,6 +922,11 @@ The session-targeting precedence is shared across start/route/sync/session-aware
 3. Current tmux session
 4. Harness fallback only for start/route when no live tmux session exists
 
+Multi-session projects (`tmux_sessions` non-empty, GH #17) insert two
+authorities and an allow-list gate into this order; see
+[Session Routing](08-session-routing.md#multi-session-projects-ghmultitmux).
+With `tmux_sessions` empty the order above is unchanged.
+
 Current tmux session resolution must target the caller's `TMUX_PANE` owner pane
 when it is available. Bare `display-message -p "#{session_name}"` may follow
 another attached client's selected session and must only be used as a fallback.

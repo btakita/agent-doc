@@ -172,7 +172,7 @@ pub fn run_with_tmux_with_options(
     let file_path = agent_doc_git_io::dirs::resolve_absolute_file_path(file)
         .to_string_lossy()
         .into_owned();
-    let target_session = resolve_target_session(tmux, None, col_args, Some(file), &harness);
+    let target_session = resolve_target_session(tmux, None, col_args, Some(file), &harness)?;
     eprintln!("[route] target tmux session: {}", target_session);
 
     // === SINGLE EXIT POINT PATTERN ===

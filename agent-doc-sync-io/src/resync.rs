@@ -573,7 +573,27 @@ fn detect_issues_in_registry(tmux: &Tmux, registry: &tmux_router::Registry) -> V
         // Use frontmatter `tmux_session` if present; otherwise fall back to project config.
         // This ensures cross-session drift is detected even when documents lack a
         // `tmux_session` frontmatter field (the common case).
-        let expected_session = frontmatter_session.or_else(project_config_io::project_tmux_session);
+        //
+        // Multi-session projects (`tmux_sessions`, GH #17): an unbound pane in
+        // any allowed session is in the right place; a bound pane belongs to
+        // its binding; a pane in a disallowed session belongs to the allowed
+        // pin (or the first allowed session).
+        let session_policy = crate::sync::tmux_session_policy_for_scope(&[], Some(&entry.file));
+        let expected_session = if session_policy.is_multi_session() {
+            let actual = tmux.pane_session(&entry.pane).ok();
+            agent_doc_sync::start_session_target(
+                &session_policy,
+                actual.as_deref(),
+                frontmatter_session.as_deref(),
+                project_config_io::project_tmux_session().as_deref(),
+            )
+            .ok()
+            .flatten()
+            .map(|target| target.session)
+            .or_else(|| session_policy.allowed().first().cloned())
+        } else {
+            frontmatter_session.or_else(project_config_io::project_tmux_session)
+        };
 
         if let Some(ref expected) = expected_session {
             match tmux.pane_session(&entry.pane) {

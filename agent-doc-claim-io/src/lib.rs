@@ -306,7 +306,40 @@ pub fn run(
         }
     };
 
-    let configured_session = project_config_io::project_tmux_session();
+    // Multi-session projects (`tmux_sessions`, GH #17): the authoritative
+    // session is the document's binding, else the claiming pane's own allowed
+    // session, else the allowed project pin; a pane in a disallowed session is
+    // refused before any file mutation (`--force` does not widen the list).
+    // The single-session default keeps the project pin unchanged.
+    let session_policy = {
+        let file_arg = file.to_string_lossy().into_owned();
+        agent_doc_sync_io::sync::tmux_session_policy_for_scope(&[], Some(&file_arg))
+    };
+    let configured_session = if session_policy.is_multi_session() {
+        let claiming_pane_session = pane_id
+            .as_deref()
+            .filter(|pane_id| tmux.pane_alive(pane_id))
+            .and_then(|pane_id| agent_doc_tmux_io::target_session_name(&tmux, pane_id))
+            .filter(|session| !session.is_empty());
+        if let Some(session) = claiming_pane_session.as_deref() {
+            session_policy
+                .require(
+                    session,
+                    agent_doc_sync::LayoutSessionAuthority::FocusedActor,
+                )
+                .map_err(|refused| anyhow::anyhow!("[claim] {refused}"))?;
+        }
+        agent_doc_sync::start_session_target(
+            &session_policy,
+            claiming_pane_session.as_deref(),
+            agent_doc_sync_io::sync::document_tmux_session_binding(file).as_deref(),
+            project_config_io::project_tmux_session().as_deref(),
+        )
+        .map_err(|refused| anyhow::anyhow!("[claim] {refused}"))?
+        .map(|target| target.session)
+    } else {
+        project_config_io::project_tmux_session()
+    };
 
     // tmux_session frontmatter field is deprecated — no longer written on claim.
     // Session targeting now uses current_tmux_session() at route time.

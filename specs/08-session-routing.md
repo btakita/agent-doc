@@ -292,6 +292,86 @@ of leaving `agent-doc <FILE>` as un-run text in a shell. This closes the
 crash-mid-dispatch race observed when a `/model` switch / restart dropped the
 harness to a shell right as "Run Agent Doc" routed the trigger.
 
+## Multi-Session Projects (`ghmultitmux`)
+
+GH #17: one editor may manage panes across several tmux sessions, for example a
+session per topic or per project. The project opts in with an allow-list in
+`.agent-doc/config.toml`:
+
+```toml
+tmux_session = "main"
+tmux_sessions = ["main", "research"]
+```
+
+An empty or absent `tmux_sessions` is the single-session default. Every rule
+below is then a no-op and resolution is exactly the historical order.
+
+**Policy owner.** `agent_doc_sync::TmuxSessionPolicy` is the pure policy, built
+from `tmux_sessions` of the `.agent-doc` root that governs the document set
+(`sync_scope_root`). `agent_doc_sync_io::sync::tmux_session_policy_for_scope`
+loads it, and `document_tmux_session_binding` reads a document's
+`tmux_session:` frontmatter. That binding is honored only in multi-session mode
+(`TmuxSessionPolicy::effective_document_binding`).
+
+**Selection.** `select_layout_session_with_policy` walks the shared authority
+order used by route, sync, and layout:
+
+1. `Explicit`: the `--window` / context session.
+2. `FocusedActor`: the session of the focused document's live pane.
+3. `DocumentBinding`: the focused document's binding, else the first bound
+   column document's.
+4. `CurrentAgentDoc`: the caller's session when it has an `agent-doc` window.
+5. `ScopedProject`: the live `tmux_session` pin of the scope root.
+6. `Fallback`: ambient auto-detect, and for route the harness fallback name.
+
+A selected session must be in `tmux_sessions`. Ambient authorities
+(`CurrentAgentDoc`, `Fallback`) outside the list are skipped. Any other
+disallowed authority fails closed with `SessionNotAllowed`, whose message names
+the session, the authority that chose it, and the allowed list. No resolution
+falls back to a session outside the list.
+
+**Per command.**
+
+- *route*: `resolve_target_session` returns `Result`. A refusal aborts before
+  any pane is created or reused.
+- *sync*: `resolve_sync_target_session` returns `Result`. After selection,
+  `drop_columns_bound_to_other_sessions` removes layout columns whose documents
+  are bound to a different session (`cross_session_layout_dropped` in the sync
+  log). Those documents keep their panes in their own session, so a sync never
+  moves a pane across sessions.
+- *start*: `start_session_target` sets the expected session. The binding comes
+  first (it must be allowed). Next is the pane's own session when allowed, which
+  means no relocation. Last is the allowed pin. A pane in a disallowed session
+  with no allowed target fails closed. The dead-pin auto-rebind only rebinds to
+  an allowed session. `tmux ensure` reuses a live registry pane only from an
+  allowed session that matches the binding, and it creates or attaches the
+  binding's session before the pin.
+- *claim*: the authoritative session follows the same `start_session_target`
+  order. A claiming pane in a disallowed session is refused before any file
+  mutation, and `--force` does not widen the list.
+- *resync*: an unbound pane in any allowed session is correctly placed. A bound
+  pane belongs to its binding.
+- *controller layout survey*: in multi-session projects the drift survey
+  observes the session its layout panes live in before the pin.
+- *session set*: refuses a name outside the list and only moves the default pin.
+  It never migrates windows out of, or closes, another allowed session.
+- *terminal*: an explicit `--session`, the binding, the registry scan, and the
+  created default name must all be allowed.
+
+**Deferred.** The editor tmux focus-state query (`handle_tmux_focus_state`) and
+the pane-layout target-window fallback (`pane_layout_target_window_id`) without
+an explicit window still read the project pin. Editors that pass `--window` are
+unaffected. Path-glob topic rules (routing by directory without frontmatter) are
+not implemented. Nested `.agent-doc` roots already give each sub-project its
+own pin and allow-list.
+
+**Coverage.** `src/sim_world.rs` `multi_tmux_session_model` (two sessions,
+routing to each, sync within the selected session, fail-closed refusal, an
+unchanged single-session default, an exhaustive authority × allow-list sweep,
+and an allow-list-ignoring mutation the suite detects). There are also unit
+tests in `agent-doc-sync`, `agent-doc-sync-io`, and `agent-doc-controller-io`,
+plus `make tmux-ci` route tests on isolated sockets.
+
 ## Stash Window Routing
 
 The stash system preserves running Claude sessions when the user switches editor tabs. Panes are moved to a hidden stash window rather than killed, keeping the Claude session alive for later reuse.

@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -38,6 +37,24 @@ queue: go
 Compacted content:
 - Archived 33 response topic(s): GH #106, GH #107, and release v0.35.441; GH #108: JetBrains upgrade reporting; release + publish (v0.35.442); 30 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): GH #99, #100, #101 and release; GH #102; GH #104–105, queue fi...
+
+### Re: release + publish — opus-5.5 · 2026-10-04T00:03-04:00
+
+> **Queue prompt:** release + publish
+
+**v0.35.447 is tagged and pushed; installed locally.**
+
+- A subagent prepared the release in a clean worktree (`~/work/btakita/agent-doc-worktrees/release-0.35.447`, branched from `1064bf1f8`), because the shared `src/agent-doc` checkout holds another session's uncommitted `VERSIONS.md` and `agent-doc-start-runtime-io/src/lib.rs` edits.
+- The version was projected with `scripts/agent-doc-dev release-version 0.35.447` across 154 files: every crate `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, the skill headers and `editors/release-parity.tsv`.
+- `VERSIONS.md`: `## Unreleased` became `## 0.35.447`. The subagent added entries for the 7 user-facing commits that section was missing (GH #120, #122, #124 ask 5, and others).
+- `make check` passed with exit 0: nextest ran 10755 tests, all passed, 262 skipped; clippy, version-sync, editor-parity, lean and tla were green.
+- Commit `63b514852` (`chore: release v0.35.447`) was pushed to `origin/main` as a fast-forward from `1064bf1f8`, and tag `v0.35.447` was pushed.
+- `make install-full` ran from the worktree (exit 0). `agent-doc --version` reports `0.35.447`; the cdylib and the JetBrains and VS Code plugins were reinstalled.
+- CI started from the tag push: Release, PyPI and CI were in progress when last checked, and Book was green. I did not wait for them to finish.
+
+**Needs attention:**
+- The shared `src/agent-doc` checkout is still on `1064bf1f8`. I did not fast-forward it, because the other session's uncommitted `VERSIONS.md` edit would collide. That edit looks damaged: it deletes the whole `## 0.35.446` section and appends a few lines at the end of the file. It needs a rebase onto `origin/main` before that session commits.
+- To clean up afterwards: remove the worktree and branch `release-0.35.447`, plus the `~/work/btakita/agent-doc-worktrees/tmux-router` symlink the subagent created so the worktree could build.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -47,7 +64,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- release + publish
 <!-- /agent:queue -->
 
 

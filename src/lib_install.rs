@@ -306,7 +306,7 @@ pub(crate) fn run_paths(
     // bounded by what is actually held rather than by release cadence. Stale
     // locks go with it: a lock naming a dead PID that is later reused would
     // otherwise make its version look held forever.
-    crate::lib_gc::gc_libs_after_install(&target);
+    crate::lib_gc::gc_libs_after_install(&target, "lib-install");
     // #autorecycle-on-install (upgrades #ctlrecycle R4 from print-only to action):
     // the JetBrains plugin hot-reloads this cdylib by mtime, but already-running
     // agent-doc controllers/supervisors keep serving the PRIOR binary until they

@@ -454,9 +454,6 @@ fn try_github_release_upgrade(version: &str) -> Result<PathBuf> {
     let exe_path = std::env::current_exe()
         .and_then(|path| path.canonicalize())
         .context("failed to resolve the current executable")?;
-    let exe_dir = exe_path
-        .parent()
-        .context("current executable has no parent directory")?;
     let archive_name = format!("{CRATE_NAME}-{target}.tar.gz");
     let archive_url = release_asset_url(version, &archive_name);
     let manifest_url = release_asset_url(version, "SHA256SUMS");
@@ -471,40 +468,99 @@ fn try_github_release_upgrade(version: &str) -> Result<PathBuf> {
     let manifest = std::str::from_utf8(&manifest_bytes).context("SHA256SUMS is not UTF-8")?;
     verify_release_archive(&archive_name, &archive_bytes, manifest)?;
 
-    let tmp_archive = exe_dir.join(format!(".{CRATE_NAME}-upgrade.tar.gz"));
-    let tmp_binary = exe_dir.join(format!(".{CRATE_NAME}-upgrade"));
-    fs::write(&tmp_archive, &archive_bytes)
+    install_release_archive(&archive_bytes, &exe_path, version)?;
+    Ok(exe_path)
+}
+
+/// Install a verified release archive beside `exe_path` (GH #132).
+///
+/// The archive was previously extracted straight into the install directory,
+/// so tar wrote `libagent_doc.so` as a PLAIN FILE over the `lib-install`
+/// symlink — non-atomically, with no versioned copy — and `gc-libs` could never
+/// match "the installed library" again. Now everything is extracted into a
+/// private staging directory on the same filesystem, the cdylib is installed
+/// through [`crate::lib_install::install_versioned`] (versioned file + atomic
+/// symlink swap, which also migrates a plain-file canonical library by
+/// `rename(2)` over it, so there is never a moment with no library), the binary
+/// is renamed into place, and superseded libraries are reaped. A reap failure
+/// only warns; it never fails an install that already succeeded.
+fn install_release_archive(archive_bytes: &[u8], exe_path: &Path, version: &str) -> Result<()> {
+    let exe_dir = exe_path
+        .parent()
+        .context("current executable has no parent directory")?;
+    let staging = exe_dir.join(format!(".{CRATE_NAME}-upgrade-{}.d", std::process::id()));
+    if staging.exists() {
+        fs::remove_dir_all(&staging)
+            .with_context(|| format!("failed to clear {}", staging.display()))?;
+    }
+    fs::create_dir(&staging).with_context(|| format!("failed to create {}", staging.display()))?;
+    let outcome = install_from_staging(archive_bytes, exe_path, exe_dir, &staging, version);
+    let _ = fs::remove_dir_all(&staging);
+    let library_installed = outcome?;
+    if library_installed {
+        crate::lib_gc::gc_libs_after_install(exe_dir, "upgrade");
+    }
+    Ok(())
+}
+
+/// Returns whether the archive carried a shared library that was installed.
+fn install_from_staging(
+    archive_bytes: &[u8],
+    exe_path: &Path,
+    exe_dir: &Path,
+    staging: &Path,
+    version: &str,
+) -> Result<bool> {
+    let tmp_archive = staging.join("release.tar.gz");
+    fs::write(&tmp_archive, archive_bytes)
         .with_context(|| format!("failed to write {}", tmp_archive.display()))?;
     let tar_status = std::process::Command::new("tar")
         .args(["xzf"])
         .arg(&tmp_archive)
         .arg("-C")
-        .arg(exe_dir)
-        .arg("--transform")
-        .arg(format!("s/{CRATE_NAME}/.{CRATE_NAME}-upgrade/"))
-        .status();
-    let _ = fs::remove_file(&tmp_archive);
-    let tar_status = tar_status.context("failed to run tar")?;
+        .arg(staging)
+        .status()
+        .context("failed to run tar")?;
     if !tar_status.success() {
-        let _ = fs::remove_file(&tmp_binary);
         bail!("tar exited with {tar_status}");
     }
+    let staged_binary = staging.join(CRATE_NAME);
+    if !staged_binary.is_file() {
+        bail!("release archive is missing {CRATE_NAME}");
+    }
+
+    // Library first: a library failure aborts before the binary moves, so the
+    // install is never left as a new binary paired with an old library.
+    let staged_library = staging.join(crate::lib_install::platform_lib_name());
+    let library_installed = if staged_library.is_file() {
+        let installed = crate::lib_install::install_versioned(&staged_library, exe_dir, version)
+            .context("failed to install the release shared library")?;
+        eprintln!(
+            "[upgrade] {} -> {} (symlink: {})",
+            crate::lib_install::platform_lib_name(),
+            installed.display(),
+            crate::lib_install::platform_lib_name(),
+        );
+        true
+    } else {
+        false
+    };
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&tmp_binary, fs::Permissions::from_mode(0o755))?;
+        fs::set_permissions(&staged_binary, fs::Permissions::from_mode(0o755))?;
     }
-    if fs::rename(&tmp_binary, &exe_path).is_err() {
-        fs::copy(&tmp_binary, &exe_path).with_context(|| {
+    if fs::rename(&staged_binary, exe_path).is_err() {
+        fs::copy(&staged_binary, exe_path).with_context(|| {
             format!(
                 "failed to replace {} with {}",
                 exe_path.display(),
-                tmp_binary.display()
+                staged_binary.display()
             )
         })?;
-        let _ = fs::remove_file(&tmp_binary);
     }
-    Ok(exe_path)
+    Ok(library_installed)
 }
 
 fn agent_doc_cache_dir() -> Option<PathBuf> {
@@ -658,6 +714,126 @@ fn version_is_newer(latest: &str, current: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A gzip tarball shaped like a release asset: `agent-doc` + the cdylib.
+    #[cfg(unix)]
+    fn release_archive(dir: &Path, binary: &str, library: Option<&str>) -> Vec<u8> {
+        let src = dir.join("archive-src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join(CRATE_NAME), binary).unwrap();
+        let mut members = vec![CRATE_NAME.to_string()];
+        if let Some(library) = library {
+            let lib_name = crate::lib_install::platform_lib_name();
+            fs::write(src.join(lib_name), library).unwrap();
+            members.push(lib_name.to_string());
+        }
+        let archive = dir.join("release.tar.gz");
+        let status = std::process::Command::new("tar")
+            .arg("czf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&src)
+            .args(&members)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        fs::read(archive).unwrap()
+    }
+
+    #[cfg(unix)]
+    fn install_dir(tmp: &Path) -> (PathBuf, PathBuf) {
+        let bin = tmp.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join(CRATE_NAME);
+        fs::write(&exe, "old binary").unwrap();
+        (bin, exe)
+    }
+
+    /// GH #132: the release path must produce the same shape as `lib-install`
+    /// — a versioned library plus a canonical symlink — not a plain file.
+    #[cfg(unix)]
+    #[test]
+    fn release_install_writes_versioned_library_and_symlink() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (bin, exe) = install_dir(tmp.path());
+        let archive = release_archive(tmp.path(), "new binary", Some("new library"));
+
+        install_release_archive(&archive, &exe, "9.9.9").unwrap();
+
+        let versioned = bin.join(crate::lib_install::versioned_lib_name("9.9.9"));
+        let canonical = bin.join(crate::lib_install::platform_lib_name());
+        assert_eq!(fs::read_to_string(&versioned).unwrap(), "new library");
+        assert!(
+            canonical.is_symlink(),
+            "canonical library must be a symlink"
+        );
+        assert_eq!(
+            fs::read_link(&canonical).unwrap(),
+            PathBuf::from(crate::lib_install::versioned_lib_name("9.9.9"))
+        );
+        assert_eq!(fs::read_to_string(&exe).unwrap(), "new binary");
+        let leftovers: Vec<_> = fs::read_dir(&bin)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "staging debris: {leftovers:?}");
+    }
+
+    /// An install upgraded by the pre-fix path holds a PLAIN `libagent_doc.so`.
+    /// The next upgrade must migrate it to the symlink layout and reap the
+    /// superseded, unheld versioned pile — while a library a live process
+    /// holds survives.
+    #[cfg(unix)]
+    #[test]
+    fn release_install_migrates_plain_file_library_and_reaps_superseded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (bin, exe) = install_dir(tmp.path());
+        let canonical = bin.join(crate::lib_install::platform_lib_name());
+        fs::write(&canonical, "plain old library").unwrap();
+        let stale = bin.join(crate::lib_install::versioned_lib_name("1.0.0"));
+        fs::write(&stale, "v1").unwrap();
+        let held = bin.join(crate::lib_install::versioned_lib_name("1.5.0"));
+        fs::write(&held, "v1.5").unwrap();
+        let held_lock = bin.join(format!(
+            "{}.pid.{}",
+            crate::lib_install::versioned_lib_name("1.5.0"),
+            std::process::id()
+        ));
+        fs::write(&held_lock, "").unwrap();
+        let archive = release_archive(tmp.path(), "new binary", Some("new library"));
+
+        install_release_archive(&archive, &exe, "2.0.0").unwrap();
+
+        assert!(canonical.is_symlink(), "plain file was not migrated");
+        assert_eq!(fs::read_to_string(&canonical).unwrap(), "new library");
+        assert!(
+            !stale.exists(),
+            "auto gc-libs did not reap the superseded library"
+        );
+        assert!(
+            held.exists(),
+            "auto gc-libs reaped a library a live process holds"
+        );
+        assert!(held_lock.exists());
+    }
+
+    /// An archive without a library (a binary-only asset) still installs the
+    /// binary and leaves the existing library alone.
+    #[cfg(unix)]
+    #[test]
+    fn release_install_without_library_leaves_existing_library() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (bin, exe) = install_dir(tmp.path());
+        let canonical = bin.join(crate::lib_install::platform_lib_name());
+        fs::write(&canonical, "existing").unwrap();
+        let archive = release_archive(tmp.path(), "new binary", None);
+
+        install_release_archive(&archive, &exe, "2.0.0").unwrap();
+
+        assert_eq!(fs::read_to_string(&exe).unwrap(), "new binary");
+        assert_eq!(fs::read_to_string(&canonical).unwrap(), "existing");
+    }
 
     #[test]
     fn one_shot_plugin_reconciliation_fails_loudly_on_error() {
@@ -828,8 +1004,7 @@ mod tests {
         })
         .unwrap();
         assert!(
-            reconcile_installed_plugins_auto(release, || Err(anyhow::anyhow!("refused")))
-                .is_err()
+            reconcile_installed_plugins_auto(release, || Err(anyhow::anyhow!("refused"))).is_err()
         );
     }
 

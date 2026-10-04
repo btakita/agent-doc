@@ -142,6 +142,14 @@ fn gc_libs_with_pid_alive(
     } else {
         None
     };
+    // GH #132: a release-tarball install (`agent-doc upgrade` before the fix)
+    // wrote the canonical library as a PLAIN FILE. Comparing filenames against
+    // a symlink target then matched nothing, so every versioned library —
+    // including a byte-identical copy of the installed one — was classed "not
+    // the installed library". Resolve the plain file by identity instead: the
+    // same inode, or the same bytes.
+    let plain_canonical =
+        (current_target.is_none() && symlink_path.is_file()).then(|| symlink_path.clone());
 
     let mut result = GcResult::default();
 
@@ -160,6 +168,13 @@ fn gc_libs_with_pid_alive(
 
         if let Some(ref target) = current_target
             && target.file_name() == Some(&name)
+        {
+            result.kept_current = Some(name_str.to_string());
+            continue;
+        }
+
+        if let Some(ref canonical) = plain_canonical
+            && same_library(canonical, &entry.path())
         {
             result.kept_current = Some(name_str.to_string());
             continue;
@@ -198,7 +213,49 @@ fn gc_libs_with_pid_alive(
         }
     }
 
+    // GH #132: the per-library lock sweep above only visits versioned libraries
+    // that are candidates for removal, so markers naming the canonical
+    // (unversioned) path or the kept-current library were never swept, and
+    // dead-pid `libagent_doc.so.pid.<pid>` markers survived every run.
+    let mut lock_bases = vec![platform_lib_name().to_string()];
+    lock_bases.extend(result.kept_current.clone());
+    for entry in &entries {
+        let lock_name = entry.file_name();
+        let lock_str = lock_name.to_string_lossy();
+        let dead = lock_bases
+            .iter()
+            .any(|base| is_pid_lock(&lock_str, base).is_some_and(|pid| !pid_alive(pid)));
+        if dead {
+            if mode.deletes() {
+                std::fs::remove_file(entry.path()).ok();
+            }
+            result.locks_removed += 1;
+        }
+    }
+
     Ok(result)
+}
+
+/// Whether `candidate` is the same library as the plain-file `canonical`:
+/// the same inode (a hard link), or byte-identical contents.
+fn same_library(canonical: &Path, candidate: &Path) -> bool {
+    let (Ok(a), Ok(b)) = (std::fs::metadata(canonical), std::fs::metadata(candidate)) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if a.dev() == b.dev() && a.ino() == b.ino() {
+            return true;
+        }
+    }
+    if a.len() != b.len() {
+        return false;
+    }
+    match (std::fs::read(canonical), std::fs::read(candidate)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 #[derive(Default)]
@@ -267,14 +324,18 @@ pub fn run(target_dir: Option<&str>, dry_run: bool) -> Result<()> {
 /// `~/.cargo/bin` grew by one cdylib per `lib-install` forever. A failure here
 /// is reported and swallowed: cleanup must never fail an install that already
 /// succeeded.
-pub fn gc_libs_after_install(lib_dir: &Path) {
+///
+/// `label` names the install path in the log prefix (`lib-install`, `upgrade`);
+/// GH #132 added the release-upgrade caller. Each reaped library is named so an
+/// operator can see exactly what an install reclaimed.
+pub fn gc_libs_after_install(lib_dir: &Path, label: &str) -> Option<GcResult> {
     match gc_libs(lib_dir) {
         Ok(result) => {
             if result.libs_removed.is_empty() && result.locks_removed == 0 {
-                return;
+                return Some(result);
             }
             eprintln!(
-                "[lib-install] gc-libs reaped {} superseded librar{} and {} stale lock(s)",
+                "[{label}] gc-libs reaped {} superseded librar{} and {} stale lock(s)",
                 result.libs_removed.len(),
                 if result.libs_removed.len() == 1 {
                     "y"
@@ -283,8 +344,21 @@ pub fn gc_libs_after_install(lib_dir: &Path) {
                 },
                 result.locks_removed
             );
+            for name in &result.libs_removed {
+                eprintln!(
+                    "[{label}] gc-libs removed: {name} ({})",
+                    result.removal_reason()
+                );
+            }
+            for (name, pids) in &result.kept_locked {
+                eprintln!("[{label}] gc-libs kept (live PIDs {pids:?}): {name}");
+            }
+            Some(result)
         }
-        Err(err) => eprintln!("[lib-install] gc-libs skipped: {err:#}"),
+        Err(err) => {
+            eprintln!("[{label}] gc-libs skipped: {err:#}");
+            None
+        }
     }
 }
 
@@ -433,7 +507,7 @@ mod tests {
         let v2_name = crate::lib_install::versioned_lib_name("2.0.0");
         create_symlink(tmp.path(), &v2_name);
 
-        gc_libs_after_install(tmp.path());
+        gc_libs_after_install(tmp.path(), "lib-install");
 
         assert!(!v1.exists());
         assert!(v2.exists());
@@ -463,6 +537,85 @@ mod tests {
         gc_libs(tmp.path()).unwrap();
         assert!(!v1.exists());
         assert!(plain.exists());
+    }
+
+    /// GH #132: with a plain-file canonical library, the byte-identical
+    /// versioned copy IS the installed library and must be kept as current —
+    /// never classed "not the installed library".
+    #[test]
+    fn a_plain_file_install_keeps_its_byte_identical_versioned_copy() {
+        let tmp = setup_dir();
+        let v1 = write_versioned(tmp.path(), "1.0.0");
+        let v2 = write_versioned(tmp.path(), "2.0.0");
+        let plain = tmp.path().join(platform_lib_name());
+        fs::write(&plain, fs::read(&v2).unwrap()).unwrap();
+
+        let result = gc_libs(tmp.path()).unwrap();
+
+        assert!(v2.exists(), "the installed library was reaped");
+        assert!(plain.exists());
+        assert!(!v1.exists());
+        assert!(result.kept_current.unwrap().contains("2.0.0"));
+        assert_eq!(result.libs_removed.len(), 1);
+        assert!(result.libs_removed[0].contains("1.0.0"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plain_file_install_keeps_a_hard_linked_versioned_copy() {
+        let tmp = setup_dir();
+        let v2 = write_versioned(tmp.path(), "2.0.0");
+        let plain = tmp.path().join(platform_lib_name());
+        fs::hard_link(&v2, &plain).unwrap();
+
+        let result = gc_libs(tmp.path()).unwrap();
+
+        assert!(v2.exists());
+        assert!(result.libs_removed.is_empty());
+        assert!(result.kept_current.unwrap().contains("2.0.0"));
+    }
+
+    /// GH #132: dead-pid markers naming the canonical (unversioned) library or
+    /// the kept-current library were never swept. Live ones must survive.
+    #[test]
+    fn gc_sweeps_dead_locks_on_canonical_and_current_libraries() {
+        let tmp = setup_dir();
+        let v2 = write_versioned(tmp.path(), "2.0.0");
+        let v2_name = crate::lib_install::versioned_lib_name("2.0.0");
+        create_symlink(tmp.path(), &v2_name);
+        let canonical = tmp.path().join(platform_lib_name());
+        let dead_canonical = tmp
+            .path()
+            .join(format!("{}.pid.{}", platform_lib_name(), 7523));
+        fs::write(&dead_canonical, "").unwrap();
+        let live_canonical = tmp
+            .path()
+            .join(format!("{}.pid.{}", platform_lib_name(), 14558));
+        fs::write(&live_canonical, "").unwrap();
+        let dead_current = write_pid_lock(&v2, 54003);
+
+        let result = gc_libs_with_pid_alive(tmp.path(), |pid| pid == 14558, GcMode::Apply).unwrap();
+
+        assert!(!dead_canonical.exists());
+        assert!(!dead_current.exists());
+        assert!(live_canonical.exists());
+        assert!(canonical.exists());
+        assert!(v2.exists());
+        assert_eq!(result.locks_removed, 2);
+    }
+
+    /// The labeled install sweep is shared by `lib-install` and `upgrade`.
+    #[test]
+    fn install_sweep_reports_what_it_reaped() {
+        let tmp = setup_dir();
+        write_versioned(tmp.path(), "1.0.0");
+        write_versioned(tmp.path(), "2.0.0");
+        create_symlink(tmp.path(), &crate::lib_install::versioned_lib_name("2.0.0"));
+
+        let result = gc_libs_after_install(tmp.path(), "upgrade").unwrap();
+
+        assert_eq!(result.libs_removed.len(), 1);
+        assert!(result.libs_removed[0].contains("1.0.0"));
     }
 
     #[test]

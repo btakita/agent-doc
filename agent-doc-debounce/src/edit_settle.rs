@@ -165,6 +165,12 @@ pub fn completion_signal(text: &str) -> CompletionSignal {
     if matches!(last_line, "-" | "*" | "+") || last_line.ends_with('#') {
         return CompletionSignal::Incomplete;
     }
+    if ends_with_empty_code_span(last_line) {
+        // `#halftypedcoin`: an empty trailing span (`Add a ``) is the editor's
+        // auto-paired backticks with the caret between them, not a finished
+        // reference: the operator is about to type the span's content.
+        return CompletionSignal::Incomplete;
+    }
     if last_line.ends_with('`') {
         // The line ends in a closed code span: a finished reference.
         return CompletionSignal::Complete;
@@ -188,6 +194,25 @@ pub fn completion_signal(text: &str) -> CompletionSignal {
         return CompletionSignal::Incomplete;
     }
     CompletionSignal::Inconclusive
+}
+
+/// True when `line` ends with an empty inline code span: a bare backtick pair
+/// standing alone as its own token (`` Add a `` ``), the shape an editor's
+/// auto-paired backticks leave while the caret sits between them
+/// (`#halftypedcoin`). A double-backtick span closing real content
+/// (``` ``ab`` ```) is not empty: its closing pair follows a non-space.
+fn ends_with_empty_code_span(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    let Some(before) = trimmed.strip_suffix("``") else {
+        return false;
+    };
+    if before.ends_with('`') {
+        return false;
+    }
+    before
+        .chars()
+        .next_back()
+        .is_none_or(|ch| ch.is_whitespace() || matches!(ch, '(' | '[' | '{' | '"' | '\''))
 }
 
 /// Everything one settle decision needs, all observable without I/O.
@@ -678,6 +703,10 @@ mod tests {
             "this and",
             "-",
             "do it with",
+            "Add a ``",
+            "Add a `` ",
+            "``",
+            "wrap it (``",
         ] {
             assert_eq!(
                 completion_signal(unfinished),
@@ -691,6 +720,8 @@ mod tests {
             "do [#abc]",
             "#subagent: https://github.com/btakita/agent-doc/issues/118",
             "use `foo()`",
+            "use ``ab``",
+            "Add a `Dashboard`",
             "```\ncode\n```",
         ] {
             assert_eq!(

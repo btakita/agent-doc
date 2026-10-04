@@ -9,7 +9,7 @@ use agent_doc_preflight_io::{
     check_linked_docs, checkpoint_baseline_content, enforce_no_dropped_backlog,
     enforce_no_shadow_open_backlog, explicit_backlog_target_requirements, inspect_queue_state,
     read_and_truncate_claims, read_claims, resolve_pipeline_state, run_gate_verify,
-    run_pending_maintenance, run_queue_maintenance,
+    run_pending_maintenance, run_queue_maintenance_with_coin_gate,
     sweep::{
         current_sweep_budget, current_sweep_owner, load_sweep_cursor,
         log_and_skip_foreign_owned_sweep_if_needed, order_from_cursor, run_bounded_sweep,
@@ -943,12 +943,19 @@ fn run_with_options_to_writer_in_pass(
     // Check both file mtime (disk-level) and cross-process typing indicator
     // (buffer-level) to avoid picking up mid-typing edits.
     // Default: 2000ms (configurable via `agent_doc_debounce` frontmatter field).
+    let mut operator_edit_evidence = None;
     if !options.probe {
         agent_doc_preflight_io::debounce::wait_for_lazily_current_observation(file);
         // `#qheadcomposing`: a converged cut is not a finished prompt. When an
         // edit landed since preflight's initial read, wait for the operator to
         // pause so the diff does not admit a half-typed queue item.
-        agent_doc_preflight_io::debounce::wait_for_operator_edit_quiescence(file, &content);
+        // `#halftypedcoin`: keep what the wait saw so queue maintenance does not
+        // coin a backlog id from a line the operator is still typing.
+        operator_edit_evidence =
+            agent_doc_preflight_io::debounce::wait_for_operator_edit_quiescence_with_evidence(
+                file, &content,
+            )
+            .1;
     }
 
     crate::progress::enter("related_documents")?;
@@ -1036,7 +1043,11 @@ fn run_with_options_to_writer_in_pass(
             QueueState::default()
         })
     } else {
-        match run_queue_maintenance(file, diff_result.as_deref()) {
+        let coin_gate = operator_edit_evidence
+            .as_ref()
+            .map(agent_doc_preflight_io::debounce::OperatorEditEvidence::coin_gate)
+            .unwrap_or_default();
+        match run_queue_maintenance_with_coin_gate(file, diff_result.as_deref(), &coin_gate) {
             Ok(state) => state,
             Err(e) => {
                 if e.downcast_ref::<QueueAuthorityUnavailable>().is_some() {
@@ -2842,6 +2853,7 @@ mod tests {
     #![allow(unused_imports)]
     use super::*;
     use agent_doc_document_realtime::write_policy::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight;
+    use agent_doc_preflight_io::run_queue_maintenance;
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;

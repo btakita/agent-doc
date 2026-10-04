@@ -15,3 +15,10 @@ tmp/
 src/agent-doc-*-wt/
 .wrangler
 .tsift/
+
+# tsift skill is personal (user-scoped): `tsift init --instructions personal --harness ...`
+.agents/skills/tsift/
+.claude/skills/tsift
+.codex/skills/tsift
+.opencode/skills/tsift
+.grok/skills/tsift

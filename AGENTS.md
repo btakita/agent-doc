@@ -32,12 +32,6 @@ the dynamic file that owns its details:
 
 **Full workflow:** See [`.claude/skills/agent-doc/SKILL.md`](.claude/skills/agent-doc/SKILL.md) for the complete agent-doc workflow (preflight, respond, persist, pending ops, auto-loop).
 
-**Code navigation:** See [`.claude/skills/tsift/SKILL.md`](.claude/skills/tsift/SKILL.md) and [`runbooks/code-navigation.md`](runbooks/code-navigation.md) for tsift AST-aware search, call graphs, and digest commands.
+**Code navigation:** Use the personal (user-scoped, uncommitted) tsift skill at `~/.agents/skills/tsift/SKILL.md`, linked into harnesses by `tsift init --instructions personal --harness <claude|codex|opencode|grok|all>`, plus [`runbooks/code-navigation.md`](runbooks/code-navigation.md) for tsift AST-aware search, call graphs, and digest commands.
 
 **Runbooks:** [runbooks/](runbooks/) — dynamic-context, harness-invocation, commit, planning-dispatch, pending-ops, model-tier-gate, compact-exchange, streaming-checkpoints, document-format, code-enforced-directives, architecture-first (agent-doc development/dogfooding only), and more.
-
-<!-- tsift:code-navigation v=0.1.101 -->
-## Code Navigation
-
-Use the repository tsift skill at [`.agents/skills/tsift/SKILL.md`](.agents/skills/tsift/SKILL.md) for code search, source reading, call graphs, diffs, logs, and test output.
-<!-- /tsift:code-navigation -->

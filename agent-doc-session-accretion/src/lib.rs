@@ -5,6 +5,12 @@
 
 use serde::{Deserialize, Serialize};
 
+/// `cycles.jsonl` op for a closeout whose cycle carried chat prompts
+/// (`#chatprompt`, GH #125): committed nothing new, but answered an operator
+/// turn, so it is a committed cycle and never a no-op closeout. Mirrors
+/// `OpsLogEvent::CommitChatTurn`.
+pub const CHAT_TURN_CYCLE_OP: &str = "commit_chat_turn";
+
 pub const RECENT_WINDOW_SECS: u64 = 30 * 60;
 pub const WARN_EXCHANGE_LINES: usize = 160;
 // Block thresholds are intentionally high so session-accretion never reaches

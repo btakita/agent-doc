@@ -2902,6 +2902,7 @@ mod th {
             active_queue_heads: Vec::new(),
             active_free_text_queue_heads: Vec::new(),
             selected_free_text_queue_heads: Vec::new(),
+            chat_prompts: Vec::new(),
             semantic_merge_conflict_advisories: Vec::new(),
             skipped_queue_head_ids: Vec::new(),
             projected_in_progress_queue_heads: Vec::new(),

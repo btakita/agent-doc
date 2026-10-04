@@ -3649,13 +3649,16 @@ mod tests {
     fn bundled_skill_records_chat_originated_prompts() {
         assert!(SKILL_TEMPLATE.contains("`#chatprompt`, GH #125"));
         assert!(SKILL_TEMPLATE.contains(
-            "insert it verbatim into `agent:exchange` and persist the response through `respond` / `write --commit`"
+            "begin the `patch:exchange` response with `> **Chat prompt (#chatprompt):** <verbatim prompt>` and persist it through `respond` / `write --commit`"
         ));
         assert!(SKILL_TEMPLATE.contains(
             "unless this harness turn carries an operator prompt absent from the document"
         ));
         assert!(SKILL_TEMPLATE.contains("[agent-doc] chat prompt for session document"));
-        assert!(SKILL_TEMPLATE.contains("unrecorded chat prompt(s)"));
+        // GH #125 follow-up: the contract carries unrecorded chat prompts, and
+        // closeout warns when a cycle skipped their record.
+        assert!(SKILL_TEMPLATE.contains("A non-empty `chat_prompts` is never `no_changes`"));
+        assert!(SKILL_TEMPLATE.contains("`session-check` warns `chat prompt not recorded`"));
         let respond = include_str!("../runbooks/respond.md");
         assert!(respond.contains("Chat-originated prompts are session turns (`#chatprompt`"));
         for env in [

@@ -988,6 +988,13 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
             .is_some_and(|state| !state.is_open())
     }
 
+    fn open_cycle_carries_chat_prompts(&self, file: &Path) -> bool {
+        agent_doc_cycle_state_io::load_with_closeout_projection(file)
+            .ok()
+            .flatten()
+            .is_some_and(|state| state.is_open() && !state.chat_prompts.is_empty())
+    }
+
     fn log_cycle(
         &self,
         file: &Path,

@@ -314,6 +314,13 @@ pub struct CycleState {
     /// `> **Queue prompt:**` response echo.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_free_text_queue_heads: Vec<String>,
+    /// `#chatprompt` (GH #125): operator prompts that reached the harness chat
+    /// instead of the document and that this cycle's contract carried as its
+    /// work (`chat_prompts`). Closeout warns when the committed document has no
+    /// `> **Chat prompt (#chatprompt):**` record of one, and a no-op commit of
+    /// such a cycle is a chat turn, not an idle closeout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chat_prompts: Vec<String>,
     /// Reactive semantic-merge conflicts observed during this cycle.
     #[serde(
         default,
@@ -1332,6 +1339,12 @@ pub fn start_preflight_with_task(
             .map(agent_doc_queue::queue_heads::active_free_text_queue_heads)
             .unwrap_or_default(),
         selected_free_text_queue_heads: Vec::new(),
+        // A re-entrant preflight of the same open cycle keeps the chat prompts
+        // the first admission carried; the hook ledger was cleared by then.
+        chat_prompts: reentrant
+            .as_ref()
+            .map(|open| open.chat_prompts.clone())
+            .unwrap_or_default(),
         semantic_merge_conflict_advisories: reentrant
             .as_ref()
             .map(|open| open.semantic_merge_conflict_advisories.clone())
@@ -1399,6 +1412,31 @@ pub fn record_selected_free_text_queue_heads(
     }
     if state.selected_free_text_queue_heads != normalized {
         state.selected_free_text_queue_heads = normalized;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#chatprompt` (GH #125): add the chat prompts this open cycle carries.
+/// Union, never replace: a re-entrant admission adds to what the first one
+/// carried.
+pub fn record_chat_prompts(file: &Path, prompts: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.is_open() {
+        return Ok(Some(state));
+    }
+    let mut changed = false;
+    for prompt in prompts {
+        let prompt = prompt.trim().to_string();
+        if !prompt.is_empty() && !state.chat_prompts.contains(&prompt) {
+            state.chat_prompts.push(prompt);
+            changed = true;
+        }
+    }
+    if changed {
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -3404,6 +3442,7 @@ fn synthetic_state_with_id(
         active_queue_heads: Vec::new(),
         active_free_text_queue_heads: Vec::new(),
         selected_free_text_queue_heads: Vec::new(),
+        chat_prompts: Vec::new(),
         semantic_merge_conflict_advisories: Vec::new(),
         blocked_closeout: None,
         skipped_queue_head_ids: Vec::new(),

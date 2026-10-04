@@ -741,6 +741,15 @@ pub struct PreflightOutput {
     /// or guide the current response cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_intent_prompt_changes: Vec<agent_doc_diff::PromptBearingChange>,
+    /// `#chatprompt` (GH #125): operator prompts typed in the harness chat
+    /// since the session's last trigger that the document does not record.
+    /// They are this cycle's work (also listed in `user_intent_prompt_changes`):
+    /// begin the `patch:exchange` response with
+    /// `> **Chat prompt (#chatprompt):** <verbatim>` for each, answer it, and
+    /// persist through `respond` / `write --commit`. Non-empty means the cycle
+    /// is never `no_changes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chat_prompts: Vec<String>,
     /// Legacy compatibility field: inline user edits inside prior agent responses.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inline_annotations: Vec<String>,

@@ -21,6 +21,11 @@ pub trait PostCommitCleanupEffects {
     fn read_to_string(&self, file: &Path) -> Result<String>;
     fn load_snapshot(&self, file: &Path) -> Option<String>;
     fn cycle_is_terminal(&self, file: &Path) -> bool;
+    /// `#chatprompt` (GH #125): the open cycle carries chat prompts, so a
+    /// commit with nothing new to record is a chat turn, not an idle closeout.
+    fn open_cycle_carries_chat_prompts(&self, _file: &Path) -> bool {
+        false
+    }
     fn log_cycle(
         &self,
         file: &Path,
@@ -270,12 +275,15 @@ pub fn finalize_already_committed_noop(
     file_content: Option<&str>,
     drift_kind: Option<PostCommitLocalDriftKind>,
 ) {
-    effects.log_cycle(
-        file,
-        OpsLogEvent::CommitNoop.as_str(),
-        snapshot_content,
-        file_content,
-    );
+    // `#chatprompt` (GH #125): a cycle that carried chat prompts answered an
+    // operator turn even when the document did not change; logging it as
+    // `commit_noop` made `session_accretion` report idleness during real work.
+    let cycle_event = if effects.open_cycle_carries_chat_prompts(file) {
+        OpsLogEvent::CommitChatTurn
+    } else {
+        OpsLogEvent::CommitNoop
+    };
+    effects.log_cycle(file, cycle_event.as_str(), snapshot_content, file_content);
     let drift_kind = drift_kind
         .map(PostCommitLocalDriftKind::as_str)
         .unwrap_or("none");
@@ -319,6 +327,8 @@ mod tests {
     struct TerminalEffects {
         capture_calls: AtomicUsize,
         logs: Mutex<Vec<String>>,
+        cycle_events: Mutex<Vec<String>>,
+        chat_prompts: bool,
     }
 
     impl PostCommitCleanupEffects for TerminalEffects {
@@ -334,13 +344,18 @@ mod tests {
             true
         }
 
+        fn open_cycle_carries_chat_prompts(&self, _file: &Path) -> bool {
+            self.chat_prompts
+        }
+
         fn log_cycle(
             &self,
             _file: &Path,
-            _event: &str,
+            event: &str,
             _snapshot_content: Option<&str>,
             _file_content: Option<&str>,
         ) {
+            self.cycle_events.lock().unwrap().push(event.to_string());
         }
 
         fn log_op(&self, _file: &Path, message: &str) {
@@ -379,6 +394,23 @@ mod tests {
         fn fire_post_commit(&self, _file: &Path, _session_id: &str) {}
 
         fn fire_doc_event(&self, _file: &Path, _event: &str) {}
+    }
+
+    /// GH #125 gap 2: a no-op closeout of a cycle that carried chat prompts
+    /// answered an operator turn; it must not feed `recent_noop_closeouts`.
+    #[test]
+    fn a_noop_commit_of_a_chat_prompt_cycle_is_logged_as_a_chat_turn() {
+        let file = Path::new("/tmp/agent-doc-chat-turn-noop.md");
+        let idle = TerminalEffects::default();
+        finalize_already_committed_noop(&idle, file, "commit_already_current", None, None, None);
+        assert_eq!(*idle.cycle_events.lock().unwrap(), vec!["commit_noop"]);
+
+        let chat = TerminalEffects {
+            chat_prompts: true,
+            ..TerminalEffects::default()
+        };
+        finalize_already_committed_noop(&chat, file, "commit_already_current", None, None, None);
+        assert_eq!(*chat.cycle_events.lock().unwrap(), vec!["commit_chat_turn"]);
     }
 
     #[test]

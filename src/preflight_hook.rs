@@ -357,9 +357,20 @@ fn run_preflight_for_prompt(
     // last trigger that the document still does not record. Computed before
     // admission against the pre-cycle document; reported only on an admitted
     // contract, so a refused admission keeps them for the next attempt.
-    let chat_notice = tracked_input.and_then(|input| unrecorded_chat_prompt_notice(input, &file));
+    let chat_prompts = tracked_input
+        .map(|input| unrecorded_chat_prompts_for(input, &file))
+        .unwrap_or_default();
+    let chat_notice = tracked_input.and_then(|input| {
+        agent_doc_prompt_contract::chat_prompt::unrecorded_chat_prompts_context(
+            &display_document(Path::new(&input.cwd), &file),
+            &chat_prompts,
+        )
+    });
 
-    match run_preflight_admission(&file, budget, preflight_invocation) {
+    // The prompts travel on the preflight request itself (GH #125): preflight's
+    // reads may be served by the project controller, which cannot see this
+    // harness session's ledger.
+    match run_preflight_admission(&file, budget, preflight_invocation, &chat_prompts) {
         Ok(contract) => {
             // The marker seals a successfully produced contract. It must not
             // appear on any error path because the skill treats its absence as
@@ -401,24 +412,34 @@ fn display_document(cwd: &Path, file: &Path) -> String {
     file.strip_prefix(cwd).unwrap_or(file).display().to_string()
 }
 
-/// `#chatprompt` (GH #125): the notice for chat prompts since the previous
-/// trigger that the document does not record, if any. Best-effort: a ledger
-/// failure is logged and never blocks admission.
+/// `#chatprompt` (GH #125): chat prompts since the previous trigger that the
+/// document does not record. Best-effort: a ledger failure is logged and never
+/// blocks admission.
+fn unrecorded_chat_prompts_for(
+    input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
+    file: &Path,
+) -> Vec<String> {
+    let Ok(document) = std::fs::read_to_string(file) else {
+        return Vec::new();
+    };
+    match agent_doc_codex_hook_io::unrecorded_chat_prompts(input, file, &document) {
+        Ok(prompts) => prompts,
+        Err(err) => {
+            eprintln!("[agent-doc] chat prompt ledger read failed: {err:#}");
+            Vec::new()
+        }
+    }
+}
+
+/// The notice for chat prompts since the previous trigger, if any.
+#[cfg(test)]
 fn unrecorded_chat_prompt_notice(
     input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
     file: &Path,
 ) -> Option<String> {
-    let document = std::fs::read_to_string(file).ok()?;
-    let prompts = match agent_doc_codex_hook_io::unrecorded_chat_prompts(input, file, &document) {
-        Ok(prompts) => prompts,
-        Err(err) => {
-            eprintln!("[agent-doc] chat prompt ledger read failed: {err:#}");
-            return None;
-        }
-    };
     agent_doc_prompt_contract::chat_prompt::unrecorded_chat_prompts_context(
         &display_document(Path::new(&input.cwd), file),
-        &prompts,
+        &unrecorded_chat_prompts_for(input, file),
     )
 }
 
@@ -510,9 +531,10 @@ fn run_preflight_admission(
     file: &Path,
     budget: std::time::Duration,
     preflight_invocation: agent_doc_preflight_command_io::PreflightInvocation,
+    chat_prompts: &[String],
 ) -> anyhow::Result<String> {
     let started = std::time::Instant::now();
-    let first = run_preflight_within_budget(file, budget, preflight_invocation);
+    let first = run_preflight_within_budget(file, budget, preflight_invocation, chat_prompts);
     let Err(err) = first else {
         return first;
     };
@@ -548,7 +570,7 @@ fn run_preflight_admission(
         "[agent-doc] preflight admission: controller transport dropped ({err:#}); re-asking once within the remaining {:.1}s budget",
         remaining.as_secs_f32(),
     );
-    run_preflight_within_budget(file, remaining, preflight_invocation)
+    run_preflight_within_budget(file, remaining, preflight_invocation, chat_prompts)
 }
 
 /// Report the preflight deadline the Claude settings for this session wire, and
@@ -625,8 +647,10 @@ fn run_preflight_within_budget(
     file: &Path,
     budget: std::time::Duration,
     invocation: agent_doc_preflight_command_io::PreflightInvocation,
+    chat_prompts: &[String],
 ) -> anyhow::Result<String> {
     let preflight_file = file.to_path_buf();
+    let chat_prompts = chat_prompts.to_vec();
     run_within_budget(file, budget, move || {
         let mut output = Vec::new();
         agent_doc_preflight_command_io::run_with_options_to_writer(
@@ -634,6 +658,7 @@ fn run_preflight_within_budget(
             agent_doc_preflight_command_io::PreflightOptions {
                 probe: false,
                 invocation,
+                chat_prompts,
             },
             &mut output,
         )?;
@@ -1143,7 +1168,7 @@ mod tests {
         let next = input("/agent-doc task.md");
         agent_doc_codex_hook_io::apply_user_prompt_submit(&next).unwrap();
         let notice = super::unrecorded_chat_prompt_notice(&next, &doc).expect("unrecorded");
-        assert!(notice.contains("not idle even if `no_changes` is true"));
+        assert!(notice.contains("not idle") && notice.contains("chat_prompts"));
         assert!(notice.contains("chat_prompt: \"#upgrade\""));
     }
 

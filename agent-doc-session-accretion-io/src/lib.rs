@@ -212,8 +212,13 @@ pub fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
         {
             continue;
         }
+        // `#chatprompt` (GH #125): `commit_chat_turn` is a closeout of a cycle
+        // that carried chat prompts. It counts as a committed cycle and never
+        // as a no-op, even when the document did not change.
         match entry.op.as_str() {
-            "commit" | "commit_noop" => committed += 1,
+            "commit" | "commit_noop" | agent_doc_session_accretion::CHAT_TURN_CYCLE_OP => {
+                committed += 1
+            }
             _ => {}
         }
         if entry.op == "commit_noop" {
@@ -436,6 +441,35 @@ mod tests {
         );
 
         assert_eq!(recent_cycle_metrics(&doc, now).unwrap(), (2, 1));
+    }
+
+    /// GH #125 gap 2: the operator typed `#upgrade` in chat, the tool was
+    /// upgraded, and `session_accretion` still reported two no-op closeouts.
+    /// A chat-turn closeout is a committed cycle, never a no-op.
+    #[test]
+    fn recent_cycle_metrics_never_counts_a_chat_turn_closeout_as_a_noop() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "body").unwrap();
+        let now = 1_700_000_000;
+        let entry = |offset: u64, op: &str| agent_doc_ops_log_io::CycleEntry {
+            timestamp: (now - offset).to_string(),
+            file: "session.md".to_string(),
+            op: op.to_string(),
+            commit_hash: None,
+            snapshot_hash: None,
+            file_hash: None,
+        };
+        write_cycles_log(
+            &doc,
+            &[
+                entry(30, agent_doc_session_accretion::CHAT_TURN_CYCLE_OP),
+                entry(20, agent_doc_session_accretion::CHAT_TURN_CYCLE_OP),
+                entry(10, "commit_noop"),
+            ],
+        );
+        assert_eq!(recent_cycle_metrics(&doc, now).unwrap(), (3, 1));
     }
 
     #[test]

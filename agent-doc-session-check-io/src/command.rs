@@ -1808,6 +1808,7 @@ fn run_with_options_inner(
                 crate::invalidate_current_document_pass(file);
             }
             println!("{}", message);
+            warn_unrecorded_chat_prompts(file);
             // `#wd40` / `#staleloop-recycle-restart`: a stale route-owned supervisor
             // that can never reach its own recycle boundary during a continuously
             // self-draining session asks the in-session loop to yield one boundary.
@@ -2127,6 +2128,45 @@ fn run_with_options_inner(
     }
 }
 
+/// `#chatprompt` (GH #125 gap 4): the committed cycle carried chat prompts the
+/// document has no `> **Chat prompt (#chatprompt):**` record of. A warning with
+/// the repair, never a failure: the work may be done and committed; only its
+/// record in the session document is missing.
+pub fn unrecorded_chat_prompt_warning(file: &Path) -> Option<String> {
+    let cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten()?;
+    if cycle.phase != CyclePhase::Committed || cycle.chat_prompts.is_empty() {
+        return None;
+    }
+    let content =
+        crate::resolve_current_document_content(file, "session_check_chat_prompt_record").ok()?;
+    let missing = agent_doc_prompt_contract::chat_prompt::chat_prompts_missing_record(
+        &content,
+        &cycle.chat_prompts,
+    );
+    let warning = agent_doc_prompt_contract::chat_prompt::unrecorded_chat_prompt_closeout_warning(
+        &file.display().to_string(),
+        &missing,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_check_chat_prompt_unrecorded file={} cycle_id={} count={} (#chatprompt)",
+            file.display(),
+            cycle.cycle_id,
+            missing.len()
+        ),
+    );
+    Some(warning)
+}
+
+fn warn_unrecorded_chat_prompts(file: &Path) {
+    if let Some(warning) = unrecorded_chat_prompt_warning(file) {
+        eprintln!("{warning}");
+    }
+}
+
 /// `#steerinterruptexit`: print a pending-steering status as a successful
 /// check. The queue continuation is deferred behind the steering, exactly like
 /// `#prompt-preempts-auto-queue`: the next `agent-doc <FILE>` admits the
@@ -2244,9 +2284,11 @@ fn steering_survives_steering_carried_drift(
             agent_doc_turn::turn_admission::PENDING_OPERATOR_STEERING_RECOVERY
         ))
     {
-        report
-            .warnings
-            .push(message.replacen("INTERRUPTED:", "warn (carried by the steering turn):", 1));
+        report.warnings.push(message.replacen(
+            "INTERRUPTED:",
+            "warn (carried by the steering turn):",
+            1,
+        ));
         report.status = SessionCheckStatus::SteeringPending(steering);
     }
     report
@@ -3446,9 +3488,7 @@ fn inspect_core_profiled(
             ..
         } = crate::turn_admission(file, state.is_open())?
         {
-            return Ok(committed_cycle_steering_status(
-                file, &state, None, &marker,
-            ));
+            return Ok(committed_cycle_steering_status(file, &state, None, &marker));
         }
         return Ok(SessionCheckStatus::Ok(format!(
             "[session-check] ok — cycle `{}` is `{}` ({})",
@@ -3728,7 +3768,10 @@ mod terminal_convergence_tests {
             warnings: Vec::new(),
         };
         let kept = steering_survives_steering_carried_drift(carried, Some(steering.clone()));
-        assert_eq!(kept.status, SessionCheckStatus::SteeringPending(steering.clone()));
+        assert_eq!(
+            kept.status,
+            SessionCheckStatus::SteeringPending(steering.clone())
+        );
         assert_eq!(kept.warnings.len(), 1, "{:?}", kept.warnings);
 
         let genuine = SessionCheckReport {

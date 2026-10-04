@@ -217,7 +217,17 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         .as_deref()
         .map(|prompt| diff::synthetic_added_lines_diff(prompt, "queue"));
 
-    let Some(diff_text) = doc_diff.or(harness_diff.clone()).or(queue_diff) else {
+    // `#chatprompt` (GH #125): chat prompts the admitted cycle carries are this
+    // turn's targets even when the document diff is empty; without them plan
+    // reported `no_changes` / an empty `prompt_targets` for a real turn.
+    let chat_prompts = open_cycle_chat_prompts(file);
+    let chat_diff = (!chat_prompts.is_empty())
+        .then(|| diff::synthetic_added_lines_diff(&chat_prompts.join("\n"), "harness"));
+    let Some(diff_text) = doc_diff
+        .or(harness_diff.clone())
+        .or(queue_diff)
+        .or(chat_diff)
+    else {
         let (task_class, blockers, warnings) = match sealed_turn.as_ref() {
             Some(cycle) => (
                 "preflight_sealed".to_string(),
@@ -270,7 +280,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     };
 
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&prompt_diff_text);
-    let prompt_targets = prompt_targets_from_changes(&prompt_bearing_changes);
+    let mut prompt_targets = prompt_targets_from_changes(&prompt_bearing_changes);
+    agent_doc_prompt_contract::push_unique_strings(&mut prompt_targets, chat_prompts.clone());
     let added_diff_lines = agent_doc_prompt_contract::collect_added_diff_lines(&prompt_diff_text);
 
     let execution_scope = execution_scope_for_prompt_targets(
@@ -983,6 +994,16 @@ fn sealed_preflight_turn(file: &Path) -> Option<agent_doc_cycle_state_io::CycleS
         })
 }
 
+/// `#chatprompt` (GH #125): the chat prompts the open cycle carries.
+fn open_cycle_chat_prompts(file: &Path) -> Vec<String> {
+    agent_doc_cycle_state_io::load(file)
+        .ok()
+        .flatten()
+        .filter(|cycle| cycle.is_open())
+        .map(|cycle| cycle.chat_prompts)
+        .unwrap_or_default()
+}
+
 fn sealed_turn_warning(cycle_id: &str) -> String {
     format!(
         "#plansealedturn: no diff remains because preflight already sealed this turn \
@@ -1432,6 +1453,41 @@ Done.
             plan.warnings.iter().any(|w| w.contains("#plansealedturn")),
             "{:?}",
             plan.warnings
+        );
+    }
+
+    /// GH #125 gap 1 (`#chatprompt`): the admitted cycle carries a chat prompt
+    /// and the document did not change. Plan must treat it as the turn's
+    /// target, not as an empty sealed turn or `no_changes`.
+    #[test]
+    fn build_plan_targets_chat_prompts_the_open_cycle_carries() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = sealed_turn_doc();
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_chat_prompts(
+            &doc,
+            &["Fix the flaky login test".to_string()],
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+        assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
+        assert_ne!(plan.task_class, "no_changes");
+        assert_ne!(plan.task_class, "preflight_sealed");
+        assert!(
+            plan.prompt_targets
+                .contains(&"Fix the flaky login test".to_string()),
+            "{:?}",
+            plan.prompt_targets
         );
     }
 

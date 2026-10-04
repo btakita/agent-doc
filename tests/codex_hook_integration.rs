@@ -157,7 +157,9 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicate::str::contains("[session-check] steering pending:"))
+        .stdout(predicate::str::contains(
+            "[session-check] steering pending:",
+        ))
         .stdout(predicate::str::contains(
             "dispatch=address_now source=exchange change=added",
         ))
@@ -182,7 +184,9 @@ fn session_check_cli_reports_post_commit_steering_as_pending_with_exit_zero() {
         .args(["session-check", doc.to_str().unwrap(), "--codex-final-gate"])
         .assert()
         .code(2)
-        .stdout(predicate::str::contains("[session-check] steering pending:"));
+        .stdout(predicate::str::contains(
+            "[session-check] steering pending:",
+        ));
 }
 
 /// `#codexsteerinterrupt`: the `#steerinterruptexit` fixture inside a bound
@@ -257,7 +261,9 @@ fn session_check_cli_reports_editor_proven_codex_post_commit_steering_as_pending
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicate::str::contains("[session-check] steering pending:"))
+        .stdout(predicate::str::contains(
+            "[session-check] steering pending:",
+        ))
         .stdout(predicate::str::contains("❯ Also check the CI run."))
         .stdout(predicate::str::contains(
             "queue_continuation_required=false steering_pending=true",
@@ -271,7 +277,9 @@ fn session_check_cli_reports_editor_proven_codex_post_commit_steering_as_pending
         .args(["session-check", doc.to_str().unwrap(), "--codex-final-gate"])
         .assert()
         .code(2)
-        .stdout(predicate::str::contains("[session-check] steering pending:"));
+        .stdout(predicate::str::contains(
+            "[session-check] steering pending:",
+        ));
 }
 
 #[test]
@@ -778,4 +786,239 @@ fn codex_hook_cli_refused_admission_preserves_previous_cycle() {
         .stdout(predicate::str::contains("\"continue\":true"));
     assert_eq!(fs::read_to_string(&doc).unwrap(), before);
     assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+}
+
+// ---------------------------------------------------------------------------
+// GH #125 (`#chatprompt`): chat-originated prompts end to end.
+// ---------------------------------------------------------------------------
+
+fn codex_submit(root: &Path, session: &str, turn: &str, prompt: &str) -> String {
+    let payload = json!({
+        "session_id": session,
+        "turn_id": turn,
+        "cwd": root.display().to_string(),
+        "prompt": prompt,
+    });
+    let submit = agent_doc()
+        .current_dir(root)
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(payload.to_string())
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&submit.get_output().stdout).to_string();
+    if stdout.trim().is_empty() {
+        return String::new();
+    }
+    let output: serde_json::Value =
+        serde_json::from_str(&stdout).expect("hook stdout must be one JSON document");
+    output["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The preflight JSON inside an admitted hook context.
+fn admitted_contract(context: &str) -> serde_json::Value {
+    let start = context
+        .find("{\n")
+        .unwrap_or_else(|| panic!("no contract JSON in hook context: {context}"));
+    let end = context
+        .find("\n[agent-doc] cycle contract")
+        .unwrap_or_else(|| panic!("no contract seal in hook context: {context}"));
+    serde_json::from_str(&context[start..end])
+        .unwrap_or_else(|err| panic!("contract is not JSON ({err}): {context}"))
+}
+
+fn respond(root: &Path, doc: &Path, response: &str) -> String {
+    let out = agent_doc()
+        .current_dir(root)
+        .args(["respond", doc.to_str().unwrap()])
+        .write_stdin(response.to_string())
+        .assert()
+        .success();
+    String::from_utf8_lossy(&out.get_output().stderr).to_string()
+}
+
+fn session_check_stderr(root: &Path, doc: &Path) -> String {
+    let out = agent_doc()
+        .current_dir(root)
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    String::from_utf8_lossy(&out.get_output().stderr).to_string()
+}
+
+fn head_document(root: &Path) -> String {
+    let out = ProcessCommand::new("git")
+        .current_dir(root)
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+const CHAT: &str = "what changed in the last release?";
+/// `agent_doc_prompt_lines::CHAT_PROMPT_RECORD_PREFIX`, as SKILL.md documents it.
+const CHAT_RECORD_PREFIX: &str = "> **Chat prompt (#chatprompt):**";
+
+/// Admit and close out the first trigger so the session is bound to `doc`.
+fn bound_session_with_committed_cycle(session: &str) -> (TempDir, PathBuf) {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    let context = codex_submit(
+        tmp.path(),
+        session,
+        "turn-1",
+        &format!("agent-doc {}", doc.display()),
+    );
+    assert!(
+        context.contains("cycle contract (preflight already ran"),
+        "{context}"
+    );
+    respond(
+        tmp.path(),
+        &doc,
+        "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\n\nReplied.\n<!-- /patch:exchange -->\n",
+    );
+    session_check_stderr(tmp.path(), &doc);
+    (tmp, doc)
+}
+
+/// GH #125 gaps 1 and 4: a chat prompt reaches the next trigger's contract as
+/// a real turn, and a closeout that never records it warns with the repair.
+/// The repair (gap 5) is a pure chat turn: `respond` with the canonical record
+/// line on a committed cycle, no trigger, no open preflight cycle.
+#[test]
+fn chat_prompt_is_carried_by_the_next_contract_and_unrecorded_closeout_warns() {
+    let (tmp, doc) = bound_session_with_committed_cycle("chat-session-1");
+    let root = tmp.path();
+
+    let context = codex_submit(root, "chat-session-1", "turn-2", CHAT);
+    assert!(
+        context.starts_with(agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_MARKER),
+        "{context}"
+    );
+
+    // Gap 1: the trigger's contract carries the chat prompt; it is not idle.
+    let context = codex_submit(
+        root,
+        "chat-session-1",
+        "turn-3",
+        &format!("agent-doc {}", doc.display()),
+    );
+    assert!(
+        context.starts_with(agent_doc_prompt_contract::chat_prompt::UNRECORDED_CHAT_PROMPTS_MARKER),
+        "{context}"
+    );
+    let contract = admitted_contract(&context);
+    assert_eq!(contract["no_changes"], false, "{contract:#}");
+    assert_eq!(contract["chat_prompts"], json!([CHAT]), "{contract:#}");
+    assert_eq!(
+        contract["diff_type"],
+        agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_DIFF_TYPE
+    );
+    assert!(
+        contract["user_intent_prompt_changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|change| change["text"] == CHAT),
+        "{contract:#}"
+    );
+    let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+    assert!(cycle.is_open());
+    assert_eq!(cycle.chat_prompts, vec![CHAT.to_string()]);
+
+    // Gap 4: the response does not record the chat prompt -> a warning with the
+    // repair, never a failed closeout.
+    respond(
+        root,
+        &doc,
+        "<!-- patch:exchange -->\n### Re: release — gpt-5\n\nNothing new.\n<!-- /patch:exchange -->\n",
+    );
+    let stderr = session_check_stderr(root, &doc);
+    assert!(
+        stderr.contains(
+            agent_doc_prompt_contract::chat_prompt::UNRECORDED_CHAT_PROMPT_CLOSEOUT_MARKER
+        ),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("chat_prompt: {CHAT:?}")),
+        "{stderr}"
+    );
+
+    // Gap 5: the documented repair on a committed cycle with no trigger.
+    let record = format!("{CHAT_RECORD_PREFIX} {CHAT}");
+    let stderr = respond(
+        root,
+        &doc,
+        &format!(
+            "<!-- patch:exchange -->\n{record}\n\n### Re: release (chat) — gpt-5\n\nRecorded the chat turn.\n<!-- /patch:exchange -->\n"
+        ),
+    );
+    assert!(stderr.contains("auto-reopened a fresh cycle"), "{stderr}");
+    let head = head_document(root);
+    assert!(
+        head.contains(&record),
+        "the record must be committed:\n{head}"
+    );
+    let stderr = session_check_stderr(root, &doc);
+    assert!(
+        !stderr.contains(
+            agent_doc_prompt_contract::chat_prompt::UNRECORDED_CHAT_PROMPT_CLOSEOUT_MARKER
+        ),
+        "{stderr}"
+    );
+}
+
+/// GH #125 gaps 3 and 5: a pure chat turn (no `agent-doc <FILE>` trigger, no
+/// open preflight cycle) records the prompt by putting the canonical record at
+/// the top of its `patch:exchange` response; `respond` commits it, and the
+/// ledger forgets the prompt so no later trigger re-reports it.
+#[test]
+fn a_pure_chat_turn_records_its_prompt_through_respond_and_clears_the_ledger() {
+    let (tmp, doc) = bound_session_with_committed_cycle("chat-session-2");
+    let root = tmp.path();
+
+    let context = codex_submit(root, "chat-session-2", "turn-2", CHAT);
+    assert!(
+        context.starts_with(agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_MARKER),
+        "{context}"
+    );
+    let before = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+    assert!(!before.is_open(), "a pure chat turn has no open cycle");
+
+    let record = format!("{CHAT_RECORD_PREFIX} {CHAT}");
+    respond(
+        root,
+        &doc,
+        &format!(
+            "<!-- patch:exchange -->\n{record}\n\n### Re: release — gpt-5\n\nNothing new since 1.2.\n<!-- /patch:exchange -->\n"
+        ),
+    );
+    let head = head_document(root);
+    assert!(head.contains(&record), "{head}");
+    assert!(head.contains("Nothing new since 1.2."), "{head}");
+    let stderr = session_check_stderr(root, &doc);
+    assert!(
+        !stderr.contains(
+            agent_doc_prompt_contract::chat_prompt::UNRECORDED_CHAT_PROMPT_CLOSEOUT_MARKER
+        ),
+        "{stderr}"
+    );
+
+    // Gap 3: the next trigger neither re-reports nor carries the prompt.
+    let context = codex_submit(
+        root,
+        "chat-session-2",
+        "turn-3",
+        &format!("agent-doc {}", doc.display()),
+    );
+    assert!(
+        !context.contains(agent_doc_prompt_contract::chat_prompt::UNRECORDED_CHAT_PROMPTS_MARKER),
+        "{context}"
+    );
+    let contract = admitted_contract(&context);
+    assert!(contract.get("chat_prompts").is_none(), "{contract:#}");
 }

@@ -341,12 +341,122 @@ fn chat_prompt_ledger_key(session_id: &str) -> String {
     )
 }
 
+/// One chat prompt a document-bound session received (`#chatprompt`).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ChatPromptEntry {
+    /// Operator text, as [`agent_doc_prompt_contract::chat_prompt::chat_prompt_text`]
+    /// classified it.
+    pub text: String,
+    /// Epoch seconds the hook saw the prompt. Bounds the entry's lifetime
+    /// ([`agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_LEDGER_TTL_SECS`])
+    /// and decides whether a committed response cycle answered it.
+    pub noted_at: u64,
+    /// Harness turn the prompt opened.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub turn_id: String,
+}
+
+impl<'de> Deserialize<'de> for ChatPromptEntry {
+    /// Ledgers written by 0.35.448 stored bare strings. Read them as entries
+    /// seen now, so a genuine pending prompt survives one TTL and a harness
+    /// envelope is still purged by the classifier on the next prune.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Legacy(String),
+            Entry {
+                text: String,
+                #[serde(default)]
+                noted_at: u64,
+                #[serde(default)]
+                turn_id: String,
+            },
+        }
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Legacy(text) => ChatPromptEntry {
+                text,
+                noted_at: now_secs(),
+                turn_id: String::new(),
+            },
+            Wire::Entry {
+                text,
+                noted_at,
+                turn_id,
+            } => ChatPromptEntry {
+                text,
+                noted_at,
+                turn_id,
+            },
+        })
+    }
+}
+
 /// Chat prompts a document-bound harness session received since its last
 /// `agent-doc <FILE>` trigger (`#chatprompt`, GH #125).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatPromptLedger {
     pub doc_path: String,
-    pub prompts: Vec<String>,
+    pub prompts: Vec<ChatPromptEntry>,
+}
+
+/// What a ledger prune knows about the bound document.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ChatPromptPruneFacts<'a> {
+    /// Current document content, when read.
+    pub document: Option<&'a str>,
+    /// `started_at` of the document's latest cycle when that cycle COMMITTED a
+    /// response: the closeout of every chat turn noted at or before it.
+    pub committed_response_cycle_started_at: Option<u64>,
+}
+
+/// Ledger hygiene (`#chatprompt`, GH #125 gap 3). An entry is dropped once:
+/// - the classifier no longer calls it a chat prompt (a harness envelope such
+///   as `<task-notification>` recorded before the envelope filter existed is
+///   purged retroactively);
+/// - it is older than the TTL;
+/// - the document records it (any recording, including the
+///   `> **Chat prompt (#chatprompt):**` line);
+/// - a response cycle opened at or after it committed: the agent's response
+///   for that harness turn closed out.
+///
+/// Then the newest [`CHAT_PROMPT_LEDGER_CAP`] entries are kept. Returns whether
+/// anything was dropped.
+pub fn prune_chat_prompt_ledger(
+    ledger: &mut ChatPromptLedger,
+    now: u64,
+    facts: ChatPromptPruneFacts<'_>,
+) -> bool {
+    use agent_doc_prompt_contract::chat_prompt::{
+        CHAT_PROMPT_LEDGER_TTL_SECS, chat_prompt_recorded, chat_prompt_text,
+    };
+    let before = ledger.prompts.len();
+    ledger.prompts.retain(|entry| {
+        chat_prompt_text(&entry.text).is_some()
+            && now.saturating_sub(entry.noted_at) <= CHAT_PROMPT_LEDGER_TTL_SECS
+            && !facts
+                .document
+                .is_some_and(|document| chat_prompt_recorded(document, &entry.text))
+            && !facts
+                .committed_response_cycle_started_at
+                .is_some_and(|started_at| started_at >= entry.noted_at)
+    });
+    if ledger.prompts.len() > CHAT_PROMPT_LEDGER_CAP {
+        let excess = ledger.prompts.len() - CHAT_PROMPT_LEDGER_CAP;
+        ledger.prompts.drain(..excess);
+    }
+    ledger.prompts.len() != before
+}
+
+/// `started_at` of `doc_path`'s latest cycle when it committed a response.
+fn committed_response_cycle_started_at(doc_path: &Path) -> Option<u64> {
+    agent_doc_cycle_state_io::load(doc_path)
+        .ok()
+        .flatten()
+        .filter(|cycle| {
+            cycle.phase == agent_doc_turn::CyclePhase::Committed && cycle.response_sha256.is_some()
+        })
+        .map(|cycle| cycle.started_at)
 }
 
 fn load_chat_prompt_ledger(
@@ -367,6 +477,28 @@ fn load_chat_prompt_ledger(
     Ok(None)
 }
 
+/// Persist `ledger` (or drop it when empty) in every root.
+fn store_chat_prompt_ledger(
+    roots: &[PathBuf],
+    session_id: &str,
+    ledger: &ChatPromptLedger,
+) -> Result<()> {
+    let key = chat_prompt_ledger_key(session_id);
+    let payload = serde_json::to_string(ledger)?;
+    let now_ms = now_secs().saturating_mul(1000);
+    for root in roots {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
+        if ledger.prompts.is_empty() {
+            agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(&conn, &key)?;
+        } else {
+            agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+                &conn, &key, &payload, now_ms,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn same_document(lhs: &Path, rhs: &Path) -> bool {
     let left = lhs.canonicalize().unwrap_or_else(|_| lhs.to_path_buf());
     let right = rhs.canonicalize().unwrap_or_else(|_| rhs.to_path_buf());
@@ -379,7 +511,8 @@ fn same_document(lhs: &Path, rhs: &Path) -> bool {
 /// prompt is a chat prompt (not an `agent-doc` trigger, not a harness slash
 /// command) and session tracking bound it to a document; `None` otherwise.
 /// The prompt is appended to the session's ledger so the next trigger cycle
-/// can report it when it never reached the document.
+/// can report it when it never reached the document. Entries already resolved
+/// are pruned on the way ([`prune_chat_prompt_ledger`]).
 pub fn note_chat_prompt(input: &UserPromptSubmitInput) -> Result<Option<PathBuf>> {
     let Some(chat) = agent_doc_prompt_contract::chat_prompt::chat_prompt_text(&input.prompt) else {
         return Ok(None);
@@ -398,59 +531,72 @@ pub fn note_chat_prompt(input: &UserPromptSubmitInput) -> Result<Option<PathBuf>
         return Ok(None);
     }
     let roots = tracking_roots(&cwd, Some(&doc_path));
+    let now = now_secs();
     let mut ledger = load_chat_prompt_ledger(&roots, &input.session_id)?
         .filter(|ledger| same_document(Path::new(&ledger.doc_path), &doc_path))
         .unwrap_or_else(|| ChatPromptLedger {
             doc_path: doc_path.display().to_string(),
             prompts: Vec::new(),
         });
-    if !ledger.prompts.iter().any(|existing| existing == &chat) {
-        ledger.prompts.push(chat);
+    let document = std::fs::read_to_string(&doc_path).ok();
+    prune_chat_prompt_ledger(
+        &mut ledger,
+        now,
+        ChatPromptPruneFacts {
+            document: document.as_deref(),
+            committed_response_cycle_started_at: committed_response_cycle_started_at(&doc_path),
+        },
+    );
+    match ledger.prompts.iter_mut().find(|entry| entry.text == chat) {
+        // A repeat refreshes the entry: it is the newest unanswered turn.
+        Some(existing) => {
+            existing.noted_at = now;
+            existing.turn_id = input.turn_id.clone();
+        }
+        None => ledger.prompts.push(ChatPromptEntry {
+            text: chat,
+            noted_at: now,
+            turn_id: input.turn_id.clone(),
+        }),
     }
-    if ledger.prompts.len() > CHAT_PROMPT_LEDGER_CAP {
-        let excess = ledger.prompts.len() - CHAT_PROMPT_LEDGER_CAP;
-        ledger.prompts.drain(..excess);
-    }
-    let payload = serde_json::to_string(&ledger)?;
-    let now_ms = now_secs().saturating_mul(1000);
-    for root in roots {
-        let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
-        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
-            &conn,
-            &chat_prompt_ledger_key(&input.session_id),
-            &payload,
-            now_ms,
-        )?;
-    }
+    prune_chat_prompt_ledger(&mut ledger, now, ChatPromptPruneFacts::default());
+    store_chat_prompt_ledger(&roots, &input.session_id, &ledger)?;
     Ok(Some(doc_path))
 }
 
 /// Chat prompts this session received since its last trigger that `document`
-/// (the trigger's current content) still does not record. Read-only; call
-/// [`clear_chat_prompt_ledger`] once the notice reached an admitted contract.
+/// (the trigger's current content) still does not record. Prunes the ledger
+/// first ([`prune_chat_prompt_ledger`]) and persists the pruned form, so a
+/// resolved or stale prompt is never reported again; call
+/// [`clear_chat_prompt_ledger`] once the prompts reached an admitted contract.
 pub fn unrecorded_chat_prompts(
     input: &UserPromptSubmitInput,
     doc_path: &Path,
     document: &str,
 ) -> Result<Vec<String>> {
     let roots = tracking_roots(Path::new(&input.cwd), Some(doc_path));
-    let Some(ledger) = load_chat_prompt_ledger(&roots, &input.session_id)? else {
+    let Some(mut ledger) = load_chat_prompt_ledger(&roots, &input.session_id)? else {
         return Ok(Vec::new());
     };
     if !same_document(Path::new(&ledger.doc_path), doc_path) {
         return Ok(Vec::new());
     }
-    Ok(ledger
-        .prompts
-        .into_iter()
-        .filter(|prompt| {
-            !agent_doc_prompt_contract::chat_prompt::chat_prompt_recorded(document, prompt)
-        })
-        .collect())
+    if prune_chat_prompt_ledger(
+        &mut ledger,
+        now_secs(),
+        ChatPromptPruneFacts {
+            document: Some(document),
+            committed_response_cycle_started_at: committed_response_cycle_started_at(doc_path),
+        },
+    ) {
+        store_chat_prompt_ledger(&roots, &input.session_id, &ledger)?;
+    }
+    Ok(ledger.prompts.into_iter().map(|entry| entry.text).collect())
 }
 
-/// Drop the session's chat prompt ledger: each chat prompt is reported on
-/// exactly one following admitted cycle, never re-raised forever.
+/// Drop the session's chat prompt ledger: each chat prompt is carried by
+/// exactly one following admitted cycle (as its contract's `chat_prompts`),
+/// never re-raised forever.
 pub fn clear_chat_prompt_ledger(input: &UserPromptSubmitInput, doc_path: &Path) -> Result<()> {
     for root in tracking_roots(Path::new(&input.cwd), Some(doc_path)) {
         let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
@@ -1145,14 +1291,6 @@ mod tests {
             vec!["#upgrade".to_string()]
         );
 
-        // Once the document records the prompt it is no longer reported.
-        let recorded = format!("{content}\n#upgrade\n");
-        assert!(
-            unrecorded_chat_prompts(&trigger, &doc, &recorded)
-                .unwrap()
-                .is_empty()
-        );
-
         // Reported on exactly one admitted cycle.
         clear_chat_prompt_ledger(&trigger, &doc).unwrap();
         assert!(
@@ -1160,6 +1298,137 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    fn ledger_entries(dir: &tempfile::TempDir, doc: &Path) -> Vec<ChatPromptEntry> {
+        let roots = tracking_roots(dir.path(), Some(doc));
+        load_chat_prompt_ledger(&roots, "codex-session")
+            .unwrap()
+            .map(|ledger| ledger.prompts)
+            .unwrap_or_default()
+    }
+
+    /// GH #125 gap 3: once the document records a prompt (the canonical
+    /// `> **Chat prompt (#chatprompt):**` line counts) the ledger forgets it,
+    /// durably, instead of re-reporting it on every later trigger.
+    #[test]
+    fn a_recorded_chat_prompt_is_cleared_from_the_ledger() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "turn-1");
+        let chat = chat_input(&dir, "turn-2", "#upgrade");
+        apply_user_prompt_submit(&chat).unwrap();
+        note_chat_prompt(&chat).unwrap();
+        assert_eq!(ledger_entries(&dir, &doc).len(), 1);
+
+        let content = fs::read_to_string(&doc).unwrap();
+        let recorded = format!("{content}\n> **Chat prompt (#chatprompt):** #upgrade\n");
+        let trigger = chat_input(&dir, "turn-3", &format!("agent-doc {}", doc.display()));
+        assert!(
+            unrecorded_chat_prompts(&trigger, &doc, &recorded)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            ledger_entries(&dir, &doc).is_empty(),
+            "the recorded prompt must leave the ledger, not just the notice"
+        );
+        assert!(
+            unrecorded_chat_prompts(&trigger, &doc, &content)
+                .unwrap()
+                .is_empty(),
+            "a later trigger must not re-report the recorded prompt"
+        );
+    }
+
+    /// GH #125 gap 3: a `<task-notification>` that a pre-filter binary wrote
+    /// into the ledger kept reappearing on every later trigger. It is purged
+    /// retroactively, as is a bare-string (0.35.448) ledger entry.
+    #[test]
+    fn harness_envelopes_already_in_a_ledger_are_purged_retroactively() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let roots = tracking_roots(dir.path(), Some(&doc));
+        let legacy = serde_json::json!({
+            "doc_path": doc.display().to_string(),
+            "prompts": [
+                "<task-notification>\n<task-id>af0c40c5</task-id>\n<status>completed</status>\n</task-notification>",
+                "#upgrade",
+            ],
+        });
+        for root in &roots {
+            let conn = agent_doc_sqlite::state_store::open_state_db(root).unwrap();
+            agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+                &conn,
+                &chat_prompt_ledger_key("codex-session"),
+                &legacy.to_string(),
+                0,
+            )
+            .unwrap();
+        }
+        let trigger = chat_input(&dir, "turn-3", &format!("agent-doc {}", doc.display()));
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            unrecorded_chat_prompts(&trigger, &doc, &content).unwrap(),
+            vec!["#upgrade".to_string()]
+        );
+        let entries = ledger_entries(&dir, &doc);
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert_eq!(entries[0].text, "#upgrade");
+    }
+
+    /// GH #125 gap 3: TTL, the closeout of the turn's response, and the cap.
+    #[test]
+    fn ledger_prune_drops_expired_closed_out_and_overflow_entries() {
+        use agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_LEDGER_TTL_SECS;
+        let now = 1_000_000;
+        let entry = |text: &str, noted_at: u64| ChatPromptEntry {
+            text: text.to_string(),
+            noted_at,
+            turn_id: String::new(),
+        };
+        let mut ledger = ChatPromptLedger {
+            doc_path: "doc.md".to_string(),
+            prompts: vec![
+                entry("expired", now - CHAT_PROMPT_LEDGER_TTL_SECS - 1),
+                entry("answered", now - 100),
+                entry("fresh", now - 10),
+            ],
+        };
+        // A response cycle opened at `now - 50` committed: it closed out the
+        // turn noted at `now - 100`, not the one noted after it opened.
+        assert!(prune_chat_prompt_ledger(
+            &mut ledger,
+            now,
+            ChatPromptPruneFacts {
+                document: None,
+                committed_response_cycle_started_at: Some(now - 50),
+            },
+        ));
+        assert_eq!(
+            ledger
+                .prompts
+                .iter()
+                .map(|e| e.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fresh"]
+        );
+
+        ledger.prompts = (0..CHAT_PROMPT_LEDGER_CAP + 3)
+            .map(|i| entry(&format!("prompt {i}"), now))
+            .collect();
+        assert!(prune_chat_prompt_ledger(
+            &mut ledger,
+            now,
+            ChatPromptPruneFacts::default()
+        ));
+        assert_eq!(ledger.prompts.len(), CHAT_PROMPT_LEDGER_CAP);
+        assert_eq!(ledger.prompts[0].text, "prompt 3", "the newest are kept");
+        assert!(!prune_chat_prompt_ledger(
+            &mut ledger,
+            now,
+            ChatPromptPruneFacts::default()
+        ));
     }
 
     #[test]

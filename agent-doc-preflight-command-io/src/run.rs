@@ -60,7 +60,7 @@ impl agent_doc_diff_io::LiveCurrentSource for ReactiveLiveCurrentSource {
 }
 
 /// Options controlling a `preflight` invocation.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PreflightOptions {
     /// Pure inspection probe (`#preflight-probe-side-effect-free`): compute and
     /// emit the same JSON, but do NOT open a `preflight_started` cycle. A
@@ -71,6 +71,14 @@ pub struct PreflightOptions {
     /// provenance because their subprocess environment need not include the
     /// model harness's ambient detection variables.
     pub invocation: PreflightInvocation,
+    /// `#chatprompt` (GH #125): operator prompts the harness hook saw in chat
+    /// since the session's last trigger that the document does not record.
+    /// The hook hands them in on the request itself because preflight's reads
+    /// may be served by the project controller, which has no view of harness
+    /// session state. A cycle that carries any is a real turn: the contract
+    /// reports them as `chat_prompts` and `user_intent_prompt_changes`, never
+    /// as `no_changes`, and the cycle opens so its closeout is a turn.
+    pub chat_prompts: Vec<String>,
 }
 
 /// Provenance for a preflight invocation.
@@ -1305,6 +1313,23 @@ fn run_with_options_to_writer_in_pass(
         .as_deref()
         .and_then(diff::parse_slash_command_only_added_diff);
     let no_changes = diff_result.is_none();
+    // `#chatprompt` (GH #125): chat prompts are this cycle's work even when the
+    // document did not change. `document_no_changes` keeps the document-only
+    // meaning for the steps that are about the document diff itself.
+    let chat_prompts = options
+        .chat_prompts
+        .iter()
+        .map(|prompt| prompt.trim().to_string())
+        .filter(|prompt| !prompt.is_empty())
+        .fold(Vec::<String>::new(), |mut acc, prompt| {
+            if !acc.contains(&prompt) {
+                acc.push(prompt);
+            }
+            acc
+        });
+    let chat_turn = !chat_prompts.is_empty();
+    let document_no_changes = no_changes;
+    let no_changes = document_no_changes && !chat_turn;
 
     // `#qmaintorphan`: queue maintenance (step 4b2) runs AFTER the single step-2
     // commit, so a mutation it persisted to the visible document + snapshot is
@@ -1941,12 +1966,26 @@ fn run_with_options_to_writer_in_pass(
         .context("preflight effect graph did not reach its terminal projection")?;
 
     if !options.probe {
+        let mut checkpoint_prompt_targets = prompt_targets.clone();
+        push_unique_strings(&mut checkpoint_prompt_targets, chat_prompts.clone());
         agent_doc_cycle_state_io::record_turn_checkpoint(
             file,
-            &prompt_targets,
+            &checkpoint_prompt_targets,
             checkpoint_queue_task_id,
             checkpoint_queue_task_id,
         )?;
+        if chat_turn {
+            agent_doc_cycle_state_io::record_chat_prompts(file, &chat_prompts)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_chat_prompts_carried file={} count={} document_no_changes={} (#chatprompt)",
+                    file.display(),
+                    chat_prompts.len(),
+                    document_no_changes
+                ),
+            );
+        }
     }
     if !options.probe && !no_changes {
         agent_doc_cycle_state_io::record_backlog_capture_requirement(
@@ -2057,6 +2096,22 @@ fn run_with_options_to_writer_in_pass(
     // `#qgoalstall`: only a prompt authored OUTSIDE the active queue preempts the
     // drain. An operator adding a directive to `agent:queue` under go mode is
     // queueing work, not competing with the queue, and must not stall it.
+    // `#chatprompt` (GH #125): a chat prompt is operator intent for this turn.
+    // Added after the active-prompt marker projection (the prompt is not in the
+    // document to mark) and before the queue preemption decision (the operator
+    // asked for this turn's work, so it runs before the next queue head).
+    let document_user_intent_prompt_changes = user_intent_prompt_changes.clone();
+    for prompt in &chat_prompts {
+        if !user_intent_prompt_changes
+            .iter()
+            .any(|change| change.text.trim() == prompt)
+        {
+            user_intent_prompt_changes.push(agent_doc_diff::PromptBearingChange {
+                kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
+                text: prompt.clone(),
+            });
+        }
+    }
     let exchange_prompt_preempts_queue =
         agent_doc_workflow::session_cycle::prompt_changes_preempt_queue(
             &user_intent_prompt_changes,
@@ -2140,7 +2195,9 @@ fn run_with_options_to_writer_in_pass(
         // change) rather than the boundary-keyed exchange detector: preflight's
         // commit has already inserted a trailing boundary, which would hide a
         // freshly-committed prompt from `unresolved_exchange_prompt`.
-        let unresolved_prompt = user_intent_prompt_changes
+        // A chat prompt is not an unresolved document prompt: it already
+        // reached this very turn through the harness chat.
+        let unresolved_prompt = document_user_intent_prompt_changes
             .iter()
             .find(|change| {
                 matches!(
@@ -2155,7 +2212,7 @@ fn run_with_options_to_writer_in_pass(
                 // managed queue edit still suppresses recursive dispatch even
                 // though it is intentionally absent from actionable intent.
                 && !semantic_prompt_bearing_changes.is_empty()
-                && user_intent_prompt_changes.is_empty()
+                && document_user_intent_prompt_changes.is_empty()
                 && (prompt_edit_independent_of_active_turn
                     || op_affectedness.as_ref().is_some_and(|affectedness| {
                         !affectedness.turn_affected && !affectedness.classified.is_empty()
@@ -2393,13 +2450,17 @@ fn run_with_options_to_writer_in_pass(
         no_changes,
         no_changes_explanation,
         linked_changes: projected_linked_changes,
-        diff_type: diff_type_str.clone(),
+        diff_type: diff_type_str.clone().or_else(|| {
+            (chat_turn && document_no_changes)
+                .then(|| agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_DIFF_TYPE.to_string())
+        }),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
         semantic_diff,
         turn_scope,
         op_affectedness,
         user_intent_prompt_changes,
+        chat_prompts,
         inline_annotations,
         slash_commands,
         builtin_commands,
@@ -3325,6 +3386,79 @@ mod tests {
             state.requires_backlog_capture,
             "harness prompt preset expansion should record backlog capture requirement"
         );
+    }
+    /// GH #125 gap 1: the operator typed `#upgrade` in the harness chat and the
+    /// next trigger's contract still said `no_changes: true`. Chat prompts the
+    /// hook hands in make the cycle a real turn: `no_changes` false, a distinct
+    /// `diff_type`, the prompts in `chat_prompts` and
+    /// `user_intent_prompt_changes`, and an open cycle carrying them.
+    #[test]
+    fn preflight_carries_hook_chat_prompts_as_a_real_turn() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        // Control: the same unchanged document with no chat prompt is idle.
+        let mut idle = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions::default(), &mut idle).unwrap();
+        let idle: serde_json::Value = serde_json::from_slice(&idle).unwrap();
+        assert_eq!(idle["no_changes"], true, "{idle:#}");
+        assert!(idle.get("chat_prompts").is_none(), "{idle:#}");
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(
+            &doc,
+            PreflightOptions {
+                chat_prompts: vec!["#upgrade".to_string(), " #upgrade ".to_string()],
+                ..PreflightOptions::default()
+            },
+            &mut output,
+        )
+        .unwrap();
+        let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(contract["no_changes"], false, "{contract:#}");
+        assert!(
+            contract.get("no_changes_explanation").is_none(),
+            "{contract:#}"
+        );
+        assert_eq!(
+            contract["diff_type"],
+            agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_DIFF_TYPE
+        );
+        assert_eq!(contract["chat_prompts"], serde_json::json!(["#upgrade"]));
+        let changes = contract["user_intent_prompt_changes"].as_array().unwrap();
+        assert!(
+            changes
+                .iter()
+                .any(|change| change["kind"] == "prompt_target" && change["text"] == "#upgrade"),
+            "{contract:#}"
+        );
+
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_eq!(state.chat_prompts, vec!["#upgrade".to_string()]);
+        assert!(state.prompt_targets.contains(&"#upgrade".to_string()));
     }
     #[test]
     fn preflight_opens_cycle_from_active_queue_when_document_has_no_diff() {

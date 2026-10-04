@@ -119,6 +119,7 @@ ops_log_events! {
     CommitBlockedMissingCapturedResponse => "commit_blocked_missing_captured_response",
     SessionCheckCommitBoundaryRecovered => "session_check_commit_boundary_recovered",
     CommitNoop => "commit_noop",
+    CommitChatTurn => "commit_chat_turn",
     RouteDispatchStartProven => "route_dispatch_start_proven",
     RouteSubmitIssue => "route_submit_issue",
     PostCommitUserFollowUp => "post_commit_user_follow_up",

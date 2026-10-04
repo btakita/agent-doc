@@ -16,19 +16,26 @@ rule. This runbook carries the rest.
   operator types the prompt into the harness chat (Claude Code, Codex, OpenCode)
   instead of editing the document — including a bare `prompt_presets` key such
   as `#upgrade` — the document has no diff for it by construction. Record it:
-  insert the chat prompt verbatim into `agent:exchange` as
-  `> **Chat prompt (#chatprompt):** <prompt>` (the "missing user prompt"
-  carve-out; steering never reads that record back as operator input), do the work, and persist the response through
-  `agent-doc respond <FILE>` / `agent-doc write --commit <FILE>` with its
-  queue/backlog mutations, exactly like a document-originated turn. The
-  `UserPromptSubmit` hook marks such a prompt in a document-bound session with
-  `[agent-doc] chat prompt for session document <FILE>` (plus the resolved
-  `prompt_preset` body), and keeps it in a per-session ledger: the next admitted
-  `agent-doc <FILE>` contract is preceded by `[agent-doc] unrecorded chat
-  prompt(s) for this document` listing each one the document still does not
-  carry. That cycle is **not idle** even when `no_changes: true`; record and
-  answer the listed prompts instead of stopping. Each ledger entry is reported
-  on one admitted cycle only.
+  begin the `patch:exchange` response with the prompt verbatim as
+  `> **Chat prompt (#chatprompt):** <prompt>` (multi-line prompts continue on
+  `>` lines; steering never reads that record back as operator input), do the
+  work, and persist through `agent-doc respond <FILE>` /
+  `agent-doc write --commit <FILE>` with its queue/backlog mutations, exactly
+  like a document-originated turn. This works on a pure chat turn too (no
+  `agent-doc <FILE>` trigger, no open cycle): `respond` reopens a fresh cycle
+  from HEAD (`cycle ... was already committed; auto-reopened a fresh cycle` is
+  that path, not an error). The `UserPromptSubmit` hook marks such a prompt in
+  a document-bound session with `[agent-doc] chat prompt for session document
+  <FILE>` (plus the resolved `prompt_preset` body) and keeps it in a
+  per-session ledger. The next admitted `agent-doc <FILE>` cycle **carries**
+  every prompt the document still does not record: the contract lists them in
+  `chat_prompts` and `user_intent_prompt_changes`, reports `no_changes: false`
+  (`diff_type: "chat_prompt"` when nothing else changed), and is preceded by an
+  `[agent-doc] unrecorded chat prompt(s) for this document` notice. Record and
+  answer them in that cycle. A closeout that commits without the record makes
+  `session-check` warn `chat prompt not recorded (#chatprompt)` with the repair
+  (a warning, not a failure): pipe a response that begins with the record line
+  through `agent-doc respond <FILE>`.
 - **Informational components stay informational (`#notes-not-a-prompt`).** Content
   in `agent:notes` remains available as context when another exchange/queue
   prompt starts the turn, but it is not itself a prompt or completion target.

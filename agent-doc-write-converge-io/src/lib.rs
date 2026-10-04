@@ -923,6 +923,38 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     ) {
         return false;
     }
+    // `#cellcollide`: an editor receipt that carries the agent's written cells
+    // exactly, and differs from `content_ours` only where the operator edited a
+    // cell the agent did not write (queue, backlog, ...) or made a
+    // non-overlapping edit inside a written non-exchange cell, is the per-cell
+    // merge of both edits. It is not a collision: keep the receipt and report
+    // no drift. Exchange, unscoped text and structure keep the strict rules.
+    if decision.snap_source.is_visible_write_proven()
+        && let Some(drift) =
+            agent_doc_document_realtime::cell_collision::candidate_drift_confined_to_unowned_cells(
+                base,
+                &decision.snapshot_content,
+                ours,
+            )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "live_prompt_drift_unowned_cells_preserved file={} source={} patch_id={} drifted_cells={} merged_owned_cells={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={} reason=cell_disjoint_operator_edit (#cellcollide)",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                drift.drifted_cells.join(","),
+                drift.merged_owned_cells.join(","),
+                decision.snapshot_content.len(),
+                agent_doc_hash::content_hash(&decision.snapshot_content),
+                ours.len(),
+                agent_doc_hash::content_hash(ours),
+            ),
+        );
+        decision.live_prompt_drift_state = IpcLivePromptDriftState::VisibleResponsePreserved;
+        return false;
+    }
 
     let candidate = decision.snapshot_content.clone();
     decision.live_prompt_drift_state = IpcLivePromptDriftState::Detected;

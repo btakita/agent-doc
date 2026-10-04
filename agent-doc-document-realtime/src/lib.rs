@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub mod baseline_comparison;
+pub mod cell_collision;
 pub mod convergence_gate;
 pub mod crdt_authority;
 pub mod crdt_relay;

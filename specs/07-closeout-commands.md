@@ -80,8 +80,40 @@ canonical through the replica's next delta, and a replica generation handoff
 (for example the library reload after `make install`) can land that delta a few
 seconds after the receipt. The receipt check therefore parks on the canonical
 delivery-revision edge, never a timer poll, and re-reads canonical after each
-revision. It accepts only exact equality, and it refuses when the
-projection-observation ceiling passes or the revision stops moving.
+revision. Without a cell scope it accepts only exact equality, and it refuses
+when the projection-observation ceiling passes or the revision stops moving.
+
+Collision detection is cell-precise (`#cellcollide`). A response write owns
+only the components its target changes relative to its baseline, plus every
+component a patch names. An operator edit in a different component (the queue,
+the backlog, any other named cell) while the write is in flight is not a
+collision, and neither the live-prompt-drift guard nor the receipt check may
+report it as one:
+
+- The visible-write live-prompt-drift guard keeps a proven editor receipt, with
+  no `ipc_proof_insufficient` / `live_prompt_drift_after_preflight` record and
+  no `ipc_snapshot_adoption_blocked` latch, when every difference between the
+  receipt and `content_ours` is either in a component the agent did not write,
+  or a non-overlapping operator edit already merged into a non-exchange
+  component the agent did write (the receipt contains the agent's delta). It
+  logs `live_prompt_drift_unowned_cells_preserved` with the drifted and merged
+  cells.
+- The receipt check judges the receipt against canonical only on owned cells.
+  When they agree, canonical is adopted (`editor_receipt_owned_cells_converged`),
+  so operator edits newer than the receipt survive into disk and the commit;
+  the receipt never replaces canonical. When an owned cell in canonical still
+  equals the pre-write cut, the receipt is pending rather than divergent and may
+  wait up to three catch-up budgets for the editor delta (a replica generation
+  handoff can land it late). An owned cell matching neither side refuses at the
+  ordinary budget and names the cell (`diverged_owned_cells=`).
+- `exchange`, the unscoped text outside components, and the component
+  structure stay strict: any difference there keeps the existing live-prompt
+  handling, so a prompt or directive typed into those cells is never absorbed.
+  An empty or unparseable ownership set falls back to exact equality.
+
+A same-cell overlap still fails closed: an operator edit at the exchange tail
+where the response lands, or an operator rewrite of the queue head the
+response consumes.
 
 When retained closeout recovery observes that live editor authority and disk
 diverge, it retains an exact continuation keyed by the authority revision.

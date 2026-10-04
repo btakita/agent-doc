@@ -1884,6 +1884,54 @@ impl SimWorld {
         }
     }
 
+    /// `#cellcollide`: model the visible-write closeout over the production
+    /// cell decisions. `receipt` is the editor's visible-write receipt and
+    /// `canonical` the controller canonical when the receipt is verified (the
+    /// operator may have kept typing in between). Drift the cell guard cannot
+    /// confine keeps the strict live-prompt handling; otherwise the receipt is
+    /// judged against canonical only on the cells the write owns.
+    pub(crate) fn finalize_visible_write_receipt_by_cells(
+        &mut self,
+        baseline: &str,
+        content_ours: &str,
+        receipt: &str,
+        canonical: &str,
+    ) -> agent_doc_document_realtime::cell_collision::EditorReceiptCellVerdict {
+        use agent_doc_document_realtime::cell_collision::{
+            EditorReceiptCellVerdict, candidate_drift_confined_to_unowned_cells,
+            decide_editor_receipt_cells, owned_cell_names,
+        };
+        self.doc = canonical.to_string();
+        if agent_doc_document_realtime::write_policy::ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
+            baseline,
+            receipt,
+            content_ours,
+        ) && candidate_drift_confined_to_unowned_cells(baseline, receipt, content_ours).is_none()
+        {
+            self.snapshot = content_ours.to_string();
+            self.coverage.ipc_snapshot_live_prompt_blocks += 1;
+            return EditorReceiptCellVerdict::Diverged {
+                cells: vec!["live_prompt_drift_after_preflight".to_string()],
+            };
+        }
+        let owned = owned_cell_names(baseline, content_ours).unwrap_or_default();
+        let verdict = decide_editor_receipt_cells(Some(baseline), receipt, canonical, &owned);
+        match &verdict {
+            EditorReceiptCellVerdict::Exact
+            | EditorReceiptCellVerdict::OwnedCellsConverged { .. } => {
+                self.snapshot = canonical.to_string();
+                if receipt != content_ours || canonical != receipt {
+                    self.coverage.cell_disjoint_receipt_commits += 1;
+                }
+            }
+            EditorReceiptCellVerdict::OwnedCellsPending { .. }
+            | EditorReceiptCellVerdict::Diverged { .. } => {
+                self.coverage.ipc_snapshot_live_prompt_blocks += 1;
+            }
+        }
+        verdict
+    }
+
     /// Model the `#fintol2` finalize-tolerance decision over the same public gate
     /// primitives the binary's `guard_ipc_snapshot_adoption_against_live_prompt_drift`
     /// uses. When the live buffer drifted after preflight:

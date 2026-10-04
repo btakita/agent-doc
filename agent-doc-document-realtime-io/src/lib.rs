@@ -3004,6 +3004,26 @@ pub fn adopt_verified_editor_text_through_relay_authority(
     )
 }
 
+/// How long an editor receipt whose owned cells have simply not reached
+/// canonical yet (canonical still holds the pre-write cut there) may keep
+/// waiting (`#cellcollide`). A replica generation handoff on 2026-10-04
+/// (`tasks/agent-doc/agent-doc-bugs.md`, `provisional_replacement=true`) landed
+/// the editor's exchange delta about 12 s after the receipt; the 8 s catch-up
+/// budget refused a receipt that canonical then matched byte-for-byte. A
+/// pending owned cell is not contradicting canonical, so it gets this longer
+/// ceiling; a contradicting cell still refuses at the ordinary budget.
+pub const EDITOR_RECEIPT_OWNED_CELL_PENDING_MS: u64 = 3 * EDITOR_RECEIPT_CANONICAL_CATCHUP_MS;
+
+/// Which document cells an editor receipt is proof for (`#cellcollide`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorReceiptCellScope {
+    /// The canonical cut the write was computed against, when known.
+    pub pre_write: Option<String>,
+    /// Component names the write owns (see
+    /// [`agent_doc_document_realtime::cell_collision::owned_cell_names`]).
+    pub owned_cells: std::collections::BTreeSet<String>,
+}
+
 /// [`adopt_verified_editor_text_through_relay_authority`] with an explicit
 /// catch-up budget.
 ///
@@ -3020,8 +3040,35 @@ pub fn adopt_verified_editor_text_through_relay_authority_within(
     source: &str,
     wait: std::time::Duration,
 ) -> Result<Option<bool>> {
+    adopt_verified_editor_receipt_by_cells_within(file, text, source, None, wait, wait)
+        .map(|_| Some(false))
+}
+
+/// Cell-precise editor-receipt verification (`#cellcollide`).
+///
+/// Without a scope this is the exact-equality check above. With a scope, the
+/// receipt must agree with canonical on every cell the write owns; canonical
+/// may differ in other cells, where it carries operator edits newer than the
+/// receipt. Canonical stays the authority: the returned text is always a
+/// canonical read, never the receipt, so the caller persists the operator's
+/// newer edits instead of rolling them back. While an owned cell in canonical
+/// still equals the pre-write cut the receipt is pending, not divergent, and
+/// may wait up to `pending_wait`; an owned cell matching neither side is a
+/// genuine same-cell overlap and refuses at `wait`.
+pub fn adopt_verified_editor_receipt_by_cells_within(
+    file: &Path,
+    text: &str,
+    source: &str,
+    scope: Option<&EditorReceiptCellScope>,
+    wait: std::time::Duration,
+    pending_wait: std::time::Duration,
+) -> Result<String> {
+    use agent_doc_document_realtime::cell_collision::{
+        EditorReceiptCellVerdict, decide_editor_receipt_cells,
+    };
     let started = std::time::Instant::now();
     let deadline = started.checked_add(wait);
+    let pending_deadline = started.checked_add(pending_wait.max(wait));
     let mut controller_cursor = None;
     let mut revisions_observed = 0usize;
     loop {
@@ -3049,10 +3096,47 @@ pub fn adopt_verified_editor_text_through_relay_authority_within(
                     ),
                 );
             }
-            return Ok(Some(false));
+            return Ok(canonical);
         }
-        let remaining = deadline
-            .map(|deadline| deadline.saturating_duration_since(std::time::Instant::now()))
+        let verdict = scope.map(|scope| {
+            decide_editor_receipt_cells(
+                scope.pre_write.as_deref(),
+                text,
+                &canonical,
+                &scope.owned_cells,
+            )
+        });
+        if let Some(EditorReceiptCellVerdict::OwnedCellsConverged { drifted_cells }) = &verdict {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "editor_receipt_owned_cells_converged file={} source={} owned_cells={} operator_drift_cells={} revisions={} waited_ms={} receipt_hash={} canonical_hash={} (#cellcollide)",
+                    file.display(),
+                    source,
+                    scope
+                        .map(|scope| scope
+                            .owned_cells
+                            .iter()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(","))
+                        .unwrap_or_default(),
+                    drifted_cells.join(","),
+                    revisions_observed,
+                    started.elapsed().as_millis(),
+                    agent_doc_hash::content_hash(text),
+                    agent_doc_hash::content_hash(&canonical),
+                ),
+            );
+            return Ok(canonical);
+        }
+        let pending = matches!(
+            verdict,
+            Some(EditorReceiptCellVerdict::OwnedCellsPending { .. })
+        );
+        let limit = if pending { pending_deadline } else { deadline };
+        let remaining = limit
+            .map(|limit| limit.saturating_duration_since(std::time::Instant::now()))
             .unwrap_or_default();
         let advanced = match cursor {
             Some(_) if remaining.is_zero() => false,
@@ -3069,8 +3153,17 @@ pub fn adopt_verified_editor_text_through_relay_authority_within(
             }
         };
         if !advanced {
+            let cells = match &verdict {
+                Some(EditorReceiptCellVerdict::OwnedCellsPending { pending_cells }) => {
+                    format!(", pending_owned_cells={}", pending_cells.join(","))
+                }
+                Some(EditorReceiptCellVerdict::Diverged { cells }) => {
+                    format!(", diverged_owned_cells={}", cells.join(","))
+                }
+                _ => String::new(),
+            };
             anyhow::bail!(
-                "{source}: refusing editor receipt that diverges from controller canonical for {} (canonical_hash={}, editor_hash={}, waited_ms={}, revisions={}); retained canonical projection remains authoritative",
+                "{source}: refusing editor receipt that diverges from controller canonical for {} (canonical_hash={}, editor_hash={}, waited_ms={}, revisions={}{cells}); retained canonical projection remains authoritative",
                 file.display(),
                 agent_doc_hash::content_hash(&canonical),
                 agent_doc_hash::content_hash(text),
@@ -13989,6 +14082,153 @@ mod tests {
             "{err:#}"
         );
         assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
+
+    fn cell_doc(exchange: &str, queue: &str) -> String {
+        format!(
+            "# Session\n\n<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n"
+        )
+    }
+
+    fn exchange_scope(pre_write: &str) -> EditorReceiptCellScope {
+        EditorReceiptCellScope {
+            pre_write: Some(pre_write.to_string()),
+            owned_cells: ["exchange".to_string()].into_iter().collect(),
+        }
+    }
+
+    /// `#cellcollide`: the 2026-10-04 agent-doc-bugs.md shape. The agent wrote
+    /// only `exchange`; the operator kept typing in `queue`, so canonical holds a
+    /// queue newer than the receipt. The receipt is proof for `exchange` only,
+    /// so it is accepted and canonical (with the operator's queue) is adopted.
+    #[test]
+    fn editor_receipt_accepts_operator_drift_in_an_unowned_cell() {
+        let pre = cell_doc("prompt\n", "- do #a\n");
+        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "- do #a typ\n");
+        let canonical = cell_doc("prompt\n### Re: answer\n\nbody\n", "- do #a typed more\n");
+        let (_dir, file, _canonical) = temp_doc(&pre);
+        let identity = "test-editor-receipt-unowned-cell-drift";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        apply_cp_write_through_relay_authority(&file, &pre, &canonical, "operator_and_response")
+            .unwrap();
+
+        let adopted = adopt_verified_editor_receipt_by_cells_within(
+            &file,
+            &receipt,
+            "cellcollide_receipt",
+            Some(&exchange_scope(&pre)),
+            std::time::Duration::from_millis(200),
+            std::time::Duration::from_millis(200),
+        )
+        .expect("queue-only operator drift must not refuse an exchange receipt");
+        assert_eq!(
+            adopted, canonical,
+            "canonical keeps the operator's newer queue"
+        );
+
+        // Without a cell scope the same receipt is still refused (exact equality).
+        let err = adopt_verified_editor_text_through_relay_authority_within(
+            &file,
+            &receipt,
+            "cellcollide_unscoped_receipt",
+            std::time::Duration::from_millis(200),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("refusing editor receipt that diverges from controller canonical")
+        );
+    }
+
+    /// `#cellcollide`: an operator edit in the SAME owned cell (the exchange
+    /// tail) is a genuine overlap and still fails closed.
+    #[test]
+    fn editor_receipt_refuses_operator_overlap_in_an_owned_cell() {
+        let pre = cell_doc("prompt\n", "");
+        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "");
+        let canonical = cell_doc("prompt\n❯ operator typed at the tail\n", "");
+        let (_dir, file, _canonical) = temp_doc(&pre);
+        let identity = "test-editor-receipt-owned-cell-overlap";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        apply_cp_write_through_relay_authority(&file, &pre, &canonical, "operator_overlap")
+            .unwrap();
+
+        let err = adopt_verified_editor_receipt_by_cells_within(
+            &file,
+            &receipt,
+            "cellcollide_overlap_receipt",
+            Some(&exchange_scope(&pre)),
+            std::time::Duration::from_millis(200),
+            std::time::Duration::from_secs(5),
+        )
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("refusing editor receipt that diverges from controller canonical")
+                && message.contains("diverged_owned_cells=exchange"),
+            "{message}"
+        );
+    }
+
+    /// `#cellcollide`: the second 2026-10-04 shape. The editor's exchange delta
+    /// reached canonical after the ordinary catch-up budget (a replica
+    /// generation handoff). While canonical's owned cell still equals the
+    /// pre-write cut the receipt is pending, so it waits past the ordinary
+    /// budget and is accepted when the delta lands.
+    #[test]
+    fn editor_receipt_pending_owned_cell_waits_past_the_ordinary_budget() {
+        let pre = cell_doc("prompt\n", "- do #a\n");
+        let receipt = cell_doc("prompt\n### Re: answer\n\nbody\n", "- do #a\n");
+        let (_dir, file, _canonical) = temp_doc(&pre);
+        let identity = "test-editor-receipt-pending-owned-cell";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let writer_file = file.clone();
+        let (writer_pre, writer_receipt) = (pre.clone(), receipt.clone());
+        let writer = std::thread::spawn(move || {
+            // Unrelated operator revision first, then the late exchange delta
+            // after the ordinary budget has expired.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let operator = writer_pre.replace("- do #a\n", "- do #a!\n");
+            apply_cp_write_through_relay_authority(
+                &writer_file,
+                &writer_pre,
+                &operator,
+                "pending_operator_revision",
+            )
+            .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let landed = writer_receipt.replace("- do #a\n", "- do #a!\n");
+            apply_cp_write_through_relay_authority(
+                &writer_file,
+                &operator,
+                &landed,
+                "late_exchange_delta",
+            )
+            .unwrap();
+            landed
+        });
+        let adopted = adopt_verified_editor_receipt_by_cells_within(
+            &file,
+            &receipt,
+            "cellcollide_pending_receipt",
+            Some(&exchange_scope(&pre)),
+            std::time::Duration::from_millis(200),
+            std::time::Duration::from_secs(5),
+        );
+        let landed = writer.join().unwrap();
+        assert_eq!(
+            adopted.expect("a pending owned cell must not be refused at the ordinary budget"),
+            landed
+        );
     }
 
     #[test]

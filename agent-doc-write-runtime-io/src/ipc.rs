@@ -1003,7 +1003,10 @@ mod visible_write_content_snapshot_tests {
             !doc.contains("do [#a]"),
             "the agent's strike resurrected the operator-deleted line:\n{doc}"
         );
-        assert!(doc.contains("- do [#b]"), "untouched queue line lost:\n{doc}");
+        assert!(
+            doc.contains("- do [#b]"),
+            "untouched queue line lost:\n{doc}"
+        );
         assert!(
             doc.contains("### Re: do #a — opus-5-5"),
             "agent response lost:\n{doc}"
@@ -2306,6 +2309,96 @@ mod core_tests {
                 && log.contains("queue_live_deletion_ignored")
                 && log.contains("reason=unproven_ipc_candidate_queue_deletion"),
             "response-missing visible-write proof must fail closed while recording queue deletion proof:\n{log}"
+        );
+    }
+
+    /// `#cellcollide`: the operator typed only inside `queue` while the agent's
+    /// write touched only `exchange`. The proven receipt is the per-cell merge
+    /// of both edits; it must be kept, with no `ipc_proof_insufficient`
+    /// / `live_prompt_drift_after_preflight` record and no adoption latch.
+    #[test]
+    fn ipc_live_prompt_drift_ignores_operator_edit_confined_to_unowned_queue_cell() {
+        let dir = tempfile::tempdir().unwrap();
+        let queue = "<!-- agent:queue -->\n- do [#head] spec-test\n<!-- /agent:queue -->\n";
+        let exchange = |body: &str| {
+            format!(
+                "---\nsession: test\n---\n\n<!-- agent:exchange -->\n❯ original prompt\n{body}<!-- agent:boundary:b0 -->\n<!-- /agent:exchange -->\n\n"
+            )
+        };
+        let baseline = format!("{}{queue}", exchange(""));
+        let response = "### Re: original prompt — gpt-5\n\nDone.\n";
+        let content_ours = format!("{}{queue}", exchange(response));
+        let candidate = format!(
+            "{}{}",
+            exchange(response),
+            queue.replace("spec-test", "spec-test-build-install")
+        );
+        let doc = agent_doc_test_support::init_repo_with_doc(dir.path(), "session.md", &baseline);
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&baseline), Some(&baseline)).unwrap();
+        let mut decision = IpcRepairDecision::lazily_visible_write(candidate.clone());
+
+        let fired = guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &doc,
+            "socket_visible_write",
+            Some("patch-cellcollide"),
+            Some(&baseline),
+            Some(&content_ours),
+            &mut decision,
+        );
+
+        assert!(
+            !fired,
+            "an unowned-cell operator edit is not live prompt drift"
+        );
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::LazilyVisibleWriteEvent
+        );
+        assert_eq!(decision.snapshot_content, candidate);
+        assert_eq!(decision.disk_repair_reason, None);
+        assert!(
+            !decision.redeliver_editor,
+            "the operator's buffer must not be repaired"
+        );
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("live_prompt_drift_unowned_cells_preserved")
+                && log.contains("drifted_cells=queue"),
+            "{log}"
+        );
+        assert!(
+            !log.contains("ipc_proof_insufficient")
+                && !log.contains("ipc_snapshot_adoption_blocked"),
+            "{log}"
+        );
+        assert!(
+            !agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .is_some_and(|state| state.ipc_snapshot_adoption_blocked)
+        );
+
+        // The same receipt with an operator prompt at the exchange tail keeps
+        // the strict fail-closed handling.
+        let colliding = candidate.replace(
+            "<!-- agent:boundary:b0 -->",
+            "❯ live prompt after preflight\n<!-- agent:boundary:b0 -->",
+        );
+        let mut decision = IpcRepairDecision::lazily_visible_write(colliding);
+        assert!(guard_ipc_snapshot_adoption_against_live_prompt_drift(
+            &doc,
+            "socket_visible_write",
+            Some("patch-cellcollide-overlap"),
+            Some(&baseline),
+            Some(&content_ours),
+            &mut decision,
+        ));
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            log.contains("invariant=live_prompt_drift_after_preflight"),
+            "{log}"
         );
     }
 

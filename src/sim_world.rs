@@ -5108,6 +5108,9 @@ struct Coverage {
     editorless_disk_fallbacks: usize,
     ipc_snapshot_live_prompt_blocks: usize,
     live_prompt_forward_merges: usize,
+    /// `#cellcollide`: visible-write closeouts committed over operator drift
+    /// confined to cells the agent did not write.
+    cell_disjoint_receipt_commits: usize,
     already_applied_response_recoveries: usize,
     ack_projection_only_repairs: usize,
     ack_projection_only_blocks: usize,
@@ -10133,6 +10136,174 @@ fn finalize_carries_directive_edit_forward_instead_of_merging() {
         world.doc.contains("dispatch #spec-test-build-install"),
         "the directive is carried forward in the live buffer for the next cycle:\n{}",
         world.doc
+    );
+}
+
+// -------- #cellcollide: cell-precise collision detection --------
+
+fn cellcollide_doc(exchange: &str, queue: &str, backlog: &str) -> String {
+    format!(
+        concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n{}<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n{}<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n{}<!-- /agent:backlog -->\n",
+        ),
+        exchange, queue, backlog
+    )
+}
+
+const CELLCOLLIDE_PROMPT: &str = "❯ Please reply\n";
+const CELLCOLLIDE_REPLY: &str =
+    "❯ Please reply\n### Re: Please reply — gpt-5\n\nAnswered with a full response body.\n";
+
+#[test]
+fn cellcollide_operator_queue_edit_during_exchange_write_commits_both() {
+    // The 2026-10-04 agent-doc-bugs.md shape: the agent writes only `exchange`
+    // while the operator types inside a queue line. The receipt carries the
+    // operator's queue as of the receipt; canonical has kept moving.
+    let mut world = SimWorld::new(2_310);
+    let queue = "- do #alpha. spec-test\n- do #beta\n";
+    let backlog = "- [ ] [#alpha] alpha\n";
+    let baseline = cellcollide_doc(CELLCOLLIDE_PROMPT, queue, backlog);
+    let content_ours = cellcollide_doc(CELLCOLLIDE_REPLY, queue, backlog);
+    let receipt = cellcollide_doc(
+        CELLCOLLIDE_REPLY,
+        "- do #alpha. spec-test-build\n- do #beta\n",
+        backlog,
+    );
+    let canonical = cellcollide_doc(
+        CELLCOLLIDE_REPLY,
+        "- do #alpha. spec-test-build-install-commit\n- do #beta\n",
+        backlog,
+    );
+
+    let verdict = world.finalize_visible_write_receipt_by_cells(
+        &baseline,
+        &content_ours,
+        &receipt,
+        &canonical,
+    );
+
+    assert!(
+        matches!(
+            verdict,
+            agent_doc_document_realtime::cell_collision::EditorReceiptCellVerdict::OwnedCellsConverged { .. }
+        ),
+        "{verdict:?}"
+    );
+    assert_eq!(
+        world.coverage.ipc_snapshot_live_prompt_blocks, 0,
+        "no collision, no INTERRUPTED"
+    );
+    assert_eq!(world.coverage.cell_disjoint_receipt_commits, 1);
+    assert!(world.snapshot.contains("### Re: Please reply — gpt-5"));
+    assert!(
+        world.snapshot.contains("spec-test-build-install-commit"),
+        "the operator's newest queue text must survive:\n{}",
+        world.snapshot
+    );
+    assert_eq!(world.snapshot, world.doc, "committed == live canonical");
+}
+
+#[test]
+fn cellcollide_operator_backlog_edit_during_exchange_write_commits_both() {
+    let mut world = SimWorld::new(2_311);
+    let backlog = "- [ ] [#alpha] alpha\n";
+    let baseline = cellcollide_doc(CELLCOLLIDE_PROMPT, "", backlog);
+    let content_ours = cellcollide_doc(CELLCOLLIDE_REPLY, "", backlog);
+    let edited = "- [ ] [#alpha] alpha, with operator notes\n- [ ] [#gamma] new item\n";
+    let receipt = cellcollide_doc(CELLCOLLIDE_REPLY, "", edited);
+
+    let verdict =
+        world.finalize_visible_write_receipt_by_cells(&baseline, &content_ours, &receipt, &receipt);
+
+    assert_eq!(
+        verdict,
+        agent_doc_document_realtime::cell_collision::EditorReceiptCellVerdict::Exact
+    );
+    assert_eq!(world.coverage.ipc_snapshot_live_prompt_blocks, 0);
+    assert!(world.snapshot.contains("### Re: Please reply — gpt-5"));
+    assert!(world.snapshot.contains("[#gamma] new item"));
+}
+
+#[test]
+fn cellcollide_operator_exchange_tail_edit_still_fails_closed() {
+    // Same-cell overlap: the operator typed at the exchange tail where the
+    // response lands. That is a genuine collision and keeps the strict path.
+    let mut world = SimWorld::new(2_312);
+    let baseline = cellcollide_doc(CELLCOLLIDE_PROMPT, "", "");
+    let content_ours = cellcollide_doc(CELLCOLLIDE_REPLY, "", "");
+    let receipt = cellcollide_doc(
+        &format!("{CELLCOLLIDE_REPLY}❯ a new prompt typed at the tail\n"),
+        "",
+        "",
+    );
+
+    world.finalize_visible_write_receipt_by_cells(&baseline, &content_ours, &receipt, &receipt);
+
+    assert_eq!(world.coverage.ipc_snapshot_live_prompt_blocks, 1);
+    assert_eq!(world.coverage.cell_disjoint_receipt_commits, 0);
+    assert_eq!(
+        world.snapshot, content_ours,
+        "the live prompt is not absorbed"
+    );
+    assert!(world.doc.contains("a new prompt typed at the tail"));
+
+    // And canonical moving in the owned exchange cell after a clean receipt is
+    // refused, not adopted.
+    let mut world = SimWorld::new(2_313);
+    let canonical = cellcollide_doc("❯ Please reply\n❯ operator rewrote the tail\n", "", "");
+    let verdict = world.finalize_visible_write_receipt_by_cells(
+        &baseline,
+        &content_ours,
+        &content_ours,
+        &canonical,
+    );
+    assert!(matches!(
+        verdict,
+        agent_doc_document_realtime::cell_collision::EditorReceiptCellVerdict::Diverged { .. }
+    ));
+    assert_eq!(world.coverage.ipc_snapshot_live_prompt_blocks, 1);
+}
+
+#[test]
+fn cellcollide_response_queue_strike_vs_operator_queue_edit() {
+    // The response consumes the queue head; the operator edits a different
+    // queue line. Disjoint ops merge; editing the struck head is an overlap.
+    let mut world = SimWorld::new(2_314);
+    let queue = "- do #alpha\n- do #beta\n- do #gamma\n";
+    let baseline = cellcollide_doc(CELLCOLLIDE_PROMPT, queue, "");
+    let content_ours = cellcollide_doc(CELLCOLLIDE_REPLY, "- do #beta\n- do #gamma\n", "");
+    let disjoint = cellcollide_doc(
+        CELLCOLLIDE_REPLY,
+        "- do #beta\n- do #gamma, then ship it\n",
+        "",
+    );
+    let verdict = world.finalize_visible_write_receipt_by_cells(
+        &baseline,
+        &content_ours,
+        &disjoint,
+        &disjoint,
+    );
+    assert_eq!(
+        verdict,
+        agent_doc_document_realtime::cell_collision::EditorReceiptCellVerdict::Exact
+    );
+    assert_eq!(world.coverage.ipc_snapshot_live_prompt_blocks, 0);
+    assert!(world.snapshot.contains("then ship it"));
+    assert!(!world.snapshot.contains("- do #alpha"));
+
+    let mut world = SimWorld::new(2_315);
+    let overlap = cellcollide_doc(
+        CELLCOLLIDE_REPLY,
+        "- do #alpha rewritten by operator\n- do #beta\n- do #gamma\n",
+        "",
+    );
+    world.finalize_visible_write_receipt_by_cells(&baseline, &content_ours, &overlap, &overlap);
+    assert_eq!(
+        world.coverage.ipc_snapshot_live_prompt_blocks, 1,
+        "editing the head the response consumed is a real same-cell overlap"
     );
 }
 

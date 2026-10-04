@@ -29,12 +29,11 @@ use agent_doc_write_converge_io::{
     guard_ipc_snapshot_adoption_against_response_contamination,
     ipc_repair_decision_from_visible_write, log_full_content_ipc_disabled,
     log_ipc_snapshot_adoption_allowed, log_ipcfullprompt_corruption_if_any,
-    mark_visible_write_live_buffer_synced_after_write,
+    log_write_wedge_requests_supervisor_recycle, mark_visible_write_live_buffer_synced_after_write,
     materialize_missing_response_for_socket_visible_write_drift,
     persist_already_applied_socket_content_ours_snapshot,
     poll_visible_write_content_lazily_event_or_projection,
     prefer_visible_content_over_stale_visible_write_snapshot,
-    log_write_wedge_requests_supervisor_recycle,
     reconcile_visible_write_snapshot_to_newer_operator_buffer, record_ipc_socket_ack_failure,
     visible_write_disk_proof, write_visible_write_through_to_disk,
 };
@@ -73,30 +72,68 @@ fn ipc_response_materialized_or_fallback(
     )
 }
 
+/// `#cellcollide`: the cells an editor receipt for this write is proof for —
+/// every component the agent's target changes relative to its baseline, plus
+/// every component a patch names. Empty when neither is known, which keeps the
+/// receipt check on exact whole-document equality.
+fn editor_receipt_cell_scope(
+    patches: &[agent_doc_template::PatchBlock],
+    baseline: Option<&str>,
+    content_ours: Option<&str>,
+    pre_write: Option<&str>,
+) -> agent_doc_document_realtime_io::EditorReceiptCellScope {
+    let mut owned_cells = std::collections::BTreeSet::new();
+    if let (Some(base), Some(ours)) = (baseline, content_ours) {
+        match agent_doc_document_realtime::cell_collision::owned_cell_names(base, ours) {
+            Some(names) => owned_cells.extend(names),
+            // Unparseable transition: no cell can be called unrelated.
+            None => owned_cells.clear(),
+        }
+    }
+    if !owned_cells.is_empty() || baseline.is_none() || content_ours.is_none() {
+        owned_cells.extend(patches.iter().map(|patch| patch.name.clone()));
+    }
+    agent_doc_document_realtime_io::EditorReceiptCellScope {
+        pre_write: pre_write.map(str::to_string),
+        owned_cells,
+    }
+}
+
+/// Verify the editor receipt against canonical and return the canonical text
+/// to persist. With a cell scope, canonical may carry newer operator edits in
+/// cells the write does not own; those are kept, never rolled back to the
+/// receipt (`#cellcollide`).
 fn fold_visible_write_into_canonical(
     file: &Path,
     patch_id: &str,
     content: &str,
     source: &str,
-) -> Result<()> {
-    let changed =
-        agent_doc_document_realtime_io::adopt_verified_editor_text_through_relay_authority(
-            file, content, source,
-        )?;
+    scope: Option<&agent_doc_document_realtime_io::EditorReceiptCellScope>,
+) -> Result<String> {
+    let adopted = agent_doc_document_realtime_io::adopt_verified_editor_receipt_by_cells_within(
+        file,
+        content,
+        source,
+        scope,
+        std::time::Duration::from_millis(
+            agent_doc_document_realtime_io::EDITOR_RECEIPT_CANONICAL_CATCHUP_MS,
+        ),
+        std::time::Duration::from_millis(
+            agent_doc_document_realtime_io::EDITOR_RECEIPT_OWNED_CELL_PENDING_MS,
+        ),
+    )?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ipc_visible_write_canonical_adopt file={} patch_id={} source={} changed={} content_hash={}",
+            "ipc_visible_write_canonical_adopt file={} patch_id={} source={} changed=false content_hash={} adopted_hash={}",
             file.display(),
             patch_id,
             source,
-            changed
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "editor_absent".to_string()),
             agent_doc_hash::content_hash(content),
+            agent_doc_hash::content_hash(&adopted),
         ),
     );
-    Ok(())
+    Ok(adopted)
 }
 
 /// A repaired editor receipt is downstream proof of a binary-authored component
@@ -136,7 +173,7 @@ pub(super) fn fold_repaired_visible_write_into_canonical(
             ),
         );
     }
-    fold_visible_write_into_canonical(file, patch_id, content, source)
+    fold_visible_write_into_canonical(file, patch_id, content, source, None).map(|_| ())
 }
 
 fn log_ipc_proof_failure(
@@ -743,12 +780,23 @@ fn try_ipc_inner(
                             // recycle may leave a durable editor owner with zero registered
                             // replicas; in that shape the Lazily receipt is the only complete
                             // content proof and disk must not be used to rediscover it.
-                            fold_visible_write_into_canonical(
+                            let receipt_scope = editor_receipt_cell_scope(
+                                patches,
+                                baseline,
+                                content_ours,
+                                ipc_before_content.as_deref(),
+                            );
+                            let adopted = fold_visible_write_into_canonical(
                                 file,
                                 &patch_id,
                                 &repair_decision.snapshot_content,
                                 "socket_visible_write",
+                                Some(&receipt_scope),
                             )?;
+                            // `#cellcollide`: persist canonical, which carries
+                            // the operator's newer edits in cells this write
+                            // does not own.
+                            repair_decision.snapshot_content = adopted;
                         }
                         let proof = visible_write_disk_proof(
                             file,

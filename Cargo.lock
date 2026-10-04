@@ -2651,6 +2651,7 @@ dependencies = [
  "agent-doc-tmux-io",
  "parking_lot",
  "serde_json",
+ "tempfile",
  "tmux-router",
 ]
 

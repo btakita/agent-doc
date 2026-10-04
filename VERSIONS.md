@@ -11,6 +11,21 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   onto the committed baseline reproduces the current document exactly, the prompt is reported as
   `[session-check] steering pending: …` (exit 0, or 2 under `--codex-final-gate`). Drift the editor ops do not
   explain, such as console output replayed into the document as a fake prompt, is still INTERRUPTED.
+- **Installing no longer starts controllers for project roots nobody has open (`#installworktreecontrollers`).**
+  `make install` / `install-full` found every running controller through `/proc`, which includes idle
+  subagent worktrees and dev roots. Recycling one launched a replacement, and the `reload_library` status
+  query launched a controller wherever the socket did not answer, so idle roots kept a controller forever. One
+  worktree with no documents and no editor reached controller generation 44 in a day. A root now counts as in
+  use only when it has a listening editor socket or an open `agent-doc start` supervisor serving one of its
+  documents. Idle roots get no recycle, and `reload_library` reaches them only through a controller that is
+  already running. A controller that sees its binary was replaced retires instead of handing off when its root
+  is idle, it owns no documents, and no client has connected for 60s. The next command launches the new binary
+  as usual. Roots that are in use still recycle and reload.
+- **Test runs no longer leave controllers behind.** A controller rooted anywhere inside a `<temp>/.tmpXXXX`
+  directory, including the `<temp>/.tmpXXXX/project` fixture shape and `TMPDIR`, now shuts down after 60s with
+  no client. A test process killed before its `TempDir` dropped no longer leaks one. Fixtures that launch a
+  controller can hold the new `agent-doc-test-support` `ProjectControllerReaper`, which terminates every
+  controller under the fixture directory when it drops, including while a panic unwinds.
 
 ## 0.35.446
 

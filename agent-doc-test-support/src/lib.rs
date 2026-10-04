@@ -60,6 +60,84 @@ pub fn route_bin_env_lock() -> parking_lot::MutexGuard<'static, ()> {
     ROUTE_BIN_ENV_MUTEX.lock()
 }
 
+/// `#installworktreecontrollers`: RAII teardown for a test fixture that spawns a
+/// project controller.
+///
+/// A launched `agent-doc controller serve` is detached on purpose (it must
+/// outlive the CLI invocation that launched it), so nothing in the fixture owns
+/// it. Declare this guard AFTER the fixture's `TempDir` so it drops first —
+/// including while a failed assertion unwinds — and it terminates every
+/// controller whose `--project-root` lies under `root`: `SIGTERM`, a short grace
+/// for the serve loop to remove its socket, then `SIGKILL` for anything left.
+pub struct ProjectControllerReaper {
+    root: PathBuf,
+}
+
+impl ProjectControllerReaper {
+    pub fn under(root: &Path) -> Self {
+        Self {
+            root: canonical_or_raw(root),
+        }
+    }
+
+    /// Controller PIDs serving a project root under this guard's root.
+    pub fn controller_pids(&self) -> Vec<u32> {
+        let own_pid = std::process::id();
+        agent_doc_controller_io::process::process_pids()
+            .into_iter()
+            .filter(|pid| *pid != own_pid)
+            .filter(|pid| {
+                agent_doc_controller_io::process::controller_serve_project_root(*pid).is_some_and(
+                    |root| {
+                        root.starts_with(&self.root)
+                            || canonical_or_raw(&root).starts_with(&self.root)
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// Terminate every controller under the root; returns how many were found.
+    pub fn reap(&self) -> usize {
+        use agent_doc_controller_io::process::{ProcessSignal, send_signal};
+        let pids = self.controller_pids();
+        for pid in &pids {
+            send_signal(*pid, ProcessSignal::Term);
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline && pids.iter().any(|pid| process_is_alive(*pid)) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        for pid in &pids {
+            if process_is_alive(*pid) {
+                send_signal(*pid, ProcessSignal::Kill);
+            }
+        }
+        pids.len()
+    }
+}
+
+impl Drop for ProjectControllerReaper {
+    fn drop(&mut self) {
+        self.reap();
+    }
+}
+
+/// Alive and not a zombie awaiting its parent's `wait`.
+fn process_is_alive(pid: u32) -> bool {
+    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().next())
+            .is_some_and(|state| state != "Z" && state != "X"),
+        Err(_) => false,
+    }
+}
+
+fn canonical_or_raw(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
 pub struct ScopedCurrentDir {
     prev_cwd: PathBuf,
     _env_guard: ProcessGlobalLockGuard,
@@ -804,4 +882,94 @@ pub fn queue_consume_convergence_target() -> String {
         "<!-- /agent:queue -->\n",
     )
     .to_string()
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod project_controller_reaper_tests {
+    use super::*;
+    use std::process::{Child, Command, Stdio};
+
+    /// A process whose command line is recognized as `agent-doc controller
+    /// serve --project-root <root>` (the `sh -c` sentinel shape).
+    fn fake_controller(root: &Path) -> Child {
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg("while :; do sleep 1; done")
+            .arg("agent-doc")
+            .arg("controller")
+            .arg("serve")
+            .arg("--project-root")
+            .arg(root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while agent_doc_controller_io::process::controller_serve_project_root(child.id()).is_none()
+        {
+            assert!(Instant::now() < deadline, "fake controller never exec'd");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        child
+    }
+
+    /// Reap `child`, failing (after killing it) when it is still running at the
+    /// deadline, so a broken reaper fails the test instead of hanging it.
+    fn assert_exits_within(child: &mut Child, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                return;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("controller pid {} survived the reaper", child.id());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn reaper_terminates_only_controllers_rooted_under_its_root() {
+        let fixture = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let mut ours = fake_controller(&project);
+        let mut theirs = fake_controller(elsewhere.path());
+        // Tear the decoy down even when an assertion below fails.
+        let _decoy = ProjectControllerReaper::under(elsewhere.path());
+
+        let reaper = ProjectControllerReaper::under(fixture.path());
+        assert_eq!(reaper.controller_pids(), vec![ours.id()]);
+        drop(reaper);
+
+        assert_exits_within(&mut ours, Duration::from_secs(5));
+        assert!(
+            theirs.try_wait().unwrap().is_none(),
+            "a foreign root's controller survives"
+        );
+        drop(_decoy);
+        assert_exits_within(&mut theirs, Duration::from_secs(5));
+    }
+
+    /// The fixture's assertion panics; the guard still tears the controller down
+    /// while the panic unwinds.
+    #[test]
+    fn reaper_tears_down_the_controller_when_the_fixture_panics() {
+        let fixture = tempfile::tempdir().unwrap();
+        let project = fixture.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let mut controller = fake_controller(&project);
+        let pid = controller.id();
+        let outcome = std::panic::catch_unwind(|| {
+            let _controllers = ProjectControllerReaper::under(fixture.path());
+            panic!("fixture assertion failed");
+        });
+        assert!(outcome.is_err());
+        assert_exits_within(&mut controller, Duration::from_secs(5));
+        assert!(!process_is_alive(pid));
+    }
 }

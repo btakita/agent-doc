@@ -271,6 +271,10 @@ fn native_generations_handoff_without_sqlite_or_deleted_library_state() {
     // loaded cdylib and controller exercise the same source generation.
     unsafe { std::env::set_var("AGENT_DOC_BIN", &agent_doc_bin) };
     let temp = tempfile::tempdir().unwrap();
+    // `#installworktreecontrollers`: the controller launched below is detached;
+    // tear it down when this test ends, including when an assertion panics.
+    // Declared after `temp` so it drops before the project root is removed.
+    let _controllers = agent_doc_test_support::ProjectControllerReaper::under(temp.path());
     let project = temp.path().join("project");
     std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
     // The control-plane owner starts before either reloadable generation. An

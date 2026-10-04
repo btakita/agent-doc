@@ -287,6 +287,27 @@ next install. Because the id is a digest of the working tree, `make install`,
 cargo invocation (one build-script run) before installing either; two
 invocations let a concurrent edit of the shared tree land between them.
 
+`lib-install`'s controller fan-out never starts a controller for a project
+root nobody has open (`#installworktreecontrollers`). Running controllers are
+found by walking `/proc`, which also finds idle subagent worktrees and dev roots
+left behind by earlier sessions; recycling those launched a replacement each
+time, and the `reload_library` status query launched one wherever the socket did
+not answer, so idle roots kept a controller forever. A root counts as in use
+only with a listening PID-scoped editor socket or an open `agent-doc start`
+supervisor serving a document in it. Idle roots are skipped by the recycle
+(`install_fanout_recycle_skipped reason=idle_project_root` in their `ops.log`)
+and are reached by `reload_library` through an already-running controller only
+(`reload_library_idle_root_skipped` when none answers). A controller on a
+replaced binary whose root is idle, that owns no documents, and that has had no
+client for 60s retires instead of handing off
+(`controller_idle_root_retired_instead_of_handoff`). Test fixtures that launch a
+controller own a `ProjectControllerReaper` from `agent-doc-test-support`, which
+terminates every controller rooted under the fixture directory when it drops,
+including during a panic, and a controller rooted anywhere inside a
+`<temp>/.tmpXXXX` directory (for example `<temp>/.tmpXXXX/project`) shuts itself
+down after 60s without a client, so a test process killed before its `TempDir`
+dropped no longer leaks one.
+
 Every `lib-install` writes a new `libagent_doc-<version>.so` beside the binary
 and swaps the unversioned symlink onto it, so the directory used to grow by one
 library per install with nothing ever reaping the predecessors

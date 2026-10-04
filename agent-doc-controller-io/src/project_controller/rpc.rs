@@ -6508,20 +6508,87 @@ fn recycle_controller_request(
 /// [`agent_doc_controller::recycle::INSTALL_FANOUT_RECYCLE_REASON`], so a
 /// controller already running the installed binary declines it (counted as
 /// skipped) instead of launching a redundant handoff.
+///
+/// `#installworktreecontrollers`: a recycle is a two-phase handoff that SPAWNS a
+/// replacement controller, so it is sent only to roots an editor or supervisor
+/// actually uses ([`project_root_use_evidence`]). An idle root's controller is
+/// left alone (counted as skipped); if it is on the old binary it retires itself
+/// at its next idle tick instead of handing off.
 pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
     let roots = crate::process::controller_project_roots(std::process::id());
+    let supervisor_documents = crate::process::open_supervisor_documents(std::process::id());
+    Ok(recycle_controllers_install_fanout(
+        roots,
+        |root| project_root_use_evidence(root, &supervisor_documents),
+        |root| {
+            recycle_controller_with_reason(
+                root,
+                agent_doc_controller::recycle::INSTALL_FANOUT_RECYCLE_REASON,
+            )
+        },
+    ))
+}
+
+/// Injectable core of [`recycle_controllers_all_projects`].
+fn recycle_controllers_install_fanout(
+    roots: BTreeSet<PathBuf>,
+    evidence: impl Fn(&Path) -> agent_doc_controller::recycle::ProjectRootUseEvidence,
+    mut recycle: impl FnMut(&Path) -> Result<bool>,
+) -> (usize, usize) {
+    use agent_doc_controller::recycle::{InstallFanoutRootAction, install_fanout_root_action};
     let mut recycled = 0;
     let mut skipped = 0;
     for root in roots {
-        match recycle_controller_with_reason(
-            &root,
-            agent_doc_controller::recycle::INSTALL_FANOUT_RECYCLE_REASON,
-        ) {
+        let observed = evidence(&root);
+        if install_fanout_root_action(observed) == InstallFanoutRootAction::SkipIdle {
+            skipped += 1;
+            if root.join(".agent-doc").is_dir() {
+                agent_doc_ops_log_io::log_op(
+                    &root,
+                    &format!(
+                        "install_fanout_recycle_skipped project_root={} reason=idle_project_root {} (#installworktreecontrollers)",
+                        root.display(),
+                        observed.as_log_fields(),
+                    ),
+                );
+            }
+            continue;
+        }
+        match recycle(&root) {
             Ok(true) => recycled += 1,
             _ => skipped += 1,
         }
     }
-    Ok((recycled, skipped))
+    (recycled, skipped)
+}
+
+/// `#installworktreecontrollers`: observe whether anybody uses `project_root`
+/// without asking (or launching) its controller: listening PID-scoped editor
+/// sockets plus open `agent-doc start` supervisors whose document resolves to
+/// this root.
+pub(crate) fn project_root_use_evidence(
+    project_root: &Path,
+    supervisor_documents: &BTreeSet<PathBuf>,
+) -> agent_doc_controller::recycle::ProjectRootUseEvidence {
+    let root_key =
+        agent_doc_controller::command_line::canonical_path_for_command_line_compare(project_root);
+    let open_supervisors = supervisor_documents
+        .iter()
+        .filter(|document| {
+            agent_doc_controller::command_line::canonical_path_for_command_line_compare(
+                &agent_doc_project_root_io::resolve_ipc_project_root(document),
+            ) == root_key
+        })
+        .count();
+    let live_editor_endpoints = if agent_doc_ipc_io::socket_directory(project_root).is_dir() {
+        agent_doc_ipc_io::discover_listening_editor_pids(project_root).len()
+    } else {
+        0
+    };
+    agent_doc_controller::recycle::ProjectRootUseEvidence {
+        live_editor_endpoints,
+        open_supervisors,
+    }
 }
 
 /// `#recycleforce` — `recycle_controllers_all_projects` with an explicit operator
@@ -9977,8 +10044,8 @@ fn forward_async_editor_command_to_successor(
 ) -> CommandSubmitDispatchResult {
     let project_root = admitted.project_root.as_path();
     let public_sock = socket_path(project_root);
-    let await_timeout = Duration::from_millis(submit.deadline_ms.max(1))
-        .min(CONTROLLER_HANDOFF_SETTLE_BUDGET);
+    let await_timeout =
+        Duration::from_millis(submit.deadline_ms.max(1)).min(CONTROLLER_HANDOFF_SETTLE_BUDGET);
     agent_doc_ops_log_io::log_op(
         project_root,
         &format!(
@@ -10177,9 +10244,7 @@ fn dispatch_async_editor_command_across_handoff(
                     .bootstrap_snapshot()
                     .map(|state| state.handoff_state)
                     .unwrap_or(live.handoff_state);
-                if live_state == ControllerHandoffState::Stable
-                    || handoff_in_flight(live_state)
-                {
+                if live_state == ControllerHandoffState::Stable || handoff_in_flight(live_state) {
                     let err = anyhow::anyhow!("{}", result.output);
                     last_refusal = Some(result);
                     park.get_or_insert_with(|| runtime.async_editor_commands.park_on_handoff());
@@ -10210,7 +10275,10 @@ fn handle_editor_command_submit_async_rpc_with_settle(
     // same command arriving again — a predecessor's forward racing the editor's
     // own replay after a handoff drop. Answer with the admission it already has
     // and let the caller await the one worker; never run the route twice.
-    if runtime.async_editor_commands.is_admitted(&submit.command_id) {
+    if runtime
+        .async_editor_commands
+        .is_admitted(&submit.command_id)
+    {
         let command_id = submit.command_id.clone();
         let progress =
             command_submit_progress_events(&command_id, submit.authority_generation, false);
@@ -10480,7 +10548,10 @@ fn editor_route_terminal_reason(command: &str, result: &ControllerEditorRouteRes
         .find(|line| !line.is_empty());
     match detail {
         Some(line) => {
-            let line: String = line.chars().take(EDITOR_ROUTE_TERMINAL_REASON_MAX_CHARS).collect();
+            let line: String = line
+                .chars()
+                .take(EDITOR_ROUTE_TERMINAL_REASON_MAX_CHARS)
+                .collect();
             format!("{command} exit_code={}: {line}", result.exit_code)
         }
         None => format!("{command} exit_code={}", result.exit_code),
@@ -10741,8 +10812,8 @@ fn dispatch_command_submit_payload(
                     let terminal_applied = result.exit_code == 0;
                     // GH 91: carry the route's own first line so a blocked or
                     // deferred route names its blocker in the terminal receipt.
-                    let terminal_reason = (!terminal_applied)
-                        .then(|| editor_route_terminal_reason(command, &result));
+                    let terminal_reason =
+                        (!terminal_applied).then(|| editor_route_terminal_reason(command, &result));
                     CommandSubmitDispatchResult {
                         exit_code: result.exit_code,
                         output: result.output.clone(),
@@ -11918,16 +11989,15 @@ fn editor_native_reload_policy(
 
 /// Discover the complete native-reload scope without trusting controller process
 /// discovery as the only project index (`#reloadgateperprocess`).
-fn native_reload_scope(seed_project: Option<&Path>) -> (BTreeSet<PathBuf>, BTreeSet<PathBuf>) {
+fn native_reload_scope(seed_project: Option<&Path>) -> NativeReloadScope {
     let controller_roots = crate::process::controller_project_roots(std::process::id());
     let supervisor_documents = crate::process::open_supervisor_documents(std::process::id());
     let mut project_roots = controller_roots.clone();
-    if let Some(project_root) = seed_project {
-        project_roots.insert(
-            agent_doc_controller::command_line::canonical_path_for_command_line_compare(
-                project_root,
-            ),
-        );
+    let seed_root = seed_project.map(|project_root| {
+        agent_doc_controller::command_line::canonical_path_for_command_line_compare(project_root)
+    });
+    if let Some(seed_root) = &seed_root {
+        project_roots.insert(seed_root.clone());
     }
     for file in &supervisor_documents {
         let project_root = agent_doc_project_root_io::resolve_ipc_project_root(file);
@@ -11944,16 +12014,91 @@ fn native_reload_scope(seed_project: Option<&Path>) -> (BTreeSet<PathBuf>, BTree
             );
         }
     }
-    (project_roots, supervisor_documents)
+    NativeReloadScope {
+        project_roots,
+        supervisor_documents,
+        seed_root,
+    }
+}
+
+/// Process-discovered reload scope plus the root a caller seeded explicitly.
+struct NativeReloadScope {
+    project_roots: BTreeSet<PathBuf>,
+    supervisor_documents: BTreeSet<PathBuf>,
+    /// A seeded root is in use by definition: the supervisor that owns its
+    /// document asked for the reload (`publish_pending_native_reload`).
+    seed_root: Option<PathBuf>,
 }
 
 /// Apply one native-generation decision per editor process across all of its
 /// project endpoints.
 fn reload_library_process_scope(
-    project_roots: BTreeSet<PathBuf>,
-    supervisor_documents: BTreeSet<PathBuf>,
+    scope: NativeReloadScope,
     lib_version: &str,
 ) -> ReloadLibraryFanoutReport {
+    let supervisor_documents = scope.supervisor_documents.clone();
+    let (report, processes) = plan_reload_library_process_scope(
+        scope,
+        lib_version,
+        |project_root| project_root_use_evidence(project_root, &supervisor_documents),
+        |project_root, access| match access {
+            agent_doc_controller::recycle::InstallFanoutControllerAccess::MayLaunch => {
+                reliable_sync_status(project_root)
+            }
+            agent_doc_controller::recycle::InstallFanoutControllerAccess::ExistingOnly => {
+                request_existing_controller_with_timeout::<ControllerReliableSyncStatusResponse>(
+                    project_root,
+                    reliable_sync_status_request("reliable_sync_status"),
+                    CONTROLLER_RPC_TIMEOUT,
+                )
+            }
+        },
+        agent_doc_ipc_io::discover_listening_editor_pids,
+    );
+    reload_library_processes(
+        report,
+        processes,
+        lib_version,
+        agent_doc_ipc_io::is_listener_active_for_pid,
+        |endpoint, pid| {
+            agent_doc_ipc_io::send_reload_library_to_editor(
+                &endpoint.project_root,
+                pid,
+                &endpoint.editor_id,
+                lib_version,
+            )
+        },
+    )
+}
+
+/// Injectable planning half of [`reload_library_process_scope`]: enumerate each
+/// project's endpoints and documents without delivering anything.
+///
+/// `#installworktreecontrollers`: `status` is told whether it may launch a
+/// controller. Only a root an editor or supervisor uses (or the caller seeded)
+/// may; an idle root is asked through an already-running controller only, and a
+/// root whose controller is not running is skipped instead of started.
+fn plan_reload_library_process_scope(
+    scope: NativeReloadScope,
+    lib_version: &str,
+    evidence: impl Fn(&Path) -> agent_doc_controller::recycle::ProjectRootUseEvidence,
+    status: impl Fn(
+        &Path,
+        agent_doc_controller::recycle::InstallFanoutControllerAccess,
+    ) -> Result<ControllerReliableSyncStatusResponse>,
+    listening_editor_pids: impl Fn(&Path) -> Vec<u64>,
+) -> (
+    ReloadLibraryFanoutReport,
+    BTreeMap<u64, EditorNativeReloadProcess>,
+) {
+    use agent_doc_controller::recycle::{
+        InstallFanoutControllerAccess, install_fanout_controller_access,
+    };
+    let NativeReloadScope {
+        project_roots,
+        supervisor_documents,
+        seed_root,
+    } = scope;
     let mut report = ReloadLibraryFanoutReport::default();
     let mut processes = BTreeMap::<u64, EditorNativeReloadProcess>::new();
 
@@ -11961,10 +12106,29 @@ fn reload_library_process_scope(
         if !project_root.join(".agent-doc").is_dir() {
             continue;
         }
+        let observed = evidence(&project_root);
+        let access = install_fanout_controller_access(
+            observed,
+            seed_root.as_deref() == Some(project_root.as_path()),
+        );
+        let status_result = status(&project_root, access);
+        if access == InstallFanoutControllerAccess::ExistingOnly && status_result.is_err() {
+            agent_doc_ops_log_io::log_op(
+                &project_root,
+                &format!(
+                    "reload_library_idle_root_skipped project_root={} lib_version={lib_version} \
+                     reason=idle_project_root_without_running_controller {} \
+                     (#installworktreecontrollers)",
+                    project_root.display(),
+                    observed.as_log_fields(),
+                ),
+            );
+            continue;
+        }
         report.projects += 1;
         let mut endpoints = BTreeSet::<EditorNativeReloadEndpoint>::new();
         let mut registration_documents = Vec::<(u64, String)>::new();
-        match reliable_sync_status(&project_root) {
+        match status_result {
             Ok(status) => {
                 for registration in status.registrations {
                     registration_documents.push((registration.pid, registration.path.clone()));
@@ -11999,7 +12163,7 @@ fn reload_library_process_scope(
         // Reliable-sync registration can be empty while the editor's PID-scoped
         // listener remains live. Preserve that endpoint and attribute otherwise
         // unowned supervisor documents to it below.
-        for pid in agent_doc_ipc_io::discover_listening_editor_pids(&project_root) {
+        for pid in listening_editor_pids(&project_root) {
             if !endpoints.iter().any(|endpoint| endpoint.pid == pid) {
                 endpoints.insert(EditorNativeReloadEndpoint {
                     project_root: project_root.clone(),
@@ -12032,20 +12196,7 @@ fn reload_library_process_scope(
         }
     }
 
-    reload_library_processes(
-        report,
-        processes,
-        lib_version,
-        agent_doc_ipc_io::is_listener_active_for_pid,
-        |endpoint, pid| {
-            agent_doc_ipc_io::send_reload_library_to_editor(
-                &endpoint.project_root,
-                pid,
-                &endpoint.editor_id,
-                lib_version,
-            )
-        },
-    )
+    (report, processes)
 }
 
 /// Decide and deliver one native-generation reload per editor process.
@@ -12174,8 +12325,7 @@ fn reload_library_processes(
 /// Send one PID-scoped `reload_library` intent to every live editor process
 /// whose adapter is explicitly known to support safe native hot reload.
 pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutReport {
-    let (project_roots, supervisor_documents) = native_reload_scope(None);
-    reload_library_process_scope(project_roots, supervisor_documents, lib_version)
+    reload_library_process_scope(native_reload_scope(None), lib_version)
 }
 
 /// Trigger process-scoped reload discovery from a known project root.
@@ -12186,8 +12336,7 @@ pub fn reload_library_for_project(
     project_root: &Path,
     lib_version: &str,
 ) -> ReloadLibraryFanoutReport {
-    let (project_roots, supervisor_documents) = native_reload_scope(Some(project_root));
-    reload_library_process_scope(project_roots, supervisor_documents, lib_version)
+    reload_library_process_scope(native_reload_scope(Some(project_root)), lib_version)
 }
 
 /// Publish a reload that [`reload_library_for_project`] deferred, now that
@@ -13226,17 +13375,95 @@ impl ProjectRootIncarnation {
     }
 }
 
-fn detached_temp_project_root(project_root: &Path) -> bool {
-    let Some(name) = project_root.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    if !name.starts_with(".tmp") {
+/// `#installworktreecontrollers`: how long a stale-binary controller must have
+/// seen no client before it may retire instead of handing off.
+const IDLE_ROOT_RETIRE_QUIET: Duration = Duration::from_secs(60);
+
+/// Observe, from inside the controller, whether anybody uses its project root:
+/// live reliable-sync registrations and allocated editor models in this process,
+/// listening PID-scoped editor sockets, and open supervisors for this root.
+fn controller_idle_root_use_evidence(
+    project_root: &Path,
+) -> agent_doc_controller::recycle::ProjectRootUseEvidence {
+    let registrations = controller_liveness_plane()
+        .lock()
+        .projection()
+        .all_live_registrations()
+        .len();
+    let allocated_models = agent_doc_crdt_relay_io::allocated_routed_relay_document_hashes().len();
+    let supervisor_documents = crate::process::open_supervisor_documents(std::process::id());
+    let mut evidence = project_root_use_evidence(project_root, &supervisor_documents);
+    evidence.live_editor_endpoints += registrations + allocated_models;
+    evidence
+}
+
+fn controller_idle_root_should_retire(
+    project_root: &Path,
+    active_clients: usize,
+    quiet_for: Duration,
+) -> bool {
+    // Cheap gates first: the /proc scan and socket probes run only for a
+    // controller that is otherwise quiet.
+    if active_clients != 0 || quiet_for < IDLE_ROOT_RETIRE_QUIET {
         return false;
     }
-    matches!(
-        project_root.parent().and_then(Path::to_str),
-        Some("/tmp" | "/var/tmp" | "/dev/shm")
-    )
+    let evidence = controller_idle_root_use_evidence(project_root);
+    let owned_documents = load_actor_store(project_root).ok().map(|store| store.len());
+    let retire = agent_doc_controller::recycle::idle_stale_binary_controller_should_retire(
+        true,
+        evidence,
+        owned_documents,
+        active_clients,
+        quiet_for,
+        IDLE_ROOT_RETIRE_QUIET,
+    );
+    if retire {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "controller_idle_root_retired_instead_of_handoff project_root={} reason=stale_binary owned_documents=0 {} quiet_secs={} (#installworktreecontrollers)",
+                project_root.display(),
+                evidence.as_log_fields(),
+                quiet_for.as_secs(),
+            ),
+        );
+        eprintln!(
+            "[controller] project {} is idle on a replaced binary; retiring instead of launching a replacement",
+            project_root.display()
+        );
+    }
+    retire
+}
+
+fn detached_temp_project_root(project_root: &Path) -> bool {
+    detached_temp_project_root_under(project_root, &std::env::temp_dir())
+}
+
+/// A root inside a `tempfile` directory (`<temp>/.tmpXXXX`, or any path below
+/// it such as the `<temp>/.tmpXXXX/project` fixture shape).
+///
+/// `#installworktreecontrollers`: only the bare `<temp>/.tmpXXXX` shape used to
+/// qualify, so a test fixture rooted at `<temp>/.tmpXXXX/project` whose process
+/// died before its `TempDir` dropped (a nextest timeout, SIGKILL, abort) left
+/// its controller serving forever. `extra_temp_base` adds the configured
+/// `TMPDIR` to the fixed system temp bases.
+fn detached_temp_project_root_under(project_root: &Path, extra_temp_base: &Path) -> bool {
+    [
+        Path::new("/tmp"),
+        Path::new("/var/tmp"),
+        Path::new("/dev/shm"),
+        extra_temp_base,
+    ]
+    .into_iter()
+    .filter(|base| base.is_absolute() && *base != Path::new("/"))
+    .any(|base| {
+        project_root
+            .strip_prefix(base)
+            .ok()
+            .and_then(|rest| rest.components().next())
+            .and_then(|first| first.as_os_str().to_str())
+            .is_some_and(|name| name.starts_with(".tmp"))
+    })
 }
 
 pub(crate) fn serve_with_options(
@@ -13594,6 +13821,21 @@ pub(crate) fn serve_with_options(
                     } else {
                         "stale_binary"
                     };
+                    // `#installworktreecontrollers`: a routine stale-binary
+                    // handoff in a root nobody uses would only launch the next
+                    // perpetual idle controller. Retire instead; the next client
+                    // launches the installed binary through the lazy path.
+                    if reason == "stale_binary"
+                        && controller_idle_root_should_retire(
+                            project_root,
+                            active_clients.load(Ordering::SeqCst),
+                            last_client_activity.elapsed(),
+                        )
+                    {
+                        recycle_handoff_in_flight.store(false, Ordering::SeqCst);
+                        should_stop.store(true, Ordering::SeqCst);
+                        break;
+                    }
                     controller_self_recycle(&runtime, reason);
                     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
                         recycle_handoff_in_flight.store(false, Ordering::SeqCst);
@@ -27444,13 +27686,27 @@ mod tests {
 
     #[test]
     fn detached_temp_controller_roots_are_narrowly_classified_for_idle_reaping() {
-        assert!(detached_temp_project_root(Path::new("/tmp/.tmpABC123")));
-        assert!(detached_temp_project_root(Path::new("/var/tmp/.tmpABC123")));
-        assert!(detached_temp_project_root(Path::new("/dev/shm/.tmpABC123")));
-        assert!(!detached_temp_project_root(Path::new("/tmp/real-project")));
-        assert!(!detached_temp_project_root(Path::new(
-            "/home/user/.tmpABC123"
-        )));
+        let tmpdir = Path::new("/tmp");
+        let classify = |root: &str| detached_temp_project_root_under(Path::new(root), tmpdir);
+        assert!(classify("/tmp/.tmpABC123"));
+        assert!(classify("/var/tmp/.tmpABC123"));
+        assert!(classify("/dev/shm/.tmpABC123"));
+        assert!(!classify("/tmp/real-project"));
+        assert!(!classify("/home/user/.tmpABC123"));
+        // `#installworktreecontrollers`: the `TempDir::path().join("project")`
+        // fixture shape is a detached temp root too.
+        assert!(classify("/tmp/.tmpABC123/project"));
+        assert!(classify("/tmp/.tmpABC123/nested/repo"));
+        assert!(!classify("/tmp/real-project/.tmpABC123"));
+        // A configured TMPDIR counts as a temp base; `/` never does.
+        assert!(detached_temp_project_root_under(
+            Path::new("/scratch/tmp/.tmpXYZ/project"),
+            Path::new("/scratch/tmp"),
+        ));
+        assert!(!detached_temp_project_root_under(
+            Path::new("/.tmpXYZ/project"),
+            Path::new("/"),
+        ));
     }
 
     /// `#resumeownerfmread`: the controller answers the resume-claim question
@@ -28891,9 +29147,9 @@ mod tests {
             "the receipt must identify the publishing client and sequence: {receipts:?}"
         );
         assert!(
-            receipts.iter().all(|line| {
-                line.contains("layout=observed") && line.contains("pane_action=")
-            }),
+            receipts
+                .iter()
+                .all(|line| { line.contains("layout=observed") && line.contains("pane_action=") }),
             "the same line must join layout authority to its pane action: {receipts:?}"
         );
         let accepted_values = receipts
@@ -31474,11 +31730,20 @@ mod tests {
             predecessor["exit_code"], 0,
             "the route must complete, not die with the predecessor: {predecessor}"
         );
-        assert_eq!(predecessor["projection"]["commands"][0]["status"], "applied");
+        assert_eq!(
+            predecessor["projection"]["commands"][0]["status"],
+            "applied"
+        );
         let on_successor =
             async_command_status_for_test(successor.runtime.as_ref(), "cmd-forward-on-handoff");
-        assert_eq!(on_successor["exit_code"], 0, "ran on the successor: {on_successor}");
-        assert_eq!(on_successor["projection"]["commands"][0]["status"], "applied");
+        assert_eq!(
+            on_successor["exit_code"], 0,
+            "ran on the successor: {on_successor}"
+        );
+        assert_eq!(
+            on_successor["projection"]["commands"][0]["status"],
+            "applied"
+        );
         assert_eq!(runtime.async_editor_commands.in_flight_worker_count(), 0);
         assert_eq!(runtime.async_editor_commands.handoff_parked_count(), 0);
     }
@@ -31558,9 +31823,7 @@ mod tests {
         };
         let adopted = runtime
             .async_editor_commands
-            .await_terminal_adopting("cmd-forwarded-later", Duration::from_secs(5), || {
-                Some(456)
-            })
+            .await_terminal_adopting("cmd-forwarded-later", Duration::from_secs(5), || Some(456))
             .unwrap();
         publisher.join().unwrap();
         assert_eq!(adopted["exit_code"], 0);
@@ -31570,7 +31833,10 @@ mod tests {
             .async_editor_commands
             .await_terminal_adopting("cmd-never-forwarded", Duration::from_secs(5), || None)
             .unwrap_err();
-        assert!(started.elapsed() < Duration::from_secs(1), "no predecessor: fail at once");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "no predecessor: fail at once"
+        );
         let message = format!("{err:#}");
         assert!(message.contains("unknown or expired async editor command"));
         assert!(message.contains("re-run the command"), "{message}");
@@ -31604,7 +31870,10 @@ mod tests {
             Duration::from_millis(20),
             std::thread::sleep,
         );
-        assert_eq!(abandoned, 1, "bounded: a stuck worker is reported, not waited forever");
+        assert_eq!(
+            abandoned, 1,
+            "bounded: a stuck worker is reported, not waited forever"
+        );
     }
 
     /// GH #122 invariant 3: the settle budget covers a handoff whose successor
@@ -39760,5 +40029,282 @@ mod reload_library_failure_attribution_tests {
         assert_eq!(report.delivered, 2);
         assert_eq!(report.failed, 0);
         assert!(report.failures.is_empty());
+    }
+}
+
+/// `#installworktreecontrollers` — a simulated install fan-out over a world of
+/// project roots. Each root has real `.agent-doc` state on disk; whether an
+/// editor or supervisor uses it, whether its controller runs, and every launch
+/// are simulated, so the test can observe exactly which roots the fan-out would
+/// have SPAWNED a controller for.
+#[cfg(test)]
+mod install_fanout_idle_root_tests {
+    use super::*;
+    use agent_doc_controller::recycle::{InstallFanoutControllerAccess, ProjectRootUseEvidence};
+    use std::cell::RefCell;
+
+    #[derive(Clone, Copy, Default)]
+    struct SimRoot {
+        editor_pid: Option<u64>,
+        open_supervisors: usize,
+        controller_running: bool,
+    }
+
+    struct SimWorld {
+        _dir: tempfile::TempDir,
+        roots: BTreeMap<PathBuf, SimRoot>,
+        launched: RefCell<Vec<PathBuf>>,
+        recycled: RefCell<Vec<PathBuf>>,
+        delivered: RefCell<Vec<(PathBuf, u64)>>,
+    }
+
+    impl SimWorld {
+        fn new(roots: &[(&str, SimRoot)]) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let roots = roots
+                .iter()
+                .map(|(name, root)| {
+                    let path = dir.path().join(name);
+                    std::fs::create_dir_all(path.join(".agent-doc")).unwrap();
+                    std::fs::write(path.join("doc.md"), "# doc\n").unwrap();
+                    (path, *root)
+                })
+                .collect();
+            Self {
+                _dir: dir,
+                roots,
+                launched: RefCell::default(),
+                recycled: RefCell::default(),
+                delivered: RefCell::default(),
+            }
+        }
+
+        fn root(&self, name: &str) -> PathBuf {
+            self.roots
+                .keys()
+                .find(|path| path.ends_with(name))
+                .unwrap()
+                .clone()
+        }
+
+        fn evidence(&self, root: &Path) -> ProjectRootUseEvidence {
+            let sim = self.roots[root];
+            ProjectRootUseEvidence {
+                live_editor_endpoints: usize::from(sim.editor_pid.is_some()),
+                open_supervisors: sim.open_supervisors,
+            }
+        }
+
+        /// A recycle is a two-phase handoff: it launches a replacement.
+        fn recycle(&self, root: &Path) -> Result<bool> {
+            self.recycled.borrow_mut().push(root.to_path_buf());
+            self.launched.borrow_mut().push(root.to_path_buf());
+            Ok(true)
+        }
+
+        /// `reliable_sync_status` through `connect_or_launch` (MayLaunch) or
+        /// connect-only (ExistingOnly).
+        fn status(
+            &self,
+            root: &Path,
+            access: InstallFanoutControllerAccess,
+        ) -> Result<ControllerReliableSyncStatusResponse> {
+            let sim = self.roots[root];
+            if !sim.controller_running {
+                match access {
+                    InstallFanoutControllerAccess::MayLaunch => {
+                        self.launched.borrow_mut().push(root.to_path_buf());
+                    }
+                    InstallFanoutControllerAccess::ExistingOnly => {
+                        anyhow::bail!("no project controller is listening");
+                    }
+                }
+            }
+            let registrations = sim
+                .editor_pid
+                .map(|pid| {
+                    serde_json::json!([{
+                        "document_hash": "doc",
+                        "pid": pid,
+                        "path": root.join("doc.md").display().to_string(),
+                        "editor_id": "jetbrains-sim",
+                        "editor_kind": "jetbrains",
+                        "editor_version": "0",
+                        "capabilities": ["native_hot_reload_generation_v1"],
+                        "timestamp_ms": 1
+                    }])
+                })
+                .unwrap_or_else(|| serde_json::json!([]));
+            Ok(serde_json::from_value(serde_json::json!({
+                "plane_open_docs": [],
+                "plane_open_paths": [],
+                "plane_live_docs": [],
+                "registrations": registrations,
+                "registry_open_docs": [],
+                "per_doc_pids": [],
+            }))?)
+        }
+
+        fn listening(&self, root: &Path) -> Vec<u64> {
+            self.roots[root].editor_pid.into_iter().collect()
+        }
+
+        fn scope(&self) -> NativeReloadScope {
+            NativeReloadScope {
+                project_roots: self.roots.keys().cloned().collect(),
+                supervisor_documents: BTreeSet::new(),
+                seed_root: None,
+            }
+        }
+
+        fn run_reload(&self, scope: NativeReloadScope) -> ReloadLibraryFanoutReport {
+            let (report, processes) = plan_reload_library_process_scope(
+                scope,
+                "0.0.0-sim",
+                |root| self.evidence(root),
+                |root, access| self.status(root, access),
+                |root| self.listening(root),
+            );
+            reload_library_processes(
+                report,
+                processes,
+                "0.0.0-sim",
+                |root, pid| self.roots[root].editor_pid == Some(pid),
+                |endpoint, pid| {
+                    self.delivered
+                        .borrow_mut()
+                        .push((endpoint.project_root.clone(), pid));
+                    Ok(true)
+                },
+            )
+        }
+
+        fn launched(&self) -> Vec<PathBuf> {
+            self.launched.borrow().clone()
+        }
+    }
+
+    fn world() -> SimWorld {
+        SimWorld::new(&[
+            // A subagent worktree nobody has open, with no running controller.
+            ("idle-worktree", SimRoot::default()),
+            // A leftover idle controller from an earlier session.
+            (
+                "idle-with-controller",
+                SimRoot {
+                    controller_running: true,
+                    ..SimRoot::default()
+                },
+            ),
+            // The operator's project: an editor holds it open.
+            (
+                "edited",
+                SimRoot {
+                    editor_pid: Some(4242),
+                    controller_running: true,
+                    ..SimRoot::default()
+                },
+            ),
+            // A supervisor serves a document, but its controller is down.
+            (
+                "supervised",
+                SimRoot {
+                    open_supervisors: 1,
+                    ..SimRoot::default()
+                },
+            ),
+        ])
+    }
+
+    #[test]
+    fn install_recycle_fanout_never_launches_a_controller_for_an_idle_root() {
+        let world = world();
+        let (recycled, skipped) = recycle_controllers_install_fanout(
+            world.roots.keys().cloned().collect(),
+            |root| world.evidence(root),
+            |root| world.recycle(root),
+        );
+        assert_eq!(
+            world.recycled.borrow().clone(),
+            vec![world.root("edited"), world.root("supervised")],
+            "only roots an editor or supervisor uses are recycled"
+        );
+        assert_eq!((recycled, skipped), (2, 2));
+        assert!(!world.launched().contains(&world.root("idle-worktree")));
+        assert!(
+            !world
+                .launched()
+                .contains(&world.root("idle-with-controller"))
+        );
+        let idle_log = std::fs::read_to_string(
+            world
+                .root("idle-with-controller")
+                .join(".agent-doc/logs/ops.log"),
+        )
+        .unwrap_or_default();
+        assert!(
+            idle_log.contains("install_fanout_recycle_skipped")
+                && idle_log.contains("reason=idle_project_root"),
+            "{idle_log}"
+        );
+    }
+
+    #[test]
+    fn install_reload_fanout_never_launches_a_controller_for_an_idle_root() {
+        let world = world();
+        let report = world.run_reload(world.scope());
+
+        assert_eq!(
+            world.launched(),
+            vec![world.root("supervised")],
+            "only an in-use root whose controller is down may be launched"
+        );
+        // The in-use editor root still gets its reload.
+        assert_eq!(
+            world.delivered.borrow().clone(),
+            vec![(world.root("edited"), 4242)],
+            "{report:?}"
+        );
+        assert_eq!(report.delivered, 1);
+        // The idle root without a controller is skipped, not a failure; the idle
+        // root whose controller already runs is still asked (connect-only).
+        assert_eq!(report.projects, 3);
+        assert_eq!(report.failed, 0, "{:?}", report.failures);
+    }
+
+    #[test]
+    fn a_caller_seeded_root_may_still_launch_its_controller() {
+        let world = world();
+        let mut scope = world.scope();
+        scope.seed_root = Some(world.root("idle-worktree"));
+        world.run_reload(scope);
+        assert!(world.launched().contains(&world.root("idle-worktree")));
+        assert!(
+            !world
+                .launched()
+                .contains(&world.root("idle-with-controller"))
+        );
+    }
+
+    /// The IO evidence reader: an open supervisor whose document lives in the
+    /// root counts; one serving another root does not.
+    #[test]
+    fn project_root_use_evidence_attributes_supervisor_documents_by_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("wt");
+        let other = dir.path().join("other");
+        for project in [&root, &other] {
+            std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+            std::fs::create_dir_all(project.join("tasks")).unwrap();
+        }
+        let idle = project_root_use_evidence(&root, &BTreeSet::new());
+        assert!(!idle.in_use(), "{idle:?}");
+        let elsewhere =
+            project_root_use_evidence(&root, &BTreeSet::from([other.join("tasks/plan.md")]));
+        assert!(!elsewhere.in_use(), "{elsewhere:?}");
+        let supervised =
+            project_root_use_evidence(&root, &BTreeSet::from([root.join("tasks/plan.md")]));
+        assert_eq!(supervised.open_supervisors, 1);
+        assert!(supervised.in_use());
     }
 }

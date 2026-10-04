@@ -150,9 +150,198 @@ pub fn reexec_preserve_child_refusal(
     None
 }
 
+/// `#installworktreecontrollers`: observed evidence that somebody is actually
+/// using a project root right now.
+///
+/// An install fan-out (`make install` / `install-full` -> `lib-install`) walks
+/// `/proc` for every `controller serve` process. Subagent worktrees and dev roots
+/// that nobody has open used to receive a recycle (a two-phase handoff that
+/// SPAWNS a replacement) or a `reliable_sync_status` RPC through
+/// `connect_or_launch` (which SPAWNS a controller when the socket does not
+/// answer). Both kept idle controllers alive forever — one worktree reached
+/// controller generation 44 in a day with zero documents and no editor.
+///
+/// Only evidence that is cheap to observe without the controller counts: a
+/// listening PID-scoped editor socket, a live reliable-sync editor registration,
+/// or an open `agent-doc start` supervisor serving a document in the root.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProjectRootUseEvidence {
+    /// Live editor endpoints: listening PID-scoped editor sockets, or live
+    /// reliable-sync registrations / allocated editor models when observed from
+    /// inside the controller.
+    pub live_editor_endpoints: usize,
+    /// Open `agent-doc start` supervisors whose document resolves to this root.
+    pub open_supervisors: usize,
+}
+
+impl ProjectRootUseEvidence {
+    pub fn in_use(self) -> bool {
+        self.live_editor_endpoints > 0 || self.open_supervisors > 0
+    }
+
+    pub fn as_log_fields(self) -> String {
+        format!(
+            "live_editor_endpoints={} open_supervisors={}",
+            self.live_editor_endpoints, self.open_supervisors
+        )
+    }
+}
+
+/// What the install fan-out may do to a project root that has a running
+/// controller process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallFanoutRootAction {
+    /// Somebody uses the root: recycle its controller onto the new binary.
+    Recycle,
+    /// Nobody has the root open: never launch a replacement for it. A later
+    /// client reaches the new binary through the ordinary lazy launch.
+    SkipIdle,
+}
+
+pub fn install_fanout_root_action(evidence: ProjectRootUseEvidence) -> InstallFanoutRootAction {
+    if evidence.in_use() {
+        InstallFanoutRootAction::Recycle
+    } else {
+        InstallFanoutRootAction::SkipIdle
+    }
+}
+
+/// How an install-time `reload_library` fan-out may reach a project's
+/// controller for its reliable-sync status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallFanoutControllerAccess {
+    /// The root is in use (or the caller seeded it explicitly): a missing
+    /// controller may be launched, as before.
+    MayLaunch,
+    /// The root is idle: query an already-running controller only; a missing
+    /// one is skipped, never started.
+    ExistingOnly,
+}
+
+pub fn install_fanout_controller_access(
+    evidence: ProjectRootUseEvidence,
+    seeded_by_caller: bool,
+) -> InstallFanoutControllerAccess {
+    if seeded_by_caller || evidence.in_use() {
+        InstallFanoutControllerAccess::MayLaunch
+    } else {
+        InstallFanoutControllerAccess::ExistingOnly
+    }
+}
+
+/// `#installworktreecontrollers`: a controller that notices its binary was
+/// replaced normally launches a replacement (R1 self-handoff). For a root nobody
+/// uses, that replacement is exactly the perpetual idle controller this fix
+/// removes, so the controller retires instead and the next client launches the
+/// installed binary lazily.
+///
+/// Every condition must hold: the recycle is the ROUTINE stale-binary one (an
+/// operator, forced, or protocol-skew recycle always hands off); no live editor
+/// or supervisor uses the root; the controller owns no route-owned documents
+/// (`None` = unknown, which never retires); no RPC is in flight; and no client
+/// has connected within `quiet_for_at_least`.
+pub fn idle_stale_binary_controller_should_retire(
+    routine_stale_binary: bool,
+    evidence: ProjectRootUseEvidence,
+    owned_documents: Option<usize>,
+    active_clients: usize,
+    quiet_for: Duration,
+    quiet_for_at_least: Duration,
+) -> bool {
+    routine_stale_binary
+        && !evidence.in_use()
+        && owned_documents == Some(0)
+        && active_clients == 0
+        && quiet_for >= quiet_for_at_least
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn idle() -> ProjectRootUseEvidence {
+        ProjectRootUseEvidence::default()
+    }
+
+    fn with_editor() -> ProjectRootUseEvidence {
+        ProjectRootUseEvidence {
+            live_editor_endpoints: 1,
+            ..Default::default()
+        }
+    }
+
+    fn with_supervisor() -> ProjectRootUseEvidence {
+        ProjectRootUseEvidence {
+            open_supervisors: 1,
+            ..Default::default()
+        }
+    }
+
+    /// `#installworktreecontrollers`: the install fan-out recycles a controller
+    /// only where an editor or supervisor proves the root is in use.
+    #[test]
+    fn install_fanout_recycles_only_in_use_roots() {
+        assert_eq!(
+            install_fanout_root_action(idle()),
+            InstallFanoutRootAction::SkipIdle
+        );
+        assert_eq!(
+            install_fanout_root_action(with_editor()),
+            InstallFanoutRootAction::Recycle
+        );
+        assert_eq!(
+            install_fanout_root_action(with_supervisor()),
+            InstallFanoutRootAction::Recycle
+        );
+    }
+
+    #[test]
+    fn install_fanout_reload_launches_only_for_in_use_or_seeded_roots() {
+        assert_eq!(
+            install_fanout_controller_access(idle(), false),
+            InstallFanoutControllerAccess::ExistingOnly
+        );
+        assert_eq!(
+            install_fanout_controller_access(idle(), true),
+            InstallFanoutControllerAccess::MayLaunch
+        );
+        assert_eq!(
+            install_fanout_controller_access(with_editor(), false),
+            InstallFanoutControllerAccess::MayLaunch
+        );
+        assert_eq!(
+            install_fanout_controller_access(with_supervisor(), false),
+            InstallFanoutControllerAccess::MayLaunch
+        );
+    }
+
+    #[test]
+    fn idle_stale_binary_controller_retires_only_when_every_idle_proof_holds() {
+        let quiet = Duration::from_secs(60);
+        let retire = |routine, evidence, docs, clients, quiet_for| {
+            idle_stale_binary_controller_should_retire(
+                routine, evidence, docs, clients, quiet_for, quiet,
+            )
+        };
+        assert!(retire(true, idle(), Some(0), 0, quiet));
+        // Operator / forced / skew recycles always hand off.
+        assert!(!retire(false, idle(), Some(0), 0, quiet));
+        // Somebody uses the root.
+        assert!(!retire(true, with_editor(), Some(0), 0, quiet));
+        assert!(!retire(true, with_supervisor(), Some(0), 0, quiet));
+        // The controller owns documents, or ownership is unknown.
+        assert!(!retire(true, idle(), Some(1), 0, quiet));
+        assert!(!retire(true, idle(), None, 0, quiet));
+        // An RPC is in flight, or a client connected recently.
+        assert!(!retire(true, idle(), Some(0), 1, quiet));
+        assert!(!retire(
+            true,
+            idle(),
+            Some(0),
+            0,
+            quiet - Duration::from_secs(1)
+        ));
+    }
 
     fn live_child() -> ReexecPreserveChildFacts {
         ReexecPreserveChildFacts {

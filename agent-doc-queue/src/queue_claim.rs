@@ -92,7 +92,43 @@ pub enum ClaimOutcome {
     Reassigned,
 }
 
+/// `queue_document_state.state_kind` of the per-document claim ledger row.
+pub const QUEUE_CLAIMS_STATE_KIND: &str = "queue_claims";
+
 impl QueueClaimLedger {
+    /// Decode a stored ledger payload and re-key it under the current identity
+    /// rule. Shared by every reader of the `queue_claims` state row so the
+    /// controller and the one-shot CLI boundaries judge claims identically.
+    pub fn from_state_payload(payload_json: &str) -> anyhow::Result<Self> {
+        let mut ledger: QueueClaimLedger = serde_json::from_str(payload_json)
+            .map_err(|err| anyhow::anyhow!("parse queue claim ledger: {err}"))?;
+        // `#claimdispatchidentity`: claims stored under an older identity rule
+        // are compared under the current one.
+        ledger.rekey();
+        Ok(ledger)
+    }
+
+    /// Live queue-head texts of `content` that an active claim holds
+    /// (`#deferstrike`). The ledger first follows note edits against the live
+    /// heads in memory, exactly as the CLI readers do, so a head the operator
+    /// annotated keeps its claim.
+    pub fn claimed_live_head_texts(&self, now_secs: u64, content: &str) -> Vec<String> {
+        if self.claims.is_empty() {
+            return Vec::new();
+        }
+        let Some(heads) = crate::queue_continuation::live_queue_head_texts(content) else {
+            return Vec::new();
+        };
+        let mut ledger = self.clone();
+        ledger.follow_edits(now_secs, &heads);
+        let live = crate::queue_continuation::live_queue_head_identities(content);
+        let claimed = ledger.claimed_items(now_secs, live.as_ref());
+        heads
+            .into_iter()
+            .filter(|head| claimed.claims(head))
+            .collect()
+    }
+
     /// Re-derive every stored identity from its `item_text` with the current
     /// [`claim_identity`], merging claims that now share one identity (the
     /// later expiry wins). A ledger written before the identity rule changed

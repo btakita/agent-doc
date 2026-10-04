@@ -48,6 +48,15 @@ fn enforce_selected_queue_response_contract(
             !flags.queue_completion_ids.is_empty(),
         )?;
     if let Some(file) = file {
+        // `#deferstrike`: a head an active worker claim holds (a subagent, or
+        // the coordinator's own `coordinator:*` integration claim) belongs to
+        // that worker. This cycle may have selected it before the claim landed;
+        // it owes no answer for it, and `#ftstrike` leaves it queued.
+        let claimed_heads =
+            agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(file, current);
+        let claimed =
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
+        missing.retain(|head| !claimed.claims(head));
         let selected = agent_doc_cycle_state_io::load(file)?
             .map(|state| state.selected_free_text_queue_heads)
             .unwrap_or_default();
@@ -59,7 +68,9 @@ fn enforce_selected_queue_response_contract(
                     response,
                     &selected,
                     !flags.queue_completion_ids.is_empty(),
-                )?,
+                )?
+                .into_iter()
+                .filter(|head| !claimed.claims(head)),
         );
         missing.sort();
         missing.dedup();
@@ -87,8 +98,9 @@ fn enforce_selected_queue_response_contract(
             );
         }
         anyhow::bail!(
-            "[finalize] pre-write gate: selected free-text queue prompt lacks response evidence: {}. Include its exact `> **Queue prompt:**` quote and the completed result or concrete deferral before retrying. No response has been captured.",
-            missing.join("; ")
+            "[finalize] pre-write gate: selected free-text queue prompt lacks response evidence: {}. Include its exact `> **Queue prompt:**` quote followed by either the completed result (the head is struck) or a paragraph that opens with `{}` and names what it waits for (the head stays queued). A head a worker owns is exempt once it is claimed (`agent-doc queue claim <FILE> --item <head> --owner <owner>`). No response has been captured.",
+            missing.join("; "),
+            agent_doc_queue::queue_response::QUEUE_PROMPT_DEFERRAL_MARKER
         );
     }
     Ok(())
@@ -3275,6 +3287,61 @@ mod tests {
         .unwrap();
     }
 
+    /// `#deferstrike` (agent-doc-bugs.md 2026-10-04): preflight selected the
+    /// free-text head `release + publish`, then the coordinator claimed it
+    /// (`--owner coordinator:integration`). The claimed head owes this cycle
+    /// no answer; an unclaimed selected head still trips the gate.
+    #[test]
+    fn claimed_selected_free_text_head_passes_the_evidence_gate() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("agent-doc-bugs.md");
+        let current = concat!(
+            "<!-- agent:queue go -->\n",
+            "- 🚧 release + publish\n",
+            "- do [#ghbrew]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        let flags = WriteFlags {
+            strict_closeout: true,
+            commit_requested: true,
+            ..Default::default()
+        };
+        let response = "### Re: dispatch\n\nDispatched `#ghbrew` to a subagent.";
+
+        let error = enforce_selected_queue_response_contract(
+            Some(&doc),
+            Some(current),
+            current,
+            response,
+            &flags,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("selected free-text queue prompt lacks response evidence"));
+        assert!(
+            error.contains(agent_doc_queue::queue_response::QUEUE_PROMPT_DEFERRAL_MARKER),
+            "the gate must name the structured deferral marker: {error}"
+        );
+
+        agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "release + publish",
+            "coordinator:integration",
+            3600,
+        )
+        .unwrap();
+        enforce_selected_queue_response_contract(
+            Some(&doc),
+            Some(current),
+            current,
+            response,
+            &flags,
+        )
+        .expect("a claimed head is owned by its worker, not by this cycle");
+    }
+
     #[test]
     fn explicit_id_closeout_is_not_blocked_by_unrelated_selected_free_text() {
         let current = concat!(
@@ -3392,7 +3459,9 @@ mod tests {
             .to_string();
         assert!(err.contains("#sdkrestemitnative annotated"), "{err}");
         assert!(
-            err.contains("> **Operator note:** can the *.h files be generated from the contract as well?"),
+            err.contains(
+                "> **Operator note:** can the *.h files be generated from the contract as well?"
+            ),
             "{err}"
         );
         assert!(err.contains("No response has been captured"), "{err}");
@@ -3407,8 +3476,14 @@ mod tests {
             ..flags.clone()
         };
         assert!(
-            enforce_selected_queue_response_contract(None, None, current, echo_only, &via_queue_ids)
-                .is_err()
+            enforce_selected_queue_response_contract(
+                None,
+                None,
+                current,
+                echo_only,
+                &via_queue_ids
+            )
+            .is_err()
         );
     }
 

@@ -17,7 +17,7 @@ use agent_doc_queue::{
         consume_queue_prompts_by_exact_spans, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
-        project_answered_free_text_strike, queue_consume_count_for_done_ids,
+        project_answered_free_text_strike_excluding_claimed, queue_consume_count_for_done_ids,
         queue_consume_node_ops, queue_mark_done_node_ops, queue_prompt_node_keys_for_count,
         queue_prompt_node_keys_for_done_ids, strike_all_noise_queue_heads,
     },
@@ -909,8 +909,14 @@ pub fn strike_answered_free_text_queue_heads(
     let baseline = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
-    let Some(projected) =
-        project_answered_free_text_strike(&content, response_body, baseline.as_deref())?
+    // `#deferstrike`: never strike a head an active worker claim holds.
+    let claimed_heads = crate::queue_claim::claimed_live_head_texts_for_content(file, &content);
+    let Some(projected) = project_answered_free_text_strike_excluding_claimed(
+        &content,
+        response_body,
+        baseline.as_deref(),
+        &claimed_heads,
+    )?
     else {
         return Ok(0);
     };
@@ -923,7 +929,12 @@ pub fn strike_answered_free_text_queue_heads(
     // converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "free-text strike snapshot sync") {
         Some(snap) => {
-            match project_answered_free_text_strike(&snap, response_body, baseline.as_deref()) {
+            match project_answered_free_text_strike_excluding_claimed(
+                &snap,
+                response_body,
+                baseline.as_deref(),
+                &claimed_heads,
+            ) {
                 Ok(snapshot) => snapshot.map(|projected| projected.target_content),
                 Err(err) => {
                     log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);

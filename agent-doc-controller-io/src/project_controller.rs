@@ -2308,6 +2308,9 @@ pub struct ControllerAnsweredFreeTextStrikeInvocation {
     pub response_body: String,
     pub baseline_content: Option<String>,
     pub node_keys: Vec<String>,
+    /// Heads an active worker claim held when the target was projected
+    /// (`#deferstrike`); a snapshot projection must leave them queued too.
+    pub claimed_heads: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -4019,6 +4022,50 @@ struct QueueAuthorityObservation {
     file: PathBuf,
     content: String,
     content_hash: String,
+    /// Live heads of `content` an active worker claim holds at this
+    /// observation (`#deferstrike`): the answered-free-text projection never
+    /// strikes them. Re-read on every observation, so a released claim lets
+    /// the closing cycle's answer strike the head.
+    claimed_heads: Vec<String>,
+}
+
+/// Live queue heads of `content` held by an active worker claim, read from the
+/// document's `queue_claims` state row (`#deferstrike`). The controller cannot
+/// depend on `agent-doc-queue-io` (that crate depends on this one), so it reads
+/// the same row through the shared pure decode. An unreadable ledger is
+/// reported and treated as "no claims", the pre-claim behaviour.
+fn claimed_live_queue_head_texts(file: &Path, content: &str) -> Vec<String> {
+    let read = || -> Result<Vec<String>> {
+        let Some(root) = agent_doc_project_root_io::project_root_containing(file) else {
+            return Ok(Vec::new());
+        };
+        let document_hash = agent_doc_hash::path_hash(file)
+            .with_context(|| format!("canonicalize document path for hash: {}", file.display()))?;
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+        let Some(record) = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
+        )?
+        else {
+            return Ok(Vec::new());
+        };
+        let ledger = agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
+            &record.payload_json,
+        )?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0);
+        Ok(ledger.claimed_live_head_texts(now, content))
+    };
+    read().unwrap_or_else(|err| {
+        eprintln!(
+            "[queue-claim] WARNING: controller could not read queue claims for {}; treating every head as unclaimed: {err:#}",
+            file.display()
+        );
+        Vec::new()
+    })
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -4032,6 +4079,7 @@ struct AnsweredFreeTextQueueStrikeProjection {
     response_body: String,
     baseline_content: Option<String>,
     node_keys: Vec<String>,
+    claimed_heads: Vec<String>,
     error: Option<String>,
 }
 
@@ -5283,6 +5331,7 @@ impl ControllerDocumentGraphs {
         let observation = QueueAuthorityObservation {
             file: file.to_path_buf(),
             content_hash: agent_doc_hash::content_hash(&content),
+            claimed_heads: claimed_live_queue_head_texts(file, &content),
             content,
         };
         self.queue_authority
@@ -5350,10 +5399,11 @@ impl ControllerDocumentGraphs {
                 ) {
                     return AnsweredFreeTextQueueStrikeProjection::default();
                 }
-                match agent_doc_queue::queue_consume::project_answered_free_text_strike(
+                match agent_doc_queue::queue_consume::project_answered_free_text_strike_excluding_claimed(
                     &observation.content,
                     &captured.response_body,
                     captured.baseline_content.as_deref(),
+                    &observation.claimed_heads,
                 ) {
                     Ok(Some(target)) => {
                         let projection_id = agent_doc_hash::content_hash(&format!(
@@ -5372,6 +5422,7 @@ impl ControllerDocumentGraphs {
                             response_body: captured.response_body,
                             baseline_content: captured.baseline_content,
                             node_keys: target.node_keys,
+                            claimed_heads: observation.claimed_heads,
                             error: None,
                         }
                     }
@@ -5719,6 +5770,7 @@ impl ControllerDocumentGraphs {
                 response_body: projection.response_body.clone(),
                 baseline_content: projection.baseline_content.clone(),
                 node_keys: projection.node_keys.clone(),
+                claimed_heads: projection.claimed_heads.clone(),
             };
             let Some(sender) = sender.get() else {
                 return;
@@ -19059,6 +19111,111 @@ revised operator request
                 .contains("queue:0:completed-work:0")
         );
         assert!(!state.queue.completed_heads.contains("queue:1:ready-work:0"));
+    }
+
+    /// `#deferstrike` live shape (agent-doc-bugs.md 2026-10-04): the controller
+    /// struck `release + publish` while `coordinator:integration` held its
+    /// claim. The observation reads the claim ledger, so the projection has no
+    /// target until the claim is released.
+    #[test]
+    fn claimed_free_text_head_gets_no_answered_strike_projection_until_released() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("claimed-session.md");
+        let head = "close the GH 127 128 129 issues after integration lands";
+        let response = format!(
+            "### Re: integration — opus\n\n> **Queue prompt:** {head}\n\nClosed all three.\n"
+        );
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: claimed-projection\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response, head
+        );
+        std::fs::write(&file, &content).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let write_ledger = |ledger: &agent_doc_queue::queue_claim::QueueClaimLedger| {
+            let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+            agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+                &conn,
+                &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                    document_hash: agent_doc_hash::path_hash(&canonical).unwrap(),
+                    state_kind: agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND.to_string(),
+                    canonical_path: canonical.to_string_lossy().into_owned(),
+                    payload_json: serde_json::to_string(ledger).unwrap(),
+                    updated_at_secs: 0,
+                },
+            )
+            .unwrap();
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(head, "coordinator:integration", now, 3600);
+        write_ledger(&ledger);
+        assert_eq!(
+            claimed_live_queue_head_texts(&canonical, &content),
+            vec![head.to_string()]
+        );
+
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        runtime
+            .document_graphs
+            .install_settle_sink(dir.path().to_path_buf(), &runtime);
+        let captured = agent_doc_state_backbone::StateEvent::new(
+            "response-captured-claimed-free-text",
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.clone(),
+                cycle_id: "cycle-1".to_string(),
+                capture_id: "capture-claimed-free-text".to_string(),
+                response_sha256: agent_doc_hash::content_hash(&response),
+                response_body: Some(response.clone()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: Some(content.clone()),
+            },
+        );
+        let preflight = preflight_started_event(&document_hash);
+        append_state_event(dir.path(), &preflight).unwrap();
+        runtime.apply_state_event(&preflight).unwrap();
+        append_state_event(dir.path(), &captured).unwrap();
+        runtime.apply_state_event(&captured).unwrap();
+        runtime
+            .document_queue_authority_observe(&document_hash, &canonical, content.clone())
+            .unwrap();
+        let strike = runtime
+            .document_graphs
+            .current_answered_free_text_strike(&document_hash);
+        assert!(
+            !strike.has_target(),
+            "a claimed head must not project an answered strike: {strike:?}"
+        );
+
+        // The owner releases the claim; the next observation strikes it.
+        write_ledger(&agent_doc_queue::queue_claim::QueueClaimLedger::default());
+        let _ =
+            runtime.document_queue_authority_observe(&document_hash, &canonical, content.clone());
+        let strike = runtime
+            .document_graphs
+            .current_answered_free_text_strike(&document_hash);
+        assert!(
+            strike.has_target(),
+            "a released head answered by the response is struck: {strike:?}"
+        );
     }
 
     #[test]

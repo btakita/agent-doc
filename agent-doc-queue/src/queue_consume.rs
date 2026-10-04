@@ -676,6 +676,24 @@ pub fn answered_free_text_head_node_keys(
     response_body: &str,
     baseline: Option<&str>,
 ) -> Result<Vec<String>> {
+    answered_free_text_head_node_keys_excluding_claimed(content, response_body, baseline, &[])
+}
+
+/// [`answered_free_text_head_node_keys`] that never selects a head an active
+/// worker claim holds (`#deferstrike`).
+///
+/// A claim is the structural statement that a worker (a subagent, or the
+/// coordinator's own integration step) still owns the head. A response that
+/// quotes the head only to report that dispatch is not its answer, so the
+/// claim outranks the quote. The claim owner releases it
+/// (`agent-doc queue release`) before the closing cycle answers the head.
+pub fn answered_free_text_head_node_keys_excluding_claimed(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+) -> Result<Vec<String>> {
+    let claimed = crate::queue_claim::ClaimedQueueItems::none().with_heads(claimed_heads);
     if response_body.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -735,6 +753,9 @@ pub fn answered_free_text_head_node_keys(
             continue;
         }
         if struck_texts.contains(&normalize_queue_prompt_text(text)) {
+            continue;
+        }
+        if claimed.claims(text) {
             continue;
         }
         // `#bugautostruck`: the in-progress marker proves only which queue head
@@ -1139,11 +1160,28 @@ pub fn project_answered_free_text_strike(
     response_body: &str,
     baseline: Option<&str>,
 ) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
+    project_answered_free_text_strike_excluding_claimed(content, response_body, baseline, &[])
+}
+
+/// [`project_answered_free_text_strike`] that leaves every head in
+/// `claimed_heads` (live heads an active worker claim holds) queued
+/// (`#deferstrike`).
+pub fn project_answered_free_text_strike_excluding_claimed(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
     if response_body.trim().is_empty() {
         return Ok(None);
     }
     agent_doc_frontmatter::frontmatter::parse(content)?;
-    let node_keys = answered_free_text_head_node_keys(content, response_body, baseline)?;
+    let node_keys = answered_free_text_head_node_keys_excluding_claimed(
+        content,
+        response_body,
+        baseline,
+        claimed_heads,
+    )?;
     if node_keys.is_empty() {
         return Ok(None);
     }
@@ -1920,6 +1958,130 @@ mod tests {
         let patches = ipc_node_ops_to_node_patches(&[op]);
         assert_eq!(patches[0].op, MutationNodePatchOp::Replace);
         assert_eq!(patches[0].content.as_deref(), Some("~~struck~~ — note"));
+    }
+
+    /// `#deferstrike` live shape (agent-doc-bugs.md 2026-10-04): the
+    /// coordinator claimed `release + publish`, quoted it, and deferred it in
+    /// prose. `#ftstrike` struck it as answered anyway.
+    const DEFERSTRIKE_DOC: &str = concat!(
+        "---\nqueue_active: true\n---\n\n",
+        "<!-- agent:queue go -->\n",
+        "- do [#ghbrew]\n",
+        "- release + publish\n",
+        "<!-- /agent:queue -->\n",
+    );
+    const DEFERSTRIKE_DEFERRAL: &str = concat!(
+        "### Re: dispatch — opus\n\n",
+        "> **Queue prompt:** release + publish\n\n",
+        "**Deferred, not done:** this release has not happened yet. It is claimed by me ",
+        "(`coordinator:integration`) and waits for the six in-flight branches. ",
+        "Keep this head open until then.\n",
+    );
+    const DEFERSTRIKE_ANSWER: &str = concat!(
+        "### Re: release — opus\n\n",
+        "> **Queue prompt:** release + publish\n\n",
+        "Released v0.35.453: tagged, the GitHub release and PyPI published, issues closed.\n",
+    );
+
+    #[test]
+    fn deferstrike_claimed_head_is_never_struck_even_when_quoted() {
+        let claimed = vec!["release + publish".to_string()];
+        let keys = answered_free_text_head_node_keys_excluding_claimed(
+            DEFERSTRIKE_DOC,
+            DEFERSTRIKE_ANSWER,
+            Some(DEFERSTRIKE_DOC),
+            &claimed,
+        )
+        .unwrap();
+        assert!(keys.is_empty(), "a claimed head stays queued: {keys:?}");
+        assert!(
+            project_answered_free_text_strike_excluding_claimed(
+                DEFERSTRIKE_DOC,
+                DEFERSTRIKE_ANSWER,
+                Some(DEFERSTRIKE_DOC),
+                &claimed,
+            )
+            .unwrap()
+            .is_none()
+        );
+        // The in-progress marker does not change the claim identity.
+        let marked = DEFERSTRIKE_DOC.replace("- release + publish", "- 🚧 release + publish");
+        assert!(
+            answered_free_text_head_node_keys_excluding_claimed(
+                &marked,
+                DEFERSTRIKE_ANSWER,
+                Some(&marked),
+                &claimed,
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn deferstrike_quoted_head_with_concrete_deferral_is_not_struck() {
+        let keys = answered_free_text_head_node_keys(
+            DEFERSTRIKE_DOC,
+            DEFERSTRIKE_DEFERRAL,
+            Some(DEFERSTRIKE_DOC),
+        )
+        .unwrap();
+        assert!(
+            keys.is_empty(),
+            "a quoted, deferred head stays queued: {keys:?}"
+        );
+        let structured = concat!(
+            "> **Queue prompt:** release + publish\n\n",
+            "**Deferred:** the integration batch has not landed.\n",
+        );
+        assert!(
+            answered_free_text_head_node_keys(DEFERSTRIKE_DOC, structured, Some(DEFERSTRIKE_DOC))
+                .unwrap()
+                .is_empty(),
+            "the structured `**Deferred:**` lead keeps the head queued"
+        );
+        let dispatched = concat!(
+            "> **Queue prompt:** release + publish\n\n",
+            "Dispatched to a subagent in its own worktree.\n",
+        );
+        assert!(
+            answered_free_text_head_node_keys(DEFERSTRIKE_DOC, dispatched, Some(DEFERSTRIKE_DOC))
+                .unwrap()
+                .is_empty(),
+            "a head only dispatched this cycle is not answered"
+        );
+    }
+
+    #[test]
+    fn deferstrike_quoted_and_answered_unclaimed_head_is_struck() {
+        let keys = answered_free_text_head_node_keys_excluding_claimed(
+            DEFERSTRIKE_DOC,
+            DEFERSTRIKE_ANSWER,
+            Some(DEFERSTRIKE_DOC),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(keys.len(), 1, "the answered head is struck: {keys:?}");
+        let projected = project_answered_free_text_strike(
+            DEFERSTRIKE_DOC,
+            DEFERSTRIKE_ANSWER,
+            Some(DEFERSTRIKE_DOC),
+        )
+        .unwrap()
+        .expect("answered head projects a strike");
+        assert!(projected.target_content.contains("~~release + publish~~"));
+        // A claim on a DIFFERENT head does not hold this one back.
+        assert_eq!(
+            answered_free_text_head_node_keys_excluding_claimed(
+                DEFERSTRIKE_DOC,
+                DEFERSTRIKE_ANSWER,
+                Some(DEFERSTRIKE_DOC),
+                &["do [#ghbrew]".to_string()],
+            )
+            .unwrap()
+            .len(),
+            1
+        );
     }
 
     #[test]

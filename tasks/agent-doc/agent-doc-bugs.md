@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -148,6 +149,35 @@ I've dispatched it to a subagent as `#cellcollide`, in its own worktree on branc
 - regression tests cover a queue edit, a backlog edit, and a same-spot `exchange` edit, then the full `make check`.
 
 Three fixes are in flight in separate worktrees: `ghfix126` (GH #126 pane focus), `steerworks` (live steering delivery and false positives in chat-prompt detection) and `cellcollide`. I'll integrate them one at a time with one `make install`, then run "release + publish".
+
+### Re: [#claimedsteerwake] explicit send via Run Agent Doc — opus-5-5 · 2026-10-04T01:36-04:00
+
+> **Operator note:** should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful?
+
+**Yes, make "Run Agent Doc" the explicit send, and keep passive delivery only as a best-effort fallback.** Today agent-doc guesses when an edit is finished. It waits for typing to settle, holds an edit to a claimed item forever, and only reports changes after one of my tool calls or at turn end. Each of those guesses failed this session:
+- your Coder note on #126 was never delivered;
+- a trailing period re-surfaced as a brand-new item;
+- my own `Chat prompt` quote came back to me as your steering.
+
+The design I've handed to the `steerworks` subagent, which now holds `#claimedsteerwake`:
+1. **Run Agent Doc while a turn is running, or while the pane is idle with pending edits**, sends everything pending for that document right away:
+   - it skips the typing wait;
+   - edits to claimed items are labelled `forward to owner subagent:<label>`;
+   - an idle pane is woken, and a running turn gets the edits at its next hook;
+   - it never injects a duplicate `agent-doc <FILE>` into a busy pane.
+2. **Edits you don't explicitly send** still arrive the current way, after typing settles.
+3. **Explicitly sent items are marked `sent=explicit`**, so I treat them as final rather than possibly half-typed.
+
+**The perceptron is still useful, in a smaller role.** An explicit send bypasses it entirely. The `#steergateperceptron` typing-completion gate in `agent-doc-debounce/src/learned_gate.rs` still decides when an edit you never explicitly sent is complete enough to deliver mid-turn. Explicit sends also give it what it has lacked: labelled data. The text at the moment you press Run Agent Doc is a confirmed "finished" example, and `#steergatenamodata` still has 0 labelled rows. I've asked the subagent to record explicit sends as training labels if that fits the existing plumbing.
+
+The same subagent is also fixing the two false positives in chat-prompt detection:
+- a harness `<task-notification>` was flagged as an operator chat prompt; it was the subagent's automatic status message, not something you typed, so I didn't record it;
+- my own blockquote was read back to me as your steering.
+
+Status of the other work:
+- **#126 (`ghfix126`):** its `make check` is still finishing.
+- **`#cellcollide`:** has both repros, the queue-section and `exchange` divergence.
+- **release + publish:** follows integration.
 <!-- agent:boundary:e240a891 -->
 <!-- /agent:exchange -->
 
@@ -156,9 +186,10 @@ Three fixes are in flight in separate worktrees: `ghfix126` (GH #126 pane focus)
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
 - Ensure the real-time reactive steering works. When do you get the signal about the document changing?
+- do [#claimedsteerwake]: should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful? Note [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "#gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain"
 - release + publish
 <!-- /agent:queue -->
 

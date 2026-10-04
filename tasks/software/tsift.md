@@ -20,6 +20,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -176,12 +177,34 @@ The closeout flagged #fixhttpsgithub as a possible match for this request. That'
 They live in the shared tree, so this release left them alone. I added a backlog item to refresh them with `tsift init --harness claude`.
 
 The `agent-loop/src/tsift` checkout is still on `33bc48f` (0.1.102) and untouched. The subagent's worktree is removed.
+
+### Re: [#tsiftskillrefresh] local, uncommitted tsift skills — dispatched to a subagent — opus-5-5 · 2026-10-04T01:05-04:00
+
+> **Queue prompt:** do [#tsiftskillrefresh]: Use local non-committed tsift skills?
+
+> **Operator note:** Use local non-committed tsift skills?
+
+**Yes, and tsift already supports it.** `tsift init --instructions personal` installs the skill for your user only and leaves the repository untouched. `--harness <name>` adds a symlink so each harness can find it; those links never copy the files. The problem now is that agent-loop is in a mixed state:
+- `.claude/skills/tsift/` is **committed**: a 0.1.62 copy, with `SKILL.md` and 5 runbooks.
+- `.agents/skills/tsift/` is **untracked**, at 0.1.101.
+- `~/.claude/skills/tsift/` is a plain copy at 0.1.62.
+
+Each one goes stale until someone re-copies it, which is why the installed binary is at 0.1.103 while the skills it ships are older.
+
+I claimed the item and started a background subagent on it. It will:
+1. Run `tsift init --instructions personal --harness …` for each harness that has a tsift skill directory here, so every copy is replaced by a link to the installed 0.1.103 skill.
+2. Remove the committed `.claude/skills/tsift/` from git with `git rm --cached` and add ignore rules so it doesn't get committed again. It commits only those paths. Afterwards it checks that `git ls-files` comes back empty, because `--only` can silently undo `rm --cached`.
+3. Keep agent-loop's `CLAUDE.md` pointing at a path that exists. It currently routes to `.agents/skills/tsift/SKILL.md`.
+4. Check that every location a harness reads now shows 0.1.103.
+
+**Separate agent-doc bug, filed as `chatpromptnotif` in `agent-doc-bugs2.md`:** the hook took the release subagent's completion notice for one of your chat prompts. It flagged it on that turn and again as "unrecorded" on this one. That notice came from the harness, not from you, and its result is already in this document, so I didn't insert it as a prompt.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- do [#tsiftskillrefresh]: Use local non-committed tsift skills?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

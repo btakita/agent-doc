@@ -30,8 +30,13 @@
 
 pub mod graph;
 pub mod pane_placement;
+pub mod remote_layout;
 
 pub use graph::{EditorSurfaceState, SurfaceFold};
+pub use remote_layout::{
+    RemoteClientEditors, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,
+    RemoteLayoutSource,
+};
 
 use serde::{Deserialize, Serialize};
 

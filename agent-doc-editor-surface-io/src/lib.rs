@@ -20,7 +20,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use agent_doc_editor_surface::SurfaceColumn;
 use agent_doc_editor_surface::{
     CurrentDocumentAuthority, DocumentAuthority, EditorSurface, EditorSurfaceObservation,
-    EditorSurfaceState, SurfaceIntent, TmuxLayout,
+    EditorSurfaceState, RemoteLayoutEvidence, RemoteLayoutMemory, RemoteLayoutResolution,
+    SurfaceIntent, TmuxLayout,
 };
 use agent_doc_state_scope::ProcessScope;
 use anyhow::{Context as _, Result};
@@ -247,6 +248,44 @@ static EDITOR_SURFACE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static REGISTRY: LazyLock<Registry> =
     LazyLock::new(|| Registry::new(Arc::new(|_, _| Ok(String::new()))));
 
+// GH #134: the previous Remote Dev split resolution per project root. A pure
+// value fold (`RemoteLayoutMemory::advance`); losing it on a native reload only
+// costs one cold observation, never authority.
+static REMOTE_LAYOUT_MEMORY: LazyLock<Mutex<HashMap<PathBuf, RemoteLayoutMemory>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn remote_layout_memory() -> std::sync::MutexGuard<'static, HashMap<PathBuf, RemoteLayoutMemory>> {
+    REMOTE_LAYOUT_MEMORY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Resolve a Remote Dev backend's split layout (GH #134).
+///
+/// A Remote Dev backend has no local editor windows; the plugin reports each
+/// remote client's visible/selected/open session documents instead. The fold
+/// keeps the previous resolution per project so a degenerate single-selection
+/// observation retains a known split instead of collapsing it to one pane.
+pub fn resolve_remote_layout(
+    project_root: &Path,
+    evidence: &RemoteLayoutEvidence,
+) -> RemoteLayoutResolution {
+    let mut memories = remote_layout_memory();
+    let memory = memories.entry(project_root.to_path_buf()).or_default();
+    let (next, resolution) = memory.advance(evidence);
+    *memory = next;
+    resolution
+}
+
+pub fn resolve_remote_layout_from_json(
+    project_root: &Path,
+    evidence_json: &str,
+) -> Result<RemoteLayoutResolution> {
+    let evidence: RemoteLayoutEvidence =
+        serde_json::from_str(evidence_json).context("parse remote layout evidence json")?;
+    Ok(resolve_remote_layout(project_root, &evidence))
+}
+
 fn publish_editor_observation(
     root: &Path,
     surface: EditorSurface,
@@ -325,6 +364,7 @@ pub fn observe_json(project_root: &Path, surface_json: &str) -> Result<String> {
 
 /// Retire the controller-owned client generation and dispose its local cache.
 pub fn forget(project_root: &Path) -> bool {
+    remote_layout_memory().remove(project_root);
     let client_id = format!("native-pid:{}", std::process::id());
     let controller_forgot =
         agent_doc_controller_io::project_controller::forget_editor_surface_existing(
@@ -343,6 +383,7 @@ pub fn forget(project_root: &Path) -> bool {
 pub fn quiesce_for_reload() {
     EDITOR_GENERATION_ACCEPTING.store(false, Ordering::SeqCst);
     let reactive_roots = REGISTRY.forget_all();
+    remote_layout_memory().clear();
     eprintln!("[editor-surface] native generation quiesced reactive_roots={reactive_roots}");
 }
 
@@ -362,6 +403,29 @@ pub fn current_document_authority(project_root: &Path) -> CurrentDocumentAuthori
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GH #134: the native fold remembers a project's Remote Dev split across
+    /// observations, so the single-selection observations that follow a
+    /// detected split keep both columns; another root is independent.
+    #[test]
+    fn gh134_remote_layout_memory_is_per_project_root() {
+        let root = Path::new("/tmp/gh134-remote-layout-root");
+        let other = Path::new("/tmp/gh134-remote-layout-other");
+        let split = r#"{"clients":[{"visible":["a.md","b.md"],"selected":["a.md"],"open":["a.md","b.md"]}],"focused":["a.md"]}"#;
+        let single =
+            r#"{"clients":[{"selected":["b.md"],"open":["a.md","b.md"]}],"focused":["b.md"]}"#;
+        let first = resolve_remote_layout_from_json(root, split).unwrap();
+        assert_eq!(first.columns.len(), 2);
+        let retained = resolve_remote_layout_from_json(root, single).unwrap();
+        assert_eq!(retained.columns, first.columns);
+        let cold = resolve_remote_layout_from_json(other, single).unwrap();
+        assert!(cold.columns.is_empty(), "a different root starts cold");
+        remote_layout_memory().remove(root);
+        let after_forget = resolve_remote_layout_from_json(root, single).unwrap();
+        assert!(after_forget.columns.is_empty());
+        remote_layout_memory().remove(root);
+        remote_layout_memory().remove(other);
+    }
 
     fn mirrored(surface: &EditorSurface) -> TmuxLayout {
         TmuxLayout {

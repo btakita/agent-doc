@@ -15,3 +15,6 @@ agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.453
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.453" }
 lazily = { version = "0.57.1", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

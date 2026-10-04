@@ -154,6 +154,52 @@ class LayoutDetectorTest {
     }
 
     @Test
+    fun `GH 134 remote evidence and native resolution round-trip`() {
+        val json = LayoutDetector.remoteLayoutEvidenceJson(
+            listOf(
+                LayoutDetector.RemoteClientSessionEditors(
+                    visible = listOf("tasks/a.md", "tasks/b.md"),
+                    selected = listOf("tasks/a.md"),
+                    open = listOf("tasks/a.md", "tasks/b.md"),
+                ),
+            ),
+            focusedSessionFiles = listOf("tasks/a.md"),
+        )
+        val evidence = com.google.gson.JsonParser.parseString(json).asJsonObject
+        assertEquals(
+            listOf("tasks/a.md", "tasks/b.md"),
+            evidence.getAsJsonArray("clients")[0].asJsonObject.getAsJsonArray("visible").map { it.asString },
+        )
+        assertEquals("tasks/a.md", evidence.getAsJsonArray("focused")[0].asString)
+
+        val resolved = LayoutDetector.parseRemoteLayoutResolution(
+            """{"columns":[{"files":["tasks/a.md"]},{"files":["tasks/b.md"]}],""" +
+                """"source":"retained_remote_columns","reason":"single_selection_within_retained_layout"}""",
+        )
+        assertEquals(
+            listOf(LayoutColumn(listOf("tasks/a.md")), LayoutColumn(listOf("tasks/b.md"))),
+            resolved?.columns,
+        )
+        assertEquals("retained_remote_columns", resolved?.source)
+        assertEquals("single_selection_within_retained_layout", resolved?.reason)
+
+        val unknown = LayoutDetector.parseRemoteLayoutResolution(
+            """{"columns":[],"source":"unknown","reason":"no_split_evidence"}""",
+        )
+        assertEquals(emptyList<LayoutColumn>(), unknown?.columns)
+        assertEquals(null, LayoutDetector.parseRemoteLayoutResolution("not json"))
+
+        val line = LayoutDetector.unknownRemoteLayoutLine(
+            focusedSessionFiles = listOf("tasks/a.md"),
+            remoteSelections = listOf(listOf("tasks/a.md")),
+            visibleSelections = listOf(listOf("tasks/a.md")),
+            reason = "no_split_evidence",
+        )
+        assertTrue(line, line.contains("visible=[0:[tasks/a.md]]"))
+        assertTrue(line, line.endsWith("reason=no_split_evidence"))
+    }
+
+    @Test
     fun `one local editor window is known while one remote selection stays unknown`() {
         assertEquals(
             EditorLayout(listOf(LayoutColumn(listOf("tasks/local.md")))),

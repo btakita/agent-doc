@@ -156,6 +156,34 @@ I filed this as `#steerbacklogsource`. Steering should be attributed to the comp
 `do [#gvqv]` also appears twice in the queue: your rewritten stub plus the mirror. Both heads close together when `#gvqv` is marked done at release.
 
 **Next:** when the suite passes, I'll fast-forward main, run one `make install`, and release v0.35.452 with the missing 0.35.451 parity row. Then I'll close `#editoractionmenu`, `#gvqv` and `#halftypedcoin`, and dispatch `#steerbacklogsource`.
+
+### Re: v0.35.452 released — About Agent Doc, Dashboard, #halftypedcoin — opus-5-5 · 2026-10-04T15:20-04:00
+
+> **Queue prompt:** do [#editoractionmenu]
+> **Queue prompt:** do [#gvqv]
+> **Queue prompt:** do [#halftypedcoin]
+> **Queue prompt:** release + publish
+
+**v0.35.452 is released and installed.** `agent-doc version --json` reports `0.35.452`, with JetBrains plugin `0.2.488` and VS Code extension `0.2.80`. The JetBrains plugin was swapped into the running IDE without a restart, and the VS Code extension is installed in codium.
+
+**Verification.** I merged the three branches into `integ452`. The two plugin branches conflicted in 9 places (menus, popup lists, spec sections), and I resolved each one to keep both actions. Because the combined plugin code is new, I re-bumped JetBrains to 0.2.488 and VS Code to 0.2.80. Full `make check` exited 0 with **10890 tests run, 10890 passed**; that includes the JetBrains and VS Code suites. `editor-parity` and the plugin version fence pass on the release commit. Release commit `d08511f2b` and tag `v0.35.452` are pushed, and the superproject gitlink is `57cef3200f`.
+
+**What shipped:**
+- **About Agent Doc** (`#editoractionmenu`):
+  - New `agent-doc version --json` and a matching FFI, both reporting the version, build id, binary path, native library, and expected plugin versions.
+  - JetBrains and VS Code get an About action that shows the plugin, CLI, and native-library versions and warns on mismatch. Zed has no action surface and reports its version through LSP `serverInfo`.
+- **Dashboard** (`#gvqv`):
+  - `agent-doc dashboard` shows the fleet work board plus controller and supervisor liveness.
+  - Once `.agent-doc/dashboard.md` exists, the project controller keeps it live. It is excluded from session scanning by a marker line.
+  - The Dashboard action writes the file and opens it. Note that `dashboard` is no longer an alias for `board`.
+- **`#halftypedcoin`:** a line ending in an empty `` `` `` pair now counts as unfinished. Coining a free-text line respects the typing gate, and a stub absorbs the line you kept typing.
+- **Release-parity row:** I added the 0.35.451 row that my v0.35.451 release omitted. That gap had been failing `make check` on every branch.
+
+**Still in flight:**
+- **GH #130:** the controller closeout gate can't release an owner whose process has died. A subagent is working on it in `agent-doc-wt/gh130`.
+- **`#steerbacklogsource`:** a subagent is running its `make check` in `agent-doc-wt/steerbacklogsource`.
+
+Both will ship together in the next release.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -165,19 +193,18 @@ I filed this as `#steerbacklogsource`. Steering should be attributed to the comp
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#editoractionmenu]
-- do [#gvqv]
-- do [#halftypedcoin]
-- do [#gvqv]
+- ~~⏭️ do [#editoractionmenu]~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/130
+- do [#steerbacklogsource]
+- ~~do [#gvqv]~~
+- ~~do [#halftypedcoin]~~
+- ~~do [#gvqv]~~
 - release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
 - [ ] [#steerbacklogsource] [agent-doc] Steering classifies an operator edit to an agent:backlog line as an exchange prompt. On 2026-10-04 the operator rewrote the gvqv backlog stub into the full Dashboard request. Every steering report then surfaced it as 'source=exchange change=added dispatch=address_now', even after it was answered. The new absorbed-steering ledger (steerbaselineabsorb) then carried that backlog line into the next contract's absorbed_steering_prompts / user_intent_prompt_changes as an operator prompt. Fix: attribute steering items by the component that actually changed (backlog/review/done edits are managed-component state, not exchange prompts), and never record a non-exchange line in the absorbed-steering ledger.
-- [ ] [#halftypedcoin] [agent-doc] A half-typed free-text queue line was coined into a backlog id before the operator finished typing. Seen 2026-10-04: the operator typed '- Add a ``' (opening the Dashboard request), and preflight converted it into backlog item gvqv ('Add a ``') and queue head 'do [gvqv]'. The full line ('Add a `Dashboard` editor prompt + action ...') was still being typed underneath. Fix: free-text-to-id conversion must respect the steering typing gate (hold a line that is still changing, or one that ends inside an unclosed code span or mid-word), and a coined item whose source line is later extended should be merged into the extended line, not left as a stub.
-- [ ] [#editoractionmenu] Add an `About Agent Doc` Editor action + menu item to show which version of Agent Doc + Plugin is running?
-- [ ] [#gvqv] Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard. Can we also support a dashboard md file that live updates?
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

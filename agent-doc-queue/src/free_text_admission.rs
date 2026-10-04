@@ -46,6 +46,12 @@ pub fn normalize_admitted_free_text(text: &str) -> String {
 }
 
 /// True when free text is suitable to materialize as tracked backlog work.
+///
+/// `#halftypedcoin`: text the shared typing gate calls plainly unfinished
+/// (`Add a ``, `… publish the`, an open delimiter) is never coined into a
+/// backlog id, however long it has been quiet: a coined id is durable, and a
+/// half-typed stub plus the operator's finished line beside it is a meaningless
+/// item and a duplicate. The line stays free text until it reads finished.
 pub fn free_text_prompt_is_backlog_task(text: &str) -> bool {
     let trimmed = normalize_admitted_free_text(text);
     !trimmed.is_empty()
@@ -53,6 +59,165 @@ pub fn free_text_prompt_is_backlog_task(text: &str) -> bool {
         && !trimmed.starts_with('#')
         && !crate::queue_heads::is_do_directive(&trimmed)
         && agent_doc_prompt_lines::text_line_looks_like_prompt_target(&trimmed)
+        && !free_text_looks_unfinished(&trimmed)
+}
+
+/// The shared typing gate's structural verdict (`#steeringtypinggate`):
+/// true when the text is plainly still being typed.
+fn free_text_looks_unfinished(text: &str) -> bool {
+    agent_doc_debounce::edit_settle::completion_signal(text)
+        == agent_doc_debounce::edit_settle::CompletionSignal::Incomplete
+}
+
+/// Typing-gate evidence for coining free text into backlog ids
+/// (`#halftypedcoin`).
+///
+/// Preflight's operator-edit quiescence wait (`#qheadcomposing`) observes the
+/// live text while the operator types. When it saw edits, it knows the text it
+/// last settled on and how long ago that text last changed. A queue line that
+/// is not in that settled text appeared (or changed) after the wait returned:
+/// the operator is still typing it. Each candidate line goes through the same
+/// [`agent_doc_debounce::edit_settle::settle_decision`] steering delivery
+/// reads; a line the gate holds is left as free text for this pass instead of
+/// being coined.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FreeTextCoinGate {
+    /// `None`: no edit was observed during preflight, so there is no live
+    /// typing evidence and only the structural rule applies.
+    pub observed: Option<FreeTextCoinObservation>,
+    /// The document's quiet window.
+    pub debounce_ms: u64,
+    /// Hard max-hold, past which a structurally finished line coins anyway.
+    pub max_hold_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreeTextCoinObservation {
+    /// The text the quiescence wait last observed.
+    pub settled_text: String,
+    /// How long before this maintenance pass that text last changed.
+    pub quiet_for_ms: u64,
+}
+
+impl FreeTextCoinGate {
+    /// No live typing evidence: only the structural rule applies.
+    pub fn structural_only() -> Self {
+        Self::default()
+    }
+
+    /// The settle decision for coining one queue prompt.
+    pub fn decision(&self, text: &str) -> agent_doc_debounce::edit_settle::SettleDecision {
+        use agent_doc_debounce::edit_settle::{
+            CompletionSignal, SettleDecision, SettleInputs, completion_signal,
+            has_unbalanced_delimiters, settle_decision,
+        };
+        let normalized = normalize_admitted_free_text(text);
+        let signal = completion_signal(&normalized);
+        if signal == CompletionSignal::Incomplete {
+            // Never coined on quiescence or max-hold: an unfinished line stays
+            // free text rather than becoming a durable stub id.
+            return SettleDecision::Held {
+                recheck_after_ms: (self.debounce_ms / 2).max(100),
+            };
+        }
+        let Some(observed) = &self.observed else {
+            return SettleDecision::Settled;
+        };
+        let quiet_for_ms = if text_present_in_settled(&normalized, &observed.settled_text) {
+            observed.quiet_for_ms
+        } else {
+            0
+        };
+        settle_decision(SettleInputs {
+            quiet_for_ms: Some(quiet_for_ms),
+            stable_for_ms: None,
+            held_for_ms: quiet_for_ms,
+            debounce_ms: self.debounce_ms,
+            max_hold_ms: self.max_hold_ms,
+            signal,
+            unbalanced_delimiters: has_unbalanced_delimiters(&normalized),
+            verdict: None,
+        })
+    }
+
+    /// Whether the gate lets this queue prompt be coined in this pass.
+    pub fn allows_coining(&self, text: &str) -> bool {
+        self.decision(text).deliver()
+    }
+}
+
+/// True when every line of `text` already stood as a whole line (modulo list
+/// marker) in `settled`: the line existed, unchanged, when the operator last
+/// paused.
+fn text_present_in_settled(text: &str, settled: &str) -> bool {
+    let strip_marker = |line: &str| -> String {
+        let t = line.trim();
+        let t = t
+            .strip_prefix("- ")
+            .or_else(|| t.strip_prefix("* "))
+            .or_else(|| t.strip_prefix("+ "))
+            .unwrap_or_else(|| {
+                let digits = t.chars().take_while(char::is_ascii_digit).count();
+                if digits > 0 && (t[digits..].starts_with(". ") || t[digits..].starts_with(") ")) {
+                    &t[digits + 2..]
+                } else {
+                    t
+                }
+            });
+        normalize_admitted_free_text(t)
+    };
+    let settled_lines: HashSet<String> = settled.lines().map(strip_marker).collect();
+    let mut any = false;
+    for line in text
+        .lines()
+        .map(strip_marker)
+        .filter(|line| !line.is_empty())
+    {
+        any = true;
+        if !settled_lines.contains(&line) {
+            return false;
+        }
+    }
+    any
+}
+
+/// Narrow a queue admission scope to the prompts the typing gate lets coin
+/// this pass (`#halftypedcoin`). Returns the narrowed scope and the raw texts
+/// of the prompts it held back.
+pub fn gate_free_text_admission_scope(
+    scope: FreeTextAdmissionScope,
+    entries: &[crate::document_queue::QueueEntry],
+    gate: &FreeTextCoinGate,
+) -> (FreeTextAdmissionScope, Vec<String>) {
+    if matches!(scope, FreeTextAdmissionScope::None) {
+        return (scope, Vec::new());
+    }
+    let mut allowed = HashSet::new();
+    let mut held = Vec::new();
+    for entry in entries {
+        let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if !scope.allows_prompt(&prompt.text) {
+            continue;
+        }
+        if gate.allows_coining(&prompt.text) {
+            allowed.insert(crate::queue_response::normalize_for_answer_match(
+                &normalize_admitted_free_text(&prompt.text),
+            ));
+        } else {
+            held.push(prompt.text.clone());
+        }
+    }
+    if held.is_empty() {
+        return (scope, held);
+    }
+    let narrowed = if allowed.is_empty() {
+        FreeTextAdmissionScope::None
+    } else {
+        FreeTextAdmissionScope::NormalizedKeys(allowed)
+    };
+    (narrowed, held)
 }
 
 /// Match the editor race where queue maintenance admitted a partial free-text
@@ -91,7 +256,13 @@ fn adjacent_snapshot_extension_claims(
             .filter(|item| adjacent_ids.contains(&item.id.trim().to_ascii_lowercase()))
             .filter_map(|item| {
                 let old_key = crate::queue_response::normalize_for_answer_match(&item.text);
-                (old_key.len() >= 8
+                // `#halftypedcoin`: a stub coined from a half-typed line
+                // (`Add a ``) is too short for the prefix floor, but the typing
+                // gate already says it was unfinished, so the operator's
+                // continued line is its completion, not a second task.
+                let prefix_floor_met = old_key.len() >= 8 || free_text_looks_unfinished(&item.text);
+                (!old_key.is_empty()
+                    && prefix_floor_met
                     && new_key.len() > old_key.len()
                     && new_key.starts_with(&old_key))
                 .then(|| (item.id.trim().to_ascii_lowercase(), new_text.clone()))
@@ -922,5 +1093,184 @@ mod tests {
         assert!(items.iter().any(|item| {
             item.id != "existing" && item.text == "Implement release and publish and install"
         }));
+    }
+
+    fn backlog_items(content: &str) -> Vec<agent_doc_element_backlog::backlog::PendingItem> {
+        let components = agent_doc_element::element::parse(content).unwrap();
+        let backlog = components
+            .iter()
+            .find(|component| component.name == "backlog")
+            .unwrap();
+        agent_doc_element_backlog::backlog::parse_items(backlog.content(content)).1
+    }
+
+    const ABOUT_LINE: &str = "Add an `About Agent Doc` Editor action + menu item to show which version of Agent Doc + Plugin is running?";
+
+    /// `#halftypedcoin` real case (tasks/agent-doc/agent-doc-bugs.md,
+    /// 2026-10-04): the operator had just typed `- Add a ``` (the editor
+    /// auto-paired the backticks) when queue maintenance coined it into a stub
+    /// backlog id. The half-typed line must stay free text; the finished line
+    /// beside it is still coined.
+    #[test]
+    fn half_typed_code_span_queue_line_is_not_coined() {
+        assert!(!free_text_prompt_is_backlog_task("Add a ``"));
+        assert!(free_text_prompt_is_backlog_task(ABOUT_LINE));
+
+        let content =
+            format!("<!-- agent:queue -->\n- {ABOUT_LINE}\n- Add a ``\n<!-- /agent:queue -->\n");
+        let entries = queue_entries_from_content(&content);
+        let prepared = prepare_free_text_admission(
+            &content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(prepared.admitted_count, 1);
+        assert_eq!(prepared.unique_ids.len(), 1);
+
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let items = backlog_items(&admission.content);
+        assert_eq!(items.len(), 1, "{items:#?}");
+        assert_eq!(items[0].text, ABOUT_LINE);
+        let queue_entries = queue_entries_from_content(&admission.content);
+        assert!(
+            queue_entries.iter().any(|entry| matches!(
+                entry,
+                crate::document_queue::QueueEntry::Prompt(prompt) if prompt.text == "Add a ``"
+            )),
+            "the half-typed line must stay as free text:\n{}",
+            admission.content
+        );
+    }
+
+    /// A finished line is still coined, with or without typing evidence, once
+    /// it has been quiet for the window.
+    #[test]
+    fn complete_queue_line_is_still_coined() {
+        let content = format!("<!-- agent:queue -->\n- {ABOUT_LINE}\n<!-- /agent:queue -->\n");
+        let entries = queue_entries_from_content(&content);
+        let settled = FreeTextCoinGate {
+            observed: Some(FreeTextCoinObservation {
+                settled_text: content.clone(),
+                quiet_for_ms: 2_500,
+            }),
+            debounce_ms: 2_000,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+        };
+        for gate in [FreeTextCoinGate::structural_only(), settled] {
+            let (scope, held) =
+                gate_free_text_admission_scope(FreeTextAdmissionScope::All, &entries, &gate);
+            assert!(held.is_empty(), "{gate:?}: {held:?}");
+            let prepared =
+                prepare_free_text_admission(&content, &entries, None, &scope, false, "doc-id")
+                    .unwrap()
+                    .expect("a finished, settled line is coined");
+            assert_eq!(prepared.unique_ids.len(), 1);
+        }
+    }
+
+    /// The typing-gate hold defers coining: a line that changed after the
+    /// quiescence wait settled (absent from the settled text) or that has not
+    /// been quiet for the window is held as free text this pass. A plainly
+    /// unfinished line is never coined, even past the max-hold.
+    #[test]
+    fn typing_gate_hold_defers_coining() {
+        let line = "Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard";
+        let content = format!("<!-- agent:queue -->\n- {line}\n<!-- /agent:queue -->\n");
+        let entries = queue_entries_from_content(&content);
+        let gate = |settled_text: String, quiet_for_ms: u64| FreeTextCoinGate {
+            observed: Some(FreeTextCoinObservation {
+                settled_text,
+                quiet_for_ms,
+            }),
+            debounce_ms: 2_000,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+        };
+
+        // The wait settled on the half-typed draft; the operator kept typing.
+        let typed_after_settle = gate(
+            "<!-- agent:queue -->\n- Add a ``\n<!-- /agent:queue -->\n".to_string(),
+            2_400,
+        );
+        let (scope, held) = gate_free_text_admission_scope(
+            FreeTextAdmissionScope::All,
+            &entries,
+            &typed_after_settle,
+        );
+        assert_eq!(held, vec![line.to_string()]);
+        assert!(
+            prepare_free_text_admission(&content, &entries, None, &scope, false, "doc-id")
+                .unwrap()
+                .is_none(),
+            "a line still being typed must not be coined"
+        );
+
+        // Present in the settled text but inside the hold window.
+        let recent = gate(content.clone(), 300);
+        let (_, held) =
+            gate_free_text_admission_scope(FreeTextAdmissionScope::All, &entries, &recent);
+        assert_eq!(held.len(), 1);
+
+        // Quiet past the window: coined.
+        let quiet = gate(content.clone(), 2_100);
+        let (scope, held) =
+            gate_free_text_admission_scope(FreeTextAdmissionScope::All, &entries, &quiet);
+        assert!(held.is_empty());
+        assert!(
+            prepare_free_text_admission(&content, &entries, None, &scope, false, "doc-id")
+                .unwrap()
+                .is_some()
+        );
+
+        // Unfinished text is never coined, even past the max-hold.
+        let stale = gate("- Add a ``\n".to_string(), 600_000);
+        assert!(!stale.allows_coining("Add a ``"));
+        assert!(!FreeTextCoinGate::structural_only().allows_coining("Should we publish the"));
+    }
+
+    /// A stub coined from a half-typed line before this fix (`[#gvqv] Add a
+    /// ```) absorbs the operator's continued line beside its `do` head instead
+    /// of leaving a meaningless stub plus a duplicate free-text head, even
+    /// though the stub is below the strict-prefix length floor.
+    #[test]
+    fn half_typed_stub_absorbs_its_continued_line() {
+        let continued = "Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard. Can we also support a dashboard md file that live updates?";
+        let content = format!(
+            "<!-- agent:backlog priority queue -->\n- [ ] [#gvqv] Add a ``\n<!-- /agent:backlog -->\n\n<!-- agent:queue go -->\n- do [#gvqv]\n- {continued}\n<!-- /agent:queue -->\n"
+        );
+        let entries = queue_entries_from_content(&content);
+        let prepared = prepare_free_text_admission(
+            &content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(prepared.unique_ids, vec!["gvqv".to_string()]);
+
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let items = backlog_items(&admission.content);
+        assert_eq!(items.len(), 1, "{items:#?}");
+        assert_eq!(items[0].id, "gvqv");
+        assert_eq!(items[0].text, continued);
+        let queue_entries = queue_entries_from_content(&admission.content);
+        assert_eq!(
+            queue_entries
+                .iter()
+                .filter_map(crate::queue_projection::queue_entry_do_id)
+                .filter(|id| id == "gvqv")
+                .count(),
+            1,
+            "{}",
+            admission.content
+        );
+        assert!(!admission.content.contains(&format!("- {continued}\n")));
     }
 }

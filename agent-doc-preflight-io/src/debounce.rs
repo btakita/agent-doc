@@ -475,13 +475,49 @@ pub enum OperatorEditQuiescence {
 /// it. When nothing changed the wait returns at once, so an idle document pays
 /// no latency.
 pub fn wait_for_operator_edit_quiescence(file: &Path, admitted: &str) -> OperatorEditQuiescence {
+    wait_for_operator_edit_quiescence_with_evidence(file, admitted).0
+}
+
+/// What the operator-edit quiescence wait last saw (`#halftypedcoin`): the
+/// text it settled on and when that text last changed. Present only when the
+/// wait observed an edit landing during preflight.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorEditEvidence {
+    pub settled_text: String,
+    pub last_change: Instant,
+    pub quiet_window_ms: u64,
+}
+
+impl OperatorEditEvidence {
+    /// The typing-gate evidence for coining queue free text, measured now.
+    pub fn coin_gate(&self) -> agent_doc_queue::free_text_admission::FreeTextCoinGate {
+        agent_doc_queue::free_text_admission::FreeTextCoinGate {
+            observed: Some(
+                agent_doc_queue::free_text_admission::FreeTextCoinObservation {
+                    settled_text: self.settled_text.clone(),
+                    quiet_for_ms: u64::try_from(self.last_change.elapsed().as_millis())
+                        .unwrap_or(u64::MAX),
+                },
+            ),
+            debounce_ms: self.quiet_window_ms,
+            max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
+        }
+    }
+}
+
+/// [`wait_for_operator_edit_quiescence`] plus the evidence it gathered, for
+/// the free-text coin gate (`#halftypedcoin`).
+pub fn wait_for_operator_edit_quiescence_with_evidence(
+    file: &Path,
+    admitted: &str,
+) -> (OperatorEditQuiescence, Option<OperatorEditEvidence>) {
     let settle_ms = authority_settle_ms(file);
     let quiet = Duration::from_millis(settle_ms);
     let ceiling = agent_doc_debounce::admission_deadline::clamp(
         agent_doc_debounce::authority_settle_max_wait(settle_ms)
             .saturating_mul(agent_doc_debounce::PROGRESS_WAIT_CEILING_MULTIPLIER),
     );
-    let outcome = await_operator_edit_quiescence(
+    let (outcome, trace) = await_operator_edit_quiescence_traced(
         admitted,
         quiet,
         ceiling,
@@ -518,17 +554,41 @@ pub fn wait_for_operator_edit_quiescence(file: &Path, admitted: &str) -> Operato
         }
         OperatorEditQuiescence::Unchanged | OperatorEditQuiescence::Unobservable => {}
     }
-    outcome
+    let evidence = trace.map(|(settled_text, last_change)| OperatorEditEvidence {
+        settled_text,
+        last_change,
+        quiet_window_ms: settle_ms,
+    });
+    (outcome, evidence)
 }
 
+#[cfg(test)]
 fn await_operator_edit_quiescence<Observe, Now, Sleep>(
+    admitted: &str,
+    quiet: Duration,
+    ceiling: Duration,
+    observe: Observe,
+    now: Now,
+    sleep: Sleep,
+) -> OperatorEditQuiescence
+where
+    Observe: FnMut() -> Option<String>,
+    Now: FnMut() -> Instant,
+    Sleep: FnMut(Duration),
+{
+    await_operator_edit_quiescence_traced(admitted, quiet, ceiling, observe, now, sleep).0
+}
+
+/// The wait itself; when an edit landed, also returns the last observed text
+/// and the instant it last changed.
+fn await_operator_edit_quiescence_traced<Observe, Now, Sleep>(
     admitted: &str,
     quiet: Duration,
     ceiling: Duration,
     mut observe: Observe,
     mut now: Now,
     mut sleep: Sleep,
-) -> OperatorEditQuiescence
+) -> (OperatorEditQuiescence, Option<(String, Instant)>)
 where
     Observe: FnMut() -> Option<String>,
     Now: FnMut() -> Instant,
@@ -536,10 +596,10 @@ where
 {
     let start = now();
     let Some(mut last) = observe() else {
-        return OperatorEditQuiescence::Unobservable;
+        return (OperatorEditQuiescence::Unobservable, None);
     };
     if last == admitted {
-        return OperatorEditQuiescence::Unchanged;
+        return (OperatorEditQuiescence::Unchanged, None);
     }
     let mut changes = 1usize;
     let mut last_change = start;
@@ -552,10 +612,16 @@ where
         if at.saturating_duration_since(last_change) >= quiet
             && agent_doc_debounce::edit_settle::added_lines_look_finished(admitted, &last)
         {
-            return OperatorEditQuiescence::Settled { waited, changes };
+            return (
+                OperatorEditQuiescence::Settled { waited, changes },
+                Some((last, last_change)),
+            );
         }
         if waited >= ceiling {
-            return OperatorEditQuiescence::CeilingReached { waited, changes };
+            return (
+                OperatorEditQuiescence::CeilingReached { waited, changes },
+                Some((last, last_change)),
+            );
         }
         sleep(agent_doc_debounce::SETTLE_POLL_INTERVAL);
         if let Some(text) = observe()
@@ -974,6 +1040,42 @@ mod tests {
             .unwrap()
             .expect("queue head")
             .head_text
+    }
+
+    /// `#halftypedcoin` regression (operator-reported 2026-10-04,
+    /// agent-doc-bugs.md): the editor auto-paired the backticks of
+    /// `- Add a ``` and the operator paused before typing the span's content.
+    /// The empty span read as a finished reference, the wait settled after the
+    /// quiet window, and queue maintenance coined the stub. The wait must keep
+    /// holding until the line reads finished.
+    #[test]
+    fn preflight_does_not_settle_on_an_empty_auto_paired_code_span() {
+        let admitted = tsift_queue_doc("- Add an `About Agent Doc` editor action?");
+        let timeline = [
+            (0, "- Add an `About Agent Doc` editor action?\n- Add a ``"),
+            (
+                3_500,
+                "- Add an `About Agent Doc` editor action?\n- Add a `Dashboard`",
+            ),
+            (
+                4_200,
+                "- Add an `About Agent Doc` editor action?\n- Add a `Dashboard` editor prompt.",
+            ),
+        ];
+        let (outcome, admitted_text, _) = run_typing_timeline(
+            &admitted,
+            &timeline,
+            Duration::from_millis(2_000),
+            Duration::from_secs(18),
+        );
+        let OperatorEditQuiescence::Settled { waited, .. } = outcome else {
+            panic!("expected the typing to settle, got {outcome:?}");
+        };
+        assert!(waited >= Duration::from_millis(5_200), "{waited:?}");
+        assert!(
+            admitted_text.contains("- Add a `Dashboard` editor prompt.\n"),
+            "preflight must not settle on the half-typed `Add a ```:\n{admitted_text}"
+        );
     }
 
     /// `#qheadcomposing` regression (operator-reported 2026-10-03, tsift.md): a

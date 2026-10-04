@@ -27,8 +27,9 @@ use agent_doc_queue::{
         strip_queue_activation_tokens_in_content,
     },
     free_text_admission::{
-        FreeTextAdmissionExecution, FreeTextAdmissionScope, append_empty_agent_component,
-        collect_actionable_free_text_prompts, prepare_free_text_admission,
+        FreeTextAdmissionExecution, FreeTextAdmissionScope, FreeTextCoinGate,
+        append_empty_agent_component, collect_actionable_free_text_prompts,
+        gate_free_text_admission_scope, prepare_free_text_admission,
         queue_currently_active_for_free_text_admission, queue_free_text_admission_scope,
     },
     queue_convergence::{
@@ -3420,6 +3421,18 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
 }
 
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
+    run_queue_maintenance_with_coin_gate(file, diff, &FreeTextCoinGate::structural_only())
+}
+
+/// [`run_queue_maintenance`] with the typing-gate evidence preflight's
+/// operator-edit quiescence wait gathered (`#halftypedcoin`): queue free text
+/// the gate still holds is left as free text instead of being coined into a
+/// backlog id this pass.
+pub fn run_queue_maintenance_with_coin_gate(
+    file: &Path,
+    diff: Option<&str>,
+    coin_gate: &FreeTextCoinGate,
+) -> Result<QueueState> {
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
     // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
     // `queue consume` in flight). Round-tripping a torn intermediate queue through
@@ -3666,6 +3679,24 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         &entries,
         snapshot_content.as_deref(),
     );
+    // `#halftypedcoin`: never coin a queue line the typing gate still holds.
+    let (queue_free_text_scope, held_free_text) =
+        gate_free_text_admission_scope(queue_free_text_scope, &entries, coin_gate);
+    if !held_free_text.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "free_text_coin_held file={} held={} observed_typing={} (#halftypedcoin)",
+                file.display(),
+                held_free_text.len(),
+                coin_gate.observed.is_some(),
+            ),
+        );
+        eprintln!(
+            "[preflight] queue: held {} free-text line(s) from backlog coining; still being typed (#halftypedcoin)",
+            held_free_text.len()
+        );
+    }
     let exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&current_content);
     let document_id = agent_doc_hash::document_id_for_path(file);

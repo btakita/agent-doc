@@ -208,6 +208,42 @@ I claimed the reopened #125 and dispatched it to a subagent: worktree `ghfix125b
 5. **A chat-only turn**, with no `agent-doc <FILE>` trigger and no open cycle, will be verified to record and commit end to end.
 
 v0.35.449 (#126, `cellcollide`, `steerworks`) is still in its final `make check`. I'll fold this fix into the same release if it lands in time; otherwise it ships as v0.35.450 straight after.
+
+### Re: v0.35.449 released — GH #126, cellcollide, steerworks — opus-5-5 · 2026-10-04T02:25-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
+
+> **Queue prompt:** Ensure the real-time reactive steering works. When do you get the signal about the document changing?
+
+> **Queue prompt:** release + publish
+
+**v0.35.449 is released and installed.**
+- Release commit `8f787c9ce`, tag `v0.35.449` pushed, superproject bump `d17a64de77`. `agent-doc --version` reports 0.35.449.
+- Release, PyPI and CI runs started on the tag push (37182066700 / 37182066716 / 37182066704) and were in progress at closeout.
+- The combined branch passed `make check` with exit 0: 10806 passed, 262 skipped.
+- Another session's uncommitted `VERSIONS.md` and `start-runtime-io` edits were kept byte-for-byte; the `start-runtime-io` change is compiled into this install.
+
+**GH #126, Coder pane focus (`01786bada`), closed.** On a Coder / Remote Dev backend, every tab switch publishes a one-column layout that evicted the routed document. Focusing that document afterwards was skipped silently. It now re-places the document by replacing the retained focus column, so the column count still never grows (GH #106).
+
+**Real-time steering (`steerworks`, `a11654886`):**
+- A claim now follows its queue line when you append or remove a note.
+- An edit to a claimed item wakes me if I'm idle and is reported as `forward_to_owner`, not as a new item to dispatch.
+- Subagents no longer receive or use up your steering.
+- My `Chat prompt` record line, and harness envelopes like `<task-notification>`, are no longer read as operator input.
+
+**When the agent gets the signal:**
+- **During a turn:** after each tool call, once typing settles (1.25–2.5 s; up to 45 s for text that looks unfinished).
+- **At the end of a turn:** in the report from `respond`, `write --commit` or `session-check`.
+- **While idle:** the supervisor wakes the pane, on an editor delivery event or within at most 60 s.
+- **Gaps that remain:** unsaved editor text is invisible until the editor saves, and nothing arrives while the agent is thinking without tool calls.
+
+> **Operator note:** should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful? Note: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "#gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
+
+**Yes, Run Agent Doc is now the explicit send.** It delivers everything pending at once and skips the typing gate, marking items `sent=explicit`. It also works during an open closeout: the pasted `queued_behind_owner` / "nothing was dispatched" refusal now delivers to the owning turn and exits 0. **The perceptron stays.** It still decides when edits you don't explicitly send are finished, and every explicit send now gives it a labelled "finished" example.
+
+**Collision detection is per section (`cellcollide`, `fc7c4f0c3`).** A write that only touches `exchange` now merges with your concurrent queue or backlog edits. Only a real overlap in the same section fails closed, and the error names the section. The second hang was the editor's update arriving after the 8 s wait limit; the wait for a section that hasn't arrived yet is now longer.
+
+**Reopened GH #125:** its subagent is still running in `ghfix125b`, on top of this release. It will ship as v0.35.450.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -220,14 +256,13 @@ v0.35.449 (#126, `cellcollide`, `steerworks`) is still in its final `make check`
 - ~~do [#supportinlineprompts]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/125 reopened.
 - #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
-- Ensure the real-time reactive steering works. When do you get the signal about the document changing?
-- do [#claimedsteerwake]: should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful? Note: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "#gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
-- release + publish
+- ~~Ensure the real-time reactive steering works. When do you get the signal about the document changing?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#claimedsteerwake]: should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful? Note: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "#gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain~~
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#claimedsteerwake] [agent-doc] An operator edit to a CLAIMED queue head is held silently: the edit adding 'note this is in a Coder environment' to the claimed #126 head was never surfaced, either by a supervisor wake (claimed subagent items never wake the pane, #steeringwake) or at a turn boundary. It reached the coordinator only because it ran 'agent-doc steering --peek' after the operator asked in chat. Make an edit/annotation to a claimed head wake the idle owning pane (or surface it to the coordinator) so it can be forwarded to the subagent that holds the claim; add a regression test.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

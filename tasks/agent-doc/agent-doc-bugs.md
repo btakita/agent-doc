@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -109,6 +110,22 @@ All five fixes are integrated, released as **v0.35.451**, and installed (`agent-
 - **Another session's uncommitted work in `src/agent-doc`:** a `lib.rs` edit (`#clearrestartjoinstall`) is still uncommitted there; I preserved it unchanged when fast-forwarding main. Its `VERSIONS.md` edit conflicted with the release entry. That edit looked garbled (it deleted the 0.35.449/450 entries), so I kept the release version. The original is in `stash@{0}` in the agent-doc checkout.
 - **Queue items struck before the work was done:** my dispatch response quoted the free-text heads (GH #127/#128/#129, release + publish) as `> **Queue prompt:**`. That caused `#ftstrike` to strike them while they were only dispatched. The work is now done, so nothing was lost, but quoting a head that is only dispatched should not strike it.
 - **Verify on the next session:** GH #128's 30s suppression means a newer client briefly connects to the older controller instead of retrying the handoff.
+
+### Re: queue: About Agent Doc action, Dashboard — opus-5-5 · 2026-10-04T13:45-04:00
+
+**`#editoractionmenu`: About Agent Doc.** I claimed it and handed it to a subagent working in its own worktree (`agent-doc-wt/editoractionmenu`, based on v0.35.451). The task: add an "About Agent Doc" action to each plugin's Agent Doc menu (JetBrains, VS Code, and Zed if it has a menu surface). It shows:
+- the plugin version;
+- the agent-doc binary version actually in use;
+- the native library (cdylib) version and build id;
+- a warning when the plugin and binary versions don't match.
+
+It can add a CLI command such as `agent-doc version --json` if that helps. It will update the parity tables, bump the plugin versions, and run `make check` plus the plugin tests. I'll integrate the branch, install, and release.
+
+**`#gvqv`: a half-typed fragment.** This was the start of your Dashboard request: preflight made backlog item `#gvqv` from `Add a ``` before you finished typing. I'm not dispatching it. The full line is still being written below it ("Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard. Can we also support a dashboard md file that ?"). I'll dispatch the Dashboard request once that line settles, and close `#gvqv` into it.
+
+I filed the fragment as a bug, `#halftypedcoin`: turning a free-text queue line into a backlog item should wait while the line is still being typed, or while it ends inside an unclosed code span.
+
+**Install note.** The `stale_install` warning came up because I built v0.35.451 from a clean worktree, so the builds in `src/agent-doc`'s own target directory are older than its source. The binary actually in use is v0.35.451: `.bin/agent-doc` runs the newer `~/.cargo/bin/agent-doc`. The warning will clear when `src/agent-doc` is built again.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -117,11 +134,17 @@ All five fixes are integrated, released as **v0.35.451**, and installed (`agent-
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- do [#editoractionmenu]
+- do [#gvqv]
+- Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard. Can we also support a dashboard md file that live updates?
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#halftypedcoin] [agent-doc] A half-typed free-text queue line was coined into a backlog id before the operator finished typing. Seen 2026-10-04: the operator typed '- Add a ``' (opening the Dashboard request), and preflight converted it into backlog item gvqv ('Add a ``') and queue head 'do [gvqv]'. The full line ('Add a `Dashboard` editor prompt + action ...') was still being typed underneath. Fix: free-text-to-id conversion must respect the steering typing gate (hold a line that is still changing, or one that ends inside an unclosed code span or mid-word), and a coined item whose source line is later extended should be merged into the extended line, not left as a stub.
+- [ ] [#editoractionmenu] Add an `About Agent Doc` Editor action + menu item to show which version of Agent Doc + Plugin is running?
+- [ ] [#gvqv] Add a ``
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

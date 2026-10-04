@@ -136,7 +136,19 @@ If Local History no longer reaches 09-29, say so and I'll close `#apimdrevert` a
 - Filed `#claimedsteerwake`: an edit to a claimed queue item should be passed on to its subagent, not held silently.
 
 The `priority -->n` typo is gone, and the queue now reads correctly. "release + publish" is still mine, to run after the #126 fix lands.
-<!-- agent:boundary:6977b070 -->
+> **Chat prompt (#chatprompt):** Your edit of exchang should not be a collision with my edit in the queue. agent-doc's rules should be precise in it's collision detection. Unrelated edites to other document cells should not collide.
+
+### Re: collision detection must be cell-precise — opus-5-5 · 2026-10-04T01:30-04:00
+
+Agreed, that was a false collision. My last `respond` wrote only to `exchange` while you were typing only in `agent:queue`. It was still refused with `live_prompt_drift_after_preflight` / `refusing editor receipt that diverges from controller canonical`. `session-check` then reported `INTERRUPTED ... component_divergence=queue`. The refusal compared the editor's whole document with the controller's copy, when it should have compared each section separately. The turn did commit once the editor saved, but it should never have reported a failure.
+
+I've dispatched it to a subagent as `#cellcollide`, in its own worktree on branch `cellcollide`. The rules it is implementing:
+- an agent write that touches only `exchange` (plus queue/backlog changes that don't touch the lines you're editing) is merged with your edits in other sections and never refused;
+- only a genuine overlap within the same section fails closed;
+- regression tests cover a queue edit, a backlog edit, and a same-spot `exchange` edit, then the full `make check`.
+
+Three fixes are in flight in separate worktrees: `ghfix126` (GH #126 pane focus), `steerworks` (live steering delivery and false positives in chat-prompt detection) and `cellcollide`. I'll integrate them one at a time with one `make install`, then run "release + publish".
+<!-- agent:boundary:e240a891 -->
 <!-- /agent:exchange -->
 
 <!--

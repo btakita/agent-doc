@@ -288,6 +288,25 @@ All four were fixed by background subagents in separate worktrees, then merged s
 **Integration note:** another session has uncommitted WIP in agent-doc `agent-doc-start-runtime-io/src/lib.rs` (#clearrestartjoinstall). It overlapped GH #133's file, so I merged on an `integ454` worktree and fast-forwarded main. The WIP patch was backed up, verified to apply cleanly on top, and re-applied unchanged.
 
 **Issue watch:** still polling for issues above #134. Next: `release + publish` (v0.35.454).
+
+### Re: release + publish v0.35.454 — opus-5.5 · 2026-10-04T16:05-04:00
+
+> **Queue prompt:** release + publish
+
+**Released v0.35.454** (agent-doc `ccdb77886`, tag `v0.35.454` pushed; superproject submodule bump `3d7959bfa9` pushed):
+- `make release-version VERSION=0.35.454`, plus a `VERSIONS.md` § 0.35.454 entry covering jbpluginvanish, jbdynamicfalsereport and GH #131–#134.
+- The first `make check` failed at the editor parity audit: a release needs a row in `editors/release-parity.tsv`. I added the 0.35.454 row.
+- Re-run: **nextest 10972 passed, 0 failed, CHECK_EXIT=0**, then `make install-full` INSTALLFULL_EXIT=0 (`agent-doc 0.35.454` installed, `reload_library` 1/1, JetBrains already current at 0.2.492).
+- I ran the tag + push directly instead of `make release`, which would have re-run `check` and `install-full` on an identical tree.
+- The release commit leaves out the other session's uncommitted `agent-doc-start-runtime-io/src/lib.rs` WIP and `.claude/settings.json`; both are still in its working tree.
+
+**CI (observed once, not awaited):** the Release (37230736724) and CI (37230736490) runs are in progress; Book is green.
+
+**GitHub:** #131, #132 and #133 are closed with "Fixed in v0.35.454". #134 was already closed; I added a fix comment with the live Remote Dev verification steps.
+
+**Defect found → `#unstrikelost` (added):** your 14:13 unstrike of `release + publish` was undone by the 14:31 session-doc commit, although no response had answered that head. It only ran because I noticed the queue was empty with no release done.
+
+**Issue watch:** still polling for issues above #134.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -301,6 +320,7 @@ All four were fixed by background subagents in separate worktrees, then merged s
 
 
 <!-- agent:backlog priority -->
+- [ ] [#unstrikelost] [agent-doc] An operator UNSTRIKE of a free-text queue head was lost. At 14:13 the operator re-armed '- release + publish' (preflight cycle-1791137624141 node_event op=unstrike ft-c460e934, before ~~struck~~, after live). That cycle never wrote a response (all heads were dispatched to subagents), yet the next session-doc commit 08fdaf4438 (14:31) carried '- ~~release + publish~~' struck again, so the head silently left the drain and v0.35.454 shipped only because the agent noticed. Find which commit/closeout path (likely a pending-only or supervisor-owned commit reusing the pre-unstrike snapshot for the queue component) re-applied the old strike; an operator unstrike must survive any closeout that did not answer that head. Regression: unstrike then a closeout with no quote keeps the head live.
 - [ ] [#gh131nonipc] [agent-doc] Follow-up to GH 131: some of the issue's failures (socket_visible_write divergence refusal, serialized_atomic_write retention) never reach the IPC send, so they record nothing in editor_transport_health and cannot drive degraded/recycle. Route those retention outcomes into the same typed transport-health recorder, and consider treating an endpoint as unregistered after N consecutive rejections (issue suggestion, not implemented in 2bedfb560).
 - [ ] [#gh133sigterm] [agent-doc] Follow-up to GH 133: a deliberately SIGTERM'd supervisor in a VISIBLE column is still respawned by the controller watchdog, because there is no termination handler to distinguish a deliberate kill from a crash. Add a SIGTERM handler that records an intentional-exit marker the watchdog honours, without breaking the existing replacement path (SIGTERM then cold-start). Also decide: should idle owned supervisors whose pane is only stashed be reaped? specs/supervisor.md currently says no.
 - [ ] [#jbstagebackup] [agent-doc][jetbrains] Follow-up to jbpluginvanish: the Java upgrader's restart staging (JetBrainsPluginUpgradeAction.stageForRestart) must still emit delete-then-unzip for the IDE's action.script, so a staging whose zip vanishes (or a full disk at restart) before any agent-doc install runs can still remove the plugin. Close the gap: have preflight/supervisor auto-purge doomed stagings (purge_pending_stagings_for StagingPurge::Doomed in agent-doc-fs/src/jetbrains_install.rs) instead of only warning, and/or stage a backup copy the restart can restore. Also clear the stale fixed-name agent-doc-jetbrains-0.2.469.zip left in ~/.cache/JetBrains/IntelliJIdea2026.1/plugins/.

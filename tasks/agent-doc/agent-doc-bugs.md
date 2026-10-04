@@ -201,6 +201,14 @@ I claimed and dispatched each item to its own subagent, each in a worktree based
 > **Queue prompt:** release + publish
 
 **Deferred, not done:** this release has not happened yet. It is claimed by me (`coordinator:integration`) and waits for the six in-flight branches: the four above plus GH #130 and `#steerbacklogsource`. When they land, I'll merge them one at a time, run `make check` and one `make install`, release v0.35.453, and close the items and GH issues. Keep this head open until then.
+
+### Re: try again — opus-5-5 · 2026-10-04T13:57-04:00
+
+> **Chat prompt (#chatprompt):** try again
+
+Retrying. The document was stuck in an interrupted state: `session-check` reported that the editor authority and the disk copy disagree in one place. The queue on disk has `- do [#deferstrike]` (written there when I filed `#deferstrike`), but the editor buffer doesn't. The log also showed `live_editors=0` at that moment. `session-check`'s prescribed remedy is to open a new cycle, and this reply is that cycle: it commits whatever is currently in the buffer instead of forcing the disk copy.
+
+Integration status: all six branches (`#ghjbfolding`, `#ghbrew`, GH #130, `#steerbacklogsource`, `#ghmultitmux`, `#deferstrike`) are merged on `integ453`. The serial `make check` on it is still running (10,921 tests); nothing else is building now, and the disk has 1.1T free. When it passes, I'll release v0.35.453 and close the items.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -225,6 +233,7 @@ I claimed and dispatched each item to its own subagent, each in a worktree based
 
 
 <!-- agent:backlog priority -->
+- [ ] [#deferstrike] [agent-doc] A deferred free-text queue head is struck anyway. The finalize pre-write gate refuses a cycle whose selected free-text head (here 'release + publish') is not quoted as a queue-prompt blockquote in the response ('include its exact quote and the completed result or concrete deferral'). But once quoted, ftstrike auto-strikes it as 'answered this cycle', even when the response explicitly defers it ('Deferred, not done ... Keep this head open'). Seen 2026-10-04 15:25: the head was claimed by coordinator:integration and still got struck. The same thing struck dispatched-only GH 127/128/129 heads earlier. Fix: a quoted head followed by a deferral, or one claimed by a live owner, must satisfy the gate without being struck; strike only a completed answer. The gate should not select claimed heads at all.
 - [ ] [#steerbacklogsource] [agent-doc] Steering classifies an operator edit to an agent:backlog line as an exchange prompt. On 2026-10-04 the operator rewrote the gvqv backlog stub into the full Dashboard request. Every steering report then surfaced it as 'source=exchange change=added dispatch=address_now', even after it was answered. The new absorbed-steering ledger (steerbaselineabsorb) then carried that backlog line into the next contract's absorbed_steering_prompts / user_intent_prompt_changes as an operator prompt. Fix: attribute steering items by the component that actually changed (backlog/review/done edits are managed-component state, not exchange prompts), and never record a non-exchange line in the absorbed-steering ledger.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and

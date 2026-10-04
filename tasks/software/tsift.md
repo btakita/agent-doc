@@ -159,7 +159,7 @@ The closeout flagged #fixhttpsgithub as a possible match for this request. That'
 
 ## Queue
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

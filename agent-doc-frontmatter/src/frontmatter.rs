@@ -493,7 +493,10 @@ pub struct Frontmatter {
     /// Session is now determined at runtime by `--window` argument (sync) or
     /// `current_tmux_session()` (route/start). Still read for backward compatibility
     /// and auto-repaired by sync when it differs from the context session.
-    /// Will be removed in a future version.
+    /// Will be removed in a future version for single-session projects. In
+    /// multi-session projects (`tmux_sessions` in `.agent-doc/config.toml`,
+    /// GH #17) it is the document's topic-session binding and participates in
+    /// route/start/sync session resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_session: Option<String>,
     /// Per-document terminal-host override. Project and global terminal config are

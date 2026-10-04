@@ -84,6 +84,10 @@ impl AutoStartMode {
 pub struct LayoutSessionCandidates {
     pub explicit: Option<String>,
     pub focused_actor: Option<String>,
+    /// The focused document's own `tmux_session` frontmatter binding. IO
+    /// adapters populate it only in multi-session mode (a non-empty
+    /// `tmux_sessions` list), so the single-session order is unchanged.
+    pub document_binding: Option<String>,
     pub current_agent_doc: Option<String>,
     pub scoped_project: Option<String>,
     pub fallback: Option<String>,
@@ -93,9 +97,31 @@ pub struct LayoutSessionCandidates {
 pub enum LayoutSessionAuthority {
     Explicit,
     FocusedActor,
+    DocumentBinding,
     CurrentAgentDoc,
     ScopedProject,
     Fallback,
+}
+
+impl LayoutSessionAuthority {
+    /// Ambient candidates come from the caller's terminal rather than from the
+    /// operator, the document, or the project. Under a multi-session policy a
+    /// disallowed ambient candidate is skipped; every other authority is an
+    /// explicit statement of intent and fails closed instead.
+    pub fn is_ambient(self) -> bool {
+        matches!(self, Self::CurrentAgentDoc | Self::Fallback)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit window",
+            Self::FocusedActor => "existing document pane",
+            Self::DocumentBinding => "document tmux_session binding",
+            Self::CurrentAgentDoc => "current agent-doc session",
+            Self::ScopedProject => "project tmux_session pin",
+            Self::Fallback => "fallback session",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,11 +136,25 @@ pub struct LayoutSessionDecision {
 /// recycle may replace the controller process and its ambient `TMUX_PANE`, but
 /// must not relocate a surviving document actor as a consequence.
 pub fn select_layout_session(candidates: LayoutSessionCandidates) -> Option<LayoutSessionDecision> {
-    let ordered = [
+    ordered_layout_session_candidates(candidates)
+        .into_iter()
+        .find_map(|(authority, session)| {
+            session.map(|session| LayoutSessionDecision { session, authority })
+        })
+}
+
+fn ordered_layout_session_candidates(
+    candidates: LayoutSessionCandidates,
+) -> [(LayoutSessionAuthority, Option<String>); 6] {
+    [
         (LayoutSessionAuthority::Explicit, candidates.explicit),
         (
             LayoutSessionAuthority::FocusedActor,
             candidates.focused_actor,
+        ),
+        (
+            LayoutSessionAuthority::DocumentBinding,
+            candidates.document_binding,
         ),
         (
             LayoutSessionAuthority::CurrentAgentDoc,
@@ -125,10 +165,209 @@ pub fn select_layout_session(candidates: LayoutSessionCandidates) -> Option<Layo
             candidates.scoped_project,
         ),
         (LayoutSessionAuthority::Fallback, candidates.fallback),
-    ];
-    ordered.into_iter().find_map(|(authority, session)| {
-        session.map(|session| LayoutSessionDecision { session, authority })
-    })
+    ]
+}
+
+/// Allowed tmux sessions for one project (`tmux_sessions` in
+/// `.agent-doc/config.toml`, GH #17).
+///
+/// An empty list is the single-session default: every session is allowed and
+/// selection is exactly [`select_layout_session`]. A non-empty list turns on
+/// multi-session mode, where one editor manages panes across several tmux
+/// sessions and every resolved target must be a member.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TmuxSessionPolicy {
+    allowed: Vec<String>,
+}
+
+impl TmuxSessionPolicy {
+    /// Build a policy from configured names. Blank names are dropped and
+    /// duplicates collapse, preserving first-seen order.
+    pub fn new<I, S>(allowed: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut names: Vec<String> = Vec::new();
+        for name in allowed {
+            let name = name.as_ref().trim();
+            if !name.is_empty() && !names.iter().any(|existing| existing == name) {
+                names.push(name.to_string());
+            }
+        }
+        Self { allowed: names }
+    }
+
+    /// The single-session default policy (no allowed list).
+    pub fn single_session() -> Self {
+        Self::default()
+    }
+
+    pub fn is_multi_session(&self) -> bool {
+        !self.allowed.is_empty()
+    }
+
+    pub fn allowed(&self) -> &[String] {
+        &self.allowed
+    }
+
+    pub fn allows(&self, session: &str) -> bool {
+        !self.is_multi_session() || self.allowed.iter().any(|allowed| allowed == session)
+    }
+
+    /// Fail closed when `session` is outside the allowed list.
+    pub fn require(
+        &self,
+        session: &str,
+        authority: LayoutSessionAuthority,
+    ) -> Result<(), SessionNotAllowed> {
+        if self.allows(session) {
+            Ok(())
+        } else {
+            Err(SessionNotAllowed {
+                session: session.to_string(),
+                authority,
+                allowed: self.allowed.clone(),
+            })
+        }
+    }
+
+    /// The document binding that participates in selection: honored only in
+    /// multi-session mode so the deprecated single-session frontmatter field
+    /// never changes default routing.
+    pub fn effective_document_binding(&self, binding: Option<&str>) -> Option<String> {
+        if !self.is_multi_session() {
+            return None;
+        }
+        binding
+            .map(str::trim)
+            .filter(|binding| !binding.is_empty())
+            .map(str::to_string)
+    }
+
+    /// Whether a layout column bound to `binding` belongs to a different
+    /// session than `target_session` and must therefore stay out of this
+    /// session's layout (it keeps its pane in its own session).
+    pub fn column_bound_to_other_session(
+        &self,
+        binding: Option<&str>,
+        target_session: &str,
+    ) -> bool {
+        self.effective_document_binding(binding)
+            .is_some_and(|binding| binding != target_session)
+    }
+}
+
+/// A resolved tmux target that the project's `tmux_sessions` list refuses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionNotAllowed {
+    pub session: String,
+    pub authority: LayoutSessionAuthority,
+    pub allowed: Vec<String>,
+}
+
+impl std::fmt::Display for SessionNotAllowed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "tmux session '{}' (from {}) is not in the allowed tmux_sessions list [{}] in .agent-doc/config.toml; add it to tmux_sessions or bind the document to an allowed session with `tmux_session:` frontmatter",
+            self.session,
+            self.authority.label(),
+            self.allowed.join(", ")
+        )
+    }
+}
+
+impl std::error::Error for SessionNotAllowed {}
+
+/// Select a tmux session under a multi-session [`TmuxSessionPolicy`].
+///
+/// With the single-session policy this is exactly [`select_layout_session`].
+/// Otherwise candidates are walked in the same authority order: a disallowed
+/// ambient candidate (current terminal session, fallback) is skipped, and any
+/// other disallowed candidate (explicit window, existing pane, document
+/// binding, project pin) fails closed with [`SessionNotAllowed`].
+pub fn select_layout_session_with_policy(
+    candidates: LayoutSessionCandidates,
+    policy: &TmuxSessionPolicy,
+) -> Result<Option<LayoutSessionDecision>, SessionNotAllowed> {
+    if !policy.is_multi_session() {
+        return Ok(select_layout_session(candidates));
+    }
+    for (authority, session) in ordered_layout_session_candidates(candidates) {
+        let Some(session) = session else {
+            continue;
+        };
+        if policy.allows(&session) {
+            return Ok(Some(LayoutSessionDecision { session, authority }));
+        }
+        if authority.is_ambient() {
+            continue;
+        }
+        return Err(SessionNotAllowed {
+            session,
+            authority,
+            allowed: policy.allowed.clone(),
+        });
+    }
+    Ok(None)
+}
+
+/// Where `agent-doc start` expects a document's pane to live.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartSessionTarget {
+    pub session: String,
+    pub authority: LayoutSessionAuthority,
+}
+
+/// Decide the session a starting pane must live in.
+///
+/// Single-session mode keeps the historical rule: the project pin, when set, is
+/// the expected session (start relocates a stray pane into it). Multi-session
+/// mode resolves, in order: the document binding (must be allowed), the pane's
+/// own session when allowed (no relocation), then the project pin (must be
+/// allowed). A pane in a disallowed session with no allowed target fails closed.
+pub fn start_session_target(
+    policy: &TmuxSessionPolicy,
+    pane_session: Option<&str>,
+    document_binding: Option<&str>,
+    project_pin: Option<&str>,
+) -> Result<Option<StartSessionTarget>, SessionNotAllowed> {
+    let project_pin = project_pin.map(str::trim).filter(|pin| !pin.is_empty());
+    if !policy.is_multi_session() {
+        return Ok(project_pin.map(|session| StartSessionTarget {
+            session: session.to_string(),
+            authority: LayoutSessionAuthority::ScopedProject,
+        }));
+    }
+    if let Some(binding) = policy.effective_document_binding(document_binding) {
+        policy.require(&binding, LayoutSessionAuthority::DocumentBinding)?;
+        return Ok(Some(StartSessionTarget {
+            session: binding,
+            authority: LayoutSessionAuthority::DocumentBinding,
+        }));
+    }
+    if let Some(current) = pane_session.filter(|session| policy.allows(session)) {
+        return Ok(Some(StartSessionTarget {
+            session: current.to_string(),
+            authority: LayoutSessionAuthority::FocusedActor,
+        }));
+    }
+    if let Some(pin) = project_pin {
+        policy.require(pin, LayoutSessionAuthority::ScopedProject)?;
+        return Ok(Some(StartSessionTarget {
+            session: pin.to_string(),
+            authority: LayoutSessionAuthority::ScopedProject,
+        }));
+    }
+    match pane_session {
+        Some(session) => Err(SessionNotAllowed {
+            session: session.to_string(),
+            authority: LayoutSessionAuthority::FocusedActor,
+            allowed: policy.allowed.clone(),
+        }),
+        None => Ok(None),
+    }
 }
 
 /// Trim an optional CLI scope argument and treat empty strings as absent.
@@ -780,6 +1019,7 @@ mod tests {
         let decision = select_layout_session(LayoutSessionCandidates {
             explicit: None,
             focused_actor: Some("terminal-owner".to_string()),
+            document_binding: None,
             current_agent_doc: Some("replacement-controller".to_string()),
             scoped_project: Some("configured".to_string()),
             fallback: Some("fallback".to_string()),
@@ -795,6 +1035,7 @@ mod tests {
         let decision = select_layout_session(LayoutSessionCandidates {
             explicit: Some("operator-target".to_string()),
             focused_actor: Some("actor-owner".to_string()),
+            document_binding: None,
             current_agent_doc: Some("ambient".to_string()),
             scoped_project: None,
             fallback: None,
@@ -803,6 +1044,57 @@ mod tests {
 
         assert_eq!(decision.session, "operator-target");
         assert_eq!(decision.authority, LayoutSessionAuthority::Explicit);
+    }
+
+    #[test]
+    fn tmux_session_policy_normalizes_and_gates_document_bindings() {
+        let policy = TmuxSessionPolicy::new([" main ", "", "research", "main"]);
+        assert_eq!(policy.allowed(), ["main", "research"]);
+        assert!(policy.is_multi_session());
+        assert!(policy.allows("research"));
+        assert!(!policy.allows("scratch"));
+        assert_eq!(
+            policy.effective_document_binding(Some(" research ")),
+            Some("research".to_string())
+        );
+        assert!(policy.column_bound_to_other_session(Some("main"), "research"));
+        assert!(!policy.column_bound_to_other_session(None, "research"));
+
+        let single = TmuxSessionPolicy::single_session();
+        assert!(single.allows("anything"));
+        assert_eq!(single.effective_document_binding(Some("research")), None);
+        assert!(!single.column_bound_to_other_session(Some("main"), "research"));
+    }
+
+    #[test]
+    fn start_session_target_keeps_single_session_pin_and_multi_session_pane() {
+        let single = TmuxSessionPolicy::single_session();
+        assert_eq!(
+            start_session_target(&single, Some("research"), Some("research"), Some("main"))
+                .unwrap()
+                .map(|target| target.session),
+            Some("main".to_string())
+        );
+
+        let multi = TmuxSessionPolicy::new(["main", "research"]);
+        assert_eq!(
+            start_session_target(&multi, Some("research"), None, Some("main"))
+                .unwrap()
+                .map(|target| target.session),
+            Some("research".to_string())
+        );
+        assert_eq!(
+            start_session_target(&multi, Some("scratch"), None, Some("main"))
+                .unwrap()
+                .map(|target| target.session),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            start_session_target(&multi, Some("main"), Some("scratch"), None)
+                .unwrap_err()
+                .authority,
+            LayoutSessionAuthority::DocumentBinding
+        );
     }
 
     #[test]

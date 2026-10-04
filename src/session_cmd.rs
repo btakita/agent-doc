@@ -17,6 +17,10 @@
 //!   but only when the old session holds nothing but agent-doc-managed windows with no
 //!   live agent; sessions with unmanaged user windows or a running agent are preserved.
 //! - `clear()` removes tmux_session from config.toml, returning to auto-detect mode.
+//! - Multi-session projects (`tmux_sessions` set, GH #17): `show()` also prints
+//!   the allowed list; `set()` refuses a name outside it and only moves the
+//!   default pin — it never migrates windows out of, or closes, another allowed
+//!   session, because each allowed session legitimately hosts its own panes.
 //! - Session names are not validated against live tmux sessions — tmux will error if the
 //!   target session doesn't exist, and we propagate that error.
 //!
@@ -38,6 +42,10 @@ pub fn show() -> Result<()> {
         Some(s) => println!("{}", s),
         None => println!("(auto-detect)"),
     }
+    let allowed = project_config_io::load_project().tmux_sessions;
+    if !allowed.is_empty() {
+        println!("allowed: {}", allowed.join(", "));
+    }
     Ok(())
 }
 
@@ -51,9 +59,22 @@ pub fn clear() -> Result<()> {
 pub fn set(name: &str) -> Result<()> {
     let tmux = agent_doc_tmux_io::configured_tmux();
     let old_session = project_config_io::project_tmux_session();
+    let policy =
+        agent_doc_sync::TmuxSessionPolicy::new(project_config_io::load_project().tmux_sessions);
+    policy
+        .require(name, agent_doc_sync::LayoutSessionAuthority::ScopedProject)
+        .map_err(|refused| anyhow::anyhow!("[session] {refused}"))?;
 
     // Update config first
     project_config_io::update_project_tmux_session(name)?;
+
+    if policy.is_multi_session() {
+        eprintln!(
+            "[session] multi-session project: default pin set to '{}'; panes in other allowed sessions stay where they are",
+            name
+        );
+        return Ok(());
+    }
 
     // Try to move the agent-doc window from old session to new session
     if let Some(ref old) = old_session {

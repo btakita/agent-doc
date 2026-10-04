@@ -5,7 +5,7 @@
 //! `agent-doc-orchestration`.
 //!
 //! ## Spec
-//! - Defines `ProjectConfig`: per-project settings (tmux_session, components).
+//! - Defines `ProjectConfig`: per-project settings (tmux_session, tmux_sessions, components).
 //! - Defines `ComponentConfig`: per-component patch configuration (mode, timestamps, hooks).
 //! - `parse_project_toml()` parses a TOML string into a `ProjectConfig`.
 //! - `parse_legacy_components_toml()` parses legacy `components.toml` bodies.
@@ -318,6 +318,14 @@ pub struct ProjectConfig {
     /// Target tmux session name for this project.
     #[serde(default)]
     pub tmux_session: Option<String>,
+    /// Allowed tmux sessions for multi-session projects (GH #17). Empty (the
+    /// default) keeps the single-session model: `tmux_session` plus ambient
+    /// auto-detect. When non-empty, route/start/sync/layout resolve each
+    /// document to one of these sessions (explicit window, the document's
+    /// existing pane, its `tmux_session` frontmatter binding, then the project
+    /// pin) and refuse any target outside the list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tmux_sessions: Vec<String>,
     /// Optional tmux client executable. Use an absolute path when GUI/IDE and
     /// terminal environments expose different tmux versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -652,6 +660,30 @@ attach_command = "tmux attach-session -t {session}"
         assert_eq!(
             terminal.attach_command.as_deref(),
             Some("tmux attach-session -t {session}")
+        );
+    }
+
+    #[test]
+    fn allowed_tmux_sessions_list_parses_and_defaults_empty() {
+        let cfg = parse_project_toml(
+            r#"
+tmux_session = "main"
+tmux_sessions = ["main", "research"]
+"#,
+        )
+        .expect("allowed tmux sessions must parse");
+        assert_eq!(cfg.tmux_session.as_deref(), Some("main"));
+        assert_eq!(cfg.tmux_sessions, vec!["main", "research"]);
+
+        let single = parse_project_toml("tmux_session = \"main\"\n").unwrap();
+        assert!(
+            single.tmux_sessions.is_empty(),
+            "omitting tmux_sessions keeps the single-session default"
+        );
+        let serialized = toml::to_string_pretty(&single).unwrap();
+        assert!(
+            !serialized.contains("tmux_sessions"),
+            "an empty allowed list must not be written back: {serialized}"
         );
     }
 

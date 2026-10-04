@@ -109,7 +109,31 @@ fn ensure_tmux_session_with_ide(
         false
     };
 
-    if let Some(target) = live_registry_target(tmux, &project_root, &canonical)? {
+    // Multi-session projects (`tmux_sessions`, GH #17): an explicit session or
+    // the document's `tmux_session` binding must be allowed, and a live
+    // registry pane is reused only from an allowed session that matches the
+    // binding. The single-session default leaves every check a no-op.
+    let project_config = agent_doc_project_config_io::load_project_for_doc(&canonical);
+    let session_policy = agent_doc_sync::TmuxSessionPolicy::new(&project_config.tmux_sessions);
+    let document_binding = session_policy.effective_document_binding(
+        agent_doc_sync_io::sync::document_tmux_session_binding(&canonical).as_deref(),
+    );
+    if let Some(explicit) = explicit_session.map(str::trim).filter(|s| !s.is_empty()) {
+        session_policy.require(explicit, agent_doc_sync::LayoutSessionAuthority::Explicit)?;
+    }
+    if let Some(binding) = document_binding.as_deref() {
+        session_policy.require(
+            binding,
+            agent_doc_sync::LayoutSessionAuthority::DocumentBinding,
+        )?;
+    }
+
+    if let Some(target) = live_registry_target(tmux, &project_root, &canonical, |session| {
+        session_policy.allows(session)
+            && document_binding
+                .as_deref()
+                .is_none_or(|binding| binding == session)
+    })? {
         let state = if is_session_attached(tmux, &target.session_name) {
             TerminalSessionState::Attached
         } else {
@@ -130,9 +154,15 @@ fn ensure_tmux_session_with_ide(
         ));
     }
 
-    let configured = agent_doc_project_config_io::load_project_for_doc(&canonical).tmux_session;
-    let (session_name, resolution) =
-        resolve_tmux_session_name(explicit_session, configured.as_deref())?;
+    let configured = project_config.tmux_session.clone();
+    let (session_name, resolution) = match (explicit_session, document_binding.as_deref()) {
+        (None, Some(binding)) => (binding.to_string(), "document_binding"),
+        _ => resolve_tmux_session_name(explicit_session, configured.as_deref())?,
+    };
+    session_policy.require(
+        &session_name,
+        agent_doc_sync::LayoutSessionAuthority::ScopedProject,
+    )?;
     let session_exists = tmux.session_exists(&session_name);
     let state = if session_exists {
         if is_session_attached(tmux, &session_name) {
@@ -395,6 +425,7 @@ fn live_registry_target(
     tmux: &tmux_router::Tmux,
     project_root: &Path,
     canonical_file: &Path,
+    session_allowed: impl Fn(&str) -> bool,
 ) -> Result<Option<LiveRegistryTarget>> {
     let registry = agent_doc_session_registry_io::load_in(project_root)?;
     let mut targets = registry
@@ -404,7 +435,8 @@ fn live_registry_target(
             let session_name = tmux
                 .pane_session(&entry.pane)
                 .ok()
-                .filter(|name| !name.is_empty())?;
+                .filter(|name| !name.is_empty())
+                .filter(|name| session_allowed(name))?;
             let entry_path = Path::new(&entry.file);
             let entry_path = if entry_path.is_absolute() {
                 entry_path.to_path_buf()
@@ -1405,10 +1437,28 @@ fn prepare_start_runtime_with_admission(
         );
     }
 
-    if let Some(expected_session) = agent_doc_project_config_io::project_tmux_session()
-        && !relocate_if_wrong_session(&tmux, &pane_id, &expected_session)
+    // Single-session default: the project pin is the expected session and a
+    // stray pane is relocated into it. Multi-session (`tmux_sessions`, GH #17):
+    // the document binding, else the pane's own allowed session (no
+    // relocation), else the allowed pin; a pane stranded in a disallowed
+    // session with no allowed target fails closed.
+    let session_policy = agent_doc_sync_io::sync::tmux_session_policy_for_root(&project_root);
+    let pane_session = tmux.pane_session(&pane_id).ok();
+    let start_target = agent_doc_sync::start_session_target(
+        &session_policy,
+        pane_session.as_deref(),
+        agent_doc_sync_io::sync::document_tmux_session_binding(&canonical).as_deref(),
+        agent_doc_project_config_io::project_tmux_session().as_deref(),
+    )
+    .map_err(|refused| anyhow::anyhow!("[start] {refused}"))?;
+    if let Some(target) = start_target
+        && !relocate_if_wrong_session(&tmux, &pane_id, &target.session)
+        && target.authority == agent_doc_sync::LayoutSessionAuthority::ScopedProject
+        && pane_session
+            .as_deref()
+            .is_some_and(|session| session_policy.allows(session))
     {
-        rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &expected_session);
+        rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &target.session);
     }
 
     let pane_window = agent_doc_tmux_io::target_window_id(&tmux, &pane_id).unwrap_or_default();

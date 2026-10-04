@@ -354,7 +354,7 @@ pub fn provision_and_route_pane(
         crate::invocation::WaitForReadyOverrideGuard::set(Some(MANUAL_SYNC_ROUTE_READY_TIMEOUT));
     let split_before = is_first_column(file, col_args);
     let harness = resolve_harness_for_file(file);
-    let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness);
+    let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness)?;
     ensure_auto_start_target_session(tmux, context_session, &session_name, &harness)?;
     auto_start_in_session(
         tmux,
@@ -442,7 +442,7 @@ pub fn auto_start_ext_with_lock_mode(
     effects: RouteStartupEffects,
 ) -> Result<Option<String>> {
     let harness = resolve_harness_for_file(file);
-    let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness);
+    let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness)?;
     ensure_auto_start_target_session(tmux, context_session, &session_name, &harness)?;
     auto_start_in_session_with_lock_mode(
         tmux,

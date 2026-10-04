@@ -205,6 +205,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         include_str!("../runbooks/coder-workspace.md"),
     ),
     (
+        "multi-tmux-sessions.md",
+        include_str!("../runbooks/multi-tmux-sessions.md"),
+    ),
+    (
         "dynamic-context.md",
         include_str!("../runbooks/dynamic-context.md"),
     ),

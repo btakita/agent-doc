@@ -678,6 +678,499 @@ mod pane_layout_effect_assignment_model {
     }
 }
 
+/// GH #17 (`ghmultitmux`) reference model: one editor managing panes across
+/// several tmux sessions (a session per topic or project).
+///
+/// The world holds live tmux sessions, the caller's terminal session, the
+/// project's `tmux_session` pin and `tmux_sessions` allow-list, per-document
+/// `tmux_session` frontmatter bindings, and each document's live pane. Route,
+/// sync and start build the same candidate sets their IO adapters observe and
+/// drive the production policy (`agent_doc_sync::select_layout_session_with_policy`,
+/// `TmuxSessionPolicy::column_bound_to_other_session`, `start_session_target`).
+/// The model carries an allow-list-ignoring mutation so the refusal coverage is
+/// provably sensitive.
+mod multi_tmux_session_model {
+    use agent_doc_sync::{
+        LayoutSessionAuthority, LayoutSessionCandidates, SessionNotAllowed, TmuxSessionPolicy,
+        select_layout_session, select_layout_session_with_policy, start_session_target,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+
+    const HARNESS_FALLBACK: &str = "claude";
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum PolicyMode {
+        Production,
+        /// Mutation: the adapters forget the allow-list (single-session policy).
+        IgnoreAllowList,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum Refusal {
+        NotAllowed(SessionNotAllowed),
+        SessionNotAlive(String),
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct SyncLayout {
+        session: String,
+        authority: LayoutSessionAuthority,
+        columns: Vec<&'static str>,
+        dropped: Vec<&'static str>,
+    }
+
+    struct World {
+        live_sessions: BTreeSet<&'static str>,
+        agent_doc_windows: BTreeSet<&'static str>,
+        current_session: Option<&'static str>,
+        pin: Option<&'static str>,
+        allowed: Vec<&'static str>,
+        bindings: BTreeMap<&'static str, &'static str>,
+        panes: BTreeMap<&'static str, (String, &'static str)>,
+        next_pane: u32,
+        mode: PolicyMode,
+    }
+
+    impl World {
+        fn new(sessions: &[&'static str], allowed: &[&'static str]) -> Self {
+            Self {
+                live_sessions: sessions.iter().copied().collect(),
+                agent_doc_windows: BTreeSet::new(),
+                current_session: sessions.first().copied(),
+                pin: None,
+                allowed: allowed.to_vec(),
+                bindings: BTreeMap::new(),
+                panes: BTreeMap::new(),
+                next_pane: 1,
+                mode: PolicyMode::Production,
+            }
+        }
+
+        fn policy(&self) -> TmuxSessionPolicy {
+            match self.mode {
+                PolicyMode::Production => TmuxSessionPolicy::new(&self.allowed),
+                PolicyMode::IgnoreAllowList => TmuxSessionPolicy::single_session(),
+            }
+        }
+
+        fn alive(&self, session: &str) -> bool {
+            self.live_sessions.contains(session)
+        }
+
+        /// The current terminal session when it already hosts an agent-doc window.
+        fn current_agent_doc(&self) -> Option<String> {
+            self.current_session
+                .filter(|session| self.agent_doc_windows.contains(session))
+                .map(str::to_string)
+        }
+
+        /// `configured_session_for_root`: the pin, only while it is alive.
+        fn live_pin(&self) -> Option<String> {
+            self.pin.filter(|pin| self.alive(pin)).map(str::to_string)
+        }
+
+        /// `resolve_preferred_session(.., None, ..)`: the ambient fallback.
+        fn ambient_fallback(&self) -> Option<String> {
+            self.current_agent_doc()
+                .or_else(|| self.live_pin())
+                .or_else(|| self.current_session.map(str::to_string))
+        }
+
+        /// `scoped_document_tmux_session_binding`: focus first, then columns,
+        /// and only under a multi-session policy.
+        fn document_binding(&self, focus: Option<&str>, columns: &[&str]) -> Option<String> {
+            let policy = self.policy();
+            focus
+                .into_iter()
+                .chain(columns.iter().copied())
+                .find_map(|doc| policy.effective_document_binding(self.bindings.get(doc).copied()))
+        }
+
+        fn candidates(
+            &self,
+            explicit: Option<&str>,
+            focused_actor: Option<String>,
+            focus: Option<&str>,
+            columns: &[&str],
+        ) -> LayoutSessionCandidates {
+            LayoutSessionCandidates {
+                explicit: explicit.map(str::to_string),
+                focused_actor,
+                document_binding: self.document_binding(focus, columns),
+                current_agent_doc: self.current_agent_doc(),
+                scoped_project: self.live_pin(),
+                fallback: self.ambient_fallback(),
+            }
+        }
+
+        /// `route`: resolve the target session (no actor binding), then
+        /// provision the document's pane there when it has none.
+        fn route(&mut self, doc: &'static str, explicit: Option<&str>) -> Result<String, Refusal> {
+            let policy = self.policy();
+            let decision = select_layout_session_with_policy(
+                self.candidates(explicit, None, Some(doc), &[]),
+                &policy,
+            )
+            .map_err(Refusal::NotAllowed)?;
+            let session = match decision {
+                Some(decision) => decision.session,
+                None => {
+                    policy
+                        .require(HARNESS_FALLBACK, LayoutSessionAuthority::Fallback)
+                        .map_err(Refusal::NotAllowed)?;
+                    HARNESS_FALLBACK.to_string()
+                }
+            };
+            if !self.alive(&session) {
+                return Err(Refusal::SessionNotAlive(session));
+            }
+            if !self.panes.contains_key(doc) {
+                let pane = format!("%{}", self.next_pane);
+                self.next_pane += 1;
+                let session_ref = *self.live_sessions.get(session.as_str()).unwrap();
+                self.panes.insert(doc, (pane, session_ref));
+                self.agent_doc_windows.insert(session_ref);
+            }
+            Ok(session)
+        }
+
+        /// `sync`: the focused document's live pane is the actor binding; the
+        /// selected session's layout keeps only documents that belong there.
+        fn sync(
+            &self,
+            explicit: Option<&str>,
+            focus: Option<&'static str>,
+            columns: &[&'static str],
+        ) -> Result<SyncLayout, Refusal> {
+            let policy = self.policy();
+            let focused_actor = focus
+                .and_then(|doc| self.panes.get(doc))
+                .map(|(_, session)| session.to_string());
+            let decision = select_layout_session_with_policy(
+                self.candidates(explicit, focused_actor, focus, columns),
+                &policy,
+            )
+            .map_err(Refusal::NotAllowed)?
+            .expect("sync model always has a live candidate");
+            let (columns, dropped): (Vec<_>, Vec<_>) = columns.iter().copied().partition(|doc| {
+                !policy.column_bound_to_other_session(
+                    self.bindings.get(doc).copied(),
+                    &decision.session,
+                )
+            });
+            Ok(SyncLayout {
+                session: decision.session,
+                authority: decision.authority,
+                columns,
+                dropped,
+            })
+        }
+
+        /// `start`: where the starting pane must live (`None` = no constraint).
+        fn start(&self, doc: &'static str) -> Result<Option<String>, SessionNotAllowed> {
+            let pane_session = self.panes.get(doc).map(|(_, session)| *session);
+            start_session_target(
+                &self.policy(),
+                pane_session,
+                self.bindings.get(doc).copied(),
+                self.pin,
+            )
+            .map(|target| target.map(|target| target.session))
+        }
+    }
+
+    fn two_session_world() -> World {
+        let mut world = World::new(&["main", "research", "scratch"], &["main", "research"]);
+        world.pin = Some("main");
+        world.current_session = Some("main");
+        world.agent_doc_windows.insert("main");
+        world.bindings.insert("tasks/research/notes.md", "research");
+        world.bindings.insert("tasks/ops.md", "main");
+        world
+    }
+
+    #[test]
+    fn two_sessions_route_each_document_to_its_own_session() {
+        let mut world = two_session_world();
+
+        assert_eq!(
+            world.route("tasks/research/notes.md", None),
+            Ok("research".to_string()),
+            "a document bound to an allowed session routes there even from another session's terminal"
+        );
+        assert_eq!(world.route("tasks/ops.md", None), Ok("main".to_string()));
+        assert_eq!(
+            world.route("tasks/plan.md", None),
+            Ok("main".to_string()),
+            "an unbound document follows the current agent-doc session"
+        );
+        assert_eq!(world.panes["tasks/research/notes.md"].1, "research");
+        assert_eq!(world.panes["tasks/plan.md"].1, "main");
+
+        // From the research terminal, the bound document still lands in research
+        // and an unbound one now follows the research agent-doc window.
+        world.current_session = Some("research");
+        assert_eq!(
+            world.route("tasks/ops.md", None),
+            Ok("main".to_string()),
+            "the binding outranks the caller's terminal"
+        );
+        assert_eq!(
+            world.route("tasks/topic.md", None),
+            Ok("research".to_string())
+        );
+    }
+
+    #[test]
+    fn sync_arranges_each_layout_within_the_focused_documents_session() {
+        let mut world = two_session_world();
+        world.route("tasks/research/notes.md", None).unwrap();
+        world.route("tasks/ops.md", None).unwrap();
+        world.route("tasks/plan.md", None).unwrap();
+        let columns = ["tasks/ops.md", "tasks/research/notes.md", "tasks/plan.md"];
+
+        let research = world
+            .sync(None, Some("tasks/research/notes.md"), &columns)
+            .unwrap();
+        assert_eq!(research.session, "research");
+        assert_eq!(research.authority, LayoutSessionAuthority::FocusedActor);
+        assert_eq!(
+            research.columns,
+            vec!["tasks/research/notes.md", "tasks/plan.md"]
+        );
+        assert_eq!(
+            research.dropped,
+            vec!["tasks/ops.md"],
+            "a document bound to main keeps its pane in main"
+        );
+
+        let main = world.sync(None, Some("tasks/ops.md"), &columns).unwrap();
+        assert_eq!(main.session, "main");
+        assert_eq!(main.columns, vec!["tasks/ops.md", "tasks/plan.md"]);
+        assert_eq!(main.dropped, vec!["tasks/research/notes.md"]);
+
+        // An unbound document whose pane already lives in research stays there:
+        // the existing pane's session outranks the caller's terminal and the pin.
+        world
+            .panes
+            .insert("tasks/topic.md", ("%9".to_string(), "research"));
+        let topic = world.sync(None, Some("tasks/topic.md"), &columns).unwrap();
+        assert_eq!(topic.session, "research");
+        assert_eq!(
+            world.start("tasks/topic.md"),
+            Ok(Some("research".to_string())),
+            "start keeps an allowed pane where it is instead of relocating it to the pin"
+        );
+        assert_eq!(
+            world.start("tasks/research/notes.md"),
+            Ok(Some("research".to_string()))
+        );
+    }
+
+    #[test]
+    fn disallowed_session_targets_fail_closed() {
+        let mut world = two_session_world();
+
+        let explicit = world.route("tasks/plan.md", Some("scratch")).unwrap_err();
+        let Refusal::NotAllowed(refused) = explicit else {
+            panic!("explicit scratch window must be refused by the allow-list");
+        };
+        assert_eq!(refused.session, "scratch");
+        assert_eq!(refused.authority, LayoutSessionAuthority::Explicit);
+        assert!(
+            refused
+                .to_string()
+                .contains("is not in the allowed tmux_sessions list [main, research]"),
+            "{refused}"
+        );
+
+        world.bindings.insert("tasks/stray.md", "scratch");
+        assert!(matches!(
+            world.route("tasks/stray.md", None),
+            Err(Refusal::NotAllowed(SessionNotAllowed {
+                authority: LayoutSessionAuthority::DocumentBinding,
+                ..
+            }))
+        ));
+        assert!(!world.panes.contains_key("tasks/stray.md"));
+
+        // A pane already living in a disallowed session is refused by sync and
+        // by start (no allowed pin to relocate to).
+        world
+            .panes
+            .insert("tasks/legacy.md", ("%7".to_string(), "scratch"));
+        assert!(matches!(
+            world.sync(None, Some("tasks/legacy.md"), &["tasks/legacy.md"]),
+            Err(Refusal::NotAllowed(SessionNotAllowed {
+                authority: LayoutSessionAuthority::FocusedActor,
+                ..
+            }))
+        ));
+        world.pin = None;
+        assert_eq!(
+            world.start("tasks/legacy.md").unwrap_err().authority,
+            LayoutSessionAuthority::FocusedActor
+        );
+
+        // A pin outside the allow-list is a configuration error, not a target.
+        world.pin = Some("scratch");
+        world.current_session = Some("scratch");
+        world.agent_doc_windows.remove("main");
+        assert_eq!(
+            world.sync(None, None, &["tasks/plan.md"]).unwrap_err(),
+            Refusal::NotAllowed(SessionNotAllowed {
+                session: "scratch".to_string(),
+                authority: LayoutSessionAuthority::ScopedProject,
+                allowed: vec!["main".to_string(), "research".to_string()],
+            })
+        );
+    }
+
+    #[test]
+    fn disallowed_ambient_terminal_session_is_skipped_not_targeted() {
+        let mut world = two_session_world();
+        world.current_session = Some("scratch");
+        world.agent_doc_windows.insert("scratch");
+
+        assert_eq!(
+            world.route("tasks/plan.md", None),
+            Ok("main".to_string()),
+            "a caller in a disallowed terminal session falls through to the allowed pin"
+        );
+        assert_eq!(world.panes["tasks/plan.md"].1, "main");
+    }
+
+    #[test]
+    fn single_session_default_is_unchanged() {
+        // No allow-list: the deprecated frontmatter binding is ignored, every
+        // session is a target, and start relocates to the pin exactly as before.
+        let mut world = World::new(&["0", "1", "scratch"], &[]);
+        world.pin = Some("0");
+        world.current_session = Some("1");
+        world.agent_doc_windows.insert("1");
+        world.bindings.insert("tasks/a.md", "scratch");
+
+        assert_eq!(world.route("tasks/a.md", None), Ok("1".to_string()));
+        assert_eq!(
+            world.route("tasks/b.md", Some("scratch")),
+            Ok("scratch".to_string())
+        );
+        assert_eq!(world.start("tasks/a.md"), Ok(Some("0".to_string())));
+        let layout = world
+            .sync(None, Some("tasks/a.md"), &["tasks/a.md", "tasks/b.md"])
+            .unwrap();
+        assert_eq!(layout.session, "1");
+        assert!(layout.dropped.is_empty());
+
+        // Exhaustive: for every candidate shape the single-session policy is
+        // exactly the historical selection.
+        for mask in 0u32..64 {
+            let pick = |bit: u32, name: &str| (mask & (1 << bit) != 0).then(|| name.to_string());
+            let candidates = LayoutSessionCandidates {
+                explicit: pick(0, "explicit"),
+                focused_actor: pick(1, "actor"),
+                document_binding: None,
+                current_agent_doc: pick(3, "current"),
+                scoped_project: pick(4, "pin"),
+                fallback: pick(5, "fallback"),
+            };
+            assert_eq!(
+                select_layout_session_with_policy(
+                    candidates.clone(),
+                    &TmuxSessionPolicy::single_session()
+                ),
+                Ok(select_layout_session(candidates)),
+                "mask={mask:#b}"
+            );
+        }
+    }
+
+    #[test]
+    fn multi_session_selection_never_returns_a_disallowed_session() {
+        // Exhaustive over which of the six authorities are present and which
+        // of their sessions are allowed: a selection is always an allowed
+        // session, a refusal is never an ambient authority, and an allowed
+        // non-ambient candidate is never skipped.
+        let names = ["explicit", "actor", "binding", "current", "pin", "fallback"];
+        for present in 0u32..64 {
+            for allowed_mask in 0u32..64 {
+                let allowed: Vec<&str> = (0..6)
+                    .filter(|bit| allowed_mask & (1 << bit) != 0)
+                    .map(|bit| names[bit as usize])
+                    .chain(std::iter::once("anchor"))
+                    .collect();
+                let policy = TmuxSessionPolicy::new(&allowed);
+                let pick =
+                    |bit: u32| (present & (1 << bit) != 0).then(|| names[bit as usize].to_string());
+                let candidates = LayoutSessionCandidates {
+                    explicit: pick(0),
+                    focused_actor: pick(1),
+                    document_binding: pick(2),
+                    current_agent_doc: pick(3),
+                    scoped_project: pick(4),
+                    fallback: pick(5),
+                };
+                let first_present = (0..6).find(|bit| present & (1 << bit) != 0);
+                match select_layout_session_with_policy(candidates, &policy) {
+                    Ok(Some(decision)) => {
+                        assert!(policy.allows(&decision.session));
+                        let bit = names.iter().position(|n| *n == decision.session).unwrap();
+                        // Every earlier present candidate must have been a
+                        // skipped (disallowed ambient) one.
+                        for earlier in 0..bit {
+                            if present & (1 << earlier) != 0 {
+                                assert!(matches!(earlier, 3 | 5));
+                                assert_eq!(allowed_mask & (1 << earlier), 0);
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        for bit in 0..6 {
+                            if present & (1 << bit) != 0 {
+                                assert!(matches!(bit, 3 | 5), "present={present:#b}");
+                                assert_eq!(allowed_mask & (1 << bit), 0);
+                            }
+                        }
+                    }
+                    Err(refused) => {
+                        assert!(!refused.authority.is_ambient());
+                        assert!(!policy.allows(&refused.session));
+                        assert!(first_present.is_some());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn allow_list_mutation_is_detected() {
+        // Coverage sensitivity: with the allow-list dropped by the adapters,
+        // the refusals above become silent misroutes into the scratch session.
+        let mut world = two_session_world();
+        world.mode = PolicyMode::IgnoreAllowList;
+        assert_eq!(
+            world.route("tasks/plan.md", Some("scratch")),
+            Ok("scratch".to_string())
+        );
+        world
+            .panes
+            .insert("tasks/legacy.md", ("%7".to_string(), "scratch"));
+        assert_eq!(
+            world
+                .sync(None, Some("tasks/legacy.md"), &["tasks/legacy.md"])
+                .unwrap()
+                .session,
+            "scratch"
+        );
+        world.bindings.insert("tasks/stray.md", "research");
+        assert_eq!(
+            world.route("tasks/stray.md", None),
+            Ok("main".to_string()),
+            "without the allow-list the binding is ignored: per-topic routing is lost"
+        );
+    }
+}
+
 /// Installed-build handoff reference model. The controller process is the
 /// lifetime of the reactive actor: a replacement rebuilds its Sources from the
 /// durable projection, while write ordinals prevent observations from an older

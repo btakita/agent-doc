@@ -115,26 +115,59 @@ enum SessionTarget {
 /// 2. Scan the durable registry for ANY live session with agent-doc panes for this project
 /// 3. Fall back to default session name "0"
 ///
-/// Note: `tmux_session` frontmatter is deprecated and no longer consulted.
+/// Note: `tmux_session` frontmatter is deprecated in single-session projects
+/// and not consulted there. In multi-session projects (`tmux_sessions` set,
+/// GH #17) it is the document binding and outranks the registry scan; every
+/// target must then be in the allowed list.
 /// For each candidate, checks if the session exists and is attached.
 fn resolve_target_session(
     tmux: &Tmux,
     file: &Path,
     explicit: Option<&str>,
 ) -> Result<SessionTarget> {
+    // Multi-session projects (`tmux_sessions`, GH #17): a document bound to an
+    // allowed session targets that session, and every target must be allowed.
+    let file_arg = file.to_string_lossy().into_owned();
+    let policy = agent_doc_sync_io::sync::tmux_session_policy_for_scope(&[], Some(&file_arg));
+    let binding = agent_doc_sync_io::sync::scoped_document_tmux_session_binding(
+        &policy,
+        &[],
+        Some(&file_arg),
+    );
+    let explicit = match explicit {
+        Some(name) => {
+            policy.require(name, agent_doc_sync::LayoutSessionAuthority::Explicit)?;
+            Some(name.to_string())
+        }
+        None => match binding {
+            Some(bound) => {
+                policy.require(
+                    &bound,
+                    agent_doc_sync::LayoutSessionAuthority::DocumentBinding,
+                )?;
+                Some(bound)
+            }
+            None => None,
+        },
+    };
+    let explicit = explicit.as_deref();
+
     if !tmux.running() {
         // tmux not running at all — create with the best session name we have
         let name = resolve_session_name(file, explicit)?;
+        policy.require(&name, agent_doc_sync::LayoutSessionAuthority::ScopedProject)?;
         return Ok(SessionTarget::Create(name));
     }
 
-    // Try explicit --session flag first
+    // Try explicit --session flag (or the multi-session document binding) first
     if let Some(name) = explicit {
         return Ok(classify_session(tmux, name));
     }
 
     // Scan the durable registry for any live session hosting this project's panes
-    if let Some(active_session) = find_active_project_session(tmux)? {
+    if let Some(active_session) = find_active_project_session(tmux)?
+        && policy.allows(&active_session)
+    {
         eprintln!(
             "[terminal] targeting session '{}' (from registry scan)",
             active_session
@@ -144,6 +177,7 @@ fn resolve_target_session(
 
     // No active session found — create with default name
     let name = resolve_session_name(file, None)?;
+    policy.require(&name, agent_doc_sync::LayoutSessionAuthority::ScopedProject)?;
     Ok(SessionTarget::Create(name))
 }
 

@@ -20,7 +20,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -198,13 +197,46 @@ I claimed the item and started a background subagent on it. It will:
 4. Check that every location a harness reads now shows 0.1.103.
 
 **Separate agent-doc bug, filed as `chatpromptnotif` in `agent-doc-bugs2.md`:** the hook took the release subagent's completion notice for one of your chat prompts. It flagged it on that turn and again as "unrecorded" on this one. That notice came from the harness, not from you, and its result is already in this document, so I didn't insert it as a prompt.
+
+### Re: [#tsiftskillrefresh] done — tsift skill is now personal and uncommitted — opus-5-5 · 2026-10-04T01:20-04:00
+
+> **Queue prompt:** do [#tsiftskillrefresh]: Use local non-committed tsift skills?
+
+> **Operator note:** Use local non-committed tsift skills?
+
+**Done: the tsift skill is now personal and uncommitted, at 0.1.103.** Claude Code reads it through the link `~/.claude/skills/tsift -> ~/.agents/skills/tsift`, which `tsift init` generates and owns, so it stays current with each install. The committed 0.1.62 copy is gone from agent-loop.
+
+**What changed:**
+1. The old user copy at `~/.claude/skills/tsift` (0.1.62) was moved to `~/.claude/skills.retired/tsift-0.1.62-2026-10-04`. `tsift init --harness` refuses to replace a directory it doesn't own, so it had to move first.
+2. `tsift init --instructions personal --harness claude .` ran in agent-loop. It:
+   - deleted the untracked `.agents/skills/tsift/SKILL.md` (0.1.101);
+   - removed its own managed section from `AGENTS.md`;
+   - created the `~/.claude` link;
+   - switched `.tsift/instruction-mode` from shared to personal.
+3. **agent-loop commit `82a23db9da`**, pushed as a plain fast-forward:
+   - deleted the 6 tracked files under `.claude/skills/tsift/`;
+   - added `.gitignore` rules for `.agents/skills/tsift/` and for `.claude`, `.codex`, `.opencode` and `.grok` `/skills/tsift`;
+   - pointed `AGENTS.md` line 35 at the personal skill (`CLAUDE.md` is a symlink to `AGENTS.md`).
+
+   Afterwards, `git ls-files .claude/skills/tsift` returns nothing.
+4. **Your hand-written note is kept.** The leftover `.agents/skills/tsift/references/code-navigation.md` held only your "agent-loop CI closeout" note, and nothing linked to it any more. I merged its wording into the matching line of `CLAUDE.local.md`, which already had an older version, then deleted the file.
+
+**Checks:**
+- The linked `SKILL.md` reads `tsift-version: "0.1.103"`.
+- `tsift status` reports `instructions: current (v0.1.103)`.
+- This session's skill list already shows the new skill.
+
+**Things to know:**
+- **The new skill is shorter.** The retired 0.1.62 skill was 7.8 KB of hand-written text plus 5 runbooks. The generated 0.1.103 skill is 4.4 KB, close to the tsift repo's own `.agents/skills/tsift/SKILL.md` (4.6 KB). It's the current official skill, but those 5 runbooks are no longer in the global skill. The backup is in `~/.claude/skills.retired/` if you want any of it back.
+- **Possible overwrite:** my `CLAUDE.local.md` edit sits inside a `<!-- tsift:code-navigation -->` block that tsift manages. A later `tsift init` that rewrites that block could undo it.
+- **339 of 339 submodule scopes report stale instructions.** `tsift status` says `run tsift init --workspace`. I didn't run it, because it would edit instructions in 339 other repos. That's your call.
+- **Follow-up `tsiftharnesslinks`:** codex, opencode and grok don't have personal links yet. Before adding them, it needs checking where each harness reads global skills. Personal mode would link `~/.opencode/skills`, but OpenCode documents `~/.config/opencode/skills`.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#tsiftskillrefresh]: Use local non-committed tsift skills?
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -213,7 +245,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tsiftskillrefresh] [recommended] Refresh the stale tsift skill copies to 0.1.103: agent-loop .agents/skills/tsift/SKILL.md (0.1.101), .claude/skills/tsift/SKILL.md and ~/.claude/skills/tsift/SKILL.md (both 0.1.62, plain copies, not links). Use tsift init --harness claude (links rather than copies). Check first that no other session is editing those files in the shared tree, and commit only those paths.
+- [ ] [#tsiftharnesslinks] [recommended] Decide whether codex, opencode and grok should get personal tsift skill links (tsift init --instructions personal --harness all). First confirm where each harness reads global skills: personal mode links ~/.opencode/skills, but OpenCode documents ~/.config/opencode/skills. If tsift links the wrong directory, fix that in tsift with a regression test.
 <!-- /agent:backlog -->
 
 ## Review

@@ -20,6 +20,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -231,12 +232,27 @@ I claimed the item and started a background subagent on it. It will:
 - **Possible overwrite:** my `CLAUDE.local.md` edit sits inside a `<!-- tsift:code-navigation -->` block that tsift manages. A later `tsift init` that rewrites that block could undo it.
 - **339 of 339 submodule scopes report stale instructions.** `tsift status` says `run tsift init --workspace`. I didn't run it, because it would edit instructions in 339 other repos. That's your call.
 - **Follow-up `tsiftharnesslinks`:** codex, opencode and grok don't have personal links yet. Before adding them, it needs checking where each harness reads global skills. Personal mode would link `~/.opencode/skills`, but OpenCode documents `~/.config/opencode/skills`.
+
+### Re: #tsiftharnesslinks dispatched to a subagent — opus-5.5 · 2026-10-04T02:52-04:00
+
+> **Queue prompt:** do [#tsiftharnesslinks]
+
+This item was claimed (`subagent:harnesslinks`) and handed to a background subagent. The subagent works in its own tsift worktree outside the IDE-watched project (`~/work/worktrees/tsift-harnesslinks`, branch `harnesslinks`, based on v0.1.103). Its tasks:
+
+1. Confirm where Codex, OpenCode and Grok each read global skills, using docs and the local installs. Open question: tsift's personal mode targets `~/.opencode/skills`, but OpenCode documents `~/.config/opencode/skills`.
+2. If tsift links any wrong directory, fix it and add regression tests that pin each harness's personal dir.
+3. Run `make check` and commit on the branch. It does not push or install.
+
+When it reports back, I'll integrate serially: merge, `make check`, install, then create the personal links with `tsift init --instructions personal --harness …`. After that I'll release the claim and close the item.
+
+Exchange is large (196 lines). The queue is active, so I'm not compacting.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- do [#tsiftharnesslinks]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

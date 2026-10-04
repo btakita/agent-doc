@@ -208,6 +208,18 @@ not one. A route lease's deferred plugin publication is arbitrated and logged
 when the lease releases. The width can therefore change only through a newer
 plugin publication or an `exact` route, each attributable from one log line.
 
+*A plugin win never strands a routed document (GH #126).* A passive
+single-column plugin publication (a tab switch; on a Remote Dev / Coder backend
+every publication is one undetected column) correctly supersedes a route by
+`newer_plane_version`, which takes the routed document out of the retained
+layout and lets tmux stash its pane. A later explicit focus of that document —
+Sync Tmux Layout or a tab switch back — refused
+`actor_pane_not_visible`/`outside_agent_doc_window` escalates, and the
+escalation puts the document into the retained focus column (the `ensure` rule
+above, `source=retained_focus_column replaced=<column>`) instead of skipping
+with `cause=document_outside_retained_layout`. The escalation keeps the column
+count and therefore the plugin's `structure_owner`.
+
 **Cross-document child-route boundary:** A route with no layout columns that is
 invoked from explicit live tmux process context inside a pane owned by another
 document is background work, not a new editor-surface intent. It may reuse and

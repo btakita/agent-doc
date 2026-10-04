@@ -182,12 +182,20 @@ stripped at the effect boundary so it cannot surface `stash` after the editor
 loses desktop focus.
 - A `focus_only` refusal the selection lane cannot repair (`actor_pane_not_visible`,
 `outside_agent_doc_window`) escalates to the structural layout owner. With no
-editor columns it may republish the retained desired layout **unchanged**, and
-only when that layout already covers the document. It must never append the
-asking document as a new column (GH #106): the escalation's output is its own
-next input, so appending grew the column count by one per tab switch. An
-uncovered document fails closed with
-`controller_editor_surface_focus_escalation_skipped cause=document_outside_retained_layout`.
+editor columns it republishes the retained desired layout **unchanged** when
+that layout already covers the document. It must never append the asking
+document as a new column (GH #106): the escalation's output is its own next
+input, so appending grew the column count by one per tab switch. A document the
+retained layout does not cover takes the place of the retained **focus column**
+(else the rightmost), the same rule as an `ensure` route (GH #120), so the width
+never changes and the document is focused
+(`controller_editor_surface_focus_escalated source=retained_focus_column replaced=<column>`).
+It is never skipped (GH #126): a passive single-column plugin publication (a tab
+switch, the norm on a Remote Dev / Coder backend where splits are undetected)
+legitimately supersedes a route's layout by plane version, and a later explicit
+focus or Sync Tmux Layout on the evicted document must bring its pane back
+rather than leave it stashed with no `select-pane` and no error. Only an empty
+retained layout still skips (`cause=no_editor_columns`).
 - Realising a column is audited after tmux-router runs (GH #109). A column pane
 that moved windows (a stash → layout promotion), runs another document, or
 whose route-owned supervisor maps a superseded binary gets one

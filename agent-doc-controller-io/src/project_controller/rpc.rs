@@ -20942,44 +20942,93 @@ fn focus_refusal_requires_structural_layout(reason: &str) -> bool {
 /// the owner this hand-off is addressed to, so fall back to its columns and let
 /// the caller move the focus onto `document`.
 ///
-/// GH #106: the fallback must republish the retained layout *unchanged* or not
-/// at all. It used to append an uncovered `document` as a new column, and since
-/// the escalation publishes its result as the next desired layout, its output
+/// GH #106: the fallback must never grow the retained layout. It used to
+/// append an uncovered `document` as a new column, and since the escalation
+/// publishes its result as the next desired layout, its output
 /// became its own next input: four documents asking in one second grew the
 /// column count 1→2→3→4, in the order they asked rather than their editor
 /// split position, for a surface that never reported more than one column.
-/// Appending encodes "I do not know where this goes" as a structural claim, so
-/// an uncovered document fails closed (`cause=document_outside_retained_layout`)
-/// like the empty-layout case. Republishing a covered layout as-is is a fixed
-/// point — the column set can never exceed what the editor last observed.
+/// Republishing a covered layout as-is is a fixed point — the column set can
+/// never exceed what the editor last observed.
+///
+/// GH #126: failing closed on an *uncovered* document was the opposite defect.
+/// A passive single-column plugin publication (a tab switch to `laptop.md`)
+/// legitimately supersedes a route's `[agent-doc.ad.md]` by plane version, so
+/// the document the route had just placed is no longer a retained column; its
+/// pane is then stashed, focus refuses `actor_pane_not_visible`, and the
+/// escalation — the only thing that could switch tmux windows — was skipped.
+/// No `select-pane`, no error: the operator's explicit focus silently did
+/// nothing. An uncovered document now takes the place of the retained focus
+/// column (else the rightmost), exactly the `ensure` route rule of GH #120
+/// (`merge_editor_route_columns_within`). The width is unchanged, so GH #106's
+/// invariant holds: no sequence of escalations can grow the layout.
 fn focus_escalation_columns(
     runtime: &ControllerRuntime,
     document: &str,
     columns: &[SurfaceColumn],
-) -> std::result::Result<(Vec<String>, &'static str), &'static str> {
+) -> std::result::Result<FocusEscalationColumns, &'static str> {
     if !columns.is_empty() {
-        return Ok((
-            columns
+        return Ok(FocusEscalationColumns {
+            columns: columns
                 .iter()
                 .map(|column| column.files.join(","))
                 .collect(),
-            "editor_surface",
-        ));
+            source: "editor_surface",
+            replaced: None,
+        });
     }
-    let retained = runtime
+    let (retained, retained_focus) = runtime
         .pane_layout_desired()
-        .map(|desired| desired.invocation.columns)
+        .map(|desired| (desired.invocation.columns, desired.invocation.focus))
         .unwrap_or_default();
     if retained.is_empty() {
         return Err("no_editor_columns");
     }
-    if !retained
+    if retained
         .iter()
         .any(|column| column.split(',').any(|file| file == document))
     {
+        return Ok(FocusEscalationColumns {
+            columns: retained,
+            source: "retained_layout",
+            replaced: None,
+        });
+    }
+    let (merged, _, _) = merge_editor_route_columns_within(
+        EditorRouteLayoutMode::Ensure,
+        &retained,
+        retained_focus.as_deref(),
+        &[document.to_string()],
+        Some(document),
+        EnsureRouteWidening::PluginSplitHolds,
+    );
+    let replaced = retained
+        .iter()
+        .zip(&merged)
+        .find(|(before, after)| before != after)
+        .map(|(before, _)| before.clone());
+    if merged.len() != retained.len() || replaced.is_none() {
+        // Unreachable by `merge_editor_route_columns_within`'s contract for a
+        // routed focus column over a non-empty layout; refuse rather than
+        // publish a layout that grew or does not hold the document.
         return Err("document_outside_retained_layout");
     }
-    Ok((retained, "retained_layout"))
+    Ok(FocusEscalationColumns {
+        columns: merged,
+        source: "retained_focus_column",
+        replaced,
+    })
+}
+
+/// The layout a focus escalation republishes and where it came from.
+#[derive(Debug, PartialEq, Eq)]
+struct FocusEscalationColumns {
+    columns: Vec<String>,
+    /// `editor_surface`, `retained_layout` (republished unchanged), or
+    /// `retained_focus_column` (GH #126: the document took one retained column).
+    source: &'static str,
+    /// The retained column the document replaced, for `retained_focus_column`.
+    replaced: Option<String>,
 }
 
 /// Hand a `Focus` intent the selection lane could not apply to the structural
@@ -20999,7 +21048,11 @@ fn escalate_focus_to_structural_layout(
     columns: &[SurfaceColumn],
     reason: &str,
 ) {
-    let (columns, source) = match focus_escalation_columns(runtime, document, columns) {
+    let FocusEscalationColumns {
+        columns,
+        source,
+        replaced,
+    } = match focus_escalation_columns(runtime, document, columns) {
         Ok(escalation) => escalation,
         Err(cause) => {
             agent_doc_ops_log_io::log_op(
@@ -21014,14 +21067,17 @@ fn escalate_focus_to_structural_layout(
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
-            "controller_editor_surface_focus_escalated document={document} reason={reason} columns={} source={source}",
-            columns.len()
+            "controller_editor_surface_focus_escalated document={document} reason={reason} columns={} source={source}{}",
+            columns.len(),
+            replaced
+                .map(|column| format!(" replaced={column}"))
+                .unwrap_or_default()
         ),
     );
     // The intent is "select this document", so the republished layout must carry
     // the focus rather than preserve whatever tmux happens to have selected.
     let mut invocation = automatic_layout_sync_invocation(columns, document, false);
-    if source == "retained_layout" {
+    if source != "editor_surface" {
         // GH #112: republishing the retained layout keeps its order source, so
         // an unchanged layout still coalesces instead of relabelling a
         // `retained` order as `editor` and minting a new generation.
@@ -28461,8 +28517,9 @@ mod tests {
     /// GH #106: the retained-layout fallback was a feedback loop. It appended
     /// every uncovered asking document to the last published layout and
     /// republished the result, so four documents switching in one second grew
-    /// the columns 1→2→3→4. An uncovered document must fail closed, and no
-    /// sequence of focus-only escalations may grow the retained column set.
+    /// the columns 1→2→3→4. No sequence of focus-only escalations may grow the
+    /// retained column set. GH #126: an uncovered document takes the retained
+    /// focus column instead of being skipped, so the width still holds.
     #[test]
     fn focus_only_escalations_never_grow_the_retained_layout() {
         let dir = tempfile::tempdir().unwrap();
@@ -28500,9 +28557,12 @@ mod tests {
             );
             let desired = runtime.pane_layout_desired().unwrap();
             assert_eq!(
-                desired.invocation.columns, observed,
+                desired.invocation.columns.len(),
+                observed.len(),
                 "a focus-only escalation must never grow the published layout: {desired:?}"
             );
+            assert_eq!(desired.invocation.columns, vec![other.clone()]);
+            assert_eq!(desired.invocation.focus.as_deref(), Some(other.as_str()));
         }
 
         let ops_log =
@@ -28510,15 +28570,15 @@ mod tests {
         for other in &others {
             assert!(
                 ops_log.contains(&format!(
-                    "controller_editor_surface_focus_escalation_skipped document={other} \
-                     reason=actor_pane_not_visible cause=document_outside_retained_layout"
+                    "controller_editor_surface_focus_escalated document={other} \
+                     reason=actor_pane_not_visible columns=1 source=retained_focus_column"
                 )),
-                "an uncovered document must fail closed with a named cause: {ops_log}"
+                "an uncovered document must take the retained focus column: {ops_log}"
             );
         }
         assert!(
-            !ops_log.contains("source=retained_layout"),
-            "no uncovered document may be escalated from the retained layout: {ops_log}"
+            !ops_log.contains("controller_editor_surface_focus_escalation_skipped"),
+            "no uncovered document may be silently skipped (GH #126): {ops_log}"
         );
     }
 
@@ -30024,6 +30084,110 @@ mod tests {
                 .map(str::to_string)
                 .collect()
         }
+    }
+
+    /// GH #126, the reported three-step repro, end to end through the route
+    /// and plugin publishers the arbiter decides between:
+    ///
+    /// 1. Run Agent Doc routes `agent-doc.ad.md`: it is the one column.
+    /// 2. A tab switch to `laptop.md` makes the plugin publish its single
+    ///    visible column; it is a newer plane version, so it wins
+    ///    (`newer_plane_version`) and `agent-doc.ad.md` is no longer retained.
+    /// 3. Sync Tmux Layout / focus on `agent-doc.ad.md` is refused
+    ///    `actor_pane_not_visible` (its pane was stashed), and escalates.
+    ///
+    /// The escalation used to skip with `cause=document_outside_retained_layout`
+    /// and publish nothing, so no `select-pane` ever ran and nothing surfaced an
+    /// error. It must now put the document back in the focus column and focus
+    /// it, without widening the plugin's one-column split.
+    #[test]
+    fn gh126_focus_on_a_document_a_plugin_publication_evicted_republishes_it() {
+        let fixture = RouteLayoutFixture::new(&["agent-doc.ad", "laptop"]);
+        let ad = fixture.id("agent-doc.ad");
+        let laptop = fixture.id("laptop");
+
+        let routed = fixture
+            .route("agent-doc.ad", &["agent-doc.ad"], Some("ensure"))
+            .unwrap();
+        assert_eq!(routed.exit_code, 0);
+        assert_eq!(fixture.desired_columns(), vec![ad.clone()]);
+
+        let evicting = fixture.plugin(&["laptop"], "laptop", 100);
+        assert_eq!(fixture.desired_columns(), vec![laptop.clone()]);
+        assert!(
+            fixture.superseded_lines().iter().any(|line| line
+                .contains("winner=plugin_publication loser=route reason=newer_plane_version")),
+            "step 2 must reproduce the reported supersession: {:#?}",
+            fixture.superseded_lines()
+        );
+
+        escalate_focus_to_structural_layout(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            &ad,
+            &[],
+            "actor_pane_not_visible",
+        );
+        let ops = fixture.ops_log();
+        assert!(
+            !ops.contains("controller_editor_surface_focus_escalation_skipped"),
+            "an explicit focus on an existing pane must not be silently skipped: {ops}"
+        );
+        assert!(
+            ops.contains(&format!(
+                "controller_editor_surface_focus_escalated document={ad} \
+                 reason=actor_pane_not_visible columns=1 source=retained_focus_column \
+                 replaced={laptop}"
+            )),
+            "the escalation must say which retained column the document took: {ops}"
+        );
+        let desired = fixture.runtime.pane_layout_desired().unwrap();
+        assert!(desired.generation > evicting.generation);
+        assert_eq!(
+            desired.invocation.columns,
+            vec![ad.clone()],
+            "the document must be back in the layout, in place of the evicting column"
+        );
+        assert_eq!(desired.invocation.focus.as_deref(), Some(ad.as_str()));
+        assert_eq!(
+            desired.provenance.structure_owner,
+            PaneLayoutPublisher::PluginPublication,
+            "re-placing a column inside the plugin's split keeps its owner"
+        );
+
+        // Repeating the request is a fixed point, not a new generation.
+        escalate_focus_to_structural_layout(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            &ad,
+            &[],
+            "actor_pane_not_visible",
+        );
+        assert_eq!(
+            fixture.runtime.pane_layout_desired().unwrap().generation,
+            desired.generation
+        );
+    }
+
+    /// GH #126 in a multi-column split: the uncovered document takes the
+    /// retained *focus* column, the other columns stay where they are, and the
+    /// width never changes.
+    #[test]
+    fn gh126_uncovered_focus_escalation_replaces_only_the_retained_focus_column() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
+        fixture.plugin(&["alpha", "beta"], "beta", 100);
+        escalate_focus_to_structural_layout(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            &fixture.id("gamma"),
+            &[],
+            "outside_agent_doc_window",
+        );
+        assert_eq!(
+            fixture.desired_columns(),
+            vec![fixture.id("alpha"), fixture.id("gamma")]
+        );
+        assert_eq!(fixture.desired_focus(), Some(fixture.id("gamma")));
     }
 
     /// `layoutpublisherarbiter` (GH #120 asks 2-3): the route publisher and

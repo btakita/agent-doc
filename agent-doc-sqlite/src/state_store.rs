@@ -727,7 +727,8 @@ degraded INTEGER NOT NULL,
 recycle_attempted INTEGER NOT NULL,
 last_delivery_id TEXT,
 last_transport TEXT NOT NULL,
-updated_at_secs INTEGER NOT NULL
+updated_at_secs INTEGER NOT NULL,
+consecutive_rejections INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS editor_op_captures (
@@ -1950,6 +1951,12 @@ pub struct EditorTransportHealthRecord {
     pub last_delivery_id: Option<String>,
     pub last_transport: String,
     pub updated_at_secs: u64,
+    /// GH #131: how many of the trailing consecutive failures were explicit
+    /// receipt REJECTIONS (the endpoint answered NO), as opposed to timeouts.
+    /// Reset by any non-rejection failure and cleared with the whole record on
+    /// a proven delivery. Non-zero means the editor endpoint that would have to
+    /// converge a retained write is refusing it, so it cannot be its holder.
+    pub consecutive_rejections: u64,
 }
 
 pub fn upsert_editor_transport_health_in_db(
@@ -1959,8 +1966,8 @@ pub fn upsert_editor_transport_health_in_db(
     conn.execute(
         "INSERT INTO editor_transport_health \
          (document_hash, session_id, consecutive_timeouts, degraded, recycle_attempted, \
-          last_delivery_id, last_transport, updated_at_secs) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+          last_delivery_id, last_transport, updated_at_secs, consecutive_rejections) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
          ON CONFLICT(document_hash) DO UPDATE SET \
           session_id = excluded.session_id, \
           consecutive_timeouts = excluded.consecutive_timeouts, \
@@ -1968,7 +1975,8 @@ pub fn upsert_editor_transport_health_in_db(
           recycle_attempted = excluded.recycle_attempted, \
           last_delivery_id = excluded.last_delivery_id, \
           last_transport = excluded.last_transport, \
-          updated_at_secs = excluded.updated_at_secs",
+          updated_at_secs = excluded.updated_at_secs, \
+          consecutive_rejections = excluded.consecutive_rejections",
         params![
             health.document_hash,
             health.session_id,
@@ -1978,6 +1986,7 @@ pub fn upsert_editor_transport_health_in_db(
             health.last_delivery_id,
             health.last_transport,
             health.updated_at_secs as i64,
+            health.consecutive_rejections as i64,
         ],
     )?;
     Ok(())
@@ -1989,7 +1998,7 @@ pub fn load_editor_transport_health_from_db(
 ) -> Result<Option<EditorTransportHealthRecord>> {
     conn.query_row(
         "SELECT document_hash, session_id, consecutive_timeouts, degraded, recycle_attempted, \
-                last_delivery_id, last_transport, updated_at_secs \
+                last_delivery_id, last_transport, updated_at_secs, consecutive_rejections \
          FROM editor_transport_health WHERE document_hash = ?1",
         params![document_hash],
         |row| {
@@ -1997,6 +2006,7 @@ pub fn load_editor_transport_health_from_db(
             let degraded: i64 = row.get(3)?;
             let recycle_attempted: i64 = row.get(4)?;
             let updated_at_secs: i64 = row.get(7)?;
+            let consecutive_rejections: i64 = row.get(8)?;
             Ok(EditorTransportHealthRecord {
                 document_hash: row.get(0)?,
                 session_id: row.get(1)?,
@@ -2006,6 +2016,7 @@ pub fn load_editor_transport_health_from_db(
                 last_delivery_id: row.get(5)?,
                 last_transport: row.get(6)?,
                 updated_at_secs: u64::try_from(updated_at_secs).unwrap_or_default(),
+                consecutive_rejections: u64::try_from(consecutive_rejections).unwrap_or_default(),
             })
         },
     )
@@ -2454,6 +2465,11 @@ const CANONICAL_ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "state_events",
         "document_version",
         "document_version INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "editor_transport_health",
+        "consecutive_rejections",
+        "consecutive_rejections INTEGER NOT NULL DEFAULT 0",
     ),
 ];
 

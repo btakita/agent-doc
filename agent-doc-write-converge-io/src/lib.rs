@@ -30,7 +30,7 @@ use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
     FullContentRepairRedelivery, IpcDiskRepairReason, IpcLivePromptDriftState, IpcRepairDecision,
-    IpcSnapshotSource, is_socket_receipt_timeout_error, is_socket_status_error,
+    IpcSnapshotSource, SocketDeliveryFailure, classify_socket_delivery_failure,
 };
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, merge_visible_queue_additions_into_content_ours,
@@ -4338,20 +4338,18 @@ pub fn try_editor_converge(
             // It shares the timeout counter and threshold rather than escalating on
             // the first rejection: this arms a supervisor recycle, so two
             // consecutive refusals is the conservative bar.
-            let failure_kind = if is_socket_receipt_timeout_error(err.to_string()) {
-                Some("timeout")
-            } else if is_socket_status_error(err.to_string()) {
-                Some("rejection")
-            } else {
-                None
-            };
-            if let Some(failure_kind) = failure_kind {
+            //
+            // GH #131: classified into a TYPED outcome, so a rejection is
+            // remembered as "the endpoint answered NO" (it strands the retained
+            // write rather than reading as a pending convergence).
+            if let Some(failure) = classify_socket_delivery_failure(err.to_string()) {
+                let failure_kind = failure.as_str();
                 match record_ipc_socket_ack_failure(
                     &project_root,
                     file,
                     Some(&patch_id),
                     source,
-                    failure_kind,
+                    failure,
                 ) {
                     Ok(true) => {
                         eprintln!(
@@ -4513,6 +4511,7 @@ fn editor_transport_health_for_current_session(
             serde_json::json!({
                 "session_id": health.session_id,
                 "consecutive_timeouts": health.consecutive_timeouts,
+                "consecutive_rejections": health.consecutive_rejections,
                 "degraded": health.degraded,
                 "recycle_attempted": health.recycle_attempted,
                 "last_patch_id": health.last_delivery_id.as_deref().unwrap_or("-"),
@@ -4529,29 +4528,50 @@ pub fn record_ipc_socket_ack_timeout(
     patch_id: Option<&str>,
     transport: &str,
 ) -> Result<bool> {
-    record_ipc_socket_ack_failure(project_root, file, patch_id, transport, "timeout")
+    record_ipc_socket_ack_failure(
+        project_root,
+        file,
+        patch_id,
+        transport,
+        SocketDeliveryFailure::Timeout,
+    )
 }
 
 /// `#rejectioncountswedge` — record one unproven-delivery failure against the
 /// editor transport health record, and report whether it crossed the wedge
 /// threshold.
 ///
-/// `failure_kind` is `timeout` or `rejection`. Both accrue on the same counter:
-/// the question the threshold answers is "has a nominally-active listener refused
-/// this many consecutive writes without proving delivery", and a rejection
-/// answers it at least as strongly as a timeout.
+/// Every failure kind accrues on the same counter: the question the threshold
+/// answers is "has a nominally-active listener refused this many consecutive
+/// writes without proving delivery", and a rejection answers it at least as
+/// strongly as a timeout.
+///
+/// GH #131: a rejection ALSO accrues `consecutive_rejections`, the durable fact
+/// the retained-write ownership predicate reads. A timeout or unsupported
+/// receipt resets it — only an unbroken run of explicit NO answers proves the
+/// endpoint is refusing, rather than merely slow.
 pub fn record_ipc_socket_ack_failure(
     project_root: &Path,
     file: &Path,
     patch_id: Option<&str>,
     transport: &str,
-    failure_kind: &str,
+    failure: SocketDeliveryFailure,
 ) -> Result<bool> {
+    let failure_kind = failure.as_str();
     let prior = editor_transport_health_for_current_session(project_root, file)?;
     let prior_timeouts = prior
         .as_ref()
         .and_then(|value| value.get("consecutive_timeouts").and_then(|v| v.as_u64()))
         .unwrap_or(0);
+    let prior_rejections = prior
+        .as_ref()
+        .and_then(|value| value.get("consecutive_rejections").and_then(|v| v.as_u64()))
+        .unwrap_or(0);
+    let consecutive_rejections = if failure.is_definitive_rejection() {
+        prior_rejections.saturating_add(1)
+    } else {
+        0
+    };
     // `#midturn-wedge-recycle`: preserve the once-per-episode recycle guard across
     // marker rewrites. If a mid-turn recycle was already attempted for this wedge
     // episode, further accruing timeouts must NOT reset it — re-recycling a binary
@@ -4583,17 +4603,19 @@ pub fn record_ipc_socket_ack_failure(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|duration| duration.as_secs())
                 .unwrap_or_default(),
+            consecutive_rejections,
         },
     )?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ipc_socket_ack_failure_recorded file={} transport={} kind={} patch_id={} consecutive_failures={} degraded={} (#rejectioncountswedge)",
+            "ipc_socket_ack_failure_recorded file={} transport={} kind={} patch_id={} consecutive_failures={} consecutive_rejections={} degraded={} (#rejectioncountswedge)",
             file.display(),
             transport,
             failure_kind,
             patch_id.unwrap_or("-"),
             consecutive_timeouts,
+            consecutive_rejections,
             degraded
         ),
     );
@@ -5258,12 +5280,24 @@ mod tests {
         fs::write(&doc, "---\nsession: reject-session\n---\n\ncontent").unwrap();
 
         assert!(
-            !record_ipc_socket_ack_failure(dir.path(), &doc, Some("p1"), "finalize", "rejection")
+            !record_ipc_socket_ack_failure(
+                dir.path(),
+                &doc,
+                Some("p1"),
+                "finalize",
+                SocketDeliveryFailure::Rejected
+            )
                 .unwrap(),
             "the first rejection only records health state"
         );
         assert!(
-            record_ipc_socket_ack_failure(dir.path(), &doc, Some("p2"), "finalize", "rejection")
+            record_ipc_socket_ack_failure(
+                dir.path(),
+                &doc,
+                Some("p2"),
+                "finalize",
+                SocketDeliveryFailure::Rejected
+            )
                 .unwrap(),
             "a second consecutive rejection must mark the listener degraded"
         );
@@ -5282,11 +5316,62 @@ mod tests {
     fn a_rejected_receipt_is_classified_as_a_recordable_failure() {
         let rejected = r#"IPC receipt rejected: {"type":"receipt","status":"rejected"}"#;
         assert!(
-            !is_socket_receipt_timeout_error(rejected),
+            !agent_doc_ipc_protocol::is_socket_receipt_timeout_error(rejected),
             "a rejection is not a timeout — which is why it was being dropped"
         );
-        assert!(is_socket_status_error(rejected));
-        assert!(is_socket_receipt_timeout_error("IPC receipt timeout (2s)"));
+        assert_eq!(
+            classify_socket_delivery_failure(rejected),
+            Some(SocketDeliveryFailure::Rejected)
+        );
+        assert!(agent_doc_ipc_protocol::is_socket_receipt_timeout_error(
+            "IPC receipt timeout (2s)"
+        ));
+    }
+
+    /// GH #131: a run of rejections is remembered as a REJECTION run, durable
+    /// beside the degradation counter, so the ownership predicate can tell "the
+    /// endpoint answered NO" from "the endpoint has not answered yet". A
+    /// timeout breaks the run; a proven delivery clears it.
+    #[test]
+    fn a_rejection_run_is_recorded_distinctly_and_reset_by_a_timeout() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "---\nsession: reject-run\n---\n\ncontent").unwrap();
+
+        assert!(!agent_doc_capture_io::editor_delivery_endpoint_rejected(&doc));
+        record_ipc_socket_ack_failure(
+            dir.path(),
+            &doc,
+            Some("p1"),
+            "socket_ipc",
+            SocketDeliveryFailure::Rejected,
+        )
+        .unwrap();
+        assert!(
+            agent_doc_capture_io::editor_delivery_endpoint_rejected(&doc),
+            "one explicit NO is already a definitive answer"
+        );
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+        assert!(
+            !agent_doc_capture_io::editor_delivery_endpoint_rejected(&doc),
+            "a timeout is 'no answer', which must not keep the rejection verdict"
+        );
+        assert!(
+            editor_ipc_write_wedged(dir.path(), &doc),
+            "the rejection still counted toward degradation alongside the timeout"
+        );
+        record_ipc_socket_ack_failure(
+            dir.path(),
+            &doc,
+            Some("p3"),
+            "socket_ipc",
+            SocketDeliveryFailure::Rejected,
+        )
+        .unwrap();
+        assert!(agent_doc_capture_io::editor_delivery_endpoint_rejected(&doc));
+        clear_ipc_socket_ack_timeouts(dir.path(), &doc, "delivery_receipt").unwrap();
+        assert!(!agent_doc_capture_io::editor_delivery_endpoint_rejected(&doc));
     }
 
     #[test]

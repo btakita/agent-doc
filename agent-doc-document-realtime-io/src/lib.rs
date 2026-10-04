@@ -6417,16 +6417,67 @@ fn defer_visible_delivery_projection_with_ownership(
     live_editors: usize,
     ownership: ProjectionRefusalOwnership,
 ) -> Result<()> {
+    let ownership = match ownership {
+        ProjectionRefusalOwnership::PriorWrite => {
+            agent_doc_turn::write_ownership::RetainedProjectionOwnership::ResponseWrite(
+                // This refusal is emitted only after the current write
+                // entered the durable delivery projection. That
+                // projection owns the write even when there is no open
+                // response cycle or retained response capture (the
+                // pending-only closeout shape). Carry the fact we just
+                // proved instead of asking the capture-only I/O shell
+                // to rediscover an edge that has not settled yet.
+                //
+                // GH #131: the I/O shell also carries whether the editor
+                // endpoint answered its delivery receipt with a rejection. A projection held
+                // only by a rejecting endpoint is not owned, and the
+                // predicate says so — this site must not re-decide it.
+                agent_doc_capture_io::retained_write_ownership(file).with_retained_projection(true),
+            )
+        }
+        ProjectionRefusalOwnership::PrewriteBase => {
+            agent_doc_turn::write_ownership::RetainedProjectionOwnership::PrewriteMutation
+        }
+    };
+    // GH #131: the narrow `retained=delivery_projection_pending` marker promises
+    // a live replica that will converge ON ITS OWN, which is what lets callers
+    // defer idempotent bookkeeping past this refusal. An endpoint that answered
+    // NO voids that promise, so the marker is withheld and those callers fail
+    // closed instead of waiting on a convergence that is being refused.
+    let delivery_rejected = matches!(
+        ownership,
+        agent_doc_turn::write_ownership::RetainedProjectionOwnership::ResponseWrite(owned)
+            if owned.verdict()
+                == agent_doc_turn::write_ownership::RetainedWriteVerdict::DeliveryRejected
+    );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "visible_write_delivery_projection_deferred file={} source={} delivery_version={} live_editors={} recovery=lazy_projection_pending operator_action=none",
+            "visible_write_delivery_projection_deferred file={} source={} delivery_version={} live_editors={} recovery={} operator_action={}",
             file.display(),
             source,
             delivery_version,
             live_editors,
+            if delivery_rejected {
+                "editor_receipt_rejected"
+            } else {
+                "lazy_projection_pending"
+            },
+            if delivery_rejected {
+                "restart_rejecting_editor"
+            } else {
+                "none"
+            },
         ),
     );
+    let pending_marker = if delivery_rejected {
+        String::new()
+    } else {
+        format!(
+            " [{}]",
+            agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN
+        )
+    };
     // `#retainedwriteremedy`: this refusal must name its recovery, exactly like
     // its two sibling branches above. Without the remedy the message reads as
     // "nothing happened" — but the write may already have applied. A retained
@@ -6443,28 +6494,13 @@ fn defer_visible_delivery_projection_with_ownership(
     // constructor's own argument — so the token joins the remedy in that argument
     // instead of hiding behind another call.
     Err(await_editor_replica_no_disk_write(format!(
-        "visible document write for {} is retained by the lazy delivery projection because the editor state projection has not converged; no secondary snapshot/commit or forced disk write was attempted. {} [{}]",
+        "visible document write for {} is retained by the lazy delivery projection because the editor state projection has not converged; no secondary snapshot/commit or forced disk write was attempted. {}{}",
         file.display(),
         agent_doc_turn::write_ownership::retained_projection_remedy(
-            match ownership {
-                ProjectionRefusalOwnership::PriorWrite =>
-                    agent_doc_turn::write_ownership::RetainedProjectionOwnership::ResponseWrite(
-                        // This refusal is emitted only after the current write
-                        // entered the durable delivery projection. That
-                        // projection owns the write even when there is no open
-                        // response cycle or retained response capture (the
-                        // pending-only closeout shape). Carry the fact we just
-                        // proved instead of asking the capture-only I/O shell
-                        // to rediscover an edge that has not settled yet.
-                        agent_doc_capture_io::retained_write_ownership(file)
-                            .with_retained_projection(true),
-                    ),
-                ProjectionRefusalOwnership::PrewriteBase =>
-                    agent_doc_turn::write_ownership::RetainedProjectionOwnership::PrewriteMutation,
-            },
+            ownership,
             &file.display().to_string(),
         ),
-        agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+        pending_marker,
     )))
 }
 
@@ -6674,6 +6710,65 @@ mod retained_refusal_token_tests {
         assert!(
             !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&unreachable),
             "an unreachable replica must not read as a converging one: {unreachable}"
+        );
+    }
+
+    /// GH #131: a retained projection whose editor endpoint REJECTED the
+    /// delivery receipt is not "a live replica that will converge on its own".
+    /// The refusal must derive the rejected verdict from the shared predicate,
+    /// drop the narrow pending marker, and name a real recovery instead of the
+    /// owned case's blanket do-NOT list.
+    #[test]
+    fn a_rejecting_endpoint_strands_the_projection_instead_of_deferring_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).expect("agent-doc dir");
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "---\nagent_doc_session: gh131\n---\n\n# plan\n").expect("write");
+
+        let owned = format!(
+            "{:#}",
+            defer_visible_delivery_projection(&file, "test", 14, 1)
+                .expect_err("a non-converged delivery projection must refuse")
+        );
+        assert!(owned.contains("deferral, not a lost response"), "{owned}");
+
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).expect("state db");
+        agent_doc_sqlite::state_store::upsert_editor_transport_health_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::EditorTransportHealthRecord {
+                document_hash: agent_doc_fs::document_state_hash(&file).expect("hash"),
+                session_id: "gh131".to_string(),
+                consecutive_timeouts: 1,
+                degraded: false,
+                recycle_attempted: false,
+                last_delivery_id: Some("p1".to_string()),
+                last_transport: "socket_ipc".to_string(),
+                updated_at_secs: 0,
+                consecutive_rejections: 1,
+            },
+        )
+        .expect("record rejection");
+        drop(conn);
+
+        let rejected = format!(
+            "{:#}",
+            defer_visible_delivery_projection(&file, "test", 14, 1)
+                .expect_err("a rejected delivery projection must still refuse disk")
+        );
+        assert!(
+            agent_doc_turn::write_ownership::is_retained_write_refusal(&rejected),
+            "still the retained-write class (the CRDT holds the intent): {rejected}"
+        );
+        assert!(
+            !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&rejected),
+            "an endpoint that answered NO is not a converging replica: {rejected}"
+        );
+        assert!(rejected.contains("REJECTED the delivery receipt"), "{rejected}");
+        assert!(rejected.contains("restart or reload the editor"), "{rejected}");
+        assert!(
+            !rejected.contains("deferral, not a lost response")
+                && !rejected.contains("`admin recycle`, or `admin reload-lib`"),
+            "the owned do-NOT guidance must not be emitted for a rejection: {rejected}"
         );
     }
 

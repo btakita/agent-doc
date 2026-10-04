@@ -9,10 +9,10 @@ use agent_doc_element_exchange::{
     extract_post_commit_normalization_targets, normalize_exchange_prefixes_for_targets,
 };
 use agent_doc_ipc_io::editor_target::target_payload_to_editor;
-use agent_doc_ipc_protocol::{EditorIntent, is_socket_receipt_timeout_error};
+use agent_doc_ipc_protocol::{EditorIntent, classify_socket_delivery_failure};
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_template::stale_baseline::is_append_mode_component;
-use agent_doc_write_converge_io::{clear_ipc_socket_ack_timeouts, record_ipc_socket_ack_timeout};
+use agent_doc_write_converge_io::{clear_ipc_socket_ack_timeouts, record_ipc_socket_ack_failure};
 use anyhow::Result;
 use std::path::Path;
 
@@ -445,18 +445,25 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> BoundaryRepositionAttempt {
         }
         Err(e) => {
             eprintln!("[commit] IPC reposition failed (non-fatal): {}", e);
-            if is_socket_receipt_timeout_error(e.to_string()) {
-                match record_ipc_socket_ack_timeout(&project_root, file, None, "reposition") {
+            // `#rejectioncountswedge` / GH #131: the reposition site was the
+            // third recorder and still classified timeouts only, so a rejecting
+            // endpoint accrued nothing here. Use the typed classification so a
+            // rejection counts (and is remembered as one) like the other sites.
+            if let Some(failure) = classify_socket_delivery_failure(e.to_string()) {
+                match record_ipc_socket_ack_failure(&project_root, file, None, "reposition", failure)
+                {
                     Ok(true) => {
                         eprintln!(
-                            "[commit] IPC listener degraded for {} after repeated reposition receipt timeouts",
-                            file.display()
+                            "[commit] IPC listener degraded for {} after repeated reposition receipt {}s",
+                            file.display(),
+                            failure.as_str()
                         );
                         return BoundaryRepositionAttempt::Unavailable;
                     }
                     Ok(false) => {}
                     Err(record_err) => eprintln!(
-                        "[commit] IPC reposition timeout record failed (non-fatal): {}",
+                        "[commit] IPC reposition {} record failed (non-fatal): {}",
+                        failure.as_str(),
                         record_err
                     ),
                 }

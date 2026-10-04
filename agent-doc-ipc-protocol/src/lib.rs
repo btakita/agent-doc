@@ -462,6 +462,61 @@ pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
         || message.as_ref().contains("IPC receipt unsupported")
 }
 
+/// Why an editor socket delivery failed to prove itself (GH #131,
+/// `#idlerevisionreactive`).
+///
+/// The outcomes are kept DISTINCT on purpose. "I looked and got no answer"
+/// (`Timeout`) and "the endpoint answered NO" (`Rejected`) used to collapse into
+/// the same "delivery projection has not converged yet" state downstream, so a
+/// rejecting endpoint — strictly MORE informative than a silent one — produced
+/// strictly LESS recovery: the write retained forever waiting for a convergence
+/// the editor was refusing to grant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SocketDeliveryFailure {
+    /// No terminal receipt arrived within the budget.
+    Timeout,
+    /// The endpoint returned an explicit `{"type":"receipt","status":"rejected"}`.
+    /// A definitive negative answer: no convergence is coming from this endpoint.
+    Rejected,
+    /// The endpoint answered with a legacy/unknown receipt shape.
+    Unsupported,
+}
+
+impl SocketDeliveryFailure {
+    /// The `kind=` label recorded against editor transport health.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Rejected => "rejection",
+            Self::Unsupported => "unsupported",
+        }
+    }
+
+    /// The endpoint answered, and the answer was NO.
+    pub const fn is_definitive_rejection(self) -> bool {
+        matches!(self, Self::Rejected)
+    }
+}
+
+/// Classify a rendered socket-send error into a typed delivery failure.
+///
+/// `None` means the error is not a receipt outcome at all (connect failure,
+/// handshake mismatch, ...), which is not evidence about the endpoint's answer.
+pub fn classify_socket_delivery_failure(
+    message: impl AsRef<str>,
+) -> Option<SocketDeliveryFailure> {
+    let message = message.as_ref();
+    if message.contains("IPC receipt rejected") {
+        Some(SocketDeliveryFailure::Rejected)
+    } else if is_socket_receipt_timeout_error(message) {
+        Some(SocketDeliveryFailure::Timeout)
+    } else if message.contains("IPC receipt unsupported") {
+        Some(SocketDeliveryFailure::Unsupported)
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Provenance of the candidate used for CP write reconciliation.
 pub enum IpcSnapshotSource {
@@ -1236,6 +1291,30 @@ impl FullContentIpcMode {
 
 #[cfg(test)]
 mod tests {
+    /// GH #131: a rejection is a DISTINCT typed outcome, never folded into a
+    /// timeout or into "not yet converged".
+    #[test]
+    fn a_rejected_receipt_is_its_own_typed_delivery_failure() {
+        use super::{SocketDeliveryFailure, classify_socket_delivery_failure};
+        let rejected = r#"IPC receipt rejected: {"type":"receipt","status":"rejected"}"#;
+        assert_eq!(
+            classify_socket_delivery_failure(rejected),
+            Some(SocketDeliveryFailure::Rejected)
+        );
+        assert!(SocketDeliveryFailure::Rejected.is_definitive_rejection());
+        assert_eq!(
+            classify_socket_delivery_failure("IPC receipt timeout (2000ms)"),
+            Some(SocketDeliveryFailure::Timeout)
+        );
+        assert!(!SocketDeliveryFailure::Timeout.is_definitive_rejection());
+        assert_eq!(
+            classify_socket_delivery_failure("IPC receipt unsupported legacy response: ACK"),
+            Some(SocketDeliveryFailure::Unsupported)
+        );
+        assert_eq!(classify_socket_delivery_failure("connection refused"), None);
+        assert_eq!(SocketDeliveryFailure::Rejected.as_str(), "rejection");
+    }
+
     use super::{
         AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
         FullContentRepairRedelivery, IPC_PROTOCOL_VERSION, IpcDiskRepairReason, IpcHandshakeError,

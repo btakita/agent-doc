@@ -836,16 +836,21 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
 
     let zip_path = local_jetbrains_zip()?;
     let mut installed = 0usize;
+    let mut hot_upgraded = 0usize;
     let mut unchanged = 0usize;
     let mut restart_pending = 0usize;
     for target_dir in &targets {
         match install_jetbrains_local_zip_into(&zip_path, target_dir)? {
             JetbrainsLocalInstallOutcome::Installed => {
                 installed += 1;
-                eprintln!("Plugin installed to {}", target_dir.display());
+                eprintln!(
+                    "Plugin installed to {}; no live IDE runs it, so the next IDE start loads it",
+                    target_dir.display()
+                );
             }
             JetbrainsLocalInstallOutcome::HotUpgraded { processes } => {
                 installed += 1;
+                hot_upgraded += 1;
                 eprintln!(
                     "Plugin dynamically upgraded in {processes} live JetBrains process(es) for {}",
                     target_dir.display()
@@ -879,7 +884,7 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
     );
     eprintln!(
         "{}",
-        jetbrains_convergence_restart_summary(installed, restart_pending)
+        jetbrains_convergence_restart_summary(installed, hot_upgraded, restart_pending)
     );
     Ok(())
 }
@@ -887,13 +892,27 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
 /// The closing line of a local JetBrains convergence. It used to say "no IDE
 /// restart is required" whenever anything changed, including right after a
 /// WARNING that the upgrade was staged for the next IDE start.
-fn jetbrains_convergence_restart_summary(installed: usize, restart_pending: usize) -> String {
+///
+/// `#jbdynamicfalsereport`: it also claimed a dynamic replacement for a plain
+/// `Installed` outcome -- files written while no live IDE ran the plugin -- so a
+/// running IDE with no agent-doc plugin loaded was told no restart was needed.
+/// Only `hot_upgraded` installs (proven live) may claim a dynamic replacement.
+fn jetbrains_convergence_restart_summary(
+    installed: usize,
+    hot_upgraded: usize,
+    restart_pending: usize,
+) -> String {
+    let cold = installed.saturating_sub(hot_upgraded + restart_pending);
     if restart_pending > 0 {
         format!(
-            "{restart_pending} JetBrains installation(s) still run the previous plugin generation; restart those IDEs to load the new plugin."
+            "{restart_pending} JetBrains installation(s) are not running the new plugin generation; restart those IDEs to load the new plugin."
         )
-    } else if installed > 0 {
-        "Changed live JetBrains packages were dynamically replaced; no IDE restart is required."
+    } else if cold > 0 {
+        format!(
+            "{cold} JetBrains installation(s) were written with no live IDE running agent-doc from them; the new plugin loads at the next IDE start (a running IDE without the plugin loaded must be restarted)."
+        )
+    } else if hot_upgraded > 0 {
+        "Changed live JetBrains packages were dynamically replaced and verified live; no IDE restart is required."
             .to_string()
     } else {
         "No JetBrains restart is required; no installed plugin bytes changed.".to_string()
@@ -1007,6 +1026,180 @@ enum JetbrainsHotUpgrade {
     StagedForRestart {
         reason: String,
     },
+    /// `#jbdynamicfalsereport`: an in-IDE install already rewrote the plugin
+    /// tree, but no live process proved it loaded the new generation (or another
+    /// live owner of the target runs none at all). The tree is not replaced
+    /// again under a JVM that may map it; the caller is told to restart.
+    InstalledUnverified {
+        reason: String,
+    },
+    /// `#jbdynamicfalsereport`: a live IDE owns the target plugins directory but
+    /// had no agent-doc generation loaded, so nothing could be dynamically
+    /// replaced. The files are written for the next start, which must happen
+    /// before the IDE runs the plugin.
+    NotLoaded {
+        reason: String,
+    },
+}
+
+/// `#jbdynamicfalsereport`: one live JetBrains process's answer to the dynamic
+/// upgrader, parsed from the launcher's stdout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum JetbrainsUpgraderStatus {
+    /// `ok:<version>[:<reattach receipt>]` -- the IDE reports a fresh generation.
+    Ok { status_line: String },
+    /// `staged:<version>:<reason>` -- the IDE staged the package for its next start.
+    Staged { reason: String },
+    /// `skip:plugin-not-loaded[:plugins-path=<dir>]` -- the IDE runs no agent-doc
+    /// generation. `plugins_path` names the directory it loads plugins from when
+    /// the upgrader reported it (older upgraders did not).
+    PluginNotLoaded { plugins_path: Option<PathBuf> },
+    /// `skip:different-plugin-root:...` or any other status: this process does
+    /// not serve the target installation.
+    NotOwner,
+}
+
+fn parse_jetbrains_upgrader_status(stdout: &str) -> JetbrainsUpgraderStatus {
+    for line in stdout.lines().map(str::trim) {
+        if line.starts_with("ok:") {
+            return JetbrainsUpgraderStatus::Ok {
+                status_line: line.to_string(),
+            };
+        }
+        if let Some(reason) = staged_upgrade_reason(line) {
+            return JetbrainsUpgraderStatus::Staged { reason };
+        }
+        if let Some(rest) = line.strip_prefix("skip:plugin-not-loaded") {
+            let plugins_path = rest
+                .strip_prefix(":plugins-path=")
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from);
+            return JetbrainsUpgraderStatus::PluginNotLoaded { plugins_path };
+        }
+    }
+    JetbrainsUpgraderStatus::NotOwner
+}
+
+/// How long the installer waits for a live process to map the replacement jar
+/// after the upgrader reported `ok:`.
+const JETBRAINS_LIVE_LOAD_PROOF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn same_filesystem_path(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left.components().eq(right.components()),
+    }
+}
+
+/// `#jbdynamicfalsereport`: whether a live process's mapped plugin jar proves it
+/// is executing `expected_version` from `target_dir`. Only a still-linked jar at
+/// `<target_dir>/agent-doc-jetbrains/lib/agent-doc-jetbrains-<expected>.jar`
+/// counts; a deleted mapping, a different version or a different plugin root is
+/// not a load of this install.
+fn jetbrains_mapped_jar_proves_load(
+    mapped: &agent_doc_fs::plugin_jar::MappedPluginJar,
+    target_dir: &Path,
+    expected_version: &str,
+) -> bool {
+    let agent_doc_fs::plugin_jar::MappedPluginJar::Current { path, .. } = mapped else {
+        return false;
+    };
+    let expected = target_dir
+        .join("agent-doc-jetbrains")
+        .join("lib")
+        .join(format!("agent-doc-jetbrains-{expected_version}.jar"));
+    same_filesystem_path(Path::new(path), &expected)
+}
+
+/// Poll `pid`'s mapped plugin jar until it proves the expected generation is
+/// loaded from `target_dir`, or `timeout` elapses.
+#[cfg(all(not(test), target_os = "linux"))]
+fn await_jetbrains_live_load(
+    pid: u32,
+    target_dir: &Path,
+    expected_version: &str,
+    timeout: std::time::Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let mapped = agent_doc_fs::plugin_jar::probe_mapped_plugin_jar(pid, "agent-doc-jetbrains-");
+        if jetbrains_mapped_jar_proves_load(&mapped, target_dir, expected_version) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+/// Without `/proc` there is no mapped-jar evidence; the upgrader's own `ok:`
+/// receipt (a fresh descriptor of the expected version owning a new
+/// classloader) is the only proof available.
+#[cfg(all(not(test), not(target_os = "linux")))]
+fn await_jetbrains_live_load(
+    _pid: u32,
+    _target_dir: &Path,
+    _expected_version: &str,
+    _timeout: std::time::Duration,
+) -> bool {
+    true
+}
+
+/// `#jbdynamicfalsereport`: fold every live process's upgrader status into one
+/// verdict. A process counts as dynamically upgraded only when the upgrader
+/// reported `ok:` AND `load_proof` then observed the new generation live in it.
+/// A live owner of the target with no generation loaded is a fresh install that
+/// only a restart loads -- never a dynamic replacement.
+fn jetbrains_hot_upgrade_from_statuses(
+    statuses: Vec<(u32, JetbrainsUpgraderStatus)>,
+    target_dir: &Path,
+    expected_version: &str,
+    mut load_proof: impl FnMut(u32) -> bool,
+) -> Option<JetbrainsHotUpgrade> {
+    let mut upgraded = 0usize;
+    let mut unverified: Option<String> = None;
+    let mut not_loaded: Option<String> = None;
+    let mut staged: Option<String> = None;
+    for (pid, status) in statuses {
+        match status {
+            JetbrainsUpgraderStatus::Ok { status_line } => {
+                if load_proof(pid) {
+                    upgraded += 1;
+                    if let Some(warning) = jetbrains_upgrade_reattach_warning(pid, &status_line) {
+                        eprintln!("WARNING: {warning}");
+                    }
+                } else {
+                    unverified.get_or_insert_with(|| {
+                        format!(
+                            "pid {pid}: the upgrader reported `{status_line}` but the IDE was not observed running agent-doc-jetbrains-{expected_version}.jar from {} within {}s",
+                            target_dir.join("agent-doc-jetbrains").display(),
+                            JETBRAINS_LIVE_LOAD_PROOF_TIMEOUT.as_secs()
+                        )
+                    });
+                }
+            }
+            JetbrainsUpgraderStatus::Staged { reason } => {
+                staged.get_or_insert_with(|| format!("pid {pid}: {reason}"));
+            }
+            JetbrainsUpgraderStatus::PluginNotLoaded { plugins_path } => {
+                if plugins_path
+                    .as_deref()
+                    .is_some_and(|path| !same_filesystem_path(path, target_dir))
+                {
+                    continue;
+                }
+                not_loaded.get_or_insert_with(|| {
+                    format!(
+                        "live JetBrains pid {pid} has no agent-doc plugin loaded, so there was no generation to replace dynamically; the IDE loads the installed plugin only after a restart"
+                    )
+                });
+            }
+            JetbrainsUpgraderStatus::NotOwner => {}
+        }
+    }
+    jetbrains_hot_upgrade_verdict(upgraded, unverified, not_loaded, staged)
 }
 
 /// GH #113: the release `agent-doc upgrade` just installed. When set, plugin
@@ -1042,7 +1235,7 @@ fn dynamic_upgrade_enabled() -> bool {
 
 fn restart_required_message(target_dir: &Path, reason: &str) -> String {
     format!(
-        "Plugin files replaced in {} but the running IDE still has the previous generation loaded ({reason}). Restart the IDE to load the new plugin.",
+        "Plugin files replaced in {} but the running IDE is not running the new plugin generation ({reason}). Restart the IDE to load the new plugin.",
         target_dir.display()
     )
 }
@@ -1286,8 +1479,7 @@ fn try_hot_upgrade_jetbrains(
         .tempfile()
         .context("Failed to stage JetBrains package for dynamic install")?;
     fs::copy(zip_path, archive.path()).context("Failed to stage JetBrains package")?;
-    let mut upgraded = 0usize;
-    let mut staged: Option<String> = None;
+    let mut statuses = Vec::with_capacity(pids.len());
     for pid in pids {
         let java = java_executable_for_ide(pid)?;
         let output = Command::new(&java)
@@ -1312,16 +1504,21 @@ fn try_hot_upgrade_jetbrains(
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        if let Some(status) = stdout.lines().find(|line| line.starts_with("ok:")) {
-            upgraded += 1;
-            if let Some(warning) = jetbrains_upgrade_reattach_warning(pid, status) {
-                eprintln!("WARNING: {warning}");
-            }
-        } else if let Some(reason) = stdout.lines().find_map(staged_upgrade_reason) {
-            staged.get_or_insert_with(|| format!("pid {pid}: {reason}"));
-        }
+        statuses.push((pid, parse_jetbrains_upgrader_status(&stdout)));
     }
-    Ok(jetbrains_hot_upgrade_verdict(upgraded, staged))
+    Ok(jetbrains_hot_upgrade_from_statuses(
+        statuses,
+        target_dir,
+        expected_version,
+        |pid| {
+            await_jetbrains_live_load(
+                pid,
+                target_dir,
+                expected_version,
+                JETBRAINS_LIVE_LOAD_PROOF_TIMEOUT,
+            )
+        },
+    ))
 }
 
 /// The failure reason carried by a `staged:<version>:<reason>` upgrader status.
@@ -1335,18 +1532,29 @@ fn staged_upgrade_reason(line: &str) -> Option<String> {
     })
 }
 
-/// Any converged hot-swap wins: its install already rewrote the shared plugin
-/// tree. Only when none converged does a staged package keep the tree as is.
+/// Any in-IDE install (proven or not) already rewrote the shared plugin tree, so
+/// it outranks a staging; it is a dynamic upgrade only when every such install
+/// was proven live and no live owner of the target was left without the plugin.
+/// Only when no in-IDE install ran does a staged package keep the tree as is,
+/// and only when nothing staged either is a not-loaded owner reported.
 fn jetbrains_hot_upgrade_verdict(
     upgraded: usize,
+    unverified: Option<String>,
+    not_loaded: Option<String>,
     staged: Option<String>,
 ) -> Option<JetbrainsHotUpgrade> {
-    if upgraded > 0 {
-        return Some(JetbrainsHotUpgrade::Upgraded {
-            processes: upgraded,
+    if upgraded > 0 || unverified.is_some() {
+        return Some(match unverified.or(not_loaded) {
+            Some(reason) => JetbrainsHotUpgrade::InstalledUnverified { reason },
+            None => JetbrainsHotUpgrade::Upgraded {
+                processes: upgraded,
+            },
         });
     }
-    staged.map(|reason| JetbrainsHotUpgrade::StagedForRestart { reason })
+    if let Some(reason) = staged {
+        return Some(JetbrainsHotUpgrade::StagedForRestart { reason });
+    }
+    not_loaded.map(|reason| JetbrainsHotUpgrade::NotLoaded { reason })
 }
 
 #[cfg(test)]
@@ -1844,6 +2052,29 @@ fn install_jetbrains_package_bytes(
                     installed_jetbrains_plugin_version(target_dir).as_deref(),
                 );
                 return Ok(JetbrainsLocalInstallOutcome::StagedForRestart { reason });
+            }
+            Ok(Some(JetbrainsHotUpgrade::InstalledUnverified { reason })) => {
+                // `#jbdynamicfalsereport`: never claim a dynamic replacement the
+                // live IDE did not prove. The in-IDE install already wrote the
+                // tree; rewriting it again would unlink jars that JVM may map.
+                let reason = format!("dynamic upgrade not verified live: {reason}");
+                eprintln!("WARNING: {reason}");
+                log_jetbrains_upgrade_decision(&format!(
+                    "plugin_dynamic_upgrade outcome=restart_required declined_by=unverified_live_load version={expected_version} target={} reason={reason:?}",
+                    target_dir.display()
+                ));
+                if !jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
+                    replace_jetbrains_plugin_tree(zip_path, target_dir)?;
+                }
+                record_restart_required_marker(&restart_marker, &reason, None, None);
+                return Ok(JetbrainsLocalInstallOutcome::RestartRequired { reason });
+            }
+            Ok(Some(JetbrainsHotUpgrade::NotLoaded { reason })) => {
+                log_jetbrains_upgrade_decision(&format!(
+                    "plugin_dynamic_upgrade outcome=restart_required declined_by=plugin_not_loaded version={expected_version} target={} reason={reason:?}",
+                    target_dir.display()
+                ));
+                Some(reason)
             }
             Ok(None) => None,
             Err(error) => {
@@ -3939,16 +4170,294 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert_eq!(super::staged_upgrade_reason("ok:0.2.456"), None);
 
         assert_eq!(
-            super::jetbrains_hot_upgrade_verdict(1, Some("pid 2: refused".into())),
+            super::jetbrains_hot_upgrade_verdict(1, None, None, Some("pid 2: refused".into())),
             Some(super::JetbrainsHotUpgrade::Upgraded { processes: 1 })
         );
         assert_eq!(
-            super::jetbrains_hot_upgrade_verdict(0, Some("pid 2: refused".into())),
+            super::jetbrains_hot_upgrade_verdict(0, None, None, Some("pid 2: refused".into())),
             Some(super::JetbrainsHotUpgrade::StagedForRestart {
                 reason: "pid 2: refused".into()
             })
         );
-        assert_eq!(super::jetbrains_hot_upgrade_verdict(0, None), None);
+        assert_eq!(
+            super::jetbrains_hot_upgrade_verdict(0, None, None, None),
+            None
+        );
+        // `#jbdynamicfalsereport`: a proven upgrade beside a live owner that runs
+        // no plugin is not a restart-free convergence.
+        assert_eq!(
+            super::jetbrains_hot_upgrade_verdict(1, None, Some("pid 3: not loaded".into()), None),
+            Some(super::JetbrainsHotUpgrade::InstalledUnverified {
+                reason: "pid 3: not loaded".into()
+            })
+        );
+    }
+
+    /// `#jbdynamicfalsereport`: the upgrader's statuses parse into owner classes,
+    /// including the plugins directory a not-loaded IDE reports.
+    #[test]
+    fn upgrader_status_parses_ok_staged_and_not_loaded() {
+        use super::JetbrainsUpgraderStatus as S;
+        assert_eq!(
+            super::parse_jetbrains_upgrader_status("noise\nok:0.2.448:documents=1/1\n"),
+            S::Ok {
+                status_line: "ok:0.2.448:documents=1/1".into()
+            }
+        );
+        assert_eq!(
+            super::parse_jetbrains_upgrader_status("staged:0.2.448:refused"),
+            S::Staged {
+                reason: "refused".into()
+            }
+        );
+        assert_eq!(
+            super::parse_jetbrains_upgrader_status("skip:plugin-not-loaded"),
+            S::PluginNotLoaded { plugins_path: None }
+        );
+        assert_eq!(
+            super::parse_jetbrains_upgrader_status(
+                "skip:plugin-not-loaded:plugins-path=/home/u/.local/share/JetBrains/IntelliJIdea2026.1"
+            ),
+            S::PluginNotLoaded {
+                plugins_path: Some("/home/u/.local/share/JetBrains/IntelliJIdea2026.1".into())
+            }
+        );
+        assert_eq!(
+            super::parse_jetbrains_upgrader_status("skip:different-plugin-root:/x"),
+            S::NotOwner
+        );
+        assert_eq!(super::parse_jetbrains_upgrader_status(""), S::NotOwner);
+    }
+
+    /// `#jbdynamicfalsereport` regression (1): `make install` into a running IDE
+    /// whose agent-doc plugin directory had vanished reported "dynamically
+    /// replaced; no IDE restart is required". The upgrader said
+    /// `skip:plugin-not-loaded`, which the installer discarded as "no live IDE".
+    #[test]
+    fn no_plugin_loaded_before_install_reports_restart_required() {
+        use super::JetbrainsUpgraderStatus as S;
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        fs::create_dir_all(&target).unwrap();
+        let no_proof = |_pid: u32| -> bool { panic!("a not-loaded IDE has nothing to prove") };
+
+        for plugins_path in [None, Some(target.clone())] {
+            let verdict = super::jetbrains_hot_upgrade_from_statuses(
+                vec![(41, S::PluginNotLoaded { plugins_path })],
+                &target,
+                "0.2.448",
+                no_proof,
+            );
+            assert!(
+                matches!(
+                    &verdict,
+                    Some(super::JetbrainsHotUpgrade::NotLoaded { reason }) if reason.contains("pid 41")
+                ),
+                "{verdict:?}"
+            );
+        }
+        // An IDE loading plugins from a different directory does not own this target.
+        assert_eq!(
+            super::jetbrains_hot_upgrade_from_statuses(
+                vec![(
+                    41,
+                    S::PluginNotLoaded {
+                        plugins_path: Some(tmp.path().join("other-ide"))
+                    }
+                )],
+                &target,
+                "0.2.448",
+                no_proof,
+            ),
+            None
+        );
+
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.448.zip");
+        write_test_jetbrains_zip(&zip, "0.2.448", b"new");
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            "0.2.448",
+            true,
+            || {
+                Ok(super::jetbrains_hot_upgrade_from_statuses(
+                    vec![(41, S::PluginNotLoaded { plugins_path: None })],
+                    &target,
+                    "0.2.448",
+                    no_proof,
+                ))
+            },
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+        match &outcome {
+            JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
+                assert!(reason.contains("no agent-doc plugin loaded"), "{reason}");
+            }
+            other => panic!("expected RestartRequired, got {other:?}"),
+        }
+        assert!(jetbrains_local_zip_matches_installation(&zip, &target).unwrap());
+        let marker = target.join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER);
+        assert!(marker.exists());
+        let summary = super::jetbrains_convergence_restart_summary(1, 0, 1);
+        assert!(!summary.contains("dynamically replaced"), "{summary}");
+        assert!(summary.contains("restart"), "{summary}");
+    }
+
+    /// `#jbdynamicfalsereport` regression (2): an `ok:` receipt is not enough; with
+    /// no post-replace load proof within the timeout the install must say restart.
+    #[test]
+    fn upgrader_ok_without_live_load_proof_requires_restart() {
+        use super::JetbrainsUpgraderStatus as S;
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        fs::create_dir_all(&target).unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.448.zip");
+        write_test_jetbrains_zip(&zip, "0.2.448", b"new");
+        // The in-IDE install already wrote the tree.
+        super::replace_jetbrains_plugin_tree(&zip, &target).unwrap();
+        let jar = target.join("agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.448.jar");
+        let before = fs::metadata(&jar).unwrap();
+
+        let mut probed = Vec::new();
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            "0.2.448",
+            true,
+            || {
+                Ok(super::jetbrains_hot_upgrade_from_statuses(
+                    vec![(
+                        42,
+                        S::Ok {
+                            status_line: "ok:0.2.448".into(),
+                        },
+                    )],
+                    &target,
+                    "0.2.448",
+                    |pid| {
+                        probed.push(pid);
+                        false
+                    },
+                ))
+            },
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+        assert_eq!(probed, vec![42]);
+        match &outcome {
+            JetbrainsLocalInstallOutcome::RestartRequired { reason } => {
+                assert!(reason.contains("not verified live"), "{reason}");
+                assert!(reason.contains("pid 42"), "{reason}");
+            }
+            other => panic!("expected RestartRequired, got {other:?}"),
+        }
+        // Not rewritten again under a JVM that may map it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(fs::metadata(&jar).unwrap().ino(), before.ino());
+        }
+        let _ = before;
+        assert!(
+            target
+                .join(agent_doc_preflight_io::warnings::PLUGIN_RESTART_REQUIRED_MARKER)
+                .exists()
+        );
+    }
+
+    /// `#jbdynamicfalsereport` regression (3): an `ok:` receipt plus an observed
+    /// live load is a dynamic replacement.
+    #[test]
+    fn observed_live_load_reports_dynamic_replacement() {
+        use super::JetbrainsUpgraderStatus as S;
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        fs::create_dir_all(&target).unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.448.zip");
+        write_test_jetbrains_zip(&zip, "0.2.448", b"new");
+        super::replace_jetbrains_plugin_tree(&zip, &target).unwrap();
+        let jar = target.join("agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.448.jar");
+
+        let outcome = install_jetbrains_package_bytes(
+            &zip,
+            &target,
+            "0.2.448",
+            true,
+            || {
+                Ok(super::jetbrains_hot_upgrade_from_statuses(
+                    vec![(
+                        43,
+                        S::Ok {
+                            status_line: "ok:0.2.448".into(),
+                        },
+                    )],
+                    &target,
+                    "0.2.448",
+                    |_pid| {
+                        super::jetbrains_mapped_jar_proves_load(
+                            &agent_doc_fs::plugin_jar::MappedPluginJar::Current {
+                                path: jar.to_string_lossy().into_owned(),
+                                inode: 1,
+                            },
+                            &target,
+                            "0.2.448",
+                        )
+                    },
+                ))
+            },
+            || panic!("the dynamic path does not enumerate pids"),
+        )
+        .unwrap();
+        assert_eq!(
+            outcome,
+            JetbrainsLocalInstallOutcome::HotUpgraded { processes: 1 }
+        );
+        assert!(
+            super::jetbrains_convergence_restart_summary(1, 1, 0).contains("dynamically replaced")
+        );
+    }
+
+    #[test]
+    fn mapped_jar_proves_load_only_for_the_expected_live_jar_in_the_target() {
+        use agent_doc_fs::plugin_jar::MappedPluginJar as M;
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        let jar = lib.join("agent-doc-jetbrains-0.2.448.jar");
+        fs::write(&jar, b"x").unwrap();
+        let current = |path: &Path| M::Current {
+            path: path.to_string_lossy().into_owned(),
+            inode: 1,
+        };
+        assert!(super::jetbrains_mapped_jar_proves_load(
+            &current(&jar),
+            &target,
+            "0.2.448"
+        ));
+        assert!(!super::jetbrains_mapped_jar_proves_load(
+            &current(&jar),
+            &target,
+            "0.2.449"
+        ));
+        assert!(!super::jetbrains_mapped_jar_proves_load(
+            &current(&jar),
+            &tmp.path().join("other"),
+            "0.2.448"
+        ));
+        assert!(!super::jetbrains_mapped_jar_proves_load(
+            &M::Deleted {
+                path: jar.to_string_lossy().into_owned()
+            },
+            &target,
+            "0.2.448"
+        ));
+        assert!(!super::jetbrains_mapped_jar_proves_load(
+            &M::Unknown,
+            &target,
+            "0.2.448"
+        ));
     }
 
     /// A staged `--local` install leaves the live generation's jar in place, so
@@ -3987,15 +4496,21 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     /// is required".
     #[test]
     fn convergence_summary_names_a_pending_restart() {
-        assert!(super::jetbrains_convergence_restart_summary(1, 1).contains("restart those IDEs"));
         assert!(
-            super::jetbrains_convergence_restart_summary(2, 0)
+            super::jetbrains_convergence_restart_summary(1, 0, 1).contains("restart those IDEs")
+        );
+        assert!(
+            super::jetbrains_convergence_restart_summary(2, 2, 0)
                 .contains("no IDE restart is required")
         );
         assert!(
-            super::jetbrains_convergence_restart_summary(0, 0)
+            super::jetbrains_convergence_restart_summary(0, 0, 0)
                 .contains("no installed plugin bytes changed")
         );
+        // `#jbdynamicfalsereport`: a cold install never claims a dynamic replacement.
+        let cold = super::jetbrains_convergence_restart_summary(1, 0, 0);
+        assert!(!cold.contains("dynamically replaced"), "{cold}");
+        assert!(!cold.contains("no IDE restart is required"), "{cold}");
     }
 
     fn reconcile_target(

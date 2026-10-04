@@ -2,6 +2,39 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.453
+
+- **Multi-session tmux projects (GH #17, `#ghmultitmux`).** `.agent-doc/config.toml` `tmux_sessions = [...]` is an
+  allow-list. With two or more sessions, each document's `tmux_session:` frontmatter binds it to its session, and
+  route, sync, start, claim, resync, `tmux ensure`, `session set`, terminal and the controller's layout survey pick the
+  session through one policy (`select_layout_session_with_policy`). The order is explicit, then focused actor, then
+  document binding, then current, then scoped project, then fallback. A disallowed explicit/bound target fails closed
+  (`--force` does not widen the list); a disallowed ambient candidate is skipped. Layout columns bound to another
+  session are dropped. Single-session projects are unchanged. See `runbooks/multi-tmux-sessions.md`. Deferred: the
+  editor focus-state query and the pane-layout window fallback still read the project pin; there are no path-based
+  topic rules.
+- **JetBrains component folding, gutter markers and structure view (GH #19, `#ghjbfolding`, plugin 0.2.490).** Each
+  multi-line `agent:NAME` component folds to `<!-- agent:NAME · N items -->`, open markers get a gutter icon that
+  toggles the fold, and the Markdown structure view lists components and their items. Boundaries come from the native
+  parser off the EDT and are cached as range markers; the extensions never call native code per keystroke.
+- **Dead closeout owners release by liveness (GH #130).** The controller closeout gate now supplies typed owner
+  liveness (pid probe with start-time / zombie checks against pid reuse) and enables dead-owner takeover, so a claimant
+  waiting on an exited owner is released with `OwnerProcessGone` instead of after the 300s lease. Blocking owners are
+  re-probed every 500ms; a live or unknown owner still blocks.
+- **Homebrew formula (GH #31, `#ghbrew`).** `scripts/bump-homebrew-formula.py` generates `Formula/agent-doc.rb` for
+  btakita/homebrew-tap from a release's `SHA256SUMS` (binary and cdylib side by side in `libexec`, behind a wrapper so
+  `lib-path` resolves). The new `homebrew.yml` workflow, called by `release.yml`, pushes it on each tag when the
+  `HOMEBREW_TAP_TOKEN` secret is set. `release-macos-assets` re-triggers it to add Darwin blocks. The stale in-repo
+  formula is removed.
+- **Managed-component edits are never steering prompts (`#steerbacklogsource`).** The steering diff masks
+  backlog/review/icebox/done/queue contents, and the absorbed-steering ledger records only exchange-component lines
+  (and drops work-item rows an older binary recorded), so a backlog edit no longer surfaces as
+  `source=exchange address_now` or rides into the next contract.
+- **Claimed or deferred free-text queue heads are not struck (`#deferstrike`).** Every strike path (controller
+  projection, in-process, commit-time recovery, preflight residue) skips heads with a live claim, and the finalize
+  pre-write gate no longer demands a quote for a claimed head. A quoted head followed by a `**Deferred:**` paragraph
+  (or natural deferral phrasing) stays queued; only a completed answer strikes.
+
 ## 0.35.452
 
 - **About Agent Doc (`#editoractionmenu`).** A new `agent-doc version [--json]` (schema `agent-doc-build-info-v1`:

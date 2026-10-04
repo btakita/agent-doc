@@ -229,6 +229,37 @@ Done. After your IDE restart the editor re-registered: 6 live registrations, and
 **New bugs filed from this session** (appended to the backlog):
 - **`#jbpluginvanish`:** the JetBrains plugin directory disappeared around the 13:49 IDE restart, while the disk was full, and every document lost its editor. I reinstalled it from the release.
 - **`#jbdynamicfalsereport`:** `plugin install` claimed it had "dynamically replaced, no restart required" when no plugin was loaded in the IDE.
+
+### Re: JetBrains plugin vanish + false dynamic-replace report — opus-5.5 · 2026-10-04T15:03-04:00
+
+> **Queue prompt:**
+>
+> do [#jbpluginvanish]
+>
+> do [#jbdynamicfalsereport]
+
+
+> **Chat prompt (#chatprompt):** Watch agent-doc github issues for new issues.
+
+> **Chat prompt (#chatprompt):** I will have another process file an issue in the coder environment. This will take ~20-30 minutes
+
+**Issue watch:** a background poller checks `btakita/agent-doc` every 5 minutes for any issue newer than #133 and wakes this session when one appears; each new issue is dispatched to its own subagent. GH #133 (route-owned supervisors never reaped / respawn on kill) had just been filed and is already with a subagent.
+
+**`#jbpluginvanish` — done** (agent-doc `1b1088b36`, merged to main):
+- **Root cause:** not the full disk. A *stale 0.2.468 restart staging* was still queued in the IDE `action.script` (`delete:<plugins>/agent-doc-jetbrains` then `unzip:<0.2.468 zip>`). The 13:12 restart-free upgrade never cleared it. At the 13:48 restart the IDE ran the delete, the zip was already gone, the unzip failed, and the plugin was gone (`idea.1.log`: `Source file missing: …agent-doc-jetbrains-0.2.468.zip`). If the zip had survived, the restart would have *downgraded* to 0.2.468 instead.
+- **Fix 1:** every install purges agent-doc stagings whose zip is gone. After a successful restart-free upgrade or a direct replace, it purges all agent-doc stagings for that plugins dir. The `action.script` rewrite is atomic and leaves other plugins' lines unchanged; each purge logs `plugin_pending_staging_purged`.
+- **Fix 2 (latent bug):** `replace_jetbrains_plugin_tree` used to `remove_dir_all` before extracting. It now extracts into a staging dir, fsyncs and checks the tree against the package, moves the old tree to a backup, swaps the new one in, and restores the backup on failure. A backup left by an interrupted swap is restored on the next attempt.
+- **Tests:** 6 swap tests (disk full mid-extraction, failure moving the old tree aside, failed swap, package with no plugin jar, successful swap, interrupted-swap recovery) + 3 purge tests (including a replay of the exact 0.2.468 incident script). Putting the old delete-first code back failed 5 of the 6 swap tests.
+- **Follow-up `#jbstagebackup`** (added): the Java restart staging still has to emit delete-then-unzip. Preflight should auto-purge doomed stagings instead of only warning, and/or the staging should keep a backup copy.
+
+**`#jbdynamicfalsereport` — done** (agent-doc `d28a000d7`, merged to main):
+- **Root cause:** the upgrader's `skip:plugin-not-loaded` answer was discarded (only `ok:`/`staged:` were parsed). The install then fell through to a plain `Installed`, and `jetbrains_convergence_restart_summary` printed "dynamically replaced; no IDE restart is required" for any changed install.
+- **Fix:** upgrader answers are parsed into typed outcomes. An `ok:` counts as a dynamic replacement only once the IDE process is seen with the new `agent-doc-jetbrains-<version>.jar` mapped in memory (checked every 200ms for up to 10s). Otherwise the install reports restart required. "Plugin not loaded" also reports restart required. The Java side now includes its plugins dir in the skip answer, so an IDE that uses a different plugins dir is ignored. Plugin bumped to 0.2.491.
+- **Tests:** not loaded → restart required; `ok:` with no live-load proof → restart required, with no second rewrite; proof seen → dynamic; status parsing; mapped-jar matching.
+
+**Verification:** `make check` on merged main: nextest **10936 passed, 0 failed**. The final `audit-docs` step failed only on the stale installed `.grok` skill and passed after `make install`. `make install` EXIT=0. The live install was itself a proof of the new path: `Plugin dynamically upgraded in 1 live JetBrains process(es)` → `dynamically replaced and verified live`. `IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.491.jar` is present and no `action.script` is pending.
+
+**Still in flight (claimed, subagents):** GH #131 (rejected editor IPC receipt), GH #132 (upgrade cdylib + gc-libs), GH #133 (supervisor reap/respawn). They will be integrated as one batch, followed by one `make install`, then `release + publish`.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -238,16 +269,16 @@ Done. After your IDE restart the editor re-registered: 6 live registrations, and
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#jbpluginvanish]
-- do [#jbdynamicfalsereport]
+- ~~do [#jbpluginvanish]~~
+- ~~do [#jbdynamicfalsereport]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/131
+- #gh-fix https://github.com/btakita/agent-doc/issues/132
 - ~~release + publish~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#jbpluginvanish] [agent-doc][jetbrains] The agent-doc JetBrains plugin vanished from ~/.local/share/JetBrains/IntelliJIdea2026.1 around the 2026-10-04 13:49 IDE restart (plugin dir gone, only .agent-doc-jetbrains-install.lock left; 'agent-doc plugin list' showed vscode only), so every document lost its editor registration (33 open docs not-live). Context: at 13:12 the v0.35.452 install dynamically replaced 0.2.488 through the upgrader java agent but logged 'replica restart incomplete attached=10/23', and the disk was 100% full around 13:4x. Hypothesis: a staged replacement or action script failed during the restart on a full disk, and the old dir was removed without the new one. Find the install/upgrade path that can delete the plugin dir without a successful replacement; make it atomic (stage, verify, then swap) with a regression test.
-- [ ] [#jbdynamicfalsereport] [agent-doc][jetbrains] 'agent-doc plugin install jetbrains --local --all-installed' (make install, 2026-10-04 14:03) reported 'JetBrains package convergence: 1 updated ... Changed live JetBrains packages were dynamically replaced; no IDE restart is required' even though the running IDE had no agent-doc plugin loaded (it had vanished, see jbpluginvanish). The idea.log showed no plugin activity and editor registrations stayed at 0 until a manual IDE restart. The dynamic-replace path must verify that the plugin is actually loaded in the live IDE after replacement (e.g. a registration or handshake within a timeout) and otherwise report 'restart required'.
+- [ ] [#jbstagebackup] [agent-doc][jetbrains] Follow-up to jbpluginvanish: the Java upgrader's restart staging (JetBrainsPluginUpgradeAction.stageForRestart) must still emit delete-then-unzip for the IDE's action.script, so a staging whose zip vanishes (or a full disk at restart) before any agent-doc install runs can still remove the plugin. Close the gap: have preflight/supervisor auto-purge doomed stagings (purge_pending_stagings_for StagingPurge::Doomed in agent-doc-fs/src/jetbrains_install.rs) instead of only warning, and/or stage a backup copy the restart can restore. Also clear the stale fixed-name agent-doc-jetbrains-0.2.469.zip left in ~/.cache/JetBrains/IntelliJIdea2026.1/plugins/.
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

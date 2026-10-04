@@ -196,7 +196,19 @@ Status:
 - **#126:** fixed on `ghfix126` as `27dd583f5`; `make check` ran 10769 tests, all passed. Waiting to be merged.
 - **`steerworks` and `cellcollide`:** still running.
 - **release + publish:** after all three are merged and installed.
-<!-- agent:boundary:e240a891 -->
+> **Chat prompt (#chatprompt):** #gh-fix https://github.com/btakita/agent-doc/issues/125 reopened.
+
+### Re: GH #125 reopened — opus-5-5 · 2026-10-04T02:15-04:00
+
+I claimed the reopened #125 and dispatched it to a subagent: worktree `ghfix125b`, based on the v0.35.449 integration commit, so it sits on top of the `steerworks` chat-prompt fixes. It is closing the remaining gaps, every one of which showed up live this session:
+1. **The cycle contract itself still says `no_changes: true`** when a chat prompt is flagged; only the notice beside it disagrees. Unrecorded chat prompts will go into preflight's contract as prompt targets, so the cycle counts as a real turn.
+2. **`recent_noop_closeouts` / `session_accretion`** will stop counting a cycle that answered a chat prompt as a no-op.
+3. **Stale prompts keep coming back.** The list of unrecorded prompts was re-reported on every later trigger, including a stale `<task-notification>` false positive. It will clear once a prompt is recorded, purge harness envelopes, and expire old entries.
+4. **Closeout warning:** `session-check` will warn when a turn with a flagged chat prompt committed without a `> **Chat prompt (#chatprompt):**` record.
+5. **A chat-only turn**, with no `agent-doc <FILE>` trigger and no open cycle, will be verified to record and commit end to end.
+
+v0.35.449 (#126, `cellcollide`, `steerworks`) is still in its final `make check`. I'll fold this fix into the same release if it lands in time; otherwise it ships as v0.35.450 straight after.
+<!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -206,6 +218,7 @@ Status:
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~do [#supportinlineprompts]~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/125 reopened.
 - #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
 - Ensure the real-time reactive steering works. When do you get the signal about the document changing?
 - do [#claimedsteerwake]: should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful? Note: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "#gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain

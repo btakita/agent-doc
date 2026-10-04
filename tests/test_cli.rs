@@ -27898,7 +27898,7 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
             && preflight_io_source
                 .contains("agent_doc_git_io::revision::last_commit_mtime(&resolved)")
             && preflight_run_source
-                .contains("agent_doc_git_io::revision::last_commit_mtime(&doc_path)"),
+                .contains("agent_doc_git_io::revision::last_commit_mtime(doc_path)"),
         "runtime callers should use focused git IO status/submodule/revision helpers directly"
     );
     for forbidden in [

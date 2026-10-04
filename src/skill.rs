@@ -1469,7 +1469,24 @@ pub(crate) fn installed_preflight_hook_timeout_secs(settings: &str) -> Option<u6
 /// (`src/haiven-dev`) lost its cycle contract to
 /// `UserPromptSubmit hook timed out after 30s — output discarded` while the
 /// superproject beside it carried the 120s entry.
-pub(crate) fn repair_claude_preflight_hook_timeout(path: &Path) -> Result<Option<u64>> {
+/// The preflight hook `timeout` that fits an admission `budget` (GH #127).
+///
+/// The binary clamps its budget to the installed timeout minus its report
+/// headroom, so an operator who raises `AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS`
+/// past the installed timeout gets nothing unless the timeout rises too. This
+/// keeps the default gap between [`PREFLIGHT_HOOK_TIMEOUT_SECS`] and
+/// [`crate::preflight_hook::HOOK_ADMISSION_BUDGET_SECS`] above any larger
+/// budget, and never goes below the default timeout.
+pub(crate) fn preflight_hook_timeout_for_budget(budget: std::time::Duration) -> u64 {
+    const GAP: u64 =
+        PREFLIGHT_HOOK_TIMEOUT_SECS - crate::preflight_hook::HOOK_ADMISSION_BUDGET_SECS;
+    PREFLIGHT_HOOK_TIMEOUT_SECS.max(budget.as_secs().saturating_add(GAP))
+}
+
+pub(crate) fn repair_claude_preflight_hook_timeout(
+    path: &Path,
+    required_secs: u64,
+) -> Result<Option<u64>> {
     if !path.exists() {
         return Ok(None);
     }
@@ -1482,7 +1499,8 @@ pub(crate) fn repair_claude_preflight_hook_timeout(path: &Path) -> Result<Option
     // invariant safer, not weaker, and this repair must not quietly undo that.
     // Only a deadline below the installed default can produce the silent
     // output-discard this exists to prevent.
-    if installed >= PREFLIGHT_HOOK_TIMEOUT_SECS {
+    let required_secs = required_secs.max(PREFLIGHT_HOOK_TIMEOUT_SECS);
+    if installed >= required_secs {
         return Ok(None);
     }
     let mut root = serde_json::from_str::<serde_json::Value>(&content)
@@ -1505,10 +1523,7 @@ pub(crate) fn repair_claude_preflight_hook_timeout(path: &Path) -> Result<Option
         let Some(hook) = hook.as_object_mut() else {
             continue;
         };
-        hook.insert(
-            "timeout".to_string(),
-            serde_json::json!(PREFLIGHT_HOOK_TIMEOUT_SECS),
-        );
+        hook.insert("timeout".to_string(), serde_json::json!(required_secs));
     }
     let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
     std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
@@ -1777,8 +1792,15 @@ fn ensure_codex_hook_command(
                         // Repair an already-installed entry too, not just a fresh
                         // write: the checkouts that need the timeout most are the
                         // ones whose hook is already wired without it.
+                        // Raise-only (GH #127): an installed timeout already
+                        // above ours was chosen to fit a larger admission
+                        // budget, and lowering it would silently re-cap that
+                        // budget at the next session.
                         if let Some(timeout) = timeout_secs {
-                            hook.insert("timeout".to_string(), serde_json::json!(timeout));
+                            let installed = hook.get("timeout").and_then(|v| v.as_u64());
+                            if installed.is_none_or(|installed| installed < timeout) {
+                                hook.insert("timeout".to_string(), serde_json::json!(timeout));
+                            }
                         }
                     }
                     matches

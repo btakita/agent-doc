@@ -82,6 +82,15 @@ fn resolve_hook_admission_budget(raw: Option<&str>) -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
+/// GH #127: the budget override alone is not a complete remedy. The hook's own
+/// harness `timeout` caps the budget (see
+/// [`admission_budget_under_harness_deadline`]), so a refusal that recommends
+/// the override must say so.
+const HOOK_TIMEOUT_CAP_NOTE: &str = "The `timeout` on the `agent-doc hook \
+     preflight-user-prompt-submit` entry in `.claude/settings.json` caps that budget (at the \
+     timeout minus 5s), so raise both: this hook raises a smaller timeout to fit the configured \
+     budget, and the raised timeout takes effect once Claude Code reloads settings.";
+
 /// Seconds reserved for the binary to print its own refusal before the harness
 /// deadline. Emitting the failure marker is a single `println!`, so this only
 /// has to cover process scheduling.
@@ -216,7 +225,7 @@ fn admission_deadline_refusal_payload(target: &str, reason: &str, phase: &str) -
          phase `{phase}` and can be retried, run `agent-doc session-check {target}` and relay \
          any pending operator prompt it lists, then stop. If retries keep stopping at `{phase}`, \
          that phase is the work to move off the admission path, or raise the budget with \
-         {HOOK_ADMISSION_BUDGET_ENV}=<seconds>."
+         {HOOK_ADMISSION_BUDGET_ENV}=<seconds>. {HOOK_TIMEOUT_CAP_NOTE}"
     )
 }
 
@@ -341,9 +350,10 @@ fn run_preflight_for_prompt(
     // the full one. A checkout whose `.claude/settings.json` predates the
     // installed timeout otherwise keeps Claude's 30s default indefinitely — the
     // merge that writes it only runs on an explicit install in that directory.
+    let configured_budget = hook_admission_budget();
     let budget = admission_budget_under_harness_deadline(
-        hook_admission_budget(),
-        repair_and_report_hook_deadline(cwd),
+        configured_budget,
+        repair_and_report_hook_deadline(cwd, configured_budget),
     );
 
     if let Err(err) = claim_loop_drain_owner(&invocation, &file) {
@@ -581,7 +591,14 @@ fn run_preflight_admission(
 /// the next session, the clamp fixes this one. Best-effort by construction: a
 /// hook must never block an ordinary prompt over a settings file, so a failure
 /// is reported to the operator's hook log and treated as an unknown deadline.
-fn repair_and_report_hook_deadline(cwd: &Path) -> Option<u64> {
+fn repair_and_report_hook_deadline(
+    cwd: &Path,
+    configured_budget: std::time::Duration,
+) -> Option<u64> {
+    // GH #127: the repaired timeout fits the CONFIGURED budget, so raising
+    // `AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS` past the installed timeout is not
+    // silently capped forever.
+    let required = crate::skill::preflight_hook_timeout_for_budget(configured_budget);
     // Claude reads project settings from the directory it was launched in; the
     // project root is checked too so a session started in a subdirectory still
     // finds the file that wired the hook.
@@ -602,12 +619,11 @@ fn repair_and_report_hook_deadline(cwd: &Path) -> Option<u64> {
         };
         // The nearest settings layer that wires the hook is the one in force.
         deadline.get_or_insert(installed);
-        match crate::skill::repair_claude_preflight_hook_timeout(&path) {
+        match crate::skill::repair_claude_preflight_hook_timeout(&path, required) {
             Ok(Some(previous)) => eprintln!(
-                "[agent-doc] repaired {} preflight hook timeout {previous}s -> {}s; \
+                "[agent-doc] repaired {} preflight hook timeout {previous}s -> {required}s; \
                  the {previous}s deadline still applies until Claude Code reloads settings",
                 path.display(),
-                crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
             ),
             Ok(None) => {}
             Err(err) => eprintln!(
@@ -773,7 +789,7 @@ fn overrun_reason(
          Check `agent-doc admin inspect {}` and that phase in `.agent-doc/logs/ops.log`. \
          The abandoned preflight worker stops when this hook process exits, so it cannot race \
          the next trigger; a `preflight_started` cycle it opened is closed by the next turn's \
-         recovery. Override the budget with {}=<seconds>.",
+         recovery. Override the budget with {}=<seconds>. {HOOK_TIMEOUT_CAP_NOTE}",
         budget.as_secs(),
         file.display(),
         overrun_phase_clause(snapshot),
@@ -985,6 +1001,51 @@ mod tests {
     };
     use std::time::Duration;
 
+    fn default_budget() -> Duration {
+        Duration::from_secs(HOOK_ADMISSION_BUDGET_SECS)
+    }
+
+    /// GH #127: an operator budget above the installed timeout used to be
+    /// capped silently by the clamp. The repair now raises the timeout to fit
+    /// the configured budget, so the next session gets the whole budget.
+    #[test]
+    fn a_larger_configured_budget_raises_the_installed_timeout_to_fit_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(
+            &settings,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "hooks": { "UserPromptSubmit": [{ "hooks": [{
+                    "type": "command",
+                    "command": "agent-doc hook preflight-user-prompt-submit",
+                    "timeout": crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS
+                }]}]}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let configured = Duration::from_secs(300);
+        let in_force = repair_and_report_hook_deadline(dir.path(), configured);
+        assert_eq!(in_force, Some(crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS));
+        // THIS turn is still clamped by the timeout in force...
+        assert!(admission_budget_under_harness_deadline(configured, in_force) < configured);
+        // ...but the repaired timeout admits the whole budget next session.
+        let repaired = crate::skill::installed_preflight_hook_timeout_secs(
+            &std::fs::read_to_string(&settings).unwrap(),
+        );
+        assert_eq!(repaired, Some(330));
+        assert_eq!(
+            admission_budget_under_harness_deadline(configured, repaired),
+            configured
+        );
+        // The default budget keeps the default timeout.
+        assert_eq!(
+            crate::skill::preflight_hook_timeout_for_budget(default_budget()),
+            crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS
+        );
+    }
+
     #[test]
     fn an_untimed_installed_hook_clamps_the_budget_under_claudes_own_deadline() {
         // `#hookcontractlost`, submodule half. A checkout wired by a binary that
@@ -1055,7 +1116,7 @@ mod tests {
         // The deadline reported is the one still in force for THIS turn, not the
         // repaired value — Claude has not reloaded settings yet.
         assert_eq!(
-            repair_and_report_hook_deadline(dir.path()),
+            repair_and_report_hook_deadline(dir.path(), default_budget()),
             Some(crate::skill::CLAUDE_DEFAULT_HOOK_TIMEOUT_SECS)
         );
 
@@ -1071,7 +1132,7 @@ mod tests {
         );
         // Idempotent: a second pass reports the repaired deadline and rewrites nothing.
         assert_eq!(
-            repair_and_report_hook_deadline(dir.path()),
+            repair_and_report_hook_deadline(dir.path(), default_budget()),
             Some(crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS)
         );
     }
@@ -1097,7 +1158,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(repair_and_report_hook_deadline(dir.path()), Some(300));
+        assert_eq!(
+            repair_and_report_hook_deadline(dir.path(), default_budget()),
+            Some(300)
+        );
         assert_eq!(
             crate::skill::installed_preflight_hook_timeout_secs(
                 &std::fs::read_to_string(&settings).unwrap()
@@ -1120,7 +1184,10 @@ mod tests {
         .unwrap();
         std::fs::write(&settings, &original).unwrap();
 
-        assert_eq!(repair_and_report_hook_deadline(dir.path()), None);
+        assert_eq!(
+            repair_and_report_hook_deadline(dir.path(), default_budget()),
+            None
+        );
         assert_eq!(
             std::fs::read_to_string(&settings).unwrap(),
             original,
@@ -1279,6 +1346,10 @@ mod tests {
             message.contains(HOOK_ADMISSION_BUDGET_ENV),
             "overrun must name the override: {message}"
         );
+        assert!(
+            message.contains("raise both"),
+            "GH #127: the overrun remedy must name the hook timeout cap: {message}"
+        );
         // GH #78: the cause is measured, not asserted.
         assert!(
             message.contains("still in preflight phase `settle_debounce`"),
@@ -1351,6 +1422,14 @@ mod tests {
         );
         assert!(
             payload.contains("Do NOT shell `agent-doc preflight`"),
+            "{payload}"
+        );
+        // GH #127: the budget override is capped by the hook's own timeout;
+        // the remedy must say to raise both.
+        assert!(
+            payload.contains(HOOK_ADMISSION_BUDGET_ENV)
+                && payload.contains("`timeout`")
+                && payload.contains("raise both"),
             "{payload}"
         );
         assert!(

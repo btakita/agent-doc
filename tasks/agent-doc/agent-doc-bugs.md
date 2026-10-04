@@ -184,6 +184,23 @@ I filed this as `#steerbacklogsource`. Steering should be attributed to the comp
 - **`#steerbacklogsource`:** a subagent is running its `make check` in `agent-doc-wt/steerbacklogsource`.
 
 Both will ship together in the next release.
+
+### Re: queue: #ghbrew, #ghjbfolding, #ghmultitmux, #apimdrevert + release — opus-5-5 · 2026-10-04T15:25-04:00
+
+> **Queue prompt:** do [#ghbrew]
+> **Queue prompt:** do [#ghjbfolding]
+> **Queue prompt:** do [#ghmultitmux]
+> **Queue prompt:** do [#apimdrevert]
+
+I claimed and dispatched each item to its own subagent, each in a worktree based on v0.35.452 (`agent-doc-wt/<id>`):
+- **`#ghbrew` (GH #31):** `Formula/agent-doc.rb` in the `homebrew-tap` repo (branch `agent-doc-formula`), built from the release archives: binary and cdylib side by side, with sha256s. It also gets a release-workflow step that bumps the formula on each tag. Pushing the tap and closing #31 stay with me.
+- **`#ghjbfolding` (GH #19, phases 5–7):** folding for `agent:*` regions, gutter icons on component markers, and a structure view of components, with JetBrains tests.
+- **`#ghmultitmux` (GH #17):** an allowed-sessions list in config, with routing, start, sync and layout choosing among the sessions. It fails closed on a session not in the list, the single-session default is unchanged, and SimWorld tests cover it on isolated tmux sockets only.
+- **`#apimdrevert`:** read-only forensics first. The subagent checks JetBrains Local History and `idea.log` around 2026-09-29 00:40, the git history of `api.md`, and haiven-dev's `ops.log`, to answer the open question itself: was operator text actually lost? If it finds a real path that drops text, it fixes it with a regression test. If not, the item closes as not-a-defect, with the evidence.
+
+> **Queue prompt:** release + publish
+
+**Deferred, not done:** this release has not happened yet. It is claimed by me (`coordinator:integration`) and waits for the six in-flight branches: the four above plus GH #130 and `#steerbacklogsource`. When they land, I'll merge them one at a time, run `make check` and one `make install`, release v0.35.453, and close the items and GH issues. Keep this head open until then.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -193,13 +210,17 @@ Both will ship together in the next release.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~⏭️ do [#editoractionmenu]~~
+- ~~do [#editoractionmenu]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/130
 - do [#steerbacklogsource]
 - ~~do [#gvqv]~~
 - ~~do [#halftypedcoin]~~
-- ~~do [#gvqv]~~
-- release + publish
+- ~~release + publish~~
+- do [#ghbrew]
+- do [#ghjbfolding]
+- do [#ghmultitmux]
+- do [#apimdrevert]
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

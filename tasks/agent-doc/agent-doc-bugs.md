@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -37,6 +38,16 @@ prompt_presets:
 Compacted content:
 - Archived 15 response topic(s): release + publish; release cleanup; queue dispatch; 12 more
 - Prior summary/context: prior compacted content: Archived 33 response topic(s): GH #106, GH #107, and release v0.35.441; GH #108: JetBrains u...
+
+### Re: do #steerbaselineabsorb — opus-5-5 · 2026-10-04T03:10-04:00
+
+> **Queue prompt:** do [#steerbaselineabsorb]
+
+I claimed this item and handed it to a background subagent (worktree `agent-doc-wt/steerbaselineabsorb`, branched from v0.35.450 `478ff964e`). It is fixing both symptoms:
+1. **Steering absorbed into a commit:** steering that is still pending at closeout, but whose text is already in the committed baseline, will be saved as an unrecorded prompt (the same mechanism as `chat_prompts`). The next contract then carries it with `no_changes: false`.
+2. **Answered steering keeps coming back:** an item is marked consumed once a later committed response answers it, so the hook stops resurfacing it.
+
+It has two regression tests to add, one for each symptom, and must pass `make check` before committing on branch `steerbaselineabsorb`. When it reports back, I'll merge the branch, do one `make install`, release the claim, and close the item.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -45,7 +56,8 @@ Compacted content:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- do [#steerbaselineabsorb]
 <!-- /agent:queue -->
 
 

@@ -70,6 +70,24 @@ The subagent will:
 3. Add a regression test for this case and pass `make check`.
 
 When both branches are in, I'll merge them serially and run one `make install`.
+
+### Re: queue: GH #127, #128, #129 + release — opus-5-5 · 2026-10-04T03:52-04:00
+
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/127
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/128
+> **Queue prompt:** do https://github.com/btakita/agent-doc/issues/129
+> **Queue prompt:** release + publish
+
+I claimed each head. Every subagent has its own worktree based on integration commit `b63deb809`, so it builds on both fixes that are not yet released:
+- **GH #127** (`agent-doc-wt/gh127b`): `cross_document_sweep` uses 23–42s of the 85s admission deadline committing other documents. The fix takes it off the admission-critical path.
+- **GH #128** (`agent-doc-wt/gh128b`): a stale-binary recycle reports `old_version == new_version`, then asks to restart again. The fix makes it report the version it actually re-exec'd into and stops the duplicate request.
+- **GH #129** (`agent-doc-wt/gh129b`): the `session-check` repair hint asks for the very document write that the admission-deadline refusal forbids. The fix makes the two consistent and checks why the queue head was dropped.
+
+**Both fixes are done and merged** on the integration branch (`b63deb809`), and the full `make check` is running on the merged code:
+- **`#steerbaselineabsorb`** (`bc6abda76`): steering absorbed into a closeout commit now carries into the next contract with `no_changes: false`, and answered items stop resurfacing. Passed on its branch: 10822 tests.
+- **`#preflightrepairdrift`** (`1c4caeded`): the haiven-dev refusal was the template-normalization repair. It ran while the operator was typing and correctly rolled forward over the new text, but the settle step only accepted the pre-typing target. Settle now accepts "the repair plus newer edits" and keeps the typed text as pending input. Passed on its branch: 10826 tests.
+
+**release + publish** stays with me. Once the three GH branches land, I'll merge them in one at a time, run `make check` and one `make install`, cut the release, close the issues, and close all five items.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -79,7 +97,12 @@ When both branches are in, I'll merge them serially and run one `make install`.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#steerbaselineabsorb]
+- ⏭️ do [#steerbaselineabsorb]
+- do [#preflightrepairdrift]
+- ~~do https://github.com/btakita/agent-doc/issues/127~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do https://github.com/btakita/agent-doc/issues/128~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do https://github.com/btakita/agent-doc/issues/129~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

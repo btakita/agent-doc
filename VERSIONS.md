@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.449
+
+- **Pane focus re-places a document a plugin publication evicted (GH #126).** A single-column plugin
+  publication (every tab switch on a Coder / Remote Dev backend, which cannot see editor splits) dropped the
+  routed document from the retained layout and stashed its pane; a later focus or Sync Tmux Layout for it then
+  skipped escalation (`document_outside_retained_layout`) with no select-pane and no error. An escalation for a
+  document outside the retained layout now replaces the retained focus column (or the rightmost one), so the
+  column count still never grows (GH #106) and the focus applies.
+- **Collision detection is cell-precise (`#cellcollide`).** An agent write is checked only against the
+  components it owns. An operator edit in another cell (queue, backlog) while the agent writes `exchange` no
+  longer trips `live_prompt_drift_after_preflight` or refuses the editor receipt; both edits commit. A late
+  owned-cell update gets a longer wait, and a real same-cell overlap still fails closed and names the cell.
+- **Steering reaches the right agent, and Run Agent Doc is an explicit send (`#steerworks`, `#claimedsteerwake`).**
+  A claim follows its queue head across an appended or removed note; an edit to a claimed head wakes the idle
+  coordinator and is reported as `dispatch=forward_to_owner owner=subagent:<label>` instead of "dispatch a new
+  subagent"; a new cycle no longer swallows unreported claimed edits. `agent-doc route` (Run Agent Doc) records
+  an explicit send: pending steering bypasses the typing gate, is marked `sent=explicit`, and is delivered to
+  the owning turn even during an open closeout (previously "nothing was dispatched"); it also labels a
+  "complete" example for the learned typing gate. Subagent tool calls no longer receive or consume the
+  coordinator's steering, the agent's own `> **Chat prompt (#chatprompt):**` record is never read back as
+  steering, and harness envelopes such as `<task-notification>` are no longer classified as chat prompts.
+
 ## 0.35.448
 
 - **Prompts typed in chat are recorded in the session document (GH #125).** Every hot-path rule assumed the

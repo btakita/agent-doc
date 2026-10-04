@@ -178,6 +178,24 @@ Status of the other work:
 - **#126 (`ghfix126`):** its `make check` is still finishing.
 - **`#cellcollide`:** has both repros, the queue-section and `exchange` divergence.
 - **release + publish:** follows integration.
+
+### Re: [#supportinlineprompts] inline prompts in agent:exchange — opus-5-5 · 2026-10-04T01:55-04:00
+
+> **Queue prompt:** do [#supportinlineprompts]
+
+**Yes, inline prompts are still supported.** You can add or edit a line anywhere inside `agent:exchange`, including in the middle of one of my earlier responses. It is still picked up as a prompt; it doesn't have to be at the end.
+- **Detection:** `agent-doc-diff` classifies each user-authored change in order. A line you add between agent lines (`[user+]`) becomes a `prompt_target`. A line you edit (`[user~]`) becomes a `content_edit`, which I treat as a correction.
+- **Where it shows up:** preflight passes both in `user_intent_prompt_changes`, and still emits the older `inline_annotations` field for compatibility. Unit tests cover both shapes.
+- **What doesn't count:** two artifacts are deliberately ignored: the ` (HEAD)` marker being moved, and blank or marker-only lines.
+- **Format docs:** `runbooks/document-format.md` lists blockquotes, HTML comments and edits to earlier responses as valid prompts.
+- **This cycle:** your edit to the `#claimedsteerwake` queue line arrived as a `prompt_target` in `user_intent_prompt_changes`.
+
+**One oddity:** you typed this as a plain question in the queue. agent-doc turned it into the backlog item `#supportinlineprompts` and queued `do [#supportinlineprompts]`, even though preflight still offered the raw question text for subagent dispatch. So `agent-doc queue claim --item '<question>'` failed with "no live queue head matches". I answered it here directly rather than giving it to a subagent. The mismatch between the dispatch list and the live queue line belongs to the same claim/identity problem `steerworks` is fixing (item 3, claims following an item's identity).
+
+Status:
+- **#126:** fixed on `ghfix126` as `27dd583f5`; `make check` ran 10769 tests, all passed. Waiting to be merged.
+- **`steerworks` and `cellcollide`:** still running.
+- **release + publish:** after all three are merged and installed.
 <!-- agent:boundary:e240a891 -->
 <!-- /agent:exchange -->
 
@@ -187,9 +205,10 @@ Status of the other work:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- ~~do [#supportinlineprompts]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
 - Ensure the real-time reactive steering works. When do you get the signal about the document changing?
-- do [#claimedsteerwake]: should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful? Note [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "#gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain"
+- do [#claimedsteerwake]: should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful? Note: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "#gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain
 - release + publish
 <!-- /agent:queue -->
 

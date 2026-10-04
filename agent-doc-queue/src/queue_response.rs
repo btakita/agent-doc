@@ -244,7 +244,41 @@ pub fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
             .iter()
             .all(|id| head_id_is_registered_preset(content, id));
     }
+    if head_leads_with_open_backlog_directive(content, text) {
+        return false;
+    }
     !normalized_queue_prompt_text_is_queue_activation_trigger(&normalized)
+}
+
+/// GH #129: a head that LEADS with an id directive followed by prose —
+/// `[#id] [operator-verify] Confirm whether ...`, `do [#id] and keep the old
+/// API` — is id-backed when that id is still open `agent:backlog` work.
+///
+/// The exact-id grammar above only recognizes heads made of nothing but
+/// directives, so these annotated heads fell through to free text, and the
+/// answered-free-text strike (`#qheadresidue`) could complete one by a
+/// response's quote or `### Re: #id` heading while its backlog item stayed
+/// open. Every other surface already treats the head as id-backed: the
+/// `#queue-clear-unrun-items` session-check guard (`do_directive_target_ids`)
+/// then reported the struck head as silently dropped, and `#qheadannotation`
+/// parses it as an annotated id head. Requiring the id to be open keeps a head
+/// that merely starts with a resolved or unknown id consumable as free text.
+fn head_leads_with_open_backlog_directive(content: &str, text: &str) -> bool {
+    let Some(first_line) = text.lines().find(|line| !line.trim().is_empty()) else {
+        return false;
+    };
+    // Only the leading directive id decides: a later `#id` in the prose is a
+    // mention, not the head's identity.
+    let Some(lead) = crate::queue_directive::do_directive_target_ids_in_line(first_line)
+        .into_iter()
+        .next()
+    else {
+        return false;
+    };
+    let lead = agent_doc_element_backlog::backlog::normalize_pending_id(&lead);
+    agent_doc_element_backlog::backlog::open_backlog_ids_in_content(content)
+        .iter()
+        .any(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id) == lead)
 }
 
 /// True when the active queue head is a free-text prompt: it is neither an
@@ -1087,6 +1121,46 @@ mod tests {
         assert!(queue_prompt_text_is_free_text(
             content,
             "[#editorauth2]: a note"
+        ));
+    }
+
+    #[test]
+    fn head_leading_with_an_open_backlog_id_is_never_free_text() {
+        // GH #129: `[#id] [operator-verify] prose` is the shape the
+        // `#queue-clear-unrun-items` guard reported as silently dropped after the
+        // answered-free-text strike completed it with its backlog item open.
+        let content = concat!(
+            "---\nqueue_active: true\n---\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#confirmwhethersoftwrap] [operator-verify] Confirm whether the softwrap-caret fix works\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:queue -->\n- x\n<!-- /agent:queue -->\n",
+        );
+        for head in [
+            "[#confirmwhethersoftwrap] [operator-verify] Confirm whether the softwrap-caret fix works",
+            ":pushpin: [#confirmwhethersoftwrap] [operator-verify] Confirm whether it works",
+            "do [#confirmwhethersoftwrap] and confirm the terminal cursor symptom",
+            "#confirmwhethersoftwrap confirm the terminal cursor symptom",
+        ] {
+            assert!(
+                !queue_prompt_text_is_free_text(content, head),
+                "head {head:?} leads with an open backlog id, so it is id-backed"
+            );
+        }
+        // A head that only starts with a resolved/unknown id stays free text,
+        // and so does prose that merely mentions the open id later.
+        assert!(queue_prompt_text_is_free_text(
+            content,
+            "[#resolvedlongago] follow-up question about the old fix"
+        ));
+        assert!(queue_prompt_text_is_free_text(
+            content,
+            "Approve [#confirmwhethersoftwrap] then ship it"
+        ));
+        // The inert `[#id]: note` shape keeps its contract.
+        assert!(queue_prompt_text_is_free_text(
+            content,
+            "[#confirmwhethersoftwrap]: a note"
         ));
     }
 

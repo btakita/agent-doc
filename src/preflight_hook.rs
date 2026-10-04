@@ -201,6 +201,20 @@ fn admission_failure_payload_for_error(target: &str, err: &anyhow::Error) -> Str
     }
 }
 
+/// GH #129: what a deadline refusal still permits.
+///
+/// The prohibition protects against a model composing a turn with no admitted
+/// cycle — a response write. A binary-owned tracked-work repair that
+/// `session-check` prescribes (`agent-doc backlog <FILE> requeue|done|
+/// keep-unqueued`) is not that: it runs without a cycle contract through the
+/// same editor-convergent tracked-work path an operator uses, and refusing it
+/// left a dropped queue head unrepairable across every refused turn (the
+/// session-check hint and this remedy forbade each other).
+const DEADLINE_REFUSAL_PERMITTED_REPAIRS: &str = "Permitted this turn: a binary-owned \
+     tracked-work repair that `agent-doc session-check` names, such as `agent-doc backlog \
+     <FILE> requeue <id>`, `agent-doc backlog <FILE> done <id>`, or `agent-doc backlog <FILE> \
+     keep-unqueued <id>` -- these need no admitted cycle and are not a response.";
+
 /// `#preflightdeadline`: the payload for a run the admission deadline stopped.
 ///
 /// Same marker, `document:`, `reason:` and `pending:` lines as every refusal,
@@ -221,9 +235,11 @@ fn admission_deadline_refusal_payload(target: &str, reason: &str, phase: &str) -
          refused this turn. Re-send `agent-doc {target}` to retry admission: the next preflight \
          starts afresh, and a `preflight_started` cycle this run opened is closed by its \
          recovery. Do NOT shell `agent-doc preflight` to recreate admission, and do not start a \
-         response or write the document this turn. Tell the operator admission timed out in \
-         phase `{phase}` and can be retried, run `agent-doc session-check {target}` and relay \
-         any pending operator prompt it lists, then stop. If retries keep stopping at `{phase}`, \
+         response this turn: no `agent-doc write`/`commit`/`finalize` and no hand edit of the \
+         document, because no cycle was admitted. {DEADLINE_REFUSAL_PERMITTED_REPAIRS} Tell the \
+         operator admission timed out in phase `{phase}` and can be retried, run \
+         `agent-doc session-check {target}`, relay any pending operator prompt it lists, run \
+         any binary-owned repair it names, then stop. If retries keep stopping at `{phase}`, \
          that phase is the work to move off the admission path, or raise the budget with \
          {HOOK_ADMISSION_BUDGET_ENV}=<seconds>. {HOOK_TIMEOUT_CAP_NOTE}"
     )
@@ -1437,6 +1453,74 @@ mod tests {
             "a boundary refusal is not the backstop overrun: {payload}"
         );
         assert!(!payload.contains(CONTRACT_MARKER), "{payload}");
+    }
+
+    /// GH #129: the deadline refusal sends the agent to `session-check`, so
+    /// every repair `session-check` prescribes for a dropped queue head must be
+    /// one the refusal permits. Before the fix the refusal forbade writing the
+    /// document and the hint prescribed `agent-doc write --commit`, so an agent
+    /// obeying both could only stop and the dropped head survived every
+    /// refused turn.
+    #[test]
+    fn deadline_refusal_permits_every_repair_session_check_names_for_a_dropped_head() {
+        let payload = admission_deadline_refusal_payload(
+            "tasks/doc.md",
+            "preflight admission deadline reached",
+            "prompt_classification",
+        );
+        let remedy = payload
+            .lines()
+            .find(|line| line.starts_with("remedy:"))
+            .unwrap_or_else(|| panic!("remedy line: {payload}"));
+        for command in
+            agent_doc_workflow::session_check::queue_head_removal_repair_commands("<FILE>", "<id>")
+        {
+            assert!(
+                remedy.contains(&command),
+                "the refusal must permit `{command}`: {remedy}"
+            );
+        }
+        // The prohibition is narrowed to a response, never dropped.
+        assert!(
+            remedy.contains("do not start a response this turn"),
+            "{remedy}"
+        );
+        assert!(
+            remedy.contains("no `agent-doc write`/`commit`/`finalize`"),
+            "{remedy}"
+        );
+        assert!(remedy.contains("no hand edit of the document"), "{remedy}");
+        assert!(
+            remedy.contains("Do NOT shell `agent-doc preflight`"),
+            "{remedy}"
+        );
+
+        // And the hint session-check prints in that state names nothing the
+        // refusal forbids.
+        let hint = match agent_doc_workflow::session_check::queue_head_removal_guard_result(
+            "tasks/doc.md",
+            &["confirmwhethersoftwrap".to_string()],
+            agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict,
+        ) {
+            agent_doc_workflow::session_check::GuardResult::Error(message) => message,
+            other => panic!("strict guard must interrupt: {other:?}"),
+        };
+        for forbidden in [
+            "agent-doc write --commit tasks/doc.md",
+            "agent-doc commit tasks/doc.md",
+            "agent-doc finalize tasks/doc.md",
+            "to the response",
+            "agent-doc preflight",
+        ] {
+            assert!(
+                !hint.contains(forbidden),
+                "session-check hint names `{forbidden}`, which the refusal forbids: {hint}"
+            );
+        }
+        assert!(
+            hint.contains("agent-doc backlog tasks/doc.md requeue confirmwhethersoftwrap"),
+            "{hint}"
+        );
     }
 
     /// `#preflightdeadline` (1): a bounded wait inside a phase is clamped to

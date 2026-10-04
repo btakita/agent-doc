@@ -932,9 +932,148 @@ pub fn reopen_actionable_id_in_content(content: &str, id: &str) -> anyhow::Resul
     Ok(Some(queue_comp.replace_content(content, &new_body)))
 }
 
+/// Outcome of [`requeue_open_ids_in_content`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequeueOpenIdsPlan {
+    /// Ids that gained a live `do [#id]` directive.
+    pub restored: Vec<String>,
+    /// Ids a live queue entry already referenced; left untouched.
+    pub already_live: Vec<String>,
+    /// The projected document, `None` when nothing was restored.
+    pub content: Option<String>,
+}
+
+/// `GH #129`: restore a live `do [#id]` queue directive for open backlog items
+/// whose queue head was dropped (the `#queue-clear-unrun-items` session-check
+/// finding).
+///
+/// The guard used to prescribe a hand edit of `agent:queue` followed by
+/// `agent-doc write --commit`. A refused admission forbids both, so the repair
+/// is a binary-owned tracked-work projection instead: it needs no cycle
+/// contract. Each id must still name an OPEN `agent:backlog` item — a resolved
+/// id has nothing to restore. Ids already referenced by a live queue entry are
+/// left alone; the rest are appended in the given order after every existing
+/// line, so the operator's current head keeps its slot. Struck entries for the
+/// id stay as completion history; only a live directive is added.
+pub fn requeue_open_ids_in_content(
+    content: &str,
+    ids: &[String],
+) -> anyhow::Result<RequeueOpenIdsPlan> {
+    let open: HashSet<String> = backlog::open_backlog_ids_in_content(content)
+        .into_iter()
+        .map(|id| backlog::normalize_pending_id(&id))
+        .collect();
+    let mut wanted: Vec<String> = Vec::new();
+    for raw in ids {
+        let id = backlog::normalize_pending_id(raw);
+        anyhow::ensure!(!id.is_empty(), "requeued id must not be empty");
+        anyhow::ensure!(
+            open.contains(&id),
+            "cannot requeue #{id}: it does not name an open agent:backlog item (a resolved id has no queue head to restore)"
+        );
+        if !wanted.contains(&id) {
+            wanted.push(id);
+        }
+    }
+
+    let components = element::parse(content)?;
+    let queue_comp = components
+        .iter()
+        .find(|component| component.name == "queue")
+        .ok_or_else(|| anyhow::anyhow!("document has no agent:queue component"))?;
+    let body = &content[queue_comp.open_end..queue_comp.close_start];
+    let mut live: HashSet<String> = HashSet::new();
+    for (entry, _) in document_queue::parse_spans(body)? {
+        if matches!(entry, QueueEntry::Prompt(_)) {
+            live.extend(document_queue::queue_entry_reference_ids(&entry));
+        }
+    }
+
+    let (already_live, restored): (Vec<String>, Vec<String>) =
+        wanted.into_iter().partition(|id| live.contains(id));
+    if restored.is_empty() {
+        return Ok(RequeueOpenIdsPlan {
+            restored,
+            already_live,
+            content: None,
+        });
+    }
+
+    let mut new_body = body.to_string();
+    if !new_body.trim().is_empty() && !new_body.ends_with('\n') {
+        new_body.push('\n');
+    }
+    if new_body.trim().is_empty() {
+        new_body.clear();
+    }
+    for id in &restored {
+        new_body.push_str(&format!("- do [#{id}]\n"));
+    }
+    Ok(RequeueOpenIdsPlan {
+        content: Some(queue_comp.replace_content(content, &new_body)),
+        restored,
+        already_live,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn requeue_restores_dropped_open_heads_after_existing_lines() {
+        // GH #129: the `#queue-clear-unrun-items` repair is a binary projection,
+        // not a hand edit plus `write --commit`.
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#dropped] [operator-verify] confirm the fix\n",
+            "- [ ] [#live] still queued\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- ~~do [#dropped]~~\n",
+            "- do [#live]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let plan =
+            requeue_open_ids_in_content(content, &["#dropped".to_string(), "live".to_string()])
+                .unwrap();
+        assert_eq!(plan.restored, vec!["dropped".to_string()]);
+        assert_eq!(plan.already_live, vec!["live".to_string()]);
+        let updated = plan.content.unwrap();
+        assert!(
+            updated.contains(
+                "- ~~do [#dropped]~~\n- do [#live]\n- do [#dropped]\n<!-- /agent:queue -->"
+            ),
+            "restored head appended after every existing line, struck history kept:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn requeue_refuses_an_id_that_is_not_open_backlog() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n- [ ] [#open] x\n<!-- /agent:backlog -->\n",
+            "<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+        );
+        let err = requeue_open_ids_in_content(content, &["gone".to_string()]).unwrap_err();
+        assert!(err.to_string().contains("cannot requeue #gone"), "{err}");
+        let plan = requeue_open_ids_in_content(content, &["open".to_string()]).unwrap();
+        assert!(
+            plan.content
+                .unwrap()
+                .contains("<!-- agent:queue -->\n- do [#open]\n<!-- /agent:queue -->")
+        );
+    }
+
+    #[test]
+    fn requeue_is_a_no_op_when_every_id_is_already_live() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n",
+            "<!-- agent:queue -->\n- :pushpin: [#a]\n<!-- /agent:queue -->\n",
+        );
+        let plan = requeue_open_ids_in_content(content, &["a".to_string()]).unwrap();
+        assert!(plan.content.is_none());
+        assert_eq!(plan.already_live, vec!["a".to_string()]);
+    }
 
     fn set(items: &[&str]) -> HashSet<String> {
         items.iter().map(|item| item.to_string()).collect()

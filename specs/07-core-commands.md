@@ -466,6 +466,16 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   the archive plus session document in one tracked-work transaction.
   `--queue` also removes a same-id struck directive and prepends one live
   `do [#ID]` directive without rewriting unrelated queue bytes.
+- `backlog <FILE> requeue <ID>...` and `backlog <FILE> keep-unqueued <ID>...`
+  repair the `#queue-clear-unrun-items` session-check finding (GH #129), a
+  runnable queue head dropped while its backlog item stayed open. `requeue`
+  appends one live `do [#ID]` per open id that has no live queue entry, through
+  the tracked-work transaction; `keep-unqueued` records the ids as kept open on
+  the last cycle's state, writing no document, when the operator removed the
+  head on purpose. Both refuse an id that is not open backlog work. Neither
+  needs an admitted cycle, so both stay legal after a preflight
+  admission-deadline refusal, which forbids a response write but names these
+  repairs as permitted; the finding clears without `write --commit`.
 - Non-item separator lines and headings inside backlog/icebox must be preserved during mutation.
 - Flush-left parent items are the tracked units; indented nested lists travel with the parent during edit/reorder/reap/transfer.
 - `backlog <FILE> set-attr <ATTR> [VALUE]` / `unset-attr <ATTR>` mutate the

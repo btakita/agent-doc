@@ -336,9 +336,13 @@ pub fn queue_head_removal_guard_result(
     let warn_line = format!(
         "[session-check] warn: runnable agent:queue head(s) {ids} were removed from the committed queue but their backlog item(s) are still open in agent:backlog, and the cycle never consumed, completed, gated, or reaped them — unrun queue work was silently dropped"
     );
-    let repair = format!(
-        "restore the dropped head(s) to `agent:queue` (or resolve each id with `--done`/`--pending-gate`), then re-run `agent-doc write --commit {file}`; add `<!-- no-queue-removal-guard -->` to the response if the removal was an explicit user edit"
-    );
+    // GH #129: this guard only fires on a committed (closed) cycle, so there is
+    // no response to re-commit — and the repair must stay legal when no cycle
+    // contract exists (a refused preflight admission forbids a response write
+    // and any hand edit of the document). Every command named here is a
+    // binary-owned tracked-work repair that needs no admitted cycle.
+    let id_args = lost.join(" ");
+    let repair = queue_head_removal_repair(file, &id_args);
 
     match mode {
         PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
@@ -351,6 +355,27 @@ pub fn queue_head_removal_guard_result(
         )),
         PendingCaptureGuardMode::Off => GuardResult::None,
     }
+}
+
+/// The repair commands the `#queue-clear-unrun-items` finding names (GH #129).
+///
+/// Each one is a binary-owned tracked-work command that runs without an
+/// admitted cycle, so the hint stays executable after a preflight admission
+/// refusal. Nothing here asks for `agent-doc write --commit`, a hand edit of
+/// `agent:queue`, or a response marker.
+pub fn queue_head_removal_repair_commands(file: &str, id_args: &str) -> [String; 3] {
+    [
+        format!("agent-doc backlog {file} requeue {id_args}"),
+        format!("agent-doc backlog {file} done <id>"),
+        format!("agent-doc backlog {file} keep-unqueued {id_args}"),
+    ]
+}
+
+fn queue_head_removal_repair(file: &str, id_args: &str) -> String {
+    let [requeue, done, keep] = queue_head_removal_repair_commands(file, id_args);
+    format!(
+        "restore the dropped head(s) with `{requeue}`, resolve an id whose work is finished with `{done}`, or, if the operator removed the head(s) on purpose, accept that with `{keep}`; then re-run `agent-doc session-check {file}`. These are binary-owned repairs that need no admitted cycle, so they are permitted even after a refused preflight admission; nothing is re-committed afterwards, because this cycle is already committed"
+    )
 }
 
 pub fn free_text_queue_marker_residue_result(file: &str) -> GuardResult {
@@ -748,6 +773,39 @@ pub fn open_cycle_manual_patchback_message(input: OpenCycleManualPatchbackMessag
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_head_removal_hint_names_only_repairs_legal_without_a_cycle() {
+        // GH #129: the hint must stay executable when preflight refused
+        // admission, which forbids a response write and any document edit.
+        let lost = vec!["confirmwhethersoftwrap".to_string(), "other".to_string()];
+        for mode in [
+            PendingCaptureGuardMode::Warn,
+            PendingCaptureGuardMode::Strict,
+        ] {
+            let text = match queue_head_removal_guard_result("doc.md", &lost, mode) {
+                GuardResult::Warn(lines) => lines.join("\n"),
+                GuardResult::Error(message) => message,
+                GuardResult::None => panic!("guard must report"),
+            };
+            assert!(
+                !text.contains("write --commit doc.md")
+                    && !text.contains("re-run `agent-doc write"),
+                "the hint must not prescribe a response write: {text}"
+            );
+            assert!(
+                !text.contains("to the response"),
+                "the hint must not require a response marker: {text}"
+            );
+            for command in
+                queue_head_removal_repair_commands("doc.md", "confirmwhethersoftwrap other")
+            {
+                assert!(text.contains(&command), "hint names `{command}`: {text}");
+            }
+            assert!(text.contains("agent-doc session-check doc.md"), "{text}");
+            assert!(text.contains("need no admitted cycle"), "{text}");
+        }
+    }
 
     #[test]
     fn no_response_active_queue_head_result_formats_modes() {

@@ -55,6 +55,19 @@ Compacted content:
 **Needs attention:**
 - The shared `src/agent-doc` checkout is still on `1064bf1f8`. I did not fast-forward it, because the other session's uncommitted `VERSIONS.md` edit would collide. That edit looks damaged: it deletes the whole `## 0.35.446` section and appends a few lines at the end of the file. It needs a rebase onto `origin/main` before that session commits.
 - To clean up afterwards: remove the worktree and branch `release-0.35.447`, plus the `~/work/btakita/agent-doc-worktrees/tmux-router` symlink the subagent created so the worktree could build.
+
+### Re: release cleanup — opus-5.5 · 2026-10-04T00:12-04:00
+
+> **Queue prompt:** Do the cleanup that you suggested.
+
+The release cleanup is finished:
+
+- **Worktree:** `~/work/btakita/agent-doc-worktrees/release-0.35.447` was removed. Before removing it, the subagent checked that it had no uncommitted changes and that its HEAD, `63b514852`, is already on `origin/main`.
+- **Branch:** `release-0.35.447` was deleted. Plain `-d` refused because the shared checkout's local `main` is still at `1064bf1f8`, so the subagent used `-D`. That loses nothing, since the commit is on `origin/main`.
+- **Symlink and folder:** the `tmux-router` symlink was removed as a link, without following it. The now-empty `agent-doc-worktrees/` directory was removed too.
+- **Untouched:** the remote tag `v0.35.447`, `origin/main`, and the shared `src/agent-doc` checkout.
+
+The shared checkout still needs the other session to rebase its uncommitted edits onto `origin/main`, as noted in my previous response.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 

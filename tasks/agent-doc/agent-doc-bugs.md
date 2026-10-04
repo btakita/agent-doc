@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -297,14 +296,7 @@ All four were fixed by background subagents in separate worktrees, then merged s
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~do [#jbpluginvanish]~~
-- ~~do [#jbdynamicfalsereport]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/131
-- #gh-fix https://github.com/btakita/agent-doc/issues/132
-- #gh-fix https://github.com/btakita/agent-doc/issues/133
-- #gh-fix https://github.com/btakita/agent-doc/issues/134
-- ~~release + publish~~
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

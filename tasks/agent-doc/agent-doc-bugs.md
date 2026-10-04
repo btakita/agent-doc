@@ -201,7 +201,6 @@ I claimed and dispatched each item to its own subagent, each in a worktree based
 > **Queue prompt:** release + publish
 
 **Deferred, not done:** this release has not happened yet. It is claimed by me (`coordinator:integration`) and waits for the six in-flight branches: the four above plus GH #130 and `#steerbacklogsource`. When they land, I'll merge them one at a time, run `make check` and one `make install`, release v0.35.453, and close the items and GH issues. Keep this head open until then.
-
 ### Re: try again — opus-5-5 · 2026-10-04T13:57-04:00
 
 > **Chat prompt (#chatprompt):** try again
@@ -209,6 +208,27 @@ I claimed and dispatched each item to its own subagent, each in a worktree based
 Retrying. The document was stuck in an interrupted state: `session-check` reported that the editor authority and the disk copy disagree in one place. The queue on disk has `- do [#deferstrike]` (written there when I filed `#deferstrike`), but the editor buffer doesn't. The log also showed `live_editors=0` at that moment. `session-check`'s prescribed remedy is to open a new cycle, and this reply is that cycle: it commits whatever is currently in the buffer instead of forcing the disk copy.
 
 Integration status: all six branches (`#ghjbfolding`, `#ghbrew`, GH #130, `#steerbacklogsource`, `#ghmultitmux`, `#deferstrike`) are merged on `integ453`. The serial `make check` on it is still running (10,921 tests); nothing else is building now, and the disk has 1.1T free. When it passes, I'll release v0.35.453 and close the items.
+
+### Re: try again — v0.35.453 closed out — opus-5-5 · 2026-10-04T14:15-04:00
+
+> **Chat prompt (#chatprompt):** try again
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/130
+
+Done. After your IDE restart the editor re-registered: 6 live registrations, and the earlier "try again" reply committed. This cycle closes out **v0.35.453**, which is already released, installed and pushed.
+
+**Released in v0.35.453** (release commit `8df52fee7`, tag pushed, superproject gitlink `84f3b3aca0`). All six branches were merged serially; full `make check` exited 0 with **10921 tests passed**, and `editor-parity` and the plugin version fence passed. Installed: CLI `0.35.453`, JetBrains `0.2.490`, VS Code `0.2.80`.
+- **GH #130, closed:** the controller closeout gate now checks whether the owner process is still alive, so a claimant blocked on an owner that has exited is released right away (`OwnerProcessGone`) instead of after the 300s lease.
+- **`#ghmultitmux` (GH #17, closed):** a `tmux_sessions` allow-list, plus a per-document `tmux_session:` binding that one policy applies to route, sync, start, claim, `tmux ensure`, `session set` and terminal. It fails closed on a session not in the list, and single-session projects are unchanged. Runbook: `runbooks/multi-tmux-sessions.md`.
+- **`#ghjbfolding` (GH #19):** JetBrains component folding (`agent:NAME · N items`), gutter toggles and a structure view, built from the native parser off the editor thread. The plugin needs a live-IDE look.
+- **`#ghbrew` (GH #31, closed):** the formula is pushed to `btakita/homebrew-tap` main, so `brew install btakita/tap/agent-doc` works on Linux. `homebrew.yml` bumps it on each tag once the `HOMEBREW_TAP_TOKEN` secret is added; macOS waits on Darwin archives.
+- **`#steerbacklogsource`:** edits in backlog/review/done/queue are no longer surfaced as exchange steering or carried forward as absorbed prompts.
+- **`#deferstrike`:** claimed or `**Deferred:**` free-text queue heads are no longer struck, and the pre-write gate skips claimed heads.
+- **`#apimdrevert`, closed as a real loss that was already fixed:** two pieces of operator text in `api.md` were lost on 2026-09-28 at 21:34 and 21:52, when the editor reattached after an install. They were the words " Add alerts " and the queue's `go` marker plus `do [#sbxsignupcodegate]` and `do [#sbxearlyaccesssheet]`. The cause was fixed that same night (`f812e450d`, then `c9b731ea1`). The lost text was not restored; re-add it by hand if you still want it.
+
+**New bugs filed from this session** (appended to the backlog):
+- **`#jbpluginvanish`:** the JetBrains plugin directory disappeared around the 13:49 IDE restart, while the disk was full, and every document lost its editor. I reinstalled it from the release.
+- **`#jbdynamicfalsereport`:** `plugin install` claimed it had "dynamically replaced, no restart required" when no plugin was loaded in the IDE.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -219,26 +239,23 @@ Integration status: all six branches (`#ghjbfolding`, `#ghbrew`, GH #130, `#stee
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~do [#editoractionmenu]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/130
-- do [#steerbacklogsource]
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/130~~
+- ~~do [#steerbacklogsource]~~
+- ~~do [#deferstrike]~~
 - ~~do [#gvqv]~~
 - ~~do [#halftypedcoin]~~
 - ~~release + publish~~
-- do [#ghbrew]
-- do [#ghjbfolding]
-- do [#ghmultitmux]
-- do [#apimdrevert]
+- ~~do [#ghbrew]~~
+- ~~do [#ghjbfolding]~~
+- ~~do [#ghmultitmux]~~
+- ~~do [#apimdrevert]~~
 - ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#deferstrike] [agent-doc] A deferred free-text queue head is struck anyway. The finalize pre-write gate refuses a cycle whose selected free-text head (here 'release + publish') is not quoted as a queue-prompt blockquote in the response ('include its exact quote and the completed result or concrete deferral'). But once quoted, ftstrike auto-strikes it as 'answered this cycle', even when the response explicitly defers it ('Deferred, not done ... Keep this head open'). Seen 2026-10-04 15:25: the head was claimed by coordinator:integration and still got struck. The same thing struck dispatched-only GH 127/128/129 heads earlier. Fix: a quoted head followed by a deferral, or one claimed by a live owner, must satisfy the gate without being struck; strike only a completed answer. The gate should not select claimed heads at all.
-- [ ] [#steerbacklogsource] [agent-doc] Steering classifies an operator edit to an agent:backlog line as an exchange prompt. On 2026-10-04 the operator rewrote the gvqv backlog stub into the full Dashboard request. Every steering report then surfaced it as 'source=exchange change=added dispatch=address_now', even after it was answered. The new absorbed-steering ledger (steerbaselineabsorb) then carried that backlog line into the next contract's absorbed_steering_prompts / user_intent_prompt_changes as an operator prompt. Fix: attribute steering items by the component that actually changed (backlog/review/done edits are managed-component state, not exchange prompts), and never record a non-exchange line in the absorbed-steering ledger.
-- [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
-- [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
-- [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.
-- [/] [#apimdrevert] [agent-doc][operator-verify] src/haiven-dev/tasks/api.md 'reverted by queue updates' (2026-09-29): forensics found NO lost operator text — disk/controller/editor converged at c9273a0b (HEAD 1b432940 + Codex 00:49:49 queue stop+strike, applied as a 2038-byte CRDT delta against the converged base). Only editor-side anomaly: idea.1.log 00:40:02
+- [ ] [#jbpluginvanish] [agent-doc][jetbrains] The agent-doc JetBrains plugin vanished from ~/.local/share/JetBrains/IntelliJIdea2026.1 around the 2026-10-04 13:49 IDE restart (plugin dir gone, only .agent-doc-jetbrains-install.lock left; 'agent-doc plugin list' showed vscode only), so every document lost its editor registration (33 open docs not-live). Context: at 13:12 the v0.35.452 install dynamically replaced 0.2.488 through the upgrader java agent but logged 'replica restart incomplete attached=10/23', and the disk was 100% full around 13:4x. Hypothesis: a staged replacement or action script failed during the restart on a full disk, and the old dir was removed without the new one. Find the install/upgrade path that can delete the plugin dir without a successful replacement; make it atomic (stage, verify, then swap) with a regression test.
+- [ ] [#jbdynamicfalsereport] [agent-doc][jetbrains] 'agent-doc plugin install jetbrains --local --all-installed' (make install, 2026-10-04 14:03) reported 'JetBrains package convergence: 1 updated ... Changed live JetBrains packages were dynamically replaced; no IDE restart is required' even though the running IDE had no agent-doc plugin loaded (it had vanished, see jbpluginvanish). The idea.log showed no plugin activity and editor registrations stayed at 0 until a manual IDE restart. The dynamic-replace path must verify that the plugin is actually loaded in the live IDE after replacement (e.g. a registration or handshake within a timeout) and otherwise report 'restart required'.
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

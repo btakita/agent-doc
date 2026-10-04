@@ -154,6 +154,28 @@ I claimed this item and started a background subagent on it. It's cutting **tsif
 This is the first release where `tsift-tree-sitter-jai` publishes through the trusted publisher, so the subagent will confirm that crate specifically.
 
 The closeout flagged #fixhttpsgithub as a possible match for this request. That's an August release, so it isn't this one.
+
+### Re: release + publish done — tsift 0.1.103 — opus-5-5 · 2026-10-04T00:55-04:00
+
+**tsift 0.1.103 is out on crates.io, npm and GitHub, and it's installed locally.** The subagent ran it end to end, and nothing failed.
+
+- **Commit and tag:** the version bump is `f57f902` ("chore: release v0.1.103"). It went onto `main` as a fast-forward from `92f6bb1`, without force, and the annotated tag `v0.1.103` points at it.
+- **What the bump changed:** 50 files, the same set as 0.1.102 plus the new jai crate. In `VERSIONS.md`, `## Unreleased` became `## 0.1.103`.
+- **Publish lists:** I compared both lists in `release.yml` against `cargo metadata --all-features`. All 23 crates that `tsift` and `tsift-cli` depend on, optional ones included, are in both lists in dependency order. No change was needed.
+- **`make check`:** exited 0, with 3,915 Rust tests passed and 0 failed. The 8 npm tests also passed.
+- **Release run `37178286130`:** every job succeeded: verify, the 3 OS builds, the GitHub Release, npm and crates.io.
+- **crates.io:** the job log says `published=27 skipped=0`, all through the trusted publisher. **tsift-tree-sitter-jai 0.1.103 published through it for the first time**, which confirms last cycle's setup. The crates.io index shows 0.1.103 for every crate checked.
+- **npm and GitHub:** `opencode-tsift` is at 0.1.103. The GitHub Release is published with 6 assets.
+
+**Local install now matches the release binary.** The subagent's plain `cargo install --path .` left out the opt-in `lang-jai` feature, which the release binaries include through `all-languages`. I reinstalled from crates.io with `cargo install --locked tsift@0.1.103 --features all-languages`. It exited 0, and `tsift --version` reports `tsift 0.1.103`. I didn't finish a check that the binary actually parses `.jai` files: the test indexed far more than the one test file and I stopped it after 2 minutes. So the only evidence is the feature flag.
+
+**Follow-up (`tsiftskillrefresh`, recommended):** some tsift skill copies are out of date:
+- agent-loop's `.agents/skills/tsift/SKILL.md` says 0.1.101.
+- agent-loop's `.claude/skills/tsift/SKILL.md` and the global `~/.claude/skills/tsift/SKILL.md` say 0.1.62. They're plain copies, not links.
+
+They live in the shared tree, so this release left them alone. I added a backlog item to refresh them with `tsift init --harness claude`.
+
+The `agent-loop/src/tsift` checkout is still on `33bc48f` (0.1.102) and untouched. The subagent's worktree is removed.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -168,6 +190,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tsiftskillrefresh] [recommended] Refresh the stale tsift skill copies to 0.1.103: agent-loop .agents/skills/tsift/SKILL.md (0.1.101), .claude/skills/tsift/SKILL.md and ~/.claude/skills/tsift/SKILL.md (both 0.1.62, plain copies, not links). Use tsift init --harness claude (links rather than copies). Check first that no other session is editing those files in the shared tree, and commit only those paths.
 <!-- /agent:backlog -->
 
 ## Review

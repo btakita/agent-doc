@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.450
+
+- **Chat-originated prompts are a real turn end to end (GH #125, reopened).** The Claude Code and Codex prompt
+  hooks now pass unrecorded chat prompts into preflight's request (`chat_prompts`), so the cycle contract
+  carries them, reports `no_changes: false` (with `diff_type: "chat_prompt"` when the document did not change),
+  and lists each as a `prompt_target` in `user_intent_prompt_changes` and in `plan`. A cycle that answered a chat
+  prompt logs `commit_chat_turn`, not `commit_noop`, so `recent_noop_closeouts` no longer counts it. The prompt
+  ledger drops harness envelopes (including stored ones), entries older than 6 hours, prompts the document
+  already records with a `> **Chat prompt (#chatprompt):**` line, and prompts a later committed cycle closed out;
+  it keeps the newest 8. `session-check` warns (never fails) when a committed cycle carried a chat prompt with no
+  record, and names the repair.
+
 ## 0.35.449
 
 - **Pane focus re-places a document a plugin publication evicted (GH #126).** A single-column plugin

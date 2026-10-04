@@ -539,6 +539,10 @@ fn committed_cycle_steering_status(
         .ok()
         .map(|current| crate::midturn_steering::pending_steering_items(file, &current))
         .unwrap_or_default();
+    // `#steerbaselineabsorb`: a pending prompt the committed baseline already
+    // carries would read as `no_changes` to the next preflight; persist it so
+    // the next contract carries it.
+    crate::absorbed_steering::record_reported_logged(file, &items, &state.cycle_id);
     let items = crate::midturn_steering::render_pending_steering_items(&items)
         .map(|rendered| format!("\n{rendered}"))
         .unwrap_or_default();

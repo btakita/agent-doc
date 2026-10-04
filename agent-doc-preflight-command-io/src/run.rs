@@ -1328,8 +1328,36 @@ fn run_with_options_to_writer_in_pass(
             acc
         });
     let chat_turn = !chat_prompts.is_empty();
+    // `#steerbaselineabsorb`: steering a turn-boundary report announced for
+    // this cycle, but whose text an earlier closeout commit absorbed into the
+    // committed baseline, is invisible to the document diff. Carry it like a
+    // chat prompt.
+    let absorbed_steering_prompts: Vec<String> =
+        match agent_doc_session_check_io::absorbed_steering::unanswered_prompts(file) {
+            Ok(prompts) => prompts
+                .into_iter()
+                .map(|prompt| prompt.trim().to_string())
+                .filter(|prompt| !prompt.is_empty() && !chat_prompts.contains(prompt))
+                .fold(Vec::<String>::new(), |mut acc, prompt| {
+                    if !acc.contains(&prompt) {
+                        acc.push(prompt);
+                    }
+                    acc
+                }),
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "preflight_absorbed_steering_read_failed file={} error={err:#} (#steerbaselineabsorb)",
+                        file.display()
+                    ),
+                );
+                Vec::new()
+            }
+        };
+    let absorbed_turn = !absorbed_steering_prompts.is_empty();
     let document_no_changes = no_changes;
-    let no_changes = document_no_changes && !chat_turn;
+    let no_changes = document_no_changes && !chat_turn && !absorbed_turn;
 
     // `#qmaintorphan`: queue maintenance (step 4b2) runs AFTER the single step-2
     // commit, so a mutation it persisted to the visible document + snapshot is
@@ -1968,6 +1996,10 @@ fn run_with_options_to_writer_in_pass(
     if !options.probe {
         let mut checkpoint_prompt_targets = prompt_targets.clone();
         push_unique_strings(&mut checkpoint_prompt_targets, chat_prompts.clone());
+        push_unique_strings(
+            &mut checkpoint_prompt_targets,
+            absorbed_steering_prompts.clone(),
+        );
         agent_doc_cycle_state_io::record_turn_checkpoint(
             file,
             &checkpoint_prompt_targets,
@@ -1982,6 +2014,30 @@ fn run_with_options_to_writer_in_pass(
                     "preflight_chat_prompts_carried file={} count={} document_no_changes={} (#chatprompt)",
                     file.display(),
                     chat_prompts.len(),
+                    document_no_changes
+                ),
+            );
+        }
+        if absorbed_turn
+            && let Some(state) = agent_doc_cycle_state_io::record_absorbed_steering_prompts(
+                file,
+                &absorbed_steering_prompts,
+            )?
+            && state.is_open()
+        {
+            // Carried by an admitted cycle: consumed, never carried again.
+            agent_doc_session_check_io::absorbed_steering::mark_carried(
+                file,
+                &absorbed_steering_prompts,
+                &state.cycle_id,
+            )?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_absorbed_steering_carried file={} cycle={} count={} document_no_changes={} (#steerbaselineabsorb)",
+                    file.display(),
+                    state.cycle_id,
+                    absorbed_steering_prompts.len(),
                     document_no_changes
                 ),
             );
@@ -2101,7 +2157,7 @@ fn run_with_options_to_writer_in_pass(
     // document to mark) and before the queue preemption decision (the operator
     // asked for this turn's work, so it runs before the next queue head).
     let document_user_intent_prompt_changes = user_intent_prompt_changes.clone();
-    for prompt in &chat_prompts {
+    for prompt in chat_prompts.iter().chain(absorbed_steering_prompts.iter()) {
         if !user_intent_prompt_changes
             .iter()
             .any(|change| change.text.trim() == prompt)
@@ -2451,8 +2507,18 @@ fn run_with_options_to_writer_in_pass(
         no_changes_explanation,
         linked_changes: projected_linked_changes,
         diff_type: diff_type_str.clone().or_else(|| {
-            (chat_turn && document_no_changes)
-                .then(|| agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_DIFF_TYPE.to_string())
+            if !document_no_changes {
+                None
+            } else if chat_turn {
+                Some(agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_DIFF_TYPE.to_string())
+            } else if absorbed_turn {
+                Some(
+                    agent_doc_session_check_io::absorbed_steering::ABSORBED_STEERING_DIFF_TYPE
+                        .to_string(),
+                )
+            } else {
+                None
+            }
         }),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
@@ -2461,6 +2527,7 @@ fn run_with_options_to_writer_in_pass(
         op_affectedness,
         user_intent_prompt_changes,
         chat_prompts,
+        absorbed_steering_prompts,
         inline_annotations,
         slash_commands,
         builtin_commands,
@@ -3459,6 +3526,129 @@ mod tests {
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_eq!(state.chat_prompts, vec!["#upgrade".to_string()]);
         assert!(state.prompt_targets.contains(&"#upgrade".to_string()));
+    }
+    /// `#steerbaselineabsorb` (agent-doc-bugs.md, 2026-10-04): the operator
+    /// finished `testing to see` as `testing to see if you pick this up.` while
+    /// `respond` was committing. The commit absorbed the line, the closeout
+    /// steering report announced it as a new prompt for the next cycle, and the
+    /// next preflight still said `no_changes: true` because the editor matched
+    /// the commit. The report persists it; the next contract carries it.
+    #[test]
+    fn preflight_carries_steering_absorbed_into_the_closeout_commit() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let prompt = "testing to see if you pick this up.";
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent_doc_steering_debounce_ms: 0\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "testing to see\n\n",
+            "### Re: testing to see — gpt-5\n\n",
+            "Seen.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let first = agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline))
+            .unwrap();
+        agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+            &doc,
+            &first.cycle_id,
+            baseline,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+
+        // The operator finishes the line while the closeout commits; the
+        // commit (snapshot + cycle) absorbs it.
+        let absorbed = baseline.replace("Seen.\n", &format!("Seen.\n\n{prompt}\n"));
+        std::fs::write(&doc, &absorbed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &absorbed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "test_commit",
+            Some(&absorbed),
+            Some(&absorbed),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&doc)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+            .unwrap();
+
+        // The turn-boundary report announces it for the next cycle.
+        let mut report = Vec::new();
+        agent_doc_session_check_io::midturn_steering::emit_closeout_steering(&doc, &mut report);
+        let report = String::from_utf8(report).unwrap();
+        assert!(
+            report.starts_with(
+                agent_doc_document_realtime::midturn_steering::CLOSEOUT_STEERING_MARKER
+            ),
+            "{report}"
+        );
+        assert!(report.contains("dispatch=address_now"), "{report}");
+        assert!(report.contains(&format!("verbatim: {prompt}")), "{report}");
+        assert_eq!(
+            agent_doc_session_check_io::absorbed_steering::unanswered_prompts(&doc).unwrap(),
+            vec![prompt.to_string()]
+        );
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions::default(), &mut output).unwrap();
+        let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(contract["no_changes"], false, "{contract:#}");
+        assert!(
+            contract.get("no_changes_explanation").is_none(),
+            "{contract:#}"
+        );
+        assert_eq!(
+            contract["diff_type"],
+            agent_doc_session_check_io::absorbed_steering::ABSORBED_STEERING_DIFF_TYPE
+        );
+        assert_eq!(
+            contract["absorbed_steering_prompts"],
+            serde_json::json!([prompt])
+        );
+        let changes = contract["user_intent_prompt_changes"].as_array().unwrap();
+        assert!(
+            changes
+                .iter()
+                .any(|change| change["kind"] == "prompt_target" && change["text"] == prompt),
+            "{contract:#}"
+        );
+
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_ne!(state.cycle_id, first.cycle_id);
+        assert_eq!(state.absorbed_steering_prompts, vec![prompt.to_string()]);
+        assert!(state.prompt_targets.contains(&prompt.to_string()));
+        // Carried by an admitted cycle: consumed, never carried again.
+        assert!(
+            agent_doc_session_check_io::absorbed_steering::unanswered_prompts(&doc)
+                .unwrap()
+                .is_empty()
+        );
     }
     #[test]
     fn preflight_opens_cycle_from_active_queue_when_document_has_no_diff() {

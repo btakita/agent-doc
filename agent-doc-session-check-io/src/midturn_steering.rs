@@ -341,6 +341,17 @@ impl PreparedObservation {
             .as_ref()
             .filter(|report| !report.items.is_empty())
         {
+            // `#steerbaselineabsorb`: a turn-boundary report frames each
+            // exchange item as the NEXT cycle's prompt. When the closeout commit
+            // already absorbed its text, the next preflight diffs clean, so
+            // persist it for that contract to carry.
+            if self.boundary {
+                crate::absorbed_steering::record_reported_logged(
+                    file,
+                    &report.items,
+                    &next.cycle_id,
+                );
+            }
             let dispatches = report
                 .items
                 .iter()
@@ -626,6 +637,9 @@ fn prepare_with_gate(
         decisions: std::mem::take(&mut observation.decisions),
     };
     route_claimed_items(file, &content, &mut observation.ready);
+    // `#steerbaselineabsorb`: a prompt a cycle already carried or answered is
+    // never re-surfaced (the watermark still advances past it).
+    crate::absorbed_steering::drop_consumed(file, &mut observation.ready);
     let mut next = observation.next;
     next.last_observed_stat = Some(fingerprint);
     let report = SteeringReport {
@@ -882,6 +896,7 @@ pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
     let mut ready =
         core::observe_with_mode(&base, current, &ctx, core::ObserveMode::Boundary).ready;
     route_claimed_items(file, current, &mut ready);
+    crate::absorbed_steering::drop_consumed(file, &mut ready);
     ready
 }
 
@@ -1862,5 +1877,90 @@ mod tests {
         let stored = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
         assert_eq!(stored.claims.len(), 1, "{stored:?}");
         assert_eq!(stored.claims[0].item_text, format!("{annotated_head}."));
+    }
+
+    /// `#steerbaselineabsorb` (agent-doc-bugs.md, 2026-10-04): the operator
+    /// finished a prompt line while `respond` was committing, the commit
+    /// absorbed it, and the steering hook kept re-surfacing the same item after
+    /// a later cycle had answered and committed it. Once the absorbed prompt is
+    /// answered, no steering consumer lists it again.
+    #[test]
+    fn answered_absorbed_steering_is_never_resurfaced() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let prompt = "testing to see if you pick this up.";
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:exchange -->\nEarlier prompt.\n\n### Re: Earlier prompt\n\nAnswer.\n<!-- /agent:exchange -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let first =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &first.cycle_id, baseline, None, Vec::new()).unwrap();
+
+        // The closeout commit absorbs the operator's line into its baseline.
+        let absorbed = baseline.replace("Answer.\n", &format!("Answer.\n\n{prompt}\n"));
+        std::fs::write(&file, &absorbed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &absorbed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        close_cycle(&file, &absorbed);
+        backdate(&file);
+
+        // Control: the hook's stale cycle base still derives the item.
+        let peek = observe(&file, CONSUMER_HOOK, false)
+            .unwrap()
+            .expect("hook peek");
+        assert_eq!(peek.items.len(), 1, "{peek:?}");
+        assert_eq!(peek.items[0].verbatim, prompt);
+        assert_eq!(peek.items[0].dispatch, core::SteeringDispatch::AddressNow);
+        // The `steering pending` report persists it: the committed baseline
+        // carries the text, so the next preflight would otherwise diff clean.
+        assert_eq!(
+            crate::absorbed_steering::record_reported(&file, &peek.items, &first.cycle_id).unwrap(),
+            vec![prompt.to_string()]
+        );
+        assert_eq!(
+            crate::absorbed_steering::unanswered_prompts(&file).unwrap(),
+            vec![prompt.to_string()]
+        );
+
+        // A later response cycle answers it and commits without a preflight
+        // re-seed (a `respond` that reopens a committed cycle from HEAD).
+        let second =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&absorbed), Some(&absorbed))
+                .unwrap();
+        assert_ne!(second.cycle_id, first.cycle_id);
+        let answered = absorbed.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: testing to see — opus\n\nYes, picked up.\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&file, &answered).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &file,
+            "test_capture",
+            Some(&answered),
+            Some(&answered),
+            "sha-answer",
+            Some(&second.cycle_id),
+        )
+        .unwrap();
+        close_cycle(&file, &answered);
+        backdate(&file);
+
+        assert!(
+            crate::absorbed_steering::unanswered_prompts(&file)
+                .unwrap()
+                .is_empty()
+        );
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap();
+        assert!(
+            hook.as_ref().is_none_or(|report| report.items.is_empty()),
+            "{hook:?}"
+        );
+        assert!(observe_for_wake(&file).unwrap().items.is_empty());
+        assert!(pending_steering_items(&file, &answered).is_empty());
     }
 }

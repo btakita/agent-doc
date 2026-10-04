@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::cell::Cell;
 use std::path::Path;
 
+pub mod absorbed_steering;
 pub mod backlog_guards;
 pub mod closeout_guards;
 pub mod command;

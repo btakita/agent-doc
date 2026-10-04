@@ -1000,7 +1000,16 @@ fn open_cycle_chat_prompts(file: &Path) -> Vec<String> {
         .ok()
         .flatten()
         .filter(|cycle| cycle.is_open())
-        .map(|cycle| cycle.chat_prompts)
+        .map(|cycle| {
+            // `#steerbaselineabsorb`: absorbed steering the cycle carries is
+            // the same kind of diff-invisible operator prompt.
+            let mut prompts = cycle.chat_prompts;
+            agent_doc_prompt_contract::push_unique_strings(
+                &mut prompts,
+                cycle.absorbed_steering_prompts,
+            );
+            prompts
+        })
         .unwrap_or_default()
 }
 

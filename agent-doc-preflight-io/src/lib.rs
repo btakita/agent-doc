@@ -750,6 +750,15 @@ pub struct PreflightOutput {
     /// is never `no_changes`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chat_prompts: Vec<String>,
+    /// `#steerbaselineabsorb`: operator prompts a previous turn-boundary
+    /// steering report announced ("answer it in the next cycle") whose text an
+    /// earlier closeout commit already absorbed into the committed baseline, so
+    /// the document diff cannot show them. They are this cycle's work (also
+    /// listed in `user_intent_prompt_changes`): answer each in the
+    /// `patch:exchange` response. The text is already in the document; do not
+    /// re-insert it. Non-empty means the cycle is never `no_changes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub absorbed_steering_prompts: Vec<String>,
     /// Legacy compatibility field: inline user edits inside prior agent responses.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inline_annotations: Vec<String>,

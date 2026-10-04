@@ -11,4 +11,5 @@
 //! ## Evals
 //! - FFI functions return stable C ABI result structs and JSON envelopes.
 
+pub mod build_info;
 pub mod ffi;

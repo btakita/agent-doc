@@ -19,7 +19,8 @@ export type PopupMenuActionId =
     | 'cancelTurn'
     | 'killSupervisor'
     | 'resyncFixSessions'
-    | 'gcStaleSessions';
+    | 'gcStaleSessions'
+    | 'about';
 
 export interface PopupMenuItem {
     label: string;
@@ -54,5 +55,6 @@ export function buildOverflowPopupMenuItems(): PopupMenuItem[] {
         { label: '$(trash) Kill Supervisor', id: 'killSupervisor' },
         { label: '$(sync) Resync / Fix Sessions', id: 'resyncFixSessions' },
         { label: '$(database) GC Stale Sessions', id: 'gcStaleSessions' },
+        { label: '$(info) About Agent Doc', id: 'about' },
     ];
 }

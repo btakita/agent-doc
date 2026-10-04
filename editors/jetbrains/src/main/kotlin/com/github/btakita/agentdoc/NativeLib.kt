@@ -672,6 +672,13 @@ interface AgentDocLib : Library {
     fun agent_doc_version(): Pointer?
 
     /**
+     * `editoractionmenu`: the loaded library's `agent-doc-build-info-v1` JSON (version, IPC
+     * build id, expected editor plugin generations). Libraries built before this symbol existed
+     * lack it; callers treat an unresolved symbol as "build id unknown". Caller must free result.
+     */
+    fun agent_doc_build_info_json(): Pointer?
+
+    /**
      * Read the Rust-owned document state projection JSON for a document hash. Caller must free the
      * returned pointer with [agent_doc_free_string].
      */
@@ -1632,6 +1639,34 @@ interface AgentDocLib : Library {
             } catch (error: SecurityException) {
                 LOG.warn("[native] could not remove plugin-generation shutdown hook", error)
             }
+        }
+
+        /**
+         * `editoractionmenu`: what About Agent Doc reports about the native generation. Reads the
+         * already-published generation only: it never triggers a load, a reload, or a lib-path
+         * subprocess, so opening About cannot change native state.
+         */
+        internal fun aboutSnapshot(): NativeAboutSnapshot {
+            val generation = loadedGeneration
+            val path = loadedPath
+            if (generation == null || instance == null) {
+                return NativeAboutSnapshot(path, null, null, null, loadError)
+            }
+            val buildInfoJson =
+                try {
+                    generation.proxy.agent_doc_build_info_json()?.let { ptr ->
+                        try {
+                            ptr.getString(0)
+                        } finally {
+                            generation.proxy.agent_doc_free_string(ptr)
+                        }
+                    }
+                } catch (error: Throwable) {
+                    // An older library lacks the symbol (UnsatisfiedLinkError).
+                    LOG.info("[native] agent_doc_build_info_json unavailable: ${error.message}")
+                    null
+                }
+            return NativeAboutSnapshot(path, generation.loadTarget, generation.version, buildInfoJson, null)
         }
 
         private fun resolveLibPath(): String? {

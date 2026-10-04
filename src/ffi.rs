@@ -32,6 +32,8 @@
 //! - `agent_doc_admin_*_json(...)`: controller-backed admin/editor wrappers for inspect, queue
 //!   pause/resume/drain, handoff, reap, and projection repair. They return the same JSON receipt
 //!   envelopes as the CLI `--json` forms.
+//! - `agent_doc_build_info_json()`: the loaded library's `agent-doc-build-info-v1` identity
+//!   (version, IPC `build_id`, expected editor plugin generations) for editor "About Agent Doc".
 //! - `agent_doc_free_string(ptr)` / `agent_doc_free_state(ptr, len)`: free memory returned by any
 //!   `agent_doc_*` function.  Must be called for every non-null pointer.
 //!
@@ -2127,6 +2129,22 @@ fn ffi_git_commit(file: &std::path::Path) -> bool {
 pub extern "C" fn agent_doc_version() -> *mut c_char {
     mark_embedded_editor_host();
     CString::new(env!("CARGO_PKG_VERSION")).unwrap().into_raw()
+}
+
+/// Get the loaded library's build identity as `agent-doc-build-info-v1` JSON
+/// (`editoractionmenu`): `version`, the IPC `build_id`
+/// (`<version>+<source digest>`), and the editor plugin generations this build
+/// expects. Editors use it for "About Agent Doc" to prove whether the loaded
+/// library and the CLI binary are the same build. Older libraries lack the
+/// symbol; callers must treat that as "build id unknown", not as a failure.
+///
+/// Caller must free with `agent_doc_free_string`.
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_build_info_json() -> *mut c_char {
+    mark_embedded_editor_host();
+    let json = serde_json::to_string(&crate::build_info::native_library_build_info())
+        .unwrap_or_else(|_| "{}".to_string());
+    CString::new(json).unwrap_or_default().into_raw()
 }
 
 #[inline]

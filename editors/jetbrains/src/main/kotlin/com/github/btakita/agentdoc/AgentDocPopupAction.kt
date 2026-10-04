@@ -46,6 +46,8 @@ class AgentDocPopupAction : AnAction(), DumbAware {
             // #gh116: every declared AgentDoc.* action is reachable from the popup.
             "AgentDoc.StopAgent",
             "AgentDoc.KillSupervisor",
+            // `editoractionmenu`: which plugin/CLI/native library is running.
+            "AgentDoc.About",
         )
     }
 

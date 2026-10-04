@@ -76,7 +76,17 @@ Automatic tab-to-pane sync is **reported, not planned** (`#jbsurfaceswap` / `#jb
 ## 6. Popup Menu
 
 - **Trigger:** a `.md` file is focused and the editor's popup shortcut is pressed — VS Code `Alt+Enter`; JetBrains `Ctrl+Shift+Alt+D` (also Tools menu and editor context menu → Agent Doc Actions). The default must be a keystroke that Windows, macOS, and Linux all deliver to the editor: never `Alt+Space` (Windows window system menu), `Alt+F4`, or `Alt+Tab`. The shortcut stays user-rebindable through the editor's keymap settings.
-- **Behavior:** Show numbered popup with Run, Claim, Compact Exchange, Sync Layout, Show Session Status, Recycle Supervisor, Restart Agent, Clear Session Context, Interrupt and Clear Session Context, and Copy Session Diagnostics actions. Every editor action that can be invoked on the document must be reachable from the popup (top level or overflow). Lower-frequency operator actions such as Run with Junie and Force Claim stay available from a non-numbered overflow path instead of consuming top-level numeric shortcuts.
+- **Behavior:** Show numbered popup with Run, Claim, Compact Exchange, Sync Layout, Show Session Status, Recycle Supervisor, Restart Agent, Clear Session Context, Interrupt and Clear Session Context, and Copy Session Diagnostics actions. Every editor action that can be invoked on the document must be reachable from the popup (top level or overflow). Lower-frequency operator actions such as Run with Junie, Force Claim, and About Agent Doc stay available from a non-numbered overflow path instead of consuming top-level numeric shortcuts.
+
+## 6b. About Agent Doc
+
+- **Availability:** the Agent Doc popup's overflow (More Actions) path and the editor's command/menu surface (JetBrains Tools, editor, and project-view menus; VS Code command palette and markdown editor context menu). It needs an open project, not an agent-doc document.
+- **Behavior:** show one dialog (modal message in VS Code) with the running editor plugin version, the agent-doc CLI binary actually in use, and the loaded native library, plus a one-click copy of the exact text.
+  - **Plugin version:** the version the plugin registers with the controller (JetBrains plugin descriptor; VS Code `EDITOR_PLUGIN_VERSION`).
+  - **CLI binary:** resolved the same way every other action resolves `agent-doc`, then queried with `agent-doc version --json` (`agent-doc-build-info-v1`: `version`, IPC `build_id` = `<version>+<source digest>`, `executable`, sibling `library`, and `expected_plugins.{jetbrains,vscode,zed}`). A binary without the `version` subcommand falls back to parsing `agent-doc --version`, and the build id is reported as unknown.
+  - **Native library:** the generation the plugin already loaded: its canonical path, `agent_doc_version()`, and `agent_doc_build_info_json()` (same contract, `component = "native_library"`). A library without that symbol reports its build id as unknown. About never loads, reloads, or searches for a library; an unloaded library is shown as not loaded, which is not a mismatch.
+- **Mismatch warnings:** the dialog uses a warning presentation and lists each mismatch with both sides named when (a) the CLI's `expected_plugins.<editor>` differs from the plugin version, (b) the loaded library expects a different plugin version than the plugin and the CLI disagree on, (c) the CLI and library build ids differ (the IPC handshake rejects that pair), or, when either build id is unknown, their versions differ, or (d) the CLI cannot be queried.
+- **Zed:** the Zed extension is a language server with no editor action or menu surface; its server version is reported through LSP `serverInfo`, and `agent-doc version` covers the binary.
 
 ## 6a. Session Operator Actions
 

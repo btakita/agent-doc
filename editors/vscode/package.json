@@ -2,7 +2,7 @@
   "name": "agent-doc",
   "displayName": "Agent Doc",
   "description": "Submit markdown documents to AI agents via agent-doc",
-  "version": "0.2.78",
+  "version": "0.2.79",
   "publisher": "btakita",
   "icon": "icon.png",
   "license": "MIT",
@@ -105,6 +105,10 @@
       {
         "command": "agentDoc.popupMenu",
         "title": "Agent Doc: Menu"
+      },
+      {
+        "command": "agentDoc.about",
+        "title": "Agent Doc: About Agent Doc"
       }
     ],
     "keybindings": [
@@ -231,6 +235,11 @@
           "command": "agentDoc.copySessionDiagnostics",
           "when": "editorLangId == markdown",
           "group": "agentDoc@9"
+        },
+        {
+          "command": "agentDoc.about",
+          "when": "editorLangId == markdown",
+          "group": "agentDoc@10"
         }
       ],
       "explorer/context": [
@@ -249,7 +258,7 @@
     "bundle:watch": "node esbuild.js --watch",
     "check-types": "tsc -p ./ --noEmit",
     "vscode:prepublish": "npm run check-types && node esbuild.js --production",
-    "test": "tsc -p ./ && node --test out/native.test.js out/nativeReloadGate.test.js out/stateMirror.test.js out/stateMirrorConformance.test.js out/reposition.test.js out/patchGuard.test.js out/patchPlan.test.js out/tabSync.test.js out/sessionUi.test.js out/popupMenu.test.js out/crossSession.test.js out/editorCommandState.test.js out/mergeOwnershipStateChart.test.js out/crdtReplica.test.js out/peerReplicaPull.test.js out/uiThreadBudget.test.js out/reloadLibraryIntent.test.js out/ideTerminal.test.js",
+    "test": "tsc -p ./ && node --test out/about.test.js out/native.test.js out/nativeReloadGate.test.js out/stateMirror.test.js out/stateMirrorConformance.test.js out/reposition.test.js out/patchGuard.test.js out/patchPlan.test.js out/tabSync.test.js out/sessionUi.test.js out/popupMenu.test.js out/crossSession.test.js out/editorCommandState.test.js out/mergeOwnershipStateChart.test.js out/crdtReplica.test.js out/peerReplicaPull.test.js out/uiThreadBudget.test.js out/reloadLibraryIntent.test.js out/ideTerminal.test.js",
     "package": "vsce package --skip-license",
     "publish": "vsce publish"
   },

@@ -26,3 +26,7 @@
   rebroadcast.
 - The LSP process PID is part of registration so the controller's process-exit
   watcher owns crash-safe editor authority.
+- Zed extensions have no editor action or menu surface, so the shared
+  `About Agent Doc` action (`editors/SPEC.md` section 6b) does not exist here.
+  The language server reports its version in the LSP `initialize` response's
+  `serverInfo`; `agent-doc version` reports the binary.

@@ -197,6 +197,7 @@ function resetBindings(): void {
     _free_state = null;
     _free_string = null;
     _version = null;
+    _build_info_json = null;
     _state_projection = null;
     _state_subscribe = null;
     _reconcile_text = null;
@@ -220,7 +221,7 @@ function resetBindings(): void {
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
 export const NATIVE_HOT_RELOAD_CAPABILITY = 'native_hot_reload_generation_v1';
-export const EDITOR_PLUGIN_VERSION = '0.2.78';
+export const EDITOR_PLUGIN_VERSION = '0.2.79';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 const BOUNDED_EDITOR_SPLICES_CAPABILITY = 'bounded_editor_splices_v1';
@@ -390,6 +391,7 @@ let _peer_replicas_missing: any = null;
 let _free_state: any = null;
 let _free_string: any = null;
 let _version: any = null;
+let _build_info_json: any = null;
 let _state_projection: any = null;
 let _state_subscribe: any = null;
 let _reconcile_text: any = null;
@@ -621,6 +623,13 @@ function bindFunctions(): void {
     // the wrapper can decode and release the original allocation.
     _free_string = lib.func('agent_doc_free_string', 'void', [OWNED_C_STRING_POINTER]);
     _version = lib.func('agent_doc_version', OWNED_C_STRING_POINTER, []);
+    // `editoractionmenu`: libraries built before this symbol existed lack it;
+    // About Agent Doc then reports the build id as unknown.
+    try {
+        _build_info_json = lib.func('agent_doc_build_info_json', OWNED_C_STRING_POINTER, []);
+    } catch {
+        _build_info_json = null;
+    }
     try {
         _state_projection = lib.func(
             'agent_doc_state_projection',
@@ -743,6 +752,46 @@ function bindFunctions(): void {
         _replica_text = null;
         _replica_close = null;
     }
+}
+
+/** `editoractionmenu`: what About Agent Doc reports about the loaded native library. */
+export interface NativeAboutSnapshot {
+    path: string | null;
+    version: string | null;
+    buildInfoJson: string | null;
+}
+
+function decodeOwnedString(call: () => any): string | null {
+    const ptr = call();
+    if (!ptr) return null;
+    try {
+        return koffi.decode(ptr, 'char', -1);
+    } finally {
+        _free_string(ptr);
+    }
+}
+
+/**
+ * Read the already-loaded library's version and build info. Never loads,
+ * reloads, or searches for a library, so opening About cannot change native
+ * state.
+ */
+export function nativeAboutSnapshot(): NativeAboutSnapshot {
+    if (!loaded || !lib) {
+        return { path: loadedPath, version: null, buildInfoJson: null };
+    }
+    let version: string | null = null;
+    let buildInfoJson: string | null = null;
+    try {
+        bindFunctions();
+        version = decodeOwnedString(() => _version());
+        if (_build_info_json) {
+            buildInfoJson = decodeOwnedString(() => _build_info_json());
+        }
+    } catch (e: any) {
+        console.log(`[agent-doc/native] about snapshot failed: ${e.message}`);
+    }
+    return { path: loadedPath, version, buildInfoJson };
 }
 
 function verifyVersion(libPath: string): void {

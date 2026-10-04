@@ -28,6 +28,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 - `Interrupt and clear` requires explicit VS Code confirmation and then runs `agent-doc session interrupt-clear <relative-path>`. It is the only action that intentionally discards protected prompt input.
 - `Recycle Supervisor` runs `agent-doc session restart-supervisor <relative-path>` and keeps recycle ownership in the binary/supervisor path. The command ID remains `agentDoc.restartSession`. If the binary refuses because the pane is busy or the authoritative actor is still starting, VS Code shows typed restart recovery actions and the confirmed interrupt path invokes `agent-doc session restart-supervisor --force <relative-path>`.
 - `Copy Session Diagnostics` runs `agent-doc session doctor <relative-path>` and copies the exact output for bug reports.
+- `About Agent Doc` (`agentDoc.about`, command palette, markdown editor context menu, and the popup's More Actions) runs `agent-doc version --json` (falling back to `--version`) with the same `resolveAgentDoc()` binary as every other command, reads the already-loaded library through `native.nativeAboutSnapshot()` (`agent_doc_version()` and `agent_doc_build_info_json()`; never loads or reloads), and shows a modal message with a Copy action. The plugin version is `EDITOR_PLUGIN_VERSION`. Mismatch rules follow `editors/SPEC.md` section 6b.
 
 ## Tab Sync Compatibility
 

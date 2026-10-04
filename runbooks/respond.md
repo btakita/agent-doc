@@ -183,6 +183,21 @@ free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
 
+**Quoting a free-text head you are NOT finishing this cycle (`#deferstrike`).** The
+quote alone reads as "answered" and strikes the head. To keep it queued, either:
+- **Claim it** (preferred, structural): `agent-doc queue claim <FILE> --item "<head>"
+  --owner <owner>` (`subagent:<label>`, or `coordinator:integration` for work you
+  integrate yourself). A head with a live claim is never auto-struck, by this
+  cycle's `#ftstrike` or by preflight's residue strike, and the pre-write gate does
+  not demand evidence for it even if this cycle selected it. Release the claim
+  (`agent-doc queue release <FILE> --item "<head>"`) before the cycle that answers it.
+- **Defer it explicitly:** follow the `> **Queue prompt:**` quote with a paragraph
+  that opens with the bold lead `**Deferred:**` (any `**Deferred…**` lead, such as
+  `**Deferred, not done:**`, counts) and says what it waits for. Plain phrasing such
+  as "not done yet", "keep this head open", "dispatched to a subagent" or "waits
+  for" in the quote's paragraph is also read as a deferral, but the bold lead is the
+  contract.
+
 **Annotated `#id` heads are operator steering — answer the annotation (`#qheadannotation`).**
 The canonical backlog-mirror head is `do [#id]`. When the operator appends their own
 text to it — `do [#id]: can the *.h files be generated too?`, `[#id] and keep the old

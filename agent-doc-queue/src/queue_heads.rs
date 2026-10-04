@@ -414,6 +414,9 @@ pub fn free_text_queue_head_is_completed_residue(
     }
     committed_queue_contains_free_text_head(content, head)
         && free_text_head_answered_by_response(exchange_text, head)
+        // `#deferstrike`: an echo followed by a deferral keeps the head queued
+        // on purpose; it is not completed residue.
+        && !crate::queue_response::latest_free_text_head_echo_is_deferral(exchange_text, head)
 }
 
 fn queue_prompt_heads(doc: &str) -> Vec<String> {
@@ -914,6 +917,36 @@ mod tests {
             doc,
             exchange,
             "explain the queue churn"
+        ));
+    }
+
+    #[test]
+    fn deferstrike_latest_deferred_echo_is_not_completed_residue() {
+        // A non-imperative head: `release + publish` is already exempt as a
+        // recurring imperative, which would make this test vacuous.
+        let head = "close the GH 127 128 129 issues after integration lands";
+        let content = format!("<!-- agent:queue go -->\n- {head}\n<!-- /agent:queue -->\n");
+        let exchange_deferred = format!(
+            "> **Queue prompt:** {head}\n\n\
+             Dispatched to a subagent; it waits for the integration batch. Keep this head open.\n"
+        );
+        assert!(crate::queue_response::free_text_head_answered_by_response(
+            &exchange_deferred,
+            head
+        ));
+        assert!(!free_text_queue_head_is_completed_residue(
+            &content,
+            &exchange_deferred,
+            head
+        ));
+        // A later cycle that answers the head makes it residue again.
+        let exchange_answered = format!(
+            "{exchange_deferred}\n> **Queue prompt:** {head}\n\nClosed all three after the merge.\n"
+        );
+        assert!(free_text_queue_head_is_completed_residue(
+            &content,
+            &exchange_answered,
+            head
         ));
     }
 

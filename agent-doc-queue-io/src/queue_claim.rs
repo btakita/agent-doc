@@ -26,7 +26,7 @@ use agent_doc_queue::queue_claim::{
 use agent_doc_queue::queue_continuation::{live_queue_head_identities, live_queue_head_texts};
 use anyhow::{Context, Result, bail};
 
-const QUEUE_CLAIMS_STATE_KIND: &str = "queue_claims";
+use agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND;
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -57,12 +57,9 @@ fn load_from_conn(
     else {
         return Ok(QueueClaimLedger::default());
     };
-    let mut ledger: QueueClaimLedger =
-        serde_json::from_str(&record.payload_json).context("parse queue claim ledger")?;
-    // `#claimdispatchidentity`: claims stored under an older identity rule are
-    // compared under the current one; the next mutation persists the re-key.
-    ledger.rekey();
-    Ok(ledger)
+    // `#claimdispatchidentity`: the decode re-keys claims stored under an older
+    // identity rule; the next mutation persists the re-key.
+    QueueClaimLedger::from_state_payload(&record.payload_json)
 }
 
 /// Apply `mutate` to the document's ledger in one immediate transaction.
@@ -376,6 +373,24 @@ pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItem
     match crate::subagent_dispatch::queue_attr_subagent_plan(file, content) {
         Some(plan) if !plan.held.is_empty() => claimed.with_heads(&plan.held),
         _ => claimed,
+    }
+}
+
+/// Live queue-head texts of `content` held by an active worker claim
+/// (`#deferstrike`). A claimed head is owned by its worker, not by the cycle
+/// that happens to see it: the selected-free-text evidence gate must not demand
+/// an answer for it, and `#ftstrike` must not strike it. An unreadable ledger
+/// is reported and treated as "no claims" (the pre-claim behaviour).
+pub fn claimed_live_head_texts_for_content(file: &Path, content: &str) -> Vec<String> {
+    match load_ledger(file) {
+        Ok(ledger) => ledger.claimed_live_head_texts(now_secs(), content),
+        Err(err) => {
+            eprintln!(
+                "[queue-claim] WARNING: could not read queue claims for {}; treating every head as unclaimed: {err:#}",
+                file.display()
+            );
+            Vec::new()
+        }
     }
 }
 

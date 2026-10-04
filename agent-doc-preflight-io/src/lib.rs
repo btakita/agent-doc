@@ -4531,6 +4531,14 @@ pub fn run_queue_maintenance_with_coin_gate(
                 _ => None,
             })
             .collect();
+        // `#deferstrike`: a head an active worker claim holds is owned by that
+        // worker; an earlier echo that reported its dispatch is not its answer.
+        let claimed_heads = agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(
+            file,
+            &current_content,
+        );
+        let claimed =
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
         let mut struck_count = 0usize;
         let new_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = activation
             .entries_after
@@ -4549,6 +4557,11 @@ pub fn run_queue_maintenance_with_coin_gate(
                             if !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
                                 && queue_prompt_text_is_free_text(&current_content, &p.text)
                                 && free_text_head_answered_by_response(&exchange_text, &p.text)
+                                && !agent_doc_queue::queue_response::latest_free_text_head_echo_is_deferral(
+                                    &exchange_text,
+                                    &p.text,
+                                )
+                                && !claimed.claims(&p.text)
                                 && committed_free_text.contains(&gate_norm(&p.text)) =>
                 {
                     struck_count += 1;

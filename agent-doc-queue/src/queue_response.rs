@@ -842,7 +842,35 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
 ///
 /// Kept deliberately narrow and literal: each one is an explicit statement about
 /// pending work, not a hedge.
+/// The structured deferral marker (`#deferstrike`): a response that quotes a
+/// free-text head and does NOT finish it this cycle opens the paragraph right
+/// after the `> **Queue prompt:**` quote with this bold lead (any bold
+/// `**Deferred…**` lead counts, e.g. `**Deferred, not done:**`). The quote then
+/// satisfies the pre-write evidence gate while the head stays queued.
+pub const QUEUE_PROMPT_DEFERRAL_MARKER: &str = "**Deferred:**";
+
 const FREE_TEXT_HEAD_DEFERRAL_MARKERS: &[&str] = &[
+    // Structured lead (`QUEUE_PROMPT_DEFERRAL_MARKER` and its bold variants).
+    "**deferred",
+    // Natural phrasing a coordinator uses for claimed/dispatched work
+    // (`#deferstrike`, agent-doc-bugs.md 2026-10-04: `release + publish` was
+    // struck while "Deferred, not done ... Keep this head open").
+    "deferred, not done",
+    "deferred until",
+    "not done yet",
+    "not yet done",
+    "is not done",
+    "has not happened yet",
+    "keep this head open",
+    "keep this head queued",
+    "keep the head open",
+    "keep the head queued",
+    "dispatched to subagent",
+    "dispatched to a subagent",
+    "dispatched to its own subagent",
+    "dispatched to the subagent",
+    "waits for",
+    "waiting on",
     "queued and untouched",
     "still queued",
     "remains queued",
@@ -885,20 +913,59 @@ pub fn response_defers_free_text_head(response_body: &str, head_text: &str) -> b
         {
             continue;
         }
-        let mut scope = String::from(*block);
-        if let Some(next) = blocks.get(index + 1) {
-            scope.push(' ');
-            scope.push_str(next);
-        }
-        let scope = scope.to_ascii_lowercase();
-        if FREE_TEXT_HEAD_DEFERRAL_MARKERS
-            .iter()
-            .any(|marker| scope.contains(marker))
-        {
+        if deferral_scope_has_marker(&blocks, index) {
             return true;
         }
     }
     false
+}
+
+/// True when the LAST `> **Queue prompt:**`-style blockquote echo of `head_text`
+/// in `text` (normally the committed exchange) is followed by a deferral
+/// (`#deferstrike`).
+///
+/// The exchange accumulates every cycle's responses, so the most recent echo is
+/// the current statement about the head: a deferral there keeps the head out of
+/// the completed-residue set, while a later answered echo (the closing cycle)
+/// makes it residue again.
+pub fn latest_free_text_head_echo_is_deferral(text: &str, head_text: &str) -> bool {
+    let head_clean = strip_priority_markers(head_text);
+    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
+    if head_norm.is_empty() {
+        return false;
+    }
+    let blocks: Vec<&str> = text.split("\n\n").collect();
+    let Some(index) = blocks.iter().rposition(|block| {
+        block.trim_start().starts_with('>')
+            && normalize_for_answer_match(block).contains(&head_norm)
+    }) else {
+        return false;
+    };
+    deferral_scope_has_marker(&blocks, index)
+}
+
+/// Whether the block at `index` plus the block after it states a deferral.
+///
+/// Blockquote lines are the head's own echo, not the response's statement
+/// about it, so they are left out: a head whose text happens to contain a
+/// marker (`answered but still queued`) must not defer itself.
+fn deferral_scope_has_marker(blocks: &[&str], index: usize) -> bool {
+    let prose = |block: &str| {
+        block
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('>'))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let mut scope = prose(blocks[index]);
+    if let Some(next) = blocks.get(index + 1) {
+        scope.push(' ');
+        scope.push_str(&prose(next));
+    }
+    let scope = scope.to_ascii_lowercase();
+    FREE_TEXT_HEAD_DEFERRAL_MARKERS
+        .iter()
+        .any(|marker| scope.contains(marker))
 }
 
 /// True when `head_text`'s normalized prose prefix matches a free-text queue head

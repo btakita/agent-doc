@@ -60,6 +60,26 @@ pub fn snapshot_model<E: DashboardEffects + ?Sized>(
     ))
 }
 
+/// `gvqv`: the same actor rows and findings without per-actor controller
+/// inspection. The `agent-doc dashboard` projection is re-rendered from inside
+/// the controller process, so it must not round-trip through controller RPC.
+pub fn snapshot_model_without_diagnostics<E: DashboardEffects + ?Sized>(
+    effects: &E,
+    root: &Path,
+) -> Result<DashboardModel> {
+    let rows = build_admin_actor_list(
+        effects.actor_records(root)?,
+        effects.registry_bindings(root)?,
+        |pane| effects.pane_alive(pane),
+    );
+    let findings = detect_admin_findings(&rows);
+    Ok(build_dashboard_model_with_diagnostics(
+        rows,
+        findings,
+        BTreeMap::new(),
+    ))
+}
+
 fn snapshot_controller_diagnostics<E: DashboardEffects + ?Sized>(
     effects: &E,
     root: &Path,

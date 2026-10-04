@@ -80,3 +80,11 @@ pub fn dashboard(
 ) -> Result<()> {
     agent_doc_controller_io::dashboard::dashboard(&EFFECTS, project_root, json, once, interval_ms)
 }
+
+/// `gvqv`: the controller liveness model without per-actor controller
+/// inspection, for the `agent-doc dashboard` projection.
+pub(crate) fn fleet_model_without_diagnostics(
+    root: &Path,
+) -> Result<agent_doc_controller::fleet::DashboardModel> {
+    agent_doc_controller_io::dashboard::snapshot_model_without_diagnostics(&EFFECTS, root)
+}

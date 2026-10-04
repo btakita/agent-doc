@@ -2409,6 +2409,13 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         &self,
         invocation: ControllerCompactProjectionCompletion,
     ) -> Result<ControllerCompactProjectionCompletionOutcome>;
+
+    /// `gvqv`: re-render the armed `.agent-doc/dashboard.md` projection for
+    /// `project_root`. The renderer needs the fleet board, which lives above
+    /// this crate. Returns `Ok(true)` when the projection bytes changed.
+    fn refresh_dashboard_projection(&self, _project_root: &Path) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();
@@ -6841,10 +6848,18 @@ impl ControllerRuntime {
         runtime.document_authority_graph.install_runtime(&runtime);
         runtime
             .document_graphs
-            .install_settle_sink(project_root, &runtime);
+            .install_settle_sink(project_root.clone(), &runtime);
         rpc::install_state_plane_projection_sinks(&runtime);
         #[cfg(not(any(test, feature = "test-support")))]
         rpc::install_pane_layout_projection_sink(&runtime);
+        // `gvqv`: this controller owns its project's live dashboard projection.
+        #[cfg(not(any(test, feature = "test-support")))]
+        crate::dashboard_refresh::start_global(
+            project_root.clone(),
+            std::sync::Arc::new(|root: &Path| {
+                runtime_effects()?.refresh_dashboard_projection(root)
+            }),
+        );
         Ok(runtime)
     }
 
@@ -7110,6 +7125,7 @@ impl ControllerRuntime {
         }
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
+        crate::dashboard_refresh::mark_dirty_global();
         Ok(())
     }
 
@@ -7165,6 +7181,7 @@ impl ControllerRuntime {
         }
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
+        crate::dashboard_refresh::mark_dirty_global();
         Ok(())
     }
 

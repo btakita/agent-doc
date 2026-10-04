@@ -76,7 +76,7 @@ Automatic tab-to-pane sync is **reported, not planned** (`#jbsurfaceswap` / `#jb
 ## 6. Popup Menu
 
 - **Trigger:** a `.md` file is focused and the editor's popup shortcut is pressed — VS Code `Alt+Enter`; JetBrains `Ctrl+Shift+Alt+D` (also Tools menu and editor context menu → Agent Doc Actions). The default must be a keystroke that Windows, macOS, and Linux all deliver to the editor: never `Alt+Space` (Windows window system menu), `Alt+F4`, or `Alt+Tab`. The shortcut stays user-rebindable through the editor's keymap settings.
-- **Behavior:** Show numbered popup with Run, Claim, Compact Exchange, Sync Layout, Show Session Status, Recycle Supervisor, Restart Agent, Clear Session Context, Interrupt and Clear Session Context, and Copy Session Diagnostics actions. Every editor action that can be invoked on the document must be reachable from the popup (top level or overflow). Lower-frequency operator actions such as Run with Junie and Force Claim stay available from a non-numbered overflow path instead of consuming top-level numeric shortcuts.
+- **Behavior:** Show numbered popup with Run, Claim, Compact Exchange, Sync Layout, Show Session Status, Recycle Supervisor, Restart Agent, Clear Session Context, Interrupt and Clear Session Context, Copy Session Diagnostics, and Dashboard actions. Every editor action that can be invoked on the document must be reachable from the popup (top level or overflow). Lower-frequency operator actions such as Run with Junie and Force Claim stay available from a non-numbered overflow path instead of consuming top-level numeric shortcuts.
 
 ## 6a. Session Operator Actions
 
@@ -86,6 +86,14 @@ Automatic tab-to-pane sync is **reported, not planned** (`#jbsurfaceswap` / `#jb
 - **Clear settlement without document authority:** Once the owning pane reports the cleared harness prompt, the supervisor must settle the in-flight clear and return the actor to `ready` even when the open editor replica or queue authority is temporarily unavailable. Document attachment may recover independently; it must not leave a successful clear displayed as `agent-doc: awaiting response` or prevent a later Compact Exchange retry after reattachment.
 - **Copy Session Diagnostics:** Run `agent-doc session doctor <relative-path>`, show the output in an IDE-owned diagnostics surface, and offer a one-click copy path for the exact text.
 - **Verification floor:** editor-plugin tests must cover exact session-status display, `session clear` command routing, and a persistent route-dispatch failure surface with the exact stage-specific CLI output.
+
+## 6c. Dashboard
+
+- **Availability:** Project-scoped, not markdown-gated: the editor's Agent Doc popup (numbered, after the session actions), the command palette / action search (`Agent Doc: Dashboard` in VS Code, `Agent Doc Dashboard` in JetBrains), and the Tools / editor / project-view context menus in JetBrains.
+- **Behavior:** Run `agent-doc dashboard --write` from the focused markdown document's project root (else the workspace/project base) and then open the generated projection `<root>/.agent-doc/dashboard.md` — VS Code opens its markdown preview, JetBrains opens the file (split preview per the IDE's markdown setting). Opening it is an explicit operator request, so taking focus is correct here. Writing the default path arms the project controller, which keeps the file current on state change; the editor shows the live view through its normal external-change reload.
+- **Never a session document:** the projection carries no frontmatter, no `<!-- agent:` marker, and no `agent_doc_*` token, so content-based session classification (`isAgentDocDocumentTextUtil`, `agent_doc_is_session_document`) rejects it. Adapters must not register a CRDT replica for it, report it in the editor surface, or route it to tmux.
+- **Feedback:** A failed or timed-out render surfaces the exact CLI output as a persistent error; success needs no extra notification beyond opening the view.
+- **Verification floor:** plugin tests cover the exact command arguments, the projection path, popup/palette reachability, and that the rendered projection is not classified as a session document.
 
 ## 7. Notifications
 

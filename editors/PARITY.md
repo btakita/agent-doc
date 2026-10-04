@@ -24,5 +24,11 @@ conditional on the host. Zed remains staged for the native-peer contract and is
 not counted as proven parity. Changing these declarations requires adapter and
 conformance coverage, not simply changing a status cell.
 
+Operator UI actions are not capability rows: `plugin-parity.tsv` is the native
+capability vocabulary each adapter advertises at registration. The Dashboard
+action (`gvqv`, `SPEC.md` § 6c) ships in JetBrains and VS Code; Zed is staged
+because its extension is a Markdown language server with no command or menu
+surface.
+
 Headless native tests prove transport/FFI behavior. IDE UI, VFS wiring, and
 platform-specific terminal behavior still need their documented host smokes.

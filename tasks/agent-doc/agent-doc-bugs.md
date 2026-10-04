@@ -139,6 +139,23 @@ Three subagents are running, each in its own worktree based on v0.35.451:
 - **`#halftypedcoin`:** `agent-doc-wt/halftypedcoin`. Turning a free-text queue line into a backlog item will wait until the operator stops typing, will never act on an obviously unfinished line like `Add a ```, and will fold later typing into the item it created.
 
 **release + publish** stays with me. Once all three branches report back, I'll merge them one at a time (the two plugin branches will need their version bumps and parity tables reconciled), run `make check` and one `make install`, release v0.35.452, and close the items.
+
+### Re: re-trigger while v0.35.452 integrates — opus-5-5 · 2026-10-04T14:40-04:00
+
+Nothing new needs answering this cycle. Every live queue head is in flight:
+- `#editoractionmenu`, `#gvqv` and `#halftypedcoin` are merged into the integration branch `integ452`.
+- `release + publish` is mine.
+- Full `make check` is running on the combined tree.
+
+**The "prompt" this cycle carried is your `#gvqv` backlog edit.** Preflight listed `- [ ] [#gvqv] Add a `Dashboard` editor prompt ...` under `absorbed_steering_prompts`. That line is a backlog item, not an exchange prompt, and the Dashboard work is already merged. Two bugs combine here:
+1. The steering report has been labelling that backlog edit `source=exchange` since you made it.
+2. The new absorbed-steering ledger from v0.35.451 trusted that label.
+
+I filed this as `#steerbacklogsource`. Steering should be attributed to the component that actually changed, and the ledger should record only exchange lines.
+
+`do [#gvqv]` also appears twice in the queue: your rewritten stub plus the mirror. Both heads close together when `#gvqv` is marked done at release.
+
+**Next:** when the suite passes, I'll fast-forward main, run one `make install`, and release v0.35.452 with the missing 0.35.451 parity row. Then I'll close `#editoractionmenu`, `#gvqv` and `#halftypedcoin`, and dispatch `#steerbacklogsource`.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -148,7 +165,7 @@ Three subagents are running, each in its own worktree based on v0.35.451:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#editoractionmenu]
+- ⏭️ do [#editoractionmenu]
 - do [#gvqv]
 - do [#halftypedcoin]
 - do [#gvqv]
@@ -157,6 +174,7 @@ Three subagents are running, each in its own worktree based on v0.35.451:
 
 
 <!-- agent:backlog priority -->
+- [ ] [#steerbacklogsource] [agent-doc] Steering classifies an operator edit to an agent:backlog line as an exchange prompt. On 2026-10-04 the operator rewrote the gvqv backlog stub into the full Dashboard request. Every steering report then surfaced it as 'source=exchange change=added dispatch=address_now', even after it was answered. The new absorbed-steering ledger (steerbaselineabsorb) then carried that backlog line into the next contract's absorbed_steering_prompts / user_intent_prompt_changes as an operator prompt. Fix: attribute steering items by the component that actually changed (backlog/review/done edits are managed-component state, not exchange prompts), and never record a non-exchange line in the absorbed-steering ledger.
 - [ ] [#halftypedcoin] [agent-doc] A half-typed free-text queue line was coined into a backlog id before the operator finished typing. Seen 2026-10-04: the operator typed '- Add a ``' (opening the Dashboard request), and preflight converted it into backlog item gvqv ('Add a ``') and queue head 'do [gvqv]'. The full line ('Add a `Dashboard` editor prompt + action ...') was still being typed underneath. Fix: free-text-to-id conversion must respect the steering typing gate (hold a line that is still changing, or one that ends inside an unclosed code span or mid-word), and a coined item whose source line is later extended should be merged into the extended line, not left as a stub.
 - [ ] [#editoractionmenu] Add an `About Agent Doc` Editor action + menu item to show which version of Agent Doc + Plugin is running?
 - [ ] [#gvqv] Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard. Can we also support a dashboard md file that live updates?

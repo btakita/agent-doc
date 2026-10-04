@@ -3167,6 +3167,12 @@ struct ControllerDocumentGraphs {
         Option<agent_doc_state_backbone::CloseoutOwnerProjection>,
     >,
     closeout_now_secs: lazily::ThreadSafeSourceMap<String, u64>,
+    /// GH #130: typed liveness evidence for the recorded closeout owner. The
+    /// pid probe is an effect performed outside the graph (like the clock);
+    /// publishing its reading is a Source update, so `OwnerProcessGone` is a
+    /// Computed transition rather than a branch hidden in the wait loop.
+    closeout_owner_alive: lazily::ThreadSafeSourceMap<String, Option<bool>>,
+    closeout_allow_dead_owner_takeover: lazily::ThreadSafeSourceMap<String, bool>,
     closeout_gate: lazily::ThreadSafeComputedMap<
         String,
         agent_doc_state_backbone::closeout_gate::CloseoutGate,
@@ -4524,6 +4530,23 @@ impl RetainedWriteSettleSink {
     }
 }
 
+/// How often a closeout wait re-probes a blocking owner's pid. A process exit
+/// appends no state fact, so without a bounded re-probe a dead owner would only
+/// be noticed at the lease stopgap. Matches the editor process-exit poller.
+const CLOSEOUT_OWNER_LIVENESS_PROBE_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Typed liveness evidence for a recorded closeout owner (GH #130).
+///
+/// The one probe both the claim path (`rpc::claim_closeout_owner`) and the
+/// controller's derived gate use, so the two cannot drift. The owner records its
+/// own pid at claim time, so a pid whose current process started after
+/// `claimed_secs` is a recycled pid and the owner is gone.
+pub(crate) fn closeout_owner_alive(
+    owner: &agent_doc_state_backbone::CloseoutOwnerProjection,
+) -> bool {
+    crate::process::recorded_process_is_alive(owner.owner_pid, owner.claimed_secs)
+}
+
 impl ControllerDocumentGraphs {
     fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
         let ctx = scope.ctx().clone();
@@ -4533,6 +4556,8 @@ impl ControllerDocumentGraphs {
             closeout_cycle_id: lazily::ThreadSafeSourceMap::new(&ctx),
             closeout_owner: lazily::ThreadSafeSourceMap::new(&ctx),
             closeout_now_secs: lazily::ThreadSafeSourceMap::new(&ctx),
+            closeout_owner_alive: lazily::ThreadSafeSourceMap::new(&ctx),
+            closeout_allow_dead_owner_takeover: lazily::ThreadSafeSourceMap::new(&ctx),
             closeout_gate: lazily::ThreadSafeComputedMap::new(&ctx),
             pending: lazily::ThreadSafeComputedMap::new(&ctx),
             authority: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -4932,11 +4957,20 @@ impl ControllerDocumentGraphs {
     /// wall clock is an effect; publishing the reading is a Source update.
     /// Expiry is therefore a Computed state transition, not an imperative
     /// branch hidden inside the wait loop.
+    ///
+    /// GH #130: owner liveness is observed the same way. `owner_alive` is the
+    /// caller's pid probe of the recorded owner ([`closeout_owner_alive`]);
+    /// `Some(false)` with `allow_dead_owner_takeover` releases the incumbent as
+    /// `OwnerProcessGone`. A live or unknown owner (`Some(true)`/`None`) keeps
+    /// blocking until supersession or the lease stopgap, exactly as before, so
+    /// a live owner is never stolen from mid-closeout.
     fn closeout_gate(
         &self,
         document_hash: &str,
         closeout: &agent_doc_state_backbone::CloseoutProjection,
         now_secs: u64,
+        owner_alive: Option<bool>,
+        allow_dead_owner_takeover: bool,
     ) -> agent_doc_state_backbone::closeout_gate::CloseoutGate {
         self.ctx.batch(|ctx| {
             self.closeout_cycle_id
@@ -4945,11 +4979,20 @@ impl ControllerDocumentGraphs {
                 .set(ctx, document_hash.to_string(), closeout.owner.clone());
             self.closeout_now_secs
                 .set(ctx, document_hash.to_string(), now_secs);
+            self.closeout_owner_alive
+                .set(ctx, document_hash.to_string(), owner_alive);
+            self.closeout_allow_dead_owner_takeover.set(
+                ctx,
+                document_hash.to_string(),
+                allow_dead_owner_takeover,
+            );
         });
 
         let cycle_id = self.closeout_cycle_id.clone();
         let owner = self.closeout_owner.clone();
         let observed_now_secs = self.closeout_now_secs.clone();
+        let observed_owner_alive = self.closeout_owner_alive.clone();
+        let observed_allow_dead_owner_takeover = self.closeout_allow_dead_owner_takeover.clone();
         self.closeout_gate.get_or_insert_with(
             &self.ctx,
             document_hash.to_string(),
@@ -4960,8 +5003,10 @@ impl ControllerDocumentGraphs {
                     cycle_id.as_deref(),
                     owner.as_ref(),
                     observed_now_secs.observe(ctx, key).unwrap_or_default(),
-                    None,
-                    false,
+                    observed_owner_alive.observe(ctx, key).flatten(),
+                    observed_allow_dead_owner_takeover
+                        .observe(ctx, key)
+                        .unwrap_or_default(),
                 )
             },
         )
@@ -7365,6 +7410,13 @@ impl ControllerRuntime {
     /// liveness cannot identify the end of one closeout request. The controller
     /// instead observes the exact cycle projection and wakes on terminal-cycle
     /// or owner-release facts.
+    ///
+    /// The converse does hold, though: a *dead* owner pid definitively ends the
+    /// request (GH #130). Each pass probes the recorded owner and publishes the
+    /// reading into the Computed gate, which releases the incumbent as
+    /// `OwnerProcessGone`. A process exit appends no projection fact, so while
+    /// the incumbent blocks the wait re-probes at [`CLOSEOUT_OWNER_LIVENESS_PROBE_INTERVAL`]
+    /// rather than sleeping to the lease stopgap.
     fn wait_for_closeout_cycle_progress(
         &self,
         document_hash: &str,
@@ -7413,14 +7465,25 @@ impl ControllerRuntime {
             // timer is only an effect: the Computed closeout gate below owns the
             // decision that the incumbent no longer blocks.
             let now_secs = timestamp_secs();
-            let gate = self
-                .document_graphs
-                .closeout_gate(document_hash, closeout, now_secs);
+            // GH #130: the only claimant that follows this wait (session-check
+            // recovery) re-claims with `allow_dead_owner_takeover`, so a release
+            // here is one its retry can actually take. Takeover still requires
+            // definitive death (`Some(false)`); a live owner keeps blocking.
+            let owner_alive = current_owner.map(closeout_owner_alive);
+            let gate = self.document_graphs.closeout_gate(
+                document_hash,
+                closeout,
+                now_secs,
+                owner_alive,
+                true,
+            );
             if !gate.blocks_claim() {
                 return rpc::CloseoutCycleWaitOutcome::OwnerReleased;
             }
-            let lease_wait = current_owner
-                .map(|owner| Duration::from_secs(owner.expires_secs.saturating_sub(now_secs)));
+            let lease_wait = current_owner.map(|owner| {
+                Duration::from_secs(owner.expires_secs.saturating_sub(now_secs))
+                    .min(CLOSEOUT_OWNER_LIVENESS_PROBE_INTERVAL)
+            });
 
             let elapsed = started.elapsed();
             if elapsed >= timeout {
@@ -10323,6 +10386,92 @@ mod tests {
             pane_graph.actor_bindings().is_empty(),
             "a prior generation's structural proof must not bind a document absent from current desired state",
         );
+    }
+
+    fn gh130_closeout(owner_pid: u32, now: u64) -> agent_doc_state_backbone::CloseoutProjection {
+        agent_doc_state_backbone::CloseoutProjection {
+            cycle_id: Some("cycle-dead-owner".into()),
+            owner: Some(agent_doc_state_backbone::CloseoutOwnerProjection {
+                cycle_id: "cycle-dead-owner".into(),
+                owner_id: "foreground-finalize-other".into(),
+                owner_pid,
+                role: "foreground_finalize".into(),
+                claimed_secs: now,
+                // The lease is still valid: only liveness can release it.
+                expires_secs: now + agent_doc_state_backbone::CLOSEOUT_OWNER_LEASE_SECS,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// GH #130: the controller gate must release a dead owner by typed liveness
+    /// evidence (`OwnerProcessGone`), not hold it until the lease stopgap.
+    #[test]
+    fn controller_closeout_gate_releases_dead_owner_as_owner_process_gone() {
+        use agent_doc_state_backbone::CloseoutOwnerRelease;
+
+        let dead_pid = u32::MAX - 2;
+        let now = timestamp_secs();
+        let closeout = gh130_closeout(dead_pid, now);
+        let owner = closeout.owner.as_ref().unwrap();
+        assert!(!closeout_owner_alive(owner), "test requires a dead pid");
+        let graphs = ControllerDocumentGraphs::new_in(&agent_doc_state_scope::ProcessScope::new());
+
+        let gate = graphs.closeout_gate(
+            "doc-hash",
+            &closeout,
+            now,
+            Some(closeout_owner_alive(owner)),
+            true,
+        );
+        assert!(!gate.blocks_claim(), "dead owner must not block: {gate:?}");
+        assert_eq!(
+            gate.release_reason(),
+            Some(CloseoutOwnerRelease::OwnerProcessGone)
+        );
+        assert!(!gate.released_by_stopgap());
+
+        // Takeover not permitted: the dead owner keeps blocking (lease valid).
+        let gate = graphs.closeout_gate("doc-hash", &closeout, now, Some(false), false);
+        assert!(gate.blocks_claim(), "{gate:?}");
+    }
+
+    /// GH #130: a live same-turn owner is never stolen from mid-closeout, and
+    /// unknown liveness keeps the previous (blocking) behaviour exactly.
+    #[test]
+    fn controller_closeout_gate_still_blocks_live_or_unknown_owner() {
+        let now = timestamp_secs();
+        let closeout = gh130_closeout(std::process::id(), now);
+        let owner = closeout.owner.as_ref().unwrap();
+        assert!(closeout_owner_alive(owner));
+        let graphs = ControllerDocumentGraphs::new_in(&agent_doc_state_scope::ProcessScope::new());
+
+        let gate = graphs.closeout_gate(
+            "doc-hash",
+            &closeout,
+            now,
+            Some(closeout_owner_alive(owner)),
+            true,
+        );
+        assert!(gate.blocks_claim(), "live owner must block: {gate:?}");
+        let gate = graphs.closeout_gate("doc-hash", &closeout, now, None, true);
+        assert!(gate.blocks_claim(), "unknown liveness must block: {gate:?}");
+        // The same keyed graph flips once the owner is observed dead.
+        let gate = graphs.closeout_gate("doc-hash", &closeout, now, Some(false), true);
+        assert!(!gate.blocks_claim(), "{gate:?}");
+    }
+
+    /// GH #130 pid-reuse guard: a live pid whose process started after the
+    /// recorded claim is a recycled pid, so the recorded owner is gone.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn closeout_owner_alive_treats_a_pid_started_after_the_claim_as_reused() {
+        let mut owner = gh130_closeout(std::process::id(), timestamp_secs())
+            .owner
+            .unwrap();
+        assert!(closeout_owner_alive(&owner));
+        owner.claimed_secs = 10;
+        assert!(!closeout_owner_alive(&owner));
     }
 
     #[test]

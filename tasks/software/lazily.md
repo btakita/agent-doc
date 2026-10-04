@@ -513,6 +513,56 @@ Each rejection is a `ValueError` naming the field; a missing field used to raise
 **Next:** recommended `#lzwiremodel6`, appended. It covers union lowering for Go and Rust, starting with Go because Go has no codec-dependent fields, and then generating `delta` into lazily-go. `docs/wire-codegen.md` lists what each backend still needs.
 
 The exchange is past 430 lines; not stopping the queue for it.
+
+### Re: #lzwiremodel6, Go union lowering + delta generated into lazily-go — opus-5-5 · 2026-10-04T01:43-04:00
+
+> **Queue prompt:**
+>
+> do [#lzwiremodel6]
+
+**Go part done; Rust and Kotlin deferred to a follow-up.** The Go backend now generates unions, and `delta` is generated into lazily-go as its second binding after Python. lazily-go was pushed first, then lazily-spec. I didn't do the Rust part this cycle; it's the recommended follow-up `#lzwiremodel7`.
+
+| Repo | Commit | What changed |
+|---|---|---|
+| lazily-go | `b47d655` | `delta_wire_gen.go` (generated) replaces 408 hand-written lines in `ipc.go` |
+| lazily-spec | `bf112f2` | Go union lowering, `delta` Go target, tests, docs |
+
+**Correction to what I said last cycle.** I called Go the easy next binding because it has no fields whose encoding depends on the codec. That missed something: lazily-go stores `NodeId` and `Epoch` as `int64`, just as Kotlin stores `NodeId` as `Long`. Changing either to an unsigned type would ripple through the whole binding. So instead of that migration, I added an `int64` target option: the wire stays u64, the field stays `int64`, and decoding refuses anything past 2^63-1. The spec explicitly allows this: a binding that can't represent a value exactly must refuse the frame (protocol.md § NodeId / PeerId). Encoding refuses a negative id.
+
+**How Go lowers a union:**
+- **Interface plus structs.** Each union is an interface plus one struct per variant: `DeltaOpCellSet{Node, Payload}`, `IpcValueInline{Bytes}`, `NodeStateOpaque{}`. That is the shape lazily-go's hand-written types already had, so names, fields and `unmarshalDeltaOp` / `unmarshalIpcValue` / `unmarshalNodeState` are unchanged.
+- **Shared plan.** It reuses the Python backend's plan: record payloads flattened into their variant, `variant_fields`, `external` for `NodeKey` and `ShmBlobRef`, and emitting only reachable types.
+- **New `interface_methods` option.** It puts `TargetReadable` on the generated `DeltaOp` interface. Each variant's implementation stays hand-written in `ipc.go`, beside `IpcValueOf`, `DeltaNext`, `ApplyStatus` and `FilterReadable`.
+- **gofmt-clean as generated.** JSON is written by hand in field order, so there are no struct tags for gofmt to align. Receipts still use the old struct-tag path, and their output is byte-identical.
+
+**What's stricter now.** I checked the old decoder directly against an `origin/main` worktree rather than going from memory. The old decoder accepted all of these, and the new one refuses them:
+- unknown keys;
+- a missing `node`, which decoded as 0;
+- a missing or `null` `ops` list;
+- a negative id or epoch.
+
+It already refused `1.0` and 2^63; my first draft of the docs said otherwise, and I corrected it before pushing. lazily-go's CHANGELOG records the changes.
+
+**Line count.** In Go the generator doesn't yet save lines: 408 hand-written lines out, 888 generated lines and about 540 lines of backend in. What lazily-go gains is the strictness above. Python remains the one binding where it saves lines.
+
+**Verification:**
+- **lazily-go `make check`:** exit 0, including the race run, interop peer and conformance coverage, with no failures. Five new tests cover:
+  - 17 off-schema frames refused;
+  - every variant round-tripping byte for byte, including a node id of 2^63-1;
+  - an absent or `null` key read as absent and re-encoded as omitted;
+  - a negative id refused on encode;
+  - `backend: null` still lenient through the hand-written `ShmBlobRef`.
+- **Not vacuous:** removing the unknown-key check from the generated decoder made the strict test fail, and it passed again after restoring.
+- **lazily-spec `make check`:** exit 0, with 374 tests. `wire_codegen --check` is green for all six generated files against the local checkouts.
+- **CI:** lazily-py's run from `#lzwiremodel5` is green. The lazily-go and lazily-spec runs for this push were in progress at closeout.
+
+**Still open, filed as recommended `#lzwiremodel7`:**
+- **Kotlin:** a sealed-class lowering, plus a Kotlin version of the `int64` option so `NodeId` can stay `Long` instead of migrating to `ULong`.
+- **Rust:** an enum lowering, plus a way to express that `NodeAdd.key` is omitted in JSON and msgpack but kept in Postcard, which a plain serde derive can't do.
+
+**An agent-doc hook glitch, noted for the record:** a background-task completion notice was flagged by the hook as an operator chat prompt (`#chatprompt`). It wasn't operator input, so I didn't record it in the exchange.
+
+The exchange is past 480 lines; not stopping the queue for it.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -524,7 +574,7 @@ The exchange is past 430 lines; not stopping the queue for it.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwiremodel6] [recommended, lazily-spec] Sixth wire-model step: union lowering in the Go and Rust backends (Go first: no codec-aware fields), then lower delta into lazily-go with ShmBlobRef/NodeKey external as in Python. Rust needs a codec-aware optional (NodeAdd.key omitted in self-describing codecs, kept in Postcard); Kotlin needs the NodeId Long->ULong migration first. Design: src/lazily-spec/docs/wire-codegen.md (When to add a surface).
+- [ ] [#lzwiremodel7] [recommended, lazily-spec] Seventh wire-model step: union lowering for Kotlin and Rust, then lower delta there. Kotlin: a sealed hierarchy plus a Kotlin equivalent of Go's int64 option (NodeId stays Long, refuse past 2^63-1) instead of a ULong migration. Rust: an enum with struct variants plus a codec-aware optional field (NodeAdd.key omitted in self-describing codecs, kept in Postcard), which a plain serde derive cannot express. Design: src/lazily-spec/docs/wire-codegen.md (Go union lowering; When to add a surface).
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

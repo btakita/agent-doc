@@ -260,6 +260,35 @@ Done. After your IDE restart the editor re-registered: 6 live registrations, and
 **Verification:** `make check` on merged main: nextest **10936 passed, 0 failed**. The final `audit-docs` step failed only on the stale installed `.grok` skill and passed after `make install`. `make install` EXIT=0. The live install was itself a proof of the new path: `Plugin dynamically upgraded in 1 live JetBrains process(es)` → `dynamically replaced and verified live`. `IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.491.jar` is present and no `action.script` is pending.
 
 **Still in flight (claimed, subagents):** GH #131 (rejected editor IPC receipt), GH #132 (upgrade cdylib + gc-libs), GH #133 (supervisor reap/respawn). They will be integrated as one batch, followed by one `make install`, then `release + publish`.
+
+### Re: GH #131–#134 batch — opus-5.5 · 2026-10-04T15:40-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/131
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/132
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/133
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/134
+
+All four were fixed by background subagents in separate worktrees, then merged serially into agent-doc main. **Full-batch `make check`: nextest 10972 passed, 0 failed, EXIT=0 (audit-docs + TLA green). `make install` EXIT=0:** `reload_library` delivered 1/1, and JetBrains plugin 0.2.492 was `dynamically replaced and verified live`.
+
+- **GH #131 — rejected editor receipt** (`2bedfb560`): a typed `SocketDeliveryFailure::{Timeout,Rejected,Unsupported}`; rejections count toward degraded/recycle at all three recording sites, and a new `consecutive_rejections` column records them. The single ownership predicate (`agent_doc_turn::write_ownership`) gains a `DeliveryRejected` verdict: a write waiting on an endpoint that answered NO is no longer "deferred". Its guidance now names the recovery (restart/reload that editor, then `session-check`) instead of forbidding every one. 5 regression tests, including the real refusal against a state.db row. Follow-up **`#gh131nonipc`**: retention paths that never reach IPC still record no transport health.
+- **GH #132 — cdylib pile-up** (`165cdec4a`): `agent-doc upgrade` no longer untars the library over `~/.cargo/bin`. It stages, installs through `lib_install::install_versioned` (a versioned file plus an atomic symlink swap that migrates a plain file in one rename), installs the library before the binary, then runs `gc-libs` automatically. `gc-libs` now recognises a plain-file install (hard-link or byte-identical copy) and sweeps markers left by dead pids. 7 tests.
+- **GH #133 — supervisor reap/respawn** (`cc24eb23f`):
+  - Every route-owned supervisor now checks its owner record every 15s. It reaps itself (`superseded_binding_orphan`) only when the record names a *different*, live pane, no cycle is open, and its pane is idle.
+  - The controller watchdog respawns a supervisor only when its pane is outside a stash window (`#watchdogbindinglive`).
+  - Tests include a mutation proof.
+  - Follow-up **`#gh133sigterm`**: a deliberate kill in a visible column still respawns, and there is an open policy question about stashed owned panes.
+- **GH #134 — Remote Dev layout `unknown`** (`b07ac304c`):
+  - The JetBrains plugin now reports each remote client's visible, selected and open editors.
+  - A new pure resolver, `agent-doc-editor-surface/src/remote_layout.rs`, reads that as one column per visible document. It keeps a known split while the evidence is thin, and a tab switch replaces a column rather than adding one (no-growth, GH #120). A cold start with no evidence stays `unknown` (GH #105).
+  - The resolver is reached over FFI, with a fallback if the native library is older. Plugin 0.2.492. 11 resolver tests.
+  - **[operator-verify]:** in a live Remote Dev session with two docs in two splits, look for `source=remote_client_visible_editors` → `layout=observed`.
+
+**Integration note:** another session has uncommitted WIP in agent-doc `agent-doc-start-runtime-io/src/lib.rs` (#clearrestartjoinstall). It overlapped GH #133's file, so I merged on an `integ454` worktree and fast-forwarded main. The WIP patch was backed up, verified to apply cleanly on top, and re-applied unchanged.
+
+**Issue watch:** still polling for issues above #134. Next: `release + publish` (v0.35.454).
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -273,11 +302,15 @@ Done. After your IDE restart the editor re-registered: 6 live registrations, and
 - ~~do [#jbdynamicfalsereport]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/131
 - #gh-fix https://github.com/btakita/agent-doc/issues/132
+- #gh-fix https://github.com/btakita/agent-doc/issues/133
+- #gh-fix https://github.com/btakita/agent-doc/issues/134
 - ~~release + publish~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#gh131nonipc] [agent-doc] Follow-up to GH 131: some of the issue's failures (socket_visible_write divergence refusal, serialized_atomic_write retention) never reach the IPC send, so they record nothing in editor_transport_health and cannot drive degraded/recycle. Route those retention outcomes into the same typed transport-health recorder, and consider treating an endpoint as unregistered after N consecutive rejections (issue suggestion, not implemented in 2bedfb560).
+- [ ] [#gh133sigterm] [agent-doc] Follow-up to GH 133: a deliberately SIGTERM'd supervisor in a VISIBLE column is still respawned by the controller watchdog, because there is no termination handler to distinguish a deliberate kill from a crash. Add a SIGTERM handler that records an intentional-exit marker the watchdog honours, without breaking the existing replacement path (SIGTERM then cold-start). Also decide: should idle owned supervisors whose pane is only stashed be reaped? specs/supervisor.md currently says no.
 - [ ] [#jbstagebackup] [agent-doc][jetbrains] Follow-up to jbpluginvanish: the Java upgrader's restart staging (JetBrainsPluginUpgradeAction.stageForRestart) must still emit delete-then-unzip for the IDE's action.script, so a staging whose zip vanishes (or a full disk at restart) before any agent-doc install runs can still remove the plugin. Close the gap: have preflight/supervisor auto-purge doomed stagings (purge_pending_stagings_for StagingPurge::Doomed in agent-doc-fs/src/jetbrains_install.rs) instead of only warning, and/or stage a backup copy the restart can restore. Also clear the stale fixed-name agent-doc-jetbrains-0.2.469.zip left in ~/.cache/JetBrains/IntelliJIdea2026.1/plugins/.
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

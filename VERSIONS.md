@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.454
+
+- **JetBrains plugin no longer vanishes on IDE restart (`#jbpluginvanish`, plugin 0.2.491).** A stale restart staging
+  left in the IDE `action.script` (delete the plugin dir, then unzip a since-deleted zip) wiped the plugin at the next
+  restart. Every install now purges agent-doc stagings whose zip is gone, and purges all of them after a successful
+  restart-free upgrade or direct replace (`plugin_pending_staging_purged`). Direct replacement is atomic: the package
+  is extracted into a staging dir, fsynced and verified, then swapped in with a rename, restoring the backup on failure.
+- **Truthful dynamic-replace reporting (`#jbdynamicfalsereport`).** `skip:plugin-not-loaded` is no longer discarded;
+  an upgrader `ok:` counts as a dynamic replacement only after the IDE process is seen mapping the new jar (bounded
+  10s), otherwise the install reports that an IDE restart is required.
+- **A rejected editor receipt strands instead of retaining forever (GH #131).** `SocketDeliveryFailure::Rejected` is a
+  typed outcome that counts toward transport degradation (`consecutive_rejections`), and the single write-ownership
+  predicate gains a `DeliveryRejected` verdict whose guidance names the recovery instead of forbidding every one.
+- **`agent-doc upgrade` installs a versioned cdylib and reclaims old ones (GH #132).** The release path stages the
+  archive, installs the library through `lib_install::install_versioned` (atomic symlink swap, plain-file migration),
+  then runs `gc-libs`, which now recognises a plain-file install and sweeps dead-pid markers.
+- **Superseded route-owned supervisors reap themselves; stashed ones are not respawned (GH #133).** A supervisor whose
+  owner record names a different live pane, with no open cycle and an idle pane, exits (`superseded_binding_orphan`);
+  the controller watchdog respawns only supervisors whose pane is outside a stash window.
+- **Remote Dev layout detection yields real columns (GH #134, plugin 0.2.492).** The plugin reports each remote
+  client's visible, selected and open editors, and a pure resolver (`remote_layout.rs`, via FFI) turns them into
+  columns, keeping a known split under thin evidence and never growing on a tab switch; a cold start stays `unknown`.
+
 ## 0.35.453
 
 - **Multi-session tmux projects (GH #17, `#ghmultitmux`).** `.agent-doc/config.toml` `tmux_sessions = [...]` is an

@@ -123,6 +123,19 @@ pub fn run_with_tmux_with_options(
         );
     }
 
+    // `#claimedsteerwake`: `Run Agent Doc` / `agent-doc route` is the
+    // operator's explicit SEND. Every steering consumer now flushes the
+    // document's pending steering at once (typing gate bypassed, edits of
+    // claimed heads labelled for their owner, `sent=explicit`): the owning
+    // turn's next hook, its boundary report, or the idle wake. Recorded after
+    // the advisory settle wait, so everything typed up to the click is final.
+    if let Err(err) = agent_doc_session_check_io::midturn_steering::record_explicit_send(file) {
+        eprintln!(
+            "[route] warning: could not record the explicit steering send for {}: {err:#}",
+            file.display()
+        );
+    }
+
     let prepared = prepare_route_document(file, effects.document_prep_effects)?;
     let updated_content = prepared.content;
     let session_id = prepared.session_id;

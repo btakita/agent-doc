@@ -468,6 +468,28 @@ fn strip_prompt_prefix(line: &str) -> &str {
         .unwrap_or(line)
 }
 
+/// The canonical shape an agent records a chat-originated operator prompt in
+/// (`#chatprompt`, GH #125): `> **Chat prompt (#chatprompt):** <verbatim>`.
+/// The record is agent-authored bookkeeping of a prompt that already reached
+/// the agent through the harness chat, so steering (`#midturn-steering`)
+/// never reads it as new operator input.
+pub const CHAT_PROMPT_RECORD_PREFIX: &str = "> **Chat prompt (#chatprompt):**";
+
+/// Whether `line` starts an agent-written chat-prompt record. Lenient about
+/// emphasis and spacing (`> Chat prompt (#chatprompt): …`, `>**Chat prompt
+/// (#chatprompt)**: …`), strict about the `#chatprompt` tag, so operator
+/// prose that merely mentions a chat prompt is never mistaken for one.
+pub fn is_chat_prompt_record_line(line: &str) -> bool {
+    let Some(rest) = line.trim_start().strip_prefix('>') else {
+        return false;
+    };
+    let rest = rest.trim_start().trim_start_matches(['*', '_']);
+    let Some(rest) = rest.strip_prefix("Chat prompt") else {
+        return false;
+    };
+    rest.trim_start().starts_with("(#chatprompt)")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,5 +585,21 @@ mod tests {
                 "real user follow-up must start a new prompt run: {line}"
             );
         }
+    }
+
+    #[test]
+    fn chat_prompt_record_lines_are_recognised_by_their_tag() {
+        assert!(is_chat_prompt_record_line(
+            "> **Chat prompt (#chatprompt):** Did you get my steering change?"
+        ));
+        assert!(is_chat_prompt_record_line(
+            "  > Chat prompt (#chatprompt): what changed?"
+        ));
+        assert!(!is_chat_prompt_record_line(
+            "> **Chat prompt:** untagged quote"
+        ));
+        assert!(!is_chat_prompt_record_line(
+            "Chat prompt (#chatprompt): not a blockquote"
+        ));
     }
 }

@@ -94,6 +94,10 @@ pub enum GateLabel {
     Premature,
     Late,
     OnTime,
+    /// The operator explicitly sent the document (`Run Agent Doc` /
+    /// `agent-doc route`, `#claimedsteerwake`) with this version in it: ground
+    /// truth that the item was finished, attached at decision time.
+    ExplicitSend,
 }
 
 impl GateLabel {
@@ -102,6 +106,7 @@ impl GateLabel {
             Self::Premature => "premature",
             Self::Late => "late",
             Self::OnTime => "on_time",
+            Self::ExplicitSend => "explicit_send",
         }
     }
 
@@ -110,6 +115,7 @@ impl GateLabel {
             "premature" => Some(Self::Premature),
             "late" => Some(Self::Late),
             "on_time" => Some(Self::OnTime),
+            "explicit_send" => Some(Self::ExplicitSend),
             _ => None,
         }
     }
@@ -402,6 +408,9 @@ pub struct GateObservation {
     pub boundary: bool,
     /// The learned gate's verdicts applied to these decisions.
     pub learned_gate: bool,
+    /// The operator explicitly sent the document (`#claimedsteerwake`):
+    /// each delivered version is labelled [`GateLabel::ExplicitSend`].
+    pub explicit: bool,
     pub decisions: Vec<GateDecision>,
 }
 
@@ -465,6 +474,8 @@ pub fn training_target(row: &GateRow) -> Option<f64> {
     match (row.phase, row.label?) {
         (GatePhase::Delivered, GateLabel::Premature) => Some(0.0),
         (GatePhase::Delivered, GateLabel::OnTime | GateLabel::Late) => Some(1.0),
+        // `#claimedsteerwake`: the operator's own "this is final".
+        (_, GateLabel::ExplicitSend) => Some(1.0),
         (GatePhase::HeldPastHalf, GateLabel::Late) => Some(1.0),
         (GatePhase::HeldPastHalf | GatePhase::HeldEarly, GateLabel::OnTime)
             if row.superseded_at_ms.is_some() =>
@@ -588,13 +599,21 @@ fn fold_observation(next: &mut GateLogTracking, obs: &GateObservation) {
                 delivered_at_ms: (phase == GatePhase::Delivered).then_some(obs.now_ms),
                 superseded_at_ms: None,
                 re_edited_at_ms: None,
-                label: None,
+                label: (obs.explicit && phase == GatePhase::Delivered)
+                    .then_some(GateLabel::ExplicitSend),
                 model_probability_milli: Some(
                     (next.weights.probability(&decision.features) * 1000.0).round() as u32,
                 ),
                 model_zone: Some(next.weights.zone(&decision.features).as_str().to_string()),
                 learned_gate: obs.learned_gate,
             };
+            // An explicit-send label is known at decision time: train on it
+            // now (the later label pass skips labelled rows).
+            if let Some(target) = row.label.and_then(|_| training_target(&row)) {
+                next.weights
+                    .update(&row.features, target, next.learning_rate);
+                next.weights_revision = bump();
+            }
             next.rows.insert(
                 key.clone(),
                 TrackedRow {
@@ -1260,6 +1279,7 @@ mod tests {
             document_changed_ms: Some(changed),
             boundary: false,
             learned_gate: true,
+            explicit: false,
             decisions,
         })
     }
@@ -1498,5 +1518,37 @@ mod tests {
             .unwrap();
         assert_eq!(delivered.row.label, Some(GateLabel::Premature));
         assert_eq!(delivered.label_source, Some("stored"));
+    }
+
+    /// `#claimedsteerwake`: an explicit send is a labelled "complete" example
+    /// at decision time, so the learned gate trains on it even with no other
+    /// labelled rows (the `#steergatenamodata` floor had none).
+    #[test]
+    fn an_explicit_send_labels_the_delivery_complete_and_trains() {
+        let mut explicit = observed(
+            3_000,
+            2_900,
+            vec![decision("v1", None, SettleDecision::Settled, 100)],
+        );
+        if let GateLogEvent::Observed(obs) = &mut explicit {
+            obs.explicit = true;
+        }
+        let before = GateLogTracking::new(DEFAULT_LABEL_WINDOW_MS);
+        let state = fold(&[explicit]);
+        let delivered = row(&state, "v1", GatePhase::Delivered);
+        assert_eq!(delivered.label, Some(GateLabel::ExplicitSend));
+        assert_eq!(training_target(delivered), Some(1.0));
+        assert!(state.weights_revision > 0, "the gate trained on the send");
+        assert_ne!(state.weights, before.weights);
+        assert!(
+            state.weights.probability(&delivered.features)
+                > before.weights.probability(&delivered.features),
+            "the send moved the gate toward `complete` for these features"
+        );
+        // The label survives a storage round trip.
+        assert_eq!(
+            GateLabel::parse("explicit_send"),
+            Some(GateLabel::ExplicitSend)
+        );
     }
 }

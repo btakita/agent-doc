@@ -14,6 +14,7 @@ name = "agent_doc_prompt_contract"
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.448" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.448" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.448" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.448" }
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }
 

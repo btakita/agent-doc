@@ -16,8 +16,9 @@ rule. This runbook carries the rest.
   operator types the prompt into the harness chat (Claude Code, Codex, OpenCode)
   instead of editing the document — including a bare `prompt_presets` key such
   as `#upgrade` — the document has no diff for it by construction. Record it:
-  insert the chat prompt verbatim into `agent:exchange` (the "missing user
-  prompt" carve-out), do the work, and persist the response through
+  insert the chat prompt verbatim into `agent:exchange` as
+  `> **Chat prompt (#chatprompt):** <prompt>` (the "missing user prompt"
+  carve-out; steering never reads that record back as operator input), do the work, and persist the response through
   `agent-doc respond <FILE>` / `agent-doc write --commit <FILE>` with its
   queue/backlog mutations, exactly like a document-originated turn. The
   `UserPromptSubmit` hook marks such a prompt in a document-bound session with
@@ -72,6 +73,15 @@ rule. This runbook carries the rest.
   - `drain_after_current`: a new or edited queue item. It runs in operator queue
     order AFTER the current item closes. Acknowledge it; do not interrupt,
     interleave, or start it now.
+  - `forward_to_owner` (`#claimedsteerwake`): a queue item a worker already
+    claimed; `owner=subagent:<label>` names it. For an edit, FORWARD
+    `previous` -> `verbatim` to that running subagent (for example with
+    SendMessage). Never dispatch a new subagent for it and never re-claim it:
+    the claim follows an appended note (`#claimfollowsedit`). An edit of a
+    claimed head also wakes an idle coordinator.
+  - `sent=explicit` (`#claimedsteerwake`): the operator pressed Run Agent Doc
+    (`agent-doc route`), which flushes all pending steering at once past the
+    typing gate. Treat those items as final.
   - `subagent`: a queue item with subagent intent (`#subagents` on the line, a
     preset expanding to "run … in subagents", or such a preset at queue or cycle
     scope). Spawn a background subagent for it immediately, one per item; when it
@@ -93,7 +103,10 @@ rule. This runbook carries the rest.
   lease, convergence gate), once per steering set (a durable receipt fences
   it). The wake reads without consuming, so the woken turn still receives the
   items through preflight, the hook, or the boundary report. Items a worker
-  claimed (`agent-doc queue claim`) never wake the session. Cursor has no
+  claimed (`agent-doc queue claim`) never wake the session, but an edit of a
+  claimed item's text does (`forward_to_owner`). Steering goes only to the
+  turn that owns the document: a subagent's tool calls neither receive nor
+  consume it (`#steerowneronly`). Cursor has no
   route-owned pane, so it is never woken; it receives steering at its next
   agent-doc command.
   Steering does not depend on the hook (`#closeout-steering`): whatever no hook

@@ -102,17 +102,132 @@ pub fn seed_for_cycle(
     // Keep the previous cycle's seed queue for `queue_subagent_dispatch`: a
     // re-entrant preflight of the same cycle inherits it, a new cycle takes
     // the outgoing base's queue.
-    watermark.prior_cycle_queue = match load_watermark(&conn, &state_key("base", file))? {
+    let outgoing_base = load_watermark(&conn, &state_key("base", file))?;
+    // `#claimedsteerwake`: what the agent channel last surfaced. The hook
+    // consumer advances past the base as it surfaces; fall back to the base.
+    let prior_acknowledged = match (
+        &outgoing_base,
+        load_watermark(&conn, &state_key(CONSUMER_HOOK, file))?,
+    ) {
+        (Some(base), _) if base.cycle_id == cycle_id => None,
+        (Some(base), Some(hook)) if hook.cycle_id == base.cycle_id => Some(hook.acknowledged_queue),
+        (Some(base), _) => Some(base.acknowledged_queue.clone()),
+        (None, _) => None,
+    };
+    watermark.prior_cycle_queue = match outgoing_base {
         Some(existing) if existing.cycle_id == cycle_id => existing.prior_cycle_queue,
         Some(existing) => Some(existing.acknowledged_queue),
         None => None,
     };
+    if let Some(prior) = prior_acknowledged {
+        let owners = agent_doc_queue_io::queue_claim::claim_owners_for_content(file, baseline);
+        if !owners.is_empty() {
+            let carried = core::carry_unsurfaced_claimed_edits(&mut watermark, &prior, |text| {
+                owners.contains_key(&agent_doc_queue::queue_claim::claim_identity(text))
+            });
+            if carried > 0 {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "midturn_steering_seed_carried_claimed_edits file={} cycle={cycle_id} count={carried} (#claimedsteerwake)",
+                        file.display()
+                    ),
+                );
+            }
+        }
+    }
     agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
         &conn,
         &state_key("base", file),
         &serde_json::to_string(&watermark)?,
         now_ms(),
     )
+}
+
+/// How long after an explicit send a document save still counts as part of
+/// it: the editor may flush its buffer to disk just after the action fires.
+pub const EXPLICIT_SEND_SAVE_GRACE_MS: u64 = 5_000;
+
+/// The operator's explicit send (`#claimedsteerwake`): `Run Agent Doc` /
+/// `agent-doc route` fired at `sent_at_ms`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct ExplicitSend {
+    pub sent_at_ms: u64,
+}
+
+impl ExplicitSend {
+    /// Whether a document last changed at `document_changed_ms` is covered:
+    /// every edit up to the send (plus the save grace) was sent; anything typed
+    /// later goes back through the passive typing gate.
+    pub fn covers(&self, document_changed_ms: Option<u64>) -> bool {
+        document_changed_ms
+            .is_none_or(|changed| changed <= self.sent_at_ms + EXPLICIT_SEND_SAVE_GRACE_MS)
+    }
+}
+
+fn explicit_send_key(file: &Path) -> String {
+    state_key("explicit_send", file)
+}
+
+/// Record an explicit operator send for `file` (`#claimedsteerwake`). Every
+/// steering consumer (the PostToolUse hook, the turn-boundary report, the idle
+/// wake) then flushes the pending steering at once, bypassing the typing gate,
+/// and marks it `sent=explicit`.
+pub fn record_explicit_send(file: &Path) -> Result<()> {
+    let Some(root) = project_root(file) else {
+        return Ok(());
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let send = ExplicitSend {
+        sent_at_ms: now_ms(),
+    };
+    agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+        &conn,
+        &explicit_send_key(file),
+        &serde_json::to_string(&send)?,
+        send.sent_at_ms,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "steering_explicit_send file={} sent_at_ms={} (#claimedsteerwake)",
+            file.display(),
+            send.sent_at_ms
+        ),
+    );
+    Ok(())
+}
+
+fn load_explicit_send(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    file: &Path,
+) -> Option<ExplicitSend> {
+    agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+        conn,
+        &explicit_send_key(file),
+    )
+    .ok()
+    .flatten()
+    .and_then(|raw| serde_json::from_str(&raw).ok())
+}
+
+/// Route queue items a worker claimed to their owner (`#claimedsteerwake`).
+fn route_claimed_items(file: &Path, content: &str, items: &mut [SteeringItem]) {
+    if !items
+        .iter()
+        .any(|item| item.source == core::SteeringSource::Queue)
+    {
+        return;
+    }
+    let owners = agent_doc_queue_io::queue_claim::claim_owners_for_content(file, content);
+    if owners.is_empty() {
+        return;
+    }
+    core::apply_claim_owners(items, |text| {
+        owners
+            .get(&agent_doc_queue::queue_claim::claim_identity(text))
+            .cloned()
+    });
 }
 
 fn load_watermark(
@@ -409,9 +524,11 @@ fn prepare_with_gate(
         return prepared(Some(watermark), None, boundary, None);
     }
 
+    let explicit_send =
+        load_explicit_send(&conn, file).is_some_and(|send| send.covers(mtime_ms(&meta)));
     // The turn boundary is the last chance before the loop re-enters: an
     // item that is complete surfaces now rather than waiting out the window.
-    let debounce_ms = if policy == ClosedCyclePolicy::ForceBoundary {
+    let debounce_ms = if policy == ClosedCyclePolicy::ForceBoundary || explicit_send {
         0
     } else {
         debounce_ms_for(file, &content)
@@ -445,6 +562,7 @@ fn prepare_with_gate(
         document_changed_ms: mtime_ms(&meta),
         debounce_ms,
         binary_owned_queue_ids: if boundary { &owned } else { &empty },
+        explicit_send,
         max_hold_ms,
         classifier,
         median_pause_ms: crate::steering_gate_log::median_pause_ms(
@@ -504,8 +622,10 @@ fn prepare_with_gate(
         document_changed_ms: ctx.document_changed_ms,
         boundary,
         learned_gate: learned.is_some(),
+        explicit: explicit_send,
         decisions: std::mem::take(&mut observation.decisions),
     };
+    route_claimed_items(file, &content, &mut observation.ready);
     let mut next = observation.next;
     next.last_observed_stat = Some(fingerprint);
     let report = SteeringReport {
@@ -618,11 +738,27 @@ pub fn observe_for_wake(file: &Path) -> Result<WakeObservation> {
     };
     let content = std::fs::read_to_string(file).unwrap_or_default();
     let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content);
+    // A claimed item is in flight elsewhere, so its ADDITION never wakes the
+    // session, nor does a tag/marker-only re-tag (same work identity,
+    // `#claimdispatchidentity`). An edit of its substance (an appended note,
+    // `#claimfollowsedit`) is operator steering for that work
+    // (`#claimedsteerwake`): it wakes the coordinator, which forwards it to the
+    // owner.
+    let forwards_substance = |item: &SteeringItem| {
+        item.dispatch == core::SteeringDispatch::ForwardToOwner
+            && item.change == core::SteeringChange::Edited
+            && item.previous.as_deref().is_some_and(|previous| {
+                agent_doc_queue::queue_claim::claim_identity(previous)
+                    != agent_doc_queue::queue_claim::claim_identity(&item.verbatim)
+            })
+    };
     let items: Vec<SteeringItem> = hook_report
         .items
         .iter()
         .filter(|item| {
-            item.source != core::SteeringSource::Queue || !claimed.claims(&item.verbatim)
+            item.source != core::SteeringSource::Queue
+                || forwards_substance(item)
+                || !claimed.claims(&item.verbatim)
         })
         .cloned()
         .collect();
@@ -644,6 +780,19 @@ pub fn observe_for_wake(file: &Path) -> Result<WakeObservation> {
         pending,
         recheck_after_ms,
     })
+}
+
+/// Steering an explicit send (`#claimedsteerwake`) handed to the owning
+/// turn: the settled-or-not items the agent channel has not surfaced yet,
+/// read without consuming (the owning turn's hook, its boundary report, or
+/// the idle wake delivers them, `sent=explicit`).
+pub fn explicit_send_pending_items(file: &Path) -> Result<Vec<SteeringItem>> {
+    Ok(
+        prepare_with_gate(file, CONSUMER_HOOK, ClosedCyclePolicy::Boundary, false)?
+            .and_then(|prepared| prepared.report)
+            .map(|report| report.items)
+            .unwrap_or_default(),
+    )
 }
 
 fn wake_receipt_key(file: &Path) -> String {
@@ -725,11 +874,15 @@ pub fn pending_steering_items(file: &Path, current: &str) -> Vec<SteeringItem> {
         document_changed_ms: None,
         debounce_ms: 0,
         binary_owned_queue_ids: &owned,
+        explicit_send: false,
         max_hold_ms: max_hold_ms_for(file),
         classifier: &deterministic,
         median_pause_ms: None,
     };
-    core::observe_with_mode(&base, current, &ctx, core::ObserveMode::Boundary).ready
+    let mut ready =
+        core::observe_with_mode(&base, current, &ctx, core::ObserveMode::Boundary).ready;
+    route_claimed_items(file, current, &mut ready);
+    ready
 }
 
 /// Whether `item` came from the exchange (a prompt only an agent cycle can
@@ -751,7 +904,7 @@ pub fn render_pending_steering_items(items: &[SteeringItem]) -> Option<String> {
             out.push('\n');
         }
         out.push_str(&format!(
-            "[steering {}/{}] dispatch={} source={} change={}{}",
+            "[steering {}/{}] dispatch={} source={} change={}{}{}",
             idx + 1,
             items.len(),
             item.dispatch.as_str(),
@@ -769,6 +922,10 @@ pub fn render_pending_steering_items(items: &[SteeringItem]) -> Option<String> {
             } else {
                 ""
             },
+            item.owner
+                .as_deref()
+                .map(|owner| format!(" owner={owner}"))
+                .unwrap_or_default(),
         ));
         if let Some(previous) = &item.previous {
             out.push_str(&format!("\nprevious: {previous}"));
@@ -829,6 +986,22 @@ pub fn emit_closeout_steering(file: &Path, writer: &mut impl std::io::Write) {
 pub struct PostToolUseInput {
     pub session_id: String,
     pub cwd: String,
+    /// Claude Code sets `agent_id` (and `agent_type`) only when the tool call
+    /// ran inside a subagent; the parent's calls carry neither. Subagents
+    /// share the parent's `session_id`, so without this the coordinator's
+    /// steering leaked into (and was consumed by) its subagents' tool calls.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+impl PostToolUseInput {
+    /// The tool call ran inside a subagent, not the turn that owns the
+    /// document (`#steerowneronly`).
+    pub fn is_subagent(&self) -> bool {
+        self.agent_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty())
+    }
 }
 
 /// Resolve the document this harness session is driving, from the binding
@@ -869,6 +1042,12 @@ pub fn post_tool_use_output(context: &str) -> serde_json::Value {
 pub fn post_tool_use_response(payload: &str) -> Result<Option<serde_json::Value>> {
     let input: PostToolUseInput =
         serde_json::from_str(payload).context("parse PostToolUse payload")?;
+    // `#steerowneronly`: steering belongs to the turn that owns the document.
+    // A subagent's tool call neither receives it nor advances the watermark,
+    // so the coordinator still gets every item at its own next tool call.
+    if input.is_subagent() {
+        return Ok(None);
+    }
     let Some(file) = session_document(&input)? else {
         return Ok(None);
     };
@@ -1437,5 +1616,251 @@ mod tests {
         assert_eq!(load_wake_receipt(&file).unwrap(), None);
         record_wake_receipt(&file, "abc123", 2).unwrap();
         assert_eq!(load_wake_receipt(&file).unwrap().as_deref(), Some("abc123"));
+    }
+
+    fn bind_session(root: &Path, file: &Path, session_id: &str) {
+        agent_doc_codex_hook_io::save_state(
+            root,
+            &agent_doc_codex_hook_io::SessionState {
+                session_id: session_id.to_string(),
+                identity_origin: agent_doc_codex_hook_io::SessionIdentityOrigin::HarnessHook,
+                doc_path: file.display().to_string(),
+                last_turn_id: "turn-1".to_string(),
+                last_prompt: format!("/agent-doc {}", file.display()),
+                last_auto_queue_head: None,
+                last_context_clear_at: None,
+                last_prompt_cycle: None,
+                preflight_admitted: Some(true),
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+    }
+
+    fn hook_payload(root: &Path, agent_id: Option<&str>) -> String {
+        let mut payload = serde_json::json!({
+            "session_id": "coord",
+            "cwd": root,
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+        });
+        if let Some(agent_id) = agent_id {
+            payload["agent_id"] = serde_json::json!(agent_id);
+            payload["agent_type"] = serde_json::json!("general-purpose");
+        }
+        payload.to_string()
+    }
+
+    /// `#steerowneronly` (#steerworks): a subagent's tool calls share the
+    /// coordinator's `session_id`. They must neither receive the coordinator's
+    /// steering nor consume it; the coordinator's own next tool call gets it.
+    #[test]
+    fn subagent_tool_calls_never_receive_or_consume_coordinator_steering() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let file = root.join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\nprompt_presets:\n  '#subagents': 'run the remaining items in subagents'\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        bind_session(root, &file, "coord");
+        std::fs::write(
+            &file,
+            baseline.replace(
+                "- current task\n",
+                "- current task\n- #subagents: https://github.com/btakita/agent-doc/issues/127\n",
+            ),
+        )
+        .unwrap();
+        backdate(&file);
+
+        for _ in 0..2 {
+            assert_eq!(
+                post_tool_use_response(&hook_payload(root, Some("agent-a1b2"))).unwrap(),
+                None,
+                "a subagent tool call must stay silent"
+            );
+        }
+        let delivered = post_tool_use_response(&hook_payload(root, None))
+            .unwrap()
+            .expect("the coordinator's own tool call delivers the item");
+        let context = delivered["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(context.contains("issues/127"), "{context}");
+        assert_eq!(
+            post_tool_use_response(&hook_payload(root, None)).unwrap(),
+            None
+        );
+    }
+
+    /// `#claimedsteerwake`: `Run Agent Doc` / `agent-doc route` is an explicit
+    /// send. A line the typing gate would hold (unfinished shape, edited a
+    /// moment ago) is delivered at once, final, marked `sent=explicit`.
+    #[test]
+    fn explicit_send_flushes_pending_steering_past_the_typing_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 600000\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        std::fs::write(
+            &file,
+            baseline.replace("- current task\n", "- current task\n- also publish the\n"),
+        )
+        .unwrap();
+        let held = observe(&file, CONSUMER_HOOK, false).unwrap().unwrap();
+        assert!(held.items.is_empty(), "passive delivery holds it: {held:?}");
+        assert_eq!(held.pending, 1);
+
+        record_explicit_send(&file).unwrap();
+        let sent = observe(&file, CONSUMER_HOOK, true).unwrap().unwrap();
+        assert_eq!(sent.items.len(), 1, "{sent:?}");
+        assert!(sent.items[0].explicit && !sent.items[0].possibly_partial);
+        assert!(sent.render().unwrap().contains("sent=explicit"));
+        assert!(
+            observe(&file, CONSUMER_HOOK, true)
+                .unwrap()
+                .is_none_or(|report| report.items.is_empty()),
+            "exactly once"
+        );
+
+        // An edit typed after the send (past the save grace) is passive again.
+        let later = std::fs::read_to_string(&file).unwrap().replace(
+            "- also publish the\n",
+            "- also publish the\n- and then the\n",
+        );
+        std::fs::write(&file, later).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(
+                std::time::SystemTime::now()
+                    + std::time::Duration::from_millis(EXPLICIT_SEND_SAVE_GRACE_MS + 60_000),
+            )
+            .unwrap();
+        let passive = observe(&file, CONSUMER_HOOK, false).unwrap().unwrap();
+        assert!(passive.items.is_empty(), "{passive:?}");
+        assert_eq!(passive.pending, 1);
+    }
+
+    /// `#steerworks` items 1 + 3 (agent-doc-bugs.md, 2026-10-04): the operator
+    /// annotates a CLAIMED `#gh-fix` head while the coordinator is idle. The
+    /// claim follows the edit, the idle wake fires for it, the woken cycle's
+    /// seed keeps it pending, and its first hook says "forward to owner", not
+    /// "dispatch a new subagent". A further trailing-period edit routes the
+    /// same way with no re-claim.
+    #[test]
+    fn claimed_head_edit_wakes_the_idle_coordinator_and_forwards_to_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let url = "https://github.com/btakita/agent-doc/issues/126";
+        let head = format!("#subagents: #gh-fix {url}");
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 2500\nprompt_presets:\n  '#subagents': 'run the remaining items in subagents'\n---\n# S\n\n<!-- agent:queue go -->\n- current task\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&file, &head, "subagent:ghfix126", 3600).unwrap();
+        let closed = baseline.replace("- current task\n", "");
+        std::fs::write(&file, &closed).unwrap();
+        close_cycle(&file, &closed);
+        let mut report = Vec::new();
+        emit_closeout_steering(&file, &mut report);
+        assert!(observe_for_wake(&file).unwrap().items.is_empty());
+
+        // Idle: the operator annotates the claimed head.
+        let annotated_head = format!("{head}: note this is in a Coder environment");
+        let annotated = closed.replace(&format!("- {head}\n"), &format!("- {annotated_head}\n"));
+        std::fs::write(&file, &annotated).unwrap();
+        backdate(&file);
+        let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(&file, &annotated);
+        assert!(
+            claimed.claims(&annotated_head),
+            "the claim followed the edit"
+        );
+        let wake = observe_for_wake(&file).unwrap();
+        assert_eq!(
+            wake.items.len(),
+            1,
+            "the idle coordinator is woken: {wake:?}"
+        );
+        assert_eq!(
+            wake.items[0].dispatch,
+            core::SteeringDispatch::ForwardToOwner
+        );
+        assert_eq!(wake.items[0].owner.as_deref(), Some("subagent:ghfix126"));
+
+        // The woken cycle: preflight seeds a NEW cycle from the annotated text.
+        let woken =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&annotated), Some(&annotated))
+                .unwrap();
+        seed_for_cycle(&file, &woken.cycle_id, &annotated, None, Vec::new()).unwrap();
+        let hook = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("first hook");
+        assert_eq!(hook.items.len(), 1, "{hook:?}");
+        let text = hook.render().unwrap();
+        assert!(
+            text.contains(
+                "dispatch=forward_to_owner source=queue change=edited owner=subagent:ghfix126"
+            ),
+            "{text}"
+        );
+        assert!(text.contains(&format!("previous: {head}")), "{text}");
+        assert!(!text.contains("dispatch=subagent"), "{text}");
+
+        // A trailing period: still the owner's work, no re-claim needed.
+        let period = annotated.replace(&annotated_head, &format!("{annotated_head}."));
+        std::fs::write(&file, &period).unwrap();
+        backdate(&file);
+        let hook = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert_eq!(hook.items.len(), 1, "{hook:?}");
+        assert_eq!(
+            hook.items[0].dispatch,
+            core::SteeringDispatch::ForwardToOwner
+        );
+        let ledger =
+            agent_doc_queue_io::queue_claim::load_ledger_following(&file, &period).unwrap();
+        assert_eq!(ledger.claims.len(), 1, "{ledger:?}");
+        assert_eq!(ledger.claims[0].owner, "subagent:ghfix126");
+        // Closeout pruning keeps (and persists) the followed claim.
+        agent_doc_queue_io::queue_claim::prune_closed_claims(&file, &period).unwrap();
+        let stored = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
+        assert_eq!(stored.claims.len(), 1, "{stored:?}");
+        assert_eq!(stored.claims[0].item_text, format!("{annotated_head}."));
     }
 }

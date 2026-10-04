@@ -288,6 +288,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             );
         // GH 91: clear any deferral a previous route on this worker left behind.
         let _ = agent_doc_route_io::invocation::take_route_deferral();
+        let _ = agent_doc_route_io::invocation::take_route_steering_delivery();
         match agent_doc_route_io::invocation::run_with_force_disk_and_prune(
             &invocation.file,
             invocation.pane.as_deref(),
@@ -313,10 +314,15 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                     None => {
                         agent_doc_controller_io::project_controller::ControllerEditorRouteRuntimeResult {
                             exit_code: 0,
-                            output: format!(
-                                "[route] dispatched via controller editor_route for {}",
-                                invocation.relative_path
-                            ),
+                            // `#claimedsteerwake`: an explicit send delivered
+                            // to the owning turn reports what it delivered.
+                            output: agent_doc_route_io::invocation::take_route_steering_delivery()
+                                .unwrap_or_else(|| {
+                                    format!(
+                                        "[route] dispatched via controller editor_route for {}",
+                                        invocation.relative_path
+                                    )
+                                }),
                         }
                     }
                 },

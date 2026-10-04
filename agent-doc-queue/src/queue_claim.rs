@@ -202,10 +202,28 @@ impl QueueClaimLedger {
     /// Release the claim on `item`. Returns the released claim, if any.
     pub fn release(&mut self, item: &str) -> Option<QueueClaim> {
         let identity = claim_identity(item);
-        let index = self
+        let index = match self
             .claims
             .iter()
-            .position(|claim| claim.identity == identity)?;
+            .position(|claim| claim.identity == identity)
+        {
+            Some(index) => index,
+            // `#claimfollowsedit`: released by the text the worker was given,
+            // after the claim followed an operator annotation.
+            None => {
+                let continuing: Vec<usize> = self
+                    .claims
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, claim)| is_edit_continuation(&identity, &claim.identity))
+                    .map(|(index, _)| index)
+                    .collect();
+                match continuing.as_slice() {
+                    [only] => *only,
+                    _ => return None,
+                }
+            }
+        };
         Some(self.claims.remove(index))
     }
 
@@ -222,6 +240,70 @@ impl QueueClaimLedger {
             .iter()
             .filter(|claim| !claim.is_expired(now_secs))
             .filter(|claim| live_heads.is_none_or(|live| live.contains(&claim.identity)))
+            .collect()
+    }
+
+    /// Carry claims across operator annotations of their head
+    /// (`#claimfollowsedit`). A live (unexpired) claim whose identity is no
+    /// longer a live head follows the ONE live head that is an
+    /// [`is_edit_continuation`] of it and that no other claim holds: the
+    /// operator appended a note (`<url>` -> `<url>: note this is in a Coder
+    /// environment`), added or dropped a trailing period, or trimmed such a
+    /// note. The claim is re-keyed to that head and its `item_text` becomes the
+    /// head's text (so the on-load [`Self::rekey`] keeps it). Ambiguous matches
+    /// (two candidate heads, or two orphaned claims for one head) never follow.
+    /// Returns `(previous item_text, new item_text)` per followed claim.
+    pub fn follow_edits(&mut self, now_secs: u64, live_heads: &[String]) -> Vec<(String, String)> {
+        let live: Vec<(QueueItemIdentity, &String)> = live_heads
+            .iter()
+            .map(|head| (claim_identity(head), head))
+            .collect();
+        let held: HashSet<QueueItemIdentity> = self
+            .claims
+            .iter()
+            .filter(|claim| !claim.is_expired(now_secs))
+            .map(|claim| claim.identity.clone())
+            .collect();
+        let mut proposals: Vec<(usize, usize)> = Vec::new();
+        for (claim_idx, claim) in self.claims.iter().enumerate() {
+            if claim.is_expired(now_secs) || live.iter().any(|(id, _)| *id == claim.identity) {
+                continue;
+            }
+            let candidates: Vec<usize> = live
+                .iter()
+                .enumerate()
+                .filter(|(_, (id, _))| !held.contains(id))
+                .filter(|(_, (id, _))| is_edit_continuation(&claim.identity, id))
+                .map(|(idx, _)| idx)
+                .collect();
+            if let [only] = candidates.as_slice() {
+                proposals.push((claim_idx, *only));
+            }
+        }
+        let mut followed = Vec::new();
+        for (claim_idx, head_idx) in &proposals {
+            if proposals.iter().filter(|(_, h)| h == head_idx).count() != 1 {
+                continue;
+            }
+            let (identity, text) = &live[*head_idx];
+            let claim = &mut self.claims[*claim_idx];
+            let previous = std::mem::replace(&mut claim.item_text, (*text).clone());
+            claim.identity = identity.clone();
+            followed.push((previous, (*text).clone()));
+        }
+        followed
+    }
+
+    /// Owner of every active claim, by identity (after any
+    /// [`Self::follow_edits`] the caller applied).
+    pub fn owners(
+        &self,
+        now_secs: u64,
+        live_heads: Option<&HashSet<QueueItemIdentity>>,
+    ) -> std::collections::HashMap<QueueItemIdentity, String> {
+        self.active(now_secs, live_heads)
+            .into_iter()
+            .map(|claim| (claim.identity.clone(), claim.owner.clone()))
             .collect()
     }
 
@@ -260,6 +342,44 @@ impl QueueClaimLedger {
 /// goes through this one function.
 pub fn claim_identity(item: &str) -> QueueItemIdentity {
     queue_head_identity(item.trim())
+}
+
+/// Whether `new` is the same free-text work as `old` with a note appended,
+/// prepended, or removed at a word boundary (`#claimfollowsedit`): one
+/// normalized text is a prefix or suffix of the other, and the join is not
+/// inside a word, so `.../issues/126` -> `.../issues/126: note …` and
+/// `… works` -> `… works.` continue the work while `.../issues/126` ->
+/// `.../issues/1260` does not. Id-backed identities never need this (an edit
+/// that keeps the id keeps the identity), and a mid-text rewrite (typo fix,
+/// different URL) is still a retarget. The shorter side must carry at least
+/// eight alphanumerics so a stub cannot capture an unrelated line.
+pub fn is_edit_continuation(old: &QueueItemIdentity, new: &QueueItemIdentity) -> bool {
+    let (QueueItemIdentity::FreeText(old), QueueItemIdentity::FreeText(new)) = (old, new) else {
+        return false;
+    };
+    if old == new {
+        return false;
+    }
+    let (short, long) = if old.len() <= new.len() {
+        (old.as_str(), new.as_str())
+    } else {
+        (new.as_str(), old.as_str())
+    };
+    if short.chars().filter(|ch| ch.is_alphanumeric()).count() < 8 {
+        return false;
+    }
+    let not_word = |ch: Option<char>| ch.is_none_or(|ch| !ch.is_alphanumeric());
+    if let Some(rest) = long.strip_prefix(short)
+        && (not_word(rest.chars().next()) || not_word(short.chars().last()))
+    {
+        return true;
+    }
+    if let Some(rest) = long.strip_suffix(short)
+        && (not_word(rest.chars().last()) || not_word(short.chars().next()))
+    {
+        return true;
+    }
+    false
 }
 
 /// Tracked ids a queue line references as `[#id]` or `do #id`, lowercased, in
@@ -421,6 +541,15 @@ pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String,
         .find(|head| claim_identity(head) == identity)
     {
         return Ok(head.clone());
+    }
+    // `#claimfollowsedit`: the item names a head the operator has since
+    // annotated; resolve to the single head that continues it.
+    let continuing: Vec<&String> = live_heads
+        .iter()
+        .filter(|head| is_edit_continuation(&identity, &claim_identity(head)))
+        .collect();
+    if let [only] = continuing.as_slice() {
+        return Ok((*only).clone());
     }
     if let QueueItemIdentity::Id(id) = &identity {
         let referencing: Vec<String> = live_heads
@@ -810,5 +939,113 @@ mod tests {
         );
         assert_eq!(ledger.prune(110, Some(&live)), 2);
         assert!(ledger.claims.is_empty());
+    }
+
+    /// `#claimfollowsedit` (#steerworks): the 2026-10-04 agent-doc-bugs.md
+    /// shapes. A claimed `#gh-fix <url>` annotated with `: note …`, then given
+    /// a trailing period, keeps ONE claim with its owner; the coordinator never
+    /// re-claims by the new text.
+    #[test]
+    fn a_claim_follows_operator_annotations_of_its_head() {
+        let url = "https://github.com/btakita/agent-doc/issues/126";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(&format!("#gh-fix {url}"), "subagent:ghfix126", 100, 3600);
+
+        let annotated = format!("#gh-fix {url}: note this is in a Coder environment");
+        let followed = ledger.follow_edits(200, std::slice::from_ref(&annotated));
+        assert_eq!(followed.len(), 1);
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(ledger.claims[0].identity, claim_identity(&annotated));
+        assert_eq!(ledger.claims[0].owner, "subagent:ghfix126");
+        // The on-load re-key keeps the followed identity.
+        assert!(!ledger.rekey());
+
+        let period = format!("{annotated}.");
+        ledger.follow_edits(300, std::slice::from_ref(&period));
+        assert_eq!(ledger.claims[0].identity, claim_identity(&period));
+        let live: HashSet<_> = [claim_identity(&period)].into_iter().collect();
+        assert!(ledger.claimed_items(300, Some(&live)).claims(&period));
+        assert_eq!(
+            ledger
+                .owners(300, Some(&live))
+                .get(&claim_identity(&period)),
+            Some(&"subagent:ghfix126".to_string())
+        );
+        // Released by the text the worker was originally given.
+        assert!(ledger.release(&format!("#gh-fix {url}")).is_some());
+        assert!(ledger.claims.is_empty());
+    }
+
+    #[test]
+    fn a_claim_does_not_follow_a_retarget_or_an_ambiguous_edit() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("#gh-fix https://x.test/issues/126", "subagent:a", 100, 3600);
+        // A different issue number is a different task.
+        assert!(
+            ledger
+                .follow_edits(200, &["#gh-fix https://x.test/issues/1260".to_string()])
+                .is_empty()
+        );
+        // Two heads both continue the claim: never guess.
+        assert!(
+            ledger
+                .follow_edits(
+                    200,
+                    &[
+                        "#gh-fix https://x.test/issues/126: note a".to_string(),
+                        "#gh-fix https://x.test/issues/126: note b".to_string(),
+                    ],
+                )
+                .is_empty()
+        );
+        // The claimed head is still live: an extra annotated line is new work.
+        assert!(
+            ledger
+                .follow_edits(
+                    200,
+                    &[
+                        "#gh-fix https://x.test/issues/126".to_string(),
+                        "#gh-fix https://x.test/issues/126: also".to_string(),
+                    ],
+                )
+                .is_empty()
+        );
+        // An expired claim never follows.
+        assert!(
+            ledger
+                .follow_edits(
+                    10_000,
+                    &["#gh-fix https://x.test/issues/126: note".to_string()]
+                )
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn edit_continuation_needs_a_word_boundary_and_substance() {
+        let id = |text: &str| claim_identity(text);
+        assert!(is_edit_continuation(
+            &id("Ensure the real-time reactive steering works."),
+            &id("Ensure the real-time reactive steering works. When do you get the signal?")
+        ));
+        assert!(is_edit_continuation(
+            &id("note this is in a Coder environment"),
+            &id("note this is in a Coder environment.")
+        ));
+        assert!(!is_edit_continuation(&id("fix it"), &id("fix it now")));
+        assert!(!is_edit_continuation(&id("do [#a]"), &id("do [#a] now")));
+        assert!(!is_edit_continuation(
+            &id("https://x.test/issues/12"),
+            &id("https://x.test/issues/126")
+        ));
+    }
+
+    #[test]
+    fn claim_target_resolves_the_annotated_head_from_the_original_text() {
+        let heads = vec!["#gh-fix https://x.test/issues/126: note coder".to_string()];
+        assert_eq!(
+            resolve_claim_target("#gh-fix https://x.test/issues/126", &heads).unwrap(),
+            heads[0]
+        );
     }
 }

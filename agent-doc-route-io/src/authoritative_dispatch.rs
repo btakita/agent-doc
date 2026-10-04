@@ -154,6 +154,48 @@ fn accept_pending_harness_switch(
     Ok(dispatch_pane)
 }
 
+/// What a route that met an undrainable open closeout reports
+/// (`#claimedsteerwake`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseoutWaitRouteOutcome {
+    /// The explicit send handed pending steering to the owning turn: a
+    /// success, never "nothing was dispatched".
+    SteeringDelivered(String),
+    /// Nothing to send: the existing queue head waits behind the closeout.
+    Deferred(String),
+}
+
+impl CloseoutWaitRouteOutcome {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::SteeringDelivered(message) | Self::Deferred(message) => message,
+        }
+    }
+}
+
+/// Pure outcome for the `WaitForActiveQueueHead` closeout block.
+pub fn closeout_wait_route_outcome(
+    file: &Path,
+    head: &str,
+    blocker: &str,
+    outcome_fields: &str,
+    explicit_items: usize,
+) -> CloseoutWaitRouteOutcome {
+    if explicit_items > 0 {
+        return CloseoutWaitRouteOutcome::SteeringDelivered(format!(
+            "[route] explicit send for {}: delivered {explicit_items} pending steering item(s) to the owning turn (sent=explicit); its next tool call, its turn-boundary report, or the idle wake surfaces them. No second trigger was injected: the open closeout still owns the pane (blocker: {blocker}). steering_delivered={explicit_items} sent=explicit {outcome_fields}",
+            file.display(),
+        ));
+    }
+    CloseoutWaitRouteOutcome::Deferred(format!(
+        "[route] active closeout for {} could not be drained before reroute; nothing was dispatched and existing queue head {:?} remains queued behind the closeout (blocker: {}) {}",
+        file.display(),
+        head,
+        blocker,
+        outcome_fields
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn route_via_authoritative_actor(
     tmux: &Tmux,
@@ -297,17 +339,41 @@ pub fn route_via_authoritative_actor(
                             agent_doc_secret_redact::redact(&blocker)
                         ),
                     );
-                    let deferral = format!(
-                        "[route] active closeout for {} could not be drained before reroute; nothing was dispatched and existing queue head {:?} remains queued behind the closeout (blocker: {}) {}",
-                        file.display(),
-                        head,
-                        agent_doc_secret_redact::redact(&blocker),
-                        route_closeout_user_outcome_fields(
-                            blocked_closeout_recovery_command(&decision).as_deref(),
-                        )
+                    let fields = route_closeout_user_outcome_fields(
+                        blocked_closeout_recovery_command(&decision).as_deref(),
                     );
-                    eprintln!("{deferral}");
-                    crate::invocation::record_route_deferral(deferral);
+                    // `#claimedsteerwake`: this route is the operator's
+                    // explicit send. Pending steering goes to the owning turn
+                    // instead of the route reporting "nothing was dispatched".
+                    let explicit =
+                        agent_doc_session_check_io::midturn_steering::explicit_send_pending_items(
+                            file,
+                        )
+                        .map(|items| items.len())
+                        .unwrap_or(0);
+                    let outcome = closeout_wait_route_outcome(
+                        file,
+                        &head,
+                        &agent_doc_secret_redact::redact(&blocker),
+                        &fields,
+                        explicit,
+                    );
+                    eprintln!("{}", outcome.message());
+                    match outcome {
+                        CloseoutWaitRouteOutcome::SteeringDelivered(message) => {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "route_explicit_send_delivered_to_owner_turn file={} items={explicit} (#claimedsteerwake)",
+                                    file.display()
+                                ),
+                            );
+                            crate::invocation::record_route_steering_delivery(message);
+                        }
+                        CloseoutWaitRouteOutcome::Deferred(message) => {
+                            crate::invocation::record_route_deferral(message);
+                        }
+                    }
                     return Ok(dispatch_pane);
                 }
                 CloseoutBlockDispatchDecision::FailClosed => {
@@ -1389,5 +1455,50 @@ mod tests {
 
         assert_eq!(requested.binary, "claude");
         assert_eq!(transport.binary, "codex");
+    }
+
+    /// `#claimedsteerwake` live repro (agent-doc-bugs.md, 2026-10-04): Run
+    /// Agent Doc while the coordinator's closeout was open was refused with
+    /// "nothing was dispatched ... queued_behind_owner". With pending steering
+    /// the explicit send is delivered to the owning turn and reported as such.
+    #[test]
+    fn run_agent_doc_during_an_open_closeout_delivers_pending_steering() {
+        let file =
+            Path::new("/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md");
+        let head = "#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/126";
+        let blocker = "closeout recovery replay_safe [open_empty_preflight]: agent-doc session cancel-turn tasks/agent-doc/agent-doc-bugs.md — first interrupt the owning harness run";
+        let fields = agent_doc_controller::dispatch::route_closeout_user_outcome_fields(None);
+        assert!(
+            fields.contains("ui_outcome=queued_behind_owner"),
+            "{fields}"
+        );
+
+        let delivered = closeout_wait_route_outcome(file, head, blocker, &fields, 2);
+        let CloseoutWaitRouteOutcome::SteeringDelivered(message) = &delivered else {
+            panic!("an explicit send with pending steering is a delivery: {delivered:?}");
+        };
+        assert!(!message.contains("nothing was dispatched"), "{message}");
+        assert!(!message.contains("could not be drained"), "{message}");
+        assert!(
+            message.contains(
+                "delivered 2 pending steering item(s) to the owning turn (sent=explicit)"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains("steering_delivered=2 sent=explicit"),
+            "{message}"
+        );
+        assert!(
+            message.contains("No second trigger was injected"),
+            "{message}"
+        );
+
+        // Nothing pending: the existing deferral is unchanged.
+        let deferred = closeout_wait_route_outcome(file, head, blocker, &fields, 0);
+        let CloseoutWaitRouteOutcome::Deferred(message) = &deferred else {
+            panic!("{deferred:?}");
+        };
+        assert!(message.contains("nothing was dispatched"), "{message}");
     }
 }

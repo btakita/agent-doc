@@ -68,6 +68,10 @@ pub enum SteeringDispatch {
     DrainAfterCurrent,
     /// Dispatch now to a new background subagent (one per item).
     Subagent,
+    /// The item is already claimed by a worker (`agent-doc queue claim`):
+    /// forward the operator's change to that owner, never dispatch a new
+    /// subagent (`#claimedsteerwake`). [`SteeringItem::owner`] names it.
+    ForwardToOwner,
 }
 
 impl SteeringDispatch {
@@ -76,6 +80,7 @@ impl SteeringDispatch {
             Self::AddressNow => "address_now",
             Self::DrainAfterCurrent => "drain_after_current",
             Self::Subagent => "subagent",
+            Self::ForwardToOwner => "forward_to_owner",
         }
     }
 }
@@ -134,6 +139,15 @@ pub struct SteeringItem {
     /// still have been typing it (`#steeringtypinggate`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub possibly_partial: bool,
+    /// The claim owner (`subagent:<label>`) for a
+    /// [`SteeringDispatch::ForwardToOwner`] item (`#claimedsteerwake`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// The operator explicitly sent this item (`Run Agent Doc` / `agent-doc
+    /// route`, `#claimedsteerwake`): it bypassed the typing gate and is final,
+    /// never partial. Rendered as `sent=explicit`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub explicit: bool,
 }
 
 /// A held (unsettled) candidate observation.
@@ -236,6 +250,10 @@ pub struct ObserveContext<'a> {
     /// `do [#id]` ids the binary itself mirrored/added this cycle; queue lines
     /// naming only these are binary bookkeeping, not operator steering.
     pub binary_owned_queue_ids: &'a BTreeSet<String>,
+    /// The operator explicitly sent the document (`#claimedsteerwake`): every
+    /// candidate is final, so the typing gate is bypassed and each ready item
+    /// is marked [`SteeringItem::explicit`].
+    pub explicit_send: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -430,7 +448,12 @@ pub fn observe_with_mode(
             unbalanced_delimiters,
             verdict: ctx.classifier.assess(&features, &candidate.content_hash),
         };
-        let decision = settle_decision(settle_inputs);
+        // An explicit send is the operator saying "this is final": no gate.
+        let decision = if ctx.explicit_send {
+            SettleDecision::Settled
+        } else {
+            settle_decision(settle_inputs)
+        };
         decisions.push(GateDecision {
             key: candidate.key.clone(),
             text_hash: gate_text_hash(&candidate.item.verbatim),
@@ -480,6 +503,7 @@ pub fn observe_with_mode(
         }
         let mut item = candidate.item.clone();
         item.possibly_partial = partial_keys.contains(&candidate.key);
+        item.explicit = ctx.explicit_send;
         ready.push(item);
     }
 
@@ -607,6 +631,8 @@ fn exchange_candidates(
                 previous,
                 presets: Vec::new(),
                 possibly_partial: false,
+                owner: None,
+                explicit: false,
             },
         });
     }
@@ -629,10 +655,25 @@ fn strip_new_response_sections(baseline: &str, current: &str) -> String {
         .map(str::trim)
         .filter(|line| crate::baseline_comparison::is_exchange_response_heading(line))
         .collect();
+    let baseline_lines: BTreeSet<&str> = baseline.lines().map(str::trim).collect();
     let mut out = String::with_capacity(current.len());
     let mut skipping = false;
+    // `#chatprompt`: an agent-written record of a prompt that arrived in the
+    // harness chat (`> **Chat prompt (#chatprompt):** …`, plus its `>`
+    // continuation lines) is agent bookkeeping, never operator steering.
+    let mut in_chat_record = false;
     for line in current.split_inclusive('\n') {
         let trimmed = line.trim();
+        if in_chat_record && trimmed.starts_with('>') && !baseline_lines.contains(trimmed) {
+            continue;
+        }
+        in_chat_record = false;
+        if agent_doc_prompt_lines::is_chat_prompt_record_line(trimmed)
+            && !baseline_lines.contains(trimmed)
+        {
+            in_chat_record = true;
+            continue;
+        }
         let heading = crate::baseline_comparison::is_exchange_response_heading(trimmed);
         if heading {
             skipping = !baseline_headings.contains(trimmed);
@@ -783,6 +824,8 @@ fn queue_alignment(
                 previous: None,
                 presets: intents,
                 possibly_partial: false,
+                owner: None,
+                explicit: false,
             },
         });
         alignment.events.push(QueueEvent::Insert {
@@ -817,6 +860,8 @@ fn queue_alignment(
                 previous: Some(previous.clone()),
                 presets: intents,
                 possibly_partial: false,
+                owner: None,
+                explicit: false,
             },
         });
         alignment.events.push(QueueEvent::Edit {
@@ -849,6 +894,8 @@ fn queue_alignment(
                 previous: None,
                 presets: Vec::new(),
                 possibly_partial: false,
+                owner: None,
+                explicit: false,
             },
         });
         alignment.events.push(QueueEvent::Delete {
@@ -1134,7 +1181,7 @@ pub fn render_steering_context(
     );
     for (idx, item) in ready.iter().enumerate() {
         out.push_str(&format!(
-            "\n\n[steering {}/{}] dispatch={} source={} change={}{}",
+            "\n\n[steering {}/{}] dispatch={} source={} change={}{}{}",
             idx + 1,
             ready.len(),
             item.dispatch.as_str(),
@@ -1151,7 +1198,8 @@ pub fn render_steering_context(
                 " current_item=true"
             } else {
                 ""
-            }
+            },
+            item_header_suffix(item),
         ));
         if let Some(previous) = &item.previous {
             out.push_str(&format!("\nprevious: {previous}"));
@@ -1195,6 +1243,91 @@ pub fn render_steering_context(
     Some(out)
 }
 
+const FORWARD_EDITED: &str = "the operator EDITED a queue item a worker already claimed (`owner` \
+     above; the claim followed the edit). FORWARD the change (`previous` -> `verbatim`) to that \
+     owner now (for example SendMessage to the running subagent) so the work in flight picks it \
+     up. Do NOT dispatch a new subagent and do NOT re-claim the item.";
+const FORWARD_ADDED: &str = "already claimed by the worker named in `owner` (in flight there). \
+     Nothing to dispatch; do NOT start a second subagent for it.";
+const FORWARD_DELETED: &str = "the operator REMOVED a queue item a worker had claimed (`owner` \
+     above). Tell that owner to stop or wrap up per the operator's intent, then `agent-doc queue \
+     release` the claim.";
+
+/// ` owner=<label>` / ` sent=explicit` header fields (`#claimedsteerwake`).
+fn item_header_suffix(item: &SteeringItem) -> String {
+    let mut out = String::new();
+    if let Some(owner) = &item.owner {
+        out.push_str(&format!(" owner={owner}"));
+    }
+    if item.explicit {
+        out.push_str(" sent=explicit");
+    }
+    out
+}
+
+/// Re-route queue items a worker already claimed (`#claimedsteerwake`).
+///
+/// `owner_of` answers the claim owner for a queue line's text (the caller's
+/// claim ledger, which follows operator annotations, `#claimfollowsedit`).
+/// A claimed item that is not this turn's own current item becomes
+/// [`SteeringDispatch::ForwardToOwner`] with its owner: an edit is forwarded
+/// to the running worker instead of offered as a NEW subagent dispatch. The
+/// edit's previous text is consulted too, so a claim that could not follow
+/// (an ambiguous edit) still routes to its owner.
+pub fn apply_claim_owners(items: &mut [SteeringItem], owner_of: impl Fn(&str) -> Option<String>) {
+    for item in items.iter_mut() {
+        if item.source != SteeringSource::Queue || item.current_item {
+            continue;
+        }
+        let owner =
+            owner_of(&item.verbatim).or_else(|| item.previous.as_deref().and_then(&owner_of));
+        if let Some(owner) = owner {
+            item.dispatch = SteeringDispatch::ForwardToOwner;
+            item.presets.clear();
+            item.owner = Some(owner);
+        }
+    }
+}
+
+/// Keep unsurfaced edits of CLAIMED queue items pending across a new cycle's
+/// seed (`#claimedsteerwake`).
+///
+/// A fresh seed acknowledges the whole admitted queue, so an edit made while
+/// the coordinator was idle (the edit that woke it) would be absorbed into the
+/// new baseline and never reach the agent: the claimed head is not drainable,
+/// so the woken cycle only saw an unchanged-looking queue. For each claimed
+/// line of `seed.acknowledged_queue` that `prior_acknowledged` (what the agent
+/// channel last surfaced) knew under different text, the seed keeps the
+/// prior text, so the cycle's first hook (the preflight command's own
+/// PostToolUse) surfaces it as `previous` -> `verbatim` for the owner.
+pub fn carry_unsurfaced_claimed_edits(
+    seed: &mut SteeringWatermark,
+    prior_acknowledged: &[String],
+    claimed: impl Fn(&str) -> bool,
+) -> usize {
+    let prior = SteeringWatermark {
+        acknowledged_queue: prior_acknowledged.to_vec(),
+        baseline: seed.baseline.clone(),
+        ..SteeringWatermark::default()
+    };
+    let alignment = queue_alignment(&prior, &seed.baseline, &BTreeSet::new(), true);
+    let mut carried = 0;
+    for event in &alignment.events {
+        if let QueueEvent::Edit { old, new, .. } = event
+            && claimed(new)
+            && let Some(slot) = seed.acknowledged_queue.iter_mut().find(|norm| *norm == new)
+        {
+            *slot = old.clone();
+            carried += 1;
+        }
+    }
+    if carried > 0 {
+        // The seed's own content gate must not report "unchanged".
+        seed.last_observed_content_hash = None;
+    }
+    carried
+}
+
 /// Instruction text derived from the typed dispatch intent.
 pub fn instruction_for(item: &SteeringItem) -> &'static str {
     match (item.dispatch, item.source, item.change, item.current_item) {
@@ -1227,6 +1360,9 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              it; run `agent-doc queue release` when the subagent reports back. Keep working the \
              current item yourself; record the item as dispatched in your response."
         }
+        (SteeringDispatch::ForwardToOwner, _, SteeringChange::Deleted, _) => FORWARD_DELETED,
+        (SteeringDispatch::ForwardToOwner, _, SteeringChange::Added, _) => FORWARD_ADDED,
+        (SteeringDispatch::ForwardToOwner, _, SteeringChange::Edited, _) => FORWARD_EDITED,
         (SteeringDispatch::DrainAfterCurrent, _, _, _) => {
             "queued in operator order: it runs AFTER the current item closes, through the normal \
              queue drain. Do NOT interrupt, interleave, or start it now; acknowledge it and \
@@ -1294,7 +1430,7 @@ pub fn render_closeout_steering_context(
     );
     for (idx, item) in ready.iter().enumerate() {
         out.push_str(&format!(
-            "\n\n[steering {}/{}] dispatch={} source={} change={}",
+            "\n\n[steering {}/{}] dispatch={} source={} change={}{}",
             idx + 1,
             ready.len(),
             item.dispatch.as_str(),
@@ -1307,6 +1443,7 @@ pub fn render_closeout_steering_context(
                 SteeringChange::Edited => "edited",
                 SteeringChange::Deleted => "deleted",
             },
+            item_header_suffix(item),
         ));
         if let Some(previous) = &item.previous {
             out.push_str(&format!("\nprevious: {previous}"));
@@ -1325,6 +1462,7 @@ pub fn render_closeout_steering_context(
             );
         }
         let action = match (item.dispatch, item.source) {
+            (SteeringDispatch::ForwardToOwner, _) => instruction_for(item).to_string(),
             (SteeringDispatch::Subagent, _) => format!(
                 "DISPATCH NOW to a NEW background subagent (one per item). Claim it first with \
                  `{}` so the loop and Stop hook do not drain it inline, then dispatch; if it \
@@ -1443,6 +1581,7 @@ mod tests {
             document_changed_ms: Some(0),
             debounce_ms: DEFAULT_STEERING_DEBOUNCE_MS,
             binary_owned_queue_ids: owned,
+            explicit_send: false,
             max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
             classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
             median_pause_ms: None,
@@ -1829,6 +1968,7 @@ mod tests {
             document_changed_ms: Some(9_500),
             debounce_ms: 2_000,
             binary_owned_queue_ids: &owned,
+            explicit_send: false,
             max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
             classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
             median_pause_ms: None,
@@ -1907,6 +2047,7 @@ mod tests {
                 document_changed_ms: Some(changed),
                 debounce_ms: 2_000,
                 binary_owned_queue_ids: &owned,
+                explicit_send: false,
                 max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
                 classifier,
                 median_pause_ms: Some(900),
@@ -2055,6 +2196,7 @@ mod tests {
             document_changed_ms: Some(1_000),
             debounce_ms,
             binary_owned_queue_ids: &owned,
+            explicit_send: false,
             max_hold_ms: agent_doc_debounce::edit_settle::DEFAULT_MAX_HOLD_MS,
             classifier: &agent_doc_debounce::edit_settle::DeterministicOnly,
             median_pause_ms: None,
@@ -2114,6 +2256,8 @@ mod tests {
             previous: None,
             presets: Vec::new(),
             possibly_partial: false,
+            owner: None,
+            explicit: false,
         };
         let text = render_closeout_steering_context("tasks/bugs.md", &[item], 0).unwrap();
         assert!(text.starts_with(CLOSEOUT_STEERING_MARKER), "{text}");
@@ -2243,5 +2387,146 @@ mod tests {
     #[test]
     fn nothing_new_renders_nothing() {
         assert_eq!(render_steering_context("plan.md", &[], 3), None);
+    }
+
+    /// `#steerworks` item 2: the coordinator recorded a chat-originated prompt
+    /// as `> **Chat prompt (#chatprompt):** …` just above its `### Re:`
+    /// heading (agent-doc-bugs.md, 2026-10-04). That is agent bookkeeping and
+    /// must never come back as `address_now` operator steering.
+    #[test]
+    fn agent_recorded_chat_prompt_is_never_operator_steering() {
+        let owned = BTreeSet::new();
+        let baseline = doc("", EX);
+        let record = "> **Chat prompt (#chatprompt):** Did you get my steering change when I edited the queue item?";
+        let current = doc(
+            "",
+            &format!(
+                "{EX}{record}\n> second line of the same chat prompt\n\n### Re: steering edit on the #126 queue head\n\nAnswer.\n"
+            ),
+        );
+        let wm = seeded(&baseline, None);
+        for mode in [ObserveMode::InTurn, ObserveMode::Boundary] {
+            let obs = observe_with_mode(&wm, &current, &quiet_ctx(&owned), mode);
+            assert!(obs.ready.is_empty(), "{mode:?}: {:?}", obs.ready);
+            assert_eq!(obs.pending, 0, "{mode:?}");
+        }
+        // An operator prompt typed after the record still steers.
+        let with_operator = current.replace(
+            "Answer.\n",
+            "Answer.\n\n<!-- agent:boundary:abc -->\nplease also bump the version\n",
+        );
+        let obs = observe(&wm, &with_operator, &quiet_ctx(&owned));
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert!(
+            obs.ready[0]
+                .verbatim
+                .contains("please also bump the version")
+        );
+        assert!(!obs.ready[0].verbatim.contains("#chatprompt"));
+    }
+
+    /// `#claimedsteerwake`: an explicit send bypasses the typing gate and
+    /// marks every item final.
+    #[test]
+    fn explicit_send_flushes_held_items_as_final() {
+        let owned = BTreeSet::new();
+        let baseline = doc("- current task\n", EX);
+        // Unfinished shape: the gate would hold it, even past the window.
+        let current = doc("- current task\n- publish the\n", EX);
+        let wm = seeded(&baseline, Some("current task"));
+        let typing = ObserveContext {
+            now_ms: 10_000,
+            document_changed_ms: Some(9_900),
+            ..quiet_ctx(&owned)
+        };
+        assert!(observe(&wm, &current, &typing).ready.is_empty());
+        let sent = observe(
+            &wm,
+            &current,
+            &ObserveContext {
+                explicit_send: true,
+                ..typing
+            },
+        );
+        assert_eq!(sent.ready.len(), 1, "{:?}", sent.ready);
+        assert!(sent.ready[0].explicit);
+        assert!(!sent.ready[0].possibly_partial);
+        assert_eq!(sent.pending, 0);
+        let text = render_steering_context("plan.md", &sent.ready, 0).unwrap();
+        assert!(text.contains("sent=explicit"), "{text}");
+    }
+
+    /// `#steerworks` item 3 / `#claimedsteerwake`: an edit of a claimed head is
+    /// forwarded to its owner, never offered as a NEW subagent dispatch.
+    #[test]
+    fn edited_claimed_head_forwards_to_its_owner() {
+        let owned = BTreeSet::new();
+        let url = "https://github.com/btakita/agent-doc/issues/126";
+        let baseline = doc(&format!("- #gh-fix {url}\n"), EX);
+        let current = doc(
+            &format!("- #gh-fix {url}: note this is in a Coder environment\n"),
+            EX,
+        );
+        let mut obs = observe_with_mode(
+            &seeded(&baseline, None),
+            &current,
+            &quiet_ctx(&owned),
+            ObserveMode::Boundary,
+        );
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert_eq!(obs.ready[0].change, SteeringChange::Edited);
+        apply_claim_owners(&mut obs.ready, |text| {
+            text.contains("issues/126")
+                .then(|| "subagent:ghfix126".to_string())
+        });
+        let item = &obs.ready[0];
+        assert_eq!(item.dispatch, SteeringDispatch::ForwardToOwner);
+        assert_eq!(item.owner.as_deref(), Some("subagent:ghfix126"));
+        for text in [
+            render_steering_context("bugs.md", &obs.ready, 0).unwrap(),
+            render_closeout_steering_context("bugs.md", &obs.ready, 0).unwrap(),
+        ] {
+            assert!(
+                text.contains(
+                    "dispatch=forward_to_owner source=queue change=edited owner=subagent:ghfix126"
+                ),
+                "{text}"
+            );
+            assert!(text.contains("FORWARD the change"), "{text}");
+            assert!(!text.contains("DISPATCH NOW"), "{text}");
+            assert!(!text.contains("dispatch this item NOW"), "{text}");
+        }
+    }
+
+    /// `#claimedsteerwake`: the next cycle's seed keeps an unsurfaced edit of
+    /// a claimed head pending, so the woken cycle's first hook delivers it.
+    #[test]
+    fn new_cycle_seed_keeps_unsurfaced_claimed_edits_pending() {
+        let owned = BTreeSet::new();
+        let url = "https://github.com/btakita/agent-doc/issues/126";
+        let old_line = format!("#gh-fix {url}");
+        let new_line = format!("#gh-fix {url}: note this is in a Coder environment");
+        let baseline = doc(&format!("- {new_line}\n- other work\n"), EX);
+        let mut seed = SteeringWatermark::seed("cycle-2", &baseline, None, Vec::new());
+        let prior = vec![old_line.clone(), "other work".to_string()];
+        assert_eq!(
+            carry_unsurfaced_claimed_edits(&mut seed, &prior, |text| text.contains("issues/126")),
+            1
+        );
+        let obs = observe(&seed, &baseline, &quiet_ctx(&owned));
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert_eq!(obs.ready[0].previous.as_deref(), Some(old_line.as_str()));
+        assert_eq!(obs.ready[0].verbatim, new_line);
+        // An unclaimed edit is absorbed by the seed as before.
+        let mut plain = SteeringWatermark::seed("cycle-2", &baseline, None, Vec::new());
+        assert_eq!(
+            carry_unsurfaced_claimed_edits(&mut plain, &prior, |_| false),
+            0
+        );
+        assert!(
+            observe(&plain, &baseline, &quiet_ctx(&owned))
+                .ready
+                .is_empty()
+        );
     }
 }

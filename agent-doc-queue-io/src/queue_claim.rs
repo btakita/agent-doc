@@ -81,6 +81,16 @@ fn mutate_ledger<T>(
         .context("begin queue claim transaction")?;
     let result = (|| {
         let mut ledger = load_from_conn(&conn, &document_hash)?;
+        // `#claimfollowsedit`: persist claims that followed an operator
+        // annotation of their head before the mutation looks them up.
+        if !ledger.claims.is_empty()
+            && let Some(heads) = std::fs::read_to_string(file)
+                .ok()
+                .as_deref()
+                .and_then(live_queue_head_texts)
+        {
+            log_followed(file, &ledger.follow_edits(now_secs(), &heads));
+        }
         let value = mutate(&mut ledger)?;
         if ledger.claims.is_empty() {
             agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
@@ -114,6 +124,54 @@ fn mutate_ledger<T>(
                 eprintln!("[queue-claim] WARNING: rollback failed after {err:#}: {rollback}");
             }
             Err(err)
+        }
+    }
+}
+
+fn log_followed(file: &Path, followed: &[(String, String)]) {
+    for (previous, current) in followed {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_followed_edit previous_bytes={} current_bytes={} (#claimfollowsedit)",
+                previous.len(),
+                current.len()
+            ),
+        );
+    }
+}
+
+/// The ledger as of `content`: claims carried across operator annotations
+/// of their heads (`#claimfollowsedit`). Read-only; the next mutation
+/// persists the follow.
+pub fn load_ledger_following(file: &Path, content: &str) -> Result<QueueClaimLedger> {
+    let mut ledger = load_ledger(file)?;
+    if !ledger.claims.is_empty()
+        && let Some(heads) = live_queue_head_texts(content)
+    {
+        ledger.follow_edits(now_secs(), &heads);
+    }
+    Ok(ledger)
+}
+
+/// Owner of every active claim on a live head of `content`, by identity
+/// (`#claimedsteerwake`). An unreadable ledger is reported and empty.
+pub fn claim_owners_for_content(
+    file: &Path,
+    content: &str,
+) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, String> {
+    match load_ledger_following(file, content) {
+        Ok(ledger) if ledger.claims.is_empty() => Default::default(),
+        Ok(ledger) => {
+            let live = live_queue_head_identities(content);
+            ledger.owners(now_secs(), live.as_ref())
+        }
+        Err(err) => {
+            eprintln!(
+                "[queue-claim] WARNING: could not read queue claims for {}: {err:#}",
+                file.display()
+            );
+            Default::default()
         }
     }
 }
@@ -293,7 +351,7 @@ pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
 /// Active claims for `file` judged against `content`: expired claims and claims
 /// on items no longer in the queue are excluded.
 pub fn active_claims_for_content(file: &Path, content: &str) -> Result<Vec<QueueClaim>> {
-    let ledger = load_ledger(file)?;
+    let ledger = load_ledger_following(file, content)?;
     if ledger.claims.is_empty() {
         return Ok(Vec::new());
     }
@@ -324,7 +382,7 @@ pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItem
 /// Only the worker claims recorded in the ledger, without heads the queue
 /// subagents attribute holds back.
 pub fn ledger_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
-    match load_ledger(file) {
+    match load_ledger_following(file, content) {
         Ok(ledger) if ledger.claims.is_empty() => ClaimedQueueItems::none(),
         Ok(ledger) => {
             let live = live_queue_head_identities(content);
@@ -347,8 +405,16 @@ pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
         return Ok(0);
     }
     let live = live_queue_head_identities(content);
+    let heads = live_queue_head_texts(content);
     let now = now_secs();
-    let pruned = mutate_ledger(file, |ledger| Ok(ledger.prune(now, live.as_ref())))?;
+    let pruned = mutate_ledger(file, |ledger| {
+        // Follow against the closeout's content (the disk read inside
+        // `mutate_ledger` may lag it) before closure is judged.
+        if let Some(heads) = &heads {
+            log_followed(file, &ledger.follow_edits(now, heads));
+        }
+        Ok(ledger.prune(now, live.as_ref()))
+    })?;
     if pruned > 0 {
         agent_doc_ops_log_io::log_op(file, &format!("queue_claim_prune pruned={pruned}"));
     }

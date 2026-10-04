@@ -38,6 +38,9 @@ static DEFER_STARTUP_FOCUS_TO_LAYOUT: Cell<bool> = const { Cell::new(false) };
 /// operator-facing outcome here so the controller's editor route reports it
 /// instead of "dispatched".
 static ROUTE_DEFERRAL: RefCell<Option<String>> = const { RefCell::new(None) };
+/// `#claimedsteerwake`: a route that dispatched no new trigger but handed the
+/// operator's explicit send to the owning turn reports it here (exit 0).
+static ROUTE_STEERING_DELIVERY: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// Exit code for an editor route that completed without dispatching
@@ -48,6 +51,17 @@ pub const ROUTE_DEFERRED_EXIT_CODE: i32 = 75;
 /// Record that this route invocation deferred instead of dispatching.
 pub fn record_route_deferral(outcome: String) {
     ROUTE_DEFERRAL.with(|cell| *cell.borrow_mut() = Some(outcome));
+}
+
+/// Record that this route delivered the operator's explicit send to the
+/// owning turn instead of dispatching a new trigger (`#claimedsteerwake`).
+pub fn record_route_steering_delivery(outcome: String) {
+    ROUTE_STEERING_DELIVERY.with(|cell| *cell.borrow_mut() = Some(outcome));
+}
+
+/// Take (and clear) the steering delivery recorded by this thread's route.
+pub fn take_route_steering_delivery() -> Option<String> {
+    ROUTE_STEERING_DELIVERY.with(|cell| cell.borrow_mut().take())
 }
 
 /// Take (and clear) the deferral recorded by this thread's route invocation.

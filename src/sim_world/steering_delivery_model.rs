@@ -310,6 +310,73 @@ fn cursor_steering_reaches_the_agent_at_its_next_command() {
     run_harness("cursor");
 }
 
+/// `#claimedsteerwake` / `#claimfollowsedit` (#steerworks): the operator
+/// annotates a head a subagent already claimed while the coordinator is idle,
+/// then presses Run Agent Doc mid-typing of another line. Per harness: the
+/// idle pane is woken for the claimed edit, the agent channel labels it
+/// `forward_to_owner` (never a new subagent dispatch), and the explicit send
+/// delivers the half-typed line at once, final.
+fn run_claimed_edit_and_explicit_send(harness: &str) {
+    let adapter = steering_delivery_adapter(harness);
+    let session = Session::open();
+    let wake = SteeringWakeState::new();
+    let head = "#subagent: https://github.com/btakita/agent-doc/issues/126";
+    session.operator_appends(head);
+    backdate(&session.file);
+    assert_eq!(session.busy_delivery(adapter.busy), vec![head.to_string()]);
+    agent_doc_queue_io::queue_claim::claim(&session.file, head, "subagent:ghfix126", 3600).unwrap();
+    session.close_turn();
+
+    // Idle: annotate the claimed head.
+    let content = std::fs::read_to_string(&session.file).unwrap();
+    let annotated = format!("{head}: note this is in a Coder environment");
+    std::fs::write(&session.file, content.replace(head, &annotated)).unwrap();
+    backdate(&session.file);
+    if let IdleDelivery::SupervisorTrigger = adapter.idle {
+        assert!(
+            supervisor_tick(&session, &wake, harness, idle_pane(harness)),
+            "{harness}: an edit of a claimed head wakes the idle coordinator"
+        );
+    }
+    let consumer = match adapter.busy {
+        BusyDelivery::PostToolUseHook => CONSUMER_HOOK,
+        BusyDelivery::PollAndCommandBoundary => CONSUMER_CLI,
+    };
+    let report = steering::observe(&session.file, consumer, true)
+        .unwrap()
+        .expect("delivery");
+    let text = report.render().unwrap();
+    assert!(
+        text.contains("dispatch=forward_to_owner") && text.contains("owner=subagent:ghfix126"),
+        "{harness}: {text}"
+    );
+    assert!(!text.contains("dispatch=subagent"), "{harness}: {text}");
+
+    // Run Agent Doc while the operator's next line is still unfinished.
+    session.operator_appends("also publish the");
+    assert!(
+        session.busy_delivery(adapter.busy).is_empty(),
+        "{harness}: held"
+    );
+    steering::record_explicit_send(&session.file).unwrap();
+    let sent = steering::observe(&session.file, consumer, true)
+        .unwrap()
+        .expect("explicit send");
+    assert_eq!(sent.items.len(), 1, "{harness}: {sent:?}");
+    assert!(sent.items[0].explicit, "{harness}");
+    assert!(
+        sent.render().unwrap().contains("sent=explicit"),
+        "{harness}"
+    );
+}
+
+#[test]
+fn claimed_edit_and_explicit_send_reach_every_harness() {
+    for harness in ["claude", "codex", "opencode", "grok", "cursor"] {
+        run_claimed_edit_and_explicit_send(harness);
+    }
+}
+
 /// Parity: the scenarios above cover every supported harness.
 #[test]
 fn every_supported_harness_has_a_steering_scenario() {

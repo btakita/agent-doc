@@ -244,6 +244,36 @@ v0.35.449 (#126, `cellcollide`, `steerworks`) is still in its final `make check`
 **Collision detection is per section (`cellcollide`, `fc7c4f0c3`).** A write that only touches `exchange` now merges with your concurrent queue or backlog edits. Only a real overlap in the same section fails closed, and the error names the section. The second hang was the editor's update arriving after the 8 s wait limit; the wait for a section that hasn't arrived yet is now longer.
 
 **Reopened GH #125:** its subagent is still running in `ghfix125b`, on top of this release. It will ship as v0.35.450.
+
+### Re: v0.35.450 released — GH #125 — opus-5-5 · 2026-10-04T02:50-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/125 reopened.
+
+**v0.35.450 is released and installed.**
+- Fix `14d518454`, release `478ff964e`, tag `v0.35.450` pushed; `agent-doc --version` reports 0.35.450.
+- `make check` exited 0: 10817 passed, 262 skipped.
+- The tag push triggers the CI publish for the GitHub Release and PyPI.
+- #125 was already closed when I went to close it; I added a comment listing what shipped and what remains.
+
+**What closed the reopened gaps:**
+1. **The contract no longer reads as idle.** The hook passes unrecorded chat prompts to preflight, so the contract shows `chat_prompts` with `no_changes: false` (and `diff_type: chat_prompt` when the document didn't change). Each one is a `prompt_target` in `user_intent_prompt_changes` and in `plan`.
+2. **No-op counting.** A cycle that answered a chat prompt logs `commit_chat_turn` and no longer counts toward `recent_noop_closeouts`.
+3. **Ledger hygiene.** The prompt ledger drops:
+   - harness envelopes, including ones already stored (the stale `<task-notification>` re-reports end here);
+   - entries older than 6 hours;
+   - prompts this document already records with a `> **Chat prompt (#chatprompt):**` line;
+   - prompts a later committed cycle closed out.
+4. **Closeout warning.** `session-check` warns when a committed cycle carried a chat prompt with no record.
+5. **End-to-end check.** A pure chat turn, with no trigger and no open cycle, records and commits end to end; Codex hook integration tests prove it.
+
+**What remains:**
+- A pure chat turn that no trigger cycle ever carried gets no warning.
+- The end-to-end tests drive the Codex hook only. The Claude hook shares the same function.
+
+**Integration note:**
+- The rebase onto v0.35.449 conflicted only on version pins in two `Cargo.toml` files.
+- The other session's uncommitted `agent-doc-start-runtime-io` edit was three-way merged cleanly onto the one line this release changed in that file.
+- Its `VERSIONS.md` edit was kept byte-for-byte.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -254,7 +284,7 @@ v0.35.449 (#126, `cellcollide`, `steerworks`) is still in its final `make check`
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~do [#supportinlineprompts]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/125 reopened.
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/125 reopened.~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
 - ~~Ensure the real-time reactive steering works. When do you get the signal about the document changing?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~do [#claimedsteerwake]: should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful? Note: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "#gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain~~

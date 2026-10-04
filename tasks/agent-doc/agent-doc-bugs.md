@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -107,6 +106,21 @@ Both queue heads were claimed and handed to background subagents (`#subagents` p
 - The label Local History shows on that boundary revision: an external change, or an edit made in the IDE.
 
 If Local History no longer reaches 09-29, say so and I'll close `#apimdrevert` as unverifiable. It stays in the backlog, gated on your answer.
+
+### Re: #gh-fix GH #125 + release — opus-5-5 · 2026-10-04T01:10-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/125
+
+> **Queue prompt:** release + publish
+
+**GH #125 is fixed and released in v0.35.448.** The fix is `df3fa3407`, the release is `8ef2100ba`, and the tag `v0.35.448` is pushed. The superproject bump is `537a48d198`. `make install` completed with exit 0 and `agent-doc --version` reports 0.35.448.
+
+- **Skill rule:** a prompt the operator types in chat is now a session turn, including a bare `prompt_presets` key such as `#upgrade`. The agent inserts it into `exchange` and persists through `respond` / `write --commit` with its queue and backlog changes. `no_changes: true` now means stop only when the turn has no operator prompt missing from the document. This is in `SKILL.md`, `runbooks/respond.md`, `specs/07-closeout-commands.md` and every harness's installed copy.
+- **Detection in the binary:** the Claude Code and Codex prompt hooks save chat text typed in a session that is tied to a document, then tell the agent to record it, including the preset body when it is a preset key. The next trigger lists any prompts the document still lacks before the cycle contract. Each prompt is reported only once.
+- **Verification:** in the worktree, `make check` ran 10767 tests: 10767 passed, 262 skipped. Its TLA+ step failed parsing a `/tmp/Naturals.tla` left by another session's run, and a separate `make tla` rerun passed with exit 0.
+- **Publish:** the tag push started the Release workflow (run 37178919405) and CI (run 37178919611); both are still in progress. They publish the GitHub Release and PyPI. `release + publish` arrived mid-turn as a subagent item, but this cycle already did that work, so I didn't dispatch a second release.
+- **#125 on GitHub:** closed, with a comment listing what remains. `recent_noop_closeouts` is unchanged, and the cycle contract itself still says `no_changes: true` when a chat prompt is flagged; only the notice beside it says otherwise.
+- **The agent-doc checkout:** another session's uncommitted edits to `VERSIONS.md` and `agent-doc-start-runtime-io/src/lib.rs` are left byte-for-byte as they were. That `lib.rs` change is compiled into this install.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -115,9 +129,7 @@ If Local History no longer reaches 09-29, say so and I'll close `#apimdrevert` a
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/125
-- ~~[#apimdrevert]: how can I verify?~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

@@ -32,6 +32,7 @@ MAX_DEPTH = 6
 BUILD_PROCS = {"cargo", "rustc", "cargo-nextest", "cargo-build"}
 LOG = Path.home() / ".local/state/disk-sweep.log"
 GIB = 1024**3
+ALERT_EVERY = 6 * 3600  # seconds between "disk nearly full" notifications
 
 
 def log(msg):
@@ -224,8 +225,13 @@ def main():
         if free_now < args.low:
             msg = f"disk-sweep: only {free_now:.0f}G free; nothing else idle enough to clean"
             log(msg)
-            if not args.dry_run:
-                subprocess.run(["notify-send", "-u", "critical", "Disk nearly full", msg], capture_output=True)
+            stamp = LOG.parent / "disk-sweep.alerted"
+            recent = stamp.exists() and now - stamp.stat().st_mtime < ALERT_EVERY
+            if not args.dry_run and not recent:
+                # normal urgency so dunst expires it; critical stays until dismissed.
+                subprocess.run(["notify-send", "-u", "normal", "-t", "60000", "Disk nearly full", msg],
+                               capture_output=True)
+                stamp.touch()
 
     if cleaned or args.dry_run:
         log(f"done: {'would free' if args.dry_run else 'freed'} ~{cleaned:.0f}G; "

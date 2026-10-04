@@ -285,6 +285,18 @@ GH #126 shipped in v0.35.449 (`01786bada`) and the issue is closed; this closes 
 Got it. Preflight picked up your edit `testing to see` as a user prompt (`content_edit`), even though it sits in the middle of the exchange: between the `#chatprompt` line and the `### Re: GH #125 reopened` heading, not at the tail. So an edit in the middle of the exchange does reach the cycle contract, and the turn was admitted normally (`no_changes: false`).
 
 The sentence looks unfinished. If you meant to ask something more, finish it and I'll answer it next cycle.
+
+### Re: "testing to see if you pick this up." — opus-5-5 · 2026-10-04T03:05-04:00
+
+Yes, I picked it up, but only because the steering hook told me about it. The cycle contract did not.
+
+What happened:
+1. You finished the line (`testing to see` → `testing to see if you pick this up.`) while my previous `respond` was committing.
+2. That commit (`5eeed90b7e`) included your finished line, so the line became part of the committed baseline.
+3. Closeout reported it as steering to address now and said to answer it next cycle. I scheduled the `/loop` re-entry for that.
+4. That re-entry's preflight said `no_changes: true` (it read the live editor buffer, which matched the commit). Going by the contract alone, I would have reported "nothing changed" and stopped.
+
+That is a gap: steering that lands during a commit can disappear from the next cycle's diff. I filed it as `#steerbaselineabsorb`. The fix is to make steering that is still pending at closeout carry into the next cycle's contract as an unrecorded prompt (the way `chat_prompts` already works), so the cycle is never `no_changes`.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -298,6 +310,7 @@ The sentence looks unfinished. If you meant to ask something more, finish it and
 
 
 <!-- agent:backlog priority -->
+- [ ] [#steerbaselineabsorb] [agent-doc] Steering that arrives while respond is committing gets absorbed into that commit's baseline. The session-check reported it as address_now ("answer it in the next cycle"), but the next /loop preflight said no_changes: true (read_source=live_editor), so the prompt would have been silently skipped. Repro 2026-10-04 03:01: the operator finished the line 'testing to see' -> 'testing to see if you pick this up.' during respond; commit 5eeed90b7e contains the full line. Fix: when steering is surfaced as pending at closeout, persist it as an unrecorded prompt (like chat_prompts) so the next contract carries it as a prompt target with no_changes: false.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

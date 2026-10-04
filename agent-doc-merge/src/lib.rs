@@ -19,6 +19,7 @@ pub mod exchange_node_merge;
 pub mod exchange_seqcrdt;
 pub mod frontmatter_crdt;
 pub mod queue_seqcrdt;
+pub mod repair_proof;
 pub mod response_cell;
 pub mod salient_response;
 

@@ -287,7 +287,7 @@ GH #126 shipped in v0.35.449 (`01786bada`) and the issue is closed; this closes 
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

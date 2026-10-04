@@ -102,6 +102,24 @@ pub struct RetainedWriteOwnership {
     /// default is `false`, which keeps the conservative Deferred reading and
     /// the 2026-07-26 "do NOT invent a recovery" guidance intact.
     pub capture_resume_unowned: bool,
+    /// The editor endpoint that would have to converge this write answered its
+    /// delivery receipt with an explicit REJECTION (GH #131).
+    ///
+    /// Every holder above — an open cycle, a retained capture, a retained
+    /// delivery projection — completes by waiting for the editor's delivery
+    /// projection to converge. An endpoint that returned
+    /// `{"type":"receipt","status":"rejected"}` has answered that it will NOT,
+    /// so those holders hold nothing: the "it commits itself once delivery
+    /// converges" promise is false and the do-NOT list forbids the only moves
+    /// that work. Observed on 0.35.449 on `tasks/agent-doc/agent-doc.ad.md`:
+    /// a JetBrains backend running deleted plugin jars rejected every receipt,
+    /// and the retained intents converged the instant it exited.
+    ///
+    /// `#idlerevisionreactive`: this is the fourth outcome, "the endpoint
+    /// answered NO", and it must not collapse into "not yet converged". Only a
+    /// site that has read the durable rejection record may set it; the default
+    /// `false` keeps the conservative reading.
+    pub delivery_rejected: bool,
 }
 
 impl RetainedWriteOwnership {
@@ -115,6 +133,7 @@ impl RetainedWriteOwnership {
         retained_projection: false,
         unanswered_edit: false,
         capture_resume_unowned: false,
+        delivery_rejected: false,
     };
 
     pub const fn new(cycle_open: bool, retained_capture: bool) -> Self {
@@ -125,6 +144,7 @@ impl RetainedWriteOwnership {
             retained_projection: false,
             unanswered_edit: false,
             capture_resume_unowned: false,
+            delivery_rejected: false,
         }
     }
 
@@ -141,6 +161,7 @@ impl RetainedWriteOwnership {
             retained_projection: false,
             unanswered_edit: false,
             capture_resume_unowned: false,
+            delivery_rejected: false,
         }
     }
 
@@ -167,6 +188,14 @@ impl RetainedWriteOwnership {
         self
     }
 
+    /// Record that the editor endpoint explicitly rejected this document's
+    /// delivery receipt (GH #131). Only a site that has read the durable
+    /// rejection record may set it.
+    pub const fn with_delivery_rejected(mut self, delivery_rejected: bool) -> Self {
+        self.delivery_rejected |= delivery_rejected;
+        self
+    }
+
     /// Refine ownership with a response capture proven by the current caller.
     ///
     /// Some guards already hold the loaded capture. Keeping that evidence is
@@ -187,6 +216,16 @@ impl RetainedWriteOwnership {
             // that would re-drive it is not running. Waiting is the one thing
             // that cannot work, so this must not read as Deferred.
             RetainedWriteVerdict::CaptureResumeUnowned
+        } else if self.delivery_rejected
+            && (self.retained_capture || self.retained_projection || self.cycle_open)
+        {
+            // GH #131: every holder here completes by waiting for the editor's
+            // delivery projection to converge, and the endpoint answered NO.
+            // Nothing that can fire will fire, so this must not read as
+            // Deferred — and it is not Stranded either, because the response
+            // is durable and must not be re-sent. The recovery is removing the
+            // rejecting endpoint.
+            RetainedWriteVerdict::DeliveryRejected
         } else if self.retained_capture || self.retained_projection {
             RetainedWriteVerdict::Deferred
         } else if self.write_applied {
@@ -244,6 +283,15 @@ pub enum RetainedWriteVerdict {
     /// the next turn's prompt, so every commit path refuses it on purpose.
     /// Answering it — running the document again — is what resolves it.
     UnansweredEditPending,
+    /// The only holder of the write waits on an editor endpoint that explicitly
+    /// REJECTED the delivery receipt (GH #131).
+    ///
+    /// Between [`Self::Deferred`] and [`Self::Stranded`]: the response is NOT
+    /// lost and must not be re-sent, but the convergence every holder waits on
+    /// is being refused, so waiting never ends. Restarting or reloading the
+    /// rejecting editor is the recovery; once it is gone or re-registered the
+    /// retained intent converges through document authority on its own.
+    DeliveryRejected,
 }
 
 impl RetainedWriteVerdict {
@@ -254,6 +302,7 @@ impl RetainedWriteVerdict {
             Self::Stranded => "stranded",
             Self::AwaitingTerminalCommit => "awaiting_terminal_commit",
             Self::UnansweredEditPending => "unanswered_edit_pending",
+            Self::DeliveryRejected => "delivery_rejected",
         }
     }
 
@@ -279,7 +328,10 @@ impl RetainedWriteVerdict {
     /// recovery" guidance still governs there.
     pub const fn commit_is_the_named_recovery(self) -> bool {
         match self {
-            Self::Deferred | Self::CaptureResumeUnowned | Self::UnansweredEditPending => false,
+            Self::Deferred
+            | Self::CaptureResumeUnowned
+            | Self::UnansweredEditPending
+            | Self::DeliveryRejected => false,
             Self::Stranded | Self::AwaitingTerminalCommit => true,
         }
     }
@@ -395,6 +447,16 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
              response, force disk, or `admin recycle` — the exact capture is still the thing to \
              finish. Resume that same capture from the pane that OWNS this session: \
              `agent-doc repair --resume-capture {file}`"
+        ),
+        RetainedWriteVerdict::DeliveryRejected => format!(
+            "The registered editor endpoint REJECTED the delivery receipt (`IPC receipt \
+             rejected`) — it answered NO, so the delivery projection this write is waiting on \
+             will never converge and waiting will not commit it. The response is durable and NOT \
+             lost: do NOT re-send it or force disk. Recover by removing the rejecting endpoint: \
+             restart or reload the editor that has {file} open (a backend still running deleted \
+             plugin jars after an update is the observed cause). Once that endpoint is gone or re-registered, the retained intent \
+             converges through document authority on its own; then run `agent-doc session-check \
+             {file}` and follow the recovery it names"
         ),
         RetainedWriteVerdict::Stranded => format!(
             "NO cycle is open and NO response capture is retained, so nothing owns this write \
@@ -1307,6 +1369,7 @@ mod tests {
             RetainedWriteVerdict::AwaitingTerminalCommit,
             RetainedWriteVerdict::CaptureResumeUnowned,
             RetainedWriteVerdict::UnansweredEditPending,
+            RetainedWriteVerdict::DeliveryRejected,
         ] {
             let ownership = match verdict {
                 RetainedWriteVerdict::Deferred => RetainedWriteOwnership::new(true, false),
@@ -1319,6 +1382,9 @@ mod tests {
                 }
                 RetainedWriteVerdict::UnansweredEditPending => {
                     RetainedWriteOwnership::UNOWNED.with_unanswered_edit(true)
+                }
+                RetainedWriteVerdict::DeliveryRejected => {
+                    RetainedWriteOwnership::new(true, true).with_delivery_rejected(true)
                 }
             };
             assert_eq!(ownership.verdict(), verdict, "fixture builds {verdict:?}");
@@ -1411,5 +1477,70 @@ mod tests {
             !remedy.contains("deferral, not a lost response"),
             "the deferral promise must be earned, not asserted: {remedy}"
         );
+    }
+
+    /// GH #131: a retained write whose only holders wait on an editor endpoint
+    /// that answered NO is NOT owned. Every holder shape (open cycle, retained
+    /// capture, retained delivery projection) must yield the rejected verdict,
+    /// and a rejection with nothing to hold still reads as stranded.
+    #[test]
+    fn a_holder_waiting_on_a_rejecting_endpoint_is_not_deferred() {
+        for owned in [
+            RetainedWriteOwnership::new(true, false),
+            RetainedWriteOwnership::new(false, true),
+            RetainedWriteOwnership::new(true, true),
+            RetainedWriteOwnership::UNOWNED.with_retained_projection(true),
+            RetainedWriteOwnership::new_with_phase(true, true, true).with_retained_projection(true),
+        ] {
+            assert_eq!(owned.verdict(), RetainedWriteVerdict::Deferred, "{owned:?}");
+            let rejected = owned.with_delivery_rejected(true);
+            assert_eq!(
+                rejected.verdict(),
+                RetainedWriteVerdict::DeliveryRejected,
+                "{rejected:?} must not read as owned"
+            );
+            assert!(!rejected.verdict().commit_is_the_named_recovery());
+        }
+        // Nothing held at all: the rejection does not invent a holder.
+        assert_eq!(
+            RetainedWriteOwnership::UNOWNED
+                .with_delivery_rejected(true)
+                .verdict(),
+            RetainedWriteVerdict::Stranded,
+        );
+        // Not looked == not rejected: the default keeps the deferral.
+        assert_eq!(
+            RetainedWriteOwnership::new(true, true)
+                .with_delivery_rejected(false)
+                .verdict(),
+            RetainedWriteVerdict::Deferred,
+        );
+    }
+
+    /// GH #131: the rejected remedy names a real recovery (remove the rejecting
+    /// endpoint) and does NOT carry the owned case's blanket prohibition on
+    /// `admin recycle` / `admin reload-lib`, nor its "commits itself" promise.
+    #[test]
+    fn the_rejected_remedy_names_a_recovery_instead_of_forbidding_every_one() {
+        let remedy = retained_write_remedy(
+            RetainedWriteOwnership::new(true, true)
+                .with_retained_projection(true)
+                .with_delivery_rejected(true),
+            "plan.md",
+        );
+        assert!(remedy.contains("REJECTED the delivery receipt"), "{remedy}");
+        assert!(remedy.contains("restart or reload the editor"), "{remedy}");
+        assert!(remedy.contains("agent-doc session-check plan.md"), "{remedy}");
+        assert!(remedy.contains("re-send"), "the response is durable: {remedy}");
+        for forbidden_claim in [
+            "deferral, not a lost response",
+            "commits itself",
+            "`admin recycle`, or `admin reload-lib`",
+        ] {
+            assert!(
+                !remedy.contains(forbidden_claim),
+                "rejected remedy must not carry `{forbidden_claim}`: {remedy}"
+            );
+        }
     }
 }

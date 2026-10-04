@@ -3848,6 +3848,7 @@ Done.\n\
             RetainedWriteVerdict::CaptureResumeUnowned,
             RetainedWriteVerdict::AwaitingTerminalCommit,
             RetainedWriteVerdict::UnansweredEditPending,
+            RetainedWriteVerdict::DeliveryRejected,
         ] {
             assert!(
                 !closeout_failure_is_binary_owned_deferral(&refusal, verdict),
@@ -4138,6 +4139,7 @@ Done.\n\
             retained_projection: true,
             unanswered_edit: false,
             capture_resume_unowned: false,
+            delivery_rejected: false,
         };
         let note = closeout_repair_retained_note(&err, owned, Path::new("/p/fpe.md"));
         assert!(note.contains("intent_id=abc"), "{note}");

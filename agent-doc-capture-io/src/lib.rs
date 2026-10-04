@@ -542,6 +542,11 @@ pub fn retained_write_ownership(
         .ok()
         .flatten()
         .is_some_and(|projection| projection.retained_captured_response_write().is_some());
+    // GH #131: a holder that waits on editor delivery is no holder when the
+    // editor endpoint answered NO. Read the durable rejection run so the pure
+    // predicate can say so instead of promising a convergence the editor is
+    // refusing to grant.
+    let delivery_rejected = editor_delivery_endpoint_rejected(file);
     agent_doc_turn::write_ownership::RetainedWriteOwnership::new_with_phase(
         cycle_open,
         retained_capture,
@@ -549,6 +554,62 @@ pub fn retained_write_ownership(
     )
     .with_retained_projection(retained_projection)
     .with_capture_resume_unowned(capture_resume_unowned)
+    .with_delivery_rejected(delivery_rejected)
+}
+
+/// GH #131 — whether the editor endpoint that would have to converge this
+/// document's retained write has explicitly REJECTED its most recent delivery
+/// receipts for the current session (`{"type":"receipt","status":"rejected"}`).
+///
+/// `#idlerevisionreactive`: this is the fourth outcome, "the endpoint answered
+/// NO", kept distinct from "not converged yet". It reads the durable
+/// `editor_transport_health.consecutive_rejections` run that the delivery
+/// recorder maintains (a timeout breaks the run; a proven delivery clears the
+/// record).
+///
+/// Asymmetric on purpose: a missing record, a different session, or a read
+/// failure is `false` — "I did not look" must never be read as "the endpoint
+/// said NO". That keeps the pre-existing retained-write reading wherever this
+/// fact is not proven.
+pub fn editor_delivery_endpoint_rejected(file: &Path) -> bool {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return false;
+    };
+    // The editor FFI process forbids direct state connections; it cannot look,
+    // and not looking is not a rejection.
+    if agent_doc_sqlite::state_store::state_db_connections_forbidden_for_process()
+        || !agent_doc_sqlite::state_store::state_db_path(&project_root).exists()
+    {
+        return false;
+    }
+    let Ok(document_hash) = agent_doc_fs::document_state_hash(file) else {
+        return false;
+    };
+    let session_id = std::fs::read_to_string(file)
+        .ok()
+        .and_then(|content| agent_doc_frontmatter::frontmatter::session_id_from_content(&content))
+        .unwrap_or_else(|| "-".to_string());
+    let health = agent_doc_sqlite::state_store::open_state_db_with_timeout(
+        &project_root,
+        std::time::Duration::from_millis(250),
+    )
+    .and_then(|conn| {
+        agent_doc_sqlite::state_store::load_editor_transport_health_from_db(&conn, &document_hash)
+    });
+    match health {
+        Ok(Some(health)) => health.session_id == session_id && health.consecutive_rejections > 0,
+        Ok(None) => false,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "retained_write_ownership_transport_health_read_failed file={} error={err}",
+                    file.display()
+                ),
+            );
+            false
+        }
+    }
 }
 
 pub fn load_active(file: &Path) -> Result<Option<CaptureRecord>> {

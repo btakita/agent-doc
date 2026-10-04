@@ -25773,7 +25773,9 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             && write_ipc_transport_source.contains("reliable_sync_editor_live_for_file")
             && write_ipc_transport_source.contains("FullContentIpcMode")
             && write_ipc_transport_source.contains("is_already_applied_receipt_error_message")
-            && write_ipc_transport_source.contains("is_socket_receipt_timeout_error"),
+            // GH #131: receipt failures are classified through the typed
+            // protocol-owned `classify_socket_delivery_failure`.
+            && write_ipc_transport_source.contains("classify_socket_delivery_failure"),
         "write IPC transport should import remaining IPC protocol vocabulary from the focused protocol crate"
     );
     let admission_index = write_ipc_transport_source
@@ -25820,7 +25822,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     );
     assert!(
         write_ipc_io_source.contains("EditorIntent::Reposition.as_str()")
-            && write_ipc_io_source.contains("is_socket_receipt_timeout_error")
+            && write_ipc_io_source.contains("classify_socket_delivery_failure")
             && write_ipc_io_source.contains("pub fn try_ipc_reposition_boundary(")
             && write_ipc_io_source.contains("pub fn build_ipc_patches_json(")
             && write_ipc_io_source.contains("normalize_patch_content(")
@@ -25899,7 +25901,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         fs::read_to_string(manifest_dir.join("agent-doc-write-converge-io/src/lib.rs")).unwrap();
     assert!(
         write_converge_source.contains("use agent_doc_ipc_protocol::{")
-            && write_converge_source.contains("is_socket_receipt_timeout_error")
+            && write_converge_source.contains("classify_socket_delivery_failure")
             && write_converge_source
                 .contains("use agent_doc_ipc_io::editor_target::target_payload_to_editor;")
             && write_converge_source.contains("reliable_sync_editor_has_operator_text_authority")
@@ -33445,9 +33447,14 @@ fn restart_agent_refreshes_same_harness_config_and_degrades_failed_exact_resume(
 /// behavioural test of the branches that do exist can observe.
 #[test]
 fn every_wedge_recording_site_classifies_rejections_too() {
+    // GH #131: the boundary-reposition recorder in `agent-doc-write-ipc-io/src/lib.rs`
+    // was a third timeout-only site this list did not know about. Every site
+    // now classifies through the typed `classify_socket_delivery_failure`, which
+    // keeps a rejection distinct from a timeout instead of re-deciding it by hand.
     let sites = [
         "agent-doc-write-converge-io/src/lib.rs",
         "agent-doc-write-ipc-io/src/transport.rs",
+        "agent-doc-write-ipc-io/src/lib.rs",
     ];
     let mut checked = 0usize;
     for site in sites {
@@ -33457,13 +33464,13 @@ fn every_wedge_recording_site_classifies_rejections_too() {
         }
         checked += 1;
         assert!(
-            source.contains("is_socket_status_error("),
+            source.contains("classify_socket_delivery_failure("),
             "{site} records a wedge failure but never classifies a receipt rejection - \
              a rejecting endpoint accrues nothing and `write_wedged` never arms"
         );
     }
     assert_eq!(
-        checked, 2,
+        checked, 3,
         "expected both known wedge-recording sites to still record failures; if a site \
          moved, update this list rather than letting the guard silently check nothing"
     );

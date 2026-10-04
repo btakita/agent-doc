@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 /// Phrases that state a verdict. Each belongs to exactly one branch of
 /// `retained_write_remedy` and must not be authored anywhere else.
-const VERDICT_PHRASES: [&str; 7] = [
+const VERDICT_PHRASES: [&str; 8] = [
     "deferral, not a lost response",
     "STRANDED, not deferred",
     // `#ownershipverdictdiverges`: the third verdict. `write_applied` is neither
@@ -40,6 +40,9 @@ const VERDICT_PHRASES: [&str; 7] = [
     // exactly like a stranded write to an ownership check and takes the
     // opposite instruction, so its wording needs the same single owner.
     "UNANSWERED DOCUMENT EDIT",
+    // GH #131: the rejected-endpoint verdict. A site that re-authors it can
+    // drift back into promising a convergence the editor is refusing.
+    "REJECTED the delivery receipt",
     // `#preflightrefusalcontradiction`: the four phrases above are the verdict
     // *labels*. A site can contradict the derived verdict without using any of
     // them, simply by ASSERTING the deferral in its own words — and four sites in

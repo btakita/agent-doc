@@ -16,7 +16,7 @@ use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, FullContentIpcMode, build_ipc_node_patches_json,
     effective_unmatched_for_patch_payload, is_already_applied_receipt_error_message,
-    is_socket_receipt_timeout_error, is_socket_status_error,
+    classify_socket_delivery_failure,
 };
 use agent_doc_template as template;
 use agent_doc_template::stale_baseline::patch_touches_exchange;
@@ -976,20 +976,18 @@ fn try_ipc_inner(
                 // The result is no longer discarded: crossing the threshold is
                 // what asks the supervisor for the `#midturn-wedge-recycle`, and
                 // swallowing it left the escape silent.
-                let failure_kind = if is_socket_receipt_timeout_error(e.to_string()) {
-                    Some("timeout")
-                } else if is_socket_status_error(e.to_string()) {
-                    Some("rejection")
-                } else {
-                    None
-                };
-                if let Some(failure_kind) = failure_kind {
+                //
+                // GH #131: the outcome is TYPED, so a rejection is recorded as
+                // "the endpoint answered NO" — which the retained-write
+                // ownership predicate reads to stop calling this write deferred.
+                if let Some(failure) = classify_socket_delivery_failure(e.to_string()) {
+                    let failure_kind = failure.as_str();
                     let degraded = record_ipc_socket_ack_failure(
                         &project_root,
                         file,
                         Some(&patch_id),
                         "socket_ipc",
-                        failure_kind,
+                        failure,
                     )?;
                     if degraded {
                         eprintln!(

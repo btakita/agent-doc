@@ -36,6 +36,17 @@ After publishing, always run `cargo install --path .` — the `~/.cargo/bin/agen
 binary is used by tmux-spawned sessions. The `.bin/agent-doc` symlink (from `make release`)
 serves the local workspace but tmux panes resolve via `$PATH` which hits `~/.cargo/bin/`.
 
+## Homebrew formula (GH #31)
+
+Every tag's Release workflow calls `.github/workflows/homebrew.yml`, which renders
+`btakita/homebrew-tap` `Formula/agent-doc.rb` from the release's `SHA256SUMS` with
+`scripts/bump-homebrew-formula.py` and pushes it to the tap. It needs the repo
+secret `HOMEBREW_TAP_TOKEN` (fine-grained PAT, Contents read/write on
+`btakita/homebrew-tap` only); without it the job warns and skips. The formula is
+Linux-only until the Darwin archives exist; `make release-macos-assets` dispatches
+the workflow again so the macOS blocks land. Manual re-run:
+`gh workflow run homebrew.yml -f tag=vX.Y.Z`.
+
 ## Skill update after release
 
 After publishing a new version, run `agent-doc skill install --reload restart` inside

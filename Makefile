@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -212,6 +212,11 @@ pypi-quota-check:
 pypi-quota-self-test:
 	@python3 scripts/pypi-quota-check.py --self-test
 
+# Fixture regressions for the Homebrew formula generator (GH #31). Offline: the
+# Homebrew workflow feeds it the release's real SHA256SUMS on every tag.
+homebrew-formula-self-test:
+	@python3 scripts/bump-homebrew-formula.py --self-test
+
 # Build + machine-check the Lean formal models under formal/ (including the
 # wait-machine bound and captured-response closeout safety/completeness proofs).
 # Skips gracefully when the Lean
@@ -241,7 +246,7 @@ lean:
 # the release process runs `make check`, so leaving the installed-surface audit
 # out of it let 0.35.224 ship with harness runbooks several versions behind the
 # binary while every version marker matched.
-check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
+check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
 audit-docs:

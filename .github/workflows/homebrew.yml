@@ -1,0 +1,94 @@
+name: Homebrew
+
+# GH #31: pin `btakita/homebrew-tap` `Formula/agent-doc.rb` to one release's
+# platform archives. Called by `release.yml` on every tag, and dispatched again
+# by `scripts/release-macos-assets` after the operator-built Darwin archives
+# refresh `SHA256SUMS`, which is what adds the macOS blocks to the formula.
+#
+# Secret: `HOMEBREW_TAP_TOKEN` — a fine-grained PAT with Contents: read & write
+# on `btakita/homebrew-tap` only. `GITHUB_TOKEN` cannot push to another repo.
+# Without the secret the job warns and skips instead of failing the release.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag whose SHA256SUMS the formula pins (e.g. v0.35.451)
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag whose SHA256SUMS the formula pins (e.g. v0.35.451)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Tags can land minutes apart; serialise tap pushes rather than racing them.
+# The script itself refuses to downgrade, so order of completion is safe.
+concurrency:
+  group: homebrew-tap
+  cancel-in-progress: false
+
+jobs:
+  bump-formula:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          gh release download "$TAG" --pattern SHA256SUMS --dir release
+          cat release/SHA256SUMS
+
+      - name: Check out tap
+        id: tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set; skipping the btakita/homebrew-tap formula bump"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/btakita/homebrew-tap.git" tap
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Render formula
+        if: steps.tap.outputs.skip != 'true'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/bump-homebrew-formula.py --self-test
+          python3 scripts/bump-homebrew-formula.py \
+            --tag "$TAG" --sums release/SHA256SUMS --output tap/Formula/agent-doc.rb
+
+      - name: Commit and push
+        if: steps.tap.outputs.skip != 'true'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          cd tap
+          if [ -z "$(git status --porcelain -- Formula/agent-doc.rb)" ]; then
+            echo "Formula/agent-doc.rb already pins $TAG"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/agent-doc.rb
+          git commit -m "agent-doc ${TAG#v}"
+          git push origin HEAD

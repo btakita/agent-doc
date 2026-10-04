@@ -48,6 +48,28 @@ I claimed this item and handed it to a background subagent (worktree `agent-doc-
 2. **Answered steering keeps coming back:** an item is marked consumed once a later committed response answers it, so the hook stops resurfacing it.
 
 It has two regression tests to add, one for each symptom, and must pass `make check` before committing on branch `steerbaselineabsorb`. When it reports back, I'll merge the branch, do one `make install`, release the claim, and close the item.
+
+### Re: preflight refused on its own repair (haiven-dev sdk.md) — opus-5-5 · 2026-10-04T03:20-04:00
+
+> **Chat prompt (#chatprompt):** Also fix in subagent:
+> ❯ /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
+> ● Bash(agent-doc session-check tasks/sdk.md 2>&1 | grep -v '^\[perf\]' | tail -25)
+>   ⎿ [session-check] ok — cycle `cycle-1791097819297` is `committed` (commit_success); repaired committed historical committed_capture snapshot drift
+>      queue_continuation_required=true next_queue_prompt="Add backlog items for the demo work. Create an ADR PR in …
+> ● agent-doc refused to start this turn, so I haven't written anything to tasks/sdk.md. Its own repair step left the file slightly different from what it expected.
+>   I ran session-check afterwards. It fixed the mismatch and confirms my last reply (the demo table) is committed.
+>   It also found your new queue item: "Add backlog items for the demo work. Create an ADR PR in the haiven-sdk repo." The loop restarts in about 90 seconds and will take that one first.
+
+I filed this as `#preflightrepairdrift` and handed it to a second subagent in its own worktree (`agent-doc-wt/preflightrepairdrift`, branched from v0.35.450). It works separately from the `#steerbaselineabsorb` subagent.
+
+The bug: preflight ran a repair step (fixing committed-capture snapshot drift), and then its own check refused the turn because the document no longer matched what it expected. session-check later made the same repair and reported ok, so the drift was harmless and the turn should have been admitted.
+
+The subagent will:
+1. Find the exact refusal reason in haiven-dev's `ops.log` (around 07:14Z).
+2. Have preflight absorb its own repair before the admission check. Drift that would lose operator text still fails closed.
+3. Add a regression test for this case and pass `make check`.
+
+When both branches are in, I'll merge them serially and run one `make install`.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -62,6 +84,7 @@ It has two regression tests to add, one for each symptom, and must pass `make ch
 
 
 <!-- agent:backlog priority -->
+- [ ] [#preflightrepairdrift] [agent-doc] Preflight refused admission on src/haiven-dev/tasks/sdk.md (about 2026-10-04T07:14Z, cycle-1791097819297) because its own repair step left the document different from what it expected. A follow-up session-check then reported ok and 'repaired committed historical committed_capture snapshot drift', so the drift was benign. Fix: preflight should absorb its own self-repair (run the same repair session-check runs, before the admission guard) instead of refusing; genuinely unsafe drift stays fail-closed. Being fixed by a subagent on branch preflightrepairdrift (agent-doc-wt/preflightrepairdrift).
 - [ ] [#steerbaselineabsorb] [agent-doc] Steering that arrives while respond is committing gets absorbed into that commit's baseline. The session-check reported it as address_now ("answer it in the next cycle"), but the next /loop preflight said no_changes: true (read_source=live_editor), so the prompt would have been silently skipped. Repro 2026-10-04 03:01: the operator finished the line 'testing to see' -> 'testing to see if you pick this up.' during respond; commit 5eeed90b7e contains the full line. Fix: when steering is surfaced as pending at closeout, persist it as an unrecorded prompt (like chat_prompts) so the next contract carries it as a prompt target with no_changes: false.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and

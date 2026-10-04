@@ -117,7 +117,7 @@ If Local History no longer reaches 09-29, say so and I'll close `#apimdrevert` a
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - #gh-fix https://github.com/btakita/agent-doc/issues/125
-- [#apimdrevert]: how can I verify?
+- ~~[#apimdrevert]: how can I verify?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

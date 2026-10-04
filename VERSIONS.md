@@ -2,6 +2,26 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.452
+
+- **About Agent Doc (`#editoractionmenu`).** A new `agent-doc version [--json]` (schema `agent-doc-build-info-v1`:
+  version, build id, executable, sibling native library, expected plugin versions) and FFI
+  `agent_doc_build_info_json()`. JetBrains (0.2.488) and VS Code (0.2.80) add an "About Agent Doc" action that shows
+  the plugin version, the CLI binary actually in use, and the loaded native library's version and build id, and warns
+  on any mismatch. About never loads or reloads the library. Zed has no action surface and reports through LSP
+  `serverInfo`.
+- **Dashboard (`#gvqv`).** `agent-doc dashboard [--write [PATH]] [--watch] [--json]` renders the fleet work board plus
+  controller/supervisor liveness. Once `.agent-doc/dashboard.md` exists, the project controller keeps it live
+  (debounced on state change, 5s poll, atomic writes, unchanged bodies skipped). The file carries an
+  `<!-- agent-doc-dashboard v1 ... -->` marker that excludes it from session detection, board/serve scans, and the
+  cross-document sweep. JetBrains and VS Code add a Dashboard action that writes and opens it. `dashboard` is no
+  longer an alias for `board`.
+- **Half-typed queue lines are not coined (`#halftypedcoin`).** A line ending in an empty auto-paired code span
+  (`Add a \`\``) now reads as unfinished, so preflight's typing gate keeps holding. Free-text-to-id coining also
+  consults the gate: unfinished or still-changing lines stay free text (`free_text_coin_held`). A stub whose text is
+  unfinished absorbs the operator's continued line.
+- **Release parity:** adds the 0.35.451 `release-parity.tsv` row that the v0.35.451 release omitted.
+
 ## 0.35.451
 
 - **Steering absorbed into a closeout commit is still a turn (`#steerbaselineabsorb`).** When the operator finishes

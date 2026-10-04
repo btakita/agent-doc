@@ -238,18 +238,9 @@ Done. After your IDE restart the editor re-registered: 6 live registrations, and
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~do [#editoractionmenu]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/130~~
-- ~~do [#steerbacklogsource]~~
-- ~~do [#deferstrike]~~
-- ~~do [#gvqv]~~
-- ~~do [#halftypedcoin]~~
+- do [#jbpluginvanish]
+- do [#jbdynamicfalsereport]
 - ~~release + publish~~
-- ~~do [#ghbrew]~~
-- ~~do [#ghjbfolding]~~
-- ~~do [#ghmultitmux]~~
-- ~~do [#apimdrevert]~~
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

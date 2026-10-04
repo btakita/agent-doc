@@ -358,19 +358,62 @@ The new decoder also rejects fractional, quoted or out-of-range generations, emp
 **The line count still doesn't favour the generator.** The Kotlin backend is about 330 lines. It replaced 177 hand-written lines, and 58 of those came back as hand-written behaviour. A binding gains strictness and a single source of truth, not fewer lines. The step that could start removing more than it adds is modelling multi-variant tagged unions, which `delta` and then `reliable-sync` need. I filed that as recommended `#lzwiremodel4`, appended to the backlog. `docs/wire-codegen.md` has the updated count and reasoning.
 
 The exchange is 282 lines, over the warning point; I'm not stopping the queue for it.
+
+### Re: #lzwiremodel4, multi-variant unions and the delta surface — opus-5-5 · 2026-10-04T00:46-04:00
+
+> **Queue prompt:**
+>
+> do [#lzwiremodel4]
+
+**Done.** The wire model now handles multi-variant tagged unions, and `delta` is the second surface. It's modelled only for now: the golden model is checked, but no binding generates from it yet. Pushed as lazily-spec `feb96c9`. The receipts output is byte-identical in all four bindings.
+
+**Modelling `delta` needed more than unions.** Each item below was a separate gap, and the generator fails closed on each until it's modelled:
+
+| Kind | Where `delta` needs it |
+|---|---|
+| `union`: closed single-key objects with a PascalCase tag, plus string-`const` unit variants | `DeltaOp` (10 variants), `IpcValue`, `NodeState` (`"Opaque"`) |
+| references into `defs.json`, pulled in transitively | `NodeId`, `NodeKey`, `IpcValue`, `NodeState`, `ShmBlobRef` |
+| `alias` for named scalars | `NodeId` = u64, `NodeKey` = string with a length range and a pattern |
+| `bytes` (integers 0..=255) | inline payloads |
+| named inline enum, field `default` | `ShmBlobRef.backend` (default `shm`) |
+
+Every backend refuses these kinds as "modelled but not yet lowered". The schema edits are documentation only: descriptions, the `DeltaFrame` envelope annotation, and docs for the `backend` values.
+
+**Proof the model reads `delta` the same way the schema does.** A new test reads every `{"Delta": ...}` frame in the conformance corpus two ways: through a strict reading of the model, and through the JSON Schema validator.
+- It covers 21 frames plus 338 single-edit variants of them, such as a dropped key, an unknown key, a lowercase tag, a bad `key`, a byte of 256 or a `backend` of `rdma`. 35 of those variants are schema-valid.
+- The two readings must give the same verdict on every one, and they do.
+- **Not vacuous:** making the model drop `pattern`, or treat bytes as a list of u64, each produces a disagreement the test reports.
+
+**Fixed: the model builder failed open.** A schema root without the `x-lazily-envelope` annotation was skipped silently, so `signaling.json`, `durable-envelope.json` and `lossless-tree-delta.json` each "modelled" as zero types. The builder now refuses such a root, and refuses any schema that yields no declarations. Both cases have regression tests.
+
+**Found: queue ops in deltas are decoded by only one binding.** `protocol.md` makes `QueuePush`, `QueuePop` and `QueueClose` ordinary `DeltaOp` variants, and only lazily-cs decodes them. The other nine bindings reject a schema-valid `Delta` that carries one. The corpus has `QueuePush` frames in one reliable-sync fixture, and nothing for `QueuePop` or `QueueClose`. I filed this as actionable `#lzdeltaqueueops` at the top of the backlog. It needs codec changes in nine repos plus a new fixture, and a new canonical fixture reddens every binding until each one handles it.
+
+**What lowering `delta` still needs:**
+- **Codec-dependent `key`.** lazily-rs omits an absent `NodeAdd.key` in self-describing codecs and keeps it in positional Postcard. A generated serde derive can't express that.
+- **Null `backend`.** The schema rejects `backend: null`, but `protocol.md` requires decoders to read it as `shm`. A decoder generated from the model alone would refuse it.
+- **Union lowering in every backend.**
+
+I filed this as recommended `#lzwiremodel5`, appended. The other candidate schemas each still fail on one specific shape; `docs/wire-codegen.md` lists them, since the old list was out of date.
+
+**Verification:**
+- **lazily-spec:** 371 tests pass, including 33 generator tests. `make -k check` fails only at `coverage-check`, which reports stale coverage tables in the local lazily-zig and lazily-gd checkouts. Those checkouts are still 4 commits behind origin and hold other sessions' edits to files origin also changed, so I didn't move them.
+- **lazily-rs `make test-schema-compliance`:** exit 0 against the edited `defs.json`/`delta.json`. No binding keeps its own copy of either schema.
+- **CI:** last cycle's lazily-spec and lazily-kt runs are both green. This push's lazily-spec run was in progress at closeout.
+
+The exchange is 331 lines; I'm not stopping the queue for it.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
-- do [#lzwiremodel4]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwiremodel4] [recommended, lazily-spec] Fourth wire-model step: model multi-variant externally-tagged unions (DeltaOp in delta.json first, then reliable-sync's PascalCase-tagged unions) so a second surface can lower. This is where the generator can start removing more code than it adds. Design: src/lazily-spec/docs/wire-codegen.md (When to add a surface).
+- [ ] [#lzdeltaqueueops] [lazily-spec, all bindings except cs] protocol.md makes QueuePush / QueuePop / QueueClose ordinary DeltaOp variants (§ QueueCell op-log delta form), and only lazily-cs decodes them: rs, go, py, kt, js, dart, zig, cpp and gd reject a schema-valid Delta carrying one. Add the three variants to each binding's DeltaOp codec, plus a codec fixture carrying all three tags; the corpus has QueuePush frames only in reliable-sync/coalesce_bounds_outbox.json and none for QueuePop/QueueClose. Found by #lzwiremodel4; see src/lazily-spec/docs/wire-codegen.md (When to add a surface).
+- [ ] [#lzwiremodel5] [recommended, lazily-spec] Fifth wire-model step: lower the union kind in the backends, then lower the delta surface into one binding. Lowering must handle a codec-aware optional field (rs omits NodeAdd.key in self-describing codecs but keeps it in Postcard) and the decoder-only backend:null leniency (#lzblobbackendstrict). Design: src/lazily-spec/docs/wire-codegen.md (When to add a surface).
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

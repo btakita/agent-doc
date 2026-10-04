@@ -435,7 +435,7 @@ pub fn no_response_active_queue_head_result(
         "[session-check] warn: cycle `{cycle_id}` committed without an assistant response body while runnable agent:queue head(s) {ids} remained queued and open in agent:backlog; this was a no-response repair/reap-only closeout, not a completed queue turn"
     );
     let repair = format!(
-        "run `agent-doc {file}` from the owning session so the queued head is answered, or resolve each id through `agent-doc write --commit {file}` with `--done`, `--pending-gate`, or `--pending-edit` proof before closing"
+        "run `agent-doc {file}` from the owning session so the queued head is answered, or resolve an id whose work is finished with `agent-doc backlog {file} done <id>` (a binary-owned repair that needs no admitted cycle, so it is permitted even after a refused preflight admission, GH #129); gate or narrow an id with `--pending-gate`/`--pending-edit` only inside an admitted cycle's `agent-doc write --commit {file}`"
     );
 
     match mode {
@@ -824,6 +824,9 @@ mod tests {
         assert!(lines[0].contains("cycle `cycle-1` committed without an assistant response body"));
         assert!(lines[0].contains("#alpha, #bravo"));
         assert!(lines[1].contains("agent-doc write --commit task.md"));
+        // GH #129: the hint must name a repair that is legal after a refused
+        // preflight admission, not only a document write that the refusal forbids.
+        assert!(lines[1].contains("agent-doc backlog task.md done <id>"));
         assert!(lines[1].contains("#nochange-after-stall-breadth"));
 
         let strict = no_response_active_queue_head_result(

@@ -403,6 +403,97 @@ pub fn route_owned_reap_decision_for_purpose(
     route_owned_reap_decision(policy, liveness_reason)
 }
 
+/// Reap reason published when a route-owned supervisor proves the controller's
+/// authoritative actor binding for its document names a different, live pane.
+pub const ROUTE_OWNED_SUPERSEDED_BINDING_ORPHAN: &str = "superseded_binding_orphan";
+
+/// Durable facts about the authoritative actor binding for this supervisor's
+/// document, observed from the supervisor's own side (GH #133).
+///
+/// `own_pane_id` is the pane this supervisor generation registered with the
+/// controller. `authoritative_pane_id` is the pane named by the durable actor
+/// record for the same document (`None` when no record exists or it could not
+/// be read). `authoritative_pane_alive` must be a positive tmux observation of
+/// exactly that pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteOwnedBindingFacts<'a> {
+    pub own_pane_id: &'a str,
+    pub authoritative_pane_id: Option<&'a str>,
+    pub authoritative_pane_alive: bool,
+}
+
+/// What a route-owned supervisor can prove about its own binding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RouteOwnedBindingObservation {
+    /// The authoritative actor record still names this supervisor's pane.
+    Owned,
+    /// The authoritative record names a different pane, and that pane is live:
+    /// the controller already rejects every transition this generation makes.
+    Superseded { current_pane: String },
+    /// Neither could be proven (no record, unreadable record, a dead or empty
+    /// superseding pane, or this supervisor owns no tmux pane). Never reaps.
+    Unproven,
+}
+
+/// `#routeownedsupersededreap` (GH #133): classify this supervisor's binding.
+///
+/// A route-owned supervisor only learned it had been superseded when one of its
+/// own actor transitions was rejected (`ActorGenerationLease::observe_failure`).
+/// An idle supervisor parked in a `stash` window never transitions, so it never
+/// learned, and it lived as long as the tmux server — one permanent pane and
+/// ~7% CPU per superseded generation. This is the read-side proof of the same
+/// fact the controller's `mark_lifecycle` rejection encodes: the authoritative
+/// record names another pane.
+///
+/// Strict: only a *different, live* pane is supersession. A missing record, a
+/// dead superseding pane, or a supervisor without a tmux pane answers
+/// [`RouteOwnedBindingObservation::Unproven`], which never reaps.
+pub fn route_owned_binding_observation(
+    facts: RouteOwnedBindingFacts<'_>,
+) -> RouteOwnedBindingObservation {
+    let own = facts.own_pane_id.trim();
+    if !own.starts_with('%') {
+        return RouteOwnedBindingObservation::Unproven;
+    }
+    let Some(current) = facts.authoritative_pane_id.map(str::trim) else {
+        return RouteOwnedBindingObservation::Unproven;
+    };
+    if current == own {
+        return RouteOwnedBindingObservation::Owned;
+    }
+    if current.starts_with('%') && facts.authoritative_pane_alive {
+        return RouteOwnedBindingObservation::Superseded {
+            current_pane: current.to_string(),
+        };
+    }
+    RouteOwnedBindingObservation::Unproven
+}
+
+/// `#routeownedsupersededreap` (GH #133): reap decision for a superseded
+/// route-owned supervisor, independent of reap policy and start purpose.
+///
+/// `explicit_keep_alive` protects the document's *owner*; a superseded
+/// generation is not the owner, so no policy keeps it. Returns `Some(reap)` only
+/// when the binding is proven [`RouteOwnedBindingObservation::Superseded`], the
+/// document cycle is not open, and direct child-output observation shows no
+/// active turn in this supervisor's own pane. Every other shape returns `None`
+/// (leave the supervisor alone).
+pub fn route_owned_superseded_orphan_decision(
+    binding: &RouteOwnedBindingObservation,
+    cycle_open: bool,
+    observed_live_pane_busy: Option<&str>,
+) -> Option<RouteOwnedReapDecision> {
+    if cycle_open || observed_live_pane_busy.is_some() {
+        return None;
+    }
+    matches!(binding, RouteOwnedBindingObservation::Superseded { .. }).then(|| {
+        RouteOwnedReapDecision {
+            reap: true,
+            reason: ROUTE_OWNED_SUPERSEDED_BINDING_ORPHAN.to_string(),
+        }
+    })
+}
+
 /// Keep-alive reason for an `auto` route-owned pane that currently fills a
 /// visible editor column in the layout window.
 pub const ROUTE_OWNED_VISIBLE_COLUMN_KEEP_ALIVE: &str = "owned_pane_holds_visible_layout_column";
@@ -752,6 +843,88 @@ mod tests {
                 reap: false,
                 reason: "explicit_keep_alive".to_string()
             }
+        );
+    }
+
+    fn binding(own: &str, current: Option<&str>, alive: bool) -> RouteOwnedBindingObservation {
+        route_owned_binding_observation(RouteOwnedBindingFacts {
+            own_pane_id: own,
+            authoritative_pane_id: current,
+            authoritative_pane_alive: alive,
+        })
+    }
+
+    /// GH #133: a generation whose document binding moved to another live pane
+    /// is reaped regardless of `keep-alive` or start purpose.
+    #[test]
+    fn superseded_route_owned_supervisor_is_reaped() {
+        let observed = binding("%28", Some("%41"), true);
+        assert_eq!(
+            observed,
+            RouteOwnedBindingObservation::Superseded {
+                current_pane: "%41".to_string()
+            }
+        );
+        assert_eq!(
+            route_owned_superseded_orphan_decision(&observed, false, None),
+            Some(RouteOwnedReapDecision {
+                reap: true,
+                reason: ROUTE_OWNED_SUPERSEDED_BINDING_ORPHAN.to_string(),
+            })
+        );
+    }
+
+    /// GH #133: the live owner (record names this pane) is never reaped by the
+    /// supersession leg, whatever its other state.
+    #[test]
+    fn live_owned_supervisor_is_kept_by_the_supersession_leg() {
+        let observed = binding("%28", Some("%28"), true);
+        assert_eq!(observed, RouteOwnedBindingObservation::Owned);
+        for cycle_open in [false, true] {
+            for busy in [None, Some("live_pane_busy_blocked_prompt")] {
+                assert_eq!(
+                    route_owned_superseded_orphan_decision(&observed, cycle_open, busy),
+                    None
+                );
+            }
+        }
+    }
+
+    /// Strict proof: no record, a dead or non-tmux superseding pane, or a
+    /// supervisor without its own tmux pane is unproven and never reaps.
+    #[test]
+    fn unproven_binding_never_reaps() {
+        for observed in [
+            binding("%28", None, true),
+            binding("%28", Some("%41"), false),
+            binding("%28", Some(""), true),
+            binding("<pty>", Some("%41"), true),
+            binding("", Some("%41"), true),
+        ] {
+            assert_eq!(observed, RouteOwnedBindingObservation::Unproven);
+            assert_eq!(
+                route_owned_superseded_orphan_decision(&observed, false, None),
+                None
+            );
+        }
+    }
+
+    /// A superseded pane still running a turn, or a document with an open
+    /// cycle, waits for a quiet tick instead of being torn down mid-turn.
+    #[test]
+    fn superseded_supervisor_with_active_turn_or_open_cycle_waits() {
+        let observed = binding("%28", Some("%41"), true);
+        assert_eq!(
+            route_owned_superseded_orphan_decision(&observed, true, None),
+            None
+        );
+        assert_eq!(
+            route_owned_superseded_orphan_decision(
+                &observed,
+                false,
+                Some("live_pane_busy_blocked_prompt reason=active claude turn"),
+            ),
+            None
         );
     }
 

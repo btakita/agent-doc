@@ -53,6 +53,13 @@
   normal dispatch. Killing a quarantined supervisor must leave it stopped until
   the operator resumes the queue; a live pane and stale non-closed actor are not
   sufficient authority to relaunch its prior harness generation.
+- The dead-supervisor watchdog restarts only a supervisor whose recorded pane is
+  alive AND positively observed outside a `stash` window (`#watchdogbindinglive`,
+  GH #133). A route-owned supervisor runs inside a shell pane, so a deliberate
+  kill leaves the pane alive; a stashed pane holds no visible column and route
+  re-provisions it on demand, so resurrecting it only undoes the kill. An
+  unresolvable window fails closed. The skip is logged once per document and
+  dead pid as `controller_supervisor_watchdog_skip reason=binding_not_live`.
 - With `agent_doc_per_component_convergence` explicitly enabled, the commit
   candidate uses the same exact retained expected→target ownership set as the
   terminal convergence gate. Every owned component must already equal current

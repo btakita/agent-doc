@@ -126,6 +126,19 @@ It can add a CLI command such as `agent-doc version --json` if that helps. It wi
 I filed the fragment as a bug, `#halftypedcoin`: turning a free-text queue line into a backlog item should wait while the line is still being typed, or while it ends inside an unclosed code span.
 
 **Install note.** The `stale_install` warning came up because I built v0.35.451 from a clean worktree, so the builds in `src/agent-doc`'s own target directory are older than its source. The binary actually in use is v0.35.451: `.bin/agent-doc` runs the newer `~/.cargo/bin/agent-doc`. The warning will clear when `src/agent-doc` is built again.
+
+### Re: dispatched: Dashboard (#gvqv), #halftypedcoin; release queued — opus-5-5 · 2026-10-04T13:55-04:00
+
+Three subagents are running, each in its own worktree based on v0.35.451:
+- **`#editoractionmenu` (About Agent Doc):** `agent-doc-wt/editoractionmenu`.
+- **`#gvqv` (Dashboard):** `agent-doc-wt/dashboardaction`. I saw you rewrite the `#gvqv` stub into the full request, so the free-text Dashboard head and `#gvqv` now go to this one subagent. It will:
+  - add a "Dashboard" action, menu item and command-palette entry to the editor plugins;
+  - combine `agent-doc board` (where the work is) with controller and supervisor liveness;
+  - generate a live-updating markdown file under `.agent-doc/`, written atomically and kept fresh by the binary, that is never scanned as a session document and that the action opens;
+  - add a matching `agent-doc dashboard` command.
+- **`#halftypedcoin`:** `agent-doc-wt/halftypedcoin`. Turning a free-text queue line into a backlog item will wait until the operator stops typing, will never act on an obviously unfinished line like `Add a ```, and will fold later typing into the item it created.
+
+**release + publish** stays with me. Once all three branches report back, I'll merge them one at a time (the two plugin branches will need their version bumps and parity tables reconciled), run `make check` and one `make install`, release v0.35.452, and close the items.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -137,14 +150,16 @@ I filed the fragment as a bug, `#halftypedcoin`: turning a free-text queue line 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - do [#editoractionmenu]
 - do [#gvqv]
-- Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard. Can we also support a dashboard md file that live updates?
+- do [#halftypedcoin]
+- do [#gvqv]
+- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
 - [ ] [#halftypedcoin] [agent-doc] A half-typed free-text queue line was coined into a backlog id before the operator finished typing. Seen 2026-10-04: the operator typed '- Add a ``' (opening the Dashboard request), and preflight converted it into backlog item gvqv ('Add a ``') and queue head 'do [gvqv]'. The full line ('Add a `Dashboard` editor prompt + action ...') was still being typed underneath. Fix: free-text-to-id conversion must respect the steering typing gate (hold a line that is still changing, or one that ends inside an unclosed code span or mid-word), and a coined item whose source line is later extended should be merged into the extended line, not left as a stub.
 - [ ] [#editoractionmenu] Add an `About Agent Doc` Editor action + menu item to show which version of Agent Doc + Plugin is running?
-- [ ] [#gvqv] Add a ``
+- [ ] [#gvqv] Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard. Can we also support a dashboard md file that live updates?
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

@@ -76,6 +76,37 @@ Both queue heads were claimed and handed to background subagents (`#subagents` p
 
 - **#gh-fix GH #125** (chat-originated prompts never get recorded in the session document): the subagent works in its own worktree, `~/work/btakita/agent-doc-wt-ghfix125` on branch `ghfix125`, which sits outside agent-loop. It owns the SKILL/runbook rule and, if tractable, a preflight detection signal, plus tests and `make check`. I'll integrate its work, install, close #125 and release in the next cycle.
 - **[#apimdrevert] "how can I verify?"**: a read-only subagent is putting together a concrete procedure. It covers JetBrains Local History on `api.md` around 2026-09-29 00:40/00:49, the git history of `src/haiven-dev`, and a grep of `idea.1.log`. The answer will land here next cycle.
+
+### Re: [#apimdrevert] how to verify — opus-5-5 · 2026-10-04T00:36-04:00
+
+> **Queue prompt:** [#apimdrevert]: how can I verify?
+
+> **Operator note:** how can I verify?
+
+**Use JetBrains Local History first; it may be the only record left.** The `idea*.log` files have already rotated past 2026-09-29: the oldest, `idea.12.log`, starts on 10-02. Local History is still being written to `~/.cache/JetBrains/IntelliJIdea2026.1/LocalHistory/`. Its default retention is about 5 working days, so 09-29 may be close to being purged.
+
+1. **IDE:** right-click `src/haiven-dev/tasks/api.md` and choose Local History › Show History. Compare these revisions:
+   - **00:34** (git commit `1b432940`) against **00:40:02**. This shows the ~209 characters removed by the splice (34346 → 34137 chars).
+   - **00:40:02** against **00:40:03**. If the second change puts back exactly those characters, it was an undo/redo flip, not a loss.
+   - Just before **00:49:49** against just after it. Codex's change should touch only the queue stop and strike-through.
+   - Your newest revision with typing before 00:49 against **02:12**. Any text of yours missing here is the real loss.
+2. **Git:** `c9273a0b` is not a git object. It is agent-doc's content hash, stored in `src/haiven-dev/.agent-doc/state.db`. The commit range to check is `1b432940` (00:34:29) to `4f901866` (02:12:48):
+   ```
+   cd ~/work/btakita/agent-loop/src/haiven-dev
+   git log --format='%h %ci' --since='2026-09-28 23:00' --until='2026-09-29 03:00' -- tasks/api.md
+   git diff 1b432940 4f901866 -- tasks/api.md   # expect only queue stop/strike + later turns
+   git show 1b432940:tasks/api.md > /tmp/api-0034.md
+   ```
+   - Missing text that is in `1b432940` but not in `4f901866` was dropped between 00:34 and 02:12.
+   - Missing text that is in no commit at all was typed and lost before the next commit, and only Local History can show it.
+3. **Next time:** right after an incident, run `grep -n '<date> <HH:MM>' ~/.cache/JetBrains/IntelliJIdea2026.1/log/idea*.log | grep -iE 'splice|api.md|reload|projection'` and copy the log aside. The logs rotate in about 2 days.
+
+**Report back:**
+- The lost snippet, verbatim.
+- The last Local History timestamp where it is present and the first where it is gone.
+- The label Local History shows on that boundary revision: an external change, or an edit made in the IDE.
+
+If Local History no longer reaches 09-29, say so and I'll close `#apimdrevert` as unverifiable. It stays in the backlog, gated on your answer.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 

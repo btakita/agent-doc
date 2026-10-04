@@ -245,7 +245,7 @@ A response-bound preflight invoked from the authoritative actor's own pane may r
 
 ## board
 
-`agent-doc board [ROOT] [--json] [--dag] [--all] [--no-submodules]` (alias `dashboard`) renders one severity-ordered fleet **work** view: the queue and backlog of every session document across a superproject and its submodules, grouped into one section per project.
+`agent-doc board [ROOT] [--json] [--dag] [--all] [--no-submodules]` renders one severity-ordered fleet **work** view: the queue and backlog of every session document across a superproject and its submodules, grouped into one section per project.
 
 It is the complement of `admin dashboard`, not a replacement: `admin dashboard` answers "which controllers are alive", `board` answers "where is the work, and what is not moving". Both may be open at once.
 
@@ -256,6 +256,18 @@ It is the complement of `admin dashboard`, not a replacement: `admin dashboard` 
 - **Columns** are `state`, `document`, `queue` (drainable, or `drainable+deferred`, or `stopped` for a parked queue), `backlog`, `review`, `auto-dag` (the per-document lane rollup), `actor`, and `needs` (one phrase naming why an attention row needs a person). `--dag` appends the per-project auto-DAG lane rollup.
 - **Read-only.** `board` never writes a document, claims a pane, or mutates controller state, and a project that fails to load degrades to a missing section rather than aborting the board.
 - `--json` emits the whole board under the stable `agent-doc-fleet-board-v1` contract version. Classification, ordering, and rendering are pure and live in `agent_doc_work_graph::fleet_board`; discovery and parsing live in the binary.
+
+## dashboard
+
+`agent-doc dashboard [ROOT] [--json] [--write [PATH]] [--watch] [--interval-ms N] [--all] [--no-submodules]` renders the Agent Doc dashboard (`gvqv`): the `board` work view composed with the controller/supervisor liveness of `admin dashboard`, as one markdown document. (`dashboard` was previously an alias of `board`; it now prints that board plus liveness.)
+
+- **Sections**: a one-line summary (documents needing attention, project controllers running, actors and flagged actors), `Needs attention` (every `BLOCKED` / `STALLED` / `OPERATOR` row with its reason), `Work board` (the `board` table per project, document cells linked relative to the file), and `Controllers and supervisors` (per project: live `controller serve` pids from one `/proc` scan, then the `admin list` actor rows with pane liveness, supervisor pid, and `admin detect` finding kinds). Per-actor `controller inspect` diagnostics are deliberately omitted so a refresh never round-trips through controller RPC.
+- **Scope** follows `board`: the superproject fan-out by default, the given root only with `--no-submodules`.
+- Without `--write` the markdown (or the `agent-doc-dashboard-v1` JSON model with `--json`) goes to stdout.
+- **`--write [PATH]`** writes the projection atomically (temp file + rename) to PATH, default `.agent-doc/dashboard.md` under the project root. It refuses to replace an existing file that is not a dashboard projection. A rewrite whose body (everything but the `_Last change:` stamp) is unchanged writes nothing, so an open editor reloads only on a real change.
+- **Live updates are controller-owned.** Writing the default path arms the project controller: it re-renders after any controller state change (state event or memory refresh), debounced 500 ms, plus a 5 s poll for operator edits that never reach the controller, with renders spaced at least 1 s apart. An absent file costs one `stat` per poll; deleting it disarms the refresh. Document facts are memoized by `(mtime, len)`, so a warm refresh re-parses only changed documents. The projection's first line, `<!-- agent-doc-dashboard v1 scope=fleet|project all=true|false -->`, records the render parameters the controller re-renders with. `--watch` keeps the invoking process re-rendering instead (for a custom PATH, or with no controller running).
+- **Never a session document.** The projection has no frontmatter, contains no `<!-- agent:` marker and no `agent_doc_*` token (free text is escaped; such links are percent-encoded), lives under the gitignored `.agent-doc/` by default, and its first-line marker makes `is_agent_doc_document`, the `board` / `serve` scans, and therefore the cross-document sweep and editor tab sync reject it even under `auto_session_for_all_md` or a `**/*.md` include glob.
+- Editor plugins expose it as the **Dashboard** action (`editors/SPEC.md` § 6c).
 
 ## upgrade
 

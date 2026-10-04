@@ -27,6 +27,7 @@ class AgentDocPopupActionTest {
                 "AgentDoc.SyncLayout",
                 "AgentDoc.LoadTmuxWindow",
                 "AgentDoc.RefreshEnvironment",
+                "AgentDoc.Dashboard",
             ),
             AgentDocPopupAction.PRIMARY_ACTION_IDS,
         )

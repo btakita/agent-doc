@@ -325,7 +325,7 @@ const HEADERS: [&str; 8] = [
     "needs",
 ];
 
-fn queue_cell(facts: &DocumentFacts) -> String {
+pub fn queue_cell(facts: &DocumentFacts) -> String {
     if facts.queue_stopped {
         return "stopped".to_string();
     }
@@ -339,14 +339,14 @@ fn queue_cell(facts: &DocumentFacts) -> String {
 }
 
 /// Every open review item is normally gated, so only a partial gate is news.
-fn review_cell(facts: &DocumentFacts) -> String {
+pub fn review_cell(facts: &DocumentFacts) -> String {
     if facts.review_gated == 0 || facts.review_gated >= facts.review_open {
         return facts.review_open.to_string();
     }
     format!("{} ({} gated)", facts.review_open, facts.review_gated)
 }
 
-fn actor_cell(facts: &DocumentFacts) -> String {
+pub fn actor_cell(facts: &DocumentFacts) -> String {
     match (&facts.actor_pane, &facts.actor_harness) {
         (Some(pane), Some(harness)) if facts.actor_alive => format!("{pane} {harness}"),
         (Some(pane), _) if facts.actor_alive => pane.clone(),

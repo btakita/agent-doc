@@ -20,7 +20,8 @@ export type PopupMenuActionId =
     | 'killSupervisor'
     | 'resyncFixSessions'
     | 'gcStaleSessions'
-    | 'about';
+    | 'about'
+    | 'dashboard';
 
 export interface PopupMenuItem {
     label: string;
@@ -42,6 +43,7 @@ export function buildPrimaryPopupMenuItems(): PopupMenuItem[] {
         { label: '[11] $(debug-restart) Restart Agent', id: 'restartAgent' },
         { label: '[12] $(warning) Interrupt and Clear Session Context', id: 'interruptClear' },
         { label: '[13] $(copy) Copy Session Diagnostics', id: 'doctor' },
+        { label: '[14] $(dashboard) Dashboard', id: 'dashboard' },
         { label: '$(kebab-horizontal) More Actions', id: 'more' },
     ];
 }

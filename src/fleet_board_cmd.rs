@@ -76,14 +76,25 @@ pub(crate) fn run_command(options: BoardOptions) -> Result<()> {
 /// Build the whole board for one base root. Shared by `agent-doc board` and the
 /// `serve` HTTP view so both render exactly the same model.
 pub(crate) fn board_for_root(base: &Path, include_clear: bool, no_submodules: bool) -> FleetBoard {
-    let roots = if no_submodules {
+    board_for_projects(&project_roots(base, no_submodules), include_clear)
+}
+
+/// The project sections a board over `base` covers: just `base`, or the whole
+/// superproject fan-out. Shared with `agent-doc dashboard` so its controller
+/// liveness section covers exactly the projects its work board does.
+pub(crate) fn project_roots(base: &Path, no_submodules: bool) -> Vec<ProjectRoot> {
+    if no_submodules {
         vec![ProjectRoot {
             label: project_label(base, base),
             root: base.to_path_buf(),
         }]
     } else {
         discover_project_roots(base)
-    };
+    }
+}
+
+/// Build the board over an already-discovered set of project sections.
+pub(crate) fn board_for_projects(roots: &[ProjectRoot], include_clear: bool) -> FleetBoard {
     let owned: BTreeSet<PathBuf> = roots.iter().map(|project| project.root.clone()).collect();
     let facts: Vec<_> = roots
         .iter()
@@ -98,9 +109,9 @@ pub(crate) fn board_for_root(base: &Path, include_clear: bool, no_submodules: bo
 }
 
 /// One project section of the board.
-struct ProjectRoot {
-    label: String,
-    root: PathBuf,
+pub(crate) struct ProjectRoot {
+    pub(crate) label: String,
+    pub(crate) root: PathBuf,
 }
 
 fn resolve_base_root(root: Option<&Path>) -> Result<PathBuf> {
@@ -213,14 +224,13 @@ fn collect_project_facts(project: &ProjectRoot, owned: &BTreeSet<PathBuf>) -> Ve
     let actors = load_actor_index(&project.root);
     let mut facts = Vec::new();
     for document in discover_documents(&project.root, owned) {
-        let Ok(content) = std::fs::read_to_string(&document) else {
+        let Some(mut row) = cached_document_facts(&document) else {
             continue;
         };
         let relative = document
             .strip_prefix(&project.root)
             .map(|path| path.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| document.display().to_string());
-        let mut row = document_facts(&content);
         row.project = project.label.clone();
         row.project_root = project.root.display().to_string();
         row.path = relative;
@@ -369,10 +379,74 @@ fn is_session_document(path: &Path, name: &str) -> bool {
     if !name.ends_with(".md") || name.ends_with(".done.md") {
         return false;
     }
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    has_session_structure(&content)
+    cached_is_session_document(path)
+}
+
+/// Per-file memo keyed by `(mtime, len)`, so a long-lived renderer (the
+/// controller-owned dashboard projection, `gvqv`) re-reads and re-parses only
+/// the documents that changed since its last refresh. A one-shot `board` run
+/// sees an empty cache and behaves exactly as before.
+#[derive(Default)]
+struct CachedDocument {
+    stamp: Option<(std::time::SystemTime, u64)>,
+    session: Option<bool>,
+    facts: Option<DocumentFacts>,
+}
+
+fn document_cache() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, CachedDocument>>
+{
+    static CACHE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<PathBuf, CachedDocument>>,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+fn file_stamp(path: &Path) -> Option<(std::time::SystemTime, u64)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.modified().ok()?, metadata.len()))
+}
+
+/// Run `fill` against the cache entry for `path`, resetting it first when the
+/// file changed on disk. Returns `None` when the file cannot be stat'ed.
+fn with_cached_document<T>(path: &Path, fill: impl FnOnce(&mut CachedDocument) -> T) -> Option<T> {
+    let stamp = file_stamp(path)?;
+    let mut cache = document_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = cache.entry(path.to_path_buf()).or_default();
+    if entry.stamp != Some(stamp) {
+        *entry = CachedDocument {
+            stamp: Some(stamp),
+            ..CachedDocument::default()
+        };
+    }
+    Some(fill(entry))
+}
+
+fn cached_is_session_document(path: &Path) -> bool {
+    with_cached_document(path, |entry| {
+        if let Some(session) = entry.session {
+            return session;
+        }
+        let session = std::fs::read_to_string(path).is_ok_and(|content| {
+            has_session_structure(&content)
+                && !agent_doc_frontmatter::dashboard_projection::is_dashboard_projection(&content)
+        });
+        entry.session = Some(session);
+        session
+    })
+    .unwrap_or(false)
+}
+
+fn cached_document_facts(path: &Path) -> Option<DocumentFacts> {
+    with_cached_document(path, |entry| {
+        if entry.facts.is_none() {
+            let content = std::fs::read_to_string(path).ok()?;
+            entry.facts = Some(document_facts(&content));
+        }
+        entry.facts.clone()
+    })
+    .flatten()
 }
 
 pub(crate) fn has_session_structure(content: &str) -> bool {
@@ -536,6 +610,42 @@ mod tests {
             roots.is_empty(),
             "a directory with no .agent-doc/ is not an agent-doc project"
         );
+    }
+
+    #[test]
+    fn board_scan_never_picks_up_a_dashboard_projection() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        write(&root.join("tasks/live.md"), QUEUED_DOC);
+        // Even a projection written outside `.agent-doc/` whose rendered rows
+        // somehow carried a component marker is not a session document.
+        write(
+            &root.join("docs/dashboard.md"),
+            "<!-- agent-doc-dashboard v1 scope=project all=false -->\n<!-- agent:queue -->\n",
+        );
+        write(
+            &root.join(".agent-doc/dashboard.md"),
+            "<!-- agent-doc-dashboard v1 scope=project all=false -->\n",
+        );
+        let documents = discover_documents(root, &BTreeSet::new());
+        assert_eq!(documents.len(), 1, "found {documents:?}");
+        assert!(documents[0].ends_with("tasks/live.md"));
+    }
+
+    #[test]
+    fn cached_document_facts_follow_file_changes() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("tasks/live.md");
+        write(&path, QUEUED_DOC);
+        assert_eq!(cached_document_facts(&path).unwrap().backlog_open, 2);
+        assert!(cached_is_session_document(&path));
+        // A different length invalidates the entry even within one mtime tick.
+        let fewer = QUEUED_DOC.replace("- [ ] [#beta] extend the parser fixture set\n", "");
+        write(&path, &fewer);
+        assert_eq!(cached_document_facts(&path).unwrap().backlog_open, 1);
+        write(&path, "# plain notes now\n");
+        assert!(!cached_is_session_document(&path));
     }
 
     #[test]

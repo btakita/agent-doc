@@ -743,6 +743,9 @@ fn is_agent_doc_file(path: &Path) -> Result<bool> {
     }
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
+    if agent_doc_frontmatter::dashboard_projection::is_dashboard_projection(&content) {
+        return Ok(false);
+    }
     let (frontmatter, _) = match agent_doc_frontmatter::frontmatter::parse(&content) {
         Ok(parsed) => parsed,
         Err(_) => return Ok(false),

@@ -49,6 +49,7 @@ import {
     buildOverflowPopupMenuItems,
     buildPrimaryPopupMenuItems,
 } from './popupMenu.js';
+import { DASHBOARD_COMMAND_ARGS, dashboardPath } from './dashboard.js';
 import {
     buildEditorSurface,
     buildSyncCommandArgs,
@@ -1619,6 +1620,32 @@ async function aboutAction(): Promise<void> {
     }
 }
 
+// `gvqv`: show the Agent Doc dashboard. The binary renders the fleet work board
+// plus controller/supervisor liveness into `.agent-doc/dashboard.md` and arms
+// the project controller to keep it current; this opens its markdown preview,
+// which follows the controller's atomic rewrites. Project-scoped, so it runs
+// from the focused document's project root or the first workspace folder.
+async function dashboardAction(): Promise<void> {
+    const cwd = resolveCleanupCwd();
+    if (!cwd) {
+        showError('Dashboard: no workspace folder open');
+        return;
+    }
+    try {
+        await runCli([...DASHBOARD_COMMAND_ARGS], cwd, { timeoutMs: 30_000 });
+    } catch (err: any) {
+        showError(`Dashboard failed: ${err.message}`);
+        return;
+    }
+    const uri = vscode.Uri.file(dashboardPath(cwd));
+    try {
+        await vscode.commands.executeCommand('markdown.showPreview', uri);
+    } catch {
+        const document = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(document);
+    }
+}
+
 async function fixDocumentAction(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return;
@@ -2336,6 +2363,9 @@ async function popupMenuAction(): Promise<void> {
             break;
         case 'doctor':
             await copySessionDiagnosticsAction();
+            break;
+        case 'dashboard':
+            await dashboardAction();
             break;
         case 'more': {
             const overflow = await vscode.window.showQuickPick(buildOverflowPopupMenuItems(), {
@@ -3572,6 +3602,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.gcStaleSessions', gcStaleSessionsAction)
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.dashboard', dashboardAction)
     );
 
     // `editoractionmenu`: running plugin / CLI / native library versions.

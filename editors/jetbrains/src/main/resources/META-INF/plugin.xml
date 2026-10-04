@@ -235,5 +235,13 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.Dashboard"
+                class="com.github.btakita.agentdoc.DashboardAction"
+                text="Agent Doc Dashboard"
+                description="Show the Agent Doc dashboard: the fleet work board plus controller/supervisor liveness, kept live in .agent-doc/dashboard.md">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

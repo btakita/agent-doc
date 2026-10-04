@@ -43,6 +43,7 @@
 //! - dispatch_skill_install_reload: skill updated + `--reload compact` → prints `SKILL_RELOAD=compact`
 //! - dispatch_lib_path_missing: library absent → exits with code 1
 
+mod agent_dashboard;
 mod annotate;
 mod audit_docs;
 mod auto_dag;
@@ -565,6 +566,10 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                 invocation.commit,
             )
         })
+    }
+
+    fn refresh_dashboard_projection(&self, project_root: &Path) -> anyhow::Result<bool> {
+        agent_dashboard::refresh_if_armed(project_root)
     }
 }
 
@@ -2616,7 +2621,6 @@ enum Commands {
     /// superproject and its submodules, grouped by project and ordered by
     /// severity. `admin dashboard` shows which controllers are alive; this shows
     /// where the work is and what is not moving
-    #[command(alias = "dashboard")]
     Board {
         /// Project or superproject directory (defaults to the nearest project root from CWD)
         root: Option<PathBuf>,
@@ -2626,6 +2630,33 @@ enum Commands {
         /// Also print the per-project auto-DAG lane rollup
         #[arg(long)]
         dag: bool,
+        /// Include documents with nothing queued and nothing open
+        #[arg(long)]
+        all: bool,
+        /// Only inspect the given root, never its submodules
+        #[arg(long)]
+        no_submodules: bool,
+    },
+    /// Agent Doc dashboard: the fleet work board (`board`) composed with
+    /// controller/supervisor liveness (`admin dashboard`) as one markdown view.
+    /// `--write` keeps a live projection at `.agent-doc/dashboard.md` that the
+    /// project controller re-renders on state change; never a session document
+    Dashboard {
+        /// Project or superproject directory (defaults to the nearest project root from CWD)
+        root: Option<PathBuf>,
+        /// Output the dashboard model as JSON instead of markdown
+        #[arg(long, conflicts_with = "write")]
+        json: bool,
+        /// Write the markdown projection atomically (default: .agent-doc/dashboard.md,
+        /// which the project controller then keeps updated)
+        #[arg(long, value_name = "PATH", num_args = 0..=1)]
+        write: Option<Option<PathBuf>>,
+        /// Keep re-rendering the --write projection from this process
+        #[arg(long, requires = "write")]
+        watch: bool,
+        /// Refresh interval for --watch
+        #[arg(long = "interval-ms", default_value_t = agent_dashboard::DEFAULT_WATCH_INTERVAL_MS)]
+        interval_ms: u64,
         /// Include documents with nothing queued and nothing open
         #[arg(long)]
         all: bool,
@@ -5241,6 +5272,23 @@ fn try_main() -> anyhow::Result<()> {
             root,
             json,
             dag,
+            all,
+            no_submodules,
+        }),
+        Commands::Dashboard {
+            root,
+            json,
+            write,
+            watch,
+            interval_ms,
+            all,
+            no_submodules,
+        } => agent_dashboard::run_command(agent_dashboard::DashboardOptions {
+            root,
+            json,
+            write,
+            watch,
+            interval_ms,
             all,
             no_submodules,
         }),

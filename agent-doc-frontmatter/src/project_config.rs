@@ -519,6 +519,11 @@ pub fn parse_legacy_components_toml(content: &str) -> Result<BTreeMap<String, Co
 /// glob, with the escape hatch off, returns `false` — callers must fail closed
 /// instead of silently converting it.
 pub fn is_agent_doc_document(rel_path: &str, content: &str, config: &ProjectConfig) -> bool {
+    // `gvqv`: the generated dashboard projection is never a session, even under
+    // the escape hatch or a `**/*.md` include glob.
+    if crate::dashboard_projection::is_dashboard_projection(content) {
+        return false;
+    }
     if config.documents.auto_session_for_all_md {
         return true;
     }
@@ -983,5 +988,21 @@ free_text_execution = "goal"
         let c = cfg(&[], true);
         assert!(is_agent_doc_document("README.md", "plain notes\n", &c));
         assert!(is_agent_doc_document("anywhere/file.md", "plain\n", &c));
+    }
+
+    #[test]
+    fn dashboard_projection_is_never_a_session_document() {
+        let dashboard =
+            "<!-- agent-doc-dashboard v1 scope=project all=false -->\n# Agent Doc dashboard\n";
+        assert!(!is_agent_doc_document(
+            ".agent-doc/dashboard.md",
+            dashboard,
+            &cfg(&[], true)
+        ));
+        assert!(!is_agent_doc_document(
+            "docs/dashboard.md",
+            dashboard,
+            &cfg(&["**/*.md"], false)
+        ));
     }
 }

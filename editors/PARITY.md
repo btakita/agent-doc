@@ -24,11 +24,13 @@ conditional on the host. Zed remains staged for the native-peer contract and is
 not counted as proven parity. Changing these declarations requires adapter and
 conformance coverage, not simply changing a status cell.
 
-Editor actions are not wire capabilities and have no `plugin-parity.tsv` row;
-their parity is the shared action contract in `SPEC.md`, enforced per plugin by
-the popup/menu tests. `About Agent Doc` (`SPEC.md` section 6b) ships in JetBrains
-and VS Code; Zed has no action surface and reports its version through LSP
-`serverInfo`.
+Editor actions are not wire capabilities and have no `plugin-parity.tsv` row: that
+table is the native capability vocabulary each adapter advertises at registration.
+Action parity is the shared action contract in `SPEC.md`, enforced per plugin by
+the popup/menu tests. `About Agent Doc` (`SPEC.md` section 6b) and the Dashboard
+action (`gvqv`, `SPEC.md` § 6c) ship in JetBrains and VS Code. Zed is staged for
+both because its extension is a Markdown language server with no command or menu
+surface; it reports its version through LSP `serverInfo`.
 
 Headless native tests prove transport/FFI behavior. IDE UI, VFS wiring, and
 platform-specific terminal behavior still need their documented host smokes.

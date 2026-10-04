@@ -1,6 +1,7 @@
 //! Controller filesystem/log adapters.
 
 pub mod dashboard;
+pub mod dashboard_refresh;
 pub mod editor_route_errors;
 pub mod process;
 pub mod process_exit_watcher;

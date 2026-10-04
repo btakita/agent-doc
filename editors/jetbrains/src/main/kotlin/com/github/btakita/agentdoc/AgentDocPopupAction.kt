@@ -34,6 +34,8 @@ class AgentDocPopupAction : AnAction(), DumbAware {
             "AgentDoc.SyncLayout",
             "AgentDoc.LoadTmuxWindow",
             "AgentDoc.RefreshEnvironment",
+            // `gvqv`: project-wide dashboard (work board + controller liveness).
+            "AgentDoc.Dashboard",
         )
 
         internal val OVERFLOW_ACTION_IDS = listOf(

@@ -4,6 +4,7 @@
 //! parsing/serialization helpers. File-backed IO stays in orchestration
 //! adapters.
 
+pub mod dashboard_projection;
 pub mod frontmatter;
 pub mod lint;
 pub mod project_config;

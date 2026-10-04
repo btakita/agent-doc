@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.448
+
+- **Prompts typed in chat are recorded in the session document (GH #125).** Every hot-path rule assumed the
+  operator's prompt arrived as a document edit, so a prompt typed in the harness chat instead (for example a
+  bare `prompt_presets` key such as `#upgrade`) ran its work and never entered the document, while preflight
+  reported `no_changes: true`. The skill now says a chat-originated prompt is a session turn: the agent inserts
+  it into `exchange` and persists through `respond` / `write --commit` with its queue and backlog mutations, and
+  `no_changes: true` means stop only when the turn carries no operator prompt missing from the document. The
+  Claude Code and Codex prompt hooks detect it: on a document-bound session, non-trigger chat text is recorded
+  in a per-session ledger and the agent is told to record it (with the preset body when it is a preset key); the
+  next trigger lists any prompts the document still lacks before the cycle contract, so a `no_changes` cycle is
+  not reported as idle. Each prompt is surfaced once.
+
 ## 0.35.447
 
 - **Operator edits in flight are steering, not a refused turn.** Preflight used to wait until every editor

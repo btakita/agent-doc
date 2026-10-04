@@ -309,18 +309,68 @@ The exchange is 171 lines, over the 160-line warning point. I'm not stopping the
 **Shared working trees.** I committed only my own paths, and moved the shared checkouts forward only after confirming that each overlapping local edit was byte-identical to the remote. Where a checkout couldn't fast-forward (gd and zig, which held other sessions' changes, and kt, which has an unpushed local commit), I pushed the one-line coverage change from a scratch worktree at `origin/main`. Those three local histories are untouched.
 
 The exchange is now about 280 lines. I'm not stopping the queue for it.
+
+### Re: #lzwiremodel3, Kotlin on the receipts surface — opus-5-5 · 2026-10-04T00:38-04:00
+
+> **Queue prompt:**
+>
+> do [#lzwiremodel3]
+
+**Done.** Kotlin is now the fourth binding on the receipts surface. I picked Kotlin over js because Kotlin's extension members let the hand-written behaviour sit beside generated classes without mixins. In js, the codec sits inside the `index.js` monolith next to a hand-written `index.d.ts`, so it costs more. Pushed kt first, then spec, because spec CI checks each binding's published `main`.
+
+| Repo | Commit | What changed |
+|---|---|---|
+| lazily-kt | `fd31508` | Generated `ReceiptsWireGen.kt` replaces the hand-written declarations and codec in `Receipt.kt`. `generation` is now `ULong`. Decoding is strict. |
+| lazily-spec | `b97c278` | Kotlin backend, 2 generator tests, CI sparse checkout of lazily-kt, docs |
+
+**How the Kotlin backend lowers the model:**
+- **Types.** `u64` becomes `ULong`, a record becomes a `data class`, an enum becomes an `enum class` (`wireName` plus a `fromWire` that rejects unknown values), and the envelope becomes a `sealed interface` that includes `encodeJson`/`decodeJson`.
+- **Behaviour stays hand-written** in `Receipt.kt`. That covers `isTerminal`, the `observed`/`accepted`/`applied`/`rejected` factories, `ofCausalReceipts`, `ReceiptApplyStatus` and `ReceiptProjection`.
+  - The factories are now extensions on the generated companion object, so `CausalReceipt.observed(...)` reads the same as before.
+  - `isTerminal` is now an extension property, so Java callers would reach it differently. In Kotlin it reads the same.
+- **Formatting.** The generated file goes through lazily-kt's `spotlessCheck` like any other source. The backend emits exactly the layout ktlint produces, so a formatter change shows up as generated-file drift.
+
+**Lowering found a real mismatch, the same one Go had.** Kotlin stored `generation` as `Long`, so it accepted negative values the schema forbids and couldn't hold anything above 2^63-1. It's now `ULong`, which is an API change for Kotlin callers: `ReceiptProjection.observe` and `ReceiptApplyStatus.StaleGeneration` take `ULong`. The command plane still uses `Long`. As in Go, `receiptGenerationMatches` compares the two without wrapping, and a receipt generation too large for a `Long` is reported as `Long.MAX_VALUE` instead of wrapping.
+
+**Decode strictness now matches rs/go/py.** The old Kotlin decoder accepted all of these, and the new one rejects them:
+- unknown keys;
+- a missing `reason` or `payload_hash`;
+- a number where a string belongs (`jsonPrimitive.content` reads either);
+- negative generations.
+
+The new decoder also rejects fractional, quoted or out-of-range generations, empty ids, and an envelope with zero or several tags.
+
+**Verification:**
+- **lazily-kt `make check`:** exit 0, run again after rebasing onto the remote's v0.43.0 prep. 518 JUnit tests, 0 failures.
+- **New Kotlin tests** cover:
+  - the canonical fixture re-encodes byte for byte;
+  - a generation of `ULong.MAX_VALUE` round-trips;
+  - 12 off-schema frames are rejected;
+  - an empty batch encodes as `[]`;
+  - the generation comparison never wraps.
+- **Not vacuous.** With the unknown-key check removed from the generated decoder, the strict test failed; it passed again after restoring.
+- **lazily-spec:** the generator tests pass (22). I replayed the CI wire-codegen step against sparse clones of all four published `main`s: exit 0.
+- **lazily-spec `make check`:** everything passes except `coverage-check`, which reports stale coverage tables in the local lazily-zig and lazily-gd checkouts. Those checkouts are 4 commits behind origin and hold other sessions' edits to files origin also changed, so I didn't move them. My change doesn't touch `coverage.json`.
+- **CI:** the lazily-spec and lazily-kt runs were still in progress at closeout.
+
+**Shared working tree.** The local kt checkout had an unpushed commit, `a342adf`. It was already on origin as `f79a8de`, and the one other-session edit that overlapped origin (`scripts/check-conformance-coverage.sh`) matched origin byte for byte. So I committed only my 5 paths and rebased with autostash, and the rebase dropped the duplicate. The tsift `AGENTS.md` churn in the checkout is untouched.
+
+**The line count still doesn't favour the generator.** The Kotlin backend is about 330 lines. It replaced 177 hand-written lines, and 58 of those came back as hand-written behaviour. A binding gains strictness and a single source of truth, not fewer lines. The step that could start removing more than it adds is modelling multi-variant tagged unions, which `delta` and then `reliable-sync` need. I filed that as recommended `#lzwiremodel4`, appended to the backlog. `docs/wire-codegen.md` has the updated count and reasoning.
+
+The exchange is 282 lines, over the warning point; I'm not stopping the queue for it.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+- do [#lzwiremodel4]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwiremodel3] [recommended, lazily-spec] Third wire-model step: lower the receipts surface into a fourth binding (js or kt), replacing its hand-written receipt codec and making its decoder strict, like rs/go/py. Do this before any second surface; a second surface first needs multi-variant tagged unions modelled (delta DeltaOp, reliable-sync), plus newtype aliases (message-passing CommandId). Design: src/lazily-spec/docs/wire-codegen.md (When to add a surface).
+- [ ] [#lzwiremodel4] [recommended, lazily-spec] Fourth wire-model step: model multi-variant externally-tagged unions (DeltaOp in delta.json first, then reliable-sync's PascalCase-tagged unions) so a second surface can lower. This is where the generator can start removing more code than it adds. Design: src/lazily-spec/docs/wire-codegen.md (When to add a surface).
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

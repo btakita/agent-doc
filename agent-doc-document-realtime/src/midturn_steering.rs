@@ -1788,6 +1788,58 @@ mod tests {
         );
     }
 
+    /// `#steerbacklogsource` (agent-doc-bugs.md, 2026-10-04): the operator
+    /// rewrote the backlog stub `- [ ] [#gvqv] Add a ``` into the full
+    /// Dashboard request while a turn ran, and every steering report surfaced it
+    /// as `source=exchange change=added dispatch=address_now`. Edits inside
+    /// managed tracked-work components are component state, never exchange
+    /// prompts — including free text that is not item-shaped — while a real
+    /// exchange prompt typed in the same edit still surfaces.
+    #[test]
+    fn managed_component_edits_never_surface_as_exchange_prompts() {
+        fn tracked(exchange: &str, backlog: &str, review: &str, done: &str) -> String {
+            format!(
+                "{FM}# Session\n\n<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->\n\n## Backlog\n\n<!-- agent:backlog -->\n{backlog}<!-- /agent:backlog -->\n\n## Review\n\n<!-- agent:review -->\n{review}<!-- /agent:review -->\n\n## Done\n\n<!-- agent:done -->\n{done}<!-- /agent:done -->\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+            )
+        }
+        let owned = BTreeSet::new();
+        let baseline = tracked(
+            EX,
+            "- [ ] [#gvqv] Add a ``\n- [ ] [#other] keep me\n",
+            "",
+            "",
+        );
+        let backlog_only = tracked(
+            EX,
+            "- [ ] [#gvqv] Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard. Can we also support a dashboard md file that live updates?\n- [ ] [#other] keep me\n",
+            "Reviewer note: the dashboard needs a refresh button\n",
+            "- 2026-10-04 [#shipped] closed last cycle\n",
+        );
+        let obs = observe(&seeded(&baseline, None), &backlog_only, &quiet_ctx(&owned));
+        assert!(
+            obs.ready.is_empty() && obs.pending == 0,
+            "managed-component edits surfaced as steering: {:?}",
+            obs.ready
+        );
+        // The shared closed-cycle comparison agrees: no steering at all.
+        assert!(
+            !crate::baseline_comparison::realtime_steering_all_between(&baseline, &backlog_only)
+                .is_present()
+        );
+
+        // A real exchange prompt in the same edit is still surfaced, alone.
+        let with_prompt = backlog_only.replacen(
+            "work on the current item\n",
+            "work on the current item\n\nalso check the CI status please\n",
+            1,
+        );
+        let obs = observe(&seeded(&baseline, None), &with_prompt, &quiet_ctx(&owned));
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        assert_eq!(obs.ready[0].source, SteeringSource::Exchange);
+        assert_eq!(obs.ready[0].dispatch, SteeringDispatch::AddressNow);
+        assert_eq!(obs.ready[0].verbatim, "also check the CI status please");
+    }
+
     #[test]
     fn agent_response_checkpoint_does_not_surface() {
         let owned = BTreeSet::new();

@@ -89,10 +89,67 @@ fn identity(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Does `baseline` (frontmatter excluded) carry every non-blank line of
-/// `text` as a whole line?
-pub fn text_in_baseline(baseline: &str, text: &str) -> bool {
+/// The part of `baseline` an exchange prompt can live in
+/// (`#steerbacklogsource`): the `agent:exchange` body when the document has
+/// one, otherwise the body (frontmatter excluded) with every managed
+/// tracked-work component body blanked.
+fn exchange_text_of(baseline: &str) -> String {
     let (_, body) = agent_doc_frontmatter::frontmatter::split_frontmatter_parts(baseline);
+    if let Ok(components) = agent_doc_element::element::parse(body)
+        && let Some(exchange) = components.iter().find(|c| c.name == "exchange")
+    {
+        return exchange.content(body).to_string();
+    }
+    agent_doc_document_realtime::baseline_comparison::mask_managed_work_components(body)
+}
+
+/// Is `text` made only of tracked-work item rows (`- [ ] [#id] ...`,
+/// `- [/] [#id]`, `- [x] [#id]`, a done row `- 2026-10-04 [#id] ...`)?
+/// Such text is backlog/review/done component state, never an operator
+/// prompt, wherever a steering report claimed it came from
+/// (`#steerbacklogsource`). Deliberately narrower than preflight's
+/// `change_is_managed_state_only`, which also treats a bare `do [#id]` as
+/// bookkeeping — a real exchange prompt the ledger must keep.
+fn is_tracked_work_rows(text: &str) -> bool {
+    fn row(line: &str) -> bool {
+        let Some(rest) = line.strip_prefix("- ") else {
+            return false;
+        };
+        let rest = rest.trim_start();
+        let after_marker = if let Some(after) = rest.strip_prefix('[') {
+            let mut chars = after.chars();
+            match (chars.next(), chars.next()) {
+                (Some(_), Some(']')) => chars.as_str(),
+                _ => return false,
+            }
+        } else {
+            let date: String = rest.chars().take(10).collect();
+            let is_date = date.len() == 10
+                && date.char_indices().all(|(i, c)| match i {
+                    4 | 7 => c == '-',
+                    _ => c.is_ascii_digit(),
+                });
+            if !is_date {
+                return false;
+            }
+            &rest[10..]
+        };
+        after_marker.trim_start().starts_with("[#")
+    }
+    let mut lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .peekable();
+    lines.peek().is_some() && lines.all(row)
+}
+
+/// Does the EXCHANGE component of `baseline` carry every non-blank line of
+/// `text` as a whole line? A line that only appears inside `agent:backlog`,
+/// `agent:review`, `agent:done`, or another managed component does not count
+/// (`#steerbacklogsource`): a backlog edit is component state, not a prompt.
+pub fn text_in_baseline(baseline: &str, text: &str) -> bool {
+    let body = exchange_text_of(baseline);
     let lines: std::collections::BTreeSet<&str> = body.lines().map(str::trim).collect();
     let mut wanted = text
         .lines()
@@ -105,7 +162,9 @@ pub fn text_in_baseline(baseline: &str, text: &str) -> bool {
 /// An item the ledger tracks: an exchange prompt that is still operator text
 /// (not a removal).
 fn is_absorbable(item: &SteeringItem) -> bool {
-    item.source == SteeringSource::Exchange && item.change != SteeringChange::Deleted
+    item.source == SteeringSource::Exchange
+        && item.change != SteeringChange::Deleted
+        && !is_tracked_work_rows(&item.verbatim)
 }
 
 impl AbsorbedSteeringLedger {
@@ -166,11 +225,13 @@ impl AbsorbedSteeringLedger {
         *self != before
     }
 
-    /// Pending texts, oldest first.
+    /// Pending texts, oldest first. Managed tracked-work text a pre-guard
+    /// binary recorded is never handed to a contract (`#steerbacklogsource`).
     pub fn pending(&self) -> Vec<String> {
         self.entries
             .iter()
             .filter(|entry| entry.status == AbsorbedStatus::Pending)
+            .filter(|entry| !is_tracked_work_rows(&entry.text))
             .map(|entry| entry.text.clone())
             .collect()
     }
@@ -438,6 +499,71 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(ledger.pending().len(), 1);
+    }
+
+    /// `#steerbacklogsource` (agent-doc-bugs.md, 2026-10-04): a backlog line
+    /// misattributed as an exchange prompt was absorbed and carried into the
+    /// next preflight contract as `absorbed_steering_prompts`. Only lines of the
+    /// committed EXCHANGE component are recorded; managed tracked-work text is
+    /// refused even when a report calls it exchange, and a pre-guard entry is
+    /// never handed to a contract.
+    #[test]
+    fn only_exchange_component_lines_are_recorded() {
+        let gvqv = "- [ ] [#gvqv] Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard.";
+        let note = "Reviewer note: the dashboard needs a refresh button";
+        let prompt = "testing to see if you pick this up.";
+        let baseline = format!(
+            "---\nagent_doc_session: t\n---\n\n<!-- agent:exchange -->\n{prompt}\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n{gvqv}\n<!-- /agent:backlog -->\n\n<!-- agent:review -->\n{note}\n<!-- /agent:review -->\n"
+        );
+        assert!(!text_in_baseline(&baseline, gvqv));
+        assert!(!text_in_baseline(&baseline, note));
+        assert!(text_in_baseline(&baseline, prompt));
+
+        let mut ledger = AbsorbedSteeringLedger::default();
+        let added = ledger.record(
+            &[exchange(gvqv), exchange(note), exchange(prompt)],
+            &baseline,
+            "cycle-1",
+            100,
+        );
+        assert_eq!(added, vec![prompt.to_string()]);
+        assert_eq!(ledger.pending(), vec![prompt.to_string()]);
+
+        // An item-shaped tracked-work row is managed state wherever it sits.
+        let in_exchange = baseline.replace(
+            &format!("{prompt}\n<!-- /agent:exchange -->"),
+            &format!("{prompt}\n{gvqv}\n<!-- /agent:exchange -->"),
+        );
+        assert!(
+            AbsorbedSteeringLedger::default()
+                .record(&[exchange(gvqv)], &in_exchange, "cycle-1", 100)
+                .is_empty()
+        );
+
+        // The row guard is narrow: a bare `do [#id]` exchange prompt is real
+        // operator intent the ledger must keep.
+        assert!(is_tracked_work_rows(gvqv));
+        assert!(is_tracked_work_rows(
+            "- 2026-10-04 [#shipped] closed\n- [x] [#a] b"
+        ));
+        for prompt in [
+            "do [#durablerecycle]",
+            "- do [#a]",
+            "- [ ] buy milk",
+            "Fix the bug.",
+        ] {
+            assert!(!is_tracked_work_rows(prompt), "{prompt}");
+        }
+
+        // A pre-guard binary's entry is never carried into a contract.
+        ledger.entries.push(AbsorbedSteeringEntry {
+            text: gvqv.to_string(),
+            noted_at: 100,
+            absorbed_by_cycle: "cycle-0".into(),
+            status: AbsorbedStatus::Pending,
+            consumed_by: None,
+        });
+        assert_eq!(ledger.pending(), vec![prompt.to_string()]);
     }
 
     #[test]

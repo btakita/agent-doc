@@ -3719,6 +3719,156 @@ mod tests {
                 .is_empty()
         );
     }
+    /// `#steerbacklogsource` (agent-doc-bugs.md, 2026-10-04): the operator
+    /// rewrote the backlog stub `- [ ] [#gvqv] Add a ``` into the full
+    /// Dashboard request and the closeout commit absorbed it. Steering reported
+    /// the backlog line as `source=exchange dispatch=address_now`, the
+    /// absorbed-steering ledger recorded it, and the next preflight carried it
+    /// as `absorbed_steering_prompts` + a `prompt_target`. A managed-component
+    /// edit is component state: never reported, recorded, or carried. A real
+    /// exchange prompt absorbed by the same commit still is.
+    fn absorbed_backlog_edit_scenario(exchange_prompt: Option<&str>) -> serde_json::Value {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent_doc_steering_debounce_ms: 0\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "testing to see\n\n",
+            "### Re: testing to see — gpt-5\n\n",
+            "Seen.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#gvqv] Add a ``\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let backlog_line = "- [ ] [#gvqv] Add a `Dashboard` editor prompt + action to show the Agent Doc dashboard. Can we also support a dashboard md file that live updates?";
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let first = agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline))
+            .unwrap();
+        agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+            &doc,
+            &first.cycle_id,
+            baseline,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+
+        // The closeout commit absorbs the backlog rewrite (and the prompt).
+        let mut absorbed = baseline.replace("- [ ] [#gvqv] Add a ``", backlog_line);
+        if let Some(prompt) = exchange_prompt {
+            absorbed = absorbed.replace("Seen.\n", &format!("Seen.\n\n{prompt}\n"));
+        }
+        std::fs::write(&doc, &absorbed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &absorbed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "test_commit",
+            Some(&absorbed),
+            Some(&absorbed),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&doc)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+            .unwrap();
+
+        let mut report = Vec::new();
+        agent_doc_session_check_io::midturn_steering::emit_closeout_steering(&doc, &mut report);
+        let report = String::from_utf8(report).unwrap();
+        assert!(!report.contains("gvqv"), "{report}");
+        let expected: Vec<String> = exchange_prompt.map(str::to_string).into_iter().collect();
+        assert_eq!(
+            agent_doc_session_check_io::absorbed_steering::unanswered_prompts(&doc).unwrap(),
+            expected
+        );
+        if let Some(prompt) = exchange_prompt {
+            assert!(report.contains(&format!("verbatim: {prompt}")), "{report}");
+        }
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions::default(), &mut output).unwrap();
+        let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        let carried = contract
+            .get("absorbed_steering_prompts")
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            carried
+                .iter()
+                .all(|prompt| !prompt.as_str().unwrap_or_default().contains("gvqv")),
+            "{contract:#}"
+        );
+        let changes = contract
+            .get("user_intent_prompt_changes")
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            changes
+                .iter()
+                .all(|change| !change["text"].as_str().unwrap_or_default().contains("gvqv")),
+            "{contract:#}"
+        );
+        contract
+    }
+
+    #[test]
+    fn absorbed_backlog_edit_is_never_carried_as_steering() {
+        let contract = absorbed_backlog_edit_scenario(None);
+        assert!(
+            contract
+                .get("absorbed_steering_prompts")
+                .and_then(|value| value.as_array())
+                .is_none_or(|prompts| prompts.is_empty()),
+            "{contract:#}"
+        );
+        assert_ne!(
+            contract["diff_type"],
+            agent_doc_session_check_io::absorbed_steering::ABSORBED_STEERING_DIFF_TYPE,
+            "{contract:#}"
+        );
+    }
+
+    #[test]
+    fn absorbed_exchange_prompt_beside_a_backlog_edit_is_still_carried() {
+        let prompt = "testing to see if you pick this up.";
+        let contract = absorbed_backlog_edit_scenario(Some(prompt));
+        assert_eq!(
+            contract["absorbed_steering_prompts"],
+            serde_json::json!([prompt]),
+            "{contract:#}"
+        );
+        let changes = contract["user_intent_prompt_changes"].as_array().unwrap();
+        assert!(
+            changes
+                .iter()
+                .any(|change| change["kind"] == "prompt_target" && change["text"] == prompt),
+            "{contract:#}"
+        );
+    }
+
     #[test]
     fn preflight_opens_cycle_from_active_queue_when_document_has_no_diff() {
         let dir = setup_project();

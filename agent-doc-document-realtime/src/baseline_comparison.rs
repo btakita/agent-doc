@@ -435,6 +435,69 @@ fn queue_steering_between(baseline: &str, current: &str) -> Vec<RealtimeSteering
     }
 }
 
+/// Is `name` a managed tracked-work component (`#steerbacklogsource`)?
+///
+/// `agent:backlog` (and legacy `agent:pending`), `agent:review`,
+/// `agent:icebox`, `agent:done`, and `agent:queue` hold managed work state the
+/// binary and the operator curate through their own runtimes. An edit inside one
+/// of them is component state, never an exchange prompt.
+pub fn is_managed_work_component(name: &str) -> bool {
+    agent_doc_element::element::is_tracked_work_component(name)
+        || agent_doc_element::element::is_backlog_done_component(name)
+        || name == "queue"
+}
+
+/// Blank the bodies of every managed tracked-work component
+/// ([`is_managed_work_component`]) so a prompt-bearing diff only sees text that
+/// lives outside them (`#steerbacklogsource`).
+///
+/// Observed 2026-10-04 on agent-doc-bugs.md: the operator rewrote the backlog
+/// stub `- [ ] [#gvqv] Add a ``` into the full Dashboard request. The exchange
+/// extractor diffs the whole body (frontmatter, comments, and the queue
+/// stripped), so the backlog line read as `source=exchange change=added
+/// dispatch=address_now`, re-surfaced after it was answered, and was then
+/// absorbed into the next preflight contract as an operator prompt. Unparseable
+/// documents are returned unchanged.
+pub fn mask_managed_work_components(doc: &str) -> String {
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
+        return doc.to_string();
+    };
+    let mut ranges: Vec<(usize, usize)> = components
+        .iter()
+        .filter(|component| is_managed_work_component(&component.name))
+        .map(|component| (component.open_end, component.close_start))
+        .filter(|(start, end)| start <= end)
+        .collect();
+    // Drop ranges nested inside another masked range, then splice from the end
+    // so earlier offsets stay valid.
+    ranges.sort();
+    let mut outer: Vec<(usize, usize)> = Vec::new();
+    for range in ranges {
+        if outer
+            .last()
+            .is_some_and(|last| range.0 >= last.0 && range.1 <= last.1)
+        {
+            continue;
+        }
+        outer.push(range);
+    }
+    let mut masked = doc.to_string();
+    for (start, end) in outer.into_iter().rev() {
+        masked.replace_range(start..end, "\n");
+    }
+    masked
+}
+
+/// The operator-text body a prompt-bearing exchange diff compares: frontmatter,
+/// comments, and every managed tracked-work component body removed.
+fn exchange_prompt_bearing_body(content: &str) -> String {
+    agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+        &agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(
+            &mask_managed_work_components(content),
+        ),
+    )
+}
+
 fn exchange_steering_all_between(baseline: &str, current: &str) -> RealtimeSteeringSet {
     match unresolved_prompt_delta(baseline, current) {
         UnresolvedPromptDelta::Deleted { .. } | UnresolvedPromptDelta::Reduced { .. } => {
@@ -443,11 +506,8 @@ fn exchange_steering_all_between(baseline: &str, current: &str) -> RealtimeSteer
         UnresolvedPromptDelta::None | UnresolvedPromptDelta::AddedOrExpanded => {}
     }
 
-    let norm = |s: &str| {
-        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(s)
-    };
-    let base_norm = norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(baseline));
-    let cur_norm = norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(current));
+    let base_norm = exchange_prompt_bearing_body(baseline);
+    let cur_norm = exchange_prompt_bearing_body(current);
     let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&base_norm, &cur_norm) else {
         return RealtimeSteeringSet::default();
     };
@@ -506,11 +566,8 @@ fn exchange_steering_between(baseline: &str, current: &str) -> RealtimeSteering 
         UnresolvedPromptDelta::None | UnresolvedPromptDelta::AddedOrExpanded => {}
     }
 
-    let norm = |s: &str| {
-        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(s)
-    };
-    let base_norm = norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(baseline));
-    let cur_norm = norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(current));
+    let base_norm = exchange_prompt_bearing_body(baseline);
+    let cur_norm = exchange_prompt_bearing_body(current);
     let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&base_norm, &cur_norm) else {
         return RealtimeSteering::None;
     };

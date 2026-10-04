@@ -181,7 +181,7 @@ Status of the other work:
 ### Re: [#supportinlineprompts] inline prompts in agent:exchange — opus-5-5 · 2026-10-04T01:55-04:00
 
 > **Queue prompt:** do [#supportinlineprompts]
-
+❯ testing to see if you pick this up.
 **Yes, inline prompts are still supported.** You can add or edit a line anywhere inside `agent:exchange`, including in the middle of one of my earlier responses. It is still picked up as a prompt; it doesn't have to be at the end.
 - **Detection:** `agent-doc-diff` classifies each user-authored change in order. A line you add between agent lines (`[user+]`) becomes a `prompt_target`. A line you edit (`[user~]`) becomes a `content_edit`, which I treat as a correction.
 - **Where it shows up:** preflight passes both in `user_intent_prompt_changes`, and still emits the older `inline_annotations` field for compatibility. Unit tests cover both shapes.
@@ -279,6 +279,12 @@ v0.35.449 (#126, `cellcollide`, `steerworks`) is still in its final `make check`
 > **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
 
 GH #126 shipped in v0.35.449 (`01786bada`) and the issue is closed; this closes the queue line, which the v0.35.449 write-up didn't strike.
+
+### Re: "testing to see" — opus-5-5 · 2026-10-04T03:01-04:00
+
+Got it. Preflight picked up your edit `testing to see` as a user prompt (`content_edit`), even though it sits in the middle of the exchange: between the `#chatprompt` line and the `### Re: GH #125 reopened` heading, not at the tail. So an edit in the middle of the exchange does reach the cycle contract, and the turn was admitted normally (`no_changes: false`).
+
+The sentence looks unfinished. If you meant to ask something more, finish it and I'll answer it next cycle.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 

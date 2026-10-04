@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -831,6 +830,47 @@ Session size: the exchange is 771 lines / 30 sections. The queue is active, so I
 > **Queue prompt:** do [#codexsteerinterrupt]
 
 This cycle selected this head, but a background subagent already has it in its worktree. The claim expires at 1791077478. `installworktreecontrollers` is claimed by a subagent too. Running either one here would duplicate their work, so nothing ran inline. Every remaining head is claimed, so the queue has no drainable work (`queue_drainable_head_count=0`). Both items close when their subagents report and I integrate them with one `make install`.
+
+### Re: subagent batch integrated — codexsteerinterrupt + installworktreecontrollers — opus-5.5 · 2026-10-03T20:28-04:00
+
+> **Queue prompt:** do [#codexsteerinterrupt]
+> **Queue prompt:** do [#installworktreecontrollers]
+
+Both fixes are in, pushed and installed: agent-doc `463cb883c..1064bf1f8`.
+
+**`codexsteerinterrupt`** (`aae15eab3`)
+
+- **What changed.** In a Codex session, the check for "the harness changed the document after commit" now asks who made the change. A prompt counts as operator steering only when replaying your captured editor keystrokes onto the committed baseline reproduces the document exactly. A committed cycle then reports `[session-check] steering pending: …` and exits 0, or 2 under `--codex-final-gate`.
+- **Unchanged.** Console output replayed into the document, and harness output written next to a real prompt, are still INTERRUPTED. So is the case where your keystrokes can't be read.
+- **Tests.** New unit tests and CLI tests in `codex_hook_integration` cover both directions. A mutation check proved they fail when the fix is removed.
+- **Known gap.** The match is exact. If the editor hasn't sent its latest keystrokes yet (it sends them in batches), a real prompt still reports INTERRUPTED until they arrive. This fails safe.
+
+**`installworktreecontrollers`** (`1064bf1f8`)
+
+- **Cause.** `make install` found controllers by scanning `/proc`. Recycling one started a replacement, and the `reload_library` status query started a controller wherever none answered. `agent-doc-wt/gh111` (0 documents, no editor) reached generation 44 in one day.
+- **What changed.**
+  - A root counts as in use only if an editor socket is listening there, or an open `agent-doc start` supervisor is serving one of its documents.
+  - Idle roots get no recycle, and `reload_library` reaches them only through a controller that is already running.
+  - An idle controller with no documents and no client for 60s retires on a replaced binary instead of handing off.
+  - Temp-dir roots (`<temp>/.tmpXXXX/**`) shut down after 60s idle.
+  - A new `ProjectControllerReaper` test fixture stops a test's controllers when the test ends, even if it panics.
+- **Tests.** A mutation check (M1–M6) proved each new test fails when its piece of the fix is removed.
+- **Live check after install.** For `gh111`, install logged `install_fanout_recycle_skipped reason=idle_project_root live_editor_endpoints=0 open_supervisors=0`. One second later, the controller still on the old binary handed off to generation 45 on its own. The new code can't stop that, so I stopped by hand the 29 controllers whose root install had logged as idle (`agent-doc-wt/*`, `.worktrees/*`, `/tmp/adg*`, `/tmp/ad119.*`, `$HOME`). Six real-root controllers remain. From now on, idle ones retire instead of handing off.
+
+**Verification**
+
+- **Combined tree.** `make check` exited 0: nextest ran 10,755 tests, all passed, with 0 `result: FAILED`. Clippy, audit-docs, lean and TLA also passed.
+- **CI.** The latest run is still in progress.
+- **Install.** `make install` exited 0. The skill copies were already current.
+
+**Integration**
+
+- **Another session's uncommitted work.** The main agent-doc checkout had uncommitted edits from 19:10 to `agent-doc-start-runtime-io/src/lib.rs` and `VERSIONS.md`. I committed neither and installed neither: I built and installed from a clean worktree at `1064bf1f8`.
+- **`lib.rs`.** Left exactly as it was.
+- **`VERSIONS.md`.** I fast-forwarded main underneath it and reapplied its exact diff. That diff deletes the whole 0.35.446 section and appends a truncated fragment ("s the document, the scoped fix…"), so it looks like a damaged write, not a real edit. Whoever owns that session should look before it gets committed.
+- **Cleanup.** I removed the subagent and integration worktrees.
+
+Session size: 795 lines / 31 response sections.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -839,31 +879,11 @@ This cycle selected this head, but a background subagent already has it in its w
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~do [#qsubattr1]~~
-- ~~do [#qsubattr2]~~
-- ~~do [#qsubattr3]~~
-- ~~do [#qsubattr4]~~
-- ~~do [#qsubattr5]~~
-- ⏭️ do [#codexsteerinterrupt]
-- do [#installworktreecontrollers]
-- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/120~~
-- ~~#subagents: https://github.com/btakita/agent-doc/issues/121~~
-- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/122~~
-- ~~https://github.com/btakita/agent-doc/issues/123~~
-- ~~#subagents: #gh-fix https://github.com/btakita/agent-doc/issues/124~~
-- ~~do [#routestartupadmit]~~
-- ~~do [#steerinterruptexit]~~
-- ~~do [#handoffrouteforward]~~
-- ~~do [#layoutpublisherarbiter]~~
-- ~~do [#claimdispatchidentity]~~
-- ~~do [#steerreplicachurn]~~
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#codexsteerinterrupt] [agent-doc] In a Codex session (CODEX_THREAD_ID set), an operator prompt added after the commit is still reported INTERRUPTED (exit 1) by the active-harness-session-changed-document check, which runs before the steering-pending path shipped in c47c154ff. That check also catches console output replayed into the document as fake prompts, so it must tell real operator steering (editor-op provenance) apart from replayed harness output before it reports steering_pending. Add SimWorld/Codex hook coverage.
-- [ ] [#installworktreecontrollers] [agent-doc] make install / install-full starts an 'agent-doc controller serve' in every agent-doc worktree that has .agent-doc state (8 appeared in subagent worktrees under ~/work/btakita/worktrees/ at once on 2026-10-03, plus leftovers from test runs in each). The ensure-controller / reload fan-out must not start controllers for worktree project roots nobody has open, and test runs must not leave controllers behind (see reference_agent_doc_test_fixture_controllers_leak_to_pid1).
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

@@ -2751,6 +2751,12 @@ pub(crate) struct ControllerRuntime {
     /// handoff even mid-turn. It never interrupts the supervisor-owned harness
     /// child or an accepted RPC. Implies `recycle_requested`.
     recycle_forced: AtomicBool,
+    /// GH #128 — the on-disk binary identity a routine `stale_binary` recycle
+    /// declined because the binary it would launch was not newer than this
+    /// image. Stale detection ignores exactly this identity so the serve loop
+    /// does not re-attempt the same pointless handoff every debounce; any
+    /// further install changes the identity and re-arms it.
+    recycle_declined_target: Mutex<Option<ControllerBinaryIdentity>>,
     /// `#stategraphjoin` / `#retainedsettlereactive` — one reactive graph per
     /// open document.
     ///
@@ -6817,6 +6823,7 @@ impl ControllerRuntime {
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
+            recycle_declined_target: Mutex::new(None),
             _scope: scope,
         })
     }
@@ -6864,6 +6871,14 @@ impl ControllerRuntime {
 
     fn recycle_forced(&self) -> bool {
         self.recycle_forced.load(Ordering::SeqCst)
+    }
+
+    fn recycle_declined_target(&self) -> Option<ControllerBinaryIdentity> {
+        self.recycle_declined_target.lock().clone()
+    }
+
+    fn decline_recycle_target(&self, identity: Option<ControllerBinaryIdentity>) {
+        *self.recycle_declined_target.lock() = identity;
     }
 
     fn bootstrap_snapshot(&self) -> Result<ControllerBootstrap> {
@@ -8259,6 +8274,100 @@ pub fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
         modified_secs: modified.as_secs(),
         modified_nanos: modified.subsec_nanos(),
     })
+}
+
+/// GH #128 — how long a recycle waits for `<target> --version`.
+const TARGET_BINARY_VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// GH #128 — read the version FROM a binary on disk by running `<path>
+/// --version`. [`current_binary_identity`] stamps the RUNNING process's
+/// compiled-in version next to the on-disk path/len/mtime, so in a stale
+/// controller it names the old build even when a newer one is installed at
+/// that path. Recycle reporting and the not-newer guard must use this instead.
+/// `None` when the binary cannot be run or answers unexpectedly.
+pub fn probe_agent_doc_binary_version(path: &Path, timeout: Duration) -> Option<String> {
+    let mut child = std::process::Command::new(path)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) | Err(_) => return None,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    let mut stdout = String::new();
+    std::io::Read::read_to_string(child.stdout.as_mut()?, &mut stdout).ok()?;
+    agent_doc_controller::recycle::parse_agent_doc_version_output(&stdout)
+}
+
+/// GH #128 — identity of the binary a recycle would launch, with the version
+/// read from that binary rather than from the running process.
+pub fn binary_identity_at(path: &Path) -> Result<ControllerBinaryIdentity> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("failed to stat agent-doc binary {}", path.display()))?;
+    let modified = metadata
+        .modified()
+        .with_context(|| format!("failed to read modified time for {}", path.display()))?
+        .duration_since(UNIX_EPOCH)
+        .with_context(|| format!("modified time before unix epoch for {}", path.display()))?;
+    let version = probe_agent_doc_binary_version(path, TARGET_BINARY_VERSION_PROBE_TIMEOUT)
+        .with_context(|| format!("failed to read `--version` from {}", path.display()))?;
+    Ok(ControllerBinaryIdentity {
+        path: path.to_path_buf(),
+        version,
+        len: metadata.len(),
+        modified_secs: modified.as_secs(),
+        modified_nanos: modified.subsec_nanos(),
+    })
+}
+
+/// GH #128 — the `controller_bootstrap` scope that carries the most recent
+/// stale-binary restart attempt (pid + generation + time).
+const STALE_RESTART_ATTEMPT_SCOPE: &str = "stale_restart_attempt";
+
+pub(crate) fn read_stale_restart_attempt(
+    project_root: &Path,
+) -> Option<agent_doc_controller::recycle::StaleRestartAttempt> {
+    let conn = open_state_db(project_root).ok()?;
+    let json =
+        state_store::load_controller_bootstrap_json_from_db(&conn, STALE_RESTART_ATTEMPT_SCOPE)
+            .ok()??;
+    serde_json::from_str(&json).ok()
+}
+
+pub(crate) fn record_stale_restart_attempt(
+    project_root: &Path,
+    pid: Option<u32>,
+    generation: u64,
+    requester: &str,
+) {
+    let attempt = agent_doc_controller::recycle::StaleRestartAttempt {
+        pid,
+        generation,
+        at_secs: timestamp_secs(),
+        requester: requester.to_string(),
+    };
+    let Ok(json) = serde_json::to_string(&attempt) else {
+        return;
+    };
+    if let Ok(conn) = open_state_db(project_root) {
+        let _ = state_store::store_controller_bootstrap_json_in_db(
+            &conn,
+            STALE_RESTART_ATTEMPT_SCOPE,
+            &json,
+        );
+    }
 }
 
 fn write_bootstrap(project_root: &Path, launch_mode: LaunchMode) -> Result<ControllerBootstrap> {
@@ -15314,6 +15423,7 @@ agent:queue\n\
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
+            recycle_declined_target: Mutex::new(None),
             _scope: scope,
         }
     }

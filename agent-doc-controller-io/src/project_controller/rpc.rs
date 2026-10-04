@@ -12376,7 +12376,7 @@ pub fn publish_pending_native_reload(file: &Path) -> Option<ReloadLibraryFanoutR
 /// driven by the invoking client: it launches a replacement controller in
 /// `Preparing`, then promotes it to `Stable` via `promote_handoff`. If the client
 /// is interrupted or an RPC fails between those two steps (a `?` early-return /
-/// panic in `handoff_stale_controller`), the half-launched replacement is left
+/// panic in `request_stable_stale_controller_restart`), the half-launched replacement is left
 /// wedged in `Preparing` forever — the exact orphan M1's self-watchdog and the
 /// M3/M5 reapers exist to clean up *after the fact*. This guard prevents the wedge
 /// at the source: on drop without a completed promotion it tells that replacement
@@ -12430,31 +12430,22 @@ impl Drop for HandoffDropGuard<'_> {
     }
 }
 
-pub(crate) fn handoff_stale_controller(
-    project_root: &Path,
-    launch_mode: LaunchMode,
-    old_status: ControllerStatus,
-) -> Result<interprocess::local_socket::Stream> {
-    handoff_controller_generation(
-        project_root,
-        launch_mode,
-        old_status.pid,
-        old_status.controller_generation.unwrap_or(1),
-    )
-}
-
 /// Promote a replacement controller before retiring the current generation.
 ///
 /// Keeping the generation inputs separate from `ControllerStatus` lets the
 /// serving controller initiate its own handoff from its in-memory bootstrap;
 /// asking its single public socket for `status` from the serve loop would
 /// deadlock the very listener that must answer the request.
+///
+/// Returns the replacement's own `handoff_status` beside the stream. GH #128:
+/// the replacement reports the identity of the image it is actually running,
+/// which is the only honest `new_version` for a recycle report.
 fn handoff_controller_generation(
     project_root: &Path,
     launch_mode: LaunchMode,
     old_pid: Option<u32>,
     old_generation: u64,
-) -> Result<interprocess::local_socket::Stream> {
+) -> Result<(interprocess::local_socket::Stream, ControllerStatus)> {
     let public_sock = socket_path(project_root);
     let new_generation = old_generation.saturating_add(1).max(1);
     let temp_sock = project_root.join(".agent-doc").join(format!(
@@ -12503,7 +12494,7 @@ fn handoff_controller_generation(
     // controller now, so the drop-guard must not shut it down.
     drop_guard.complete();
 
-    wait_for_controller(project_root)
+    Ok((wait_for_controller(project_root)?, replacement_status))
 }
 
 pub fn connect_or_launch(
@@ -12584,6 +12575,93 @@ fn log_stable_stale_controller_restart(project_root: &Path, active_status: &Cont
             active_status.controller_generation.unwrap_or(0),
         ),
     );
+}
+
+fn optional_pid_label(pid: Option<u32>) -> String {
+    pid.map(|pid| pid.to_string())
+        .unwrap_or_else(|| "none".to_string())
+}
+
+fn identity_version_label(identity: Option<&ControllerBinaryIdentity>) -> String {
+    identity
+        .map(|identity| identity.version.clone())
+        .filter(|version| !version.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// GH #128 — restart a Stable controller whose binary is stale, at most once
+/// per pid + generation per [`STALE_RESTART_ATTEMPT_BACKOFF`].
+///
+/// Every handoff for a pid + generation (a client's, or the controller's own
+/// self-recycle) records itself first. A second request for the same pid +
+/// generation inside the backoff — the four-in-nine-seconds pattern, and the
+/// request two seconds after `controller_self_recycle_started` while that
+/// handoff waited for the launch claim — connects to the live controller
+/// instead of launching another replacement. The outcome of every attempt is
+/// logged, so a failed restart is no longer indistinguishable from one that
+/// was never tried.
+fn request_stable_stale_controller_restart(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+    stale_status: ControllerStatus,
+) -> Result<interprocess::local_socket::Stream> {
+    use agent_doc_controller::recycle::{
+        STALE_RESTART_ATTEMPT_BACKOFF, stale_restart_recently_attempted,
+    };
+    let pid = stale_status.pid;
+    let generation = stale_status.controller_generation.unwrap_or(0);
+    let prior = read_stale_restart_attempt(project_root);
+    if let Some(age_secs) = stale_restart_recently_attempted(
+        prior.as_ref(),
+        pid,
+        generation,
+        timestamp_secs(),
+        STALE_RESTART_ATTEMPT_BACKOFF,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "controller_active_stale_binary_restart_suppressed pid={} generation={generation} reason=recent_attempt attempt_by={} age_secs={age_secs} backoff_secs={}",
+                optional_pid_label(pid),
+                prior
+                    .as_ref()
+                    .map(|attempt| attempt.requester.as_str())
+                    .unwrap_or("unknown"),
+                STALE_RESTART_ATTEMPT_BACKOFF.as_secs(),
+            ),
+        );
+        return connect(project_root);
+    }
+    record_stale_restart_attempt(project_root, pid, generation, "client");
+    log_stable_stale_controller_restart(project_root, &stale_status);
+    let old_version = identity_version_label(stale_status.controller_binary.as_ref());
+    match handoff_controller_generation(project_root, launch_mode, pid, generation.max(1)) {
+        Ok((stream, replacement)) => {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_active_stale_binary_restart_completed pid={} generation={generation} old_version={old_version} new_pid={} new_generation={} new_version={}",
+                    optional_pid_label(pid),
+                    optional_pid_label(replacement.pid),
+                    replacement.controller_generation.unwrap_or(0),
+                    identity_version_label(replacement.controller_binary.as_ref()),
+                ),
+            );
+            Ok(stream)
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_active_stale_binary_restart_failed pid={} generation={generation} retry_after_secs={} error={}",
+                    optional_pid_label(pid),
+                    STALE_RESTART_ATTEMPT_BACKOFF.as_secs(),
+                    compact_controller_error(&err),
+                ),
+            );
+            Err(err)
+        }
+    }
 }
 
 fn connect_or_launch_with_claim_wait(
@@ -12732,8 +12810,11 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
                     .unwrap_or(ControllerHandoffState::Stable)
                     == ControllerHandoffState::Stable
                 {
-                    log_stable_stale_controller_restart(project_root, &old_status);
-                    return handoff_stale_controller(project_root, launch_mode, old_status);
+                    return request_stable_stale_controller_restart(
+                        project_root,
+                        launch_mode,
+                        old_status,
+                    );
                 } else {
                     abort_non_stable_active_controller_for_recovery(
                         project_root,
@@ -12757,8 +12838,7 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
                             .unwrap_or(ControllerHandoffState::Stable)
                             == ControllerHandoffState::Stable
                         {
-                            log_stable_stale_controller_restart(project_root, &recovered_status);
-                            return handoff_stale_controller(
+                            return request_stable_stale_controller_restart(
                                 project_root,
                                 launch_mode,
                                 recovered_status,
@@ -13521,7 +13601,7 @@ pub(crate) fn serve_with_options(
     }
     // M1b (#stuckhandoff2 reopen): a controller launched on a non-public socket is
     // a handoff *replacement* (`controller-handoff-*` temp socket from
-    // `handoff_stale_controller`). It becomes authoritative only when its client
+    // `request_stable_stale_controller_restart`). It becomes authoritative only when its client
     // renames that temp socket onto the public path; until then it is a candidate
     // for the structural stranded-replacement watchdog below. The initial
     // controller serves directly on the public socket, so this stays `None`.
@@ -13844,31 +13924,100 @@ pub(crate) fn serve_with_options(
                     };
                     let handoff_root = bootstrap.project_root.clone();
                     let old_pid = Some(bootstrap.pid);
+                    let own_pid = bootstrap.pid;
                     let old_generation = bootstrap.controller_generation;
+                    let recorded_binary = bootstrap.controller_binary.clone();
+                    let recycle_reason = reason.to_string();
                     let handoff_in_flight = Arc::clone(&recycle_handoff_in_flight);
                     let handoff_promoted = Arc::clone(&recycle_handoff_promoted);
                     let stop_after_handoff = Arc::clone(&should_stop);
                     let draining_clients = Arc::clone(&active_clients);
                     let draining_runtime = Arc::clone(&runtime);
                     std::thread::spawn(move || {
-                        let result = (|| -> Result<()> {
+                        let result = (|| -> Result<SelfRecycleHandoff> {
                             // Serialize self-initiated handoff with every client
                             // launch/handoff for this project root. The old
                             // controller keeps serving while the replacement
                             // hydrates and is promoted.
                             let _claim =
                                 LaunchClaim::acquire_blocking(&handoff_root, LAUNCH_CLAIM_WAIT)?;
-                            let stream = handoff_controller_generation(
+                            // GH #128: a client may have held the claim and
+                            // already replaced this generation; launching
+                            // another replacement would hand off the SUCCESSOR.
+                            if let Some((pid, generation)) =
+                                public_controller_superseded(&handoff_root, own_pid, old_generation)
+                            {
+                                return Ok(SelfRecycleHandoff::Superseded { pid, generation });
+                            }
+                            // GH #128: read the version FROM the binary that
+                            // would be launched. If it is not newer than this
+                            // image, a handoff cannot escape the stale build.
+                            let target = current_agent_doc_binary()
+                                .ok()
+                                .and_then(|path| binary_identity_at(&path).ok());
+                            if agent_doc_controller::recycle::self_recycle_target_decision(
+                                &recycle_reason,
+                                recorded_binary.as_ref(),
+                                target.as_ref(),
+                            ) == agent_doc_controller::recycle::SelfRecycleTargetDecision::DeferTargetNotNewer
+                            {
+                                return Ok(SelfRecycleHandoff::DeferredTargetNotNewer { target });
+                            }
+                            let (stream, replacement) = handoff_controller_generation(
                                 &handoff_root,
                                 launch_mode,
                                 old_pid,
                                 old_generation,
                             )?;
                             drop(stream);
-                            Ok(())
+                            Ok(SelfRecycleHandoff::Promoted(Box::new(replacement)))
                         })();
                         match result {
-                            Ok(()) => {
+                            Ok(SelfRecycleHandoff::DeferredTargetNotNewer { target }) => {
+                                // Ignore this exact on-disk identity until a
+                                // further install changes it.
+                                draining_runtime
+                                    .decline_recycle_target(current_binary_identity().ok());
+                                handoff_in_flight.store(false, Ordering::SeqCst);
+                                agent_doc_ops_log_io::log_op(
+                                    &handoff_root,
+                                    &format!(
+                                        "controller_self_recycle_deferred pid={own_pid} generation={old_generation} reason={recycle_reason} cause=target_not_newer old_version={} target_version={} target_path={} note=no_replacement_launched_controller_keeps_serving",
+                                        identity_version_label(recorded_binary.as_ref()),
+                                        identity_version_label(target.as_ref()),
+                                        target
+                                            .as_ref()
+                                            .map(|identity| identity.path.display().to_string())
+                                            .unwrap_or_else(|| "unknown".to_string()),
+                                    ),
+                                );
+                            }
+                            Ok(
+                                outcome @ (SelfRecycleHandoff::Promoted(_)
+                                | SelfRecycleHandoff::Superseded { .. }),
+                            ) => {
+                                match &outcome {
+                                    SelfRecycleHandoff::Promoted(replacement) => {
+                                        log_self_recycle_outcome(
+                                            &handoff_root,
+                                            own_pid,
+                                            old_generation,
+                                            &recycle_reason,
+                                            recorded_binary.as_ref(),
+                                            replacement,
+                                        );
+                                    }
+                                    SelfRecycleHandoff::Superseded { pid, generation } => {
+                                        agent_doc_ops_log_io::log_op(
+                                            &handoff_root,
+                                            &format!(
+                                                "controller_self_recycle_superseded pid={own_pid} generation={old_generation} reason={recycle_reason} successor_pid={} successor_generation={generation}",
+                                                optional_pid_label(*pid),
+                                            ),
+                                        );
+                                    }
+                                    SelfRecycleHandoff::DeferredTargetNotNewer { .. } => {}
+                                }
                                 // The public pathname now belongs to the
                                 // replacement. No new client can reach this
                                 // predecessor; let every already-accepted RPC
@@ -13887,7 +14036,8 @@ pub(crate) fn serve_with_options(
                                 agent_doc_ops_log_io::log_op(
                                     &handoff_root,
                                     &format!(
-                                        "controller_self_handoff_failed generation={} error={}",
+                                        "controller_self_handoff_failed pid={own_pid} reason={recycle_reason} old_version={} generation={} error={}",
+                                        identity_version_label(recorded_binary.as_ref()),
                                         old_generation,
                                         format!("{err:#}").replace('\n', " | "),
                                     ),
@@ -14827,7 +14977,7 @@ pub(crate) fn controller_replacement_should_self_promote(
 /// finished: atomically rename this replacement's temp handoff socket onto the
 /// canonical public path, so the live listener (this process) becomes reachable at
 /// `controller.sock` again. Mirrors the client-side promotion in
-/// `handoff_stale_controller`. The bootstrap already records `socket_path = public`
+/// `request_stable_stale_controller_restart`. The bootstrap already records `socket_path = public`
 /// (set at `promote_handoff`); re-persist it defensively so state and filesystem
 /// agree, and log the self-promotion for closeout forensics.
 pub(crate) fn controller_self_promote_to_public(
@@ -14928,10 +15078,23 @@ fn controller_binary_is_stale(runtime: &ControllerRuntime) -> bool {
             status::process_binary_is_stale(
                 bootstrap.controller_binary.as_ref(),
                 current_binary.as_ref(),
+            ) && !stale_target_was_declined(
+                runtime.recycle_declined_target().as_ref(),
+                current_binary.as_ref(),
             )
         }
         Err(_) => false,
     }
+}
+
+/// GH #128 — a routine recycle that declined this exact on-disk identity (it
+/// was not newer than the running image) must not re-arm on it; a further
+/// install changes the identity and re-arms stale detection.
+fn stale_target_was_declined(
+    declined: Option<&ControllerBinaryIdentity>,
+    current: Option<&ControllerBinaryIdentity>,
+) -> bool {
+    status::controller_binary_identity_matches(declined, current)
 }
 
 /// `#ctlrecycle` R1 — is the controller safe to begin a two-phase handoff?
@@ -14959,28 +15122,94 @@ pub(crate) fn controller_recycle_ready(runtime: &ControllerRuntime) -> bool {
 /// `connect_or_launch` relaunches the freshly-installed binary. State lives in
 /// SQLite, so a coordinator exit loses nothing; the new controller adopts it. The
 /// caller flips `should_stop`, drops the listener, and removes the socket.
+///
+/// GH #128: this only records that a self-recycle STARTED. It used to log
+/// `controller_self_recycled ... new_version=` here, before any replacement
+/// existed, with `new_version` taken from [`current_binary_identity`] — whose
+/// version is the RUNNING image's compiled-in version — so a stale 0.35.448
+/// controller reported `0.35.448 -> 0.35.448` even while launching 0.35.449.
+/// The completion row ([`log_self_recycle_outcome`]) now comes from the
+/// replacement's own report. The attempt is also recorded durably so a client
+/// that wins the launch claim first does not request a second handoff for the
+/// same pid + generation.
 pub(crate) fn controller_self_recycle(runtime: &ControllerRuntime, reason: &str) {
     let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
         return;
     };
-    let old_version = bootstrap
-        .controller_binary
-        .as_ref()
-        .map(|id| id.version.clone())
-        .unwrap_or_default();
-    let new_version = current_binary_identity()
-        .map(|id| id.version)
-        .unwrap_or_default();
+    let old_version = identity_version_label(bootstrap.controller_binary.as_ref());
+    record_stale_restart_attempt(
+        &bootstrap.project_root,
+        Some(bootstrap.pid),
+        bootstrap.controller_generation,
+        "self_recycle",
+    );
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
-            "controller_self_recycled pid={} generation={} reason={reason} old_version={old_version} new_version={new_version}",
+            "controller_self_recycle_started pid={} generation={} reason={reason} old_version={old_version}",
             bootstrap.pid, bootstrap.controller_generation
         ),
     );
     eprintln!(
         "[controller] recycling onto freshly-installed binary pid={} generation={} reason={reason}",
         bootstrap.pid, bootstrap.controller_generation
+    );
+}
+
+/// GH #128 — the result of a self-recycle handoff thread.
+enum SelfRecycleHandoff {
+    /// A replacement was promoted; carries its own `handoff_status`.
+    Promoted(Box<ControllerStatus>),
+    /// Another handoff already replaced this generation on the public socket.
+    Superseded { pid: Option<u32>, generation: u64 },
+    /// The target binary is not newer than this image; nothing was launched.
+    DeferredTargetNotNewer {
+        target: Option<ControllerBinaryIdentity>,
+    },
+}
+
+/// GH #128 — the public socket answers for a different controller than this
+/// one: someone else's handoff already promoted a successor.
+fn public_controller_superseded(
+    project_root: &Path,
+    own_pid: u32,
+    own_generation: u64,
+) -> Option<(Option<u32>, u64)> {
+    let response = request(project_root, "status").ok()?;
+    let status: ControllerStatus = serde_json::from_str(&response).ok()?;
+    let generation = status.controller_generation.unwrap_or(0);
+    (status.pid != Some(own_pid) || generation != own_generation)
+        .then_some((status.pid, generation))
+}
+
+/// GH #128 — log how a self-recycle ended, from the replacement's report.
+fn log_self_recycle_outcome(
+    project_root: &Path,
+    old_pid: u32,
+    old_generation: u64,
+    reason: &str,
+    recorded: Option<&ControllerBinaryIdentity>,
+    replacement: &ControllerStatus,
+) {
+    use agent_doc_controller::recycle::{SelfRecycleOutcome, self_recycle_outcome};
+    let old_version = identity_version_label(recorded);
+    let new_version = identity_version_label(replacement.controller_binary.as_ref());
+    let new_path = replacement
+        .controller_binary
+        .as_ref()
+        .map(|identity| identity.path.display().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let event = match self_recycle_outcome(recorded, replacement.controller_binary.as_ref()) {
+        SelfRecycleOutcome::Escaped | SelfRecycleOutcome::Unknown => "controller_self_recycled",
+        SelfRecycleOutcome::SameImage => "controller_self_recycle_failed cause=same_image",
+    };
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "{event} pid={old_pid} generation={old_generation} reason={reason} old_version={old_version} new_version={new_version} new_pid={} new_generation={} new_path={new_path}",
+            optional_pid_label(replacement.pid),
+            replacement.controller_generation.unwrap_or(0),
+        ),
     );
 }
 
@@ -31174,6 +31403,181 @@ mod tests {
             freshness: None,
             control_plane: status::default_control_plane_status(),
         }
+    }
+
+    fn gh128_ops_log(dir: &tempfile::TempDir) -> String {
+        std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
+    }
+
+    fn gh128_identity(version: &str, mtime: u64) -> ControllerBinaryIdentity {
+        ControllerBinaryIdentity {
+            path: PathBuf::from("/home/u/.local/bin/agent-doc"),
+            version: version.to_string(),
+            len: 70,
+            modified_secs: mtime,
+            modified_nanos: 0,
+        }
+    }
+
+    /// GH #128: the start-of-recycle row must not claim a `new_version` — the
+    /// old code took it from the RUNNING image and logged `0.35.448 ->
+    /// 0.35.448` while launching 0.35.449. It must also record the attempt so
+    /// a client cannot launch a second handoff for the same pid + generation.
+    #[test]
+    fn gh128_self_recycle_start_records_attempt_without_claiming_a_new_version() {
+        let dir = async_handoff_test_project();
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.controller_binary = Some(gh128_identity("0.35.448", 100));
+        bootstrap.controller_generation = 35;
+        let runtime = test_controller_runtime(&bootstrap);
+
+        controller_self_recycle(runtime.as_ref(), "stale_binary");
+
+        let log = gh128_ops_log(&dir);
+        assert!(
+            log.contains(
+                "controller_self_recycle_started pid=456 generation=35 reason=stale_binary old_version=0.35.448"
+            ),
+            "{log}"
+        );
+        assert!(!log.contains("controller_self_recycled"), "{log}");
+        assert!(!log.contains("new_version="), "{log}");
+        let attempt = read_stale_restart_attempt(dir.path()).expect("attempt recorded");
+        assert_eq!(attempt.pid, Some(456));
+        assert_eq!(attempt.generation, 35);
+        assert_eq!(attempt.requester, "self_recycle");
+    }
+
+    /// GH #128 ask 1: `new_version` is the version the replacement reports for
+    /// itself, and a replacement on the predecessor's exact image is a failed
+    /// recycle, not a completed one.
+    #[test]
+    fn gh128_self_recycle_outcome_reports_the_replacement_image() {
+        let dir = async_handoff_test_project();
+        let recorded = gh128_identity("0.35.448", 100);
+        let mut replacement =
+            active_controller_status_with_handoff_state(ControllerHandoffState::Preparing);
+        replacement.pid = Some(777);
+        replacement.controller_generation = Some(36);
+        replacement.controller_binary = Some(gh128_identity("0.35.449", 200));
+        log_self_recycle_outcome(
+            dir.path(),
+            1223695,
+            35,
+            "stale_binary",
+            Some(&recorded),
+            &replacement,
+        );
+        replacement.controller_binary = Some(recorded.clone());
+        log_self_recycle_outcome(
+            dir.path(),
+            1223695,
+            35,
+            "stale_binary",
+            Some(&recorded),
+            &replacement,
+        );
+
+        let log = gh128_ops_log(&dir);
+        assert!(
+            log.contains(
+                "controller_self_recycled pid=1223695 generation=35 reason=stale_binary old_version=0.35.448 new_version=0.35.449 new_pid=777 new_generation=36"
+            ),
+            "{log}"
+        );
+        assert!(
+            log.contains(
+                "controller_self_recycle_failed cause=same_image pid=1223695 generation=35 reason=stale_binary old_version=0.35.448 new_version=0.35.448"
+            ),
+            "{log}"
+        );
+    }
+
+    /// GH #128 ask 2: a restart for a pid + generation that already has a
+    /// recent attempt is suppressed — no second `restart_requested` row and no
+    /// replacement launch; the caller connects to the live controller instead.
+    #[test]
+    fn gh128_repeat_stale_restart_for_same_pid_and_generation_is_suppressed() {
+        let dir = async_handoff_test_project();
+        let mut stale = active_controller_status_with_handoff_state(ControllerHandoffState::Stable);
+        stale.project_root = dir.path().to_path_buf();
+        stale.pid = Some(1223695);
+        stale.controller_generation = Some(35);
+        record_stale_restart_attempt(dir.path(), Some(1223695), 35, "self_recycle");
+
+        // No controller is listening in the fixture, so the fallback connect
+        // fails — what matters is that no replacement was launched.
+        let result = request_stable_stale_controller_restart(dir.path(), LaunchMode::Lazy, stale);
+        assert!(result.is_err());
+
+        let log = gh128_ops_log(&dir);
+        assert!(
+            log.contains(
+                "controller_active_stale_binary_restart_suppressed pid=1223695 generation=35 reason=recent_attempt attempt_by=self_recycle"
+            ),
+            "{log}"
+        );
+        assert!(
+            !log.contains("controller_active_stale_binary_restart_requested"),
+            "{log}"
+        );
+        assert!(
+            !dir.path()
+                .join(".agent-doc")
+                .read_dir()
+                .unwrap()
+                .flatten()
+                .any(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("controller-handoff-")),
+            "a suppressed restart must not launch a replacement"
+        );
+    }
+
+    /// GH #128 ask 3: a routine stale-binary recycle that declined a target
+    /// which was not newer must not re-arm on that same on-disk identity every
+    /// debounce; a different identity (a further install) re-arms it.
+    #[test]
+    fn gh128_declined_target_identity_does_not_rearm_stale_detection() {
+        let dir = async_handoff_test_project();
+        let mut bootstrap = test_bootstrap(&dir);
+        let mut launched = current_binary_identity().unwrap();
+        launched.modified_secs = launched.modified_secs.saturating_sub(1);
+        bootstrap.controller_binary = Some(launched);
+        let runtime = test_controller_runtime(&bootstrap);
+        assert!(controller_wants_recycle(runtime.as_ref()));
+
+        runtime.decline_recycle_target(current_binary_identity().ok());
+        assert!(!controller_wants_recycle(runtime.as_ref()));
+
+        runtime.decline_recycle_target(Some(gh128_identity("0.35.449", 1)));
+        assert!(controller_wants_recycle(runtime.as_ref()));
+    }
+
+    /// GH #128: the target version is read FROM the target binary.
+    #[test]
+    fn gh128_target_binary_identity_reads_version_from_the_binary_on_disk() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let fresh = dir.path().join("agent-doc");
+        std::fs::write(&fresh, "#!/bin/sh\necho 'agent-doc 0.35.449'\n").unwrap();
+        std::fs::set_permissions(&fresh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let identity = binary_identity_at(&fresh).unwrap();
+        assert_eq!(identity.version, "0.35.449");
+        assert_eq!(identity.path, fresh);
+
+        let wedged = dir.path().join("agent-doc-wedged");
+        std::fs::write(&wedged, "#!/bin/sh\nsleep 5\n").unwrap();
+        std::fs::set_permissions(&wedged, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            probe_agent_doc_binary_version(&wedged, Duration::from_millis(100)),
+            None
+        );
+        assert!(
+            probe_agent_doc_binary_version(&dir.path().join("missing"), Duration::from_secs(1))
+                .is_none()
+        );
     }
 
     fn command_submit_request_for_test(

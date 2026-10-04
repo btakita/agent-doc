@@ -255,6 +255,263 @@ pub fn idle_stale_binary_controller_should_retire(
         && quiet_for >= quiet_for_at_least
 }
 
+// ---------------------------------------------------------------------------
+// GH #128 — a stale-binary recycle must report the image it actually re-exec'd
+// into, and a stale-binary restart must not be re-requested for a pid and
+// generation that already has a handoff attempt in flight or just failed.
+// ---------------------------------------------------------------------------
+
+/// How long a stale-binary restart attempt for one controller pid + generation
+/// suppresses another request for the same pid + generation. The controller's
+/// own self-recycle debounce is a few seconds and a handoff waits for the
+/// replacement to hydrate; this window covers both so the four-requests-in-nine-
+/// seconds pattern from GH #128 collapses into one attempt.
+pub const STALE_RESTART_ATTEMPT_BACKOFF: Duration = Duration::from_secs(30);
+
+/// Durable record of the most recent stale-binary restart attempt for a project
+/// controller, written by whoever starts the handoff (a client's
+/// `connect_or_launch` or the controller's own self-recycle).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StaleRestartAttempt {
+    pub pid: Option<u32>,
+    pub generation: u64,
+    pub at_secs: u64,
+    pub requester: String,
+}
+
+/// `Some(age_secs)` when `attempt` already targets this exact pid + generation
+/// and is younger than `backoff`; the caller must then not start another
+/// handoff. A different pid or generation, or an expired attempt, is `None`.
+pub fn stale_restart_recently_attempted(
+    attempt: Option<&StaleRestartAttempt>,
+    pid: Option<u32>,
+    generation: u64,
+    now_secs: u64,
+    backoff: Duration,
+) -> Option<u64> {
+    let attempt = attempt?;
+    if attempt.pid != pid || attempt.generation != generation {
+        return None;
+    }
+    let age = now_secs.saturating_sub(attempt.at_secs);
+    (age < backoff.as_secs()).then_some(age)
+}
+
+/// Parse `agent-doc --version` output (`agent-doc 0.35.449`) into the version.
+pub fn parse_agent_doc_version_output(stdout: &str) -> Option<String> {
+    let line = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    let mut parts = line.split_whitespace();
+    let name = parts.next()?;
+    let version = parts.next()?;
+    (name.starts_with("agent-doc") && version.chars().next()?.is_ascii_digit())
+        .then(|| version.to_string())
+}
+
+/// What a stale-binary self-recycle should do once it has read the version of
+/// the binary it is about to launch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelfRecycleTargetDecision {
+    /// The target is provably newer (or its version could not be read, which
+    /// is fail-open): hand off.
+    Launch,
+    /// The resolved target is not newer than the running image — handing off
+    /// would relaunch the same (or an older) build and every newer client
+    /// would keep asking for a restart. Defer and say so.
+    DeferTargetNotNewer,
+}
+
+/// `target` carries the version read FROM the target binary, not the running
+/// process's compiled-in version. Only a routine `stale_binary` recycle is
+/// gated; an operator request always launches.
+pub fn self_recycle_target_decision(
+    reason: &str,
+    recorded: Option<&crate::status::ControllerBinaryIdentity>,
+    target: Option<&crate::status::ControllerBinaryIdentity>,
+) -> SelfRecycleTargetDecision {
+    if reason != "stale_binary" {
+        return SelfRecycleTargetDecision::Launch;
+    }
+    match (recorded, target) {
+        (Some(_), Some(_))
+            if !crate::status::controller_binary_identity_is_newer(target, recorded) =>
+        {
+            SelfRecycleTargetDecision::DeferTargetNotNewer
+        }
+        _ => SelfRecycleTargetDecision::Launch,
+    }
+}
+
+/// Classify a completed handoff by the identity the REPLACEMENT reported for
+/// itself (its `handoff_status`), which is the image actually exec'd.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelfRecycleOutcome {
+    /// The replacement runs a different image than the predecessor.
+    Escaped,
+    /// The replacement reported the predecessor's exact identity: the recycle
+    /// did not escape the stale binary and must be logged as a failure.
+    SameImage,
+    /// The replacement did not report an identity.
+    Unknown,
+}
+
+pub fn self_recycle_outcome(
+    recorded: Option<&crate::status::ControllerBinaryIdentity>,
+    replacement: Option<&crate::status::ControllerBinaryIdentity>,
+) -> SelfRecycleOutcome {
+    match (recorded, replacement) {
+        (_, None) => SelfRecycleOutcome::Unknown,
+        (Some(recorded), Some(replacement)) if recorded == replacement => {
+            SelfRecycleOutcome::SameImage
+        }
+        _ => SelfRecycleOutcome::Escaped,
+    }
+}
+
+#[cfg(test)]
+mod gh128_tests {
+    use super::*;
+    use crate::status::ControllerBinaryIdentity;
+    use std::path::PathBuf;
+
+    fn identity(version: &str, mtime: u64) -> ControllerBinaryIdentity {
+        ControllerBinaryIdentity {
+            path: PathBuf::from("/home/u/.local/bin/agent-doc"),
+            version: version.to_string(),
+            len: 70,
+            modified_secs: mtime,
+            modified_nanos: 0,
+        }
+    }
+
+    fn attempt(pid: u32, generation: u64, at_secs: u64) -> StaleRestartAttempt {
+        StaleRestartAttempt {
+            pid: Some(pid),
+            generation,
+            at_secs,
+            requester: "client".to_string(),
+        }
+    }
+
+    #[test]
+    fn gh128_same_pid_and_generation_inside_backoff_is_suppressed() {
+        let recent = attempt(1223695, 35, 1_000);
+        assert_eq!(
+            stale_restart_recently_attempted(
+                Some(&recent),
+                Some(1223695),
+                35,
+                1_002,
+                STALE_RESTART_ATTEMPT_BACKOFF
+            ),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn gh128_expired_or_different_target_attempt_is_not_suppressed() {
+        let recent = attempt(1223695, 35, 1_000);
+        let backoff = STALE_RESTART_ATTEMPT_BACKOFF;
+        assert_eq!(
+            stale_restart_recently_attempted(None, Some(1223695), 35, 1_002, backoff),
+            None
+        );
+        assert_eq!(
+            stale_restart_recently_attempted(Some(&recent), Some(1223695), 35, 1_030, backoff),
+            None
+        );
+        assert_eq!(
+            stale_restart_recently_attempted(Some(&recent), Some(1223695), 36, 1_002, backoff),
+            None
+        );
+        assert_eq!(
+            stale_restart_recently_attempted(Some(&recent), Some(7), 35, 1_002, backoff),
+            None
+        );
+    }
+
+    #[test]
+    fn gh128_parses_agent_doc_version_output() {
+        assert_eq!(
+            parse_agent_doc_version_output("agent-doc 0.35.449\n").as_deref(),
+            Some("0.35.449")
+        );
+        assert_eq!(parse_agent_doc_version_output(""), None);
+        assert_eq!(parse_agent_doc_version_output("bash 5.2"), None);
+        assert_eq!(parse_agent_doc_version_output("agent-doc"), None);
+    }
+
+    #[test]
+    fn gh128_stale_binary_recycle_defers_when_target_is_not_newer() {
+        let running = identity("0.35.448", 100);
+        assert_eq!(
+            self_recycle_target_decision(
+                "stale_binary",
+                Some(&running),
+                Some(&identity("0.35.448", 100))
+            ),
+            SelfRecycleTargetDecision::DeferTargetNotNewer
+        );
+        assert_eq!(
+            self_recycle_target_decision(
+                "stale_binary",
+                Some(&running),
+                Some(&identity("0.35.447", 200))
+            ),
+            SelfRecycleTargetDecision::DeferTargetNotNewer
+        );
+        assert_eq!(
+            self_recycle_target_decision(
+                "stale_binary",
+                Some(&running),
+                Some(&identity("0.35.449", 200))
+            ),
+            SelfRecycleTargetDecision::Launch
+        );
+        // Same-version rebuild with a later mtime is a real new image.
+        assert_eq!(
+            self_recycle_target_decision(
+                "stale_binary",
+                Some(&running),
+                Some(&identity("0.35.448", 101))
+            ),
+            SelfRecycleTargetDecision::Launch
+        );
+        // Unreadable target version is fail-open; operator requests always launch.
+        assert_eq!(
+            self_recycle_target_decision("stale_binary", Some(&running), None),
+            SelfRecycleTargetDecision::Launch
+        );
+        assert_eq!(
+            self_recycle_target_decision(
+                "operator_request",
+                Some(&running),
+                Some(&identity("0.35.448", 100))
+            ),
+            SelfRecycleTargetDecision::Launch
+        );
+    }
+
+    #[test]
+    fn gh128_replacement_reporting_predecessor_identity_is_a_same_image_failure() {
+        let running = identity("0.35.448", 100);
+        assert_eq!(
+            self_recycle_outcome(Some(&running), Some(&running.clone())),
+            SelfRecycleOutcome::SameImage
+        );
+        assert_eq!(
+            self_recycle_outcome(Some(&running), Some(&identity("0.35.449", 200))),
+            SelfRecycleOutcome::Escaped
+        );
+        assert_eq!(
+            self_recycle_outcome(Some(&running), None),
+            SelfRecycleOutcome::Unknown
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

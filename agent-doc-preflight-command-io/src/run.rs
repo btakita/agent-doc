@@ -10,7 +10,11 @@ use agent_doc_preflight_io::{
     enforce_no_shadow_open_backlog, explicit_backlog_target_requirements, inspect_queue_state,
     read_and_truncate_claims, read_claims, resolve_pipeline_state, run_gate_verify,
     run_pending_maintenance, run_queue_maintenance,
-    sweep::{current_sweep_owner, log_and_skip_foreign_owned_sweep_if_needed, sweep_owner_for_doc},
+    sweep::{
+        current_sweep_budget, current_sweep_owner, load_sweep_cursor,
+        log_and_skip_foreign_owned_sweep_if_needed, order_from_cursor, run_bounded_sweep,
+        store_sweep_cursor, sweep_deadline_exhausted, sweep_owner_for_doc,
+    },
 };
 use agent_doc_preflight_runtime_io::{
     relocate_out_of_exchange_prompt_before_diff,
@@ -36,6 +40,7 @@ use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_workflow::session_cycle::{compute_user_intent_prompt_changes, derive_turn_scope};
 use anyhow::Context;
 use std::io::Write;
+use std::path::PathBuf;
 
 /// Injects the lazily reactive CRDT model as the diff's `current` source
 /// (#preflight-lazily-diff-feed). Lives here (not in `agent-doc-diff-io`)
@@ -895,105 +900,13 @@ fn run_with_options_to_writer_in_pass(
     // project that have uncommitted snapshot content. Turns preflight into a catch-all
     // backstop: even if a previous session's commit was skipped, the next preflight
     // from any document in the project will pick it up.
+    //
+    // GH #127: the sweep is maintenance for OTHER documents, so it runs under its
+    // own small budget and never consumes the admitting document's deadline.
+    // Siblings it does not reach are deferred to the next preflight's sweep via
+    // a persisted cursor (see `agent_doc_preflight_io::sweep`).
     if !options.probe {
-        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-        if let Some(root) = agent_doc_project_root_io::project_root_containing(&canonical)
-            && let Ok(registry) = agent_doc_session_registry_io::load_in(&root)
-        {
-            let current_owner = current_sweep_owner(file, &root, &registry, &canonical);
-            for (registry_key, entry) in &registry {
-                let tracked_file = if entry.file.trim().is_empty() {
-                    registry_key.as_str()
-                } else {
-                    entry.file.as_str()
-                };
-                if tracked_file.trim().is_empty() {
-                    continue;
-                }
-                let doc_path = {
-                    let path = Path::new(tracked_file);
-                    let joined = if path.is_absolute() {
-                        path.to_path_buf()
-                    } else {
-                        root.join(path)
-                    };
-                    std::fs::canonicalize(&joined).unwrap_or(joined)
-                };
-                if doc_path == canonical {
-                    continue;
-                } // already committed in step 2
-                if !doc_path.exists() {
-                    continue;
-                }
-                // State.db is the only lifecycle/baseline authority. Commit is
-                // idempotent, so inspect every live sibling document instead of
-                // consulting a snapshot-sidecar mtime as a hidden phase signal.
-                {
-                    let sibling_owner = sweep_owner_for_doc(file, &root, &registry, &doc_path);
-                    if log_and_skip_foreign_owned_sweep_if_needed(
-                        file,
-                        &doc_path,
-                        current_owner.as_ref(),
-                        sibling_owner.as_ref(),
-                    ) {
-                        continue;
-                    }
-                    // Guard: don't sweep-commit if the document has user additions
-                    // that the agent hasn't responded to yet. For inline mode this
-                    // checks ## User / ## Assistant blocks; for template mode it
-                    // falls through to a content-equality check.
-                    if let (Ok(Some(baseline_content)), Ok(doc_content)) = (
-                        agent_doc_snapshot_io::load_document_baseline(&doc_path),
-                        std::fs::read_to_string(&doc_path),
-                    ) && !agent_doc_diff::is_stale_snapshot(&baseline_content, &doc_content)
-                    {
-                        // Not a stale inline snapshot — check content equality
-                        // (covers template mode where is_stale_snapshot always returns false)
-                        let snap_stripped = agent_doc_diff::strip_comments(&baseline_content);
-                        let doc_stripped = agent_doc_diff::strip_comments(&doc_content);
-                        if snap_stripped.trim() != doc_stripped.trim() {
-                            eprintln!(
-                                "[preflight] sweep: skipping {} (unresponded user content)",
-                                doc_path.display()
-                            );
-                            continue;
-                        }
-                    }
-                    // Freshness gate: skip if another session committed this doc
-                    // within the last 5s. This is a valid fast-path — a
-                    // concurrent commit that just ran will have advanced HEAD's
-                    // commit time, so we avoid re-spawning git (~10ms) for
-                    // nothing. The gate only closes races when paired with Git's
-                    // index lock and HEAD update-ref compare-and-swap in
-                    // git::commit (there is no bespoke commit flock; #lazily-hot-path).
-                    let fresh = agent_doc_git_io::revision::last_commit_mtime(&doc_path)
-                        .ok()
-                        .flatten()
-                        .and_then(|t| t.elapsed().ok())
-                        .is_some_and(|e| e.as_secs() < 5);
-                    if fresh {
-                        eprintln!(
-                            "[preflight] sweep: skipping {} (committed <5s ago)",
-                            doc_path.display()
-                        );
-                        continue;
-                    }
-                    match agent_doc_commit_io::commit(&doc_path) {
-                        Ok(true) => {
-                            eprintln!("[preflight] sweep: committed {}", doc_path.display())
-                        }
-                        Ok(false) => {
-                            eprintln!("[preflight] sweep: clean {}", doc_path.display())
-                        }
-                        Err(e) => eprintln!(
-                            "[preflight] sweep: warning for {}: {}",
-                            doc_path.display(),
-                            e
-                        ),
-                    }
-                }
-            }
-        }
+        cross_document_sweep(file);
     }
     if !options.probe {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
@@ -2778,6 +2691,150 @@ mod projection_pass_guard {
             "`{entry}` must run the whole preflight inside one projection pass"
         );
     }
+}
+
+/// GH #127: the bounded cross-document sweep. See `agent_doc_preflight_io::sweep`.
+fn cross_document_sweep(file: &Path) {
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let Some(root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        return;
+    };
+    let Ok(registry) = agent_doc_session_registry_io::load_in(&root) else {
+        return;
+    };
+    let candidates: Vec<PathBuf> = registry
+        .iter()
+        .filter_map(|(registry_key, entry)| {
+            let tracked_file = if entry.file.trim().is_empty() {
+                registry_key.as_str()
+            } else {
+                entry.file.as_str()
+            };
+            if tracked_file.trim().is_empty() {
+                return None;
+            }
+            let path = Path::new(tracked_file);
+            let joined = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                root.join(path)
+            };
+            let doc_path = std::fs::canonicalize(&joined).unwrap_or(joined);
+            // The admitting document was already committed in step 2.
+            (doc_path != canonical && doc_path.exists()).then_some(doc_path)
+        })
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+    let ordered = order_from_cursor(candidates, load_sweep_cursor(&root).as_deref());
+    let budget = current_sweep_budget();
+    let current_owner = current_sweep_owner(file, &root, &registry, &canonical);
+    let outcome = run_bounded_sweep(ordered, budget, |doc_path| {
+        // State.db is the only lifecycle/baseline authority. Commit is
+        // idempotent, so inspect every live sibling document instead of
+        // consulting a snapshot-sidecar mtime as a hidden phase signal.
+        let sibling_owner = sweep_owner_for_doc(file, &root, &registry, doc_path);
+        sweep_sibling(file, current_owner.as_ref(), sibling_owner, doc_path)
+    });
+    store_sweep_cursor(&root, outcome.deferred.first().map(PathBuf::as_path));
+    if let Some(next) = outcome.deferred.first() {
+        eprintln!(
+            "[preflight] sweep: budget {}ms spent after {} sibling(s); deferred {} to the next sweep",
+            outcome.budget.as_millis(),
+            outcome.visited,
+            outcome.deferred.len()
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_sweep_deferred file={} visited={} deferred={} next={} budget_ms={} elapsed_ms={} (GH #127)",
+                file.display(),
+                outcome.visited,
+                outcome.deferred.len(),
+                next.display(),
+                outcome.budget.as_millis(),
+                outcome.elapsed.as_millis()
+            ),
+        );
+    }
+}
+
+/// One sibling of the bounded sweep. Returns `false` when the sweep deadline
+/// ran out before the sibling could be decided, so it is deferred.
+fn sweep_sibling(
+    file: &Path,
+    current_owner: Option<&agent_doc_preflight_io::sweep::SweepOwner>,
+    sibling_owner: Option<agent_doc_preflight_io::sweep::SweepOwner>,
+    doc_path: &Path,
+) -> bool {
+    // An owner lookup the sweep deadline cut short reads as "unknown"; never
+    // commit on it (that would bypass the foreign-owner guard).
+    if sweep_deadline_exhausted() {
+        return false;
+    }
+    if log_and_skip_foreign_owned_sweep_if_needed(
+        file,
+        doc_path,
+        current_owner,
+        sibling_owner.as_ref(),
+    ) {
+        return true;
+    }
+    // Guard: don't sweep-commit if the document has user additions
+    // that the agent hasn't responded to yet. For inline mode this
+    // checks ## User / ## Assistant blocks; for template mode it
+    // falls through to a content-equality check.
+    if let (Ok(Some(baseline_content)), Ok(doc_content)) = (
+        agent_doc_snapshot_io::load_document_baseline(doc_path),
+        std::fs::read_to_string(doc_path),
+    ) && !agent_doc_diff::is_stale_snapshot(&baseline_content, &doc_content)
+    {
+        // Not a stale inline snapshot — check content equality
+        // (covers template mode where is_stale_snapshot always returns false)
+        let snap_stripped = agent_doc_diff::strip_comments(&baseline_content);
+        let doc_stripped = agent_doc_diff::strip_comments(&doc_content);
+        if snap_stripped.trim() != doc_stripped.trim() {
+            eprintln!(
+                "[preflight] sweep: skipping {} (unresponded user content)",
+                doc_path.display()
+            );
+            return true;
+        }
+    }
+    // Freshness gate: skip if another session committed this doc
+    // within the last 5s. This is a valid fast-path — a
+    // concurrent commit that just ran will have advanced HEAD's
+    // commit time, so we avoid re-spawning git (~10ms) for
+    // nothing. The gate only closes races when paired with Git's
+    // index lock and HEAD update-ref compare-and-swap in
+    // git::commit (there is no bespoke commit flock; #lazily-hot-path).
+    let fresh = agent_doc_git_io::revision::last_commit_mtime(doc_path)
+        .ok()
+        .flatten()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|e| e.as_secs() < 5);
+    if fresh {
+        eprintln!(
+            "[preflight] sweep: skipping {} (committed <5s ago)",
+            doc_path.display()
+        );
+        return true;
+    }
+    match agent_doc_commit_io::commit(doc_path) {
+        Ok(true) => {
+            eprintln!("[preflight] sweep: committed {}", doc_path.display())
+        }
+        Ok(false) => {
+            eprintln!("[preflight] sweep: clean {}", doc_path.display())
+        }
+        Err(e) => eprintln!(
+            "[preflight] sweep: warning for {}: {}",
+            doc_path.display(),
+            e
+        ),
+    }
+    true
 }
 
 #[cfg(test)]
@@ -7379,6 +7436,121 @@ mod tests {
             "preflight sweep should have committed secondary.md, got:\n{log_str}"
         );
     }
+    /// GH #127 fixture: a committed primary plus a registry-tracked secondary
+    /// whose baseline moved past its last (backdated) commit, so it needs a
+    /// sweep commit.
+    fn setup_primary_with_sibling_needing_sweep(root: &Path) -> (PathBuf, PathBuf) {
+        use std::fs;
+        let git = |args: &[&str], backdate: bool| {
+            let mut cmd = Command::new("git");
+            cmd.current_dir(root).args(args);
+            if backdate {
+                cmd.env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+                    .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z");
+            }
+            cmd.output().unwrap();
+        };
+        fs::write(root.join("README.md"), "# project\n").unwrap();
+        git(&["add", "README.md"], false);
+        git(&["commit", "-m", "initial", "--no-verify"], false);
+
+        let primary = root.join("primary.md");
+        let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
+        fs::write(&primary, primary_content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &primary,
+            primary_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        git(&["add", "primary.md"], false);
+        git(&["commit", "-m", "add primary", "--no-verify"], false);
+
+        let secondary = root.join("secondary.md");
+        let secondary_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
+        fs::write(&secondary, secondary_content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &secondary,
+            secondary_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        git(&["add", "secondary.md"], false);
+        git(&["commit", "-m", "add secondary", "--no-verify"], true);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &secondary,
+            &format!("{secondary_content}\n<!-- agent updated -->"),
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        write_session_registry(
+            root,
+            &[("secondary-session", "%1", &secondary, "@1", "2026-01-01")],
+        );
+        (primary, secondary)
+    }
+
+    fn git_log_oneline(root: &Path) -> String {
+        let log = Command::new("git")
+            .current_dir(root)
+            .args(["log", "--oneline", "-6"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&log.stdout).into_owned()
+    }
+
+    /// GH #127: admission succeeds while another document needs sweeping and
+    /// the sweep has no budget left; the sibling is deferred (cursor + ops.log),
+    /// not dropped, and the next preflight's sweep commits it.
+    #[test]
+    fn preflight_admits_while_a_sibling_needs_sweeping_and_defers_it_to_the_next_sweep() {
+        let dir = setup_project();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let (primary, secondary) = setup_primary_with_sibling_needing_sweep(&root);
+
+        {
+            let _budget = EnvGuard::set(agent_doc_preflight_io::sweep::SWEEP_BUDGET_ENV, "0");
+            let progress = crate::progress::PreflightProgress::with_admission_deadline(
+                std::time::Duration::from_secs(120),
+            );
+            let _phases = crate::progress::install(progress.clone());
+            run(&primary).expect("admission must not wait on a sibling's sweep");
+            assert!(
+                !progress.deadline_passed(),
+                "the admission deadline must not be spent"
+            );
+        }
+        assert!(
+            !git_log_oneline(&root).contains("agent-doc(secondary):"),
+            "a zero sweep budget must defer the sibling, not commit it inside admission"
+        );
+        let secondary_canonical = std::fs::canonicalize(&secondary).unwrap();
+        assert_eq!(
+            agent_doc_preflight_io::sweep::load_sweep_cursor(&root),
+            Some(secondary_canonical.clone()),
+            "the deferred sibling is where the next sweep starts"
+        );
+        let ops = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("preflight_sweep_deferred")
+                && ops.contains(&format!("next={}", secondary_canonical.display())),
+            "the deferral is recorded:\n{ops}"
+        );
+
+        // The next preflight (default budget) reaches the deferred sibling.
+        run(&primary).unwrap();
+        assert!(
+            git_log_oneline(&root).contains("agent-doc(secondary):"),
+            "the deferred sibling must be committed eventually:\n{}",
+            git_log_oneline(&root)
+        );
+        assert_eq!(
+            agent_doc_preflight_io::sweep::load_sweep_cursor(&root),
+            None,
+            "a sweep that reached every sibling clears the cursor"
+        );
+    }
+
     #[test]
     fn preflight_sweep_skips_doc_with_unresponded_user_content() {
         use std::fs;

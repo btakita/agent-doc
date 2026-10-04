@@ -2,8 +2,54 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
-## Unreleased
+## 0.35.447
 
+- **Operator edits in flight are steering, not a refused turn.** Preflight used to wait until every editor
+  replica acknowledged the latest delivery, so typing into the queue or exchange as a turn started could end in
+  "cycle contract UNAVAILABLE". `delivery_converged` only says the text is available; it is not a receipt.
+  Preflight now admits the turn on the controller's current authority when delivery is pending, with one
+  best-effort urgent drain, and later operator ops reach the turn through mid-turn steering. States with no
+  authoritative text (`missing_replica`, `current_pending`, `authority_unavailable`) still fail closed.
+  session-check no longer reports INTERRUPTED when the only divergence is the operator's own unsaved edit over a
+  committed disk plane: that is a pending save plus verbatim pending steering. A disk ahead of or conflicting
+  with the authority still fails closed.
+- **Route startup admits on current authority too.** The route startup wait had the same defect and deferred
+  dispatch ("remained delivery_pending for 5000ms") even though the controller already held the prompt the
+  JetBrains Run Agent Doc action wrote. It now uses the same shared admission decision
+  (`route_startup_admitted_on_current_authority`).
+- **Post-commit operator steering is pending, not INTERRUPTED (`#steerinterruptexit`).** An operator prompt
+  added while a committed cycle ran made session-check exit 1, which failed the embedded
+  respond/finalize/`write --commit` closeout. session-check now reports `[session-check] steering pending: …`
+  with each settled item, exits 0 (`steering_pending=true`, or 2 under `--codex-final-gate`), and frames the
+  steering as the next cycle's input. Closeout, the Codex and Claude Stop hooks, preflight's resume gate,
+  route closeout drain, MCP and doctor all treat it as success. Genuine failures such as a blocking retained
+  write still win. Non-committed terminal phases stay INTERRUPTED.
+- **Operator edits survive replica churn after a lost burst receipt.** A typed burst the controller ingested,
+  but the editor saw as not durable, made every captured-splice rebase refuse. Each refusal ran a char-level
+  diff over the whole document for up to 72s, which starved the editor's attach and the reload quiesce, so the
+  replica re-registered every 10-60s and the prompt stayed stranded in the IDE buffer. The captured-splice
+  rebase now diffs by line and refines small hunks by char, and merges a canonical change only when it is an
+  earlier state of the operator's own typing (pure insertions), so nothing is duplicated or deleted. JetBrains
+  plugin 0.2.486 forwards the rebased delta on the attached endpoint instead of a full re-register, and skips
+  no-op native reloads before quiescing every open replica.
+- **Async routes admitted before a successful handoff are forwarded, not lost (GH #122).** An editor command
+  answered `accepted` before its worker dispatched held no client connection, so a controller self-handoff
+  could exit under it. The predecessor now waits for admitted async workers, forwards an undispatched command
+  with the same `command_id` to the successor and publishes its result, admits a known `command_id` only once
+  (`already_admitted`), and turns a failed forward into a terminal `handoff_forward_failed` rejection with a
+  re-run instruction.
+- **One work identity for queue claims, dispatch, steering and drainability.** A claim was keyed on the full,
+  tag-sensitive line text, so re-tagging a claimed line while its subagent worked dropped the claim and
+  preflight offered the line again as new. Queue identity now ignores lifecycle/priority markers and leading
+  intent/preset tags; a tag-only edit keeps the claim, a different id, URL or prose does not. Dispatch offers
+  only live executable heads (no group parents), and `queue claim` / `--refresh` / release fall back to the
+  editor authority's current text when the head is not yet on disk (GH #124). Stored ledgers are re-keyed on
+  load.
+- **Route and `plugin_publication` layouts are arbitrated, not last-writer-wins (GH #120).** Both publishers
+  are ordered by the editor state plane, not by arrival. A newer plugin frame wins, an older one is refused, an
+  `ensure` route over a plugin-owned split cannot widen it, and an exact route replaces a plugin publication it
+  disagrees with. Every displaced publication logs `pane_layout_publication_superseded`. A pane in a non-active
+  window, or one still stashed, is never a focus target (`focus_pane_window_inactive`).
 - **Codex post-commit operator steering is pending, not INTERRUPTED (`#codexsteerinterrupt`).** In a Codex
   session (`CODEX_THREAD_ID` bound to the document), the active-harness-session drift check ran before the
   `#steerinterruptexit` steering-pending path, so an operator prompt added after the commit still exited 1.

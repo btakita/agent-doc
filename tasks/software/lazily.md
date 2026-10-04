@@ -16,6 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
+queue: go
 ---
 
 ## Status
@@ -407,12 +408,14 @@ The exchange is 331 lines; I'm not stopping the queue for it.
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+- 🚧 do [#lzdeltaqueueops]
+- do [#lzwiremodel5]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdeltaqueueops] [lazily-spec, all bindings except cs] protocol.md makes QueuePush / QueuePop / QueueClose ordinary DeltaOp variants (§ QueueCell op-log delta form), and only lazily-cs decodes them: rs, go, py, kt, js, dart, zig, cpp and gd reject a schema-valid Delta carrying one. Add the three variants to each binding's DeltaOp codec, plus a codec fixture carrying all three tags; the corpus has QueuePush frames only in reliable-sync/coalesce_bounds_outbox.json and none for QueuePop/QueueClose. Found by #lzwiremodel4; see src/lazily-spec/docs/wire-codegen.md (When to add a surface).
+- [ ] 🚧 [#lzdeltaqueueops] [lazily-spec, all bindings except cs] protocol.md makes QueuePush / QueuePop / QueueClose ordinary DeltaOp variants (§ QueueCell op-log delta form), and only lazily-cs decodes them: rs, go, py, kt, js, dart, zig, cpp and gd reject a schema-valid Delta carrying one. Add the three variants to each binding's DeltaOp codec, plus a codec fixture carrying all three tags; the corpus has QueuePush frames only in reliable-sync/coalesce_bounds_outbox.json and none for QueuePop/QueueClose. Found by #lzwiremodel4; see src/lazily-spec/docs/wire-codegen.md (When to add a surface).
 - [ ] [#lzwiremodel5] [recommended, lazily-spec] Fifth wire-model step: lower the union kind in the backends, then lower the delta surface into one binding. Lowering must handle a codec-aware optional field (rs omits NodeAdd.key in self-describing codecs but keeps it in Postcard) and the decoder-only backend:null leniency (#lzblobbackendstrict). Design: src/lazily-spec/docs/wire-codegen.md (When to add a surface).
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->

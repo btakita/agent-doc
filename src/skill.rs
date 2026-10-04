@@ -3642,6 +3642,35 @@ mod tests {
         );
     }
 
+    /// GH #125 (`#chatprompt`): the hot path must tell the agent to record a
+    /// chat-originated prompt in the document, and that `no_changes: true` is
+    /// not a stop when the turn carries such a prompt.
+    #[test]
+    fn bundled_skill_records_chat_originated_prompts() {
+        assert!(SKILL_TEMPLATE.contains("`#chatprompt`, GH #125"));
+        assert!(SKILL_TEMPLATE.contains(
+            "insert it verbatim into `agent:exchange` and persist the response through `respond` / `write --commit`"
+        ));
+        assert!(SKILL_TEMPLATE.contains(
+            "unless this harness turn carries an operator prompt absent from the document"
+        ));
+        assert!(SKILL_TEMPLATE.contains("[agent-doc] chat prompt for session document"));
+        assert!(SKILL_TEMPLATE.contains("unrecorded chat prompt(s)"));
+        let respond = include_str!("../runbooks/respond.md");
+        assert!(respond.contains("Chat-originated prompts are session turns (`#chatprompt`"));
+        for env in [
+            Environment::ClaudeCode,
+            Environment::Codex,
+            Environment::OpenCode,
+            Environment::Generic,
+        ] {
+            assert!(
+                content_for_env(env).contains("`#chatprompt`"),
+                "{env:?} skill omits the chat prompt rule"
+            );
+        }
+    }
+
     #[test]
     fn bundled_skill_contains_binary_owned_respond_commit_invariant() {
         assert!(SKILL_TEMPLATE.contains("agent-doc respond <FILE>"));

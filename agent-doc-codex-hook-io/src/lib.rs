@@ -329,6 +329,139 @@ pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
     Ok(())
 }
 
+const CHAT_PROMPT_LEDGER_PREFIX: &str = "chat_prompt_session:";
+/// Chat prompts kept per session between two triggers. A burst longer than
+/// this keeps the newest prompts; the notice is advisory, not a transcript.
+const CHAT_PROMPT_LEDGER_CAP: usize = 8;
+
+fn chat_prompt_ledger_key(session_id: &str) -> String {
+    format!(
+        "{CHAT_PROMPT_LEDGER_PREFIX}{}",
+        agent_doc_hash::content_hash(session_id)
+    )
+}
+
+/// Chat prompts a document-bound harness session received since its last
+/// `agent-doc <FILE>` trigger (`#chatprompt`, GH #125).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatPromptLedger {
+    pub doc_path: String,
+    pub prompts: Vec<String>,
+}
+
+fn load_chat_prompt_ledger(
+    roots: &[PathBuf],
+    session_id: &str,
+) -> Result<Option<ChatPromptLedger>> {
+    for root in roots {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
+        if let Some(content) = agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+            &conn,
+            &chat_prompt_ledger_key(session_id),
+        )? {
+            return serde_json::from_str(&content)
+                .context("parse chat prompt ledger")
+                .map(Some);
+        }
+    }
+    Ok(None)
+}
+
+fn same_document(lhs: &Path, rhs: &Path) -> bool {
+    let left = lhs.canonicalize().unwrap_or_else(|_| lhs.to_path_buf());
+    let right = rhs.canonicalize().unwrap_or_else(|_| rhs.to_path_buf());
+    left == right
+}
+
+/// Record a chat-originated prompt for a document-bound session.
+///
+/// Call after [`apply_user_prompt_submit`]. Returns the bound document when the
+/// prompt is a chat prompt (not an `agent-doc` trigger, not a harness slash
+/// command) and session tracking bound it to a document; `None` otherwise.
+/// The prompt is appended to the session's ledger so the next trigger cycle
+/// can report it when it never reached the document.
+pub fn note_chat_prompt(input: &UserPromptSubmitInput) -> Result<Option<PathBuf>> {
+    let Some(chat) = agent_doc_prompt_contract::chat_prompt::chat_prompt_text(&input.prompt) else {
+        return Ok(None);
+    };
+    let cwd = PathBuf::from(&input.cwd);
+    let Some((_, state)) = load_state_any(&project_roots_for(&cwd), &input.session_id)? else {
+        return Ok(None);
+    };
+    // Tracking stores the exact prompt it just bound; anything else means this
+    // prompt was not bound to a document (no prior trigger in this session).
+    if state.last_prompt != input.prompt {
+        return Ok(None);
+    }
+    let doc_path = PathBuf::from(&state.doc_path);
+    if !doc_path.is_file() {
+        return Ok(None);
+    }
+    let roots = tracking_roots(&cwd, Some(&doc_path));
+    let mut ledger = load_chat_prompt_ledger(&roots, &input.session_id)?
+        .filter(|ledger| same_document(Path::new(&ledger.doc_path), &doc_path))
+        .unwrap_or_else(|| ChatPromptLedger {
+            doc_path: doc_path.display().to_string(),
+            prompts: Vec::new(),
+        });
+    if !ledger.prompts.iter().any(|existing| existing == &chat) {
+        ledger.prompts.push(chat);
+    }
+    if ledger.prompts.len() > CHAT_PROMPT_LEDGER_CAP {
+        let excess = ledger.prompts.len() - CHAT_PROMPT_LEDGER_CAP;
+        ledger.prompts.drain(..excess);
+    }
+    let payload = serde_json::to_string(&ledger)?;
+    let now_ms = now_secs().saturating_mul(1000);
+    for root in roots {
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            &chat_prompt_ledger_key(&input.session_id),
+            &payload,
+            now_ms,
+        )?;
+    }
+    Ok(Some(doc_path))
+}
+
+/// Chat prompts this session received since its last trigger that `document`
+/// (the trigger's current content) still does not record. Read-only; call
+/// [`clear_chat_prompt_ledger`] once the notice reached an admitted contract.
+pub fn unrecorded_chat_prompts(
+    input: &UserPromptSubmitInput,
+    doc_path: &Path,
+    document: &str,
+) -> Result<Vec<String>> {
+    let roots = tracking_roots(Path::new(&input.cwd), Some(doc_path));
+    let Some(ledger) = load_chat_prompt_ledger(&roots, &input.session_id)? else {
+        return Ok(Vec::new());
+    };
+    if !same_document(Path::new(&ledger.doc_path), doc_path) {
+        return Ok(Vec::new());
+    }
+    Ok(ledger
+        .prompts
+        .into_iter()
+        .filter(|prompt| {
+            !agent_doc_prompt_contract::chat_prompt::chat_prompt_recorded(document, prompt)
+        })
+        .collect())
+}
+
+/// Drop the session's chat prompt ledger: each chat prompt is reported on
+/// exactly one following admitted cycle, never re-raised forever.
+pub fn clear_chat_prompt_ledger(input: &UserPromptSubmitInput, doc_path: &Path) -> Result<()> {
+    for root in tracking_roots(Path::new(&input.cwd), Some(doc_path)) {
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+        agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(
+            &conn,
+            &chat_prompt_ledger_key(&input.session_id),
+        )?;
+    }
+    Ok(())
+}
+
 /// Does this prompt name an agent-doc document *by the same rule tracking uses*
 /// to bind one?
 ///
@@ -975,6 +1108,73 @@ mod tests {
         assert_eq!(PathBuf::from(state.doc_path), doc);
         assert_eq!(state.last_turn_id, "turn-1");
         assert_eq!(state.last_prompt, format!("agent-doc {}", doc.display()));
+    }
+
+    fn chat_input(dir: &tempfile::TempDir, turn_id: &str, prompt: &str) -> UserPromptSubmitInput {
+        UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: turn_id.to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: prompt.to_string(),
+        }
+    }
+
+    /// GH #125 (`#chatprompt`): a preset key typed in chat in a document-bound
+    /// session is recorded, then reported on the next trigger while the
+    /// document does not carry it.
+    #[test]
+    fn chat_prompt_in_a_bound_session_is_reported_on_the_next_trigger() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "turn-1");
+
+        let chat = chat_input(&dir, "turn-2", "#upgrade");
+        apply_user_prompt_submit(&chat).unwrap();
+        assert_eq!(note_chat_prompt(&chat).unwrap(), Some(doc.clone()));
+
+        let trigger = chat_input(&dir, "turn-3", &format!("agent-doc {}", doc.display()));
+        apply_user_prompt_submit(&trigger).unwrap();
+        assert_eq!(
+            note_chat_prompt(&trigger).unwrap(),
+            None,
+            "a trigger is not chat"
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            unrecorded_chat_prompts(&trigger, &doc, &content).unwrap(),
+            vec!["#upgrade".to_string()]
+        );
+
+        // Once the document records the prompt it is no longer reported.
+        let recorded = format!("{content}\n#upgrade\n");
+        assert!(
+            unrecorded_chat_prompts(&trigger, &doc, &recorded)
+                .unwrap()
+                .is_empty()
+        );
+
+        // Reported on exactly one admitted cycle.
+        clear_chat_prompt_ledger(&trigger, &doc).unwrap();
+        assert!(
+            unrecorded_chat_prompts(&trigger, &doc, &content)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn chat_prompt_without_a_bound_document_is_not_recorded() {
+        let dir = setup_project();
+        let chat = chat_input(&dir, "turn-1", "#upgrade");
+        apply_user_prompt_submit(&chat).unwrap();
+        assert_eq!(note_chat_prompt(&chat).unwrap(), None);
+
+        // Harness slash commands are never chat prompts, even when bound.
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "turn-2");
+        let clear = chat_input(&dir, "turn-3", "/clear");
+        apply_user_prompt_submit(&clear).unwrap();
+        assert_eq!(note_chat_prompt(&clear).unwrap(), None);
     }
 
     #[test]

@@ -281,6 +281,7 @@ fn run_preflight_for_prompt(
     cwd: &Path,
     admitted_directive: Option<&str>,
     preflight_invocation: agent_doc_preflight_command_io::PreflightInvocation,
+    tracked_input: Option<&agent_doc_codex_hook_io::UserPromptSubmitInput>,
 ) -> HookAdmission {
     let Some(invocation) = invoked_agent_doc(prompt) else {
         return HookAdmission::NotATrigger;
@@ -352,12 +353,30 @@ fn run_preflight_for_prompt(
         return HookAdmission::Failed;
     }
 
+    // `#chatprompt` (GH #125): chat prompts this session received since its
+    // last trigger that the document still does not record. Computed before
+    // admission against the pre-cycle document; reported only on an admitted
+    // contract, so a refused admission keeps them for the next attempt.
+    let chat_notice = tracked_input.and_then(|input| unrecorded_chat_prompt_notice(input, &file));
+
     match run_preflight_admission(&file, budget, preflight_invocation) {
         Ok(contract) => {
             // The marker seals a successfully produced contract. It must not
             // appear on any error path because the skill treats its absence as
-            // failed admission.
-            let mut context = format!("{}\n{CONTRACT_MARKER}", contract.trim_end());
+            // failed admission. A chat-prompt notice goes BEFORE the contract so
+            // the marker stays its seal.
+            let mut context = String::new();
+            if let Some(notice) = chat_notice.as_deref() {
+                context.push_str(notice);
+                context.push('\n');
+            }
+            context.push_str(&format!("{}\n{CONTRACT_MARKER}", contract.trim_end()));
+            if chat_notice.is_some()
+                && let Some(input) = tracked_input
+                && let Err(err) = agent_doc_codex_hook_io::clear_chat_prompt_ledger(input, &file)
+            {
+                eprintln!("[agent-doc] chat prompt ledger clear failed: {err:#}");
+            }
             if let Some(directive) = admitted_directive {
                 context.push('\n');
                 context.push_str(directive);
@@ -374,6 +393,57 @@ fn run_preflight_for_prompt(
             HookAdmission::Failed
         }
     }
+}
+
+/// Document path as the operator would type it: relative to the hook cwd when
+/// the document lives under it.
+fn display_document(cwd: &Path, file: &Path) -> String {
+    file.strip_prefix(cwd).unwrap_or(file).display().to_string()
+}
+
+/// `#chatprompt` (GH #125): the notice for chat prompts since the previous
+/// trigger that the document does not record, if any. Best-effort: a ledger
+/// failure is logged and never blocks admission.
+fn unrecorded_chat_prompt_notice(
+    input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
+    file: &Path,
+) -> Option<String> {
+    let document = std::fs::read_to_string(file).ok()?;
+    let prompts = match agent_doc_codex_hook_io::unrecorded_chat_prompts(input, file, &document) {
+        Ok(prompts) => prompts,
+        Err(err) => {
+            eprintln!("[agent-doc] chat prompt ledger read failed: {err:#}");
+            return None;
+        }
+    };
+    agent_doc_prompt_contract::chat_prompt::unrecorded_chat_prompts_context(
+        &display_document(Path::new(&input.cwd), file),
+        &prompts,
+    )
+}
+
+/// `#chatprompt` (GH #125): an operator prompt typed in the harness chat of a
+/// session bound to a document is still a session turn. Record it in the
+/// session's ledger and tell the agent to put it in the document. Returns the
+/// context to emit, or `None` when the prompt is not a bound chat prompt.
+fn chat_prompt_hook_context(
+    input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
+) -> Option<String> {
+    let doc = match agent_doc_codex_hook_io::note_chat_prompt(input) {
+        Ok(doc) => doc?,
+        Err(err) => {
+            eprintln!("[agent-doc] chat prompt tracking failed: {err:#}");
+            return None;
+        }
+    };
+    let chat = agent_doc_prompt_contract::chat_prompt::chat_prompt_text(&input.prompt)?;
+    let document = std::fs::read_to_string(&doc).unwrap_or_default();
+    let presets = agent_doc_prompt_contract::chat_prompt::chat_prompt_presets(&document, &chat);
+    Some(agent_doc_prompt_contract::chat_prompt::chat_prompt_context(
+        &display_document(Path::new(&input.cwd), &doc),
+        &chat,
+        &presets,
+    ))
 }
 
 /// `#admissiontransportretry` — how much of the admission budget must remain for
@@ -791,12 +861,18 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
 
     // Every outcome is already reported to the agent and the operator inside
     // `run_preflight_for_prompt`, so a refusal never blocks an ordinary prompt.
-    run_preflight_for_prompt(
+    let admission = run_preflight_for_prompt(
         &input.prompt,
         &cwd,
         None,
         agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
+        Some(&input),
     );
+    if admission == HookAdmission::NotATrigger
+        && let Some(context) = chat_prompt_hook_context(&input)
+    {
+        emit_user_prompt_submit_context(&context);
+    }
     Ok(())
 }
 
@@ -863,9 +939,15 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
         Path::new(&input.cwd),
         Some(CODEX_IN_PANE_ADMISSION_DIRECTIVE),
         agent_doc_preflight_command_io::PreflightInvocation::CodexHook,
+        Some(&input),
     );
     if admission == HookAdmission::Admitted {
         agent_doc_codex_hook_io::record_preflight_admission(&input, true)?;
+    }
+    if admission == HookAdmission::NotATrigger
+        && let Some(context) = chat_prompt_hook_context(&input)
+    {
+        emit_user_prompt_submit_context(&context);
     }
     Ok(())
 }
@@ -1021,6 +1103,50 @@ mod tests {
         );
     }
 
+    /// GH #125 (`#chatprompt`): the operator typed a `prompt_presets` key in the
+    /// Claude Code chat of a session bound to a document. The hook must tell the
+    /// agent to record it, with the preset body, and the next trigger must say
+    /// the cycle is not idle until the document records it.
+    #[test]
+    fn a_chat_preset_key_in_a_bound_session_is_surfaced_and_carried_to_the_next_trigger() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(
+            &doc,
+            "---\nprompt_presets:\n  '#upgrade': 'Upgrade agent-doc.'\n---\n\n<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        let input = |prompt: &str| agent_doc_codex_hook_io::UserPromptSubmitInput {
+            session_id: "claude-session".to_string(),
+            turn_id: String::new(),
+            cwd: dir.path().display().to_string(),
+            prompt: prompt.to_string(),
+        };
+
+        // Unbound session: an ordinary prompt stays silent.
+        let unbound = input("#upgrade");
+        agent_doc_codex_hook_io::apply_user_prompt_submit(&unbound).unwrap();
+        assert_eq!(super::chat_prompt_hook_context(&unbound), None);
+
+        let trigger = input("/agent-doc task.md");
+        agent_doc_codex_hook_io::apply_user_prompt_submit(&trigger).unwrap();
+        let chat = input("#upgrade");
+        agent_doc_codex_hook_io::apply_user_prompt_submit(&chat).unwrap();
+        let context = super::chat_prompt_hook_context(&chat).expect("bound chat prompt");
+        assert!(context.starts_with(agent_doc_prompt_contract::chat_prompt::CHAT_PROMPT_MARKER));
+        assert!(context.contains("`task.md`"));
+        assert!(context.contains("agent:exchange"));
+        assert!(context.contains("Upgrade agent-doc."));
+        assert!(!context.contains(super::CONTRACT_MARKER));
+
+        let next = input("/agent-doc task.md");
+        agent_doc_codex_hook_io::apply_user_prompt_submit(&next).unwrap();
+        let notice = super::unrecorded_chat_prompt_notice(&next, &doc).expect("unrecorded");
+        assert!(notice.contains("not idle even if `no_changes` is true"));
+        assert!(notice.contains("chat_prompt: \"#upgrade\""));
+    }
+
     /// `#hooktriggerunresolved`: a trigger whose document path does not resolve
     /// must FAIL LOUDLY, not read as an unrelated prompt.
     ///
@@ -1039,6 +1165,7 @@ mod tests {
                 dir.path(),
                 None,
                 agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
+                None,
             ),
             HookAdmission::Failed,
             "an unresolvable trigger must be a named failure, never silence"
@@ -1052,6 +1179,7 @@ mod tests {
                 dir.path(),
                 None,
                 agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
+                None,
             ),
             HookAdmission::NotATrigger,
         );
@@ -1061,6 +1189,7 @@ mod tests {
                 dir.path(),
                 None,
                 agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
+                None,
             ),
             HookAdmission::NotATrigger,
         );

@@ -3,6 +3,7 @@ use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+pub mod chat_prompt;
 pub mod harness_prompt;
 
 const BACKLOG_SIGNALS: &[&str] = &[

@@ -12,6 +12,22 @@ rule. This runbook carries the rest.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest
   question; answer or group each unresolved prompt in that tail and each
   unresolved `prompt_target`; treat `content_edit` items as user corrections.
+- **Chat-originated prompts are session turns (`#chatprompt`, GH #125).** When the
+  operator types the prompt into the harness chat (Claude Code, Codex, OpenCode)
+  instead of editing the document — including a bare `prompt_presets` key such
+  as `#upgrade` — the document has no diff for it by construction. Record it:
+  insert the chat prompt verbatim into `agent:exchange` (the "missing user
+  prompt" carve-out), do the work, and persist the response through
+  `agent-doc respond <FILE>` / `agent-doc write --commit <FILE>` with its
+  queue/backlog mutations, exactly like a document-originated turn. The
+  `UserPromptSubmit` hook marks such a prompt in a document-bound session with
+  `[agent-doc] chat prompt for session document <FILE>` (plus the resolved
+  `prompt_preset` body), and keeps it in a per-session ledger: the next admitted
+  `agent-doc <FILE>` contract is preceded by `[agent-doc] unrecorded chat
+  prompt(s) for this document` listing each one the document still does not
+  carry. That cycle is **not idle** even when `no_changes: true`; record and
+  answer the listed prompts instead of stopping. Each ledger entry is reported
+  on one admitted cycle only.
 - **Informational components stay informational (`#notes-not-a-prompt`).** Content
   in `agent:notes` remains available as context when another exchange/queue
   prompt starts the turn, but it is not itself a prompt or completion target.

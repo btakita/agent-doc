@@ -2,6 +2,40 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.451
+
+- **Steering absorbed into a closeout commit is still a turn (`#steerbaselineabsorb`).** When the operator finishes
+  an exchange line while `respond` is committing, the commit captures it and the next preflight used to report
+  `no_changes: true`. Steering that is pending at closeout and already whole in the committed baseline is now
+  recorded in a per-document ledger (`state.db`, modelled on the GH #125 `chat_prompts` ledger) and carried into the
+  next contract as `absorbed_steering_prompts` / a `prompt_target`, with `no_changes: false`. An entry is consumed
+  once a cycle carries it or a later committed response closes out, and every steering surface (hook, poll, turn
+  boundary, idle wake, `steering pending`) stops re-surfacing it.
+- **A repair rolled forward over operator typing no longer refuses admission (`#preflightrepairdrift`).** Preflight's
+  template-normalization repair can land on top of text the operator typed after the repair was computed. The
+  settle step accepted only the pre-typing target and refused the turn with `did not converge exactly`. It now
+  accepts a settled cut proven to be "repair plus concurrent edits" (`repair_projection_rebased_over_concurrent_edits`)
+  and keeps failing closed when the repair is missing, canonical and disk differ, or the text is unrelated. Repairs
+  baseline from the repair target, so the operator's typed text stays a pending diff for the admitted turn.
+- **The cross-document sweep has its own budget (GH #127).** `cross_document_sweep` committed every other tracked
+  document inside the admission window with no limit (23–42s of the 85s deadline on a ~30-document project). It now
+  runs under its own budget (default 8s, at most a quarter of the admission time left;
+  `AGENT_DOC_PREFLIGHT_SWEEP_BUDGET_SECS`, `0` skips it), narrows the admission deadline while it runs, and defers
+  unreached documents to the next preflight through `.agent-doc/preflight-sweep-cursor`. Deadline-refusal messages
+  name the Claude Code hook `timeout` that caps the budget; the hook raises its installed timeout to fit, and
+  `skill install` only raises hook timeouts.
+- **Stale-binary recycles report the image they actually exec'd into (GH #128).** `controller_self_recycled` was
+  logged before the replacement launched, with `new_version` taken from the running (stale) process. The serve loop
+  now logs `controller_self_recycle_started`; the completion row comes from the replacement's own handoff status,
+  and a replacement reporting the predecessor's identity logs `controller_self_recycle_failed cause=same_image`.
+  Repeat stale-binary restarts for the same pid and generation within 30s are suppressed, and a recycle whose target
+  is not newer is deferred instead of launched.
+- **Repairs that a refused admission permits (GH #129).** `agent-doc backlog <FILE> requeue <id>...` restores a dropped
+  queue head and `agent-doc backlog <FILE> keep-unqueued <id>...` accepts an intentional removal; neither needs an
+  admitted cycle. `session-check`'s dropped-head and no-response active-head hints name only repairs that are legal
+  after a refused admission, and the admission-deadline refusal now forbids only a response write. A queue head that
+  leads with a still-open backlog id is classified as id-backed, so the answered-free-text strike can no longer drop it.
+
 ## 0.35.450
 
 - **Chat-originated prompts are a real turn end to end (GH #125, reopened).** The Claude Code and Codex prompt

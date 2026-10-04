@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Reclaim disk by running `cargo clean` on idle Rust build dirs.
+
+Two passes, run every 10 minutes by ~/.config/systemd/user/disk-sweep.timer:
+
+1. closed:   a git worktree whose HEAD is already in its default branch
+             (local or origin), with a clean tree, no running build, and idle
+             >= --closed-idle minutes. Cleaned on every run, whatever the free
+             space. This is "cargo clean when a worktree closes".
+2. pressure: when free space on / drops below --low, clean idle build dirs,
+             most-idle first, until free space reaches --target.
+             Worktrees: clean tree, idle >= --idle.  Main checkouts (and dirty
+             worktrees): idle >= --checkout-idle.
+
+Never touches a build dir with a cargo/rustc/nextest process inside it.
+Only ever runs `cargo clean`; source and git state are never modified.
+
+Usage: disk-sweep [--dry-run] [--low 300] [--target 500] ...   (sizes in GiB)
+Log:   ~/.local/state/disk-sweep.log
+"""
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOTS = [Path.home() / "work"]
+MAX_DEPTH = 6
+BUILD_PROCS = {"cargo", "rustc", "cargo-nextest", "cargo-build"}
+LOG = Path.home() / ".local/state/disk-sweep.log"
+GIB = 1024**3
+
+
+def log(msg):
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
+    print(line, flush=True)
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    with LOG.open("a") as f:
+        f.write(line + "\n")
+
+
+def free_gib():
+    return shutil.disk_usage("/").free / GIB
+
+
+def find_targets():
+    """Yield target dirs (with CACHEDIR.TAG and a sibling Cargo.toml)."""
+    for root in ROOTS:
+        stack = [(root, 0)]
+        while stack:
+            path, depth = stack.pop()
+            try:
+                entries = list(os.scandir(path))
+            except OSError:
+                continue
+            for e in entries:
+                if not e.is_dir(follow_symlinks=False) or e.name in (".git", "node_modules"):
+                    continue
+                p = Path(e.path)
+                if e.name == "target":
+                    if (p / "CACHEDIR.TAG").exists() and (path / "Cargo.toml").exists():
+                        yield p
+                    continue
+                if depth + 1 < MAX_DEPTH:
+                    stack.append((p, depth + 1))
+
+
+def newest_mtime(path, depth=3):
+    newest = 0.0
+    stack = [(path, 0)]
+    while stack:
+        p, d = stack.pop()
+        try:
+            for e in os.scandir(p):
+                try:
+                    st = e.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                newest = max(newest, st.st_mtime)
+                if d < depth and e.is_dir(follow_symlinks=False):
+                    stack.append((e.path, d + 1))
+        except OSError:
+            pass
+    return newest
+
+
+def dir_gib(path):
+    out = subprocess.run(["du", "-xs", "--block-size=1", str(path)],
+                         capture_output=True, text=True).stdout
+    return int(out.split()[0]) / GIB if out else 0.0
+
+
+def busy_dirs():
+    """Working dirs and cmdlines of running build processes."""
+    seen = []
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            comm = Path(f"/proc/{pid}/comm").read_text().strip()
+            if comm not in BUILD_PROCS:
+                continue
+            cwd = os.readlink(f"/proc/{pid}/cwd")
+            cmd = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+            seen.append((cwd, cmd))
+        except OSError:
+            continue
+    return seen
+
+
+def is_busy(workdir, busy):
+    w = str(workdir)
+    return any(cwd == w or cwd.startswith(w + "/") or w + "/" in cmd for cwd, cmd in busy)
+
+
+def git(workdir, *args):
+    r = subprocess.run(["git", "-C", str(workdir), *args], capture_output=True, text=True)
+    return r.returncode, r.stdout.strip()
+
+
+def repo_info(workdir):
+    """(is_git, is_linked_worktree, dirty, merged)."""
+    rc, top = git(workdir, "rev-parse", "--show-toplevel")
+    if rc != 0:
+        return False, False, False, False
+    _, gitdir = git(workdir, "rev-parse", "--git-dir")
+    _, common = git(workdir, "rev-parse", "--git-common-dir")
+    linked = Path(workdir, gitdir).resolve() != Path(workdir, common).resolve()
+    _, status = git(workdir, "status", "--porcelain")
+    dirty = bool(status)
+    merged = False
+    _, head = git(workdir, "rev-parse", "HEAD")
+    _, origin_head = git(workdir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    candidates = [origin_head] if origin_head else []
+    candidates += ["origin/main", "origin/master", "main", "master"]
+    for ref in dict.fromkeys(candidates):
+        rc, ref_sha = git(workdir, "rev-parse", "--verify", "--quiet", ref)
+        if rc != 0 or ref_sha == head:
+            # HEAD == branch tip is a fresh worktree or the checkout itself, not "closed".
+            continue
+        if git(workdir, "merge-base", "--is-ancestor", head, ref)[0] == 0:
+            merged = True
+            break
+    return True, linked, dirty, merged
+
+
+def cargo_clean(workdir, size, reason, dry_run):
+    if dry_run:
+        log(f"would clean {size:6.1f}G [{reason}] {workdir}")
+        return True
+    r = subprocess.run(["nice", "-n", "19", "ionice", "-c3", "cargo", "clean", "-q"],
+                       cwd=workdir, capture_output=True, text=True)
+    if r.returncode != 0:
+        log(f"FAILED  {size:6.1f}G [{reason}] {workdir}: {r.stderr.strip()[:200]}")
+        return False
+    log(f"cleaned {size:6.1f}G [{reason}] {workdir}")
+    return True
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--verbose", action="store_true", help="list every build dir considered")
+    ap.add_argument("--low", type=float, default=300, help="GiB free that triggers the pressure pass")
+    ap.add_argument("--target", type=float, default=500, help="GiB free the pressure pass aims for")
+    ap.add_argument("--min-size", type=float, default=1, help="ignore build dirs smaller than this (GiB)")
+    ap.add_argument("--closed-idle", type=int, default=30, help="minutes idle before a merged worktree is cleaned")
+    ap.add_argument("--idle", type=int, default=60, help="minutes idle for a clean worktree under pressure")
+    ap.add_argument("--checkout-idle", type=int, default=360, help="minutes idle for a main checkout or dirty worktree under pressure")
+    args = ap.parse_args()
+
+    now = time.time()
+    busy = busy_dirs()
+    free_before = free_gib()
+    candidates = []
+    for target in find_targets():
+        workdir = target.parent
+        size = dir_gib(target)
+        if size < args.min_size:
+            continue
+        if is_busy(workdir, busy):
+            if args.verbose:
+                print(f"  {size:6.1f}G BUILDING {workdir}")
+            continue
+        idle = (now - newest_mtime(target)) / 60
+        is_git, linked, dirty, merged = repo_info(workdir)
+        if args.verbose:
+            print(f"  {size:6.1f}G idle={idle:5.0f}m linked={linked:d} dirty={dirty:d} merged={merged:d} {workdir}")
+        candidates.append(dict(workdir=workdir, size=size, idle=idle, linked=linked, dirty=dirty, merged=merged))
+
+    cleaned = 0.0
+    # Pass 1: closed (merged) worktrees.
+    for c in candidates:
+        if c["linked"] and c["merged"] and not c["dirty"] and c["idle"] >= args.closed_idle:
+            if cargo_clean(c["workdir"], c["size"], f"merged, idle {c['idle']:.0f}m", args.dry_run):
+                c["done"] = True
+                cleaned += c["size"]
+
+    # Pass 2: free-space pressure.
+    free_now = free_before + (cleaned if args.dry_run else 0)
+    if not args.dry_run:
+        free_now = free_gib()
+    if free_now < args.low:
+        log(f"pressure: {free_now:.0f}G free < {args.low:.0f}G, cleaning toward {args.target:.0f}G")
+        eligible = []
+        for c in candidates:
+            if c.get("done"):
+                continue
+            need = args.idle if (c["linked"] and not c["dirty"]) else args.checkout_idle
+            if c["idle"] >= need:
+                eligible.append(c)
+        for c in sorted(eligible, key=lambda c: -c["idle"]):
+            if free_now >= args.target:
+                break
+            kind = "worktree" if c["linked"] else "checkout"
+            if c["dirty"]:
+                kind += ", dirty"
+            if cargo_clean(c["workdir"], c["size"], f"pressure, {kind}, idle {c['idle']:.0f}m", args.dry_run):
+                cleaned += c["size"]
+                free_now = free_now + c["size"] if args.dry_run else free_gib()
+        if free_now < args.low:
+            msg = f"disk-sweep: only {free_now:.0f}G free; nothing else idle enough to clean"
+            log(msg)
+            if not args.dry_run:
+                subprocess.run(["notify-send", "-u", "critical", "Disk nearly full", msg], capture_output=True)
+
+    if cleaned or args.dry_run:
+        log(f"done: {'would free' if args.dry_run else 'freed'} ~{cleaned:.0f}G; "
+            f"free {free_before:.0f}G -> {free_now:.0f}G")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -130,6 +130,7 @@
 - **[A mutation script that restores with `git checkout --` reverts the fix under test](feedback_mutation_script_restore_must_not_use_git_checkout.md)** — restore from a scratch copy; assert each mutation applied; require a green M0.
 
 ## Misc
+- **[`bin/disk-sweep` timer auto-`cargo clean`s merged/idle worktree targets](reference_disk_sweep_timer_cleans_rust_targets.md)** — every 10m; pressure pass <300G free. Check its log before hand-cleaning.
 - **[A desk power reset does NOT drop the workstation — only USB re-enumerates](reference_desk_power_reset_spares_workstation_cycles_usb_only.md)** — check `uptime -s`/`last -x reboot` before assuming a reboot; extra `xinput` trackpad ids are normal.
 - **[X11 wedge: climb the `unwedge` ladder](reference_x11_unwedge_ladder.md)** — rungs 0-6, works from a bare TTY; never the power button.
 - **[Black bottom monitor = monitor INPUT, not X; TESmart blocks DDC/CI](reference_tesmart_kvm_blocks_ddcci_while_passing_edid.md)** — NVIDIA `/sys/class/drm` dpms/enabled is a LIE; use `nvidia-settings`.

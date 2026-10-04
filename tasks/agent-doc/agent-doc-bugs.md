@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -68,6 +69,13 @@ The release cleanup is finished:
 - **Untouched:** the remote tag `v0.35.447`, `origin/main`, and the shared `src/agent-doc` checkout.
 
 The shared checkout still needs the other session to rebase its uncommitted edits onto `origin/main`, as noted in my previous response.
+
+### Re: queue dispatch — #gh-fix GH #125, #apimdrevert — opus-5-5 · 2026-10-04T00:32-04:00
+
+Both queue heads were claimed and handed to background subagents (`#subagents` preset):
+
+- **#gh-fix GH #125** (chat-originated prompts never get recorded in the session document): the subagent works in its own worktree, `~/work/btakita/agent-doc-wt-ghfix125` on branch `ghfix125`, which sits outside agent-loop. It owns the SKILL/runbook rule and, if tractable, a preflight detection signal, plus tests and `make check`. I'll integrate its work, install, close #125 and release in the next cycle.
+- **[#apimdrevert] "how can I verify?"**: a read-only subagent is putting together a concrete procedure. It covers JetBrains Local History on `api.md` around 2026-09-29 00:40/00:49, the git history of `src/haiven-dev`, and a grep of `idea.1.log`. The answer will land here next cycle.
 <!-- agent:boundary:d3a1b952 -->
 <!-- /agent:exchange -->
 
@@ -77,6 +85,8 @@ The shared checkout still needs the other session to rebase its uncommitted edit
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- #gh-fix https://github.com/btakita/agent-doc/issues/125
+- [#apimdrevert]: how can I verify?
 <!-- /agent:queue -->
 
 

@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -274,6 +273,12 @@ v0.35.449 (#126, `cellcollide`, `steerworks`) is still in its final `make check`
 - The rebase onto v0.35.449 conflicted only on version pins in two `Cargo.toml` files.
 - The other session's uncommitted `agent-doc-start-runtime-io` edit was three-way merged cleanly onto the one line this release changed in that file.
 - Its `VERSIONS.md` edit was kept byte-for-byte.
+
+### Re: close out the #126 queue head — opus-5-5 · 2026-10-04T02:55-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
+
+GH #126 shipped in v0.35.449 (`01786bada`) and the issue is closed; this closes the queue line, which the v0.35.449 write-up didn't strike.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -283,12 +288,6 @@ v0.35.449 (#126, `cellcollide`, `steerworks`) is still in its final `make check`
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~do [#supportinlineprompts]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/125 reopened.~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment.
-- ~~Ensure the real-time reactive steering works. When do you get the signal about the document changing?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do [#claimedsteerwake]: should we have Run Agent Doc be the explicit send event rather than passively + guessing when agent-doc should send the steering to the agent? Does this mean we don't need the perceptron or is the perceptron still useful? Note: [route] active closeout for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md could not be drained before reroute; nothing was dispatched and existing queue head "#gh-fix https://github.com/btakita/agent-doc/issues/126: note this is in a Coder environment." remains queued behind the closeout (blocker: closeout recovery replay_safe [open_empty_preflight]: `agent-doc session cancel-turn /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift) ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain~~
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

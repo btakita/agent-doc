@@ -13721,6 +13721,10 @@ pub(crate) fn serve_with_options(
     let mut supervisor_watchdog_last_run: Option<Instant> = None;
     let mut supervisor_watchdog_halt_notified: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    // `#watchdogbindinglive` (GH #133): dedups the "not respawning: binding not
+    // live" diagnostic per document+dead pid so a stashed corpse is reported once.
+    let mut supervisor_watchdog_binding_skip_notified: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     let mut last_client_activity = Instant::now();
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
@@ -14058,6 +14062,7 @@ pub(crate) fn serve_with_options(
                     controller_supervisor_watchdog_tick(
                         &runtime,
                         &mut supervisor_watchdog_halt_notified,
+                        &mut supervisor_watchdog_binding_skip_notified,
                     );
                     // `#orphandrain`: sweep the documents the supervisor watchdog
                     // cannot help — those with no supervisor to revive.
@@ -14657,7 +14662,11 @@ fn supervisor_watchdog_blocked_by_queue_control(
 /// - its recorded `supervisor_pid` is dead ([`process_is_alive`] is false),
 /// - the document's actor session is not `Closed`,
 /// - effective queue control is not paused,
-/// - a live tmux pane still exists for it,
+/// - a live tmux pane still exists for it AND that pane is positively observed
+///   outside a `stash` window (`#watchdogbindinglive`, GH #133: a route-owned
+///   supervisor runs inside a shell pane, so a deliberately killed one leaves its
+///   pane alive; a stashed pane holds no visible column and is re-provisioned on
+///   demand by route, so resurrecting it only undid the kill),
 /// - its supervisor session log is still open (a hard crash leaves no close event;
 ///   this also dedups against a restart already recorded and in flight — recording
 ///   the loss below closes the log until the cold-start reopens it), AND
@@ -14673,6 +14682,7 @@ fn supervisor_watchdog_blocked_by_queue_control(
 fn controller_supervisor_watchdog_tick(
     runtime: &Arc<ControllerRuntime>,
     halt_notified: &mut std::collections::HashSet<String>,
+    binding_skip_notified: &mut std::collections::HashSet<String>,
 ) {
     let bootstrap = match runtime.bootstrap_snapshot() {
         Ok(bootstrap) => bootstrap,
@@ -14774,8 +14784,27 @@ fn controller_supervisor_watchdog_tick(
             continue;
         }
         // Gate: a live tmux pane must still exist (the pane-loss path is owned by
-        // route/sync `record_session_loss`, not the crash watchdog).
-        if !tmux.pane_alive(&record.pane_id) {
+        // route/sync `record_session_loss`, not the crash watchdog), and it must
+        // still hold a visible column (`#watchdogbindinglive`, GH #133).
+        let binding = agent_doc_supervisor::crash_policy::watchdog_binding_decision(
+            tmux.pane_alive(&record.pane_id),
+            supervisor_watchdog_pane_stashed(&tmux, &record.pane_id),
+        );
+        if !binding.allows_restart() {
+            if binding != agent_doc_supervisor::crash_policy::WatchdogBindingDecision::PaneGone
+                && binding_skip_notified.insert(format!("{document_id}:{supervisor_pid}"))
+            {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!(
+                        "controller_supervisor_watchdog_skip document={document_id} session={} pane={} generation={} dead_pid={supervisor_pid} reason=binding_not_live binding={}",
+                        record.session_id,
+                        record.pane_id,
+                        record.generation,
+                        binding.as_str(),
+                    ),
+                );
+            }
             continue;
         }
         // Gate + dedup: only act on an OPEN supervisor session log. A hard crash
@@ -14909,6 +14938,16 @@ fn controller_supervisor_watchdog_tick(
             }
         }
     }
+}
+
+/// `#watchdogbindinglive` (GH #133): observe whether `pane` sits in a `stash`
+/// window. `None` when its window cannot be resolved (the caller fails closed).
+fn supervisor_watchdog_pane_stashed(tmux: &tmux_router::Tmux, pane: &str) -> Option<bool> {
+    let window_id = agent_doc_tmux_io::target_window_id(tmux, pane)?;
+    let window_name = agent_doc_tmux_io::target_window_name(tmux, &window_id)?;
+    Some(agent_doc_controller::dispatch::is_stash_window_name(
+        &window_name,
+    ))
 }
 
 /// M1/M1b (#stuckhandoff2) — runtime adapter for the pure controller watchdog policy.

@@ -723,6 +723,43 @@ impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionS
             .is_some_and(|name| !agent_doc_controller::dispatch::is_stash_window_name(&name))
     }
 
+    /// `#routeownedsupersededreap` (GH #133): read the durable authoritative
+    /// actor record for THIS generation's document and compare its pane with the
+    /// pane this generation registered. Any read failure, a missing record, or a
+    /// superseding pane tmux cannot positively observe answers `Unproven`.
+    fn owned_binding_observation(
+        &self,
+    ) -> agent_doc_supervisor::route_owned::RouteOwnedBindingObservation {
+        use agent_doc_supervisor::route_owned::{
+            RouteOwnedBindingFacts, RouteOwnedBindingObservation, route_owned_binding_observation,
+        };
+        if !self.actor_generation_lease.active() {
+            return RouteOwnedBindingObservation::Unproven;
+        }
+        let Some(runtime) = self.actor_runtime.as_ref() else {
+            return RouteOwnedBindingObservation::Unproven;
+        };
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &runtime.project_root,
+            &runtime.file.to_string_lossy(),
+        );
+        let Ok(record) = agent_doc_controller_io::project_controller::load_actor_record(
+            &runtime.project_root,
+            &document_id,
+        ) else {
+            return RouteOwnedBindingObservation::Unproven;
+        };
+        let current_pane = record.as_ref().map(|record| record.pane_id.as_str());
+        let current_pane_alive = current_pane
+            .filter(|pane| pane.starts_with('%') && *pane != runtime.pane_id)
+            .is_some_and(|pane| agent_doc_tmux_io::configured_tmux().pane_alive(pane));
+        route_owned_binding_observation(RouteOwnedBindingFacts {
+            own_pane_id: &runtime.pane_id,
+            authoritative_pane_id: current_pane,
+            authoritative_pane_alive: current_pane_alive,
+        })
+    }
+
     fn paused_queue_has_no_supervisor_drainable_head(&self, file: &std::path::Path) -> bool {
         if !agent_doc_queue_io::controller_pause::document_queue_controller_paused(file) {
             return false;
@@ -3111,6 +3148,18 @@ mod tests {
             Err(SupervisorReexecError::Refused(Refusal::ChildExited)) => {}
             other => panic!("reexec must refuse a reaped child, got {other:?}"),
         }
+    }
+
+    /// GH #133: a supervisor that cannot name its own registered actor binding
+    /// can never prove supersession, so the supersession leg leaves it alone.
+    #[test]
+    fn route_owned_binding_without_actor_runtime_is_unproven() {
+        use agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionState;
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        assert_eq!(
+            shared.owned_binding_observation(),
+            agent_doc_supervisor::route_owned::RouteOwnedBindingObservation::Unproven
+        );
     }
 
     #[test]

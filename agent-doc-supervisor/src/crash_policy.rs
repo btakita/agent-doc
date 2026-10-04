@@ -272,6 +272,61 @@ pub fn watchdog_restart_decision(
     }
 }
 
+/// `#watchdogbindinglive` (GH #133): whether a dead supervisor's binding is
+/// still live enough for the controller watchdog to resurrect it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchdogBindingDecision {
+    /// The recorded pane is alive and positively observed outside a `stash`
+    /// window: it still fills an editor column, so a crash is restarted.
+    Live,
+    /// The recorded pane is gone. Pane loss is owned by route/sync
+    /// `record_session_loss`, not the crash watchdog.
+    PaneGone,
+    /// The recorded pane sits in a `stash` window: it holds no visible column,
+    /// so nothing needs it running. A route dispatch re-provisions on demand.
+    PaneStashed,
+    /// The recorded pane's window could not be resolved. Fail closed.
+    WindowUnresolved,
+}
+
+impl WatchdogBindingDecision {
+    pub const fn allows_restart(self) -> bool {
+        matches!(self, Self::Live)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Live => "live",
+            Self::PaneGone => "pane_gone",
+            Self::PaneStashed => "pane_stashed",
+            Self::WindowUnresolved => "window_unresolved",
+        }
+    }
+}
+
+/// `#watchdogbindinglive` (GH #133): decide whether the dead supervisor's
+/// recorded pane still carries a live binding.
+///
+/// The watchdog used to gate only on `pane_alive`. A route-owned supervisor
+/// runs inside a shell pane, so killing it leaves the pane alive — and the
+/// watchdog resurrected every deliberately terminated stashed supervisor within
+/// one tick (measured: 13 SIGTERMed, 4 back within 7-10s, 30 → 25 not 30 → 17).
+/// Restart now requires positive proof that the pane still fills a visible
+/// column; `pane_stashed` is `None` when its window could not be resolved.
+pub fn watchdog_binding_decision(
+    pane_alive: bool,
+    pane_stashed: Option<bool>,
+) -> WatchdogBindingDecision {
+    if !pane_alive {
+        return WatchdogBindingDecision::PaneGone;
+    }
+    match pane_stashed {
+        Some(false) => WatchdogBindingDecision::Live,
+        Some(true) => WatchdogBindingDecision::PaneStashed,
+        None => WatchdogBindingDecision::WindowUnresolved,
+    }
+}
+
 /// Parsed operator response to the supervisor restart/quit prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupervisorPromptDecision {
@@ -511,6 +566,32 @@ mod tests {
     /// Create an Instant offset by `secs` from a base.
     fn offset(base: Instant, secs: u64) -> Instant {
         base + Duration::from_secs(secs)
+    }
+
+    /// GH #133: a supervisor killed while its pane is stashed (or whose pane
+    /// is gone or unresolvable) has no live binding and is NOT respawned.
+    #[test]
+    fn killed_supervisor_without_live_binding_is_not_respawned() {
+        for (alive, stashed, expected) in [
+            (true, Some(true), WatchdogBindingDecision::PaneStashed),
+            (true, None, WatchdogBindingDecision::WindowUnresolved),
+            (false, Some(false), WatchdogBindingDecision::PaneGone),
+            (false, Some(true), WatchdogBindingDecision::PaneGone),
+            (false, None, WatchdogBindingDecision::PaneGone),
+        ] {
+            let decision = watchdog_binding_decision(alive, stashed);
+            assert_eq!(decision, expected);
+            assert!(!decision.allows_restart(), "{decision:?} must not respawn");
+        }
+    }
+
+    /// A crashed supervisor whose pane still fills a visible column keeps the
+    /// `#supresilience` crash-restart behaviour.
+    #[test]
+    fn crashed_supervisor_with_live_visible_binding_is_respawned() {
+        let decision = watchdog_binding_decision(true, Some(false));
+        assert_eq!(decision, WatchdogBindingDecision::Live);
+        assert!(decision.allows_restart());
     }
 
     #[test]

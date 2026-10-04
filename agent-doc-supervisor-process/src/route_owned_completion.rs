@@ -13,12 +13,12 @@ use std::time::{Duration, Instant};
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 use agent_doc_supervisor::route_owned::{
-    ROUTE_OWNED_VISIBLE_COLUMN_KEEP_ALIVE, RouteOwnedCycleFacts, RouteOwnedCyclePhase,
-    RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapEffect,
+    ROUTE_OWNED_VISIBLE_COLUMN_KEEP_ALIVE, RouteOwnedBindingObservation, RouteOwnedCycleFacts,
+    RouteOwnedCyclePhase, RouteOwnedLivenessReason, RouteOwnedReapDecision, RouteOwnedReapEffect,
     RouteOwnedReapEffects, RouteOwnedReapPolicy, RouteOwnedStartPurpose,
     route_owned_cycle_committed_since_start, route_owned_keep_visible_column,
     route_owned_liveness_reason_for_content, route_owned_reap_decision_for_purpose,
-    route_owned_visible_column_stashed_orphan_decision,
+    route_owned_superseded_orphan_decision, route_owned_visible_column_stashed_orphan_decision,
 };
 
 pub const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -122,6 +122,15 @@ pub trait RouteOwnedCompletionState: Send + Sync + 'static {
     fn owned_pane_is_visible_in_layout(&self) -> bool {
         false
     }
+    /// `#routeownedsupersededreap` (GH #133): whether the controller's durable
+    /// actor record for this document still names THIS supervisor's pane.
+    ///
+    /// Defaults to [`RouteOwnedBindingObservation::Unproven`], which never
+    /// reaps, so a state that cannot read the binding keeps the pre-existing
+    /// behaviour.
+    fn owned_binding_observation(&self) -> RouteOwnedBindingObservation {
+        RouteOwnedBindingObservation::Unproven
+    }
     fn paused_queue_has_no_supervisor_drainable_head(&self, _file: &Path) -> bool {
         false
     }
@@ -217,6 +226,10 @@ where
             // immediate first check races child attachment and reaps the new pane as stale.
             let mut next_orphan_check =
                 Instant::now() + layout_provision_orphan_check_interval;
+            // `#routeownedsupersededreap` (GH #133): every route-owned
+            // supervisor, whatever its policy or purpose, re-checks its own
+            // binding on the same throttle and with the same startup grace.
+            let mut next_binding_check = Instant::now() + layout_provision_orphan_check_interval;
             let mut ready_busy_ticks: u32 = 0;
             let mut ready_busy_key: Option<(String, String)> = None;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
@@ -242,6 +255,49 @@ where
                     && effective_start_purpose == RouteOwnedStartPurpose::LayoutProvision;
                 if let Ok(Some(cycle_state)) = load_route_owned_cycle_state(&file) {
                     let facts = route_owned_facts_from_cycle_state(&cycle_state);
+                    // `#routeownedsupersededreap` (GH #133): a generation whose
+                    // document binding moved to another live pane is not the
+                    // owner any more. It used to learn that only when one of its
+                    // own transitions was rejected, which an idle stashed pane
+                    // never attempts, so it lived forever under
+                    // `explicit_keep_alive`. Evaluated before every policy leg,
+                    // because no policy protects a supervisor that is not the
+                    // owner. A live owner answers `Owned` and is untouched.
+                    if !facts.phase.is_open() && Instant::now() >= next_binding_check {
+                        next_binding_check =
+                            Instant::now() + layout_provision_orphan_check_interval;
+                        let binding = state.owned_binding_observation();
+                        if matches!(binding, RouteOwnedBindingObservation::Superseded { .. }) {
+                            let busy = state.observed_live_pane_busy_reason(&harness);
+                            if let Some(decision) = route_owned_superseded_orphan_decision(
+                                &binding,
+                                facts.phase.is_open(),
+                                busy.as_deref(),
+                            ) {
+                                let current_pane = match &binding {
+                                    RouteOwnedBindingObservation::Superseded { current_pane } => {
+                                        current_pane.as_str()
+                                    }
+                                    _ => "",
+                                };
+                                let event = format!(
+                                    "route_owned_reap_decision policy={} purpose={} decision=reap reason={} pane={} current_pane={} cycle={} event={}",
+                                    reap_policy.as_str(),
+                                    effective_start_purpose.as_str(),
+                                    decision.reason,
+                                    state.owned_pane_label(),
+                                    current_pane,
+                                    cycle_state.cycle_id,
+                                    cycle_state.last_event,
+                                );
+                                log_session_event(&mut session_log, &event);
+                                agent_doc_ops_log_io::log_op(&file, &event);
+                                completed.store(true, Ordering::Relaxed);
+                                state.request_child_stop();
+                                return;
+                            }
+                        }
+                    }
                     // `#stashpaneunbounded`: evaluated BEFORE the commit-edge
                     // machinery below, because that machinery never fires for the
                     // shape that actually accumulates — a pane provisioned for an
@@ -756,5 +812,196 @@ mod tests {
         assert_eq!(state.stop_elapsed_millis.load(Ordering::Relaxed), u64::MAX);
         stop.store(true, Ordering::Relaxed);
         handle.join().unwrap();
+    }
+
+    /// GH #133: the `explicit_keep_alive` population. A keep-alive DISPATCH
+    /// owner that is not stashed-orphan-eligible, whose binding is observed via
+    /// [`RouteOwnedCompletionState::owned_binding_observation`].
+    struct BindingCompletionState {
+        binding: std::sync::Mutex<RouteOwnedBindingObservation>,
+        busy: AtomicBool,
+        binding_probe_count: AtomicU64,
+        stop_requested: AtomicBool,
+    }
+
+    impl BindingCompletionState {
+        fn new(binding: RouteOwnedBindingObservation, busy: bool) -> Arc<Self> {
+            Arc::new(Self {
+                binding: std::sync::Mutex::new(binding),
+                busy: AtomicBool::new(busy),
+                binding_probe_count: AtomicU64::new(0),
+                stop_requested: AtomicBool::new(false),
+            })
+        }
+    }
+
+    impl RouteOwnedCompletionState for BindingCompletionState {
+        fn actor_ready(&self) -> bool {
+            true
+        }
+
+        fn ready_busy_blocker_reason(&self, _harness: &HarnessConfig) -> Option<String> {
+            None
+        }
+
+        fn live_pane_busy_reason(&self, _harness: &HarnessConfig) -> Option<String> {
+            None
+        }
+
+        fn observed_live_pane_busy_reason(&self, _harness: &HarnessConfig) -> Option<String> {
+            self.busy
+                .load(Ordering::Relaxed)
+                .then(|| "live_pane_busy_blocked_prompt reason=active claude turn".to_string())
+        }
+
+        fn owned_pane_label(&self) -> String {
+            "%28".to_string()
+        }
+
+        fn owned_binding_observation(&self) -> RouteOwnedBindingObservation {
+            self.binding_probe_count.fetch_add(1, Ordering::Relaxed);
+            self.binding.lock().unwrap().clone()
+        }
+
+        fn request_child_stop(&self) {
+            self.stop_requested.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn committed_doc(dir: &Path) -> (PathBuf, agent_doc_cycle_state_io::CycleState) {
+        std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        let doc = dir.join("session.md");
+        std::fs::write(&doc, "body").unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
+        let baseline = load_route_owned_cycle_state(&doc).unwrap().unwrap();
+        (doc, baseline)
+    }
+
+    fn spawn_binding_loop(
+        state: &Arc<BindingCompletionState>,
+        doc: PathBuf,
+        baseline: agent_doc_cycle_state_io::CycleState,
+    ) -> (
+        std::thread::JoinHandle<()>,
+        Arc<AtomicBool>,
+        Arc<AtomicBool>,
+    ) {
+        let completed = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut config = RouteOwnedCompletionConfig::with_start_purpose(
+            doc,
+            Some(baseline),
+            RouteOwnedReapPolicy::KeepAlive,
+            RouteOwnedStartPurpose::Dispatch,
+            HarnessConfig::claude(),
+        );
+        config.poll_interval = Duration::from_millis(1);
+        config.layout_provision_orphan_check_interval = Duration::from_millis(5);
+        let handle = spawn_route_owned_completion_thread(
+            Arc::clone(state),
+            config,
+            Arc::clone(&completed),
+            Arc::clone(&stop),
+            None::<()>,
+            |_, _| {},
+        );
+        (handle, completed, stop)
+    }
+
+    fn wait_for_binding_probes(state: &BindingCompletionState, probes: u64) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while state.binding_probe_count.load(Ordering::Relaxed) < probes
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            state.binding_probe_count.load(Ordering::Relaxed) >= probes,
+            "completion loop never re-checked its binding"
+        );
+    }
+
+    fn wait_for_completed(completed: &AtomicBool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !completed.load(Ordering::Relaxed) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        completed.load(Ordering::Relaxed)
+    }
+
+    /// GH #133: a keep-alive dispatch owner whose document binding moved to
+    /// another live pane used to answer `explicit_keep_alive` forever. It is now
+    /// reaped by the supersession leg, independent of policy and purpose.
+    #[test]
+    fn superseded_keep_alive_dispatch_supervisor_is_reaped() {
+        let dir = tempfile::tempdir().unwrap();
+        let (doc, baseline) = committed_doc(dir.path());
+        let state = BindingCompletionState::new(
+            RouteOwnedBindingObservation::Superseded {
+                current_pane: "%41".to_string(),
+            },
+            false,
+        );
+        let (handle, completed, stop) = spawn_binding_loop(&state, doc, baseline);
+        let reaped = wait_for_completed(&completed);
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+        assert!(reaped, "superseded keep-alive supervisor was never reaped");
+        assert!(state.stop_requested.load(Ordering::Relaxed));
+    }
+
+    /// GH #133: the live owner is never reaped by the supersession leg.
+    #[test]
+    fn live_owned_keep_alive_supervisor_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let (doc, baseline) = committed_doc(dir.path());
+        let state = BindingCompletionState::new(RouteOwnedBindingObservation::Owned, false);
+        let (handle, completed, stop) = spawn_binding_loop(&state, doc, baseline);
+        wait_for_binding_probes(&state, 3);
+        assert!(!completed.load(Ordering::Relaxed));
+        assert!(!state.stop_requested.load(Ordering::Relaxed));
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+    }
+
+    /// An unproven binding (no record, dead superseding pane) never reaps.
+    #[test]
+    fn unproven_binding_keeps_keep_alive_supervisor() {
+        let dir = tempfile::tempdir().unwrap();
+        let (doc, baseline) = committed_doc(dir.path());
+        let state = BindingCompletionState::new(RouteOwnedBindingObservation::Unproven, false);
+        let (handle, completed, stop) = spawn_binding_loop(&state, doc, baseline);
+        wait_for_binding_probes(&state, 3);
+        assert!(!completed.load(Ordering::Relaxed));
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+    }
+
+    /// A superseded pane mid-turn waits; once the turn ends it is reaped.
+    #[test]
+    fn superseded_supervisor_waits_for_active_turn_then_reaps() {
+        let dir = tempfile::tempdir().unwrap();
+        let (doc, baseline) = committed_doc(dir.path());
+        let state = BindingCompletionState::new(
+            RouteOwnedBindingObservation::Superseded {
+                current_pane: "%41".to_string(),
+            },
+            true,
+        );
+        let (handle, completed, stop) = spawn_binding_loop(&state, doc, baseline);
+        wait_for_binding_probes(&state, 3);
+        assert!(
+            !completed.load(Ordering::Relaxed),
+            "an active turn in the superseded pane must never be torn down"
+        );
+        state.busy.store(false, Ordering::Relaxed);
+        let reaped = wait_for_completed(&completed);
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+        assert!(
+            reaped,
+            "superseded supervisor was never reaped after its turn ended"
+        );
     }
 }

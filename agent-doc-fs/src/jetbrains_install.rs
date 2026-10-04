@@ -235,6 +235,154 @@ pub fn pending_stagings_for(plugins_dir: &Path, system_roots: &[PathBuf]) -> Vec
     pending
 }
 
+/// `#jbpluginvanish`: pending agent-doc stagings removed from one IDE's
+/// pending-install script by [`purge_pending_stagings_for`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurgedStagings {
+    /// The `action.script` that was rewritten.
+    pub script: PathBuf,
+    /// The staged packages whose `unzip:` entries were removed.
+    pub zips: Vec<PathBuf>,
+    /// How many script lines were removed (deletes of the plugin dir included).
+    pub removed_lines: usize,
+}
+
+/// Which pending stagings [`purge_pending_stagings_for`] removes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StagingPurge {
+    /// Every pending agent-doc staging targeting the plugins dir. Used once the
+    /// plugin tree holds a freshly installed generation: a leftover staging can
+    /// then only downgrade it (package present) or destroy it (package gone).
+    All,
+    /// Only stagings whose package is gone ([`StagedInstallFailure::Doomed`]):
+    /// their `delete:` would remove the plugin and their `unzip:` cannot run.
+    Doomed,
+}
+
+/// Plain-text pending-install command prefixes this module can rewrite. A
+/// script holding anything else (a serialized/binary script, an unknown
+/// command) is left untouched: rewriting what cannot be parsed is guesswork.
+const ACTION_SCRIPT_TEXT_COMMANDS: [&str; 3] = ["delete:", "unzip:", "copy:"];
+
+/// `#jbpluginvanish`: remove pending agent-doc stagings targeting `plugins_dir`
+/// from every IDE's `<system>/<IDE>/plugins/action.script`.
+///
+/// IntelliJ runs a staging's `delete:<plugins>/agent-doc-jetbrains` before its
+/// `unzip:<package>:<plugins>`; when the unzip fails (package deleted, disk
+/// full) the restart leaves NO plugin. A staging also outlives a later
+/// restart-free upgrade or direct replacement, so the next IDE start would run
+/// it against the freshly installed generation. On 2026-10-04 13:48 an IDE
+/// restart ran a leftover `0.2.468` staging whose package was gone ("Source
+/// file missing") over a dynamically installed 0.2.488 and removed the plugin.
+///
+/// The plugin-dir `delete:` lines are removed only when no agent-doc `unzip:`
+/// into `plugins_dir` remains in that script, so a surviving viable staging
+/// keeps its own delete. The script is rewritten via a sibling temp file and
+/// rename; an emptied script is removed. Packages of purged stagings are
+/// deleted best-effort.
+pub fn purge_pending_stagings_for(
+    plugins_dir: &Path,
+    system_roots: &[PathBuf],
+    mode: StagingPurge,
+) -> anyhow::Result<Vec<PurgedStagings>> {
+    use anyhow::Context as _;
+    let plugin_dir = plugins_dir.join("agent-doc-jetbrains");
+    let mut purged = Vec::new();
+    for root in system_roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if !is_jetbrains_ide_data_dir(&entry.file_name().to_string_lossy()) {
+                continue;
+            }
+            let script = entry.path().join("plugins/action.script");
+            let Ok(bytes) = std::fs::read(&script) else {
+                continue;
+            };
+            let Ok(text) = String::from_utf8(bytes) else {
+                continue;
+            };
+            let lines: Vec<&str> = text.lines().collect();
+            if lines.iter().any(|line| {
+                let line = line.trim();
+                !line.is_empty()
+                    && !ACTION_SCRIPT_TEXT_COMMANDS
+                        .iter()
+                        .any(|prefix| line.starts_with(prefix))
+            }) {
+                continue;
+            }
+            // Agent-doc unzips into this plugins dir: (line index, zip).
+            let unzips: Vec<(usize, PathBuf)> = lines
+                .iter()
+                .enumerate()
+                .filter_map(|(index, line)| {
+                    let (zip, destination) = parse_unzip_line(line)?;
+                    staged_zip_version(&zip)?;
+                    same_dir(&destination, plugins_dir).then_some((index, zip))
+                })
+                .collect();
+            let doomed: Vec<&(usize, PathBuf)> = unzips
+                .iter()
+                .filter(|(_, zip)| mode == StagingPurge::All || !zip.is_file())
+                .collect();
+            if doomed.is_empty() {
+                continue;
+            }
+            let zips: Vec<PathBuf> = doomed.iter().map(|(_, zip)| zip.clone()).collect();
+            let any_unzip_survives = unzips.len() > doomed.len();
+            let mut kept = Vec::with_capacity(lines.len());
+            let mut removed_lines = 0;
+            for (index, line) in lines.iter().enumerate() {
+                let trimmed = line.trim();
+                let remove = if doomed.iter().any(|(at, _)| *at == index) {
+                    true
+                } else if let Some(path) = trimmed.strip_prefix("delete:") {
+                    let path = Path::new(path);
+                    zips.iter().any(|zip| same_dir(path, zip))
+                        || (!any_unzip_survives && same_dir(path, &plugin_dir))
+                } else {
+                    false
+                };
+                if remove {
+                    removed_lines += 1;
+                } else {
+                    kept.push(*line);
+                }
+            }
+            if kept.iter().all(|line| line.trim().is_empty()) {
+                std::fs::remove_file(&script)
+                    .with_context(|| format!("Failed to remove {}", script.display()))?;
+            } else {
+                let mut body = kept.join("\n");
+                body.push('\n');
+                let temp = script.with_file_name(format!(
+                    "action.script.agent-doc-purge.{}.tmp",
+                    std::process::id()
+                ));
+                let written = std::fs::write(&temp, body.as_bytes())
+                    .and_then(|()| std::fs::File::open(&temp)?.sync_all())
+                    .and_then(|()| std::fs::rename(&temp, &script));
+                if let Err(error) = written {
+                    let _ = std::fs::remove_file(&temp);
+                    return Err(error)
+                        .with_context(|| format!("Failed to rewrite {}", script.display()));
+                }
+            }
+            for zip in &zips {
+                let _ = std::fs::remove_file(zip);
+            }
+            purged.push(PurgedStagings {
+                script,
+                zips,
+                removed_lines,
+            });
+        }
+    }
+    Ok(purged)
+}
+
 /// GH #115: marker line recording the plugin version the plugins directory held
 /// when the staging was recorded, so a post-restart check can tell applied,
 /// not-applied and destroyed apart.
@@ -503,7 +651,11 @@ mod tests {
             .unwrap()
             .set_modified(old_jar_time)
             .unwrap();
-        std::fs::write(&marker, "staged for restart: pid 1\nstaged_version=0.2.480\n").unwrap();
+        std::fs::write(
+            &marker,
+            "staged for restart: pid 1\nstaged_version=0.2.480\n",
+        )
+        .unwrap();
 
         // Restart not yet happened: the staged version is not on disk.
         assert!(!retire_satisfied_restart_marker(&plugins));
@@ -530,7 +682,11 @@ mod tests {
             .unwrap()
             .set_modified(SystemTime::now() + std::time::Duration::from_secs(1))
             .unwrap();
-        assert!(!jetbrains_plugin_staged_in(&[plugins.clone()], &[], "0.2.480"));
+        assert!(!jetbrains_plugin_staged_in(
+            &[plugins.clone()],
+            &[],
+            "0.2.480"
+        ));
         assert!(!marker.exists(), "satisfied marker must be retired");
 
         // A reason-only (non-staged) marker is never touched by this rule.
@@ -726,6 +882,126 @@ mod tests {
             "0.2.481"
         ));
         assert!(!marker.exists(), "an applied staging retires its marker");
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// `#jbpluginvanish`: the 2026-10-04 13:48 incident. A leftover staging of
+    /// 0.2.468 (fixed package name, package gone) survived a restart-free
+    /// upgrade to 0.2.488; the next IDE start ran its `delete:` and failed its
+    /// `unzip:` ("Source file missing"), leaving no plugin. Once the tree holds
+    /// a fresh generation, every pending agent-doc staging is purged, and other
+    /// plugins' commands are kept verbatim.
+    #[test]
+    fn purge_all_removes_a_leftover_staging_after_a_fresh_install() {
+        let (tmp, plugins, system, script_dir) = gh115_fixture("purge-all");
+        let roots = vec![system.clone()];
+        let lib = plugins.join("agent-doc-jetbrains/lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(lib.join("agent-doc-jetbrains-0.2.488.jar"), b"live").unwrap();
+        let zip = script_dir.join("agent-doc-jetbrains-0.2.468.zip");
+        let other = script_dir.join("IdeaVIM.zip");
+        let script = script_dir.join("action.script");
+        std::fs::write(
+            &script,
+            format!(
+                "delete:{p}/IdeaVIM\nunzip:{o}:{p}\ndelete:{p}/agent-doc-jetbrains\nunzip:{z}:{p}\ndelete:{z}\n",
+                p = plugins.display(),
+                o = other.display(),
+                z = zip.display()
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            staged_install_failure(&plugins, &roots),
+            Some(StagedInstallFailure::Doomed { .. })
+        ));
+
+        let purged = purge_pending_stagings_for(&plugins, &roots, StagingPurge::All).unwrap();
+        assert_eq!(purged.len(), 1);
+        assert_eq!(purged[0].zips, vec![zip.clone()]);
+        assert_eq!(purged[0].removed_lines, 3);
+        assert_eq!(
+            std::fs::read_to_string(&script).unwrap(),
+            format!(
+                "delete:{p}/IdeaVIM\nunzip:{o}:{p}\n",
+                p = plugins.display(),
+                o = other.display()
+            )
+        );
+        assert!(pending_stagings_for(&plugins, &roots).is_empty());
+        assert_eq!(staged_install_failure(&plugins, &roots), None);
+        assert!(lib.join("agent-doc-jetbrains-0.2.488.jar").is_file());
+
+        // Nothing left to purge: a second pass is a no-op.
+        assert!(
+            purge_pending_stagings_for(&plugins, &roots, StagingPurge::All)
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// `#jbpluginvanish`: the doomed-only purge keeps a viable staging and its
+    /// plugin-dir delete, removes the doomed one, and drops an emptied script.
+    #[test]
+    fn purge_doomed_keeps_a_viable_staging() {
+        let (tmp, plugins, system, script_dir) = gh115_fixture("purge-doomed");
+        let roots = vec![system.clone()];
+        let script = script_dir.join("action.script");
+        let gone = script_dir.join("agent-doc-jetbrains-0.2.480+aa.zip");
+        let viable = script_dir.join("agent-doc-jetbrains-0.2.481+bb.zip");
+        std::fs::write(&viable, b"pkg").unwrap();
+        let p = plugins.display();
+        std::fs::write(
+            &script,
+            format!(
+                "delete:{p}/agent-doc-jetbrains\nunzip:{g}:{p}\ndelete:{g}\ndelete:{p}/agent-doc-jetbrains\nunzip:{v}:{p}\ndelete:{v}\n",
+                g = gone.display(),
+                v = viable.display()
+            ),
+        )
+        .unwrap();
+        let purged = purge_pending_stagings_for(&plugins, &roots, StagingPurge::Doomed).unwrap();
+        assert_eq!(purged.len(), 1);
+        assert_eq!(purged[0].zips, vec![gone.clone()]);
+        let left = std::fs::read_to_string(&script).unwrap();
+        assert_eq!(
+            left,
+            format!(
+                "delete:{p}/agent-doc-jetbrains\ndelete:{p}/agent-doc-jetbrains\nunzip:{v}:{p}\ndelete:{v}\n",
+                v = viable.display()
+            )
+        );
+        assert!(viable.is_file(), "a viable staging keeps its package");
+        assert_eq!(staged_install_failure(&plugins, &roots), None);
+
+        // Its package vanishes too: the whole script goes.
+        std::fs::remove_file(&viable).unwrap();
+        purge_pending_stagings_for(&plugins, &roots, StagingPurge::Doomed).unwrap();
+        assert!(!script.exists(), "an emptied script is removed");
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// `#jbpluginvanish`: a script this module cannot fully parse is never
+    /// rewritten.
+    #[test]
+    fn purge_leaves_an_unparseable_script_alone() {
+        let (tmp, plugins, system, script_dir) = gh115_fixture("purge-opaque");
+        let roots = vec![system.clone()];
+        let script = script_dir.join("action.script");
+        let zip = script_dir.join("agent-doc-jetbrains-0.2.468.zip");
+        let body = format!(
+            "delete:{p}/agent-doc-jetbrains\nunzip:{z}:{p}\nfuture-command:x\n",
+            p = plugins.display(),
+            z = zip.display()
+        );
+        std::fs::write(&script, &body).unwrap();
+        assert!(
+            purge_pending_stagings_for(&plugins, &roots, StagingPurge::All)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(std::fs::read_to_string(&script).unwrap(), body);
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 

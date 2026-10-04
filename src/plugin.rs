@@ -275,8 +275,7 @@ fn find_release_where(
         let is_final_page = releases.len() < RELEASES_PER_PAGE;
         scanned += releases.len();
         for release in releases {
-            if is_stable_release(&release) && accept(&release) && has_asset(&release, prefix, ext)
-            {
+            if is_stable_release(&release) && accept(&release) && has_asset(&release, prefix, ext) {
                 return Ok(release);
             }
         }
@@ -586,7 +585,10 @@ fn jetbrains_install_result_message(
     outcome: &JetbrainsLocalInstallOutcome,
     staged_version: &str,
 ) -> Result<String> {
-    if !matches!(outcome, JetbrainsLocalInstallOutcome::StagedForRestart { .. }) {
+    if !matches!(
+        outcome,
+        JetbrainsLocalInstallOutcome::StagedForRestart { .. }
+    ) {
         return jetbrains_install_success_message(target_dir);
     }
     let kept = installed_jetbrains_plugin_version(target_dir)
@@ -1383,30 +1385,303 @@ fn jetbrains_zip_plugin_version(zip_path: &Path) -> Result<String> {
     bail!("JetBrains package has no versioned agent-doc plugin jar")
 }
 
+/// `#jbpluginvanish`: hidden work directory beside the plugin tree, on the same
+/// filesystem, holding the staged extraction and the outgoing generation's
+/// backup while a replacement is in flight. Its top level is neither a plugin
+/// root (`lib/`) nor a descriptor, so the IDE never loads it.
+const JETBRAINS_INSTALL_WORK_DIR: &str = ".agent-doc-jetbrains-install";
+const JETBRAINS_PLUGIN_DIR: &str = "agent-doc-jetbrains";
+
+/// Points in [`replace_jetbrains_plugin_tree_with`] where a test can inject a
+/// failure (disk full, permission denied) to prove the old tree survives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PluginTreeReplaceStep {
+    /// About to write one extracted file into the staging tree.
+    WriteStagedFile,
+    /// The staged tree is verified; about to move the old tree aside.
+    BackupOldTree,
+    /// The old tree is aside; about to move the staged tree into place.
+    SwapInStagedTree,
+}
+
 fn replace_jetbrains_plugin_tree(zip_path: &Path, target_dir: &Path) -> Result<()> {
-    let dest = target_dir.join("agent-doc-jetbrains");
-    if dest.exists() {
-        fs::remove_dir_all(&dest).context("Failed to remove old plugin")?;
+    replace_jetbrains_plugin_tree_with(zip_path, target_dir, &mut |_| Ok(()))
+}
+
+/// `#jbpluginvanish`: replace `<target_dir>/agent-doc-jetbrains` atomically.
+///
+/// The old implementation removed the installed tree and then extracted the
+/// package over the hole, so any failure in between (disk full, a truncated
+/// package) left no plugin at all. Now the package is extracted into a staging
+/// directory beside the tree, every file is fsynced and checked against the
+/// package (size, CRC via the zip reader, a versioned plugin jar present), and
+/// only then is the old tree renamed aside and the staged tree renamed in. A
+/// failed swap renames the old tree back. The backup is removed only after the
+/// new tree is in place.
+fn replace_jetbrains_plugin_tree_with(
+    zip_path: &Path,
+    target_dir: &Path,
+    fault: &mut dyn FnMut(PluginTreeReplaceStep) -> io::Result<()>,
+) -> Result<()> {
+    let dest = target_dir.join(JETBRAINS_PLUGIN_DIR);
+    let work = target_dir.join(JETBRAINS_INSTALL_WORK_DIR);
+    recover_interrupted_plugin_tree_swap(&dest, &work)?;
+    fs::create_dir_all(&work).with_context(|| format!("Failed to create {}", work.display()))?;
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default()
+    );
+    let staging = work.join(format!("staging-{nonce}"));
+    let staged_tree = staging.join(JETBRAINS_PLUGIN_DIR);
+    let backup = work.join(format!("backup-{nonce}"));
+
+    let staged = extract_jetbrains_package_into(zip_path, &staging, fault)
+        .and_then(|()| verify_staged_jetbrains_tree(zip_path, &staged_tree));
+    if let Err(error) = staged {
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_dir(&work);
+        return Err(error.context(format!(
+            "JetBrains plugin replacement aborted before touching {}; the installed plugin was kept",
+            dest.display()
+        )));
     }
+
+    let had_old = dest.exists();
+    if had_old {
+        let moved =
+            fault(PluginTreeReplaceStep::BackupOldTree).and_then(|()| fs::rename(&dest, &backup));
+        if let Err(error) = moved {
+            let _ = fs::remove_dir_all(&staging);
+            let _ = fs::remove_dir(&work);
+            return Err(anyhow::Error::new(error).context(format!(
+                "Failed to move the installed plugin {} aside; it was kept",
+                dest.display()
+            )));
+        }
+    }
+    let swapped = fault(PluginTreeReplaceStep::SwapInStagedTree)
+        .and_then(|()| fs::rename(&staged_tree, &dest));
+    if let Err(error) = swapped {
+        let restored = if had_old {
+            fs::rename(&backup, &dest).map_err(|restore| {
+                format!(
+                    "; restoring the previous plugin from {} also failed: {restore}",
+                    backup.display()
+                )
+            })
+        } else {
+            Ok(())
+        };
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_dir(&work);
+        return Err(anyhow::Error::new(error).context(format!(
+            "Failed to move the new plugin into {}{}",
+            dest.display(),
+            restored
+                .err()
+                .unwrap_or_else(|| "; the previous plugin was restored".to_string())
+        )));
+    }
+    let _ = fs::remove_dir_all(&staging);
+    if had_old && let Err(error) = fs::remove_dir_all(&backup) {
+        eprintln!(
+            "[plugin] could not remove the previous plugin backup {}: {error}",
+            backup.display()
+        );
+    }
+    let _ = fs::remove_dir(&work);
+    Ok(())
+}
+
+/// `#jbpluginvanish`: a process that died between moving the old tree aside and
+/// moving the new one in leaves no plugin tree and a `backup-*` beside it. Put
+/// the newest such backup back before anything else, then clear leftovers.
+fn recover_interrupted_plugin_tree_swap(dest: &Path, work: &Path) -> Result<()> {
+    let Ok(entries) = fs::read_dir(work) else {
+        return Ok(());
+    };
+    let mut backups = Vec::new();
+    let mut leftovers = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("backup-") && entry.path().join("lib").is_dir() {
+            let modified = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            backups.push((modified, entry.path()));
+        } else {
+            leftovers.push(entry.path());
+        }
+    }
+    backups.sort();
+    if !dest.exists()
+        && let Some((_, newest)) = backups.pop()
+    {
+        fs::rename(&newest, dest).with_context(|| {
+            format!(
+                "Failed to restore the interrupted plugin replacement's backup {} to {}",
+                newest.display(),
+                dest.display()
+            )
+        })?;
+        eprintln!(
+            "[plugin] restored {} from an interrupted replacement's backup",
+            dest.display()
+        );
+    }
+    for path in leftovers
+        .into_iter()
+        .chain(backups.into_iter().map(|(_, path)| path))
+    {
+        let _ = if path.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+    }
+    Ok(())
+}
+
+fn extract_jetbrains_package_into(
+    zip_path: &Path,
+    staging: &Path,
+    fault: &mut dyn FnMut(PluginTreeReplaceStep) -> io::Result<()>,
+) -> Result<()> {
     let file = fs::File::open(zip_path).context("Failed to open zip")?;
     let mut archive = zip::ZipArchive::new(file).context("Failed to read zip archive")?;
+    fs::create_dir_all(staging)
+        .with_context(|| format!("Failed to create {}", staging.display()))?;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
         let enclosed = entry
             .enclosed_name()
             .with_context(|| format!("Unsafe path in JetBrains package: {}", entry.name()))?;
-        let out_path = target_dir.join(enclosed);
+        if !enclosed.starts_with(JETBRAINS_PLUGIN_DIR) {
+            bail!(
+                "Unexpected JetBrains package root: {} (expected {JETBRAINS_PLUGIN_DIR}/)",
+                enclosed.display()
+            );
+        }
+        let out_path = staging.join(&enclosed);
         if entry.is_dir() {
-            fs::create_dir_all(&out_path)?;
-        } else {
-            if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut outfile = fs::File::create(&out_path)?;
-            io::copy(&mut entry, &mut outfile)?;
+            fs::create_dir_all(&out_path)
+                .with_context(|| format!("Failed to create {}", out_path.display()))?;
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create {}", parent.display()))?;
+        }
+        fault(PluginTreeReplaceStep::WriteStagedFile)
+            .with_context(|| format!("Failed to write {}", out_path.display()))?;
+        let mut outfile = fs::File::create(&out_path)
+            .with_context(|| format!("Failed to create {}", out_path.display()))?;
+        // The zip reader verifies the entry's CRC once it is read to the end.
+        let written = io::copy(&mut entry, &mut outfile)
+            .with_context(|| format!("Failed to write {}", out_path.display()))?;
+        // Surface a delayed-allocation ENOSPC here, not after the swap.
+        outfile
+            .sync_all()
+            .with_context(|| format!("Failed to flush {}", out_path.display()))?;
+        if written != entry.size() {
+            bail!(
+                "Short write extracting {}: {written} of {} bytes",
+                out_path.display(),
+                entry.size()
+            );
         }
     }
     Ok(())
+}
+
+/// The staged tree must hold every packaged file at its packaged size and a
+/// versioned `lib/agent-doc-jetbrains-<v>.jar`; anything less never replaces
+/// a working installation.
+fn verify_staged_jetbrains_tree(zip_path: &Path, staged_tree: &Path) -> Result<()> {
+    let file = fs::File::open(zip_path).context("Failed to open zip")?;
+    let mut archive = zip::ZipArchive::new(file).context("Failed to read zip archive")?;
+    let mut packaged = BTreeSet::new();
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        if entry.is_dir() {
+            continue;
+        }
+        let enclosed = entry
+            .enclosed_name()
+            .with_context(|| format!("Unsafe path in JetBrains package: {}", entry.name()))?;
+        let relative = enclosed.strip_prefix(JETBRAINS_PLUGIN_DIR)?.to_path_buf();
+        let staged_len = fs::metadata(staged_tree.join(&relative))
+            .map(|metadata| metadata.len())
+            .with_context(|| format!("Staged plugin is missing {}", relative.display()))?;
+        if staged_len != entry.size() {
+            bail!(
+                "Staged plugin file {} is {staged_len} bytes; the package holds {}",
+                relative.display(),
+                entry.size()
+            );
+        }
+        packaged.insert(relative);
+    }
+    let has_plugin_jar = packaged.iter().any(|relative| {
+        relative.parent() == Some(Path::new("lib"))
+            && relative
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_prefix("agent-doc-jetbrains-"))
+                .is_some_and(|rest| rest.ends_with(".jar"))
+    });
+    if !has_plugin_jar {
+        bail!("Staged plugin has no lib/agent-doc-jetbrains-<version>.jar");
+    }
+    let mut staged = BTreeSet::new();
+    collect_installed_plugin_files(staged_tree, staged_tree, &mut staged)?;
+    if staged != packaged {
+        bail!("Staged plugin files differ from the package's file list");
+    }
+    Ok(())
+}
+
+/// `#jbpluginvanish`: once the plugin tree holds a freshly installed generation
+/// (`StagingPurge::All`), or before any install (`StagingPurge::Doomed`), drop
+/// pending agent-doc stagings from the IDE's pending-install scripts so the
+/// next IDE start cannot delete the plugin and fail to unzip its replacement.
+fn purge_jetbrains_pending_stagings(
+    target_dir: &Path,
+    mode: agent_doc_fs::jetbrains_install::StagingPurge,
+) {
+    let roots = agent_doc_fs::jetbrains_install::jetbrains_system_roots();
+    match agent_doc_fs::jetbrains_install::purge_pending_stagings_for(target_dir, &roots, mode) {
+        Ok(purged) => {
+            for staging in purged {
+                let zips = staging
+                    .zips
+                    .iter()
+                    .map(|zip| zip.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                eprintln!(
+                    "[plugin] removed a pending JetBrains staging for {} from {} ({zips}): its next-start delete would have removed the plugin",
+                    target_dir.display(),
+                    staging.script.display()
+                );
+                log_jetbrains_upgrade_decision(&format!(
+                    "plugin_pending_staging_purged mode={mode:?} target={} script={} removed_lines={} zips={zips:?}",
+                    target_dir.display(),
+                    staging.script.display(),
+                    staging.removed_lines
+                ));
+            }
+        }
+        Err(error) => eprintln!(
+            "WARNING: could not purge pending JetBrains stagings for {}: {error:#}",
+            target_dir.display()
+        ),
+    }
 }
 
 fn install_jetbrains_zip_into(
@@ -1419,6 +1694,12 @@ fn install_jetbrains_zip_into(
     // upgrade` and a manual `plugin update` used to stage the same package two
     // minutes apart, and the second staging is what destroyed the install.
     let _install_lock = agent_doc_fs::jetbrains_install::lock_jetbrains_install(target_dir)?;
+    // `#jbpluginvanish`: a staging whose package is gone can only delete the
+    // plugin at the next IDE start; drop it before deciding anything else.
+    purge_jetbrains_pending_stagings(
+        target_dir,
+        agent_doc_fs::jetbrains_install::StagingPurge::Doomed,
+    );
     if jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
         return Ok(JetbrainsLocalInstallOutcome::Unchanged);
     }
@@ -1447,6 +1728,19 @@ fn install_jetbrains_zip_into(
         bail!(
             "JetBrains package verification failed in {}: installed bytes differ from the package",
             target_dir.display()
+        );
+    }
+    // `#jbpluginvanish`: the tree now holds the new generation (restart-free
+    // upgrade or direct replacement). Any staging still queued would run its
+    // `delete:` over it at the next IDE start and either downgrade it or, with
+    // its package gone, leave no plugin at all.
+    if !matches!(
+        outcome,
+        JetbrainsLocalInstallOutcome::StagedForRestart { .. }
+    ) {
+        purge_jetbrains_pending_stagings(
+            target_dir,
+            agent_doc_fs::jetbrains_install::StagingPurge::All,
         );
     }
     Ok(outcome)
@@ -1494,7 +1788,7 @@ fn already_staged_outcome(
 /// GH #63: the restart-free dynamic upgrade is an optimization, never the
 /// update itself. When it cannot run (no JVM, attach refused, a platform
 /// signature the upgrader cannot call) or `--no-dynamic` skips it, the package
-/// is still replaced on disk -- the directory is removed and rewritten, so a
+/// is still replaced on disk -- staged beside the tree and swapped in by rename (`#jbpluginvanish`), so a
 /// live IDE keeps reading the old inodes -- and the caller is told to restart.
 fn install_jetbrains_package_bytes(
     zip_path: &Path,
@@ -1522,7 +1816,10 @@ fn install_jetbrains_package_bytes(
                 // preflight advises a restart rather than another install.
                 eprintln!(
                     "WARNING: {}",
-                    dynamic_upgrade_fallback_warning(&reason, "staged it for the next IDE start instead")
+                    dynamic_upgrade_fallback_warning(
+                        &reason,
+                        "staged it for the next IDE start instead"
+                    )
                 );
                 if agent_doc_declined_dynamic_upgrade(&reason) {
                     print_permanent_dynamic_upgrade_loss_once();
@@ -3988,4 +4285,185 @@ pub fn list() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// `#jbpluginvanish`: the JetBrains plugin tree is replaced atomically -- a
+/// failure anywhere before the swap completes leaves the installed plugin in
+/// place.
+#[cfg(test)]
+mod plugin_tree_replace_tests {
+    use super::{
+        JETBRAINS_INSTALL_WORK_DIR, PluginTreeReplaceStep, replace_jetbrains_plugin_tree,
+        replace_jetbrains_plugin_tree_with,
+    };
+    use std::fs;
+    use std::io::{self, Write as _};
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    fn write_package(path: &Path, version: &str, plugin: &[u8]) {
+        let mut archive = zip::ZipWriter::new(fs::File::create(path).unwrap());
+        let options = zip::write::SimpleFileOptions::default();
+        archive
+            .start_file(
+                format!("agent-doc-jetbrains/lib/agent-doc-jetbrains-{version}.jar"),
+                options,
+            )
+            .unwrap();
+        archive.write_all(plugin).unwrap();
+        archive
+            .start_file("agent-doc-jetbrains/lib/dependency.jar", options)
+            .unwrap();
+        archive.write_all(b"dependency").unwrap();
+        archive.finish().unwrap();
+    }
+
+    /// A plugins dir holding an installed 0.2.487 and a 0.2.488 package.
+    fn fixture() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let tmp = TempDir::new().unwrap();
+        let plugins = tmp.path().join("IntelliJIdea2026.1");
+        let lib = plugins.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("agent-doc-jetbrains-0.2.487.jar"), b"old plugin").unwrap();
+        fs::write(lib.join("dependency.jar"), b"old dependency").unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.488.zip");
+        write_package(&zip, "0.2.488", b"new plugin");
+        (tmp, plugins, zip)
+    }
+
+    fn assert_old_plugin_intact(plugins: &Path) {
+        let lib = plugins.join("agent-doc-jetbrains/lib");
+        assert_eq!(
+            fs::read(lib.join("agent-doc-jetbrains-0.2.487.jar")).unwrap(),
+            b"old plugin"
+        );
+        assert_eq!(
+            fs::read(lib.join("dependency.jar")).unwrap(),
+            b"old dependency"
+        );
+        assert!(!lib.join("agent-doc-jetbrains-0.2.488.jar").exists());
+        assert!(
+            !plugins.join(JETBRAINS_INSTALL_WORK_DIR).exists(),
+            "no staging or backup left beside the plugin"
+        );
+    }
+
+    fn enospc() -> io::Error {
+        io::Error::from_raw_os_error(28)
+    }
+
+    /// The 2026-10-04 shape: the disk fills while the new package is written.
+    /// The old code had already deleted the installed plugin by then.
+    #[test]
+    fn disk_full_mid_extraction_keeps_the_installed_plugin() {
+        let (_tmp, plugins, zip) = fixture();
+        let mut writes = 0;
+        let error = replace_jetbrains_plugin_tree_with(&zip, &plugins, &mut |step| {
+            if step == PluginTreeReplaceStep::WriteStagedFile {
+                writes += 1;
+                if writes == 2 {
+                    return Err(enospc());
+                }
+            }
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("installed plugin was kept"),
+            "{error:#}"
+        );
+        assert_old_plugin_intact(&plugins);
+    }
+
+    #[test]
+    fn failure_moving_the_old_tree_aside_keeps_it() {
+        let (_tmp, plugins, zip) = fixture();
+        replace_jetbrains_plugin_tree_with(&zip, &plugins, &mut |step| {
+            if step == PluginTreeReplaceStep::BackupOldTree {
+                return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+            }
+            Ok(())
+        })
+        .unwrap_err();
+        assert_old_plugin_intact(&plugins);
+    }
+
+    /// The old tree is already aside when the swap fails: it is renamed back.
+    #[test]
+    fn failed_swap_restores_the_old_tree() {
+        let (_tmp, plugins, zip) = fixture();
+        let error = replace_jetbrains_plugin_tree_with(&zip, &plugins, &mut |step| {
+            if step == PluginTreeReplaceStep::SwapInStagedTree {
+                return Err(enospc());
+            }
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("previous plugin was restored"),
+            "{error:#}"
+        );
+        assert_old_plugin_intact(&plugins);
+    }
+
+    /// A package without a versioned plugin jar never replaces a working tree.
+    #[test]
+    fn package_without_a_plugin_jar_keeps_the_installed_plugin() {
+        let (tmp, plugins, _) = fixture();
+        let zip = tmp.path().join("broken.zip");
+        let mut archive = zip::ZipWriter::new(fs::File::create(&zip).unwrap());
+        archive
+            .start_file(
+                "agent-doc-jetbrains/lib/dependency.jar",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        archive.write_all(b"dependency").unwrap();
+        archive.finish().unwrap();
+        replace_jetbrains_plugin_tree(&zip, &plugins).unwrap_err();
+        assert_old_plugin_intact(&plugins);
+    }
+
+    #[test]
+    fn successful_replacement_swaps_in_the_new_tree() {
+        let (_tmp, plugins, zip) = fixture();
+        replace_jetbrains_plugin_tree(&zip, &plugins).unwrap();
+        let lib = plugins.join("agent-doc-jetbrains/lib");
+        assert_eq!(
+            fs::read(lib.join("agent-doc-jetbrains-0.2.488.jar")).unwrap(),
+            b"new plugin"
+        );
+        assert_eq!(fs::read(lib.join("dependency.jar")).unwrap(), b"dependency");
+        assert!(!lib.join("agent-doc-jetbrains-0.2.487.jar").exists());
+        assert!(!plugins.join(JETBRAINS_INSTALL_WORK_DIR).exists());
+        // A fresh install (no previous tree) works too.
+        fs::remove_dir_all(plugins.join("agent-doc-jetbrains")).unwrap();
+        replace_jetbrains_plugin_tree(&zip, &plugins).unwrap();
+        assert!(lib.join("agent-doc-jetbrains-0.2.488.jar").is_file());
+    }
+
+    /// A process killed between moving the old tree aside and moving the new
+    /// one in leaves only the backup; the next replacement restores it first,
+    /// so even a failing retry ends with the plugin present.
+    #[test]
+    fn interrupted_swap_backup_is_restored_before_retrying() {
+        let (_tmp, plugins, zip) = fixture();
+        let backup = plugins.join(JETBRAINS_INSTALL_WORK_DIR).join("backup-dead");
+        fs::create_dir_all(backup.parent().unwrap()).unwrap();
+        fs::rename(plugins.join("agent-doc-jetbrains"), &backup).unwrap();
+        fs::create_dir_all(
+            plugins
+                .join(JETBRAINS_INSTALL_WORK_DIR)
+                .join("staging-dead/x"),
+        )
+        .unwrap();
+        replace_jetbrains_plugin_tree_with(&zip, &plugins, &mut |step| {
+            if step == PluginTreeReplaceStep::WriteStagedFile {
+                return Err(enospc());
+            }
+            Ok(())
+        })
+        .unwrap_err();
+        assert_old_plugin_intact(&plugins);
+    }
 }

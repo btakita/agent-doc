@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -88,6 +87,28 @@ I claimed each head. Every subagent has its own worktree based on integration co
 - **`#preflightrepairdrift`** (`1c4caeded`): the haiven-dev refusal was the template-normalization repair. It ran while the operator was typing and correctly rolled forward over the new text, but the settle step only accepted the pre-typing target. Settle now accepts "the repair plus newer edits" and keeps the typed text as pending input. Passed on its branch: 10826 tests.
 
 **release + publish** stays with me. Once the three GH branches land, I'll merge them in one at a time, run `make check` and one `make install`, cut the release, close the issues, and close all five items.
+
+### Re: v0.35.451 released — #steerbaselineabsorb, #preflightrepairdrift, GH #127/#128/#129 — opus-5-5 · 2026-10-04T05:05-04:00
+
+> **Queue prompt:** do [#steerbaselineabsorb]
+> **Queue prompt:** do [#preflightrepairdrift]
+
+All five fixes are integrated, released as **v0.35.451**, and installed (`agent-doc --version` → `0.35.451`).
+
+**Integration.** I merged the five subagent branches serially onto one integration branch and added one follow-up commit (below). Full `make check` on the combined tree exited 0: **10859 tests run, 10859 passed**, 262 skipped. Release commit `db150df8c` and tag `v0.35.451` are pushed; the CI Release and PyPI workflows are running. I closed GH #127, #128 and #129 with a pointer to the release, and committed the superproject gitlink as `5575f53cf9`.
+
+**What shipped:**
+- **`#steerbaselineabsorb`:** when steering is still pending at closeout and its text is already in the committed baseline, it is saved in a per-document ledger. The next contract carries it as `absorbed_steering_prompts` / a `prompt_target` with `no_changes: false`. Once it is answered, no steering surface shows it again.
+- **`#preflightrepairdrift`:** the haiven-dev refusal came from the template-normalization repair, which landed on top of text the operator typed after the repair was computed. Settle now accepts a result proven to be "the repair plus concurrent edits", and still fails closed when the repair is missing or the texts disagree. The typed text stays a pending diff.
+- **GH #127:** `cross_document_sweep` now runs on its own budget: 8s by default and at most a quarter of the admission time left (`AGENT_DOC_PREFLIGHT_SWEEP_BUDGET_SECS`). Documents it doesn't reach are deferred to the next preflight through a cursor file. The hook raises its installed timeout to fit the budget.
+- **GH #128:** the recycle itself was correct; only the report was wrong. The completion row now comes from the replacement's own status, and same-image recycles log as failures. A repeat restart for the same pid and generation within 30s is suppressed.
+- **GH #129:** two new commands, `agent-doc backlog <FILE> requeue` and `keep-unqueued`, repair a dropped head without an admitted cycle. The deadline refusal now forbids only a response write. A queue head that leads with an open backlog id is no longer treated as free text, which was the likely way the head got dropped.
+  - My follow-up commit fixes a second hint the subagent spotted: the no-response active-head hint now names `agent-doc backlog <FILE> done <id>`, which is allowed after a refused admission.
+
+**Notes:**
+- **Another session's uncommitted work in `src/agent-doc`:** a `lib.rs` edit (`#clearrestartjoinstall`) is still uncommitted there; I preserved it unchanged when fast-forwarding main. Its `VERSIONS.md` edit conflicted with the release entry. That edit looked garbled (it deleted the 0.35.449/450 entries), so I kept the release version. The original is in `stash@{0}` in the agent-doc checkout.
+- **Queue items struck before the work was done:** my dispatch response quoted the free-text heads (GH #127/#128/#129, release + publish) as `> **Queue prompt:**`. That caused `#ftstrike` to strike them while they were only dispatched. The work is now done, so nothing was lost, but quoting a head that is only dispatched should not strike it.
+- **Verify on the next session:** GH #128's 30s suppression means a newer client briefly connects to the older controller instead of retrying the handoff.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -96,19 +117,11 @@ I claimed each head. Every subagent has its own worktree based on integration co
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#steerbaselineabsorb]
-- do [#preflightrepairdrift]
-- ~~do https://github.com/btakita/agent-doc/issues/127~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do https://github.com/btakita/agent-doc/issues/128~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~do https://github.com/btakita/agent-doc/issues/129~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#preflightrepairdrift] [agent-doc] Preflight refused admission on src/haiven-dev/tasks/sdk.md (about 2026-10-04T07:14Z, cycle-1791097819297) because its own repair step left the document different from what it expected. A follow-up session-check then reported ok and 'repaired committed historical committed_capture snapshot drift', so the drift was benign. Fix: preflight should absorb its own self-repair (run the same repair session-check runs, before the admission guard) instead of refusing; genuinely unsafe drift stays fail-closed. Being fixed by a subagent on branch preflightrepairdrift (agent-doc-wt/preflightrepairdrift).
-- [ ] [#steerbaselineabsorb] [agent-doc] Steering that arrives while respond is committing gets absorbed into that commit's baseline. The session-check reported it as address_now ("answer it in the next cycle"), but the next /loop preflight said no_changes: true (read_source=live_editor), so the prompt would have been silently skipped. Repro 2026-10-04 03:01: the operator finished the line 'testing to see' -> 'testing to see if you pick this up.' during respond; commit 5eeed90b7e contains the full line. Fix: when steering is surfaced as pending at closeout, persist it as an unrecorded prompt (like chat_prompts) so the next contract carries it as a prompt target with no_changes: false.
 - [ ] [#ghbrew] [agent-doc] Homebrew formula for agent-doc (GH #31, https://github.com/btakita/agent-doc/issues/31). The tap repo ~/work/btakita/homebrew-tap holds only chromium-bridge.rb today. Add Formula/agent-doc.rb pulling the per-platform GitHub Release archives (binary + cdylib together, GH #52) with SHA256SUMS, and add a release step that bumps the formula on each tag. Close #31 when brew install btakita/tap/agent-doc works.
 - [ ] [#ghjbfolding] [agent-doc][jetbrains] JetBrains plugin UX phases 5-7 (GH #19, https://github.com/btakita/agent-doc/issues/19): fold agent:* component regions, add gutter icons on component markers, and a structure view of components and
 - [ ] [#ghmultitmux] [agent-doc] One editor managing panes across several tmux sessions (GH #17, https://github.com/btakita/agent-doc/issues/17), e.g. a session per topic or project: an allowed-sessions list in config, with routing and sync choosing among them. Close #17 when shipped.

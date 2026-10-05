@@ -81,7 +81,11 @@ projections, and tmux transcript inference.
   in-flight structural effect. A focus-only change reuses the latest
   structurally converged file-to-pane assignment only when its actor bindings
   still match, selects the pane first, and does not serialize behind another
-  full layout reconciliation.
+  full layout reconciliation. The detached effect worker is unwind-fenced: an
+  effect panic releases its active lease, a newer revision already retained at
+  the boundary transfers to one replacement worker, and the failed revision is
+  not hot-looped. A later editor selection must therefore be able to start
+  reconciliation without requiring a controller restart.
 - Plugins publish desired pane state and subscribe to status; they do not retry
   imperative tmux operations. Status `phase` is a closed enum. `reason_code` is a
   stable enum and `reason_detail` is optional diagnostic text, so clients never

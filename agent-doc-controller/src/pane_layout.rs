@@ -49,6 +49,24 @@ impl LatestProjectionWorkerState {
     pub fn deactivate(&mut self) {
         self.active = false;
     }
+
+    /// Release a worker that exited without retiring normally (for example,
+    /// after an effect panic) and report whether a newer retained revision
+    /// must be picked up by a replacement worker.
+    ///
+    /// This transition is performed while the IO layer holds its worker-state
+    /// mutex. A publication therefore either lands before this check and is
+    /// inherited by the replacement, or lands after deactivation and starts a
+    /// worker itself. The failed revision is deliberately not retried here: a
+    /// deterministic effect panic must not become a hot respawn loop.
+    pub fn recover_after_failure(&mut self, failed_revision: u64) -> bool {
+        self.active = false;
+        if self.pending_revision <= failed_revision {
+            return false;
+        }
+        self.active = true;
+        true
+    }
 }
 
 /// True when a pane's *recorded* window binding no longer matches the window the
@@ -115,6 +133,28 @@ mod tests {
         assert!(state.is_active());
         assert!(state.retire_if_current(8));
         assert!(!state.is_active());
+    }
+
+    #[test]
+    fn failed_worker_releases_current_revision_for_the_next_navigation() {
+        let mut state = LatestProjectionWorkerState::default();
+        assert!(state.schedule(7));
+
+        assert!(!state.recover_after_failure(7));
+        assert!(!state.is_active());
+        assert!(state.schedule(8));
+        assert!(state.is_active());
+    }
+
+    #[test]
+    fn failed_worker_hands_newer_retained_revision_to_a_replacement() {
+        let mut state = LatestProjectionWorkerState::default();
+        assert!(state.schedule(7));
+        assert!(!state.schedule(8));
+
+        assert!(state.recover_after_failure(7));
+        assert!(state.is_active());
+        assert_eq!(state.pending_revision(), 8);
     }
 
     /// The operator-reported shape: the record says the visible `agent-doc`

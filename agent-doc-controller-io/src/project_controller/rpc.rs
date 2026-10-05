@@ -23102,18 +23102,60 @@ impl PaneLayoutProjectionSink for ControllerPaneLayoutProjectionSink {
         if !should_spawn {
             return;
         }
-        let runtime = self.runtime.clone();
-        let state = Arc::clone(&self.state);
-        let wake = Arc::clone(&self.wake);
-        let spawn = std::thread::Builder::new()
-            .name("agent-doc-pane-layout-effect".to_string())
-            .spawn(move || {
-                pane_layout_effect_worker(runtime, state, wake);
-            });
-        if let Err(error) = spawn {
-            self.state.lock().deactivate();
-            eprintln!("[controller] failed to spawn pane-layout effect worker: {error}");
-        }
+        spawn_pane_layout_effect_worker(
+            self.runtime.clone(),
+            Arc::clone(&self.state),
+            Arc::clone(&self.wake),
+        );
+    }
+}
+
+/// Start the single latest-wins worker behind an unwind boundary.
+///
+/// An effect panic used to terminate this detached thread while leaving
+/// `LatestProjectionWorkerState::active` latched. Every later editor selection
+/// then updated `pending_revision` but declined to spawn, permanently disabling
+/// tmux auto-sync until the controller restarted. Retire the failed revision
+/// atomically and hand a revision that raced with the panic to a replacement.
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn spawn_pane_layout_effect_worker(
+    runtime: std::sync::Weak<ControllerRuntime>,
+    state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
+    wake: Arc<Condvar>,
+) {
+    let worker_runtime = runtime.clone();
+    let worker_state = Arc::clone(&state);
+    let worker_wake = Arc::clone(&wake);
+    let spawn = std::thread::Builder::new()
+        .name("agent-doc-pane-layout-effect".to_string())
+        .spawn(move || {
+            let executing_revision = AtomicU64::new(0);
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                pane_layout_effect_worker(
+                    worker_runtime,
+                    Arc::clone(&worker_state),
+                    worker_wake,
+                    &executing_revision,
+                );
+            }));
+            if outcome.is_ok() {
+                return;
+            }
+
+            let failed_revision = executing_revision.load(Ordering::SeqCst);
+            let should_restart = worker_state
+                .lock()
+                .recover_after_failure(failed_revision);
+            eprintln!(
+                "[controller] pane-layout effect worker panicked at revision {failed_revision}; restart_pending={should_restart}"
+            );
+            if should_restart {
+                spawn_pane_layout_effect_worker(runtime, worker_state, wake);
+            }
+        });
+    if let Err(error) = spawn {
+        state.lock().deactivate();
+        eprintln!("[controller] failed to spawn pane-layout effect worker: {error}");
     }
 }
 
@@ -23445,11 +23487,13 @@ fn pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
     state: Arc<Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>>,
     wake: Arc<Condvar>,
+    executing_revision: &AtomicU64,
 ) {
     let mut attempt = 0_u64;
     let mut active_generation = 0_u64;
     loop {
         let work_revision = state.lock().pending_revision();
+        executing_revision.store(work_revision, Ordering::SeqCst);
         let Some(runtime) = runtime.upgrade() else {
             state.lock().deactivate();
             return;

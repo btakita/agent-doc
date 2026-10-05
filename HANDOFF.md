@@ -4,20 +4,75 @@ Item: `#netadv6` from `agent-loop/tasks/agent-doc/plan-network-adversarial-corre
 Branch `netadv6`, worktree `agent-doc-wt/netadv6`, based on `netadv4` (agent-doc-sim-net
 crate, `src/sim_world/net.rs`, `make sim-net`). Do NOT push, install, release or merge.
 
-## Goal
-Seeded explorer over SimWorld (interleavings, SimNet faults, operator edits,
-recycles/installs, crashes, reconnects) + TLA-mirroring oracles after every step +
-shrinking to a replayable trace + regression seeds file replayed by `make check` +
-`make sim-fuzz FUZZ_SECS=...` + nightly workflow. Known netadv4 defects F1/F2/F3 are
-allow-listed by finding kind; report NEW kinds.
+## Design (done)
+- `agent-doc-sim-net`: `SendPlan` (per-send copy offsets + stall), `send_recorded`
+  (RNG draws, returns plan; `send` = this, byte-identical) and `send_planned` (replay,
+  no RNG). Test `recorded_plans_replay_the_same_deliveries`.
+- `src/sim_world/fuzz.rs`: explorer over the SAME `SimWorld::apply` engine + netadv4
+  SimNet routing (Async mode). `FuzzTrace` = profile + steps (`step <SimCommand> @plan`,
+  `tick n`); text form round-trips. `FuzzTrace::generate(seed)` draws from a weighted
+  palette (~90 commands: edits, closeout, crashes, restarts, supervisor reports,
+  dispatch, tmux observations, layout sync, admin, install/recycle) plus protocol
+  FRAGMENTS (closeout cycle, routed turn, install->boundary, rebind) and idle ticks.
+  Profile = seed % 3 (local / coder_zscaler / hostile). `step_enabled` preconditions
+  make impossible steps no-ops in generation AND replay (so shrinking cannot invent
+  unreachable schedules).
+- Oracle hooks: `SimWorld.fuzz: Option<Box<FuzzState>>` (None outside fuzz);
+  `fuzz_pre/fuzz_post` around every local step (engine `apply`) and every delivered
+  message (`net::apply_delivered`); `fuzz_on_send` stamps logical send order.
+- Oracles (each names its TLA mirror, `Oracle::tla`):
+  UniqueOwner, NoLostOperatorText, ExactlyOnceResponseCommit,
+  NoDispatchIntoBusySupervisor (+ recycle boundary), NoStaleGenerationApply,
+  StaleStashNeverWidens (GH #136), RecycleEventuallyConsumed (liveness, after a
+  deterministic fairness suffix), plus netadv4 NetChannel findings and Structural.
+- GH #136 sub-model (fuzz-only SimCommands `InstallFanout`, `SyncFocusStaleStashPane`,
+  `AdvanceWallClock`): base production `plan_column_admissions` +
+  `recycle_request_is_live`; a live request feeds `supervisor_recycle_action` as
+  explicit_admin (`fuzz_recycle_request_live`, false outside fuzz).
+- Shrinker: ddmin over steps, then plan->clean, tick->1, profile->local, to fixpoint.
+- Regression seeds: `src/sim_world/fuzz_seeds.txt` (`expect clean` / `expect known K`),
+  replayed by `sim_fuzz_regression_seeds_replay` in `make test` (so `make check`).
+- Budgets: `sim_fuzz_short_fixed_budget_finds_no_new_finding_kinds` (seeds 0..400 x 80
+  steps, ~3s, non-vacuity floors) in `make test`; `make sim-fuzz FUZZ_SECS= FUZZ_STEPS=
+  FUZZ_SEED= FUZZ_OUT=` (ignored `sim_fuzz_long_budget`); nightly
+  `.github/workflows/sim-fuzz-nightly.yml` uploads `sim-fuzz-out/*.trace` on failure.
+- Triage helpers (ignored tests): `AGENT_DOC_SIM_FUZZ_SHOW_KIND=<kind>` ->
+  `sim_fuzz_show_kind`; `AGENT_DOC_SIM_FUZZ_TRACE=<file>` -> `sim_fuzz_replay_trace_file`.
 
-## Plan
-1. agent-doc-sim-net: explicit per-send `SendPlan` (record on generation, replay on
-   shrink) so a trace replays without the channel RNG.
-2. `src/sim_world/fuzz.rs`: palette, `FuzzTrace` text form, oracles, shrinker,
-   budgets, seeds file `src/sim_world/fuzz_seeds.txt`.
-3. Makefile `sim-fuzz`, short budget + seeds in `make check`; nightly workflow.
-4. Run 10-20 min budget; triage new findings.
+## Allow-list (`KNOWN_FUZZ_FINDINGS`, keyed by kind)
+netadv4 F1/F2/F3 kinds; `stale_actor_lifecycle_overwrote_local_transition` (NEW, F1
+variant, see findings); GH #136 `stale_stash_pane_widened_layout` and
+`stale_recycle_request_lapsed_unconsumed` (fixed on main 9bb7edb2b, not in this
+base: on rebase onto main, drop both, flip their seeds to `expect clean`, and adapt
+`fuzz_sync_focus_stale_stash_pane` to main's admission/consumption-bound API).
+
+## Findings so far
+NEW, fixed (model fidelity, all `expect clean` seeds):
+1. `stale_generation_promote_starting_prompt_ready_mutated_route`: a delayed readiness
+   report promoted the NEXT generation (arm read durable generation). Fixed: uses
+   `observed_generation()` (prod `LifecycleRequest` is generation-fenced).
+2. `dispatch_into_recycling_supervisor`: route dispatch / idle drain injected while
+   `recycle_inflight`. Fixed: `dispatch_route_prompt_with` defers while inflight (prod
+   route paths wait for settle); fuzz precondition: idle tick cannot run mid-own-execve.
+3. `stale_generation_prove_dispatch_accepted_mutated_route`: a dispatch proof observed
+   at gen N proved the gen N+1 receipt. Fixed: proof must match receipt generation.
+   (netadv4 F3 test now searches the corpus instead of pinning seed 8.)
+4. `committed_response_count_exceeds_distinct_captures`: was a generator artifact
+   (DuplicateVisibleResponse with no/an earlier visible response); precondition now
+   requires the duplicated response to be the last exchange block. An adjacent
+   duplicate is never committed (seed guards it).
+5. Oracle bug (not product): liveness flagged a consumed request followed by a bare
+   `MarkSupervisorBinaryStale`; consumption now resets the obligation.
+
+NEW, open (allow-listed, needs the sibling F1 fix to cover it):
+- `stale_actor_lifecycle_overwrote_local_transition`: a lifecycle/heartbeat report
+  sent BEFORE a controller-side transition that keeps the generation (session restart
+  -> Starting, socket death -> Dead, admin reap -> Closed) lands after it and resurrects
+  Ready; the next dispatch types into a starting/dead pane. Shrunk:
+  `profile hostile / step SupervisorReady @904 / step AbandonSupervisorToDeadSocket`.
+  A per-generation report sequence alone does not order against controller-local
+  transitions; those must bump the generation or advance the fence.
 
 ## Status
-Milestone 0: started.
+Milestone 1 committed (explorer, oracles, shrinker, seeds, make sim-fuzz).
+In progress: 15-min long budget; then `make check` with explicit exit capture.

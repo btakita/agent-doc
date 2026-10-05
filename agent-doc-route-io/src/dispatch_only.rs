@@ -34,22 +34,23 @@ use crate::dispatch_recovery::{
 use crate::dispatch_target::register_dispatch_target;
 use crate::launch_contract::reapply_codex_launch_contract_before_reuse;
 use crate::restart_handoff::wait_for_busy_restart_handoff;
-use crate::startup_ready::{pane_composer_draft, wait_for_agent_ready_outcome};
+use crate::startup_ready::{pane_composer_projection, wait_for_agent_ready_outcome};
 use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
-    AuthoritativeActorDispatchIntent, BusyPaneAutoFixOutcome, DirectPaneSubmitPolicy,
-    DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyReadyProbeResolutionFacts,
-    DispatchOnlyReopenDelivery, DispatchOnlyRouteCycleStamp,
+    AgentAddressedComposerRefusalFacts, AuthoritativeActorDispatchIntent, BusyPaneAutoFixOutcome,
+    DirectPaneSubmitPolicy, DispatchOnlyBlockerRecoveryHintFacts,
+    DispatchOnlyReadyProbeResolutionFacts, DispatchOnlyReopenDelivery, DispatchOnlyRouteCycleStamp,
     DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneDraftMessageFacts,
     DispatchOnlyStartingPaneNotReadyMessageFacts, RoutedReopenGuardReason, StartingPaneBlocker,
-    classify_direct_pane_submit_policy, dispatch_only_blocked_guard_reason,
-    dispatch_only_blocker_recovery_hint, dispatch_only_effective_ready_probe_required,
-    dispatch_only_route_cycle_owns_input, dispatch_only_route_superseded_by_new_cycle,
-    dispatch_only_should_print_unproven_progress, dispatch_only_starting_pane_actor_settled,
-    dispatch_only_starting_pane_draft_message, dispatch_only_starting_pane_not_ready_message,
-    prompt_ready_barrier_failed_event, routed_admission_timeout_with_client_deadline,
+    agent_addressed_composer_refusal_message, classify_direct_pane_submit_policy,
+    dispatch_only_blocked_guard_reason, dispatch_only_blocker_recovery_hint,
+    dispatch_only_effective_ready_probe_required, dispatch_only_route_cycle_owns_input,
+    dispatch_only_route_superseded_by_new_cycle, dispatch_only_should_print_unproven_progress,
+    dispatch_only_starting_pane_actor_settled, dispatch_only_starting_pane_draft_message,
+    dispatch_only_starting_pane_not_ready_message, prompt_ready_barrier_failed_event,
+    routed_admission_timeout_with_client_deadline,
 };
-use agent_doc_harness::HarnessConfig;
+use agent_doc_harness::{HarnessConfig, PaneComposerProjection};
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
 use agent_doc_supervisor::startup_miss::StartingPaneRecoveryTarget;
 
@@ -76,8 +77,19 @@ fn remaining_ready_wait(deadline: Instant, now: Instant) -> Duration {
     deadline.saturating_duration_since(now)
 }
 
-fn dispatch_only_starting_pane_blocker(draft: Option<&str>, trigger: &str) -> StartingPaneBlocker {
-    StartingPaneBlocker::from_composer_draft_for_trigger(draft, Some(trigger))
+fn dispatch_only_starting_pane_blocker(
+    projection: &PaneComposerProjection,
+    trigger: &str,
+) -> StartingPaneBlocker {
+    match projection {
+        PaneComposerProjection::OperatorDraft { preview } => {
+            StartingPaneBlocker::from_composer_draft_for_trigger(Some(preview), Some(trigger))
+        }
+        PaneComposerProjection::AgentAddressed { .. } => StartingPaneBlocker::AgentAddressed,
+        PaneComposerProjection::ReadyEmpty { .. }
+        | PaneComposerProjection::Busy
+        | PaneComposerProjection::Absent => StartingPaneBlocker::Booting,
+    }
 }
 
 /// Run the one-shot recovery effect in causal order: submit the already-typed
@@ -486,17 +498,12 @@ pub fn dispatch_only_send_reopen(
             // signal that tells them apart and reports every autosuggest hint as an
             // operator draft. Prompt parsing strips ANSI per line itself
             // (`last_prompt_candidate`), so the candidate is unchanged either way.
-            if let Some(draft_preview) =
+            if let Ok(content) =
                 agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)
-                    .ok()
-                    .and_then(|content| {
-                        pane_composer_draft(tmux, &dispatch_pane, &content, harness)
-                    })
             {
-                match dispatch_only_starting_pane_blocker(
-                    Some(draft_preview.as_str()),
-                    &route_trigger,
-                ) {
+                let projection =
+                    pane_composer_projection(tmux, &dispatch_pane, &content, harness);
+                match dispatch_only_starting_pane_blocker(&projection, &route_trigger) {
                     StartingPaneBlocker::StrandedTrigger => {
                         if dispatch_only_cycle_owns_pane_input(
                             file,
@@ -518,6 +525,9 @@ pub fn dispatch_only_send_reopen(
                         return Ok(dispatch_pane);
                     }
                     StartingPaneBlocker::OperatorDraft => {
+                        let PaneComposerProjection::OperatorDraft { preview } = &projection else {
+                            unreachable!("operator-draft blocker requires operator-draft projection")
+                        };
                         agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
@@ -536,13 +546,42 @@ pub fn dispatch_only_send_reopen(
                                 harness_binary: &harness.binary,
                                 pane: &dispatch_pane,
                                 file_display: &file.display().to_string(),
-                                draft_preview: &draft_preview,
+                                draft_preview: preview,
+                                outcome_fields: &outcome_fields,
+                            },
+                        ));
+                    }
+                    StartingPaneBlocker::AgentAddressed => {
+                        let PaneComposerProjection::AgentAddressed { target } = &projection else {
+                            unreachable!("agent-addressed blocker requires addressed projection")
+                        };
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome=agent_addressed target={}",
+                                file.display(),
+                                dispatch_pane,
+                                harness.binary,
+                                target,
+                            ),
+                        );
+                        let outcome_fields =
+                            agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+                                StartingPaneBlocker::AgentAddressed.unblocker(),
+                            );
+                        anyhow::bail!(agent_addressed_composer_refusal_message(
+                            AgentAddressedComposerRefusalFacts {
+                                harness_binary: &harness.binary,
+                                pane: &dispatch_pane,
+                                file_display: &file.display().to_string(),
+                                target,
                                 outcome_fields: &outcome_fields,
                             },
                         ));
                     }
                     StartingPaneBlocker::Booting => {
-                        unreachable!("a captured composer draft cannot classify as a booting pane")
+                        // Ready, busy, and absent projections continue through the
+                        // existing readiness observation below.
                     }
                 }
             }
@@ -643,25 +682,27 @@ pub fn dispatch_only_send_reopen(
             // real unblocker instead (#panedraftunblocker).
             // Escapes preserved for the same reason as the pre-ready check above:
             // dim/faint styling is what separates a ghost hint from real input.
-            let draft = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)
+            let projection = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)
                 .ok()
-                .and_then(|content| pane_composer_draft(tmux, &dispatch_pane, &content, harness));
+                .map(|content| pane_composer_projection(tmux, &dispatch_pane, &content, harness));
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={} composer_draft={}",
+                    "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={} composer_state={:?}",
                     file.display(),
                     dispatch_pane,
                     harness.binary,
                     detail,
-                    draft.is_some()
+                    projection
                 ),
             );
             let file_display = file.display().to_string();
-            let blocker = dispatch_only_starting_pane_blocker(draft.as_deref(), &route_trigger);
+            let blocker = projection.as_ref().map_or(StartingPaneBlocker::Booting, |projection| {
+                dispatch_only_starting_pane_blocker(projection, &route_trigger)
+            });
             let outcome_fields =
                 agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(blocker.unblocker());
-            match (blocker, draft.as_deref()) {
+            match (blocker, projection.as_ref()) {
                 (StartingPaneBlocker::StrandedTrigger, Some(_)) => {
                     if dispatch_only_cycle_owns_pane_input(
                         file,
@@ -682,13 +723,32 @@ pub fn dispatch_only_send_reopen(
                     )?;
                     return Ok(dispatch_pane);
                 }
-                (StartingPaneBlocker::OperatorDraft, Some(draft_preview)) => {
+                (
+                    StartingPaneBlocker::OperatorDraft,
+                    Some(PaneComposerProjection::OperatorDraft {
+                        preview: draft_preview,
+                    }),
+                ) => {
                     anyhow::bail!(dispatch_only_starting_pane_draft_message(
                         DispatchOnlyStartingPaneDraftMessageFacts {
                             harness_binary: &harness.binary,
                             pane: &dispatch_pane,
                             file_display: &file_display,
                             draft_preview,
+                            outcome_fields: &outcome_fields,
+                        },
+                    ));
+                }
+                (
+                    StartingPaneBlocker::AgentAddressed,
+                    Some(PaneComposerProjection::AgentAddressed { target }),
+                ) => {
+                    anyhow::bail!(agent_addressed_composer_refusal_message(
+                        AgentAddressedComposerRefusalFacts {
+                            harness_binary: &harness.binary,
+                            pane: &dispatch_pane,
+                            file_display: &file_display,
+                            target,
                             outcome_fields: &outcome_fields,
                         },
                     ));
@@ -710,9 +770,31 @@ pub fn dispatch_only_send_reopen(
         return Ok(dispatch_pane);
     }
 
+    // This final capture is the fail-closed transport fence for every delivery
+    // mode, including paths that did not require the startup-ready wait above.
+    // An addressed Claude composer would accept the bytes but silently deliver
+    // them to the wrong agent, so it must never reach either submit adapter.
+    let pre_submit_content = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)?;
+    let pre_submit_projection =
+        pane_composer_projection(tmux, &dispatch_pane, &pre_submit_content, harness);
+    if let PaneComposerProjection::AgentAddressed { target } = pre_submit_projection {
+        let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+            StartingPaneBlocker::AgentAddressed.unblocker(),
+        );
+        anyhow::bail!(agent_addressed_composer_refusal_message(
+            AgentAddressedComposerRefusalFacts {
+                harness_binary: &harness.binary,
+                pane: &dispatch_pane,
+                file_display: &file.display().to_string(),
+                target: &target,
+                outcome_fields: &outcome_fields,
+            },
+        ));
+    }
+
     // Escapes preserved for the same reason as the recognized-blocker probe above.
-    if let Ok(content) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)
-        && let Some(reason) = agent_doc_harness::dispatch_only_blocker_reason(harness, &content)
+    if let Some(reason) =
+        agent_doc_harness::dispatch_only_blocker_reason(harness, &pre_submit_content)
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1389,7 +1471,10 @@ mod tests {
             .map(|(production, _)| production)
             .expect("dispatch_only.rs must keep its tests behind #[cfg(test)]");
         for (probe, context) in [
-            ("pane_composer_draft(tmux, &dispatch_pane", "composer draft"),
+            (
+                "pane_composer_projection(tmux, &dispatch_pane",
+                "typed composer classification",
+            ),
             (
                 "agent_doc_harness::dispatch_only_blocker_reason(harness,",
                 "blocker reason",
@@ -1477,19 +1562,48 @@ mod tests {
         let trigger = "agent-doc tasks/sample.md";
 
         assert_eq!(
-            dispatch_only_starting_pane_blocker(Some("›\u{a0}agent-doc tasks/sample.md"), trigger,),
+            dispatch_only_starting_pane_blocker(
+                &PaneComposerProjection::OperatorDraft {
+                    preview: "›\u{a0}agent-doc tasks/sample.md".to_string(),
+                },
+                trigger,
+            ),
             StartingPaneBlocker::StrandedTrigger,
         );
         assert_eq!(
             dispatch_only_starting_pane_blocker(
-                Some("❯ agent-doc tasks/sample.md please continue"),
+                &PaneComposerProjection::OperatorDraft {
+                    preview: "❯ agent-doc tasks/sample.md please continue".to_string(),
+                },
                 trigger,
             ),
             StartingPaneBlocker::OperatorDraft,
         );
         assert_eq!(
-            dispatch_only_starting_pane_blocker(Some("❯ agent-doc tasks/other.md"), trigger,),
+            dispatch_only_starting_pane_blocker(
+                &PaneComposerProjection::OperatorDraft {
+                    preview: "❯ agent-doc tasks/other.md".to_string(),
+                },
+                trigger,
+            ),
             StartingPaneBlocker::OperatorDraft,
+        );
+    }
+
+    #[test]
+    fn agent_addressing_is_a_terminal_misdelivery_blocker_not_a_draft() {
+        assert_eq!(
+            dispatch_only_starting_pane_blocker(
+                &PaneComposerProjection::AgentAddressed {
+                    target: "@general-purpose".to_string(),
+                },
+                "agent-doc tasks/sample.md",
+            ),
+            StartingPaneBlocker::AgentAddressed,
+        );
+        assert_eq!(
+            StartingPaneBlocker::AgentAddressed.unblocker(),
+            "clear_pane_agent_addressing",
         );
     }
 

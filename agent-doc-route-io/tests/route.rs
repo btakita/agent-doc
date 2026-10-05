@@ -3874,7 +3874,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_only_checks_operator_draft_before_spending_ready_budget() {
+    fn dispatch_only_checks_typed_composer_blockers_before_spending_ready_budget() {
         let source = include_str!("../src/dispatch_only.rs");
         let ready_loop = source
             .split_once("let ready_deadline = Instant::now() + ready_timeout;")
@@ -3883,15 +3883,42 @@ mod tests {
             .split_once("let recovery_remaining")
             .unwrap()
             .0;
-        let draft_probe = ready_loop
-            .find("pane_composer_draft")
-            .expect("operator draft probe");
+        let composer_probe = ready_loop
+            .find("pane_composer_projection")
+            .expect("typed composer projection");
         let blocking_wait = ready_loop
             .find("wait_for_agent_ready_outcome")
             .expect("ready wait");
         assert!(
-            draft_probe < blocking_wait,
-            "a visible draft is terminal and must fail before the bounded ready wait"
+            composer_probe < blocking_wait,
+            "a visible draft or agent-addressed composer is terminal and must fail before the bounded ready wait"
+        );
+
+        let final_capture = source
+            .find("let pre_submit_content = agent_doc_tmux_io::capture_pane_with_ansi")
+            .expect("fail-closed pre-submit composer capture");
+        let addressing_fence = source[final_capture..]
+            .find("PaneComposerProjection::AgentAddressed")
+            .map(|offset| final_capture + offset)
+            .expect("agent-addressed pre-submit fence");
+        let transport = source
+            .find("let dispatch_start = match delivery")
+            .expect("dispatch transport boundary");
+        assert!(
+            final_capture < addressing_fence && addressing_fence < transport,
+            "every delivery mode must classify and reject agent addressing before transport"
+        );
+
+        let direct_source = include_str!("../src/direct_pane_dispatch.rs");
+        let direct_projection = direct_source
+            .find("PaneComposerProjection::AgentAddressed")
+            .expect("direct-pane agent-addressed projection fence");
+        let direct_transport = direct_source
+            .find("let trigger = send_command_once_unchecked")
+            .expect("direct-pane transport boundary");
+        assert!(
+            direct_projection < direct_transport,
+            "ordinary direct-pane routes must reject agent addressing before transport"
         );
     }
 }

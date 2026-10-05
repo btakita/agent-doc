@@ -45,16 +45,27 @@ pub fn pane_ready_prompt_candidate(
     content: &str,
     harness: &HarnessConfig,
 ) -> Option<PaneComposerReadinessEvidence> {
-    match agent_doc_harness::project_pane_composer_at_cursor(
-        content,
-        harness,
-        agent_doc_tmux_io::pane_cursor_y(tmux, pane_id),
-    ) {
+    match pane_composer_projection(tmux, pane_id, content, harness) {
         PaneComposerProjection::ReadyEmpty { evidence } => Some(evidence),
         PaneComposerProjection::OperatorDraft { .. }
+        | PaneComposerProjection::AgentAddressed { .. }
         | PaneComposerProjection::Busy
         | PaneComposerProjection::Absent => None,
     }
+}
+
+/// Classify one captured pane through the shared cursor-scoped composer policy.
+pub fn pane_composer_projection(
+    tmux: &Tmux,
+    pane_id: &str,
+    content: &str,
+    harness: &HarnessConfig,
+) -> PaneComposerProjection {
+    agent_doc_harness::project_pane_composer_at_cursor(
+        content,
+        harness,
+        agent_doc_tmux_io::pane_cursor_y(tmux, pane_id),
+    )
 }
 
 /// Detect an operator-owned composer draft using the same cursor-scoped prompt
@@ -65,13 +76,10 @@ pub fn pane_composer_draft(
     content: &str,
     harness: &HarnessConfig,
 ) -> Option<String> {
-    match agent_doc_harness::project_pane_composer_at_cursor(
-        content,
-        harness,
-        agent_doc_tmux_io::pane_cursor_y(tmux, pane_id),
-    ) {
+    match pane_composer_projection(tmux, pane_id, content, harness) {
         PaneComposerProjection::OperatorDraft { preview } => Some(preview),
         PaneComposerProjection::ReadyEmpty { .. }
+        | PaneComposerProjection::AgentAddressed { .. }
         | PaneComposerProjection::Busy
         | PaneComposerProjection::Absent => None,
     }

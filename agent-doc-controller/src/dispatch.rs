@@ -2144,6 +2144,9 @@ pub enum StartingPaneBlocker {
     Booting,
     /// The composer holds unsent operator input. Waiting never resolves it.
     OperatorDraft,
+    /// Claude's composer is empty but addressed to a subagent. Injecting would
+    /// silently deliver the session trigger to that subagent.
+    AgentAddressed,
     /// The composer holds agent-doc's OWN trigger, never submitted
     /// (`#dispatchonlystrandedtrigger`). Not operator input, so telling the
     /// operator to "submit or clear that draft" asks them to finish agent-doc's
@@ -2195,6 +2198,7 @@ impl StartingPaneBlocker {
     pub fn unblocker(self) -> &'static str {
         match self {
             Self::OperatorDraft => "submit_or_clear_pane_draft",
+            Self::AgentAddressed => "clear_pane_agent_addressing",
             Self::StrandedTrigger => "resubmit_stranded_trigger",
             Self::Booting => "wait_for_dispatch_ready_prompt",
         }
@@ -2239,6 +2243,29 @@ pub fn dispatch_only_starting_pane_draft_message(
         facts.file_display,
         facts.draft_preview,
         facts.outcome_fields
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentAddressedComposerRefusalFacts<'a> {
+    pub harness_binary: &'a str,
+    pub pane: &'a str,
+    pub file_display: &'a str,
+    pub target: &'a str,
+    pub outcome_fields: &'a str,
+}
+
+pub fn agent_addressed_composer_refusal_message(
+    facts: AgentAddressedComposerRefusalFacts<'_>,
+) -> String {
+    format!(
+        "{} route refused to inject into pane {} for {} because the empty composer is addressed to subagent {}; injecting would deliver the session trigger to that subagent instead of the session. Clear the {} addressing so the composer targets the session, then reroute {}",
+        facts.harness_binary,
+        facts.pane,
+        facts.file_display,
+        facts.target,
+        facts.target,
+        facts.outcome_fields,
     )
 }
 
@@ -5515,6 +5542,28 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         // The misleading boot-wait wording must not survive on this path.
         assert!(!drafted.contains("still booting"));
         assert!(!drafted.contains("unblocker=wait_for_dispatch_ready_prompt"));
+    }
+
+    #[test]
+    fn agent_addressed_refusal_names_the_misdelivery_and_exact_unblocker() {
+        let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+            StartingPaneBlocker::AgentAddressed.unblocker(),
+        );
+        let refused =
+            agent_addressed_composer_refusal_message(AgentAddressedComposerRefusalFacts {
+                harness_binary: "claude",
+                pane: "%38",
+                file_display: "tasks/sample.md",
+                target: "@general-purpose",
+                outcome_fields: &outcome_fields,
+            });
+
+        assert!(refused.contains("empty composer is addressed to subagent @general-purpose"));
+        assert!(refused.contains("deliver the session trigger to that subagent"));
+        assert!(refused.contains("Clear the @general-purpose addressing"));
+        assert!(refused.contains("unblocker=clear_pane_agent_addressing"));
+        assert!(!refused.contains("unsent operator input"));
+        assert!(!refused.contains("submit_or_clear_pane_draft"));
     }
 
     #[test]

@@ -1367,7 +1367,9 @@ impl HarnessConfig {
                 PaneComposerProjection::OperatorDraft { preview } => {
                     Some(format!("│ ❯ {preview} │"))
                 }
-                PaneComposerProjection::Busy | PaneComposerProjection::Absent => None,
+                PaneComposerProjection::AgentAddressed { .. }
+                | PaneComposerProjection::Busy
+                | PaneComposerProjection::Absent => None,
             };
         }
         let output = if self.binary == "codex" {
@@ -1497,6 +1499,12 @@ pub enum PaneComposerProjection {
     OperatorDraft {
         preview: String,
     },
+    /// Claude's empty composer is targeting a subagent. This is chrome, not an
+    /// operator draft, but it is never safe for a session-level route submit:
+    /// Claude would deliver the injected trigger to the addressed subagent.
+    AgentAddressed {
+        target: String,
+    },
     Busy,
     Absent,
 }
@@ -1590,6 +1598,16 @@ pub fn project_pane_composer(content: &str, harness: &HarnessConfig) -> PaneComp
         };
     }
     let latest_prompt_candidate = harness.last_prompt_candidate(content);
+    let latest_agent_addressed_target = (harness.binary == "claude")
+        .then(|| {
+            latest_prompt_candidate
+                .as_deref()
+                .and_then(claude_agent_addressed_target)
+        })
+        .flatten();
+    if let Some(target) = latest_agent_addressed_target {
+        return PaneComposerProjection::AgentAddressed { target };
+    }
     let latest_prompt_is_dim_placeholder =
         latest_prompt_candidate.as_deref().is_some_and(|candidate| {
             harness.is_prompt_line(candidate)
@@ -1666,6 +1684,7 @@ pub fn pane_composer_draft(harness: &HarnessConfig, content: &str) -> Option<Str
     match project_pane_composer(content, harness) {
         PaneComposerProjection::OperatorDraft { preview } => Some(preview),
         PaneComposerProjection::ReadyEmpty { .. }
+        | PaneComposerProjection::AgentAddressed { .. }
         | PaneComposerProjection::Busy
         | PaneComposerProjection::Absent => None,
     }
@@ -1729,6 +1748,7 @@ pub fn pane_composer_draft_at_cursor(
     match project_pane_composer_at_cursor(content, harness, cursor_y) {
         PaneComposerProjection::OperatorDraft { preview } => Some(preview),
         PaneComposerProjection::ReadyEmpty { .. }
+        | PaneComposerProjection::AgentAddressed { .. }
         | PaneComposerProjection::Busy
         | PaneComposerProjection::Absent => None,
     }
@@ -1770,6 +1790,7 @@ pub fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<
     match project_pane_composer(content, harness) {
         PaneComposerProjection::ReadyEmpty { evidence } => Some(evidence.compatibility_candidate()),
         PaneComposerProjection::OperatorDraft { .. }
+        | PaneComposerProjection::AgentAddressed { .. }
         | PaneComposerProjection::Busy
         | PaneComposerProjection::Absent => None,
     }
@@ -1788,6 +1809,7 @@ pub fn ready_prompt_candidate_at_cursor(
     match project_pane_composer_at_cursor(content, harness, cursor_y) {
         PaneComposerProjection::ReadyEmpty { evidence } => Some(evidence.compatibility_candidate()),
         PaneComposerProjection::OperatorDraft { .. }
+        | PaneComposerProjection::AgentAddressed { .. }
         | PaneComposerProjection::Busy
         | PaneComposerProjection::Absent => None,
     }
@@ -1854,6 +1876,29 @@ fn is_claude_idle_placeholder_prompt(trimmed: &str) -> bool {
         return false;
     };
     PLACEHOLDERS.contains(&rest.trim())
+}
+
+/// Return the addressed subagent from Claude's empty-composer placeholder.
+///
+/// This intentionally recognizes only Claude's rendered chrome shape: prompt
+/// glyph, whitespace (including U+00A0), `Message @`, a single non-whitespace
+/// target, and a trailing ellipsis. Arbitrary operator prose remains a draft.
+fn claude_agent_addressed_target(line: &str) -> Option<String> {
+    let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
+    let trimmed = stripped.trim();
+    let after_prompt = trimmed.strip_prefix('❯')?;
+    let after_spacing = after_prompt.trim_start_matches(char::is_whitespace);
+    if after_spacing.len() == after_prompt.len() {
+        return None;
+    }
+    let addressed = after_spacing.strip_prefix("Message @")?;
+    let target = addressed
+        .strip_suffix('…')
+        .or_else(|| addressed.strip_suffix("..."))?;
+    if target.is_empty() || target.chars().any(char::is_whitespace) {
+        return None;
+    }
+    Some(format!("@{target}"))
 }
 
 /// True for the box-drawing rules Claude Code renders above and below the
@@ -2818,6 +2863,49 @@ mod tests {
             pane_composer_draft(&codex, "› |\n  gpt-5.6-sol xhigh · Context 7% used\n"),
             None
         );
+    }
+
+    #[test]
+    fn claude_agent_addressed_placeholders_are_chrome_not_operator_drafts() {
+        let h = HarnessConfig::claude();
+        for placeholder in [
+            "❯ Message @general-purpose…",
+            "❯\u{a0}Message @general-purpose…",
+            "❯\tMessage @explore...",
+            "\x1b[2m❯\u{a0}Message @plan…\x1b[22m",
+        ] {
+            let pane = format!("────────\n{placeholder}\n⏵⏵ bypass permissions on\n");
+            assert_eq!(
+                project_pane_composer(&pane, &h),
+                PaneComposerProjection::AgentAddressed {
+                    target: if placeholder.contains("@explore") {
+                        "@explore".to_string()
+                    } else if placeholder.contains("@plan") {
+                        "@plan".to_string()
+                    } else {
+                        "@general-purpose".to_string()
+                    },
+                },
+                "recognized addressed-composer chrome must remain a typed non-draft state: {placeholder:?}",
+            );
+            assert_eq!(pane_composer_draft(&h, &pane), None);
+            assert_eq!(ready_prompt_candidate(&pane, &h), None);
+        }
+    }
+
+    #[test]
+    fn claude_operator_text_that_only_resembles_addressing_remains_a_draft() {
+        let h = HarnessConfig::claude();
+        for typed in [
+            "❯ Message @general-purpose",
+            "❯ Message @general-purpose please review",
+            "❯ I sent a Message @general-purpose…",
+        ] {
+            assert!(matches!(
+                project_pane_composer(typed, &h),
+                PaneComposerProjection::OperatorDraft { .. }
+            ));
+        }
     }
 
     /// A *populated, dynamic* Claude autosuggest hint (dim SGR `2`) is an empty

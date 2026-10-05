@@ -5,11 +5,12 @@ use tmux_router::Tmux;
 
 pub use agent_doc_controller::dispatch::DirectPaneSubmitStatus as CommandDispatchStatus;
 use agent_doc_controller::dispatch::{
-    DeadHarnessShellDispatchFacts, DirectPaneAcceptancePollState,
-    DirectPaneEnterResubmitAttemptFacts, DirectPaneExistingDraftSubmitFacts,
-    DirectPaneResubmitProofFacts, DispatchInjectLogFacts, RouteLatencyFacts, RouteLatencyStatus,
-    RouteSubmitObservation, RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts,
-    RoutedDispatchStartProof, RoutedTriggerPayloadFacts,
+    AgentAddressedComposerRefusalFacts, DeadHarnessShellDispatchFacts,
+    DirectPaneAcceptancePollState, DirectPaneEnterResubmitAttemptFacts,
+    DirectPaneExistingDraftSubmitFacts, DirectPaneResubmitProofFacts, DispatchInjectLogFacts,
+    RouteLatencyFacts, RouteLatencyStatus, RouteSubmitObservation,
+    RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedDispatchStartProof,
+    RoutedTriggerPayloadFacts, StartingPaneBlocker, agent_addressed_composer_refusal_message,
     classify_dead_harness_shell_dispatch_block, direct_pane_acceptance_poll_status,
     direct_pane_can_continue_enter_resubmit, direct_pane_can_enter_existing_draft,
     direct_pane_fast_accept_on_processing, direct_pane_max_enter_resubmits,
@@ -20,7 +21,7 @@ use agent_doc_controller::dispatch::{
     route_trigger_visible_in_current_draft, routed_trigger_payload_rejection,
 };
 use agent_doc_controller_io::route_snapshot::RoutePaneSnapshot;
-use agent_doc_harness::{HarnessConfig, protected_prompt_draft_preview};
+use agent_doc_harness::{HarnessConfig, PaneComposerProjection, protected_prompt_draft_preview};
 use agent_doc_hash::short_content_hash;
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
 use agent_doc_tmux::pane_current_command_is_bare_shell;
@@ -510,6 +511,22 @@ pub fn send_command_unchecked(
         .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
     {
         Ok(captured) => {
+            if let PaneComposerProjection::AgentAddressed { target } =
+                crate::startup_ready::pane_composer_projection(tmux, pane, &captured, harness)
+            {
+                let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+                    StartingPaneBlocker::AgentAddressed.unblocker(),
+                );
+                anyhow::bail!(agent_addressed_composer_refusal_message(
+                    AgentAddressedComposerRefusalFacts {
+                        harness_binary: &harness.binary,
+                        pane,
+                        file_display: &file.display().to_string(),
+                        target: &target,
+                        outcome_fields: &outcome_fields,
+                    },
+                ));
+            }
             // Keep SGR attributes for protected-input classification: Codex uses
             // DIM to distinguish generated composer suggestions from operator
             // drafts. Diagnostics and trigger matching use the plain projection.

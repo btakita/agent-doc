@@ -588,6 +588,31 @@ Follow-ups the subagent left open:
 - `#netadv5`: stop timeouts being read as verdicts (R1 a 1s focus timeout kills a busy controller, R2 a slow attach drops the editor from the cut, R3 a slow connect deletes a live socket, R5, R6, R7, R8 duplicate prompt injection, R9 duplicate supervisor), plus tests that assert the round-trip count on hot paths.
 
 `netadv4` and `netadv7` are still running. The handoff doc stays current at each step (latest `641939ecdf`), and every worktree keeps a committed `HANDOFF.md`, so Codex can resume at any point.
+
+### Re: batch integrated, installed, pushed — opus-5-5 · 2026-10-05T01:09-04:00
+
+> **Queue prompt:**
+>
+> do [#jbstagefallback]
+>
+> do [#netadv1]
+>
+> do [#netadv2]
+
+
+> **Queue prompt:** The alt+shift agent-doc menu is not coming up.
+
+Fixed and installed. Commit `ab3e68a3a` (GH #116, plugin 0.2.485) moved the Agent Doc Actions popup from Alt+Space to Ctrl+Shift+Alt+D in every keymap, which broke the key you had been using on Linux/X. Alt+Space is now back on the XWin keymap, alongside Ctrl+Shift+Alt+D. GNOME, KDE, Windows and macOS keep only Ctrl+Shift+Alt+D. Plugin 0.2.496 is installed. **Please check in the IDE:** in a `.md` editor, both Alt+Space and Ctrl+Shift+Alt+D should open the popup, and the XWin binding may need an IDE restart rather than a hot reload. If you meant some other key by "alt+shift", say so and I'll reopen this.
+
+**Integrated into agent-doc `main` @ `8c3e97beb` (pushed):**
+- `#jbstagefallback`: the unguarded `installAfterRestart` fallback is now refused and reports restart-required. **Done.**
+- alt+shift (Alt+Space) popup fix, above.
+- GH #136: the stale-supervisor recycle request never expires; a pure `stale_focus_admission` never widens, never promotes an overdue pane and never displaces a live turn; the layout receipt carries `gated_documents`; `StaleColumnRecycle.tla` has 5 wedges. The head stays claimed until the release, and then the issue closes (`#gh-fix` = fix then close on release). The fix's open follow-ups are now `#gh136follow`.
+- `#netadv1` network channel audit, and `#netadv2` `NetChannel.tla`. **Done.**
+
+**Verification:** `make check` on the merged branch exited 0, with nextest 11,027 passed / 265 skipped and every TLA+ model and broken variant behaving as required. `make install` from the tested worktree exited 0. I deliberately built from the worktree so the other session's uncommitted `agent-doc-start-runtime-io` edit in the main checkout stays out of the binary. The JetBrains plugin is 0.2.496. The library reload reached 0 of 1 editor endpoints because that endpoint was unavailable. The superproject submodule bump is `8ee08fd571`.
+
+**Still running:** `netadv3` (models over NetChannel plus one-shot fixes F1–F23 plus SIM-F1/F2), `netadv5` (timeout-as-verdict fixes plus round-trip budgets plus SIM-F3), `netadv6` (simulation fuzzing) and `netadv7` (cargo-fuzz). `netadv4` is done but not merged yet; it goes in with the next batch. The release waits for that batch.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -597,11 +622,11 @@ Follow-ups the subagent left open:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#jbstagefallback]
+- ~~do [#jbstagefallback]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.
 - The alt+shift agent-doc menu is not coming up.
-- do [#netadv1]
-- do [#netadv2]
+- ~~do [#netadv1]~~
+- ~~do [#netadv2]~~
 - do [#netadv3]
 - do [#netadv4]
 - do [#netadv5]
@@ -613,15 +638,13 @@ Follow-ups the subagent left open:
 
 
 <!-- agent:backlog priority -->
+- [ ] [#gh136follow] [agent-doc] GH 136 follow-ups the fix left open: (a) enforce columns <= observed_panes for ALL layout publishers, including editor_surface; (b) investigate the 60s focus settle and the superseded gen-reset race on 1061.md; (c) a one-time recycle path for supervisors already stale on old code; (d) republish the layout when a recycle completes; (e) bound stale panes in non-stash windows. Context: tasks/agent-doc/handoff-2026-10-05-codex.md
 - [ ] [#codexhandoff] [agent-doc] Codex pickup of the 2026-10-05 Claude subagent batch: read tasks/agent-doc/handoff-2026-10-05-codex.md. Step 0: confirm no Claude subagent is still writing (pgrep -x claude; git log -1 in each worktree), then agent-doc queue release the claims you take over. Resume gh136/netadv1/netadv2/netadv4/netadv7 from each worktree's HANDOFF.md under ~/work/btakita/agent-doc-wt/, then the held netadv3/5/6, integrate serially into batch-0505, make check, one make install, then release + publish.
-- [ ] [#netadv1] [agent-doc][formal] Channel-assumption audit: for each TLA+ model in formal/tla/ and each IPC protocol, record channel assumption (atomic/FIFO/reliable/lossy), timeouts on the correctness path, and serial round-trip count; rank timing-dependent protocols. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
-- [ ] [#netadv2] [agent-doc][formal] Shared adversarial NetChannel.tla (deliver/drop/duplicate/reconnect + fair variant) with Wedge cfgs proving it catches a known timing bug. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv3] [agent-doc][formal] Re-check hot-path models (VisibleDeliveryReceipt, EditorReplicaStrand, PassiveTmuxSync, RecycleSettleDispatch, AgentDocCloseout, GH 136 layout/recycle) over NetChannel; fix every counterexample with SimWorld replay coverage. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv4] [agent-doc][simworld] Seeded network-conditions layer for SimWorld (latency, jitter, reorder, drop, duplicate, reconnect) with a Coder+Zscaler profile, run under make check. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv5] [agent-doc] Latency budget enforcement: per hot path (focus/layout projection, response delivery, closeout ACK) assert serial round-trip count; replace fixed sleeps/settle windows on correctness paths with ack-driven transitions. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv6] [agent-doc][simworld] Deterministic simulation fuzzing: seeded explorer over SimWorld (interleavings, network faults, edits, recycles, crashes, reconnects) checking TLA-derived invariant oracles each step; shrink failing seeds into committed regression seeds; short budget in make check, long nightly CI run. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv7] [agent-doc] Coverage-guided fuzzing: cargo-fuzz targets for IPC wire decode, markdown component/patch parsers, frontmatter, CRDT op decode (no-panic + lossless round-trip oracles; corpus seeded from redacted real logs); extend proptest to model-based tests of the pure transition functions the TLA models describe. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
-- [ ] [#jbstagefallback] [agent-doc][jetbrains] Follow-up to jbstagebackup: when IntelliJ's ActionCommand classes cannot be built, JetBrainsPluginUpgradeAction falls back to PluginInstaller.installAfterRestart, which still writes the unguarded delete-then-unzip order. Guard that fallback too (refuse it and report restart-required, or write the probe-unzip block another way), with a regression test.
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

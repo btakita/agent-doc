@@ -2749,9 +2749,8 @@ pub struct ControllerBootstrap {
 
 #[derive(Debug)]
 struct ControllerMemoryState {
-    state_ledger: agent_doc_state_backbone::EventLedger,
     /// Durable high-water captured from the exact rows folded into
-    /// `state_ledger`. This must travel with the in-memory snapshot: reading a
+    /// `state_projection`. This must travel with the in-memory snapshot: reading a
     /// later SQLite MAX could acknowledge a concurrently appended event that
     /// the outgoing graph does not contain.
     state_document_versions: BTreeMap<String, u64>,
@@ -2761,12 +2760,10 @@ struct ControllerMemoryState {
 
 impl ControllerMemoryState {
     fn load(project_root: &Path) -> Result<(Self, ControllerActorStore)> {
-        let (state_ledger, state_document_versions) =
-            load_state_event_ledger_with_versions(project_root)?;
-        let state_projection = state_ledger.project();
+        let (state_projection, state_document_versions) =
+            load_compact_state_projection_with_versions(project_root)?;
         Ok((
             Self {
-                state_ledger,
                 state_document_versions,
                 state_projection,
                 map_backend: "std_btree_map",
@@ -7358,8 +7355,15 @@ impl ControllerRuntime {
         let document_hash = event.fact.document_hash().to_string();
         let (recycle, document_projection) = {
             let mut memory = self.memory.lock();
-            memory.state_ledger.append(event.clone());
-            memory.state_projection.apply(event);
+            // SQLite accepted the unique event id before this transition. Keep
+            // only the current projection and epoch in the process: the durable
+            // store, not controller RSS, owns historical replay (GH #141).
+            memory.state_projection.apply_durable_unique(event);
+            memory
+                .state_document_versions
+                .entry(document_hash.clone())
+                .and_modify(|epoch| *epoch = epoch.saturating_add(1))
+                .or_insert(1);
             let document_projection = memory.state_projection.document(&document_hash).cloned();
             (
                 memory.state_projection.project_supervisor_recycle(),
@@ -7713,13 +7717,19 @@ impl ControllerRuntime {
         last_epoch: u64,
     ) -> Result<(agent_doc_state_wire::WireSubscribe, u64)> {
         let memory = self.memory.lock();
+        let current_epoch = memory
+            .state_document_versions
+            .get(document_hash)
+            .copied()
+            .unwrap_or(0);
         Ok((
-            agent_doc_state_wire::subscribe(&memory.state_ledger, document_hash, last_epoch),
-            memory
-                .state_document_versions
-                .get(document_hash)
-                .copied()
-                .unwrap_or(0),
+            agent_doc_state_wire::subscribe_projection(
+                &memory.state_projection,
+                document_hash,
+                current_epoch,
+                last_epoch,
+            ),
+            current_epoch,
         ))
     }
 
@@ -8951,6 +8961,39 @@ fn load_state_event_ledger_with_versions(
     Ok((ledger, document_versions))
 }
 
+/// Hydrate the controller's hot projection without retaining the durable event
+/// history a second time in process memory.
+///
+/// `state_events.event_id` is unique, so rows loaded from SQLite are already an
+/// accepted stream and can use `apply_durable_unique`. The per-document durable
+/// version is also the subscription epoch. This keeps controller memory bounded
+/// by current document state rather than controller age (GH #141).
+fn load_compact_state_projection_with_versions(
+    project_root: &Path,
+) -> Result<(
+    agent_doc_state_backbone::StateBackboneProjection,
+    BTreeMap<String, u64>,
+)> {
+    let conn = open_state_db(project_root)?;
+    let mut projection = agent_doc_state_backbone::StateBackboneProjection::default();
+    let mut document_versions: BTreeMap<String, u64> = BTreeMap::new();
+    for row in load_state_events_from_db(&conn, None)? {
+        document_versions
+            .entry(row.document_hash.clone())
+            .and_modify(|version| *version = (*version).max(row.document_version))
+            .or_insert(row.document_version);
+        let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
+            .with_context(|| {
+            format!(
+                "parse state backbone event {} from controller state",
+                row.event_id
+            )
+        })?;
+        projection.apply_durable_unique(&event);
+    }
+    Ok((projection, document_versions))
+}
+
 pub fn load_state_backbone_projection(
     project_root: &Path,
 ) -> Result<agent_doc_state_backbone::StateBackboneProjection> {
@@ -9222,7 +9265,29 @@ pub fn close_stale_starting_actors(
 /// use the same liveness backend they already trust for actor diagnostics.
 pub fn close_stale_dead_pane_actors_for_caller<F>(
     project_root: &Path,
+    pane_alive: F,
+    dry_run: bool,
+    caller: &str,
+    reason: &str,
+) -> Result<(usize, usize)>
+where
+    F: FnMut(&str) -> bool,
+{
+    close_stale_or_idle_actors_for_caller(project_root, pane_alive, None, dry_run, caller, reason)
+}
+
+/// Close non-`Closed` actor records whose pane is dead or whose document has
+/// been inactive longer than `idle_for`.
+///
+/// Activity is the newer of the actor's last state transition and the session
+/// document's last modification. The explicit idle threshold is an operator
+/// policy: unlike automatic GC, it may reclaim a still-live parked pane. A
+/// single sweep owns both predicates so summary counts never double-count an
+/// actor that is both old and dead (GH #141).
+pub fn close_stale_or_idle_actors_for_caller<F>(
+    project_root: &Path,
     mut pane_alive: F,
+    idle_for: Option<Duration>,
     dry_run: bool,
     caller: &str,
     reason: &str,
@@ -9241,20 +9306,66 @@ where
         {
             continue;
         }
-        if pane_alive(&record.pane_id) {
+        let pane_is_alive = pane_alive(&record.pane_id);
+        let last_activity = actor_last_activity_timestamp(record);
+        let idle_age = now.saturating_sub(last_activity);
+        let idle = idle_for.is_some_and(|threshold| idle_age >= threshold.as_secs());
+        if pane_is_alive && !idle {
             kept += 1;
             continue;
         }
 
+        let cause = if idle {
+            format!("idle age_secs={idle_age}")
+        } else {
+            "dead_pane".to_string()
+        };
+        let mut supervisor_kill = None;
+        if idle && pane_is_alive {
+            match agent_doc_supervisor_io::selfkill::drive_supervisor_kill(
+                Path::new(&record.document_id),
+                agent_doc_supervisor_io::selfkill::selfkill_grace(),
+                dry_run,
+            ) {
+                Ok(agent_doc_supervisor_io::selfkill::SupervisorKillOutcome::RefusedSelfAncestor(
+                    pid,
+                )) => {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{caller}_close_idle_actor_skipped file={} pane={} generation={} supervisor_pid={} reason=self_ancestor",
+                            record.document_id, record.pane_id, record.generation, pid
+                        ),
+                    );
+                    kept += 1;
+                    continue;
+                }
+                Ok(outcome) => supervisor_kill = Some(format!("{outcome:?}")),
+                Err(error) => {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{caller}_close_idle_actor_skipped file={} pane={} generation={} reason=supervisor_kill_failed error={error:#}",
+                            record.document_id, record.pane_id, record.generation
+                        ),
+                    );
+                    kept += 1;
+                    continue;
+                }
+            }
+        }
+
         if dry_run {
             eprintln!(
-                "[{}] would close stale dead-pane actor: {} session={} pane={} generation={} state={} reason={}",
+                "[{}] would close stale actor: {} session={} pane={} generation={} state={} cause={} supervisor_kill={} reason={}",
                 caller,
                 record.document_id,
                 record.session_id,
                 record.pane_id,
                 record.generation,
                 record.state.as_str(),
+                cause,
+                supervisor_kill.as_deref().unwrap_or("not_required"),
                 reason
             );
             closed += 1;
@@ -9277,13 +9388,15 @@ where
                 agent_doc_ops_log_io::log_op(
                     Path::new(&record.document_id),
                     &format!(
-                        "{}_closed_stale_dead_pane_actor file={} session={} pane={} generation={} prior_state={} reason={}",
+                        "{}_closed_stale_actor file={} session={} pane={} generation={} prior_state={} cause={} supervisor_kill={} reason={}",
                         caller,
                         record.document_id,
                         record.session_id,
                         record.pane_id,
                         record.generation,
                         record.state.as_str(),
+                        cause,
+                        supervisor_kill.as_deref().unwrap_or("not_required"),
                         reason
                     ),
                 );
@@ -9293,8 +9406,8 @@ where
                 agent_doc_ops_log_io::log_op(
                     Path::new(&record.document_id),
                     &format!(
-                        "{}_close_stale_dead_pane_actor_skipped file={} pane={} generation={} error={}",
-                        caller, record.document_id, record.pane_id, record.generation, err
+                        "{}_close_stale_actor_skipped file={} pane={} generation={} cause={} error={}",
+                        caller, record.document_id, record.pane_id, record.generation, cause, err
                     ),
                 );
                 kept += 1;
@@ -9303,6 +9416,16 @@ where
     }
 
     Ok((closed, kept))
+}
+
+fn actor_last_activity_timestamp(record: &agent_doc_controller::actor::ActorRecord) -> u64 {
+    let document_modified = std::fs::metadata(&record.document_id)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    record.last_transition.timestamp.max(document_modified)
 }
 
 pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
@@ -9327,6 +9450,44 @@ pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
         // bare-shell pane is alive but no longer owns the agent, so it must
         // transition the actor to `Closed`, not be kept as false-alive.
         |pane| agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(&tmux, pane),
+        dry_run,
+        caller,
+        reason,
+    )
+}
+
+pub fn close_stale_or_idle_actors_with_tmux_for_caller(
+    project_root: &Path,
+    idle_for: Option<Duration>,
+    dry_run: bool,
+    caller: &str,
+    reason: &str,
+) -> Result<(usize, usize)> {
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    if let Err(err) = agent_doc_tmux_io::list_panes(&tmux, None, "#{pane_id}") {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!("{caller}_stale_actor_gc_skipped reason=tmux_unavailable error={err}"),
+        );
+        if idle_for.is_none() {
+            return Ok((0, 0));
+        }
+        // Explicit age policy does not require tmux. Treat pane liveness as
+        // unknown/alive so only the independently proven idle predicate can
+        // close an actor.
+        return close_stale_or_idle_actors_for_caller(
+            project_root,
+            |_| true,
+            idle_for,
+            dry_run,
+            caller,
+            reason,
+        );
+    }
+    close_stale_or_idle_actors_for_caller(
+        project_root,
+        |pane| agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(&tmux, pane),
+        idle_for,
         dry_run,
         caller,
         reason,
@@ -12348,6 +12509,56 @@ mod tests {
             agent_doc_controller::actor::ActorState::Ready
         );
         assert_eq!(current.pane_id, "%dead");
+    }
+
+    #[test]
+    fn explicit_idle_threshold_reaps_live_parked_actor_but_keeps_recent_document() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let old_id = dir
+            .path()
+            .join("tasks/removed-old-session.md")
+            .to_string_lossy()
+            .to_string();
+        let recent_doc = dir.path().join("tasks/recent-session.md");
+        std::fs::create_dir_all(recent_doc.parent().unwrap()).unwrap();
+        std::fs::write(&recent_doc, "recent operator write").unwrap();
+        let recent_id = recent_doc.to_string_lossy().to_string();
+        let old_timestamp = timestamp_secs().saturating_sub(5 * 24 * 60 * 60);
+
+        let mut old = actor_record(&old_id, "%old-live", "@1");
+        old.state = agent_doc_controller::actor::ActorState::Ready;
+        old.last_transition.timestamp = old_timestamp;
+        let mut recent = actor_record(&recent_id, "%recent-live", "@1");
+        recent.state = agent_doc_controller::actor::ActorState::Ready;
+        recent.last_transition.timestamp = old_timestamp;
+        store_actor_record(dir.path(), Some(0), &old).unwrap();
+        store_actor_record(dir.path(), Some(0), &recent).unwrap();
+
+        let (closed, kept) = close_stale_or_idle_actors_for_caller(
+            dir.path(),
+            |_| true,
+            Some(Duration::from_secs(24 * 60 * 60)),
+            false,
+            "admin",
+            "manual idle reap",
+        )
+        .unwrap();
+
+        assert_eq!((closed, kept), (1, 1));
+        assert_eq!(
+            load_actor_record(dir.path(), &old_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            agent_doc_controller::actor::ActorState::Closed
+        );
+        assert_eq!(
+            load_actor_record(dir.path(), &recent_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            agent_doc_controller::actor::ActorState::Ready
+        );
     }
 
     #[test]
@@ -15774,7 +15985,6 @@ agent:queue\n\
         // Construct directly (bypassing `ControllerRuntime::new`'s restart-recovery /
         // state-DB load) so the self-watchdog predicate is exercised in isolation.
         let state_projection = agent_doc_state_backbone::StateBackboneProjection::default();
-        let state_ledger = agent_doc_state_backbone::EventLedger::default();
         let scope = agent_doc_state_scope::ProcessScope::new();
         let supervisor_recycle_graph = ControllerSupervisorRecycleGraph::new_in(
             &scope,
@@ -15804,7 +16014,6 @@ agent:queue\n\
         ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(ControllerMemoryState {
-                state_ledger,
                 state_document_versions: BTreeMap::new(),
                 state_projection,
                 map_backend: "std_btree_map",

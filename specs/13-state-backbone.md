@@ -95,6 +95,14 @@ during projection replay so duplicate delivery stays idempotent, while
 `causation_id` preserves the chain from prompt, queue head, IPC patch, route
 dispatch, or proof marker to the emitted fact.
 
+The long-lived project controller does not retain that durable ledger in
+memory. SQLite's unique `event_id` index deduplicates ingress; the controller
+folds each accepted row into a compact current projection with a per-document
+durable epoch, then discards the event payload and id. A subscriber at the
+current epoch receives an empty delta. A cold or lagging subscriber receives a
+current snapshot at the durable epoch, so process RSS is bounded by current
+document state rather than controller age (GH #141).
+
 Every durable event also has a monotonic per-document `document_version`.
 Editor replay acknowledgements are collected in `state_event_peer_acks`, keyed
 by `(document_hash, peer_key)`, where `peer_key` is derived from the live
@@ -272,10 +280,12 @@ projection:
 - The projection is a pure fold of deduped events, so delta application is
   deterministic and idempotent — a re-emit yields a no-op (empty) delta. This is
   the property `#queuestatemachine` / `#qdedupsync` build on.
-- The ledger is append-only within a process lifetime, so any
-  `last_epoch <= current_epoch` is satisfiable without a resync. Deltas may span
-  multiple epochs (`epoch > base_epoch + 1`); the ordered `ops` converge
-  identically to a fresh snapshot.
+- Standalone `EventLedger` replay remains append-only and can derive a delta for
+  any retained epoch. The controller's compact hot projection intentionally
+  resynchronizes lagging subscribers with a snapshot instead of retaining every
+  historical event in process memory. Deltas may span multiple epochs when
+  history is available; either response converges identically to a fresh
+  snapshot.
 
 The `type_tag` table is the in-repo producer half of the wire vocabulary. The
 canonical schema pin (`lazily-spec/schemas/agent-doc-state.json` + a conformance

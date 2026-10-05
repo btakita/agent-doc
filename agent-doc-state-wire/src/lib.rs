@@ -11,10 +11,11 @@
 //! - Cold read = full `snapshot` (the existing `agent_doc_state_projection` JSON
 //!   stays as the human/round-trip projection; this snapshot is the wire cold
 //!   path).
-//! - Warm read = `delta` since the caller's `last_epoch`. Because the projection
-//!   is a pure fold of deduped events, delta application is deterministic and
-//!   idempotent — a re-emit/replay is a no-op delta, which is the property
-//!   `#queuestatemachine` / `#qdedupsync` build on.
+//! - Warm read = `delta` since the caller's `last_epoch` when history is
+//!   retained, or a current snapshot when the controller has compacted it.
+//!   Because the projection is a pure fold of deduped events, either response
+//!   is deterministic and idempotent — a re-emit/replay is a no-op delta, which
+//!   is the property `#queuestatemachine` / `#qdedupsync` build on.
 //!
 //! The wire structs here match `src/lazily-spec/schemas/{snapshot,delta}.json`
 //! directly so kt/js/rs import one canonical vocabulary. The `lazily-spec`
@@ -23,7 +24,9 @@
 
 pub mod lazily_convert;
 
-use agent_doc_state_backbone::{DocumentStateProjection, EventLedger, StateOwner};
+use agent_doc_state_backbone::{
+    DocumentStateProjection, EventLedger, StateBackboneProjection, StateOwner,
+};
 use anyhow::Context;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use interprocess::local_socket::{GenericFilePath, ToFsName, traits::Stream as _};
@@ -902,6 +905,36 @@ pub fn subscribe(ledger: &EventLedger, document_hash: &str, last_epoch: u64) -> 
     ))
 }
 
+/// Resolve a subscription from a compact current projection.
+///
+/// A long-lived controller does not need to retain the durable event ledger in
+/// memory merely to serve warm subscribers: SQLite owns replay history, while
+/// a snapshot is a valid resynchronization response. Current subscribers still
+/// receive a no-op delta; cold or lagging subscribers receive the current
+/// snapshot at the durable per-document epoch.
+pub fn subscribe_projection(
+    projection: &StateBackboneProjection,
+    document_hash: &str,
+    current_epoch: u64,
+    last_epoch: u64,
+) -> WireSubscribe {
+    if last_epoch >= current_epoch && last_epoch != 0 {
+        return WireSubscribe::Delta(WireDelta {
+            message_type: WireDelta::TYPE,
+            base_epoch: current_epoch,
+            epoch: current_epoch,
+            document_hash: document_hash.to_string(),
+            ops: Vec::new(),
+        });
+    }
+
+    let document = projection
+        .document(document_hash)
+        .cloned()
+        .unwrap_or_else(|| DocumentStateProjection::new(document_hash));
+    WireSubscribe::Snapshot(build_snapshot(document_hash, &document, current_epoch))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1199,6 +1232,35 @@ mod tests {
             _ => panic!("last_epoch == current_epoch must yield a delta"),
         };
         assert!(delta.ops.is_empty(), "no-op delta when caller is current");
+    }
+
+    #[test]
+    fn compact_projection_resynchronizes_lagging_subscriber_without_history() {
+        let doc = "compact-doc";
+        let mut projection = StateBackboneProjection::default();
+        projection.apply_durable_unique(&baseline_event("e1", doc, "cycle-1", "bl-1"));
+        projection.apply_durable_unique(&queue_selected_event("e2", doc, "head-1"));
+
+        let lagging = subscribe_projection(&projection, doc, 2, 1);
+        let snapshot = match lagging {
+            WireSubscribe::Snapshot(snapshot) => snapshot,
+            WireSubscribe::Delta(_) => {
+                panic!("a compact projection must resynchronize a lagging subscriber")
+            }
+        };
+        assert_eq!(snapshot.epoch, 2);
+        assert!(
+            snapshot
+                .nodes
+                .iter()
+                .any(|node| { node.type_tag == AgentDocNodeType::QueueHead.type_tag() })
+        );
+
+        let current = subscribe_projection(&projection, doc, 2, 2);
+        assert!(matches!(
+            current,
+            WireSubscribe::Delta(WireDelta { ref ops, epoch: 2, .. }) if ops.is_empty()
+        ));
     }
 
     #[test]

@@ -1305,6 +1305,20 @@ impl StateBackboneProjection {
         if !self.seen_event_ids.insert(event.event_id.clone()) {
             return;
         }
+        self.apply_durable_unique(event);
+    }
+
+    /// Apply an event whose identity was already deduplicated by a durable
+    /// ingress boundary.
+    ///
+    /// The project controller's SQLite `state_events.event_id` uniqueness
+    /// constraint is the durable authority for event identity. Retaining those
+    /// same ids forever in the long-lived controller projection made memory
+    /// usage proportional to process age (GH #141). Controller hydration and
+    /// live append use this entry point after SQLite has proved uniqueness;
+    /// standalone in-memory ledgers continue to use [`Self::apply`] and retain
+    /// their own deduplication semantics.
+    pub fn apply_durable_unique(&mut self, event: &StateEvent) {
         let document = self
             .documents
             .entry(event.document_hash().to_string())
@@ -5983,6 +5997,36 @@ pub fn transition_proof_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durable_unique_projection_does_not_retain_event_id_history() {
+        let document_hash = "controller-memory-bound";
+        let mut projection = StateBackboneProjection::default();
+        for sequence in 0..1_000 {
+            projection.apply_durable_unique(&StateEvent::new(
+                format!("event-{sequence}"),
+                StateFact::BaselineSaved {
+                    document_hash: document_hash.to_string(),
+                    cycle_id: format!("cycle-{sequence}"),
+                    baseline_hash: format!("hash-{sequence}"),
+                    baseline_path: None,
+                },
+            ));
+        }
+
+        assert!(
+            projection.seen_event_ids.is_empty(),
+            "SQLite-deduped controller ingress must not duplicate every durable id in RSS"
+        );
+        assert_eq!(projection.documents.len(), 1);
+        assert_eq!(
+            projection
+                .document(document_hash)
+                .and_then(|document| document.document.latest_baseline.as_ref())
+                .map(|baseline| baseline.baseline_hash.as_str()),
+            Some("hash-999")
+        );
+    }
 
     #[test]
     fn compact_supersession_retires_only_its_identity_matched_continuation() {

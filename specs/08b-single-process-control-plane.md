@@ -619,6 +619,14 @@ The first controller-backed mutating CLI surface is:
 - `agent-doc admin queue drain <document> [--until-id <id>]`;
 - `agent-doc admin reap <document|--session <id>|--pane <pane>>
   --observed-generation <n> --reason <text>`;
+- `agent-doc admin reap --all-stale [--idle-for <Ns|Nm|Nh|Nd>]
+  [--reason <text>]` closes dead-pane actors and, when the explicit idle policy
+  is supplied, actors whose newest actor transition or document write is older
+  than the threshold. The age predicate is independent of tmux availability,
+  so parked live panes can be reclaimed without a hand-built PID list. Before
+  closing an idle live-pane actor it drives the existing verified supervisor
+  self-kill/force-kill path; a refused self-ancestor or failed kill keeps the
+  actor open rather than allowing the supervisor heartbeat to recreate it;
 - `agent-doc admin handoff <document> --to-pane <pane>
   --observed-generation <n> --reason <text>`;
 - `agent-doc admin repair-projection [document] --projection all|actors|sessions|layout`.

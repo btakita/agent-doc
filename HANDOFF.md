@@ -24,7 +24,16 @@ make hook so `make check` runs a fixed seed set under coder_zscaler.
 3. `engine.rs`: `apply` -> net wrapper; `apply_local` = old body; generation reads
    in networked arms go through `observed_generation()`; `new_local`.
 
-## Remaining
+4. Tests: `src/sim_world/net.rs` tests (local byte-identical, seed reproduces,
+   corpus coder_zscaler/hostile [ignored, run by `make sim-net`], known-defect wedge
+   tests F1/F2/F3, cross-generation straggler rejected). Ratchet
+   `KNOWN_OPEN_NET_FINDINGS`.
+5. Install-fanout SimWorld (rpc.rs `install_fanout_idle_root_tests`) routes status +
+   reload through SimNet (FireAndForget, 2s timeout); new test
+   `install_fanout_under_adversarial_net_stays_safe_and_accounts_every_endpoint` green.
+6. Makefile `sim-net` target, added to `check`. `make sim-net` exit 0.
+
+## Remaining (superseded list below kept for history)
 1. Add pure crate `agent-doc-sim-net` (publish=false, version = workspace version,
    add to root `[workspace] members` + dev-dep of root crate and agent-doc-controller-io;
    update Cargo.lock). Holds `NetConditions`, profiles, `SimNet<M>` with its own
@@ -66,4 +75,5 @@ profiles; closeout commits identical (272). Oracle findings:
 
 
 ## Commands / status
-- `make check` not yet run.
+- `make sim-net` -> EXIT=0.
+- `make check` pending (next step).

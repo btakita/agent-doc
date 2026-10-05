@@ -74,7 +74,7 @@ impl SimWorld {
         Self::run_seed_world(world, steps)
     }
 
-    fn run_seed_world(mut world: Self, steps: usize) -> Result<Self> {
+    pub(crate) fn run_seed_world(mut world: Self, steps: usize) -> Result<Self> {
         let seed = world.seed;
         let mut rng = DeterministicRng::new(seed);
         for _ in 0..steps {
@@ -313,10 +313,9 @@ impl SimWorld {
                 self.bind_route_owner();
             }
             SimCommand::SupervisorReady => {
-                if let Err(err) = self.transition_supervisor(
-                    self.observed_generation(),
-                    SupervisorLifecycle::Ready,
-                ) {
+                if let Err(err) = self
+                    .transition_supervisor(self.observed_generation(), SupervisorLifecycle::Ready)
+                {
                     self.coverage.record_block(&err.to_string());
                 }
             }
@@ -336,18 +335,16 @@ impl SimWorld {
                 }
             }
             SimCommand::SupervisorBlocked => {
-                if let Err(err) = self.transition_supervisor(
-                    self.observed_generation(),
-                    SupervisorLifecycle::Blocked,
-                ) {
+                if let Err(err) = self
+                    .transition_supervisor(self.observed_generation(), SupervisorLifecycle::Blocked)
+                {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::SupervisorClosed => {
-                if let Err(err) = self.transition_supervisor(
-                    self.observed_generation(),
-                    SupervisorLifecycle::Closed,
-                ) {
+                if let Err(err) = self
+                    .transition_supervisor(self.observed_generation(), SupervisorLifecycle::Closed)
+                {
                     self.coverage.record_block(&err.to_string());
                 }
             }
@@ -433,8 +430,8 @@ impl SimWorld {
                 }
             }
             SimCommand::AdminPauseQueue => {
-                if let Err(err) = self
-                    .admin_queue_control(QueueControlState::Paused, self.observed_generation())
+                if let Err(err) =
+                    self.admin_queue_control(QueueControlState::Paused, self.observed_generation())
                 {
                     self.coverage.record_block(&err.to_string());
                 }
@@ -448,8 +445,8 @@ impl SimWorld {
                 }
             }
             SimCommand::AdminResumeQueue => {
-                if let Err(err) = self
-                    .admin_queue_control(QueueControlState::Resumed, self.observed_generation())
+                if let Err(err) =
+                    self.admin_queue_control(QueueControlState::Resumed, self.observed_generation())
                 {
                     self.coverage.record_block(&err.to_string());
                 }
@@ -491,10 +488,7 @@ impl SimWorld {
             SimCommand::SupervisorHeartbeatReattach => {
                 if let Err(err) = self.supervisor_heartbeat_reattach(
                     self.observed_generation(),
-                    format!(
-                        "%heartbeat{}",
-                        self.observed_generation().saturating_add(1)
-                    ),
+                    format!("%heartbeat{}", self.observed_generation().saturating_add(1)),
                 ) {
                     self.coverage.record_block(&err.to_string());
                 }

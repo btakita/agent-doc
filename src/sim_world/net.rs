@@ -20,8 +20,8 @@
 //!   arrive after later local steps.
 
 use super::*;
-use std::collections::BTreeMap;
 use agent_doc_sim_net::{Delivery, NetEvent, NetProfile, NetStats, SimNet};
+use std::collections::BTreeMap;
 
 /// Virtual time one scheduler step represents.
 pub(crate) const SIM_TICK_MS: u64 = 100;
@@ -149,9 +149,7 @@ pub(crate) fn link_for(command: SimCommand) -> Option<SimLink> {
         | ProveDispatchAccepted
         | PromoteStartingPromptReady => SimLink::SupervisorToController,
         AdminPauseQueue | AdminPauseQueueStale | AdminResumeQueue | AdminDrainQueue
-        | AdminHandoff | AdminHandoffStale | AdminReap | AdminReapStale => {
-            SimLink::CliToController
-        }
+        | AdminHandoff | AdminHandoffStale | AdminReap | AdminReapStale => SimLink::CliToController,
         DispatchRoutePrompt
         | DispatchOperatorPrompt
         | SyncProtectedGrowthManual
@@ -374,7 +372,7 @@ impl NetCorpusRun {
     pub(crate) fn summary(&self, label: &str) -> String {
         let s = self.stats;
         format!(
-            "{label}: schedules={} failures={} findings={} sent={} delivered={} drops={} duplicates={} reorder_holds={} retransmits={} stalls={} reconnects={} resyncs={} max_latency_ms={} commits={}",
+            "{label}: schedules={} failures={} findings={} sent={} delivered={} drops={} duplicates={} reorder_holds={} retransmits={} stalls={} reconnects={} reconnects_handled={} max_latency_ms={} commits={}",
             self.schedules,
             self.failures.len(),
             self.findings.len(),
@@ -393,6 +391,12 @@ impl NetCorpusRun {
     }
 }
 
+/// The channel seed one corpus schedule runs with: distinct per schedule seed,
+/// so every schedule sees a different fault pattern.
+pub(crate) fn mixed_net_seed(schedule_seed: u64, net_seed: u64) -> u64 {
+    net_seed ^ schedule_seed.rotate_left(17)
+}
+
 /// Run the corpus schedules `seeds` under `profile`, once per net seed, collecting
 /// structural failures and oracle findings instead of stopping at the first.
 pub(crate) fn run_net_corpus(
@@ -405,7 +409,7 @@ pub(crate) fn run_net_corpus(
     for &net_seed in net_seeds {
         for seed in seeds.clone() {
             run.schedules += 1;
-            let mixed = net_seed ^ seed.rotate_left(17);
+            let mixed = mixed_net_seed(seed, net_seed);
             match SimWorld::run_seed_with_net(seed, steps, profile, mixed) {
                 Ok(mut world) => {
                     run.coverage.merge(world.coverage);
@@ -436,5 +440,271 @@ impl Drop for SimWorldNet {
                 self.net.trace_tail(40)
             );
         }
+    }
+}
+
+/// Oracle finding classes already diagnosed as open protocol defects (see the
+/// `netadv4_known_*` tests below). A corpus run may report these; any OTHER class
+/// is a new finding and fails the run.
+pub(crate) const KNOWN_OPEN_NET_FINDINGS: [&str; 4] = [
+    // F1: `LifecycleRequest`/`SupervisorHeartbeatRequest` are fenced by generation
+    // only; within one generation the controller applies them in arrival order.
+    "stale_actor_lifecycle_applied_out_of_order",
+    // F1 impact: a reordered Ready re-opens dispatch into a busy supervisor.
+    "dispatch_accepted_on_reordered_stale_lifecycle",
+    // F2: queue pause/resume/drain requests carry no sequence either.
+    "stale_queue_control_applied_out_of_order",
+    // F3: a retransmitted dispatch request has no idempotency key; after the first
+    // copy is proven, a straggler copy injects a second trigger.
+    "duplicate_dispatch_request_injected_twice",
+];
+
+/// Net seeds `make sim-net` runs each corpus schedule under.
+pub(crate) const NET_CORPUS_SEEDS: [u64; 4] = [0, 1, 2, 3];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_net_corpus(profile: NetProfile) {
+        let started = Instant::now();
+        let run = run_net_corpus(
+            profile,
+            FAST_CORPUS_SEEDS,
+            &NET_CORPUS_SEEDS,
+            FAST_CORPUS_STEPS,
+        );
+        eprintln!(
+            "{} elapsed_ms={}",
+            run.summary(profile.name()),
+            started.elapsed().as_millis()
+        );
+        let mut kinds: BTreeMap<&str, (usize, u64, u64)> = BTreeMap::new();
+        for (seed, net_seed, finding) in &run.findings {
+            kinds.entry(finding.kind).or_insert((0, *seed, *net_seed)).0 += 1;
+        }
+        for (kind, (count, seed, net_seed)) in &kinds {
+            eprintln!(
+                "  finding {kind}: count={count} first schedule_seed={seed} net_seed={net_seed}"
+            );
+        }
+        assert!(
+            run.failures.is_empty(),
+            "{profile}: structural invariant failures (schedule_seed, net_seed, error): {:#?}",
+            run.failures
+        );
+        let new: Vec<_> = run
+            .findings
+            .iter()
+            .filter(|(_, _, finding)| !KNOWN_OPEN_NET_FINDINGS.contains(&finding.kind))
+            .collect();
+        assert!(
+            new.is_empty(),
+            "{profile}: NEW network finding classes: {new:#?}"
+        );
+        // The same coverage floor the `local` corpus must reach.
+        assert_fast_corpus_coverage(&run.coverage);
+        // Non-vacuity: the channel really was adversarial.
+        let stats = run.stats;
+        assert!(stats.sent > 0 && stats.delivered >= stats.sent, "{stats:?}");
+        assert_eq!(
+            stats.lost, 0,
+            "at-least-once delivery never loses: {stats:?}"
+        );
+        assert!(
+            stats.drops > 0 && stats.duplicates > 0 && stats.reorder_holds > 0,
+            "{stats:?}"
+        );
+        assert!(
+            stats.stalls > 0 && stats.reconnects == stats.stalls,
+            "{stats:?}"
+        );
+        assert!(stats.max_latency_ms >= 1_000, "{stats:?}");
+    }
+
+    fn mask_boundary_ids(text: &str) -> String {
+        const MARKER: &str = "agent:boundary:";
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(at) = rest.find(MARKER) {
+            out.push_str(&rest[..at + MARKER.len()]);
+            rest = &rest[at + MARKER.len()..];
+            let id_len = rest
+                .bytes()
+                .take_while(|byte| byte.is_ascii_hexdigit())
+                .count();
+            out.push_str("<id>");
+            rest = &rest[id_len..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn local_profile_keeps_corpus_schedules_byte_identical() {
+        for seed in 0..128 {
+            let plain = SimWorld::run_seed_world(SimWorld::new_local(seed), FAST_CORPUS_STEPS)
+                .unwrap_or_else(|err| panic!("seed {seed}: {err}"));
+            let routed =
+                SimWorld::run_seed_with_net(seed, FAST_CORPUS_STEPS, NetProfile::Local, 99)
+                    .unwrap_or_else(|err| panic!("seed {seed}: {err}"));
+            assert!(routed.net.is_none(), "local must not attach a channel");
+            // Boundary markers carry fresh random ids from the production template
+            // on every run; everything else must match byte for byte.
+            let (plain, routed) = (
+                mask_boundary_ids(&format!("{plain:?}")),
+                mask_boundary_ids(&format!("{routed:?}")),
+            );
+            if plain != routed {
+                let at = plain
+                    .bytes()
+                    .zip(routed.bytes())
+                    .position(|(a, b)| a != b)
+                    .unwrap_or(plain.len().min(routed.len()));
+                let window =
+                    |s: &str| s[at.saturating_sub(160)..(at + 80).min(s.len())].to_string();
+                panic!(
+                    "seed {seed}: local routing diverged at byte {at}:\n  plain:  {}\n  routed: {}",
+                    window(&plain),
+                    window(&routed)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_net_seed_reproduces_a_corpus_schedule_exactly() {
+        for profile in NetProfile::ADVERSARIAL {
+            for seed in [0, 8, 204] {
+                let net_seed = mixed_net_seed(seed, 1);
+                let first = SimWorld::run_seed_with_net(seed, FAST_CORPUS_STEPS, profile, net_seed)
+                    .unwrap();
+                let second =
+                    SimWorld::run_seed_with_net(seed, FAST_CORPUS_STEPS, profile, net_seed)
+                        .unwrap();
+                assert_eq!(
+                    mask_boundary_ids(&format!("{first:?}")),
+                    mask_boundary_ids(&format!("{second:?}")),
+                    "{profile} {seed}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "run by `make sim-net` (part of `make check`)"]
+    fn closeout_sim_net_coder_zscaler_seed_corpus() {
+        assert_net_corpus(NetProfile::CoderZscaler);
+    }
+
+    #[test]
+    #[ignore = "run by `make sim-net` (part of `make check`)"]
+    fn closeout_sim_net_hostile_seed_corpus() {
+        assert_net_corpus(NetProfile::Hostile);
+    }
+
+    fn findings_of(seed: u64, profile: NetProfile, net_seed: u64) -> Vec<NetFinding> {
+        let mut world = SimWorld::run_seed_with_net(
+            seed,
+            FAST_CORPUS_STEPS,
+            profile,
+            mixed_net_seed(seed, net_seed),
+        )
+        .unwrap();
+        std::mem::take(&mut world.net.as_mut().unwrap().findings)
+    }
+
+    /// `#netadv4` F1, minimal trace. The supervisor reports Ready, then Busy, in
+    /// one generation. The channel delivers Busy first; the late Ready is still
+    /// current-generation, so the controller accepts it and a route dispatch
+    /// types into a busy supervisor. Production `LifecycleRequest` carries the
+    /// same generation-only fence. KNOWN OPEN DEFECT: when lifecycle updates gain
+    /// a per-generation sequence, flip these assertions.
+    #[test]
+    fn netadv4_known_f1_reordered_ready_reopens_dispatch_into_busy_supervisor() {
+        let mut world = SimWorld::new_local(4_001);
+        world.apply(SimCommand::BindRouteOwner).unwrap();
+        world.apply(SimCommand::SupervisorReady).unwrap();
+        // Sent: Ready (t0, delayed), Busy (t1). Delivered: Busy, then Ready.
+        world.apply(SimCommand::SupervisorBusy).unwrap();
+        world.apply(SimCommand::SupervisorReady).unwrap();
+        world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+        assert_eq!(
+            world.coverage.route_dispatch_acceptances, 1,
+            "known defect: the reordered Ready re-opens dispatch while the supervisor is busy"
+        );
+
+        // The corpus oracle finds the same class at pinned seeds.
+        let found = findings_of(204, NetProfile::CoderZscaler, 0);
+        assert!(
+            found
+                .iter()
+                .any(|f| f.kind == "dispatch_accepted_on_reordered_stale_lifecycle"),
+            "{found:#?}"
+        );
+        assert!(
+            findings_of(22, NetProfile::CoderZscaler, 0)
+                .iter()
+                .any(|f| f.kind == "stale_actor_lifecycle_applied_out_of_order")
+        );
+    }
+
+    /// `#netadv4` F3, minimal trace. One dispatch request, retransmitted because
+    /// its ACK was lost. The first copy is accepted and proven; the straggler copy
+    /// then passes the in-flight coalesce (nothing is in flight any more) and
+    /// injects a second trigger. Production `ControllerRequest` has no request id.
+    /// KNOWN OPEN DEFECT: flip when dispatch requests become idempotent by key.
+    #[test]
+    fn netadv4_known_f3_retransmitted_dispatch_after_proof_injects_twice() {
+        let mut world = SimWorld::new_local(4_003);
+        world.apply(SimCommand::BindRouteOwner).unwrap();
+        world.apply(SimCommand::SupervisorReady).unwrap();
+        world.apply(SimCommand::DispatchRoutePrompt).unwrap(); // copy 0
+        world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+        world.apply(SimCommand::DispatchRoutePrompt).unwrap(); // copy 1 (retransmit)
+        assert_eq!(
+            world.coverage.route_dispatch_acceptances, 2,
+            "known defect: one operator request, two injected triggers"
+        );
+        assert!(
+            findings_of(8, NetProfile::Hostile, 1)
+                .iter()
+                .any(|f| f.kind == "duplicate_dispatch_request_injected_twice")
+        );
+    }
+
+    /// `#netadv4` F2: queue control has the same last-arrival-wins shape.
+    #[test]
+    fn netadv4_known_f2_reordered_queue_control_is_detected() {
+        assert!(
+            findings_of(28, NetProfile::CoderZscaler, 0)
+                .iter()
+                .any(|f| f.kind == "stale_queue_control_applied_out_of_order")
+        );
+    }
+
+    /// Generation fencing DOES make cross-generation stragglers safe: a delayed
+    /// lifecycle update from before a handoff is rejected, not applied.
+    #[test]
+    fn delayed_lifecycle_from_a_prior_generation_is_rejected() {
+        let mut world = SimWorld::new_local(4_004).with_net(NetProfile::Hostile, 0, NetMode::Async);
+        world.apply_local(SimCommand::BindRouteOwner).unwrap();
+        world.apply_local(SimCommand::SupervisorReady).unwrap();
+        let stale = world.route.durable.generation;
+        world.apply_local(SimCommand::AdminHandoff).unwrap();
+        let blocks = world.coverage.stale_generation_blocks;
+        world
+            .apply_delivered(
+                0,
+                1,
+                NetMsg {
+                    command: SimCommand::SupervisorBusy,
+                    generation_at_send: stale,
+                },
+            )
+            .unwrap();
+        assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Ready);
+        assert_eq!(world.coverage.stale_generation_blocks, blocks + 1);
+        world.net.as_mut().unwrap().findings.clear();
     }
 }

@@ -4288,7 +4288,7 @@ mod tests {
             assert!(content.contains("Agent harnesses own tiered verification"));
             assert!(content.contains("make check-fast"));
             assert!(content.contains("exactly one authoritative `make check`"));
-            assert!(content.contains("content/toolchain fingerprint"));
+            assert!(content.contains("repository-bytes/toolchain fingerprint"));
             assert!(content.contains("runner-native failure evidence"));
             assert!(content.contains("Do not rely on a pre-commit hook"));
         }

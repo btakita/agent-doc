@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -435,6 +436,22 @@ One known gap: "editor isn't serving its replica" is read from an attachment fla
 - **Superproject:** the submodule bump is pushed. The other session's uncommitted `agent-doc-start-runtime-io/src/lib.rs` edit is still unchanged in the main checkout.
 
 **A mistake in my 0.35.455 release:** it was missing its row in `editors/release-parity.tsv`. My `make check` ran before the version bump, so the editor-parity check never covered it, and CI on `main` went red. I added the row as `13b9f9726`. For 0.35.456 I bumped the version and added both rows *before* running `make check`, so this run did cover them.
+
+### Re: queue go — subagent dispatch for 3 heads, release held — opus-5-5 · 2026-10-05T00:22-04:00
+
+Exchange is large (406 lines / 20 sections); still draining.
+
+Three heads went to background subagents. Each one is claimed and has its own worktree under `~/work/btakita/agent-doc-wt/`, outside the IDE-watched project. Subagents only commit to their own branch. They don't push, install or release. I'll merge their branches one at a time and run one `make install` for the whole batch.
+
+| Head | Claim owner | Worktree / branch |
+|---|---|---|
+| `do [#jbstagefallback]` | `subagent:jbstagefallback` | `agent-doc-wt/jbstagefallback` |
+| `#gh-fix` GH #136 (stale stash supervisor pane admitted as a layout column) | `subagent:gh136` | `agent-doc-wt/gh136` |
+| The alt+shift agent-doc menu is not coming up. | `subagent:altshiftmenu` | `agent-doc-wt/altshiftmenu` |
+
+> **Queue prompt:** release + publish
+
+**Deferred:** this release needs to ship the three fixes above. It runs after I've merged their branches, run `make check` and `make install`. GH #136 closes only after the release (`#gh-fix` → fix then closerelease).
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -443,7 +460,11 @@ One known gap: "editor isn't serving its replica" is read from an attachment fla
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- do [#jbstagefallback]
+- #gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.
+- The alt+shift agent-doc menu is not coming up.
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 

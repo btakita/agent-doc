@@ -1152,6 +1152,15 @@ fn split_reapable_trailing_text_segment(raw: &str) -> Option<(String, String)> {
     Some((reap, keep))
 }
 
+fn retain_clear_structural_text(raw: &str) -> String {
+    raw.split_inclusive('\n')
+        .filter(|segment| {
+            let line = segment.strip_suffix('\n').unwrap_or(segment);
+            line.trim().is_empty() || is_structural_inter_item_line(line)
+        })
+        .collect()
+}
+
 pub fn is_valid_pending_id(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
@@ -2234,18 +2243,44 @@ pub fn op_append_items(body: &str, items: &[PendingItem]) -> String {
 }
 
 /// Extract all items matching `state`, returning the updated body and removed items.
+///
+/// A malformed flush-left text segment immediately following a matching item is
+/// part of that item's logical block. Carry it with the item so callers that
+/// move items between components cannot strand stale prose in the source
+/// component. Structural headings/comments remain in place.
 pub fn op_take_items_by_state(body: &str, state: PendingState) -> (String, Vec<PendingItem>) {
     let layout = PendingLayout::parse(body);
     let mut taken = Vec::new();
-    let rewritten = layout.replace_items(|item| {
-        if item.state == state {
-            taken.push(item.clone());
-            None
-        } else {
-            Some(item.clone())
+    let mut segments = Vec::with_capacity(layout.segments.len());
+    let mut index = 0usize;
+    while index < layout.segments.len() {
+        match &layout.segments[index] {
+            PendingSegment::Item { item, .. } if item.state == state => {
+                let mut moved_item = item.clone();
+                index += 1;
+                while let Some(PendingSegment::Text(raw)) = layout.segments.get(index) {
+                    let Some((moved_text, keep_text)) = split_reapable_trailing_text_segment(raw)
+                    else {
+                        segments.push(PendingSegment::Text(raw.clone()));
+                        index += 1;
+                        break;
+                    };
+                    moved_item.continuation.push_str(&moved_text);
+                    index += 1;
+                    if !keep_text.is_empty() {
+                        segments.push(PendingSegment::Text(keep_text));
+                        break;
+                    }
+                }
+                taken.push(moved_item);
+            }
+            segment => {
+                segments.push(segment.clone());
+                index += 1;
+            }
         }
-    });
-    (rewritten.render(), taken)
+    }
+    (PendingLayout { segments }.render(), taken)
 }
 
 /// Extract non-done items with ids in `ids`, returning the updated body and removed items.
@@ -4212,10 +4247,22 @@ pub fn op_edit_many(body: &str, edits: &[(String, String)]) -> Result<String> {
     Ok(next)
 }
 
-/// Clear all items from the body. Non-item lines, including headers, are preserved.
+/// Clear all items and non-structural orphan spill from the body. Blank lines and
+/// structural headings/comments are preserved.
 pub fn op_clear(body: &str) -> Result<String> {
-    let cleared = PendingLayout::parse(body).replace_items(|_| None);
-    Ok(cleared.render())
+    let layout = PendingLayout::parse(body);
+    let segments = layout
+        .segments
+        .into_iter()
+        .filter_map(|segment| match segment {
+            PendingSegment::Item { .. } => None,
+            PendingSegment::Text(raw) => {
+                let structural = retain_clear_structural_text(&raw);
+                (!structural.is_empty()).then_some(PendingSegment::Text(structural))
+            }
+        })
+        .collect();
+    Ok(PendingLayout { segments }.render())
 }
 
 /// Reorder items by id. Listed ids come first (in the given order); unlisted ids
@@ -6868,6 +6915,23 @@ mod tests {
         );
         let new_body = op_clear(body).unwrap();
         assert_eq!(new_body, "### Active\n\n### Later\n");
+    }
+
+    #[test]
+    fn op_clear_discards_orphaned_flush_left_spill_and_fenced_cruft() {
+        let body = concat!(
+            "6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e\n",
+            "```text\n",
+            "captured command output\n",
+            "```\n",
+            "\n",
+            "### Operator notes\n",
+            "- [ ] [#c3d4] tracked item\n",
+        );
+
+        let new_body = op_clear(body).unwrap();
+
+        assert_eq!(new_body, "\n### Operator notes\n");
     }
 
     #[test]

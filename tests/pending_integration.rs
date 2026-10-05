@@ -413,13 +413,32 @@ fn pending_reap_backfills_legacy_done_ids_before_removing_items() {
 
 #[test]
 fn pending_clear_empties_list() {
-    let (_tmp, doc) = setup_doc("- [ ] [#aaaa] one\n- [ ] [#bbbb] two");
+    let orphan_spill = concat!(
+        "6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse ",
+        "back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged)."
+    );
+    let (_tmp, doc) = setup_doc(&format!(
+        concat!(
+            "- [ ] [#aaaa] one\n",
+            "- [ ] [#bbbb] two\n",
+            "{}\n",
+            "```text\n",
+            "captured command output\n",
+            "```\n",
+            "\n",
+            "### Operator notes\n",
+        ),
+        orphan_spill
+    ));
     agent_doc()
         .args(["backlog", doc.to_str().unwrap(), "--force-disk", "clear"])
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
     assert!(!content.contains("[#"));
+    assert!(!content.contains(orphan_spill));
+    assert!(!content.contains("captured command output"));
+    assert!(content.contains("### Operator notes"));
 }
 
 #[test]

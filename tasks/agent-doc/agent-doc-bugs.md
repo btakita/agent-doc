@@ -802,6 +802,18 @@ Yes. The existing commands and editor actions cover both views:
 - In JetBrains and VS Code, run **About Agent Doc** from the Agent Doc menu/popup or command surface. It shows the running plugin version together with the CLI and loaded native-library identity and warns about mismatches.
 
 On this machine the CLI is `0.35.460`; it expects JetBrains `0.2.498`, VS Code `0.2.80`, and Zed `0.1.1`. The installed versions reported by `plugin list` are JetBrains `0.2.498` and VS Code `0.2.80`.
+
+### Re: GitHub issue #145 — gpt-5
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/145
+
+Fixed, verified, installed, pushed, and closed. Commit `c0bd6bbd1` is on `origin/main`.
+
+The invariant is now: only a single replay-safe assistant response may enter the durable pending-capture stream. The shared pending adapter is the capture boundary, while `CloseoutRecoveryState` owns recovery policy. Its new transition is `blocked_capture` -> `agent-doc repair` -> quarantine the diagnostic, retire the capture, abandon the poisoned cycle, and admit a fresh response; it never recommends the forbidden response-write path. Legacy strict patch captures retain their existing normalization path.
+
+The reactive topology is capture fact -> closeout recovery classification -> repair/quarantine effect -> retired capture plus abandoned-cycle facts. No polling or second policy owner was added. Capture, flow, repair, session-check, and IPC model adapters were updated; ambient `git status` dirt is no longer presented as cycle-attributed side effects without a cycle-owned baseline.
+
+Verification passed: targeted repair/flow/session-check suites, the 7,920-test affected suite, and authoritative `make check` with 9,563 tests, editor parity and cross-editor harnesses, TLA+ safety/non-vacuity models, docs audit, and packaging checks. `make install` installed the new CLI/library build and dynamically converged JetBrains v0.2.498 and VS Code v0.2.80 without requiring an IDEA restart.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
@@ -811,12 +823,9 @@ On this machine the CLI is `0.35.460`; it expects JetBrains `0.2.498`, VS Code `
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~do [#claimmarker]~~
-- ~~I renamed betterstack.md to observability.md. Run Agent Doc failed: refusing duplicate session identity 0b281660-be9c-4f2d-9a1d-f5ce38aa88a9 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md: first durable owner is /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/betterstack.md in pane  (registered state-event:577209)~~
-- ~~do [#releasecyclefast]~~
-- ~~Is there a command to see the agent-doc version + plugin version(s)? If not, we need a cli + plugin command to see the versions.~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/144
- - #gh-fix https://github.com/btakita/agent-doc/issues/145
+- #gh-fix https://github.com/btakita/agent-doc/issues/145
+- #gh-fix https://github.com/btakita/agent-doc/issues/146
 - release + publish
 <!-- /agent:queue -->
 

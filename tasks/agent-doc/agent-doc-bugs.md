@@ -716,6 +716,7 @@ The exchange is large, but the active queue was drained rather than stalled for 
 - 🚧 There is leftover cruft in the `agent:backlog`. Fix agent-doc causes.
 - #gh-fix https://github.com/btakita/agent-doc/issues/139
 - #gh-fix https://github.com/btakita/agent-doc/issues/140
+- #gh-fix https://github.com/btakita/agent-doc/issues/141
 - There is only 1 tmux pane and this file's tmux pane is not visible. Fix agent-doc causes and the runtime state.
 - release + publish
 <!-- /agent:queue -->

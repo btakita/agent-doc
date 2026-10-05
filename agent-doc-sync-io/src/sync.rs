@@ -1086,6 +1086,119 @@ fn load_live_authoritative_actor_record_cached(
     record
 }
 
+/// A stale supervisor pane must not become recycle-overdue while the owning
+/// controller proves that it is still interacting with the operator. The
+/// short-lived turn marker is the fast path, but turns and permission prompts
+/// can outlive that marker. The foreground blocker used by safe-boundary
+/// replacement and the generation-fenced actor's live lease are the fallbacks.
+fn pane_interaction_is_active(
+    tmux: &Tmux,
+    caller_project_root: &Path,
+    file: &Path,
+    pane: &str,
+    proof_cache: &SyncProofCache,
+) -> bool {
+    let owner_root = agent_doc_project_root_io::project_root_containing(file)
+        .unwrap_or_else(|| caller_project_root.to_path_buf());
+    if agent_doc_turn_status_io::turn_active_for_pane(&owner_root, pane) {
+        return true;
+    }
+
+    // The safe-boundary replacement path also refuses to interrupt harness
+    // blockers. Observe the same foreground truth here so a long permission
+    // prompt or active turn cannot become "overdue" merely because its short
+    // coordination marker and transition heartbeat aged out.
+    if agent_doc_tmux_io::capture_pane(tmux, pane)
+        .ok()
+        .is_some_and(|capture| {
+            let harness = resolve_harness_for_sync(file);
+            let blocker = harness.dispatch_blocker_reason(&capture);
+            if let Some(reason) = blocker.as_deref() {
+                sync_log(&format!(
+                    "stale_column_interaction_proven file={} pane={} source=harness_blocker reason={}",
+                    file.display(),
+                    pane,
+                    reason.replace(' ', "_")
+                ));
+            }
+            blocker.is_some()
+        })
+    {
+        return true;
+    }
+
+    let Some(record) =
+        load_live_authoritative_actor_record_for_file_cached(tmux, file, proof_cache)
+    else {
+        return false;
+    };
+    if record.pane_id != pane
+        || !matches!(
+            record.state,
+            agent_doc_controller::actor::ActorState::Busy
+                | agent_doc_controller::actor::ActorState::WaitingInput
+        )
+    {
+        return false;
+    }
+
+    let Ok(conn) = agent_doc_sqlite::state_store::open_state_db(&owner_root) else {
+        return false;
+    };
+    let Ok(Some(lease)) = agent_doc_sqlite::state_store::load_supervisor_lease_from_db(
+        &conn,
+        &record.document_id,
+        record.generation,
+    ) else {
+        return false;
+    };
+    interaction_actor_lease_is_live(&record, pane, &lease)
+}
+
+fn interaction_actor_lease_is_live(
+    record: &agent_doc_controller::actor::ActorRecord,
+    pane: &str,
+    lease: &agent_doc_sqlite::state_store::SupervisorLeaseStatus,
+) -> bool {
+    interaction_actor_lease_is_live_at(
+        record,
+        pane,
+        lease,
+        agent_doc_sqlite::state_store::timestamp_secs(),
+        lease
+            .supervisor_pid
+            .is_some_and(agent_doc_controller_io::process::process_is_alive),
+    )
+}
+
+fn interaction_actor_lease_is_live_at(
+    record: &agent_doc_controller::actor::ActorRecord,
+    pane: &str,
+    lease: &agent_doc_sqlite::state_store::SupervisorLeaseStatus,
+    now: u64,
+    supervisor_process_alive: bool,
+) -> bool {
+    let actor_interactive = record.pane_id == pane
+        && matches!(
+            record.state,
+            agent_doc_controller::actor::ActorState::Busy
+                | agent_doc_controller::actor::ActorState::WaitingInput
+        );
+    let lease_interactive = matches!(
+        lease.runtime_state.as_deref(),
+        Some("busy" | "waiting_input")
+    );
+    actor_interactive
+        && lease.generation == record.generation
+        && lease_interactive
+        && agent_doc_controller::status::supervisor_lease_is_fresh_and_alive(
+            lease.last_heartbeat,
+            supervisor_process_alive,
+            now,
+            agent_doc_controller_io::project_controller::SUPERVISOR_LEASE_GUARD_STALE_AFTER,
+        )
+}
+
 pub fn authoritative_actor_pane_for_document(
     tmux: &Tmux,
     file: &Path,
@@ -4866,8 +4979,9 @@ fn run_with_options_internal_at_root(
             let window = window?;
             tmux.list_window_panes(window).ok().map(|panes| panes.len())
         };
-        let gate_pane_turn_active =
-            |pane: &str| agent_doc_turn_status_io::turn_active_for_pane(project_root, pane);
+        let gate_pane_interaction_active = |file: &Path, pane: &str| {
+            pane_interaction_is_active(tmux, project_root, file, pane, &proof_cache)
+        };
         let gate = crate::layout_column_audit::gate_stale_column_panes(
             tmux,
             &crate::layout_column_audit::StaleColumnGateInput {
@@ -4879,7 +4993,7 @@ fn run_with_options_internal_at_root(
                 before: &pane_windows_before_router,
                 live_turn_window_panes: &gate_live_turn_window_panes,
                 window_pane_count: &gate_window_pane_count,
-                pane_turn_active: &gate_pane_turn_active,
+                pane_interaction_active: &gate_pane_interaction_active,
             },
         );
         // GH #136: acknowledge what this pass deliberately does not build, so
@@ -6811,6 +6925,74 @@ mod tests {
         assert!(
             !pane_projection_reuse_allowed(true, true),
             "pane liveness must not let a stale actor or registry projection relabel a foreign document owner"
+        );
+    }
+
+    #[test]
+    fn stale_stash_permission_prompt_remains_interaction_active_after_turn_marker_expires() {
+        let now = 10_000;
+        let record = agent_doc_controller::actor::ActorRecord {
+            document_id: "/nested/tasks/devops.md".to_string(),
+            session_id: "session-devops".to_string(),
+            generation: 16,
+            pane_id: "%125".to_string(),
+            window_id: "@2".to_string(),
+            harness: "codex".to_string(),
+            state: agent_doc_controller::actor::ActorState::WaitingInput,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "supervisor".to_string(),
+                reason: "harness_permission_prompt".to_string(),
+                timestamp: now - 90,
+                prior_generation: 16,
+                new_generation: 16,
+            },
+        };
+        let lease = agent_doc_sqlite::state_store::SupervisorLeaseStatus {
+            generation: 16,
+            supervisor_pid: Some(4242),
+            supervisor_socket: Some("/tmp/devops.sock".to_string()),
+            last_heartbeat: Some(now - 1),
+            runtime_state: Some("waiting_input".to_string()),
+        };
+
+        assert!(interaction_actor_lease_is_live_at(
+            &record, "%125", &lease, now, true
+        ));
+
+        let mut idle = record.clone();
+        idle.state = agent_doc_controller::actor::ActorState::Ready;
+        assert!(!interaction_actor_lease_is_live_at(
+            &idle, "%125", &lease, now, true
+        ));
+
+        let mut stale_lease = lease.clone();
+        stale_lease.last_heartbeat = Some(now - 61);
+        assert!(!interaction_actor_lease_is_live_at(
+            &record,
+            "%125",
+            &stale_lease,
+            now,
+            true
+        ));
+        assert!(!interaction_actor_lease_is_live_at(
+            &record, "%125", &lease, now, false
+        ));
+        assert!(!interaction_actor_lease_is_live_at(
+            &record, "%999", &lease, now, true
+        ));
+
+        let active_capture = "\
+• Working (19m 44s • esc to interrupt)
+
+› Ask Codex to do anything
+  GPT-5.6-Sol high · ~/work · Context 24% used
+";
+        assert_eq!(
+            agent_doc_harness::HarnessConfig::codex()
+                .dispatch_blocker_reason(active_capture)
+                .as_deref(),
+            Some("active codex turn"),
+            "foreground harness evidence keeps a long turn protected even after actor/lease timers age out"
         );
     }
 

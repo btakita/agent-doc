@@ -521,6 +521,25 @@ Yes to both. They do different jobs: the TLA+ models prove the *design* correct,
 - `netadv7`, **coverage-guided fuzzing** (`cargo-fuzz`) of the bytes that cross a process or network boundary: IPC wire decode, markdown/patch parsers, frontmatter and CRDT op decode. The checks are no panics, and lossless round-trips where a parser claims them. `proptest` is used in only 3 files today; it extends to model-based tests where one transition table drives both the TLA+ model and the Rust test.
 
 Deterministic simulation fuzzing is the one that would have found GH #136 proactively. The bug only shows up under one specific ordering of focus, recycle and stale-supervisor events, and random schedules reach orderings like that.
+
+### Re: netadv batch dispatch — opus-5-5 · 2026-10-05T00:33-04:00
+
+The `netadv1`–`netadv7` items were mirrored into the subagent queue. I dispatched the four that don't depend on anything, each with its own claim and its own worktree under `~/work/btakita/agent-doc-wt/`:
+
+| Item | Owner | Scope |
+|---|---|---|
+| `#netadv1` | `subagent:netadv1` | channel-assumption audit of every TLA+/Lean model and IPC protocol, ranked by timing dependence, plus a list of one-shot-notification defects |
+| `#netadv2` | `subagent:netadv2` | `NetChannel.tla` (deliver/drop/duplicate/reconnect, fair-lossy), a reference retransmit protocol, and 3 Wedge cfgs that must produce counterexamples |
+| `#netadv4` | `subagent:netadv4` | SimWorld seeded network layer (`local` / `coder_zscaler` / `hostile` profiles), existing scenarios re-run under faults, and a fixed seed set added to `make check` |
+| `#netadv7` | `subagent:netadv7` | `cargo-fuzz` targets for IPC decode, markdown/patch, frontmatter and CRDT decode, a corpus from redacted logs, and proptest model-based tests |
+
+These three are held on dependencies, under coordinator claims with a 4h TTL so the loop doesn't spin on them:
+
+- `#netadv3` needs `netadv2` (`NetChannel`) and the GH #136 model.
+- `#netadv5` needs the round-trip counts from the `netadv1` audit.
+- `#netadv6` needs the `netadv4` network layer.
+
+Still in flight: GH #136. `#jbstagefallback` and the alt+shift menu fix are merged on `batch-0505`. The release stays held until GH #136 lands. If the network batch is ready by then, it ships in the same release; otherwise in the next one.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -533,7 +552,14 @@ Deterministic simulation fuzzing is the one that would have found GH #136 proact
 - do [#jbstagefallback]
 - #gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.
 - The alt+shift agent-doc menu is not coming up.
-- 🚧 release + publish
+- do [#netadv1]
+- do [#netadv2]
+- do [#netadv3]
+- do [#netadv4]
+- do [#netadv5]
+- do [#netadv6]
+- do [#netadv7]
+- release + publish
 <!-- /agent:queue -->
 
 

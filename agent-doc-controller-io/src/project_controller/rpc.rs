@@ -27075,12 +27075,33 @@ struct SupervisorReplacementWork {
     operator_receipt_id: u64,
 }
 
-#[cfg(not(any(test, feature = "test-support")))]
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SupervisorReplacementIpcStatus {
     Accepted,
     Dead,
     Failed,
+    /// `#netadv5` R9: live socket, late effect receipt — maybe accepted.
+    ResponseTimedOut,
+}
+
+/// `#netadv5` R9: classify a `restart` send error. A dead socket is positive
+/// evidence; a response timeout on a live socket means the supervisor took the
+/// command and may be executing it; anything else is a failure.
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn supervisor_replacement_ipc_error_status(
+    socket_dead: bool,
+    failure_kind: Option<agent_doc_supervisor_io::ipc::SupervisorCommandFailureKind>,
+) -> SupervisorReplacementIpcStatus {
+    if socket_dead {
+        SupervisorReplacementIpcStatus::Dead
+    } else if failure_kind
+        == Some(agent_doc_supervisor_io::ipc::SupervisorCommandFailureKind::ResponseTimeout)
+    {
+        SupervisorReplacementIpcStatus::ResponseTimedOut
+    } else {
+        SupervisorReplacementIpcStatus::Failed
+    }
 }
 
 /// `#restartlivepane`: refusing every live non-shell pane made "Restart Agent"
@@ -27288,6 +27309,9 @@ fn drive_supervisor_replacement_background(
         SupervisorReplacementIpcStatus::Accepted => SupervisorReplacementIpcOutcome::Accepted,
         SupervisorReplacementIpcStatus::Dead => SupervisorReplacementIpcOutcome::Dead,
         SupervisorReplacementIpcStatus::Failed => SupervisorReplacementIpcOutcome::Failed,
+        SupervisorReplacementIpcStatus::ResponseTimedOut => {
+            SupervisorReplacementIpcOutcome::ResponseTimedOut
+        }
     };
     match decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
         ipc_outcome,
@@ -27486,14 +27510,13 @@ fn request_supervisor_replacement_ipc(
             SupervisorReplacementIpcStatus::Failed
         }
         Err(err) => {
-            let status = if matches!(
-                agent_doc_supervisor_io::ipc::probe_socket(socket),
-                agent_doc_supervisor_io::ipc::SocketLiveness::Dead
-            ) {
-                SupervisorReplacementIpcStatus::Dead
-            } else {
-                SupervisorReplacementIpcStatus::Failed
-            };
+            let status = supervisor_replacement_ipc_error_status(
+                matches!(
+                    agent_doc_supervisor_io::ipc::probe_socket(socket),
+                    agent_doc_supervisor_io::ipc::SocketLiveness::Dead
+                ),
+                agent_doc_supervisor_io::ipc::supervisor_command_failure_kind(&err),
+            );
             agent_doc_ops_log_io::log_op(
                 &work.file,
                 &format!(
@@ -28280,6 +28303,29 @@ mod tests {
             agent_doc_controller::dispatch::with_dispatch_request_key("netadv5", "dr-test-2");
         let _ = handle_dispatch(&bootstrap, None, request(&fresh));
         assert!(attempts() > after_first, "a new key is a new request");
+    }
+
+    /// `#netadv5` R9: a restart whose receipt is late on a live socket is
+    /// "maybe accepted", never a failure that escalates to a cold start.
+    #[test]
+    fn late_supervisor_restart_receipt_is_maybe_accepted() {
+        use agent_doc_supervisor_io::ipc::SupervisorCommandFailureKind as K;
+        assert!(matches!(
+            supervisor_replacement_ipc_error_status(false, Some(K::ResponseTimeout)),
+            SupervisorReplacementIpcStatus::ResponseTimedOut
+        ));
+        assert!(matches!(
+            supervisor_replacement_ipc_error_status(true, Some(K::ResponseTimeout)),
+            SupervisorReplacementIpcStatus::Dead
+        ));
+        assert!(matches!(
+            supervisor_replacement_ipc_error_status(false, Some(K::Connect)),
+            SupervisorReplacementIpcStatus::Failed
+        ));
+        assert!(matches!(
+            supervisor_replacement_ipc_error_status(false, None),
+            SupervisorReplacementIpcStatus::Failed
+        ));
     }
 
     /// `#netadv5` R5: a controller that refuses connects mid-handoff is not

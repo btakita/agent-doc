@@ -1514,9 +1514,10 @@ pub(crate) fn guard_stale_snapshot_recovery_only(
     false
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct PendingStatusMutationOutcome {
     queue_completion_projected: bool,
+    actionable_ids: Vec<String>,
 }
 
 /// `#prmergeguardpr`: closeout runs the tracked-work mutation envelope twice —
@@ -1744,6 +1745,7 @@ fn apply_pending_and_status_mutations_with_mode(
 ) -> Result<PendingStatusMutationOutcome> {
     let validate_only = mode.is_validate();
     let queue_completion_projected = std::cell::Cell::new(false);
+    let actionable_ids = std::cell::RefCell::new(Vec::new());
     let queue_resolution_ids = agent_doc_queue::queue_heads::explicit_queue_resolution_ids(
         &options.pending_done,
         &options.pending_gate,
@@ -2150,6 +2152,13 @@ fn apply_pending_and_status_mutations_with_mode(
                         &same_cycle_added_ids,
                         &options.pending_ungate,
                     )?;
+                    actionable_ids.replace(
+                        same_cycle_added_ids
+                            .iter()
+                            .chain(&options.pending_ungate)
+                            .cloned()
+                            .collect(),
+                    );
                     if !anchored_added_ids.is_empty() {
                         agent_doc_cycle_state_io::record_pending_anchored_ids(
                             file,
@@ -2220,6 +2229,7 @@ fn apply_pending_and_status_mutations_with_mode(
 
     Ok(PendingStatusMutationOutcome {
         queue_completion_projected: queue_completion_projected.get(),
+        actionable_ids: actionable_ids.into_inner(),
     })
 }
 
@@ -2702,24 +2712,27 @@ fn run_command_inner_within_pass(
             has_pending_ops,
             commit_mode != CommitMode::None || captured_finalize_continuation_owns_commit(&options),
         );
-        if let Err(error) = mutation_result {
-            if let Some(target_hash) = absorb_retained_pending_only_mutation(
-                file,
-                commit_mode,
-                &error,
-                prior_retained_intent.as_deref(),
-            )? {
-                eprintln!(
-                    "[write] {}",
-                    agent_doc_turn::write_ownership::pending_only_absorbed_notice(
-                        &file.display().to_string(),
-                        &target_hash,
-                    )
-                );
-                return Ok(());
+        let mutation_outcome = match mutation_result {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if let Some(target_hash) = absorb_retained_pending_only_mutation(
+                    file,
+                    commit_mode,
+                    &error,
+                    prior_retained_intent.as_deref(),
+                )? {
+                    eprintln!(
+                        "[write] {}",
+                        agent_doc_turn::write_ownership::pending_only_absorbed_notice(
+                            &file.display().to_string(),
+                            &target_hash,
+                        )
+                    );
+                    return Ok(());
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
+        };
         complete_queue_prompts_for_pending_only_done(
             file,
             &options.pending_done,
@@ -2768,16 +2781,13 @@ fn run_command_inner_within_pass(
         // closeout path before returning.
         if commit_mode != CommitMode::None {
             let placement = follow_up_queue_placement(&options)?;
-            if let Err(e) = with_backlog_effects(|| {
-                agent_doc_preflight_io::sync_same_cycle_actionable_backlog_into_go_queue(
-                    file, placement,
+            with_backlog_effects(|| {
+                agent_doc_preflight_io::sync_actionable_backlog_ids_into_go_queue(
+                    file,
+                    placement,
+                    &mutation_outcome.actionable_ids,
                 )
-            }) {
-                eprintln!(
-                    "[queue] warning: same-cycle actionable backlog queue sync failed: {}",
-                    e
-                );
-            }
+            })?;
         }
         ensure_closeout_lease_still_held(_closeout_owner.as_ref())?;
         return finalize_commit(file, commit_mode, options.force_disk);
@@ -3139,6 +3149,7 @@ fn run_command_inner_within_pass(
                     )?;
                     PendingStatusMutationOutcome {
                         queue_completion_projected: true,
+                        ..PendingStatusMutationOutcome::default()
                     }
                 } else {
                     return Err(err.context(rendered));
@@ -3799,7 +3810,23 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                 ) {
                     // `#staleinmem` — record what we just committed so a later
                     // out-of-band disk correction is detectable at the next barrier.
-                    Ok(_) => {
+                    Ok(did_commit) => {
+                        if session_document && !did_commit {
+                            let current = if force_disk {
+                                resolve_force_disk_document(
+                                    file,
+                                    "best_effort_commit_refusal_current",
+                                )?
+                            } else {
+                                resolve_current_document(file, "best_effort_commit_refusal_current")?
+                            };
+                            let head = agent_doc_git_io::revision::show_head(file)?;
+                            anyhow::ensure!(
+                                head.as_deref() == Some(current.content()),
+                                "git refused to commit the changed session document {}",
+                                file.display()
+                            );
+                        }
                         if let Err(err) = agent_doc_controller_io::project_controller::
                             record_committed_baseline_via_controller_model_for_doc(file)
                         {

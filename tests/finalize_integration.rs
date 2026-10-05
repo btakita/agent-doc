@@ -314,6 +314,58 @@ fn write_commit_requires_git_repo_before_mutating_session_document() {
     );
 }
 
+#[test]
+fn backlog_only_write_commit_fails_when_git_refuses_the_session_document() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("scratch")).unwrap();
+    fs::write(tmp.path().join(".gitignore"), "scratch/\n.agent-doc/\n").unwrap();
+    let doc = tmp.path().join("scratch/session.md");
+    let content = session_template_doc_content().replace("❯ Please reply\n", "");
+    fs::write(&doc, content).unwrap();
+
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["init"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["config", "user.email", "test@example.com"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["config", "user.name", "Test User"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["add", ".gitignore"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["commit", "-m", "initial", "--no-verify"])
+        .status()
+        .unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--backlog-only",
+            "--backlog-add",
+            "id=task task",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "git refused to commit the changed session document",
+        ));
+}
+
 /// GH #93: a backlog item quoting a component-marker *prefix* in backticks is
 /// prose, so the final lint gate must not report the backlog as unclosed.
 #[test]
@@ -3138,6 +3190,51 @@ fn backlog_only_write_enqueues_created_items_at_go_queue_head() {
         fresh < tail,
         "the follow-up belongs at the queue head:\n{queue}"
     );
+}
+
+#[test]
+fn backlog_only_upsert_enqueues_first_generated_id_without_open_cycle() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue: go\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n<!-- /agent:queue -->\n\n<!-- agent:backlog queue=\"append\" -->\n<!-- /agent:backlog -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--backlog-only",
+            "--origin",
+            "slack-triage",
+            "--backlog-upsert",
+            "stable-key=task",
+            "--backlog-queue-placement",
+            "append",
+        ])
+        .assert()
+        .success();
+
+    let updated = fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("[#stablekeytask] stable-key task"),
+        "upsert must create a stable generated id:\n{updated}"
+    );
+    assert!(
+        updated.contains("- do [#stablekeytask]"),
+        "the first generated id must be mirrored in the same committed write:\n{updated}"
+    );
+    let committed = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(committed.status.success());
+    assert_eq!(String::from_utf8(committed.stdout).unwrap(), updated);
 }
 
 #[test]

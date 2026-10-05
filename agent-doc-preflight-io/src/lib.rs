@@ -5697,7 +5697,21 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     file: &Path,
     placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
 ) -> Result<Vec<String>> {
-    let actionable_this_cycle = agent_doc_cycle_state_io::pending_actionable_ids(file);
+    let actionable_this_cycle: Vec<String> = agent_doc_cycle_state_io::pending_actionable_ids(file)
+        .into_iter()
+        .collect();
+    sync_actionable_backlog_ids_into_go_queue(file, placement, &actionable_this_cycle)
+}
+
+/// Mirror the actionable ids produced by one mutation envelope into an active
+/// go queue. Callers that do not own a response cycle (for example
+/// `write --backlog-only`) pass the mutation outcome directly instead of
+/// depending on cycle-state storage that intentionally does not exist.
+pub fn sync_actionable_backlog_ids_into_go_queue(
+    file: &Path,
+    placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
+    actionable_this_cycle: &[String],
+) -> Result<Vec<String>> {
     if actionable_this_cycle.is_empty() {
         return Ok(Vec::new());
     }
@@ -5752,8 +5766,8 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
         return Ok(Vec::new());
     };
     let actionable_norm: std::collections::HashSet<String> = actionable_this_cycle
-        .into_iter()
-        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(&id))
+        .iter()
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
         .filter(|id| !id.is_empty())
         .collect();
     let mut backlog_ids: Vec<String> = sync_request

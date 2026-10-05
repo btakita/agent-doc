@@ -506,6 +506,21 @@ Yes. The plan's adversarial channel includes a Drop action, and loss is the hard
 - **Liveness only under fairness:** a message resent infinitely often is eventually delivered. A Wedge config with a fire-and-forget variant must show the stall, so a green run is not vacuous.
 
 GH #136 may itself be a loss bug. Its safe-boundary recycle request was never consumed (`prior_request=unconsumed`, up to 22h old), which is what you'd see if a one-shot notification were dropped. I've told that subagent to check whether this is the cause. If it is, the fix should be a durable request that is re-read at every supervisor idle boundary or reconnect, consumed idempotently by request id, plus a Wedge config showing that the fire-and-forget version stalls under Drop.
+
+### Re: network conditions in simulation, and fuzzing — opus-5-5 · 2026-10-05T00:30-04:00
+
+> **Chat prompt (#chatprompt):** SHould the siumulation suite also account for various network conditions? Should we add fuzzing to proactively find new issues?
+
+Yes to both. They do different jobs: the TLA+ models prove the *design* correct, while simulation and fuzzing find places where the *code* departs from that design.
+
+**Simulation under network conditions:** `netadv4` already covers this. SimWorld (`src/sim_world.rs`) gets a seeded network layer with latency, jitter, reordering, drop, duplication and reconnect, including a Coder+Zscaler profile.
+
+**Fuzzing:** two new phases (plan commit `48372a6948`):
+
+- `netadv6`, **deterministic simulation fuzzing.** A seeded explorer drives SimWorld through random interleavings, network faults, edits, recycles, crashes and reconnects. After every step it checks invariant oracles, which are the same safety properties the TLA+ models state. A failing seed is shrunk to a minimal trace and committed as a permanent regression seed. `make check` runs a short budget plus every regression seed, and a nightly CI job runs fresh seeds for longer.
+- `netadv7`, **coverage-guided fuzzing** (`cargo-fuzz`) of the bytes that cross a process or network boundary: IPC wire decode, markdown/patch parsers, frontmatter and CRDT op decode. The checks are no panics, and lossless round-trips where a parser claims them. `proptest` is used in only 3 files today; it extends to model-based tests where one transition table drives both the TLA+ model and the Rust test.
+
+Deterministic simulation fuzzing is the one that would have found GH #136 proactively. The bug only shows up under one specific ordering of focus, recycle and stale-supervisor events, and random schedules reach orderings like that.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -528,6 +543,8 @@ GH #136 may itself be a loss bug. Its safe-boundary recycle request was never co
 - [ ] [#netadv3] [agent-doc][formal] Re-check hot-path models (VisibleDeliveryReceipt, EditorReplicaStrand, PassiveTmuxSync, RecycleSettleDispatch, AgentDocCloseout, GH 136 layout/recycle) over NetChannel; fix every counterexample with SimWorld replay coverage. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv4] [agent-doc][simworld] Seeded network-conditions layer for SimWorld (latency, jitter, reorder, drop, duplicate, reconnect) with a Coder+Zscaler profile, run under make check. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv5] [agent-doc] Latency budget enforcement: per hot path (focus/layout projection, response delivery, closeout ACK) assert serial round-trip count; replace fixed sleeps/settle windows on correctness paths with ack-driven transitions. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
+- [ ] [#netadv6] [agent-doc][simworld] Deterministic simulation fuzzing: seeded explorer over SimWorld (interleavings, network faults, edits, recycles, crashes, reconnects) checking TLA-derived invariant oracles each step; shrink failing seeds into committed regression seeds; short budget in make check, long nightly CI run. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
+- [ ] [#netadv7] [agent-doc] Coverage-guided fuzzing: cargo-fuzz targets for IPC wire decode, markdown component/patch parsers, frontmatter, CRDT op decode (no-panic + lossless round-trip oracles; corpus seeded from redacted real logs); extend proptest to model-based tests of the pure transition functions the TLA models describe. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#jbstagefallback] [agent-doc][jetbrains] Follow-up to jbstagebackup: when IntelliJ's ActionCommand classes cannot be built, JetBrainsPluginUpgradeAction falls back to PluginInstaller.installAfterRestart, which still writes the unguarded delete-then-unzip order. Guard that fallback too (refuse it and report restart-required, or write the probe-unzip block another way), with a regression test.
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

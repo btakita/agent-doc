@@ -634,7 +634,23 @@ pub(crate) fn request_path_with_reason(path: &Path, command: &str, reason: &str)
     )
 }
 
+thread_local! {
+    static CONTROLLER_ROUND_TRIPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `#netadv5` RTT budget probe: serial controller-socket round trips issued by
+/// the calling thread (every request written and awaited through either
+/// request funnel). Hot-path tests diff this around one operation.
+pub fn controller_round_trips_on_this_thread() -> u64 {
+    CONTROLLER_ROUND_TRIPS.with(std::cell::Cell::get)
+}
+
+fn note_controller_round_trip() {
+    CONTROLLER_ROUND_TRIPS.with(|count| count.set(count.get() + 1));
+}
+
 fn request_path_json(path: &Path, request_value: serde_json::Value) -> Result<String> {
+    note_controller_round_trip();
     // `#preflightdeadline`: inside a preflight admission, no RPC may wait past
     // the admission deadline, and none may start once it is spent.
     let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
@@ -1432,6 +1448,7 @@ fn request_controller_on_stream_with_timeout<T: DeserializeOwned>(
     timeout: Duration,
     stream: interprocess::local_socket::Stream,
 ) -> Result<T> {
+    note_controller_round_trip();
     // `#preflightdeadline`: every per-call timeout is clamped to the preflight
     // admission deadline (unchanged outside an admission), and a request is
     // refused before it is sent once that deadline is spent.
@@ -5333,6 +5350,12 @@ pub fn new_closeout_owner_id(role: &str) -> String {
 ///
 /// The controller serializes the projection decision and fact append. SQLite is
 /// only the actor's persistence substrate and is never read by this client.
+/// `#netadv5` RTT budget: serial controller round trips for one closeout
+/// owner claim (also each lease heartbeat) and one release: the
+/// `connect_or_launch` liveness `status` plus the `command_plane_submit`.
+pub const CLOSEOUT_OWNER_CLAIM_SERIAL_ROUND_TRIPS: u64 = 2;
+pub const CLOSEOUT_OWNER_RELEASE_SERIAL_ROUND_TRIPS: u64 = 2;
+
 pub fn claim_closeout_owner_for_file(
     file: &Path,
     request: CloseoutOwnerClaimRequest,
@@ -5340,10 +5363,12 @@ pub fn claim_closeout_owner_for_file(
     use super::command_plane::{CloseoutOwnerClaimPayload, build_closeout_owner_claim_submit};
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
+    // `#netadv5` RTT budget: no separate `ensure_controller_running` here —
+    // `request_controller_with_timeout` already runs the same
+    // `connect_or_launch`, so the extra call only cost one more `status` round
+    // trip and connect on every claim and every lease heartbeat.
     #[cfg(feature = "test-support")]
     ensure_state_actor_for_tests(&project_root)?;
-    #[cfg(not(feature = "test-support"))]
-    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
     let document_path = file
         .canonicalize()
         .unwrap_or_else(|_| file.to_path_buf())
@@ -5387,7 +5412,10 @@ pub fn release_closeout_owner_for_file(
     use super::command_plane::{CloseoutOwnerReleasePayload, build_closeout_owner_release_submit};
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
-    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    // `#netadv5` RTT budget: `request_controller_with_timeout` already
+    // connects-or-launches; see `claim_closeout_owner_for_file`.
+    #[cfg(feature = "test-support")]
+    ensure_state_actor_for_tests(&project_root)?;
     let document_path = file
         .canonicalize()
         .unwrap_or_else(|_| file.to_path_buf())
@@ -28303,6 +28331,48 @@ mod tests {
             agent_doc_controller::dispatch::with_dispatch_request_key("netadv5", "dr-test-2");
         let _ = handle_dispatch(&bootstrap, None, request(&fresh));
         assert!(attempts() > after_first, "a new key is a new request");
+    }
+
+    /// `#netadv5` RTT budget for the closeout ACK lease: one claim and one
+    /// release each cost exactly their budgeted serial controller round trips.
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn closeout_owner_claim_and_release_stay_within_round_trip_budget() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/rtt.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-rtt\n---\nBody\n").unwrap();
+        // Warm the in-process controller so the measured calls see a serving one.
+        ensure_state_actor_for_tests(root).unwrap();
+
+        let before = controller_round_trips_on_this_thread();
+        let outcome = claim_closeout_owner_for_file(
+            &doc,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: None,
+                owner_id: "rtt-owner".to_string(),
+                owner_pid: std::process::id(),
+                role: CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.to_string(),
+                now_secs: timestamp_secs(),
+                lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+        );
+        let claim_rtt = controller_round_trips_on_this_thread() - before;
+        assert_eq!(
+            claim_rtt, CLOSEOUT_OWNER_CLAIM_SERIAL_ROUND_TRIPS,
+            "claim outcome={outcome:?}"
+        );
+
+        let before = controller_round_trips_on_this_thread();
+        let released = release_closeout_owner_for_file(&doc, "cycle", "rtt-owner", "netadv5");
+        let release_rtt = controller_round_trips_on_this_thread() - before;
+        assert_eq!(
+            release_rtt, CLOSEOUT_OWNER_RELEASE_SERIAL_ROUND_TRIPS,
+            "release outcome={released:?}"
+        );
     }
 
     /// `#netadv5` R9: a restart whose receipt is late on a live socket is

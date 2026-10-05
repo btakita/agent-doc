@@ -2309,6 +2309,11 @@ pub enum RecycleInflightUnsettledVerdict {
     /// Unstamped projection. Unknown is not stale, and an unbounded wait on an
     /// unknown mark cannot terminate, so this stays fail-closed.
     FailClosed,
+    /// `#netadv5` R9: past the TTL, but the document's supervisor process is
+    /// still alive. An elapsed TTL is not proof the settle was lost — on a slow
+    /// host the `auto_install_reexec` phase spans a whole `make install`. Do not
+    /// inject into a pane that may be mid-`execve`; refuse retryably.
+    RefuseOwnerStillRecycling,
 }
 
 /// How many times the gated recycle may be replaced by a NEW epoch before the
@@ -2343,6 +2348,24 @@ pub fn recycle_inflight_unsettled_verdict(
         return RecycleInflightUnsettledVerdict::ProceedAbandoned;
     }
     RecycleInflightUnsettledVerdict::KeepWaiting
+}
+
+/// `#netadv5` R9: [`recycle_inflight_unsettled_verdict`] with positive
+/// evidence. Abandonment ("the settle was lost") additionally requires that no
+/// supervisor process for the document is alive; a live one past the TTL is
+/// [`RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling`].
+pub fn recycle_inflight_unsettled_verdict_with_owner(
+    marked_secs: u64,
+    now_secs: u64,
+    ttl_secs: u64,
+    supervisor_alive: bool,
+) -> RecycleInflightUnsettledVerdict {
+    match recycle_inflight_unsettled_verdict(marked_secs, now_secs, ttl_secs) {
+        RecycleInflightUnsettledVerdict::ProceedAbandoned if supervisor_alive => {
+            RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling
+        }
+        verdict => verdict,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4243,6 +4266,31 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(!dispatch_should_coalesce_in_flight(true, true));
         assert!(!dispatch_should_coalesce_in_flight(false, false));
         assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+
+    /// `#netadv5` R9: a slow `make install` that outlives the 120s TTL while
+    /// its supervisor is alive is not a lost settle; only a dead supervisor is.
+    #[test]
+    fn recycle_ttl_elapsed_with_live_supervisor_is_not_abandonment() {
+        let ttl = RECYCLE_INFLIGHT_SETTLE_TTL_SECS;
+        let marked = 1_000;
+        let late = marked + ttl + 30;
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_owner(marked, late, ttl, true),
+            RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling
+        );
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_owner(marked, late, ttl, false),
+            RecycleInflightUnsettledVerdict::ProceedAbandoned
+        );
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_owner(marked, marked + 5, ttl, true),
+            RecycleInflightUnsettledVerdict::KeepWaiting
+        );
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_owner(0, late, ttl, false),
+            RecycleInflightUnsettledVerdict::FailClosed
+        );
     }
 
     #[test]

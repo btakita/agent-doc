@@ -969,13 +969,18 @@ mod tests {
                 .collect();
             let builds: Vec<&&str> = body
                 .iter()
-                .filter(|line| line.contains("cargo build"))
+                .filter(|line| line.contains("$(CARGO_CMD) build"))
                 .collect();
             assert_eq!(builds.len(), 1, "{target} must build once: {builds:?}");
             assert!(
                 builds[0].contains("--bin agent-doc") && builds[0].contains("--lib"),
                 "{target} must build the binary and cdylib together: {}",
                 builds[0]
+            );
+            assert!(
+                builds[0].contains("scripts/with-cargo-cache")
+                    || makefile.contains("CARGO_CMD ?= ./scripts/with-cargo-cache cargo"),
+                "{target} must preserve worktree-local targets while enabling optional sccache"
             );
         }
     }

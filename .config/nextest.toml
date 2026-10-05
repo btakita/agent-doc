@@ -29,3 +29,10 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 [[profile.ci.overrides]]
 filter = 'test(run_auto_queue_starts_fresh_backend_session_after_accretion_threshold)'
 slow-timeout = { period = "120s", terminate-after = 2 }
+
+# Affected-scope edit-loop runs fail at the first regression. Controller-heavy
+# packages are deliberately batched by Cargo outside nextest, so this profile
+# covers only the remaining selected packages.
+[profile.dev-fast]
+inherits = "default"
+fail-fast = true

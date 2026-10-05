@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    echo "usage: scripts/with-cargo-cache COMMAND [ARG ...]" >&2
+    exit 2
+fi
+
+# Keep compilation outputs worktree-local.  sccache shares only content-addressed
+# compiler results, never Cargo's mutable target directory or dep-info files.
+if [ -z "${CARGO_TARGET_DIR+x}" ]; then
+    CARGO_TARGET_DIR="$PWD/target"
+    export CARGO_TARGET_DIR
+fi
+
+# Respect an explicit wrapper (including an explicit empty value).  Otherwise,
+# use one shared, content-addressed cache when sccache is available and fall back
+# to ordinary Cargo with no setup requirement when it is not.
+if [ -z "${RUSTC_WRAPPER+x}" ] && command -v sccache >/dev/null 2>&1; then
+    RUSTC_WRAPPER=$(command -v sccache)
+    export RUSTC_WRAPPER
+    if [ -z "${SCCACHE_DIR+x}" ]; then
+        cache_home=${XDG_CACHE_HOME:-${HOME:?HOME must be set when sccache is enabled}/.cache}
+        SCCACHE_DIR="$cache_home/agent-doc/sccache"
+        export SCCACHE_DIR
+    fi
+    mkdir -p "$SCCACHE_DIR"
+fi
+
+exec "$@"

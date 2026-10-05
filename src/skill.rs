@@ -4285,11 +4285,11 @@ mod tests {
             assert!(content.contains("final document-mutation boundary for the cycle"));
             assert!(content.contains("Imperative edits are executable directives"));
             assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
-            assert!(content.contains("Agent harnesses own full-suite verification"));
-            assert!(content.contains("Preserve the command's exit status explicitly"));
-            assert!(content.contains("runner-native failure count"));
-            assert!(content.contains("generic output grep copied from another runner"));
-            assert!(content.contains("Do not waive red suites as \"unrelated\" or \"flaky\""));
+            assert!(content.contains("Agent harnesses own tiered verification"));
+            assert!(content.contains("make check-fast"));
+            assert!(content.contains("exactly one authoritative `make check`"));
+            assert!(content.contains("content/toolchain fingerprint"));
+            assert!(content.contains("runner-native failure evidence"));
             assert!(content.contains("Do not rely on a pre-commit hook"));
         }
         assert!(persist_closeout.contains("Capture two independent proofs"));

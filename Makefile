@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
+.PHONY: build build-release release release-check release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check check-fast dev-check-self-test python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -7,7 +7,11 @@ CARGO_TARGET_DIR_ABS := $(abspath $(if $(strip $(CARGO_TARGET_DIR)),$(CARGO_TARG
 AGENT_DOC_TEST_TMPDIR ?= $(if $(strip $(TMPDIR)),$(TMPDIR),$(shell if test -d /var/tmp && test -w /var/tmp; then printf '%s' /var/tmp; else printf '%s' /tmp; fi))
 VSCODE_NODE_LOCK := editors/vscode/node_modules/.package-lock.json
 CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
+CARGO_CMD ?= ./scripts/with-cargo-cache cargo
 NEXTEST_QUIET_FLAGS ?= --cargo-quiet --show-progress none --status-level fail --final-status-level fail --failure-output immediate-final --success-output never
+BATCHED_TEST_PACKAGES := agent-doc-controller agent-doc-controller-io agent-doc-route-io agent-doc-session-check-io agent-doc-start-runtime-io
+BATCHED_TEST_PACKAGE_ARGS := $(foreach package,$(BATCHED_TEST_PACKAGES),-p $(package))
+NEXTEST_NON_BATCHED_FILTER := not (package(agent-doc-controller) | package(agent-doc-controller-io) | package(agent-doc-route-io) | package(agent-doc-session-check-io) | package(agent-doc-start-runtime-io))
 LOCAL_INSTALL_PROFILE ?= release-local
 LOCAL_INSTALL_TARGET_DIR ?= target/local-install
 LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mold; elif command -v ld.lld >/dev/null 2>&1 || command -v lld >/dev/null 2>&1; then printf '%s' lld; fi)
@@ -19,11 +23,11 @@ endif
 
 # Build debug binary
 build:
-	$(LOCAL_CARGO_ENV) cargo build
+	$(LOCAL_CARGO_ENV) $(CARGO_CMD) build
 
 # Build release binary, cdylib, and symlink to .bin/
 build-release:
-	cargo build --release
+	$(CARGO_CMD) build --release
 	@mkdir -p .bin
 	@ln -sf ../target/release/agent-doc .bin/agent-doc
 	@agent-doc lib-install 2>/dev/null || true
@@ -34,12 +38,21 @@ build-release:
 # cadence-gated.
 # GitHub Actions publishes Linux and Windows assets. Darwin archives are built
 # on operator-owned Mac hardware and may be attached to the release later.
-release: check
+# The release owns the one authoritative full-suite gate. A content-identical
+# successful `make check` performed after integration/version projection is
+# reused; any source or toolchain change invalidates the local receipt.
+release: release-check
 	@version=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	echo "Releasing v$$version..."; \
 	git tag "v$$version" && git push origin main "v$$version" && \
 	echo "Tag v$$version pushed. CI handles GitHub Release + PyPI."; \
 	$(MAKE) install-full
+
+release-check: tmux-ci
+	@if ! python3 scripts/dev-check.py verify-full-check; then \
+		$(MAKE) check; \
+	fi
+	@python3 scripts/dev-check.py verify-full-check
 
 release-macos-cadence-check:
 	@python3 scripts/agent-doc-dev verify-macos-release-cadence
@@ -64,13 +77,14 @@ release-version:
 	@# `#skillinstallstalemirror`: installed copies are the installer's output,
 	@# not a sed target. `--root .` reaches the submodule-local install that bare
 	@# root resolution skips in favour of the superproject.
-	@$(LOCAL_CARGO_ENV) cargo run --quiet --bin agent-doc -- skill install --root . --all
-	@$(LOCAL_CARGO_ENV) cargo run --quiet --bin agent-doc -- skill install --all
+	@$(LOCAL_CARGO_ENV) $(CARGO_CMD) run --quiet --bin agent-doc -- skill install --root . --all
+	@$(LOCAL_CARGO_ENV) $(CARGO_CMD) run --quiet --bin agent-doc -- skill install --all
 
 # Run tests (unset git hook env vars so temp-repo tests are not confused by GIT_DIR).
-# Prefer cargo-nextest when installed; it runs test binaries concurrently while
-# preserving Cargo's integration-test environment. Fall back to Cargo's own
-# runner rather than reimplementing test execution.
+# Prefer cargo-nextest when installed; it runs ordinary test binaries
+# concurrently. Controller-heavy packages use one cargo-test process per test
+# binary instead: nextest's one-process-per-test model repeatedly paid controller
+# initialization cost. The fallback remains one workspace-wide cargo-test run.
 test sim-medium sim-net cross-editor-simworld dev-harness-test editor-parity tmux-ci check: export TMPDIR := $(AGENT_DOC_TEST_TMPDIR)
 
 $(VSCODE_NODE_LOCK): editors/vscode/package.json editors/vscode/package-lock.json
@@ -79,13 +93,20 @@ $(VSCODE_NODE_LOCK): editors/vscode/package.json editors/vscode/package-lock.jso
 test:
 	@set -e; \
 	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
-	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --lib --quiet; \
+	$(CARGO_CLEAN_ENV) $(CARGO_CMD) build --bin agent-doc --lib --quiet; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets $(NEXTEST_QUIET_FLAGS); then \
+		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) nextest run --workspace --all-targets -E '$(NEXTEST_NON_BATCHED_FILTER)' $(NEXTEST_QUIET_FLAGS); then \
 			exit 1; \
 		fi; \
+		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-batched-test.XXXXXX.log"); \
+		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test $(BATCHED_TEST_PACKAGE_ARGS) --all-targets --quiet -- --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
+			cat "$$log"; \
+			rm -f "$$log"; \
+			exit 1; \
+		fi; \
+		rm -f "$$log"; \
 		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-doctest.XXXXXX.log"); \
-		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --workspace --doc --quiet >"$$log" 2>&1; then \
+		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --doc --quiet >"$$log" 2>&1; then \
 			cat "$$log"; \
 			rm -f "$$log"; \
 			exit 1; \
@@ -93,7 +114,7 @@ test:
 		rm -f "$$log"; \
 	else \
 		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-test.XXXXXX.log"); \
-		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --workspace --all-targets --quiet -- --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
+		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --workspace --all-targets --quiet -- --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
 			cat "$$log"; \
 			rm -f "$$log"; \
 			exit 1; \
@@ -105,7 +126,7 @@ test:
 # #[ignore], but make check runs it explicitly so CI exercises more schedules.
 sim-medium:
 	@log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-sim-medium.XXXXXX.log"); \
-	if ! $(CARGO_CLEAN_ENV) cargo test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget --quiet -- --ignored --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
+	if ! $(CARGO_CLEAN_ENV) $(CARGO_CMD) test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget --quiet -- --ignored --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
 		cat "$$log"; \
 		rm -f "$$log"; \
 		exit 1; \
@@ -120,7 +141,7 @@ sim-medium:
 # profile ad hoc: AGENT_DOC_SIM_NET_PROFILE=hostile AGENT_DOC_SIM_NET_SEED=3 cargo test sim_world::
 sim-net:
 	@log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-sim-net.XXXXXX.log"); \
-	if ! $(CARGO_CLEAN_ENV) cargo test --bin agent-doc sim_world::net::tests::closeout_sim_net_ --quiet -- --ignored --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
+	if ! $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --bin agent-doc sim_world::net::tests::closeout_sim_net_ --quiet -- --ignored --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
 		cat "$$log"; \
 		rm -f "$$log"; \
 		exit 1; \
@@ -140,7 +161,7 @@ sim-fuzz:
 	@mkdir -p "$(FUZZ_OUT)"; log="$(FUZZ_OUT)/sim-fuzz.log"; \
 	if AGENT_DOC_SIM_FUZZ_SECS="$(FUZZ_SECS)" AGENT_DOC_SIM_FUZZ_STEPS="$(FUZZ_STEPS)" \
 		AGENT_DOC_SIM_FUZZ_OUT="$(FUZZ_OUT)" $(if $(FUZZ_SEED),AGENT_DOC_SIM_FUZZ_SEED="$(FUZZ_SEED)") \
-		$(CARGO_CLEAN_ENV) cargo test --bin agent-doc sim_world::fuzz::tests::sim_fuzz_long_budget \
+		$(CARGO_CLEAN_ENV) $(CARGO_CMD) test --bin agent-doc sim_world::fuzz::tests::sim_fuzz_long_budget \
 		-- --ignored --nocapture --test-threads=1 >"$$log" 2>&1; then status=0; else status=1; fi; \
 	grep -v '^\[template\]' "$$log" | grep -v '^\[perf\]'; \
 	echo "sim-fuzz: exit=$$status log=$$log out=$(FUZZ_OUT)"; \
@@ -152,27 +173,27 @@ sim-fuzz:
 cross-editor-simworld: $(VSCODE_NODE_LOCK)
 	@set -e; \
 	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
-	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --lib --quiet; \
+	$(CARGO_CLEAN_ENV) $(CARGO_CMD) build --bin agent-doc --lib --quiet; \
 	( cd editors/vscode && npm run compile ); \
 	( cd editors/jetbrains && ./gradlew --no-daemon --console=plain -q testClasses ); \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --test cross_editor_simworld native_plugin_harnesses_peer_through_real_agent_doc_controller -- --ignored --nocapture --test-threads=1
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --test cross_editor_simworld native_plugin_harnesses_peer_through_real_agent_doc_controller -- --ignored --nocapture --test-threads=1
 
 # Live tmux integration sweep. These tests are intentionally ignored in the
 # default development suite and run on CI where tmux is installed.
 tmux-ci:
 	@set -e; \
 	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
-	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --quiet; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --all-targets -- --ignored --skip native_plugin_harnesses_peer_through_real_agent_doc_controller --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test -p agent-doc-sync-io repair_layout_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test -p agent-doc-route-io --lib layout_startup_completion_cannot_append_a_third_visible_pane -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	$(CARGO_CLEAN_ENV) $(CARGO_CMD) build --bin agent-doc --quiet; \
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test --all-targets -- --ignored --skip native_plugin_harnesses_peer_through_real_agent_doc_controller --test-threads="$(TMUX_TEST_THREADS)"; \
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io repair_layout_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib layout_startup_completion_cannot_append_a_third_visible_pane -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	for test_filter in provision_pane_ manual_layout_provisions_paused_queue_without_dispatch_or_resume layout_owned_provisioning_does_not_focus_intermediate_pane; do \
-		AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test -p agent-doc-route-io --test route "$$test_filter" -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+		AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --test route "$$test_filter" -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	done
 
 # Lint
 clippy:
-	@cargo clippy --quiet --all-targets --all-features -- -D warnings
+	@$(CARGO_CMD) clippy --quiet --all-targets --all-features -- -D warnings
 
 # Verify the complete release projection and every agent-doc crate's privacy.
 version-sync:
@@ -280,11 +301,20 @@ lean:
 # the release process runs `make check`, so leaving the installed-surface audit
 # out of it let 0.35.224 ship with harness runbooks several versions behind the
 # binary while every version marker matched.
-check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity python-bootstrap-test lean tla
+dev-check-self-test:
+	@python3 scripts/dev-check.py self-test
+
+# Fast edit-loop validation: helper checks plus Rust packages affected by the
+# diff and their reverse-dependency closure. This is not a release proof.
+check-fast: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test
+	@python3 scripts/dev-check.py run
+
+check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity python-bootstrap-test lean tla
+	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
 audit-docs:
-	@cargo run --quiet -- audit-docs
+	@$(CARGO_CMD) run --quiet -- audit-docs
 
 # Translate the PlusCal concurrency model and check its TLA+ safety/liveness properties.
 tla:
@@ -306,17 +336,16 @@ fuzz:
 	for target in $(FUZZ_TARGETS); do \
 		mkdir -p "$(FUZZ_WORK)/$$target"; \
 		echo "fuzz: $$target for $(FUZZ_SECONDS)s"; \
-		cargo +nightly fuzz run -O $$target "$(FUZZ_WORK)/$$target" fuzz/corpus/$$target fuzz/regressions/$$target -- \
+		$(CARGO_CMD) +nightly fuzz run -O $$target "$(FUZZ_WORK)/$$target" fuzz/corpus/$$target fuzz/regressions/$$target -- \
 			-max_total_time=$(FUZZ_SECONDS) -timeout=10 -rss_limit_mb=2048 -max_len=16384; \
 	done
 
 # Pre-commit: clippy + test + audit-docs + plugin version check
 precommit: check
-	cargo run --quiet -- audit-docs
 
 # Emit Cargo's build-timing report for local bottleneck analysis.
 timings:
-	$(LOCAL_CARGO_ENV) cargo build --timings
+	$(LOCAL_CARGO_ENV) $(CARGO_CMD) build --timings
 
 # Fast local install: reusable incremental target dir + local release profile.
 # Build first, then let the freshly-built binary atomically replace the installed
@@ -330,7 +359,7 @@ timings:
 # c7a28f.. under one version (2026-09-29), and every editor handshake was then
 # refused until the next install. `lib-install` also refuses that skew.
 install: editor-generation-bump
-	$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc --lib
+	$(LOCAL_CARGO_ENV) $(CARGO_CMD) build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc --lib
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --all
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --root . --all
@@ -350,7 +379,7 @@ install: editor-generation-bump
 # loop. Reserve `install-full` for verifying pre-release parity, which is what
 # the `release` target uses it for.
 install-full: editor-generation-bump
-	cargo build --release --bin agent-doc --lib
+	$(CARGO_CMD) build --release --bin agent-doc --lib
 	@target/release/agent-doc binary-install --source target/release/agent-doc
 	@target/release/agent-doc skill install --all
 	@target/release/agent-doc skill install --root . --all
@@ -406,7 +435,7 @@ install-hooks:
 
 # Remove build artifacts
 clean:
-	cargo clean
+	$(CARGO_CMD) clean
 	rm -f .bin/agent-doc
 
 # Set up a Python venv for building and publishing the bootstrap wheel.

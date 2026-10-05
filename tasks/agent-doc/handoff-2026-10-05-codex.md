@@ -36,8 +36,8 @@ Another session has uncommitted edits there.
 | `do [#netadv2]` NetChannel.tla | `netadv2` @ 6fdaa8607 | DONE. `make tla` green, 25 modules; 4 wedges and the Reach config fail on their intended properties. API is in formal/tla/README.md. Delivery fairness is strong (SF) per message. netadv3 is now unblocked on its netadv2 side | — |
 | `do [#netadv4]` SimWorld network layer | `netadv4` | IN PROGRESS | — |
 | `do [#netadv7]` cargo-fuzz + proptest | `netadv7` | IN PROGRESS | — |
-| `do [#netadv3]` re-check hot-path models over NetChannel | not started | READY (netadv2 + gh136 done; port StaleColumnRecycle's plain-set channel to NetChannel) | netadv2, gh136 |
-| `do [#netadv5]` latency budget enforcement | not started | HELD | netadv1 |
+| `do [#netadv3]` re-check hot-path models over NetChannel + fix one-shot defects F1-F23 | `netadv3` (from batch-0505) | IN PROGRESS; see HANDOFF.md | — |
+| `do [#netadv5]` timeout-as-verdict fixes R1-R3,R5-R9 + RTT budget tests | `netadv5` (from batch-0505) | IN PROGRESS; see HANDOFF.md | — |
 | `do [#netadv6]` deterministic simulation fuzzing | not started | HELD | netadv4 |
 | `release + publish` | — | HELD | integration below |
 
@@ -45,9 +45,10 @@ Plan for all netadv items: `tasks/agent-doc/plan-network-adversarial-correctness
 
 ## Step 2: integrate serially, one install per batch
 
-1. In `batch-0505` (already holds jbstagefallback + altshiftmenu, JetBrains plugin
-   0.2.496, JB suite 714/0 green), merge `gh136`, then each finished netadv branch, one
-   at a time. Delete each branch's `HANDOFF.md` in the merge.
+1. `batch-0505` already holds jbstagefallback, altshiftmenu, gh136, netadv2 and netadv1
+   (merged 2026-10-05; TLA README and run_tla.sh conflicts union-resolved). A `make
+   check` on it was started; re-run it if the result isn't recorded here. Merge the
+   remaining netadv branches one at a time. Delete each branch's `HANDOFF.md` in the merge.
 2. JetBrains version conflicts in `editors/jetbrains/gradle.properties`: take one side,
    then `python3 scripts/check_plugin_versions.py --bump JetBrains`, `git add` the file,
    and re-run `python3 scripts/check_plugin_versions.py` (it must exit 0).

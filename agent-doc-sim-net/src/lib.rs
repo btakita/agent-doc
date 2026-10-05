@@ -899,7 +899,8 @@ mod tests {
     fn recorded_plans_replay_the_same_deliveries() {
         for profile in NetProfile::ADVERSARIAL {
             for seed in 0..8 {
-                let mut live = SimNet::<Link, u32>::for_profile(profile, seed, Delivery::AtLeastOnce);
+                let mut live =
+                    SimNet::<Link, u32>::for_profile(profile, seed, Delivery::AtLeastOnce);
                 let mut replay =
                     SimNet::<Link, u32>::for_profile(NetProfile::Local, 0, Delivery::AtLeastOnce);
                 let (mut a, mut b) = (Vec::new(), Vec::new());

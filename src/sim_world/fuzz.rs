@@ -140,7 +140,9 @@ impl Oracle {
                 "ReactiveTopology!StaleEffectNeverMutates + PaneExecutionAuthority!NonOwnerNeverMutates \
                  (+ NetChannelRetransmit!NoStaleApply on main)"
             }
-            Oracle::StaleStashNeverWidens => "StaleColumnRecycle!StashPromotionNeverWidens (GH #136, main)",
+            Oracle::StaleStashNeverWidens => {
+                "StaleColumnRecycle!StashPromotionNeverWidens (GH #136, main)"
+            }
             Oracle::RecycleEventuallyConsumed => {
                 "SupervisorGenerationTransition!TerminalRequestEventuallyReplaced + \
                  StaleColumnRecycle!EventuallyConsumed (GH #136, main)"
@@ -286,8 +288,11 @@ fn lifecycle_reported(command: SimCommand) -> Option<SupervisorLifecycle> {
 fn generation_fenced(command: SimCommand) -> Option<bool> {
     use SimCommand::*;
     match command {
-        StaleSupervisorUpdate | SupervisorHeartbeatStale | AdminPauseQueueStale
-        | AdminHandoffStale | AdminReapStale => Some(true),
+        StaleSupervisorUpdate
+        | SupervisorHeartbeatStale
+        | AdminPauseQueueStale
+        | AdminHandoffStale
+        | AdminReapStale => Some(true),
         SupervisorReady
         | SupervisorBusy
         | SupervisorWaitingInput
@@ -359,7 +364,9 @@ impl SimWorld {
         };
         let n = pre.next_prompt;
         let line = match command {
-            SimCommand::EditPrompt => format!("❯ do #sim{n}. spec-test-build-install-commit-push\n"),
+            SimCommand::EditPrompt => {
+                format!("❯ do #sim{n}. spec-test-build-install-commit-push\n")
+            }
             SimCommand::EditLaterPrompt => format!("❯ later follow-up #sim{n}\n"),
             SimCommand::CaptureResponse | SimCommand::CaptureFallbackResponse => {
                 fuzz.capture_epoch += 1;
@@ -490,7 +497,12 @@ impl SimWorld {
 
     /// CloseoutChurn!ResponseAppliedAtMostOnce / RetainedTransitionFixedPoint!AtMostOneResponse:
     /// a commit never records more response blocks than distinct captures applied.
-    fn fuzz_check_exactly_once_commit(&self, fuzz: &mut FuzzState, pre: &FuzzPre, event: FuzzEvent) {
+    fn fuzz_check_exactly_once_commit(
+        &self,
+        fuzz: &mut FuzzState,
+        pre: &FuzzPre,
+        event: FuzzEvent,
+    ) {
         if self.snapshot == pre.snapshot {
             return;
         }
@@ -1137,7 +1149,13 @@ fn structural(world: &mut SimWorld, err: &anyhow::Error) {
         .to_string();
     let kind: String = head
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '_' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
         .collect();
     if let Some(fuzz) = world.fuzz.as_mut() {
         fuzz.report(Oracle::Structural, &format!("structural_{kind}"), message);
@@ -1157,7 +1175,10 @@ fn step_enabled(world: &SimWorld, command: SimCommand) -> bool {
         SimCommand::DuplicateVisibleResponse => world
             .component_content("exchange")
             .ok()
-            .and_then(|body| body.rfind(RESPONSE_HEADING).map(|at| !body[at..].contains("❯ ")))
+            .and_then(|body| {
+                body.rfind(RESPONSE_HEADING)
+                    .map(|at| !body[at..].contains("❯ "))
+            })
             .unwrap_or(false),
         // `recycle_inflight` is the marker a supervisor publishes immediately
         // before its own `execve`; its idle watch does not run again until the
@@ -1171,7 +1192,7 @@ fn step_enabled(world: &SimWorld, command: SimCommand) -> bool {
 /// seeded RNG and the drawn plans are written back into `trace`; with `None`
 /// every sent message follows its recorded plan (a missing plan = clean).
 pub(crate) fn execute(trace: &mut FuzzTrace, record: Option<u64>) -> FuzzRun {
-    let mut world = SimWorld::new_local(0x6e65_7461_6476_36).with_net(
+    let mut world = SimWorld::new_local(0x006e_6574_6164_7636).with_net(
         trace.profile,
         record.unwrap_or(0),
         NetMode::Async,
@@ -1246,9 +1267,11 @@ pub(crate) fn execute(trace: &mut FuzzTrace, record: Option<u64>) -> FuzzRun {
     let fuzz = world.fuzz.take().expect("fuzz state");
     run.findings = fuzz.findings;
     run.checks = fuzz.checks;
-    run.acceptances = world.coverage.route_dispatch_acceptances + world.coverage.go_drain_dispatches;
+    run.acceptances =
+        world.coverage.route_dispatch_acceptances + world.coverage.go_drain_dispatches;
     run.commits = world.coverage.commits;
-    run.recycles = world.coverage.supervisor_recycles + world.coverage.supervisor_restart_drain_reexecs;
+    run.recycles =
+        world.coverage.supervisor_recycles + world.coverage.supervisor_restart_drain_reexecs;
     run
 }
 
@@ -1486,7 +1509,10 @@ mod tests {
                 "oracle {oracle:?} never checked anything: {checks:?}"
             );
         }
-        assert!(acceptances > 50 && commits > 50 && recycles > 10, "{acceptances} {commits} {recycles}");
+        assert!(
+            acceptances > 50 && commits > 50 && recycles > 10,
+            "{acceptances} {commits} {recycles}"
+        );
         assert!(drops > 0 && reconnects > 0, "{drops} {reconnects}");
     }
 
@@ -1561,7 +1587,8 @@ mod tests {
     #[test]
     #[ignore = "triage helper"]
     fn sim_fuzz_show_kind() {
-        let kind = std::env::var("AGENT_DOC_SIM_FUZZ_SHOW_KIND").expect("set AGENT_DOC_SIM_FUZZ_SHOW_KIND");
+        let kind = std::env::var("AGENT_DOC_SIM_FUZZ_SHOW_KIND")
+            .expect("set AGENT_DOC_SIM_FUZZ_SHOW_KIND");
         let seeds: Vec<u64> = match std::env::var("AGENT_DOC_SIM_FUZZ_SEED") {
             Ok(raw) => vec![raw.trim().parse().unwrap()],
             Err(_) => (0..20_000).collect(),
@@ -1627,7 +1654,9 @@ mod tests {
             .ok()
             .and_then(|raw| raw.trim().parse().ok())
             .unwrap_or(FUZZ_STEPS * 2);
-        let out = std::env::var("AGENT_DOC_SIM_FUZZ_OUT").ok().map(PathBuf::from);
+        let out = std::env::var("AGENT_DOC_SIM_FUZZ_OUT")
+            .ok()
+            .map(PathBuf::from);
         let deadline = Instant::now() + Duration::from_secs(secs);
         let mut kinds: BTreeMap<String, (usize, u64)> = BTreeMap::new();
         let mut new_blocks: BTreeMap<String, String> = BTreeMap::new();

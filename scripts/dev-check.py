@@ -30,6 +30,10 @@ PROOFS = {
 }
 
 
+def tool_version_command(tool: str, executable: str) -> list[str]:
+    return [executable, "-V" if tool == "tmux" else "--version"]
+
+
 def output(*args: str) -> str:
     return subprocess.check_output(args, cwd=ROOT, text=True, stderr=subprocess.DEVNULL).strip()
 
@@ -234,7 +238,9 @@ def repository_fingerprint() -> str:
         if executable:
             try:
                 version = subprocess.check_output(
-                    [executable, "--version"], stderr=subprocess.STDOUT, timeout=10
+                    tool_version_command(tool, executable),
+                    stderr=subprocess.STDOUT,
+                    timeout=10,
                 )
             except (subprocess.SubprocessError, OSError):
                 version = b"version-unavailable"
@@ -306,6 +312,11 @@ def verify_tmux_ci() -> bool:
 
 
 def self_test() -> None:
+    assert tool_version_command("tmux", "/usr/bin/tmux") == ["/usr/bin/tmux", "-V"]
+    assert tool_version_command("cargo", "/usr/bin/cargo") == [
+        "/usr/bin/cargo",
+        "--version",
+    ]
     fake_root = Path("/workspace")
     metadata = {
         "workspace_members": ["leaf", "middle", "app"],
@@ -429,7 +440,11 @@ def self_test() -> None:
     install_recipe = makefile[install_start:makefile.index("\n# Keep every existing", install_start)]
     assert '--target-dir "$(CARGO_TARGET_DIR_ABS)"' in install_recipe
     assert install_recipe.count('"$(CARGO_TARGET_DIR_ABS)/release/agent-doc"') >= 4
-    assert 'CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" agent-doc lib-install --profile release' in install_recipe
+    assert (
+        'CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" '
+        '"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" lib-install --profile release'
+        in install_recipe
+    )
     assert "target/release/agent-doc" not in install_recipe
     print("dev-check self-test: ok")
 

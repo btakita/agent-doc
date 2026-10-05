@@ -391,7 +391,7 @@ install-full: editor-generation-bump
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" binary-install --source "$(CARGO_TARGET_DIR_ABS)/release/agent-doc"
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --all
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --root . --all
-	@CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" agent-doc lib-install --profile release
+	@CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" "$(CARGO_TARGET_DIR_ABS)/release/agent-doc" lib-install --profile release
 	@$(MAKE) install-editor-plugins
 	@$(MAKE) cleanup-build-artifacts
 

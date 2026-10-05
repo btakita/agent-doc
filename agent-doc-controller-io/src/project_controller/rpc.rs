@@ -12906,30 +12906,110 @@ pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -
 pub fn ensure_serving_controller(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
     // A successful connect proves only that the kernel accepted a socket. Focus
     // handoff reaches this boundary specifically after a request was not served,
-    // so require the controller's status receipt before adopting it. `status`
-    // falls back to process-backed inactive facts; only those verified
-    // same-project PIDs are reaped before the ordinary launch/adopt transition.
-    // This keeps ambiguous foreign sockets fail-closed while allowing an
-    // accepting-but-wedged controller to recover without operator intervention.
+    // so require the controller's status receipt before adopting it.
     // Do not call the public `status` projection here. Its inactive fallback
     // reads durable control-plane counts, and SQLite access is forbidden inside
     // a reloadable editor host. A direct status receipt is sufficient proof of
-    // service; on failure, process discovery supplies the only reap authority.
-    if request(project_root, "status")
-        .ok()
-        .and_then(|response| serde_json::from_str::<ControllerStatus>(&response).ok())
-        .is_some_and(|status| status.active)
-    {
-        let stream = connect(project_root)?;
-        drop(stream);
-        return Ok(());
+    // service.
+    //
+    // `#netadv5` R1: a status receipt that is merely *late* is not proof that
+    // the controller is wedged. On a slow workspace (Coder + Zscaler, a starved
+    // host, a hung tmux the controller is waiting on) a busy controller misses
+    // the 5s budget while it is mid-write, mid-closeout or mid-handoff, and the
+    // old code then SIGTERM/SIGKILLed it. Only positive evidence that nothing
+    // is bound (connect refused / socket missing) authorizes reaping verified
+    // same-project pids before the launch/adopt transition. A timeout returns
+    // a retryable "busy" error; the editor retries on its next request.
+    ensure_serving_controller_with(
+        project_root,
+        || request(project_root, "status"),
+        || {
+            for pid in discover_stale_duplicate_pids(project_root, None) {
+                reap_verified_controller_pid(project_root, pid, 0);
+            }
+        },
+        || {
+            let stream = connect_or_launch(project_root, launch_mode)?;
+            drop(stream);
+            Ok(())
+        },
+        || {
+            let stream = connect(project_root)?;
+            drop(stream);
+            Ok(())
+        },
+    )
+}
+
+/// What a `status` probe proved about the controller bound at the socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ServingProbe {
+    /// A parsed, active status receipt came back.
+    Serving,
+    /// The kernel refused the connect or the socket path is missing: nothing
+    /// is bound. Positive evidence the controller is not serving.
+    NotBound,
+    /// Connected but no usable receipt (timeout, reset, garbage). Unknown:
+    /// the controller may be busy. Never a verdict.
+    Unresponsive,
+}
+
+pub(crate) fn classify_serving_probe(result: &Result<String>) -> ServingProbe {
+    match result {
+        Ok(response) => {
+            if serde_json::from_str::<ControllerStatus>(response)
+                .is_ok_and(|status| status.active)
+            {
+                ServingProbe::Serving
+            } else {
+                ServingProbe::Unresponsive
+            }
+        }
+        Err(error) => {
+            let not_bound = error.chain().any(|cause| {
+                cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+                    matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+                })
+            });
+            if not_bound {
+                ServingProbe::NotBound
+            } else {
+                ServingProbe::Unresponsive
+            }
+        }
     }
-    for pid in discover_stale_duplicate_pids(project_root, None) {
-        reap_verified_controller_pid(project_root, pid, 0);
+}
+
+/// Error text for the retryable busy outcome of [`ensure_serving_controller`].
+pub const CONTROLLER_BUSY_RETRY_LATER: &str =
+    "controller_busy_retry_later: status receipt was late, controller left running";
+
+fn ensure_serving_controller_with(
+    project_root: &Path,
+    probe_status: impl FnOnce() -> Result<String>,
+    reap_unbound_duplicates: impl FnOnce(),
+    launch_or_adopt: impl FnOnce() -> Result<()>,
+    reconnect: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let probe = probe_status();
+    match classify_serving_probe(&probe) {
+        ServingProbe::Serving => reconnect(),
+        ServingProbe::NotBound => {
+            reap_unbound_duplicates();
+            launch_or_adopt()
+        }
+        ServingProbe::Unresponsive => {
+            let detail = match &probe {
+                Ok(_) => "unparsed_or_inactive_receipt".to_string(),
+                Err(error) => compact_controller_error(error),
+            };
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!("controller_self_heal_deferred reason=status_unresponsive detail={detail}"),
+            );
+            anyhow::bail!("{CONTROLLER_BUSY_RETRY_LATER}: {detail}")
+        }
     }
-    let stream = connect_or_launch(project_root, launch_mode)?;
-    drop(stream);
-    Ok(())
 }
 
 /// Wait for the controller socket to become connectable after a handoff drop.
@@ -27964,6 +28044,90 @@ mod tests {
     #![allow(unused_imports)]
 
     use super::*;
+
+    /// `#netadv5` R1: a busy controller whose status receipt exceeds the 5s
+    /// budget must never be reaped. The ensure call defers with a retryable
+    /// error, and a later probe that answers adopts the same controller.
+    #[test]
+    fn slow_status_receipt_never_reaps_a_busy_controller() {
+        let root = tempfile::tempdir().unwrap();
+        let timed_out = || -> Result<String> {
+            Err(std::io::Error::new(
+                ErrorKind::TimedOut,
+                "timed out after 5.0s waiting for project controller response",
+            )
+            .into())
+        };
+        let reaped = std::cell::Cell::new(0);
+        let launched = std::cell::Cell::new(0);
+        let err = ensure_serving_controller_with(
+            root.path(),
+            timed_out,
+            || reaped.set(reaped.get() + 1),
+            || {
+                launched.set(launched.get() + 1);
+                Ok(())
+            },
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains(CONTROLLER_BUSY_RETRY_LATER));
+        assert_eq!(reaped.get(), 0, "a late receipt must not authorize a kill");
+        assert_eq!(launched.get(), 0, "a late receipt must not launch a duplicate");
+
+        // A reset mid-recycle is equally inconclusive.
+        let reset = || -> Result<String> {
+            Err(std::io::Error::from(ErrorKind::ConnectionReset).into())
+        };
+        assert!(
+            ensure_serving_controller_with(root.path(), reset, || reaped.set(9), || Ok(()), || Ok(()))
+                .is_err()
+        );
+        assert_eq!(reaped.get(), 0);
+
+        // Eventual progress: the controller finishes its work and answers.
+        let serving = || -> Result<String> { Ok(r#"{"active":true,"project_root":"/p","socket_path":"/p/.agent-doc/controller.sock"}"#.to_string()) };
+        assert_eq!(classify_serving_probe(&serving()), ServingProbe::Serving);
+        let reconnected = std::cell::Cell::new(false);
+        ensure_serving_controller_with(
+            root.path(),
+            serving,
+            || reaped.set(reaped.get() + 1),
+            || unreachable!("a serving controller is adopted, not relaunched"),
+            || {
+                reconnected.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(reconnected.get());
+        assert_eq!(reaped.get(), 0);
+    }
+
+    /// Positive evidence (nothing bound) still recovers: reap verified
+    /// duplicates, then launch/adopt.
+    #[test]
+    fn refused_status_connect_is_positive_evidence_for_relaunch() {
+        let root = tempfile::tempdir().unwrap();
+        let refused = || -> Result<String> {
+            Err(anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+                .context("failed to connect to project controller"))
+        };
+        assert_eq!(classify_serving_probe(&refused()), ServingProbe::NotBound);
+        let order = std::cell::RefCell::new(Vec::new());
+        ensure_serving_controller_with(
+            root.path(),
+            refused,
+            || order.borrow_mut().push("reap"),
+            || {
+                order.borrow_mut().push("launch");
+                Ok(())
+            },
+            || unreachable!(),
+        )
+        .unwrap();
+        assert_eq!(*order.borrow(), vec!["reap", "launch"]);
+    }
 
     #[test]
     fn editor_route_terminal_reason_carries_the_route_blocker() {

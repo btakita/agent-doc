@@ -349,6 +349,48 @@ All five branches, plus the `#unstrikelost` follow-up, are merged into the integ
 2. run `make install` once and recycle;
 3. bump the version and add the `VERSIONS.md` entry, then tag v0.35.455 (pushing the tag publishes to GitHub Releases and PyPI);
 4. close GH #135, which is what `#gh-fix` asks for, and mark `#unstrikelost`, `#gh131nonipc`, `#gh133sigterm` and `#jbstagebackup` done.
+
+### Re: batch integrated, v0.35.455 released — opus-5-5 · 2026-10-04T22:58-04:00
+
+All five subagent branches, plus a follow-up fix for `#unstrikelost`, are merged into `main` and shipped as **v0.35.455**. The full `make check` on the integrated branch passed cleanly, with no retries: **11,010 tests run, 11,010 passed**, exit 0. Every subagent's own run had hit timing flakes at load average 60–100, so this clean run is the evidence for the release.
+
+> **Queue prompt:** release + publish
+
+Done:
+- **Release:** commit `00d0468df` (`chore: release v0.35.455`) is pushed to `main`, and tag `v0.35.455` is pushed. The GitHub Release and PyPI runs started from the tag and were still in progress when this response was committed.
+- **Install:** `make install` was run from the clean release tree, not the main checkout, so the other session's uncommitted `agent-doc-start-runtime-io/src/lib.rs` edit was not built in. `agent-doc --version` reports 0.35.455. The library reload reached the 1 open editor. The VS Code extension is now 0.2.80.
+- **JetBrains plugin:** the install's source-change check bumped the plugin to **0.2.494**, so I committed that bump as `ffe836933`. The tag still says 0.2.493.
+- **Superproject:** the submodule bump is committed as `da34bb1d6` and pushed.
+- **WIP preserved:** the main `src/agent-doc` checkout is fast-forwarded. The other session's uncommitted edit was stashed and restored on top unchanged; a backup copy is in my scratchpad.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/135
+
+**Fixed and closed.** Merged commit `a0f59fd93`. Expired `turn_active` leases are now swept by age, in preflight's automatic cleanup and in `agent-doc gc`. Any read that finds an expired lease also deletes it. Removal no longer depends on the pane that created the lease, so a lease whose pane died is cleaned up too. GH #135 is closed with a comment pointing at the fix.
+
+**`#unstrikelost`** (`e70ac0d19` + `e76fcf260`): the operator's unstrike was undone by preflight's queue clean-up, not by the closeout. That step re-strikes any head that is struck in the last commit but live in the editor, to keep a stale buffer from reviving finished work. An operator re-arm looks identical, so it was struck again.
+- Preflight now replays the operator's recorded keystrokes onto the last commit and leaves alone any head they re-armed.
+- The follow-up applies the same keystroke check to the closeout merge, which had the same struck-beats-live rule.
+- Regression tests reproduce both paths and fail when the keystroke check is turned off.
+
+**`#gh131nonipc`** (`db988678b`): two failures that never reached the socket are now recorded in editor transport health: a visible write refused as divergent, and a `serialized_atomic_write` that is held back waiting for the editor.
+- After 3 refusals in a row, the editor connection is treated as unregistered. A proven delivery resets the count, and after 60s one probe write is allowed through.
+- An ACK no longer clears a refusal count that is still building.
+
+**`#gh133sigterm`** (`7095bbdef`): a supervisor you SIGTERM on purpose now records an exit marker tied to its pid and generation.
+- The controller watchdog honours the marker (`reason=intentional_exit`). `admin kill-supervisor` records the same marker.
+- Recycle/replace clears its own marker before starting the replacement, and a crash still respawns.
+- Stashed idle owned supervisors are still not reaped, because they hold the document's live conversation; this is now stated in the spec.
+- The actual replacement cold start is compiled out of test builds, so it has not been exercised.
+
+**`#jbstagebackup`** (`c53aabbb5`): the restart staging now unzips the package once into a test folder before deleting the installed plugin. A vanished or corrupt zip, or a full disk, now stops the script before anything is deleted.
+- Preflight repairs broken stagings and test folders, and removes orphan agent-doc zips.
+- The stale `agent-doc-jetbrains-0.2.469.zip` was deleted after confirming no pending `action.script` referenced it.
+- One remaining gap is filed as `jbstagefallback` below.
+
+Follow-ups and notes:
+- **`jbstagefallback` (backlog):** when IntelliJ's command classes cannot be built, the plugin falls back to `installAfterRestart`, which still writes the old, unprotected order. It is added to the backlog and the queue.
+- **Flaky test:** `finalize_editor_absent_replays_operator_deleted_struck_queue_rows` failed under load in two separate subagent runs. It passed in the clean integrated run. If it shows up again, it is worth checking for a timing dependency.
+- **Size:** the exchange section is large (over 300 lines); I am not compacting while the queue is active.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -368,10 +410,7 @@ All five branches, plus the `#unstrikelost` follow-up, are merged into the integ
 
 
 <!-- agent:backlog priority -->
-- [ ] [#unstrikelost] [agent-doc] An operator UNSTRIKE of a free-text queue head was lost. At 14:13 the operator re-armed '- release + publish' (preflight cycle-1791137624141 node_event op=unstrike ft-c460e934, before ~~struck~~, after live). That cycle never wrote a response (all heads were dispatched to subagents), yet the next session-doc commit 08fdaf4438 (14:31) carried '- ~~release + publish~~' struck again, so the head silently left the drain and v0.35.454 shipped only because the agent noticed. Find which commit/closeout path (likely a pending-only or supervisor-owned commit reusing the pre-unstrike snapshot for the queue component) re-applied the old strike; an operator unstrike must survive any closeout that did not answer that head. Regression: unstrike then a closeout with no quote keeps the head live.
-- [ ] [#gh131nonipc] [agent-doc] Follow-up to GH 131: some of the issue's failures (socket_visible_write divergence refusal, serialized_atomic_write retention) never reach the IPC send, so they record nothing in editor_transport_health and cannot drive degraded/recycle. Route those retention outcomes into the same typed transport-health recorder, and consider treating an endpoint as unregistered after N consecutive rejections (issue suggestion, not implemented in 2bedfb560).
-- [ ] [#gh133sigterm] [agent-doc] Follow-up to GH 133: a deliberately SIGTERM'd supervisor in a VISIBLE column is still respawned by the controller watchdog, because there is no termination handler to distinguish a deliberate kill from a crash. Add a SIGTERM handler that records an intentional-exit marker the watchdog honours, without breaking the existing replacement path (SIGTERM then cold-start). Also decide: should idle owned supervisors whose pane is only stashed be reaped? specs/supervisor.md currently says no.
-- [ ] [#jbstagebackup] [agent-doc][jetbrains] Follow-up to jbpluginvanish: the Java upgrader's restart staging (JetBrainsPluginUpgradeAction.stageForRestart) must still emit delete-then-unzip for the IDE's action.script, so a staging whose zip vanishes (or a full disk at restart) before any agent-doc install runs can still remove the plugin. Close the gap: have preflight/supervisor auto-purge doomed stagings (purge_pending_stagings_for StagingPurge::Doomed in agent-doc-fs/src/jetbrains_install.rs) instead of only warning, and/or stage a backup copy the restart can restore. Also clear the stale fixed-name agent-doc-jetbrains-0.2.469.zip left in ~/.cache/JetBrains/IntelliJIdea2026.1/plugins/.
+- [ ] [#jbstagefallback] [agent-doc][jetbrains] Follow-up to jbstagebackup: when IntelliJ's ActionCommand classes cannot be built, JetBrainsPluginUpgradeAction falls back to PluginInstaller.installAfterRestart, which still writes the unguarded delete-then-unzip order. Guard that fallback too (refuse it and report restart-required, or write the probe-unzip block another way), with a regression test.
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

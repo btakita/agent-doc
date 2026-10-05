@@ -256,9 +256,15 @@ take the place of a column, never add one (`admission=excluded_focused_stash_wou
 The request is *overdue* when the FIRST unconsumed request (the oldest
 `SupervisorRecycleRequested` epoch above the highest `Started`/`Settled` epoch)
 is older than `AGENT_DOC_STALE_RECYCLE_CONSUME_BOUND_SECS` (default 120s) while
-the pane holds no fresh turn-active lease (`admission=excluded_focused_recycle_overdue`,
-`prior_request=overdue:reason=...:age_secs=...`; a mid-turn pane reads
-`pending:...:deferred_by_turn`). Re-requests and install fan-outs refresh the
+the pane has no active-interaction proof (`admission=excluded_focused_recycle_overdue`,
+`prior_request=overdue:reason=...:age_secs=...`). That proof is a fresh
+turn-active lease from the document's owning project root, a live foreground
+harness blocker (including an active turn or permission prompt), or a matching
+generation-fenced `Busy`/`WaitingInput` actor with a fresh live supervisor
+lease. The owning-root and foreground fallbacks matter for nested-project
+documents and operator interactions that outlive short coordination markers;
+they read
+`pending:...:deferred_by_turn`. Re-requests and install fan-outs refresh the
 request's reason but never its clock, so an overdue refusal cannot flap back
 into an admission until the request is consumed. The bound is a liveness
 budget for a local process, never a safety argument: every invariant holds for

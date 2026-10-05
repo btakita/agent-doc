@@ -738,10 +738,12 @@ pub struct StaleColumnGateInput<'a> {
     /// GH #136: pane count of the target window. Evaluated only when a stale
     /// focused column needs it.
     pub window_pane_count: &'a dyn Fn() -> Option<usize>,
-    /// GH #136: whether one pane is running a turn (its recycle is then
-    /// deferred to the turn boundary, never overdue). Evaluated only for a
-    /// stale own pane.
-    pub pane_turn_active: &'a dyn Fn(&str) -> bool,
+    /// GH #136: whether one document pane is in an active interaction (its
+    /// recycle is then deferred to the interaction boundary, never overdue).
+    /// The document is included because its owning controller may live under a
+    /// nested project root rather than the sync caller's root. Evaluated only
+    /// for a stale own pane.
+    pub pane_interaction_active: &'a dyn Fn(&Path, &str) -> bool,
 }
 
 /// GH #121 (GH #105 ask 2 / GH #109 ask 4): make the staleness verdict a
@@ -795,7 +797,8 @@ pub fn gate_stale_column_panes(
             pane_outside_target_window(input.before.get(&pane), input.target_window);
         // GH #136: one ledger read per stale own pane, before this pass makes
         // any request, so the classification reflects what the consumer had.
-        let turn_active = own_pane && freshness.is_stale() && (input.pane_turn_active)(&pane);
+        let turn_active =
+            own_pane && freshness.is_stale() && (input.pane_interaction_active)(&file, &pane);
         let recycle = if own_pane && freshness.is_stale() {
             observe_stale_recycle_request(&file, turn_active)
         } else {
@@ -1718,7 +1721,7 @@ mod tests {
         stale: bool,
         /// Seconds since the FIRST unconsumed recycle request (None: none).
         request_age: Option<u64>,
-        stale_pane_turn_active: bool,
+        stale_pane_interaction_active: bool,
         window_count_queries: std::cell::Cell<usize>,
     }
 
@@ -1736,7 +1739,7 @@ mod tests {
                 stale_pane: "%41",
                 stale: true,
                 request_age: Some(31_622),
-                stale_pane_turn_active: false,
+                stale_pane_interaction_active: false,
                 window_count_queries: std::cell::Cell::new(0),
             }
         }
@@ -1758,7 +1761,7 @@ mod tests {
             agent_doc_supervisor::recycle_request::classify_stale_recycle_request(
                 outstanding.as_ref(),
                 1_000_000,
-                self.stale_pane_turn_active,
+                self.stale_pane_interaction_active,
                 STALE_RECYCLE_CONSUME_BOUND_SECS,
             )
         }
@@ -1788,7 +1791,7 @@ mod tests {
                         } else {
                             StaleRecycleRequestState::NotRequested
                         },
-                        turn_active: stale && self.stale_pane_turn_active,
+                        turn_active: stale && self.stale_pane_interaction_active,
                     }
                 })
                 .collect();
@@ -1856,9 +1859,11 @@ mod tests {
         let two = cols(&["tasks/pmt2/mr/1099.md", "tasks/agent-doc/agent-doc.ad.md"]);
         let window = world.sync(&two, "tasks/pmt2/mr/1099.md");
         assert_eq!(window, vec!["%434".to_string()]);
-        // A turn in the stale pane defers its recycle: not overdue, admitted.
+        // An active interaction in the stale pane (including an operator
+        // permission prompt after its short turn marker expires) defers its
+        // recycle: not overdue, admitted.
         let mut busy = Gh136World::issue_136();
-        busy.stale_pane_turn_active = true;
+        busy.stale_pane_interaction_active = true;
         assert!(!busy.recycle_state().is_overdue());
         assert_eq!(
             busy.sync(&two, "tasks/pmt2/mr/1099.md"),

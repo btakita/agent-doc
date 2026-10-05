@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
-  codex: 01a10ac4-43d9-7292-a0c9-54c6148b42bb
+  codex: 01a10c4e-9d09-7702-964c-9375947d5ea2
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -19,12 +19,13 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
+
+Released agent-doc v0.35.460; fixed and closed GH #139–#143; restored this document pane; cleared backlog cruft; captured two release-cycle follow-ups.
 <!-- /agent:status -->
  
 
@@ -704,6 +705,50 @@ Verification on the exact release tree:
 - GitHub Release, PyPI, Pages, Book, and CI run `37289728900` all completed successfully; CI independently passed both `make check` and `make tmux-ci`.
 
 The exchange is large, but the active queue was drained rather than stalled for compaction, as required.
+
+### Re: v0.35.460 release, queue fixes, and faster development cycle — gpt-5 · 2026-10-05T13:50:14-04:00
+
+> **Chat prompt (#chatprompt):** Should we have the construction utf8 icon prefix for all claimed items?
+> **Chat prompt (#chatprompt):** Are you releasing an upgrade to tmux-router as well?
+> **Chat prompt (#chatprompt):** Is the backlog cruft issue fixed?
+> **Chat prompt (#chatprompt):** I still see the cruft in the backlog
+> **Chat prompt (#chatprompt):** The development cycle for agent-doc is slowing down. Are there any ways to speed up the development cycle?
+> **Chat prompt (#chatprompt):** cont
+> **Chat prompt (#chatprompt):** do your recommendations in a subagent
+> **Chat prompt (#chatprompt):** cont
+> **Chat prompt (#chatprompt):** what version is released?
+> **Chat prompt (#chatprompt):** awe we released yet?
+
+> **Queue prompt:** There is leftover cruft in the `agent:backlog`. Fix agent-doc causes.
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/139
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/140
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/141
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/142
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/143
+> **Queue prompt:** There is only 1 tmux pane and this file's tmux pane is not visible. Fix agent-doc causes and the runtime state.
+> **Queue prompt:** release + publish
+
+Yes on the construction marker: `🚧` should be a transient projection on every live claimed queue head, removed on release or expiry, excluded from item identity, and never used to make a claimed head selectable. I captured that as `#claimmarker` with regression coverage rather than folding it into unrelated fixes.
+
+No `tmux-router` upgrade was released. It remains unchanged at `0.3.20`; the sibling checkout only satisfied agent-doc's existing path dependency.
+
+The backlog cruft is now fixed both ways. v0.35.459 fixed logical-block moves and orphan cleanup, and this response uses that fixed `--backlog-clear` path to remove the visible `6local-splice-batch …` residue from this document. My earlier “fixed” answer referred only to the implementation; your correction that the residue was still visible was right.
+
+The development-cycle recommendations were implemented by a dedicated subagent and shipped in v0.35.460: `make check-fast` computes changed packages plus reverse dependents; optional shared `sccache` preserves isolated target directories; controller-heavy tests are batched selectively; and full-suite proof receipts can be reused conservatively. The final fast-tier proof passed 1,638 tests with 14 skipped in 123.667 seconds. The release exercise also exposed three remaining costs—cheap parity validation ran too late, a content-identical release commit invalidated the receipt, and `install-full` ignored external `CARGO_TARGET_DIR`. Those are captured together as `#releasecyclefast`; tmux-ci proof reuse is included there too.
+
+The pane incident is fixed and the runtime is healthy. A stale-but-live pane was excluded during deferred safe-boundary recycle, stashed, and then blocked from re-entry by the widening guard. v0.35.460 preserves a desired stale pane already visible in the target window while recycle proceeds. This document is visible and active in pane `%2`; the focused regression, package tests, and full suite passed.
+
+All GitHub work is complete and closed:
+
+- #139 excludes Codex subagent handbacks from operator intent and records closeout obligations only for the selected queue head.
+- #140 makes chat-prompt persistence hook-independent, including OpenCode.
+- #141 bounds controller memory by compacting durable state and adds age-based idle actor reaping.
+- #142 retries critical state-event ingress once across controller deadlines and surfaces deadline pressure in `ops summary`.
+- #143 reports the actual foreground layout superseder, generation, and columns immediately.
+
+agent-doc v0.35.460 is tagged and pushed at commit `50338a9234a86c4289313ccb468fe3802245e3ae`; the installed binary and library report 0.35.460. The corrected final-tree `make check` passed (`tart-ad01f9664c`), the post-commit release check passed (`tart-21cc50a818`), and tmux CI passed (`tart-0c10633285`). GitHub Release, PyPI, Homebrew, and main-CI workflows were still running at the required one-time publication inspection; v0.35.459 remains the last fully publication-verified release until those jobs finish.
+
+All eight answered queue heads were consumed and the queue is drained. The exchange remains large; I did not compact it without an explicit compact request.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
@@ -713,17 +758,12 @@ The exchange is large, but the active queue was drained rather than stalled for 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- 🚧 There is leftover cruft in the `agent:backlog`. Fix agent-doc causes.
-- #gh-fix https://github.com/btakita/agent-doc/issues/139
-- #gh-fix https://github.com/btakita/agent-doc/issues/140
-- #gh-fix https://github.com/btakita/agent-doc/issues/141
-- There is only 1 tmux pane and this file's tmux pane is not visible. Fix agent-doc causes and the runtime state.
-- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
+- [ ] [#claimmarker] [recommended] [agent-doc] Project the transient 🚧 in-progress marker onto every live claimed queue head; remove it on release or expiry; keep it out of item identity and keep claimed heads non-selectable, with spec and regression coverage.
+- [ ] [#releasecyclefast] [recommended] [agent-doc] Finish release-cycle acceleration: run cheap version and editor-parity preflight before the full suite; make full-check receipts independent of commit metadata when repository bytes and toolchains match; reuse tmux-ci proof; and make install-full honor external CARGO_TARGET_DIR, with regressions.
 <!-- /agent:backlog -->
 
 ## Review

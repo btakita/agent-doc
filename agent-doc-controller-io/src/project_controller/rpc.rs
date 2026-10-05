@@ -17190,7 +17190,23 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
     };
     let stream = match connect(&project_root) {
         Ok(stream) => stream,
-        Err(_) => return false,
+        // `#netadv5` R5: a connect failure is evidence about the controller,
+        // not the editor. During a handoff/recycle the socket refuses while a
+        // controller process still exists and the editor is still attached.
+        Err(error) => {
+            // A socket path the OS can never bind is permanent, not transient:
+            // no editor can reach a controller there either.
+            if agent_doc_controller::paths::resolved_socket_path_rejection(&socket_path(
+                &project_root,
+            ))
+            .is_some()
+            {
+                return false;
+            }
+            return editor_live_on_controller_connect_failure(&error, || {
+                !crate::process::project_controller_pids(&project_root).is_empty()
+            });
+        }
     };
     let document_hash = agent_doc_hash::document_id_for_path(file);
     match request_controller_on_stream_with_timeout::<ControllerReliableSyncStatusResponse>(
@@ -17210,6 +17226,27 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
             true
         }
     }
+}
+
+/// `#netadv5` R5: the editor-liveness answer when the controller socket could
+/// not be connected after the local durable plane missed.
+///
+/// Only positive evidence that no controller exists at all — the kernel refused
+/// the connect (or the socket is missing) **and** no same-project controller
+/// process is running — lets the durable plane's "not live" stand. Anything
+/// else (a slow connect, a refusal while a controller process is mid-handoff)
+/// is unknown, and unknown fails closed as "live" so no disk replace is
+/// authorized behind an attached editor.
+pub(crate) fn editor_live_on_controller_connect_failure(
+    error: &anyhow::Error,
+    controller_process_present: impl FnOnce() -> bool,
+) -> bool {
+    let nothing_bound = error.chain().any(|cause| {
+        cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+        })
+    });
+    !nothing_bound || controller_process_present()
 }
 
 /// The hot-path CRDT authority for `file` (sidecar-retirement P3/P4).
@@ -28102,6 +28139,30 @@ mod tests {
         .unwrap();
         assert!(reconnected.get());
         assert_eq!(reaped.get(), 0);
+    }
+
+    /// `#netadv5` R5: a controller that refuses connects mid-handoff is not
+    /// evidence that the editor closed. Only refused + no controller process
+    /// lets the durable plane's "not live" stand.
+    #[test]
+    fn controller_connect_failure_is_not_proof_of_no_live_editor() {
+        let refused = anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+            .context("failed to connect to project controller");
+        assert!(
+            editor_live_on_controller_connect_failure(&refused, || true),
+            "refused while a controller process exists (handoff) is unknown → live"
+        );
+        assert!(
+            !editor_live_on_controller_connect_failure(&refused, || false),
+            "refused with no controller process: the durable plane is authoritative"
+        );
+        let missing = anyhow::Error::new(std::io::Error::from(ErrorKind::NotFound));
+        assert!(!editor_live_on_controller_connect_failure(&missing, || false));
+        // A slow/blocked connect proves nothing, even without a visible process.
+        let slow = anyhow::Error::new(std::io::Error::from(ErrorKind::TimedOut));
+        assert!(editor_live_on_controller_connect_failure(&slow, || false));
+        let path_rejected = anyhow::anyhow!("socket path too long");
+        assert!(editor_live_on_controller_connect_failure(&path_rejected, || false));
     }
 
     /// Positive evidence (nothing bound) still recovers: reap verified

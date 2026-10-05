@@ -1273,8 +1273,12 @@ fn replay_has(trace: &FuzzTrace, kind: &str) -> bool {
 /// finding of `kind`: drop chunks of steps (delta debugging), then simplify each
 /// remaining fault to a clean delivery and shorten idle ticks, to a fixpoint.
 pub(crate) fn shrink(trace: &FuzzTrace, kind: &str) -> FuzzTrace {
+    shrink_where(trace, &|candidate| replay_has(candidate, kind))
+}
+
+fn shrink_where(trace: &FuzzTrace, predicate: &impl Fn(&FuzzTrace) -> bool) -> FuzzTrace {
     let mut best = trace.clone();
-    if !replay_has(&best, kind) {
+    if !predicate(&best) {
         // The recorded plans should reproduce exactly; keep the original if not.
         return best;
     }
@@ -1290,7 +1294,7 @@ pub(crate) fn shrink(trace: &FuzzTrace, kind: &str) -> FuzzTrace {
                 let end = (start + chunk).min(best.steps.len());
                 let mut candidate = best.clone();
                 candidate.steps.drain(start..end);
-                if replay_has(&candidate, kind) {
+                if predicate(&candidate) {
                     best = candidate;
                     changed = true;
                 } else {
@@ -1316,7 +1320,7 @@ pub(crate) fn shrink(trace: &FuzzTrace, kind: &str) -> FuzzTrace {
             };
             let mut candidate = best.clone();
             candidate.steps[index] = simpler;
-            if replay_has(&candidate, kind) {
+            if predicate(&candidate) {
                 best = candidate;
                 changed = true;
             }
@@ -1329,7 +1333,7 @@ pub(crate) fn shrink(trace: &FuzzTrace, kind: &str) -> FuzzTrace {
                     *plan = None;
                 }
             }
-            if replay_has(&candidate, kind) {
+            if predicate(&candidate) {
                 best = candidate;
                 changed = true;
             }
@@ -1538,20 +1542,22 @@ mod tests {
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
-    /// Shrinking reduces a known finding to a short trace that replays from text.
+    /// Shrinking reduces a reachable behavior to a short trace that replays from
+    /// text. This stays useful when every committed finding has been fixed.
     #[test]
-    fn shrinking_reduces_a_failing_seed_to_a_replayable_minimal_trace() {
+    fn shrinking_reduces_a_reachable_seed_to_a_replayable_minimal_trace() {
         let mut seeds = SHORT_BUDGET_SEEDS;
-        let (seed, trace, kind) = seeds
+        let (seed, trace) = seeds
             .find_map(|seed| {
                 let (trace, run) = explore_seed(seed, FUZZ_STEPS);
-                run.findings
-                    .iter()
-                    .find(|f| f.kind == "stale_actor_lifecycle_applied_out_of_order")
-                    .map(|f| (seed, trace, f.kind.clone()))
+                (run.acceptances > 0).then_some((seed, trace))
             })
-            .expect("the short budget reaches SIM-F1");
-        let shrunk = shrink(&trace, &kind);
+            .expect("the short budget reaches a dispatch acceptance");
+        let accepted = |candidate: &FuzzTrace| {
+            let mut replay = candidate.clone();
+            execute(&mut replay, None).acceptances > 0
+        };
+        let shrunk = shrink_where(&trace, &accepted);
         assert!(
             shrunk.steps.len() < trace.steps.len() / 4,
             "seed {seed}: {} -> {} steps\n{}",
@@ -1559,8 +1565,8 @@ mod tests {
             shrunk.steps.len(),
             shrunk.to_text()
         );
-        let mut replay = FuzzTrace::parse(&shrunk.to_text()).unwrap();
-        assert!(execute(&mut replay, None).has_kind(&kind));
+        let replay = FuzzTrace::parse(&shrunk.to_text()).unwrap();
+        assert!(accepted(&replay));
     }
 
     /// Triage helper: `AGENT_DOC_SIM_FUZZ_SHOW_KIND=<kind>` prints the shrunk

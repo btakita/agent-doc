@@ -470,6 +470,28 @@ I've forwarded this to the GH #136 subagent along with the earlier formal-proof 
 - **Configurable timeouts:** any timeout or budget that gets added is configurable or based on measured round-trip time, and the spec names the remote/Zscaler path as the design point.
 
 Batch status: `#jbstagefallback` and the alt+shift menu fix are merged on `batch-0505` (plugin 0.2.496). The JetBrains suite passes there (exit 0, 714 tests, 0 failures). GH #136 is still running, and the release stays held until it lands.
+
+### Re: provable correctness under varying network conditions — opus-5-5 · 2026-10-05T00:28-04:00
+
+> **Chat prompt (#chatprompt):** Basically agent-doc needs to be provably correct with varying network conditions.
+
+There's a real gap here. `formal/tla/` has about 30 models, each with Reach/Wedge variants, but they treat the editor↔controller↔tmux IPC hop as either an atomic step or a perfect channel. The models README never mentions delay, reordering, loss, duplication or reconnect. Their safety proofs hold only for a perfect network, which is exactly what the Coder + Zscaler path isn't.
+
+The target property set, from the plan file `tasks/agent-doc/plan-network-adversarial-correctness.md`:
+
+- **Safety under an adversarial channel:** any delay, reordering, loss, duplication, or reconnect to a new generation. No timeout value may appear in a safety argument.
+- **Liveness under fairness only:** a message re-sent infinitely often is eventually delivered. Progress may wait on delivery, never on a wall-clock guess.
+- **Latency:** each hot path has a stated, tested serial round-trip count. Any remaining timeout is configurable or derived from measured RTT.
+
+These are captured as phased backlog items, appended so they don't jump ahead of the current batch or the release:
+
+- `netadv1`: audit each model's and protocol's channel assumptions.
+- `netadv2`: a shared `NetChannel.tla` module, with Wedge configs proving it can catch a timing bug.
+- `netadv3`: re-check the hot-path models over `NetChannel` and fix every counterexample, with SimWorld replay.
+- `netadv4`: seeded network fault injection in SimWorld, with a Coder+Zscaler profile, run in `make check`.
+- `netadv5`: tests that enforce the round-trip budget per path, and ack-driven transitions in place of fixed waits.
+
+GH #136 is the first concrete case. I've told its subagent to model the messages as an adversarial channel: invariants hold under delay, reordering, drop, duplication and reconnect; liveness only under fairness. It should also add a Wedge config showing the pre-fix behaviour breaks the invariant. The plan file is committed (`992e5902c7`).
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -487,6 +509,11 @@ Batch status: `#jbstagefallback` and the alt+shift menu fix are merged on `batch
 
 
 <!-- agent:backlog priority -->
+- [ ] [#netadv1] [agent-doc][formal] Channel-assumption audit: for each TLA+ model in formal/tla/ and each IPC protocol, record channel assumption (atomic/FIFO/reliable/lossy), timeouts on the correctness path, and serial round-trip count; rank timing-dependent protocols. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
+- [ ] [#netadv2] [agent-doc][formal] Shared adversarial NetChannel.tla (deliver/drop/duplicate/reconnect + fair variant) with Wedge cfgs proving it catches a known timing bug. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
+- [ ] [#netadv3] [agent-doc][formal] Re-check hot-path models (VisibleDeliveryReceipt, EditorReplicaStrand, PassiveTmuxSync, RecycleSettleDispatch, AgentDocCloseout, GH 136 layout/recycle) over NetChannel; fix every counterexample with SimWorld replay coverage. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
+- [ ] [#netadv4] [agent-doc][simworld] Seeded network-conditions layer for SimWorld (latency, jitter, reorder, drop, duplicate, reconnect) with a Coder+Zscaler profile, run under make check. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
+- [ ] [#netadv5] [agent-doc] Latency budget enforcement: per hot path (focus/layout projection, response delivery, closeout ACK) assert serial round-trip count; replace fixed sleeps/settle windows on correctness paths with ack-driven transitions. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#jbstagefallback] [agent-doc][jetbrains] Follow-up to jbstagebackup: when IntelliJ's ActionCommand classes cannot be built, JetBrainsPluginUpgradeAction falls back to PluginInstaller.installAfterRestart, which still writes the unguarded delete-then-unzip order. Guard that fallback too (refuse it and report restart-required, or write the probe-unzip block another way), with a regression test.
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->

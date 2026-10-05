@@ -70,3 +70,22 @@ Candidate one-shot / loss-sensitive defects:
 - D10 rpc.rs:996,1026-1042,916-924 Rust authority-stream client has no read deadline and stops permanently after 2 disconnects (no callers; latent).
 Response delivery happy path ≈ 2 editor connects + hello RT + accepted/applied + ≥6 serial controller RPCs (transport.rs:354-1090).
 Closeout claim 1 RPC (15s), heartbeat every 100s, release 1 RPC. Focus observe 1 RT (1s, CpRouteClient.kt:160) + up to 2 on timeout. editor_route submit+await 2 RT.
+
+## Milestone: tmux/focus/layout/supervisor agent results
+Framing fix: every agent-doc channel is LOCAL to the Coder workspace (AF_UNIX controller.sock,
+tmux subprocesses, supervisor socket). Zscaler sits only on the JetBrains thin-client↔backend
+link. Network effects therefore reach agent-doc as delayed, reordered or coalesced editor events
+and as slow, overloaded peers. The Remote Dev backend has no currentWindow/EditorWindow
+(EditorTabSyncListener.kt:241-259; agent-doc-editor-surface/src/remote_layout.rs:1-38).
+Defects (E-series):
+- E1 VERIFIED, severe: a 1s focus observe timeout (CpRouteClient.kt:160, selfHeal :1294-1335) → FFI src/ffi.rs:3383 → ensure_serving_controller (rpc.rs:12906-12933). A status RPC failing within 5s → discover_stale_duplicate_pids(root, None) includes the bootstrap (live) pid (rpc.rs:4741-4767) → SIGTERM, then 750ms, then SIGKILL (rpc.rs:4770-4786). A busy controller is killed on a timeout.
+- E2 rpc.rs:21728-21742,21421-21434,21848 surface-observe returns Ok even when layout publish/escalation failed (e.g. handoff not Stable :25052). The plugin treats that as delivered, and the graph already advanced (agent-doc-editor-surface/src/lib.rs:429-436), so a resend becomes Idle. Lost until the next distinct editor event.
+- E3 agent-doc-route-io/src/dispatch.rs:829-861,887-915 stranded-draft: a bare Enter, then 3s admission wait (controller dispatch.rs:3227-3233) times out → the full trigger text is sent again → possible double prompt.
+- E4 supervisor lease freshness 60s (agent-doc-controller/src/status.rs:774-784; project_controller.rs:8944) is refreshed only on transitions (no periodic heartbeat found). An idle live supervisor reads as stale → claim auto-force allowed (agent-doc-claim-io/src/lib.rs:358-388).
+- E5 agent-doc-sync-io sync lock: after SYNC_LOCK_WAIT_BUDGET 3s (agent-doc-sync/src/lib.rs:32) a non-SafePassive sync proceeds WITHOUT the lock (sync.rs:2748-2773).
+- E6 focus lane is not retried (EditorTabSyncListener.kt:1168-1181); select-pane is not read back (rpc.rs:24360); focused_document advances before the effect (agent-doc-editor-surface/src/lib.rs:383-398).
+- E7 GH #136: escalation reuses whichever lane published last as "retained" columns (rpc.rs:21312-21328). The column gate admits the stale focused pane (layout_column_audit.rs:353-354) and admits Unknown freshness (:151-156,:554-557). The desired layout is not reloaded from state.db on controller start; the generation is per-process.
+- E8 the surface-forget on shutdown is one-shot (EditorTabSyncListener.kt:1210-1222); low impact.
+- E9 tmux Command::output() has no timeout (agent-doc-tmux-io/src/lib.rs:192-215). A hung tmux blocks the focus handler, which causes the 1s timeout, which leads to E1.
+- E10 supervisor inject dedupe key is in-memory (agent-doc-start-runtime-io/src/lib.rs:2469-2503). The 10s effect timeout (supervisor-io/src/ipc.rs:58) reports failure after delivery; the key is lost on re-exec.
+Round trips: one focus change ≈ 1-2 plugin RTs + 12-16 serial subprocesses (i3-msg ×2, tmux probes, select-pane). Layout reconcile ≈ 35 distinct tmux commands (sync.rs:2776-2779). Direct prompt injection ≈ 10+ tmux subprocesses before dispatch-start polling.

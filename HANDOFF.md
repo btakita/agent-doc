@@ -15,9 +15,10 @@ R8, R9 (F1, F2, F3, F6, F19, F20) and round-trip budget tests.
 - [x] 2. Net models: VisibleDeliveryReceiptNet, EditorReplicaStrandNet, RecycleSettleDispatchNet,
       AgentDocCloseoutNet, PassiveTmuxSyncNet, plus LifecycleSequence (SIM-F1/F2); all
       registered in scripts/run_tla.sh (modules, must_pass, must_violate)
-- [ ] 3. Code fixes: DONE F9, F10, F13, ERS-1, RSD-1. TODO F4/F5, SIM-F1/F2, F14/F15,
-      then F11, F16, F17, F18, F21 if time
-- [ ] 4. `make tla` + `make check` green, exit status captured
+- [x] 3. Priority code fixes: F9, F10, F13, ERS-1, RSD-1, F4/F5, SIM-F1/F2,
+      and F14/F15. Lower-priority F11/F16/F17/F18/F21 remain separate follow-ups.
+- [ ] 4. `make tla` green (79 required wedge/reach violations); full `make check`
+      delegated to the integration coordinator after the final F14/F15 commit
 - [x] netadv5 merged into netadv3 (b3d316b41); only HANDOFF.md conflicted. netadv5 brought
       netadv4's sim-net crate with it. Models updated for netadv5's `deferred` receipt and
       R9 (TTL is not proof), including the ATOMIC RecycleSettleDispatch (+ TtlWedge).
@@ -52,6 +53,12 @@ Code fixes planned (in order): F10, F9, F13, ERS-1, RSD-1, F4/F5, SIM-F1/F2
 
 - make tla (scripts/run_tla.sh) EXIT=0 before the netadv5 merge: 78 non-vacuity obligations.
 - Fixes committed: c87bd9785 (F10+F9), 4c1bf92f3 (F13), 9e41b5a32 (ERS-1), 4eba411a9 (RSD-1).
+- Fixes committed: c2aec5ab9 (F4/F5), dc17e89d3 (SIM-F1/F2).
+- F14/F15 completed by retaining the exact failed editor-surface intent across
+  focus, structural publication and focus-escalation failures. The next matching
+  editor observation reapplies it; success, answered refusal, focus move or
+  client retirement clears it. Deterministic Focus + Sync wedge regression green.
+- Final `make tla` EXIT=0: 79 required non-vacuity wedge/reach violations confirmed.
 
 ## Remaining items
 

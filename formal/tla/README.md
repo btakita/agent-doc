@@ -305,8 +305,8 @@ modules prove the transport around it.
 | `EditorReplicaStrandNet` | re-registration request with refused/accepted/`deferred` answers | `Latch` (ERS-1: a budget whose receipts were all lost latches self-heal forever), `GiveUpRefusal` (R2/R3 class, fixed by `#netadv5`) |
 | `RecycleSettleDispatchNet` | settle-wait RPC, one request per connection | `Unreachable` (RSD-1: two lost round trips refused a pending recycle), `Ttl` (R9: TTL read as proof; fixed by `#netadv5`, abandonment needs the supervisor gone) |
 | `AgentDocCloseoutNet` | closeout owner claim and heartbeat | `OneShotClaim` (F4), `HeartbeatBreak` (F5a), `IgnoreLoss` (F5b), `Fence` (ADC-fence, not fixed: needs a commit fenced by owner id; `FencedTarget` is the passing target) |
-| `PassiveTmuxSyncNet` | editor focus observation and its reply | `AdvanceFirst` (F14/F15: tracking advances before the swap), `Reorder` (sequence fence) |
-| `LifecycleSequence` | lifecycle, heartbeat and queue-control level updates | `Reorder` (SIM-F1/SIM-F2: generation-only fence, last arrival wins) |
+| `PassiveTmuxSyncNet` | editor focus/layout observation and its effect | `AdvanceFirst` (F14/F15: tracking advances before the effect; fixed by retaining the exact failed `SurfaceIntent` until a later observation applies it), `Reorder` (sequence fence) |
+| `LifecycleSequence` | lifecycle, heartbeat and queue-control level updates | `Reorder` (SIM-F1/SIM-F2: fixed by a monotonic send-stamp fence within each generation) |
 
 Each module also has a reach config that must be violated, so the happy path
 stays reachable over the lossy channel.

@@ -27,8 +27,8 @@ use agent_doc_controller::supervisor_replacement::{
 use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_document_realtime::watch_authority::{DiskChangeSignal, WatchAction, WatchDelivery};
 use agent_doc_editor_surface::{
-    EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState, SurfaceColumn,
-    SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
+    EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
+    SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use std::collections::{BTreeMap, BTreeSet};
@@ -21835,7 +21835,7 @@ fn escalate_focus_to_structural_layout(
     document: &str,
     columns: &[SurfaceColumn],
     reason: &str,
-) {
+) -> bool {
     let FocusEscalationColumns {
         columns,
         source,
@@ -21849,7 +21849,7 @@ fn escalate_focus_to_structural_layout(
                     "controller_editor_surface_focus_escalation_skipped document={document} reason={reason} cause={cause}"
                 ),
             );
-            return;
+            return false;
         }
     };
     agent_doc_ops_log_io::log_op(
@@ -21888,7 +21888,9 @@ fn escalate_focus_to_structural_layout(
                 "controller_editor_surface_focus_escalation_failed document={document} reason={reason} error={error:#}"
             ),
         );
+        return false;
     }
+    true
 }
 
 fn record_editor_surface_focus_outcome(
@@ -22068,6 +22070,79 @@ fn surface_intent_label(intent: &SurfaceIntent) -> &'static str {
     }
 }
 
+/// `#netadv3` F14/F15: editor-surface intent that the graph already folded but
+/// its layout/focus effect never accepted, per (project root, editor client).
+///
+/// `SurfaceTracking::advance` moves `focused_document` when it DERIVES the
+/// `Focus` intent, before the `select-pane` effect runs. When that effect fails
+/// (a tmux error, a wedged server), every later observation of the same focus
+/// folded to `Idle`, so the wrong pane stayed visible until the operator
+/// switched tabs (`formal/tla/PassiveTmuxSyncNet.tla`, `AdvanceFirst` wedge).
+/// The controller now remembers the failed focus and marks the next
+/// observation of that same focus `force_reconcile`, which re-derives `Focus`
+/// and retries the effect: a level-triggered retry driven by the editor's own
+/// observation stream. Answered refusals (desktop inactive, a stashed pane
+/// handed to the layout owner) are verdicts, not losses, and are not retried.
+#[derive(Clone)]
+struct EditorSurfaceRetry {
+    surface: EditorSurface,
+    intent: SurfaceIntent,
+}
+
+static EDITOR_SURFACE_RETRY: std::sync::LazyLock<
+    parking_lot::Mutex<std::collections::HashMap<(PathBuf, String), EditorSurfaceRetry>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+
+/// Return the intent whose effect failed, and forget it once the editor has
+/// moved to another document. The intent remains pending until an effect is
+/// accepted, so another transport failure cannot consume the only retry.
+fn pending_editor_surface_retry(
+    project_root: &Path,
+    client_id: &str,
+    surface: &EditorSurface,
+) -> Option<SurfaceIntent> {
+    let key = (project_root.to_path_buf(), client_id.to_string());
+    let mut pending = EDITOR_SURFACE_RETRY.lock();
+    match pending.get(&key) {
+        Some(retry)
+            if retry.surface.focused == surface.focused
+                && retry.surface.columns == surface.columns
+                && retry.surface.focus_only == surface.focus_only
+                && retry.surface.preserve_focus == surface.preserve_focus =>
+        {
+            Some(retry.intent.clone())
+        }
+        Some(_) => {
+            pending.remove(&key);
+            None
+        }
+        None => None,
+    }
+}
+
+/// Record the outcome of one editor-driven focus effect for the retry above.
+fn record_editor_surface_effect(
+    project_root: &Path,
+    client_id: &str,
+    surface: &EditorSurface,
+    intent: &SurfaceIntent,
+    effect_failed: bool,
+) {
+    let key = (project_root.to_path_buf(), client_id.to_string());
+    let mut pending = EDITOR_SURFACE_RETRY.lock();
+    if effect_failed {
+        pending.insert(
+            key,
+            EditorSurfaceRetry {
+                surface: surface.clone(),
+                intent: intent.clone(),
+            },
+        );
+    } else {
+        pending.remove(&key);
+    }
+}
+
 fn handle_editor_surface_observe(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -22076,6 +22151,26 @@ fn handle_editor_surface_observe(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let observation: EditorSurfaceObservation =
         serde_json::from_str(&payload_json).context("parse editor surface observation")?;
+    let retry_intent = if !observation.surface.force_reconcile {
+        pending_editor_surface_retry(
+            &bootstrap.project_root,
+            &observation.client_id,
+            &observation.surface,
+        )
+    } else {
+        None
+    };
+    if retry_intent.is_some() {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "controller_editor_surface_retry client={} sequence={} document={} reason=previous_surface_effect_failed",
+                observation.client_id, observation.sequence, observation.surface.focused,
+            ),
+        );
+    }
+    let focus_client_id = observation.client_id.clone();
+    let observed_surface = observation.surface.clone();
     let projection_identity = (
         observation.client_id.clone(),
         observation.generation,
@@ -22106,6 +22201,9 @@ fn handle_editor_surface_observe(
         observation,
         None,
     );
+    if accepted && let Some(intent) = retry_intent {
+        receipt.intent = intent;
+    }
     // `#surfaceobservesilent`: an observation the graph REJECTS produced no ops.log
     // line at all, and neither did a plain accepted `Idle`. A selection that
     // published and was rejected was therefore indistinguishable from a selection
@@ -22173,7 +22271,8 @@ fn handle_editor_surface_observe(
         // so the editor socket request never round-trips through the controller
         // command socket. The eager intent effect is a no-op for both in
         // production (see the runtime constructor closure).
-        match receipt.intent.clone() {
+        let effect_intent = receipt.intent.clone();
+        match effect_intent.clone() {
             SurfaceIntent::Sync {
                 columns,
                 document,
@@ -22181,14 +22280,22 @@ fn handle_editor_surface_observe(
             } => {
                 let invocation =
                     automatic_editor_surface_sync_invocation(&columns, &document, preserve_focus);
-                if let Err(error) = publish_pane_layout_desired_invocation(
+                let publish_result = publish_pane_layout_desired_invocation(
                     bootstrap,
                     runtime,
                     invocation,
                     None,
                     PaneLayoutPublication::CoalesceIdentical,
                     PaneLayoutPublisher::EditorSurface,
-                ) {
+                );
+                record_editor_surface_effect(
+                    &bootstrap.project_root,
+                    &focus_client_id,
+                    &observed_surface,
+                    &effect_intent,
+                    publish_result.is_err(),
+                );
+                if let Err(error) = publish_result {
                     agent_doc_ops_log_io::log_op(
                         &bootstrap.project_root,
                         &format!(
@@ -22201,6 +22308,13 @@ fn handle_editor_surface_observe(
             // target pane directly — a single tmux command, no socket round-trip.
             SurfaceIntent::Focus { document } => {
                 if !automatic_editor_focus_allowed(desktop_editor_focus_state()) {
+                    record_editor_surface_effect(
+                        &bootstrap.project_root,
+                        &focus_client_id,
+                        &observed_surface,
+                        &effect_intent,
+                        false,
+                    );
                     agent_doc_ops_log_io::log_op(
                         &bootstrap.project_root,
                         &format!(
@@ -22264,13 +22378,16 @@ fn handle_editor_surface_observe(
                                 && focus_refusal_requires_structural_layout(&outcome.reason)
                         })
                         .map(|outcome| outcome.reason.clone());
+                    // `#netadv3` F14/F15: an effect that ERRORED was lost, not
+                    // refused; keep the intent for the next observation.
+                    let mut effect_failed = focus_result.is_err();
                     record_editor_surface_focus_outcome(
                         &bootstrap.project_root,
                         &mut receipt,
                         focus_result,
                     )?;
                     if let Some(reason) = structural_refusal {
-                        escalate_focus_to_structural_layout(
+                        effect_failed = !escalate_focus_to_structural_layout(
                             bootstrap,
                             runtime,
                             &document,
@@ -22278,6 +22395,13 @@ fn handle_editor_surface_observe(
                             &reason,
                         );
                     }
+                    record_editor_surface_effect(
+                        &bootstrap.project_root,
+                        &focus_client_id,
+                        &observed_surface,
+                        &effect_intent,
+                        effect_failed,
+                    );
                 }
             }
             SurfaceIntent::Idle => {}
@@ -22313,6 +22437,13 @@ fn handle_editor_surface_forget(
     let retire_client_family =
         request.reason.as_deref() == Some("editor_surface_client_family_retired");
     let client_id = request_string(&request.caller, "caller")?;
+    record_editor_surface_effect(
+        &bootstrap.project_root,
+        &client_id,
+        &EditorSurface::default(),
+        &SurfaceIntent::Idle,
+        false,
+    );
     let generation = request
         .generation
         .context("editor_surface_forget requires generation")?;
@@ -38340,6 +38471,89 @@ mod tests {
             )
         );
     }
+    /// `#netadv3` F14/F15, replaying `PassiveTmuxSyncNetAdvanceFirstWedge`: the
+    /// graph folded the focus/layout before its effect ran, the effect errored,
+    /// and the next identical observation folded to `Idle`. The controller
+    /// retains the exact failed intent and reapplies it on that next observation;
+    /// a success or a move to another document clears it.
+    #[test]
+    fn a_failed_editor_surface_effect_is_retried_by_the_next_observation() {
+        use agent_doc_editor_surface::{EditorSurface, SurfaceColumn, SurfaceTracking};
+        let root = std::path::Path::new("/tmp/netadv3-focus-retry");
+        let surface = |focused: &str| EditorSurface {
+            focused: focused.to_string(),
+            open: vec!["/a.md".to_string(), "/b.md".to_string()],
+            visible: vec!["/a.md".to_string(), "/b.md".to_string()],
+            columns: vec![
+                SurfaceColumn::new(["/a.md"]),
+                SurfaceColumn::new(["/b.md"]),
+            ],
+            force_reconcile: false,
+            focus_only: false,
+            preserve_focus: false,
+        };
+        let (tracking, _) = SurfaceTracking::default().advance(&surface("/a.md"), Some(true));
+        let (tracking, intent) = tracking.advance(&surface("/b.md"), Some(true));
+        assert!(matches!(intent, SurfaceIntent::Focus { .. }));
+        // The select-pane effect errored. Pre-fix, the same focus is now Idle.
+        let (_, idle) = tracking.advance(&surface("/b.md"), Some(true));
+        assert!(idle.is_idle(), "the wedge: graph advanced before the effect");
+        let focus_intent = SurfaceIntent::Focus {
+            document: "/b.md".to_string(),
+        };
+        record_editor_surface_effect(root, "client-1", &surface("/b.md"), &focus_intent, true);
+
+        // The next observation carries the retained Focus even though the graph
+        // has already folded it to Idle.
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-1", &surface("/b.md")),
+            Some(focus_intent.clone())
+        );
+        // Success clears the retry.
+        record_editor_surface_effect(root, "client-1", &surface("/b.md"), &focus_intent, false);
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-1", &surface("/b.md")),
+            None
+        );
+        // So does the editor moving on; other clients are independent.
+        record_editor_surface_effect(root, "client-1", &surface("/b.md"), &focus_intent, true);
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-2", &surface("/b.md")),
+            None
+        );
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-1", &surface("/a.md")),
+            None
+        );
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-1", &surface("/b.md")),
+            None
+        );
+
+        // F14 is the same wedge on the structural lane: the graph advances its
+        // layout signature before the desired-layout publication can fail.
+        let (tracking, first_sync) =
+            SurfaceTracking::default().advance(&surface("/a.md"), Some(true));
+        assert!(matches!(first_sync, SurfaceIntent::Sync { .. }));
+        let (_, idle) = tracking.advance(&surface("/a.md"), Some(true));
+        assert!(idle.is_idle(), "the structural wedge: graph advanced first");
+        record_editor_surface_effect(root, "client-2", &surface("/a.md"), &first_sync, true);
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-2", &surface("/a.md")),
+            Some(first_sync.clone())
+        );
+        // A newer layout observation supersedes rather than replays the stale
+        // structural intent, even when focus stayed on the same document.
+        let mut changed_layout = surface("/a.md");
+        changed_layout.columns = vec![SurfaceColumn::new(["/a.md", "/b.md"])];
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-2", &changed_layout),
+            None
+        );
+        record_editor_surface_effect(root, "client-2", &surface("/a.md"), &first_sync, true);
+        record_editor_surface_effect(root, "client-2", &surface("/a.md"), &first_sync, false);
+    }
+
     /// `#netadv3` SIM-F1, replaying the netadv4 SimWorld trace through the real
     /// handler (`formal/tla/LifecycleSequence.tla`, `Reorder` wedge): the
     /// supervisor sends Ready, then Busy, in one generation; the channel delivers

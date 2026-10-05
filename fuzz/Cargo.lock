@@ -198,6 +198,7 @@ dependencies = [
  "agent-doc-template",
  "serde",
  "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]

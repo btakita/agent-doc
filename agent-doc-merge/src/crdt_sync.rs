@@ -219,7 +219,11 @@ fn decode_columnar_ops(compressed: &[u8]) -> Result<Vec<TextOp>> {
     let mut absolute_counters = Vec::with_capacity(count);
     let mut previous_counter: i64 = 0;
     for delta in &columns.id_counter_delta {
-        previous_counter += *delta;
+        // `#netadv7`: the deltas are untrusted wire input; an overflowing sum
+        // panicked under overflow checks (and wrapped silently without them).
+        previous_counter = previous_counter
+            .checked_add(*delta)
+            .context("op counter delta overflows")?;
         absolute_counters.push(previous_counter);
     }
     let id_pairs = absolute_counters
@@ -252,8 +256,11 @@ fn decode_columnar_ops(compressed: &[u8]) -> Result<Vec<TextOp>> {
                 .origin_peer
                 .get(cursor)
                 .context("missing origin peer")?;
+            let origin_counter = counter
+                .checked_sub(delta)
+                .context("origin counter delta overflows")?;
             pairs.push((
-                u64::try_from(counter - delta).context("negative origin counter")?,
+                u64::try_from(origin_counter).context("negative origin counter")?,
                 peer,
             ));
             cursor += 1;
@@ -743,6 +750,53 @@ mod tests {
 
     fn op_id(counter: u64, peer: u64) -> OpId {
         rmp_serde::from_slice(&rmp_serde::to_vec(&(counter, peer)).unwrap()).unwrap()
+    }
+
+    fn columnar_envelope(columns: &ColumnarOps) -> Vec<u8> {
+        let packed = rmp_serde::to_vec(columns).unwrap();
+        let compressed = zstd::stream::encode_all(packed.as_slice(), 3).unwrap();
+        let mut envelope = COLUMNAR_TEXT_OPS_MAGIC.to_vec();
+        envelope.extend_from_slice(BASE64_STANDARD.encode(compressed).as_bytes());
+        envelope
+    }
+
+    fn columns(id_counter_delta: Vec<i64>, origin_counter_delta: Vec<i64>) -> ColumnarOps {
+        let count = id_counter_delta.len();
+        let origins = origin_counter_delta.len();
+        ColumnarOps {
+            chars: "x".repeat(count),
+            id_counter_delta,
+            id_peer: vec![1; count],
+            origin_present: (0..count).map(|i| u8::from(i < origins)).collect(),
+            origin_counter_delta,
+            origin_peer: vec![1; origins],
+            del_idx: Vec::new(),
+            del_counter: Vec::new(),
+            del_peer: Vec::new(),
+        }
+    }
+
+    /// `#netadv7` crasher: hostile counter deltas in a columnar envelope
+    /// overflowed `i64` arithmetic in the decoder (a panic under overflow
+    /// checks). They must be refused as malformed wire input.
+    #[test]
+    fn columnar_decode_refuses_overflowing_counter_deltas() {
+        for hostile in [
+            columns(vec![i64::MAX, 1], Vec::new()),
+            columns(vec![i64::MIN, -1], Vec::new()),
+            columns(vec![1], vec![i64::MIN]),
+        ] {
+            let envelope = columnar_envelope(&hostile);
+            let outcome = std::panic::catch_unwind(|| decode_update_ops(&envelope));
+            let decoded = outcome.expect("columnar decode must not panic");
+            assert!(decoded.is_err(), "overflowing deltas must be refused");
+            let replica = ReplicaState::from_text(1, "seed");
+            assert!(replica.apply_update(&envelope).is_err());
+            assert_eq!(replica.text(), "seed");
+        }
+        // Control: the same builder with sane deltas decodes.
+        let sane = columnar_envelope(&columns(vec![1, 1], vec![1]));
+        assert_eq!(decode_update_ops(&sane).unwrap().len(), 2);
     }
 
     #[test]

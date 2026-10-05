@@ -222,7 +222,7 @@ pub fn frontmatter(data: &[u8]) {
     let rewritten =
         agent_doc_frontmatter::write(&canonical, rebody).expect("canonical frontmatter must write");
     assert_eq!(rewritten, written, "write must reach a fixed point after one canonicalization");
-    let expected = serde_json::to_value(&canonical).expect("frontmatter must serialize");
+    let expected = serde_yaml::to_value(&canonical).expect("frontmatter must serialize");
 
     // `write_preserving` claims byte preservation of unchanged keys; at minimum
     // it must produce a document that parses back to the same frontmatter.
@@ -233,7 +233,7 @@ pub fn frontmatter(data: &[u8]) {
     assert_eq!(rebody, body, "write_preserving must preserve the body");
     assert_same_decisions(&fm, &reparsed);
     assert_eq!(
-        serde_json::to_value(&reparsed).expect("frontmatter must serialize"),
+        serde_yaml::to_value(&reparsed).expect("frontmatter must serialize"),
         expected,
         "write_preserving must agree with write"
     );
@@ -259,10 +259,23 @@ pub fn crdt_update(data: &[u8]) {
     if data.len() > MAX_INPUT_LEN {
         return;
     }
-    if let Ok(ops) = decode_update_ops(data) {
-        let encoded = encode_update_ops(&ops).expect("decoded ops must re-encode");
-        let decoded = decode_update_ops(&encoded).expect("re-encoded ops must decode");
-        assert_eq!(decoded, ops, "text-op envelope must round-trip");
+    // Raw bytes exercise envelope detection and framing; the same bytes
+    // re-wrapped as an envelope body reach the msgpack / columnar decoder,
+    // which base64 + zstd framing otherwise shields from byte mutations.
+    for update in [
+        data.to_vec(),
+        wrap_envelope(b"ADCR2:", data),
+        wrap_envelope(b"ADCR1:", data),
+    ] {
+        if let Ok(ops) = decode_update_ops(&update) {
+            let encoded = encode_update_ops(&ops).expect("decoded ops must re-encode");
+            let decoded = decode_update_ops(&encoded).expect("re-encoded ops must decode");
+            assert_eq!(decoded, ops, "text-op envelope must round-trip");
+            let replica = ReplicaState::from_text(9, "seed\n");
+            if replica.apply_update(&update).is_ok() {
+                let _ = replica.text();
+            }
+        }
     }
 
     // A replica must either refuse the update or apply it and still project.
@@ -294,6 +307,20 @@ pub fn crdt_update(data: &[u8]) {
     if let Ok(projection) = agent_doc_markdown_lossless::projection_from_bytes(data) {
         let _ = agent_doc_markdown_lossless::restore(&projection);
     }
+}
+
+/// `magic || base64(zstd(body))`: the framing of the ADCR1 / ADCR2 text-op
+/// envelopes around an arbitrary body.
+fn wrap_envelope(magic: &[u8], body: &[u8]) -> Vec<u8> {
+    use base64::Engine as _;
+    let compressed = zstd::stream::encode_all(body, 1).expect("zstd encode in memory");
+    let mut envelope = magic.to_vec();
+    envelope.extend_from_slice(
+        base64::engine::general_purpose::STANDARD
+            .encode(compressed)
+            .as_bytes(),
+    );
+    envelope
 }
 
 /// Model-based CRDT edit fuzzing: interpret the input as an editor edit script

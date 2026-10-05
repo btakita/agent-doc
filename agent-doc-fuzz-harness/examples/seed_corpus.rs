@@ -204,6 +204,14 @@ fn crdt_seeds(out: &Path, docs: &[(String, String)], legacy: &[(String, Vec<u8>)
         peer.apply_local_edit(0, 0, "# ");
         let columnar = peer.encode_state();
         write(out, "crdt_update", &format!("{name}-adcr2.bin"), &columnar);
+        // Envelope BODIES (msgpack): the harness re-wraps raw input in each
+        // envelope, so these seed the columnar / compact decoders directly.
+        let unwrap = |envelope: &[u8], magic: &[u8]| -> Vec<u8> {
+            let b64 = envelope.strip_prefix(magic).unwrap();
+            let compressed = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+            zstd::stream::decode_all(compressed.as_slice()).unwrap()
+        };
+        write(out, "crdt_update", &format!("{name}-adcr2-body.msgpack"), unwrap(&columnar, b"ADCR2:"));
         let ops = decode_update_ops(&columnar).unwrap();
         write(out, "crdt_update", &format!("{name}-legacy.json"), serde_json::to_vec(&ops).unwrap());
         let packed = rmp_serde::to_vec(&ops).unwrap();
@@ -211,6 +219,7 @@ fn crdt_seeds(out: &Path, docs: &[(String, String)], legacy: &[(String, Vec<u8>)
         let mut adcr1 = b"ADCR1:".to_vec();
         adcr1.extend_from_slice(base64::engine::general_purpose::STANDARD.encode(compressed).as_bytes());
         write(out, "crdt_update", &format!("{name}-adcr1.bin"), adcr1);
+        write(out, "crdt_update", &format!("{name}-adcr1-body.msgpack"), &packed);
         let delta = peer.diff(&replica.state_vector()).unwrap();
         write(out, "crdt_update", &format!("{name}-delta.bin"), delta);
         write(out, "crdt_update", &format!("{name}-vv.json"), peer.state_vector());

@@ -1577,8 +1577,10 @@ mod tests {
     #[test]
     #[ignore = "triage helper"]
     fn sim_fuzz_show_kind() {
-        let kind = std::env::var("AGENT_DOC_SIM_FUZZ_SHOW_KIND")
-            .expect("set AGENT_DOC_SIM_FUZZ_SHOW_KIND");
+        let Ok(kind) = std::env::var("AGENT_DOC_SIM_FUZZ_SHOW_KIND") else {
+            eprintln!("AGENT_DOC_SIM_FUZZ_SHOW_KIND is unset; skipping opt-in triage helper");
+            return;
+        };
         let seeds: Vec<u64> = match std::env::var("AGENT_DOC_SIM_FUZZ_SEED") {
             Ok(raw) => vec![raw.trim().parse().unwrap()],
             Err(_) => (0..20_000).collect(),
@@ -1603,7 +1605,10 @@ mod tests {
     #[test]
     #[ignore = "triage helper"]
     fn sim_fuzz_replay_trace_file() {
-        let path = std::env::var("AGENT_DOC_SIM_FUZZ_TRACE").expect("set AGENT_DOC_SIM_FUZZ_TRACE");
+        let Ok(path) = std::env::var("AGENT_DOC_SIM_FUZZ_TRACE") else {
+            eprintln!("AGENT_DOC_SIM_FUZZ_TRACE is unset; skipping opt-in triage helper");
+            return;
+        };
         let text = std::fs::read_to_string(&path).unwrap();
         let body: String = text
             .lines()

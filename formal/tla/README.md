@@ -192,6 +192,27 @@ line-based `Semantic` rung keeps both of two different edits of one item.
 `equals_authority` is no substitute for the guard; `AdmissionSplitMergeReach.cfg`
 must show disk-only additions still land.
 
+`StaleColumnRecycle.tla` checks GH #136: the stale-supervisor column gate and
+the safe-boundary recycle request it depends on. The editor link is an
+adversarial channel (delay, reorder, drop, duplicate, reconnect) and the
+controller applies any delivered layout in any order; the request's
+consumption bound is an arbitrary local `Expire` event, so no timeout appears
+in a safety argument. Safety: a stale pane is never promoted out of the stash
+while its request is overdue (`NoStashPromotionWhileOverdue`), a stash
+promotion never widens the target window (`StashPromotionNeverWidens`), and
+once refused as overdue it is not promoted again until consumed
+(`NoFlapAfterOverdueRefusal`). Liveness (`EventuallyConsumed`) holds only
+under fairness of the supervisor's own idle boundary and cycle closure, for a
+durable level-triggered request. One wedge per fix must violate:
+`StaleColumnRecycleOverdueWedge`, `StaleColumnRecycleWidenWedge`,
+`StaleColumnRecycleRefreshWedge` (a refresh restarting the consumption clock),
+`StaleColumnRecycleLapseWedge` (an install fan-out request that lapses), and
+`StaleColumnRecycleDropWedge` (a fire-and-forget notification under Drop);
+`StaleColumnRecycleReach` and `StaleColumnRecycleConsumeReach` keep the focus
+exception and consumption reachable. The channel is a plain set with explicit
+`Drop` and duplicate-on-deliver so it can be swapped for a shared channel
+module later.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

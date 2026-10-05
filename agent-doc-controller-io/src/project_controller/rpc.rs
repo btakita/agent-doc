@@ -11835,7 +11835,7 @@ pub fn checkpoint_route_owned_documents_for_project(
 pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usize)> {
     let docs = crate::process::open_supervisor_documents(std::process::id());
     let reason = if force {
-        "install_fanout_force"
+        agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT_FORCE
     } else {
         agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT
     };
@@ -21036,6 +21036,51 @@ fn canonical_layout_document_id(project_root: &Path, file: &str) -> String {
         .to_string()
 }
 
+/// GH #136: `columns` without the documents the layout effect acknowledged it
+/// gated out. Matching is on canonical document identity, so absolute and
+/// root-relative spellings agree; a column left empty is dropped.
+fn layout_columns_without_gated_documents(
+    project_root: &Path,
+    columns: &[String],
+    gated_documents: &[String],
+) -> Vec<String> {
+    if gated_documents.is_empty() {
+        return columns.to_vec();
+    }
+    let gated: Vec<String> = gated_documents
+        .iter()
+        .map(|file| canonical_layout_document_id(project_root, file))
+        .collect();
+    columns
+        .iter()
+        .filter_map(|column| {
+            let kept: Vec<&str> = column
+                .split(',')
+                .map(str::trim)
+                .filter(|file| !file.is_empty())
+                .filter(|file| !gated.contains(&canonical_layout_document_id(project_root, file)))
+                .collect();
+            (!kept.is_empty()).then(|| kept.join(","))
+        })
+        .collect()
+}
+
+/// GH #136: a gated document has no realised pane to focus; demanding focus
+/// of it would hold the projection in `retry_pending` for as long as the
+/// supervisor stays stale.
+fn focus_outside_gated_documents(
+    project_root: &Path,
+    focus: Option<String>,
+    gated_documents: &[String],
+) -> Option<String> {
+    let focus = focus?;
+    let focus_id = canonical_layout_document_id(project_root, &focus);
+    (!gated_documents
+        .iter()
+        .any(|file| canonical_layout_document_id(project_root, file) == focus_id))
+    .then_some(focus)
+}
+
 fn first_agent_doc_in_layout_column(project_root: &Path, column: &str) -> Option<String> {
     column.split(',').find_map(|raw| {
         let raw = raw.trim();
@@ -23517,6 +23562,20 @@ fn pane_layout_effect_worker(
             .as_ref()
             .map(|receipt| receipt.file_panes.clone())
             .unwrap_or_default();
+        // GH #136: the effect acknowledges the columns it deliberately did not
+        // build (stale-supervisor gate). Convergence is measured against what
+        // it promised, and focus is not demanded of a gated document, so a
+        // gated column converges in ONE attempt instead of a retry loop that
+        // cannot converge while the supervisor stays stale.
+        let gated_documents = effect_result
+            .as_ref()
+            .map(|receipt| receipt.gated_documents.clone())
+            .unwrap_or_default();
+        let projected_focus = focus_outside_gated_documents(
+            &bootstrap.project_root,
+            projected_focus,
+            &gated_documents,
+        );
         if effect_result.is_ok() {
             runtime.record_pane_layout_structural_assignment(
                 &desired,
@@ -23574,12 +23633,33 @@ fn pane_layout_effect_worker(
         );
         let mut observation_invocation = pane_layout_state_invocation(&desired);
         observation_invocation.focus = focus_required.then(|| projected_focus.clone()).flatten();
-        let report = tmux_layout_sync_state_for_invocation_with_effect_assignment(
-            &bootstrap,
-            &runtime,
-            &observation_invocation,
-            &effect_file_panes,
+        observation_invocation.columns = layout_columns_without_gated_documents(
+            &bootstrap.project_root,
+            &observation_invocation.columns,
+            &gated_documents,
         );
+        let report = if observation_invocation.columns.is_empty() && !gated_documents.is_empty() {
+            // Every column was gated: the effect preserved the current layout
+            // by design, which is exactly what it acknowledged.
+            Ok(layout_sync_state_report(
+                true,
+                "all_columns_gated_layout_preserved",
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                LayoutSyncStateTarget {
+                    window_id: desired.invocation.window.clone(),
+                    ..LayoutSyncStateTarget::default()
+                },
+            ))
+        } else {
+            tmux_layout_sync_state_for_invocation_with_effect_assignment(
+                &bootstrap,
+                &runtime,
+                &observation_invocation,
+                &effect_file_panes,
+            )
+        };
         let (report, effect_reason) = match (report, effect_result) {
             (Ok(report), Ok(receipt)) => (report, receipt.reason),
             (Ok(report), Err(error)) => (report, format!("tmux_effect_failed:{error:#}")),
@@ -25363,6 +25443,7 @@ fn await_sync_tmux_layout_projection(
         if !pane_layout_invocation_awaits_projection(&invocation) {
             let routes_created_panes = invocation.routes_created_panes();
             return Ok(ControllerTmuxLayoutSyncReceipt {
+                gated_documents: Vec::new(),
                 applied: false,
                 reason: "projection_published".to_string(),
                 columns: invocation.columns,
@@ -25396,6 +25477,7 @@ fn await_sync_tmux_layout_projection(
             .unwrap_or(desired.generation);
         let routes_created_panes = invocation.routes_created_panes();
         Ok(ControllerTmuxLayoutSyncReceipt {
+            gated_documents: Vec::new(),
             applied,
             reason: reason.to_string(),
             columns: invocation.columns,
@@ -25439,6 +25521,7 @@ fn editor_route_layout_receipt(
         .map(|current| current.generation)
         .unwrap_or(published_generation);
     ControllerTmuxLayoutSyncReceipt {
+        gated_documents: Vec::new(),
         applied,
         reason: reason.to_string(),
         columns: receipt_invocation.columns,
@@ -31082,6 +31165,7 @@ mod tests {
         columns: &[&str],
     ) -> ControllerTmuxLayoutSyncReceipt {
         ControllerTmuxLayoutSyncReceipt {
+            gated_documents: Vec::new(),
             applied,
             reason: reason.to_string(),
             columns: columns.iter().map(|column| column.to_string()).collect(),
@@ -31939,9 +32023,68 @@ mod tests {
         );
     }
 
+    /// GH #136: a column the layout effect acknowledged as gated (stale
+    /// supervisor) is removed from what convergence is measured against, under
+    /// any spelling, and focus is never demanded of it. Without this the
+    /// projection compared tmux against a column it was told not to build and
+    /// retried forever (`retry_pending`, 250ms..5s backoff, no attempt cap).
+    #[test]
+    fn gh136_gated_documents_are_excluded_from_convergence_and_focus() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("tasks/pmt2/mr")).unwrap();
+        for doc in ["tasks/pmt2/mr/1099.md", "tasks/ad.md", "tasks/two.md"] {
+            std::fs::write(root.join(doc), "").unwrap();
+        }
+        let abs = |doc: &str| root.join(doc).to_string_lossy().to_string();
+        let columns = vec![
+            "tasks/pmt2/mr/1099.md".to_string(),
+            format!("{},tasks/two.md", abs("tasks/ad.md")),
+        ];
+        // Gated under its absolute spelling, published root-relative.
+        let gated = vec![abs("tasks/pmt2/mr/1099.md")];
+        assert_eq!(
+            layout_columns_without_gated_documents(root, &columns, &gated),
+            vec![format!("{},tasks/two.md", abs("tasks/ad.md"))]
+        );
+        assert_eq!(
+            layout_columns_without_gated_documents(root, &columns, &[]),
+            columns,
+            "nothing gated: convergence is measured against the full layout"
+        );
+        assert_eq!(
+            layout_columns_without_gated_documents(
+                root,
+                &["tasks/pmt2/mr/1099.md".to_string()],
+                &gated
+            ),
+            Vec::<String>::new(),
+            "every column gated: nothing left to observe"
+        );
+        assert_eq!(
+            focus_outside_gated_documents(root, Some("tasks/pmt2/mr/1099.md".to_string()), &gated),
+            None
+        );
+        assert_eq!(
+            focus_outside_gated_documents(root, Some("tasks/ad.md".to_string()), &gated),
+            Some("tasks/ad.md".to_string())
+        );
+        assert_eq!(focus_outside_gated_documents(root, None, &gated), None);
+    }
+
+    #[test]
+    fn gh136_gated_receipt_field_defaults_for_older_peers() {
+        // A receipt from a peer that predates the field still deserialises.
+        let json = r#"{"applied":true,"reason":"applied","columns":[],"no_autostart":true,
+            "exact_visible":true,"routes_created_panes":false}"#;
+        let receipt: ControllerTmuxLayoutSyncReceipt = serde_json::from_str(json).unwrap();
+        assert!(receipt.gated_documents.is_empty());
+    }
+
     #[test]
     fn published_tmux_layout_projection_is_a_successful_command_terminal() {
         let receipt = |applied, reason: &str| ControllerTmuxLayoutSyncReceipt {
+            gated_documents: Vec::new(),
             applied,
             reason: reason.to_string(),
             columns: vec!["tasks/one.md".to_string()],

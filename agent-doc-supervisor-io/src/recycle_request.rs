@@ -98,6 +98,74 @@ pub fn read_recycle_request(file: &str) -> Option<RecycleRequest> {
     })
 }
 
+/// GH #136: the outstanding (unconsumed) request for `file`, with the time the
+/// FIRST unconsumed request was made.
+///
+/// Every request is its own epoch; consumption is a `Started`/`Settled` event
+/// at some epoch. The requests above the highest consumed epoch are the ones
+/// nothing has acted on, and the oldest of them starts the consumption clock.
+/// When history compaction has dropped those events the projection's own
+/// `marked_secs` is used, which can only make the request look younger.
+pub fn read_outstanding_recycle_request(
+    file: &str,
+) -> Option<agent_doc_supervisor::recycle_request::OutstandingRecycleRequest> {
+    let identity = crate::state_events::document_state_identity(Path::new(file)).ok()??;
+    let ledger = crate::state_events::load_document_ledger_shared(
+        &identity.project_root,
+        &identity.document_hash,
+    )
+    .ok()?;
+    let recycle = ledger
+        .project_document(&identity.document_hash)?
+        .supervisor
+        .recycle;
+    if recycle.phase != SupervisorRecyclePhase::Requested {
+        return None;
+    }
+    let latest = recycle_request(
+        recycle.reason.as_deref().unwrap_or("unspecified"),
+        recycle.marked_secs,
+    );
+    let first_requested_secs = first_unconsumed_request_secs(&ledger, &identity.document_hash)
+        .unwrap_or(recycle.marked_secs)
+        .min(recycle.marked_secs);
+    Some(
+        agent_doc_supervisor::recycle_request::OutstandingRecycleRequest {
+            latest,
+            first_requested_secs,
+        },
+    )
+}
+
+fn first_unconsumed_request_secs(
+    ledger: &agent_doc_state_backbone::EventLedger,
+    document_hash: &str,
+) -> Option<u64> {
+    let events = ledger
+        .events()
+        .iter()
+        .filter(|event| event.document_hash() == document_hash);
+    let consumed_epoch = events
+        .clone()
+        .filter_map(|event| match &event.fact {
+            StateFact::SupervisorRecycleStarted { recycle_epoch, .. }
+            | StateFact::SupervisorRecycleSettled { recycle_epoch, .. } => Some(*recycle_epoch),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    events
+        .filter_map(|event| match &event.fact {
+            StateFact::SupervisorRecycleRequested {
+                recycle_epoch,
+                marked_secs,
+                ..
+            } if *recycle_epoch > consumed_epoch => Some(*marked_secs),
+            _ => None,
+        })
+        .min()
+}
+
 /// Return the recycle-request iff it exists and is fresh against `now`.
 pub fn fresh_recycle_request(file: &str, now: u64) -> Option<RecycleRequest> {
     let request = read_recycle_request(file)?;
@@ -303,6 +371,76 @@ mod tests {
         assert!(
             live_recycle_request(&file, hours_later, true).is_none(),
             "consuming the request settles it"
+        );
+    }
+
+    #[test]
+    fn gh136_outstanding_request_keeps_the_first_unconsumed_request_time() {
+        // A refresh (a re-request, or an install fan-out on top of a stale
+        // request) must not reset the consumption clock; a settlement does.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+        let identity = crate::state_events::document_state_identity(&file)
+            .unwrap()
+            .unwrap();
+        let file = file.to_string_lossy().to_string();
+        assert!(read_outstanding_recycle_request(&file).is_none());
+        let hash = identity.document_hash.clone();
+        let append = |id: &str, fact: StateFact| {
+            crate::state_events::append_event(dir.path(), &StateEvent::new(id, fact)).unwrap();
+        };
+        append(
+            "r1",
+            StateFact::SupervisorRecycleRequested {
+                document_hash: hash.clone(),
+                reason: "stale_supervisor_turn_stage".into(),
+                recycle_epoch: 1,
+                marked_secs: 100,
+            },
+        );
+        append(
+            "r2",
+            StateFact::SupervisorRecycleRequested {
+                document_hash: hash.clone(),
+                reason: "install_fanout".into(),
+                recycle_epoch: 2,
+                marked_secs: 5_000,
+            },
+        );
+        let outstanding = read_outstanding_recycle_request(&file).unwrap();
+        assert_eq!(outstanding.latest.reason, "install_fanout");
+        assert_eq!(outstanding.latest.requested_secs, 5_000);
+        assert_eq!(outstanding.first_requested_secs, 100);
+        append(
+            "s2",
+            StateFact::SupervisorRecycleSettled {
+                document_hash: hash.clone(),
+                reason: "install_fanout".into(),
+                recycle_epoch: 2,
+                marked_secs: 5_001,
+            },
+        );
+        assert!(
+            read_outstanding_recycle_request(&file).is_none(),
+            "a settlement consumes every request at or below its epoch"
+        );
+        append(
+            "r3",
+            StateFact::SupervisorRecycleRequested {
+                document_hash: hash,
+                reason: "stale_supervisor_turn_stage".into(),
+                recycle_epoch: 3,
+                marked_secs: 9_000,
+            },
+        );
+        assert_eq!(
+            read_outstanding_recycle_request(&file)
+                .unwrap()
+                .first_requested_secs,
+            9_000,
+            "the clock restarts only after a consumption"
         );
     }
 

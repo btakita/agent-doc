@@ -240,6 +240,9 @@ pub struct SyncRunReport {
     pub applied: bool,
     pub reason: String,
     pub file_panes: Vec<(PathBuf, String)>,
+    /// GH #136: column documents the stale-supervisor gate deliberately left
+    /// unrealised this pass (see `layout_column_audit::gate_stale_column_panes`).
+    pub gated_documents: Vec<PathBuf>,
 }
 
 impl Default for SyncRunReport {
@@ -248,6 +251,7 @@ impl Default for SyncRunReport {
             applied: true,
             reason: "applied".to_string(),
             file_panes: Vec::new(),
+            gated_documents: Vec::new(),
         }
     }
 }
@@ -265,11 +269,19 @@ fn reset_sync_run_report() {
 
 fn mark_sync_layout_preserved(reason: &str) {
     LAST_SYNC_RUN_REPORT.with(|report| {
+        let gated_documents = std::mem::take(&mut report.borrow_mut().gated_documents);
         *report.borrow_mut() = SyncRunReport {
             applied: false,
             reason: reason.to_string(),
             file_panes: Vec::new(),
+            gated_documents,
         };
+    });
+}
+
+fn record_sync_gated_documents(gated: &[PathBuf]) {
+    LAST_SYNC_RUN_REPORT.with(|report| {
+        report.borrow_mut().gated_documents = gated.to_vec();
     });
 }
 
@@ -4809,7 +4821,15 @@ fn run_with_options_internal_at_root(
                 .filter(|pane| agent_doc_turn_status_io::turn_active_for_pane(project_root, pane))
                 .collect()
         };
-        crate::layout_column_audit::gate_stale_column_panes(
+        // GH #136: a stale stash pane may replace a column, never add one, so
+        // the bounded focus exception needs the target window's pane count.
+        let gate_window_pane_count = || -> Option<usize> {
+            let window = window?;
+            tmux.list_window_panes(window).ok().map(|panes| panes.len())
+        };
+        let gate_pane_turn_active =
+            |pane: &str| agent_doc_turn_status_io::turn_active_for_pane(project_root, pane);
+        let gate = crate::layout_column_audit::gate_stale_column_panes(
             tmux,
             &crate::layout_column_audit::StaleColumnGateInput {
                 col_args,
@@ -4818,8 +4838,14 @@ fn run_with_options_internal_at_root(
                 registry_pane: &gate_registry_pane,
                 before: &pane_windows_before_router,
                 live_turn_window_panes: &gate_live_turn_window_panes,
+                window_pane_count: &gate_window_pane_count,
+                pane_turn_active: &gate_pane_turn_active,
             },
-        )
+        );
+        // GH #136: acknowledge what this pass deliberately does not build, so
+        // the controller converges on it instead of retrying it.
+        record_sync_gated_documents(&gate.excluded);
+        gate.col_args
     };
     if router_col_args.is_empty() && !col_args.is_empty() {
         // GH #124: every column was gated out (stale, or a stale focused pane

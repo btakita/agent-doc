@@ -274,6 +274,14 @@ pub struct ControllerTmuxLayoutSyncReceipt {
     /// partial actor store.
     #[serde(default)]
     pub file_panes: Vec<(String, String)>,
+    /// GH #136: column documents the effect deliberately did NOT realise —
+    /// the stale-supervisor column gate excluded them. This is the effect's
+    /// acknowledgement of what it promised, so the projection measures
+    /// convergence against `columns - gated_documents` instead of retrying a
+    /// layout it was told not to build (a 250ms..5s retry loop that never
+    /// converges while the supervisor stays stale).
+    #[serde(default)]
+    pub gated_documents: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2541,6 +2549,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
     ) -> Result<ControllerTmuxLayoutSyncReceipt> {
         let routes_created_panes = invocation.routes_created_panes();
         Ok(ControllerTmuxLayoutSyncReceipt {
+            gated_documents: Vec::new(),
             applied: true,
             reason: "test_runtime".to_string(),
             columns: invocation.columns,

@@ -29,7 +29,15 @@
 //!    `layout_column_pane_selected` line naming the candidates and why the
 //!    winner was chosen. A stale pane that still reached a column is recorded as
 //!    `layout_column_pane_stale_admitted`, never as a plain selection.
-//! 4. The stale-supervisor consequence: the pane is neither killed nor reaped.
+//! 4. GH #136: the focus exception is bounded. It exists "on the strength of"
+//!    a safe-boundary recycle that will make the pane fresh, so a stale pane
+//!    still parked in the stash is promoted only while that request is
+//!    [`StaleRecycleRequestState::Pending`] and only when promoting it does not
+//!    widen the target window. An idle supervisor that left its request
+//!    unconsumed past [`STALE_RECYCLE_CONSUME_BOUND_SECS`] is `Overdue`, and its
+//!    stash pane stays in the stash. See [`stale_focus_admission`] for the
+//!    transition function and `formal/tla/StaleColumnRecycle.tla` for the model.
+//! 5. The stale-supervisor consequence: the pane is neither killed nor reaped.
 //!    The existing safe-boundary recycle is requested — the supervisor re-execs
 //!    onto the installed build at its next idle boundary, preserving the harness
 //!    child and the pane id — and the request now stays live past its TTL while
@@ -37,6 +45,9 @@
 
 use crate::sync::{PaneOccupant, pane_occupant_for_document};
 use agent_doc_controller::dispatch::is_stash_window_name;
+pub use agent_doc_supervisor::recycle_request::{
+    STALE_RECYCLE_CONSUME_BOUND_SECS, StaleRecycleRequestState,
+};
 use agent_doc_turn::turn_status::STALE_SUPERVISOR_PANE_MARKER;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -312,6 +323,69 @@ pub enum ColumnAdmission {
     /// exception does not apply: the column is excluded like any stale column
     /// and the next sync after the recycle (or after the turn) admits it.
     ExcludeStaleFocusedLiveTurn,
+    /// GH #136: the stale focused pane is still in the stash and its recycle
+    /// request is [`StaleRecycleRequestState::Overdue`]: the supervisor sat idle
+    /// past the consumption bound without recycling. The exception was granted
+    /// on the strength of that recycle, so it no longer applies; the pane is
+    /// not promoted.
+    ExcludeStaleFocusedRecycleOverdue,
+    /// GH #136: promoting the stale focused pane out of the stash would realise
+    /// more columns than the target window holds — the `columns =
+    /// observed_panes + 1` flap. A stale stash pane may take the place of a
+    /// column, never add one.
+    ExcludeStaleFocusedWouldWiden,
+}
+
+impl ColumnAdmission {
+    /// Whether the column is removed from what tmux-router realises.
+    pub fn excludes(self) -> bool {
+        !matches!(self, Self::Admit | Self::AdmitStaleFocused)
+    }
+}
+
+/// GH #136: the facts the bounded focus exception decides on, for one stale
+/// focused column. Pure data so the transition function can be enumerated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaleFocusFacts {
+    /// The pane currently sits in a stash window (admitting it is a promotion).
+    pub in_stash: bool,
+    /// The recycle request is overdue (idle past the consumption bound).
+    pub recycle_overdue: bool,
+    /// Columns the plan would realise if this pane were admitted.
+    pub realised_columns: usize,
+    /// Panes currently in the target window, when observed.
+    pub window_panes: Option<usize>,
+    /// Some live-turn pane in the target window would be stashed for it.
+    pub displaces_live_turn: bool,
+}
+
+/// GH #136: the bounded focus exception, as a total transition function from
+/// the observed facts to an admission. Only ever called for a column whose
+/// base admission is [`ColumnAdmission::AdmitStaleFocused`].
+///
+/// Invariants (enumerated exhaustively in the tests and model-checked in
+/// `formal/tla/StaleColumnRecycle.tla`):
+///
+/// * a stash pane is never promoted while its recycle is overdue;
+/// * a stash pane is never promoted when that widens the target window past
+///   `max(window_panes, 1)` (unknown counts as empty);
+/// * a live turn is never displaced (GH #124);
+/// * a pane already visible is never moved by this rule — only promotion out
+///   of the stash is bounded, so a visible stale pane cannot flap.
+pub fn stale_focus_admission(facts: StaleFocusFacts) -> ColumnAdmission {
+    if facts.displaces_live_turn {
+        return ColumnAdmission::ExcludeStaleFocusedLiveTurn;
+    }
+    if !facts.in_stash {
+        return ColumnAdmission::AdmitStaleFocused;
+    }
+    if facts.recycle_overdue {
+        return ColumnAdmission::ExcludeStaleFocusedRecycleOverdue;
+    }
+    if facts.realised_columns > facts.window_panes.unwrap_or(0).max(1) {
+        return ColumnAdmission::ExcludeStaleFocusedWouldWiden;
+    }
+    ColumnAdmission::AdmitStaleFocused
 }
 
 /// GH #124: panes running a live turn that the layout would stash — live-turn
@@ -366,6 +440,11 @@ pub struct ColumnGateFacts {
     /// The pane is the column's own (not bound to another document).
     pub own_pane: bool,
     pub is_focus: bool,
+    /// GH #136: the pane currently sits in a stash window.
+    pub in_stash: bool,
+    /// GH #136: the recycle request's lifecycle state (meaningful only for a
+    /// stale own pane; `NotRequested` otherwise).
+    pub recycle: StaleRecycleRequestState,
 }
 
 /// Pure gate plan: one admission (plus the live-turn panes it would have
@@ -376,8 +455,13 @@ pub struct ColumnGateFacts {
 /// no pane in the target window running a live turn would be stashed for it —
 /// a live agent pane is never stashed in favour of a stale-supervisor pane.
 /// `live_turn_window_panes` is consulted only when a stale focused column exists.
+///
+/// GH #136: the exception is further bounded by [`stale_focus_admission`].
+/// `window_pane_count` (the target window's current pane count) is likewise
+/// consulted only when a stale focused column exists, and at most once.
 pub fn plan_column_admissions(
     facts: &[ColumnGateFacts],
+    window_pane_count: &dyn Fn() -> Option<usize>,
     live_turn_window_panes: &dyn Fn() -> Vec<String>,
 ) -> Vec<(ColumnAdmission, Vec<String>)> {
     let base: Vec<ColumnAdmission> = facts
@@ -385,9 +469,13 @@ pub fn plan_column_admissions(
         .map(|fact| column_admission(&fact.freshness, fact.own_pane, fact.is_focus))
         .collect();
     if !base.contains(&ColumnAdmission::AdmitStaleFocused) {
-        return base.into_iter().map(|admission| (admission, Vec::new())).collect();
+        return base
+            .into_iter()
+            .map(|admission| (admission, Vec::new()))
+            .collect();
     }
     let live = live_turn_window_panes();
+    let window_panes = window_pane_count();
     let realised: Vec<String> = facts
         .iter()
         .zip(&base)
@@ -417,10 +505,14 @@ pub fn plan_column_admissions(
                 .cloned()
                 .collect();
             let displaced = live_turn_panes_displaced(&live_elsewhere, &others);
-            (
-                protect_live_turn_from_stale_focus(admission, &displaced),
-                displaced,
-            )
+            let admission = stale_focus_admission(StaleFocusFacts {
+                in_stash: fact.in_stash,
+                recycle_overdue: fact.recycle.is_overdue(),
+                realised_columns: realised.len(),
+                window_panes,
+                displaces_live_turn: !displaced.is_empty(),
+            });
+            (admission, displaced)
         })
         .collect()
 }
@@ -451,17 +543,21 @@ pub fn col_args_without(col_args: &[String], excluded: &[PathBuf]) -> Vec<String
         .collect()
 }
 
-/// Pure: the `prior_request=` token describing the recycle request already on
-/// the document's ledger, so a re-request says whether the last one was ever
-/// consumed instead of repeating `requested` with no outcome (GH #121 ask 4).
-pub fn prior_recycle_request_token(prior: Option<(&str, u64)>, now_secs: u64) -> String {
-    match prior {
-        None => "none".to_string(),
-        Some((reason, marked_secs)) => format!(
-            "unconsumed:reason={reason}:age_secs={}",
-            now_secs.saturating_sub(marked_secs)
-        ),
-    }
+/// The lifecycle state of `file`'s outstanding recycle request, for a
+/// supervisor just observed stale (GH #136). One ledger read.
+pub fn observe_stale_recycle_request(
+    file: &Path,
+    consumer_turn_active: bool,
+) -> StaleRecycleRequestState {
+    let outstanding = agent_doc_supervisor_io::recycle_request::read_outstanding_recycle_request(
+        &file.to_string_lossy(),
+    );
+    agent_doc_supervisor::recycle_request::classify_stale_recycle_request(
+        outstanding.as_ref(),
+        now_epoch_secs(),
+        consumer_turn_active,
+        agent_doc_supervisor::recycle_request::stale_recycle_consume_bound_secs(),
+    )
 }
 
 fn now_epoch_secs() -> u64 {
@@ -478,6 +574,7 @@ fn request_stale_column_recycle(
     pane: &str,
     freshness: &PaneSupervisorFreshness,
     source: &str,
+    prior: Option<&StaleRecycleRequestState>,
 ) -> Option<String> {
     let PaneSupervisorFreshness::Stale { supervisor_pid, .. } = freshness else {
         return None;
@@ -488,14 +585,12 @@ fn request_stale_column_recycle(
     if !claim_stale_column_recycle(&ledger_key, Instant::now()) {
         return Some("safe_boundary_recycle_already_requested".to_string());
     }
-    let prior =
-        agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy());
-    let prior_token = prior_recycle_request_token(
-        prior
-            .as_ref()
-            .map(|request| (request.reason.as_str(), request.requested_secs)),
-        now_epoch_secs(),
-    );
+    // GH #136: the gate already classified the request; the post-router audit
+    // has no turn evidence, so it reports the idle classification.
+    let prior_token = match prior {
+        Some(prior) => prior.log_token(),
+        None => observe_stale_recycle_request(file, false).log_token(),
+    };
     let status = agent_doc_controller_io::project_controller::schedule_stale_supervisor_cp_recycle(
         file, source,
     );
@@ -519,6 +614,13 @@ pub struct StaleColumnGateInput<'a> {
     /// GH #124: panes in the target window running a live turn (fresh
     /// turn-active lease). Evaluated only when a stale focused column needs it.
     pub live_turn_window_panes: &'a dyn Fn() -> Vec<String>,
+    /// GH #136: pane count of the target window. Evaluated only when a stale
+    /// focused column needs it.
+    pub window_pane_count: &'a dyn Fn() -> Option<usize>,
+    /// GH #136: whether one pane is running a turn (its recycle is then
+    /// deferred to the turn boundary, never overdue). Evaluated only for a
+    /// stale own pane.
+    pub pane_turn_active: &'a dyn Fn(&str) -> bool,
 }
 
 /// GH #121 (GH #105 ask 2 / GH #109 ask 4): make the staleness verdict a
@@ -531,9 +633,13 @@ pub struct StaleColumnGateInput<'a> {
 /// lands the pane reads fresh and the next sync admits it. The focused document
 /// is the one exception (see [`ColumnAdmission::AdmitStaleFocused`]).
 ///
-/// Returns the column arguments tmux-router should realise. Never moves, kills,
-/// or reaps a pane.
-pub fn gate_stale_column_panes(tmux: &Tmux, input: &StaleColumnGateInput<'_>) -> Vec<String> {
+/// Returns the column arguments tmux-router should realise, and the documents
+/// it excluded (GH #136: the effect's acknowledgement of what it will not
+/// build). Never moves, kills, or reaps a pane.
+pub fn gate_stale_column_panes(
+    tmux: &Tmux,
+    input: &StaleColumnGateInput<'_>,
+) -> StaleColumnGateOutcome {
     let _observations = agent_doc_process_owner_io::begin_process_observation_scope();
     let focus = input.focus.map(|focus| path_identity(Path::new(focus)));
     let mut excluded: Vec<PathBuf> = Vec::new();
@@ -549,7 +655,10 @@ pub fn gate_stale_column_panes(tmux: &Tmux, input: &StaleColumnGateInput<'_>) ->
         };
         let own_pane = pane_occupant_for_document(tmux, &pane, &file) == PaneOccupant::Free;
         let freshness = if own_pane {
-            let title = input.before.get(&pane).map(|snapshot| snapshot.title.as_str());
+            let title = input
+                .before
+                .get(&pane)
+                .map(|snapshot| snapshot.title.as_str());
             pane_supervisor_freshness(tmux, &pane, &file, title)
         } else {
             PaneSupervisorFreshness::Unknown {
@@ -557,16 +666,33 @@ pub fn gate_stale_column_panes(tmux: &Tmux, input: &StaleColumnGateInput<'_>) ->
             }
         };
         let is_focus = focus.as_ref() == Some(&path_identity(&file));
+        let in_stash = input
+            .before
+            .get(&pane)
+            .is_some_and(|snapshot| is_stash_window_name(&snapshot.window_name));
+        // GH #136: one ledger read per stale own pane, before this pass makes
+        // any request, so the classification reflects what the consumer had.
+        let recycle = if own_pane && freshness.is_stale() {
+            observe_stale_recycle_request(&file, (input.pane_turn_active)(&pane))
+        } else {
+            StaleRecycleRequestState::NotRequested
+        };
         facts.push(ColumnGateFacts {
             file,
             pane,
             freshness,
             own_pane,
             is_focus,
+            in_stash,
+            recycle,
         });
         sources.push(pre_resolved);
     }
-    let plan = plan_column_admissions(&facts, input.live_turn_window_panes);
+    let plan = plan_column_admissions(
+        &facts,
+        input.window_pane_count,
+        input.live_turn_window_panes,
+    );
     for ((fact, pre_resolved), (admission, displaced)) in facts.iter().zip(sources).zip(plan) {
         let (file, pane, freshness) = (&fact.file, &fact.pane, &fact.freshness);
         let before = input.before.get(pane);
@@ -590,14 +716,34 @@ pub fn gate_stale_column_panes(tmux: &Tmux, input: &StaleColumnGateInput<'_>) ->
                     ),
                 )
             }
+            ColumnAdmission::ExcludeStaleFocusedRecycleOverdue => {
+                excluded.push(file.clone());
+                (
+                    "layout_column_pane_excluded",
+                    "excluded_focused_recycle_overdue".to_string(),
+                )
+            }
+            ColumnAdmission::ExcludeStaleFocusedWouldWiden => {
+                excluded.push(file.clone());
+                (
+                    "layout_column_pane_excluded",
+                    "excluded_focused_stash_would_widen".to_string(),
+                )
+            }
         };
         let source = if pre_resolved.as_deref() == Some(pane.as_str()) {
             ColumnPaneSource::PreResolved
         } else {
             ColumnPaneSource::Registry
         };
-        let action = request_stale_column_recycle(file, pane, freshness, "layout_column_gate")
-            .unwrap_or_else(|| "none".to_string());
+        let action = request_stale_column_recycle(
+            file,
+            pane,
+            freshness,
+            "layout_column_gate",
+            Some(&fact.recycle),
+        )
+        .unwrap_or_else(|| "none".to_string());
         let line = format!(
             "{record} file={} pane={} source={} window={} supervisor={} admission={admission_token} reason=stale_supervisor action={action} (GH #121)",
             file.display(),
@@ -617,7 +763,19 @@ pub fn gate_stale_column_panes(tmux: &Tmux, input: &StaleColumnGateInput<'_>) ->
             agent_doc_ops_log_io::log_op(file, &line);
         }
     }
-    col_args_without(input.col_args, &excluded)
+    StaleColumnGateOutcome {
+        col_args: col_args_without(input.col_args, &excluded),
+        excluded,
+    }
+}
+
+/// What the pre-selection gate decided for one sync pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleColumnGateOutcome {
+    /// The `--col` arguments tmux-router should realise.
+    pub col_args: Vec<String>,
+    /// The documents removed from them.
+    pub excluded: Vec<PathBuf>,
 }
 
 /// One tmux pane's window and title, captured in a single `list-panes -a`.
@@ -706,7 +864,7 @@ pub fn audit_layout_column_panes(tmux: &Tmux, input: &LayoutColumnAuditInput<'_>
         // column is recorded under its own name — never as a plain selection —
         // and its recycle request is de-duplicated with the gate's.
         let recycle_action =
-            request_stale_column_recycle(file, pane, &freshness, "layout_column_selection");
+            request_stale_column_recycle(file, pane, &freshness, "layout_column_selection", None);
         let recycle_requested_now = recycle_action
             .as_deref()
             .is_some_and(|action| action.starts_with("safe_boundary_recycle_requested"));
@@ -989,6 +1147,17 @@ mod tests {
                         ),
                         own_pane: true,
                         is_focus: doc == focus,
+                        in_stash: !self.window.contains(&pane),
+                        // A request made this pass: inside its bound.
+                        recycle: if replaced {
+                            StaleRecycleRequestState::Pending {
+                                reason: "stale_supervisor_turn_stage".to_string(),
+                                age_secs: 0,
+                                deferred_by_turn: false,
+                            }
+                        } else {
+                            StaleRecycleRequestState::NotRequested
+                        },
                     }
                 })
                 .collect();
@@ -1001,17 +1170,12 @@ mod tests {
                     .map(|pane| pane.to_string())
                     .collect()
             };
-            let plan = plan_column_admissions(&facts, &live);
+            let window_panes = || Some(self.window.len());
+            let plan = plan_column_admissions(&facts, &window_panes, &live);
             let excluded: Vec<PathBuf> = facts
                 .iter()
                 .zip(&plan)
-                .filter(|(_, (admission, _))| {
-                    matches!(
-                        admission,
-                        ColumnAdmission::ExcludeStale
-                            | ColumnAdmission::ExcludeStaleFocusedLiveTurn
-                    )
-                })
+                .filter(|(_, (admission, _))| admission.excludes())
                 .map(|(fact, _)| fact.file.clone())
                 .collect();
             let gated = col_args_without(col_args, &excluded);
@@ -1049,7 +1213,9 @@ mod tests {
         }
 
         fn stale(&self, pane: &str) -> bool {
-            self.panes.iter().any(|(p, _, replaced)| *p == pane && *replaced)
+            self.panes
+                .iter()
+                .any(|(p, _, replaced)| *p == pane && *replaced)
         }
     }
 
@@ -1057,7 +1223,10 @@ mod tests {
     fn gh124_live_turn_pane_is_never_stashed_in_favour_of_a_stale_focused_pane() {
         let world = Gh124World::issue_124();
         // The operator focuses 1061.md, whose only pane runs a stale supervisor.
-        let outcome = world.sync(&["tasks/pmt2/mr/1061.md".to_string()], "tasks/pmt2/mr/1061.md");
+        let outcome = world.sync(
+            &["tasks/pmt2/mr/1061.md".to_string()],
+            "tasks/pmt2/mr/1061.md",
+        );
         assert!(
             !outcome.stashed.contains(&"%434".to_string()),
             "the live agent pane was stashed for a stale pane: window={:?} stashed={:?}",
@@ -1071,7 +1240,10 @@ mod tests {
             outcome.window
         );
         assert!(
-            !outcome.active.as_deref().is_some_and(|pane| world.stale(pane)),
+            !outcome
+                .active
+                .as_deref()
+                .is_some_and(|pane| world.stale(pane)),
             "a stale-supervisor pane must not be the active pane: {:?}",
             outcome.active
         );
@@ -1097,7 +1269,10 @@ mod tests {
         // No live turn anywhere: the GH #121 focus exception is unchanged.
         let mut world = Gh124World::issue_124();
         world.live_turn.clear();
-        let outcome = world.sync(&["tasks/pmt2/mr/1061.md".to_string()], "tasks/pmt2/mr/1061.md");
+        let outcome = world.sync(
+            &["tasks/pmt2/mr/1061.md".to_string()],
+            "tasks/pmt2/mr/1061.md",
+        );
         assert_eq!(outcome.window, vec!["%33".to_string()]);
         // The live turn runs in a pane that is itself a realised column.
         let mut world = Gh124World::issue_124();
@@ -1113,7 +1288,10 @@ mod tests {
         let mut world = Gh124World::issue_124();
         world.window = vec!["%434", "%33"];
         world.live_turn = vec!["%33"];
-        let outcome = world.sync(&["tasks/pmt2/mr/1061.md".to_string()], "tasks/pmt2/mr/1061.md");
+        let outcome = world.sync(
+            &["tasks/pmt2/mr/1061.md".to_string()],
+            "tasks/pmt2/mr/1061.md",
+        );
         assert_eq!(outcome.window, vec!["%33".to_string()]);
     }
 
@@ -1125,7 +1303,10 @@ mod tests {
             "tasks/laptop/laptop.md",
         );
         assert_eq!(outcome.live_turn_queried, 0);
-        let outcome = world.sync(&["tasks/pmt2/mr/1061.md".to_string()], "tasks/pmt2/mr/1061.md");
+        let outcome = world.sync(
+            &["tasks/pmt2/mr/1061.md".to_string()],
+            "tasks/pmt2/mr/1061.md",
+        );
         assert_eq!(outcome.live_turn_queried, 1);
     }
 
@@ -1166,7 +1347,9 @@ mod tests {
                     freshness.log_token()
                 ),
                 ColumnAdmission::AdmitStaleFocused
-                | ColumnAdmission::ExcludeStaleFocusedLiveTurn => unreachable!(),
+                | ColumnAdmission::ExcludeStaleFocusedLiveTurn
+                | ColumnAdmission::ExcludeStaleFocusedRecycleOverdue
+                | ColumnAdmission::ExcludeStaleFocusedWouldWiden => unreachable!(),
             }
         }
         assert_eq!(excluded, vec![PathBuf::from("tasks/pmt2/mr/1061.md")]);
@@ -1217,13 +1400,336 @@ mod tests {
         assert_eq!(col_args_without(&col_args, &[]), col_args);
     }
 
+    // ---------------------------------------------------------------------
+    // GH #136: the bounded focus exception.
+    // ---------------------------------------------------------------------
+
+    /// Exhaustive transition table: every combination of the facts the
+    /// bounded exception decides on, checked against each invariant.
     #[test]
-    fn prior_request_token_names_an_unconsumed_request() {
-        assert_eq!(prior_recycle_request_token(None, 100), "none");
+    fn gh136_stale_focus_admission_transition_table_is_exhaustive() {
+        let mut cases = 0usize;
+        for in_stash in [false, true] {
+            for recycle_overdue in [false, true] {
+                for displaces_live_turn in [false, true] {
+                    for realised_columns in 1..=5usize {
+                        for window_panes in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
+                            cases += 1;
+                            let facts = StaleFocusFacts {
+                                in_stash,
+                                recycle_overdue,
+                                realised_columns,
+                                window_panes,
+                                displaces_live_turn,
+                            };
+                            let admission = stale_focus_admission(facts);
+                            let admitted = admission == ColumnAdmission::AdmitStaleFocused;
+                            // The function only ever answers within the
+                            // focused-stale family.
+                            assert!(
+                                matches!(
+                                    admission,
+                                    ColumnAdmission::AdmitStaleFocused
+                                        | ColumnAdmission::ExcludeStaleFocusedLiveTurn
+                                        | ColumnAdmission::ExcludeStaleFocusedRecycleOverdue
+                                        | ColumnAdmission::ExcludeStaleFocusedWouldWiden
+                                ),
+                                "{facts:?}"
+                            );
+                            // I1: a live turn is never displaced.
+                            assert!(!(admitted && displaces_live_turn), "{facts:?}");
+                            // I2: never promoted out of the stash while overdue.
+                            assert!(!(admitted && in_stash && recycle_overdue), "{facts:?}");
+                            // I3: a stash promotion never widens the window.
+                            assert!(
+                                !(admitted
+                                    && in_stash
+                                    && realised_columns > window_panes.unwrap_or(0).max(1)),
+                                "{facts:?}"
+                            );
+                            // I4: a visible pane is never moved by this rule
+                            // (no flap): only the live-turn guard can exclude it.
+                            if !in_stash && !displaces_live_turn {
+                                assert!(admitted, "{facts:?}");
+                            }
+                            // Liveness of the exception: a stash pane with a
+                            // pending request that replaces a column is admitted.
+                            if in_stash
+                                && !recycle_overdue
+                                && !displaces_live_turn
+                                && realised_columns <= window_panes.unwrap_or(0).max(1)
+                            {
+                                assert!(admitted, "{facts:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 2 * 2 * 2 * 5 * 6);
+    }
+
+    /// GH #136 SimWorld: tmux panes, the gate plan, and tmux-router realising
+    /// the gated columns, as in [`Gh124World`], plus the recycle request
+    /// lifecycle driven by a clock and a consumer.
+    struct Gh136World {
+        /// pane -> document
+        panes: Vec<(&'static str, &'static str)>,
+        /// Panes in `0:agent-doc`, in order.
+        window: Vec<&'static str>,
+        /// The supervisor of this pane runs replaced bytes.
+        stale_pane: &'static str,
+        stale: bool,
+        /// Seconds since the FIRST unconsumed recycle request (None: none).
+        request_age: Option<u64>,
+        stale_pane_turn_active: bool,
+        window_count_queries: std::cell::Cell<usize>,
+    }
+
+    impl Gh136World {
+        /// The measured shape: `0:agent-doc` holds 2 panes, `%41` (1099.md)
+        /// is a stale supervisor in `stash`.
+        fn issue_136() -> Self {
+            Self {
+                panes: vec![
+                    ("%434", "tasks/agent-doc/agent-doc.ad.md"),
+                    ("%430", "tasks/pmt2/tickets/2222.md"),
+                    ("%41", "tasks/pmt2/mr/1099.md"),
+                ],
+                window: vec!["%434", "%430"],
+                stale_pane: "%41",
+                stale: true,
+                request_age: Some(31_622),
+                stale_pane_turn_active: false,
+                window_count_queries: std::cell::Cell::new(0),
+            }
+        }
+
+        fn pane_for(&self, doc: &str) -> &'static str {
+            self.panes.iter().find(|(_, d)| *d == doc).unwrap().0
+        }
+
+        fn recycle_state(&self) -> StaleRecycleRequestState {
+            let outstanding = self.request_age.map(|age| {
+                agent_doc_supervisor::recycle_request::OutstandingRecycleRequest {
+                    latest: agent_doc_supervisor::recycle_request::recycle_request(
+                        "stale_supervisor_turn_stage",
+                        1_000_000,
+                    ),
+                    first_requested_secs: 1_000_000 - age,
+                }
+            });
+            agent_doc_supervisor::recycle_request::classify_stale_recycle_request(
+                outstanding.as_ref(),
+                1_000_000,
+                self.stale_pane_turn_active,
+                STALE_RECYCLE_CONSUME_BOUND_SECS,
+            )
+        }
+
+        /// One sync pass; returns the realised window (or the preserved one
+        /// when every column was gated out, as sync.rs does).
+        fn sync(&self, col_args: &[String], focus: &str) -> Vec<String> {
+            let facts: Vec<ColumnGateFacts> = col_args
+                .iter()
+                .flat_map(|arg| arg.split(','))
+                .map(|doc| {
+                    let pane = self.pane_for(doc);
+                    let stale = self.stale && pane == self.stale_pane;
+                    ColumnGateFacts {
+                        file: PathBuf::from(doc),
+                        pane: pane.to_string(),
+                        freshness: classify_pane_supervisor_freshness(
+                            Some(20488),
+                            Some(stale),
+                            stale,
+                        ),
+                        own_pane: true,
+                        is_focus: doc == focus,
+                        in_stash: !self.window.contains(&pane),
+                        recycle: if stale {
+                            self.recycle_state()
+                        } else {
+                            StaleRecycleRequestState::NotRequested
+                        },
+                    }
+                })
+                .collect();
+            let window_panes = || {
+                self.window_count_queries
+                    .set(self.window_count_queries.get() + 1);
+                Some(self.window.len())
+            };
+            let plan = plan_column_admissions(&facts, &window_panes, &Vec::new);
+            let excluded: Vec<PathBuf> = facts
+                .iter()
+                .zip(&plan)
+                .filter(|(_, (admission, _))| admission.excludes())
+                .map(|(fact, _)| fact.file.clone())
+                .collect();
+            let gated = col_args_without(col_args, &excluded);
+            if gated.is_empty() {
+                return self.window.iter().map(|p| p.to_string()).collect();
+            }
+            gated
+                .iter()
+                .flat_map(|arg| arg.split(','))
+                .map(|doc| self.pane_for(doc).to_string())
+                .collect()
+        }
+    }
+
+    fn cols(docs: &[&str]) -> Vec<String> {
+        docs.iter().map(|doc| doc.to_string()).collect()
+    }
+
+    #[test]
+    fn gh136_stale_stash_pane_never_widens_the_window() {
+        // The editor asks for three columns with 1099.md focused; the window
+        // holds two panes. Promoting `%41` was the `columns = observed + 1` flap.
+        let mut world = Gh136World::issue_136();
+        world.request_age = Some(0); // even a fresh request may not widen
+        let three = cols(&[
+            "tasks/pmt2/mr/1099.md",
+            "tasks/agent-doc/agent-doc.ad.md",
+            "tasks/pmt2/tickets/2222.md",
+        ]);
+        let window = world.sync(&three, "tasks/pmt2/mr/1099.md");
+        assert!(!window.contains(&"%41".to_string()), "{window:?}");
+        assert!(window.len() <= world.window.len(), "{window:?}");
+        // Replacing a column is still allowed while the request is pending.
+        let two = cols(&["tasks/pmt2/mr/1099.md", "tasks/agent-doc/agent-doc.ad.md"]);
         assert_eq!(
-            prior_recycle_request_token(Some(("stale_supervisor_turn_stage", 40)), 8_320),
-            "unconsumed:reason=stale_supervisor_turn_stage:age_secs=8280"
+            world.sync(&two, "tasks/pmt2/mr/1099.md"),
+            vec!["%41".to_string(), "%434".to_string()]
         );
+        assert_eq!(
+            world.window_count_queries.get(),
+            2,
+            "the window is counted at most once per pass"
+        );
+    }
+
+    #[test]
+    fn gh136_overdue_recycle_stops_the_stash_promotion() {
+        // The recorded admission: `%41` stale, request unconsumed for 31,622s
+        // while idle. It may no longer be promoted on the strength of it.
+        let world = Gh136World::issue_136();
+        assert!(world.recycle_state().is_overdue());
+        let two = cols(&["tasks/pmt2/mr/1099.md", "tasks/agent-doc/agent-doc.ad.md"]);
+        let window = world.sync(&two, "tasks/pmt2/mr/1099.md");
+        assert_eq!(window, vec!["%434".to_string()]);
+        // A turn in the stale pane defers its recycle: not overdue, admitted.
+        let mut busy = Gh136World::issue_136();
+        busy.stale_pane_turn_active = true;
+        assert!(!busy.recycle_state().is_overdue());
+        assert_eq!(
+            busy.sync(&two, "tasks/pmt2/mr/1099.md"),
+            vec!["%41".to_string(), "%434".to_string()]
+        );
+        // Already visible: never moved by the bound (no flap).
+        let mut visible = Gh136World::issue_136();
+        visible.window = vec!["%434", "%41"];
+        assert_eq!(
+            visible.sync(&two, "tasks/pmt2/mr/1099.md"),
+            vec!["%41".to_string(), "%434".to_string()]
+        );
+    }
+
+    /// GH #136 time evolution: drive the request lifecycle with a clock, an
+    /// operator switching tabs between 1099.md and another document every 50s
+    /// (so `%41` keeps returning to the stash), and a consumer that either
+    /// consumes at a given tick or never does (an old binary stuck deferring).
+    /// At every tick:
+    ///
+    /// * `%41` is promoted out of the stash while stale only when its FIRST
+    ///   unconsumed request is within the bound — refreshes do not extend it;
+    /// * no pass realises more columns than the editor asked for or the window
+    ///   held (no widening from the stash);
+    /// * once a promotion is refused as overdue, no later promotion happens
+    ///   while the supervisor is still stale (no flap);
+    /// * after consumption the pane is promoted as a plain fresh column.
+    #[test]
+    fn gh136_request_lifecycle_has_no_flap_and_a_bounded_admission_window() {
+        let with_1099 = cols(&["tasks/pmt2/mr/1099.md", "tasks/agent-doc/agent-doc.ad.md"]);
+        let without = cols(&[
+            "tasks/pmt2/tickets/2222.md",
+            "tasks/agent-doc/agent-doc.ad.md",
+        ]);
+        let bound = STALE_RECYCLE_CONSUME_BOUND_SECS;
+        for consume_at in [
+            Some(30u64),
+            Some(120),
+            Some(121),
+            Some(160),
+            Some(5_000),
+            None,
+        ] {
+            let mut world = Gh136World::issue_136();
+            world.request_age = None;
+            let mut first_request: Option<u64> = None;
+            let mut refused_overdue_at: Option<u64> = None;
+            let mut fresh_promotions = 0usize;
+            for now in 0..=3_600u64 {
+                let focus_1099 = (now / 50) % 2 == 0;
+                let (col_args, focus) = if focus_1099 {
+                    (&with_1099, "tasks/pmt2/mr/1099.md")
+                } else {
+                    (&without, "tasks/pmt2/tickets/2222.md")
+                };
+                if consume_at == Some(now) {
+                    world.stale = false;
+                    first_request = None;
+                }
+                if world.stale && focus_1099 {
+                    // The gate requests on the first stale pass; later passes
+                    // refresh it but never move the first-unconsumed time.
+                    first_request.get_or_insert(now);
+                }
+                world.request_age = first_request.map(|first| now - first);
+                let was_stashed = !world.window.contains(&"%41");
+                let window = world.sync(col_args, focus);
+                assert!(
+                    window.len() <= col_args.len().max(world.window.len()),
+                    "widened at {now}: {window:?}"
+                );
+                let promoted = was_stashed && window.contains(&"%41".to_string());
+                if world.stale && promoted {
+                    let age = world.request_age.unwrap();
+                    assert!(age <= bound, "stale stash pane promoted at age {age}");
+                    assert!(refused_overdue_at.is_none(), "flap at {now}");
+                }
+                if world.stale && focus_1099 && was_stashed && !promoted {
+                    refused_overdue_at.get_or_insert(now);
+                }
+                if !world.stale && promoted {
+                    fresh_promotions += 1;
+                }
+                world.window = window
+                    .iter()
+                    .map(|pane| match pane.as_str() {
+                        "%41" => "%41",
+                        "%434" => "%434",
+                        _ => "%430",
+                    })
+                    .collect();
+            }
+            match consume_at {
+                // Consumed before the first refocus that would read it overdue.
+                Some(at) if at <= 100 + 1 => {
+                    assert!(refused_overdue_at.is_none(), "consume_at={at}")
+                }
+                // The first refocus after the bound (t=100 is inside it; the
+                // next is t=200) is refused and nothing promotes it again.
+                Some(at) if at <= 200 => {
+                    assert!(refused_overdue_at.is_none(), "consume_at={at}")
+                }
+                _ => assert_eq!(refused_overdue_at, Some(200), "consume_at={consume_at:?}"),
+            }
+            if consume_at.is_some_and(|at| at < 3_600) {
+                assert!(fresh_promotions > 0, "consume_at={consume_at:?}");
+            }
+        }
     }
 
     #[test]

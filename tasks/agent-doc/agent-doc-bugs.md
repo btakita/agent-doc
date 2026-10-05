@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -412,6 +411,30 @@ Each of the three shapes gets a regression test that fails without the fix. This
 > **Queue prompt:** release + publish
 
 **Deferred:** I claimed this as `subagent:release-coordinator`. v0.35.455 is already out: the GitHub Release has 8 assets and PyPI has 0.35.455. This head stays queued for **v0.35.456**, which I'll cut after merging `gh131reopen`, running a clean `make check` and one `make install`. GH #131 gets closed at that release.
+
+### Re: GH #131 fixed, v0.35.456 released — opus-5-5 · 2026-10-05T00:12-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/131
+
+**Fixed and closed.** Fix commit `3443fe555` is merged into release `504ed3089`. GH #131 is closed with a comment. The three recovery loops now each finish, and all derive from the shared `write_ownership` predicate:
+- **Pending-only writes are absorbed.** A pending-only `--done/--pending-gate … --pending-only` write is no longer refused when its response is already committed. It becomes a pending-only commit continuation, and `session-check` commits it once delivery converges. A pending-only `--done` stopped by this specific refusal used to have nothing that would ever commit it.
+- **`session-check` stops naming refused repairs.** It no longer suggests a repair the write path will refuse (`tracked_work_repair_admission`). When the editor connection rejects writes or the editor isn't serving its replica, it prints the editor recovery first.
+- **The `admin reload-lib` advice is consistent.** A new `ReplicaUnserved` verdict renders one shared recovery sentence for both the integrity gate and the retained-write message. That message no longer forbids reload-lib when `session-check` reports the editor isn't serving its replica.
+- **Preflight admits the turn.** It no longer refuses because a pending-only write's base already contains a committed response. The write that introduced the response body still blocks, as before.
+
+Each case has a regression test that fails with its fix reverted.
+
+One known gap: "editor isn't serving its replica" is read from an attachment flag that can stay set after the editor closes. In that case the advice says reload-lib, which won't help. The integrity gate has the same weakness, so the two still give the same advice.
+
+> **Queue prompt:** release + publish
+
+**Done: v0.35.456.**
+- **Release commit and tag:** `504ed3089` is pushed to `main`, and tag `v0.35.456` is pushed. The GitHub Release and PyPI runs were still in progress when this was committed.
+- **Verification:** `make check` ran on the bumped release tree before the commit. 11,019 tests passed with no retries, the editor-parity check passed, and the run exited 0.
+- **Install:** done from the clean release tree; `agent-doc --version` reports 0.35.456. The reload reached the 1 open editor, and the JetBrains plugin stayed at 0.2.494.
+- **Superproject:** the submodule bump is pushed. The other session's uncommitted `agent-doc-start-runtime-io/src/lib.rs` edit is still unchanged in the main checkout.
+
+**A mistake in my 0.35.455 release:** it was missing its row in `editors/release-parity.tsv`. My `make check` ran before the version bump, so the editor-parity check never covered it, and CI on `main` went red. I added the row as `13b9f9726`. For 0.35.456 I bumped the version and added both rows *before* running `make check`, so this run did cover them.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -421,8 +444,6 @@ Each of the three shapes gets a regression test that fails without the fix. This
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/131
-- 🚧 release + publish
 <!-- /agent:queue -->
 
 

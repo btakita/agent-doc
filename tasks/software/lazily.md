@@ -16,7 +16,6 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: go
 ---
 
 ## Status
@@ -685,19 +684,42 @@ Next is the queued `release + publish`.
 **Still yours:** `rm -rf ~/.cache/claude-qops`. It's the Rust build cache, about 74 GB, and the delete hook blocks me from removing it.
 
 The exchange is past 610 lines.
+
+### Re: #lzmacroslicense — gpt-5 · 2026-10-05T03:51-04:00
+
+> **Queue prompt:**
+>
+> do [#lzmacroslicense]
+
+Done. `lazily-macros 0.23.1` is published on crates.io with the corrected Apache-2.0 license metadata.
+
+- Bumped `macros/Cargo.toml`, the root crate's exact `lazily-macros` dependency pin, and `Cargo.lock` from 0.23.0 to 0.23.1.
+- Regenerated the reviewed dependency inventory. Its only semantic dependency-row change is the workspace macro version; the license remains Apache-2.0, with the same workspace provenance, repository URL, and NOTICE coverage.
+- `cargo package -p lazily-macros --locked --allow-dirty` packaged and verified the release tarball successfully.
+- The complete `make check` suite passed: all feature matrices and doctests, 21 Loom tests, durable Postgres and JetStream integration, both Lean models, benchmark budgets, 177/177 opened-fixture scenarios, and the 56-target CI reachability oracle all completed with zero failures.
+- Committed the four scoped release files as `87da9e7` (`chore: release lazily-macros 0.23.1`) and pushed `main`; local HEAD and `origin/main` both resolve to `87da9e7494f6cec0cc5deb981361519f5af9eedf`. Unrelated pre-existing checkout changes were not staged.
+- Published with `cargo publish -p lazily-macros --locked` using the Passage token at point of use; no credential was written or printed.
+- Verified from outside the workspace through Cargo's crates.io registry client, the official crates.io API, and the sparse index: version 0.23.1, license `Apache-2.0`, `yanked=false`, published at 2026-10-05T07:49:35Z.
+- The new GitHub CI run `37279876654` is in progress. The previous main CI run was green; per the closeout policy, queued/in-progress CI is recorded rather than waited on when full local verification is green.
+
+The plan marked this single-repository release task `parallelizable: false`, so no subagent was dispatched despite the queue's conditional fan-out preset.
+
+The exchange remains above the session-accretion warning threshold; the active queue was not stalled for compaction.
+
+Changed paths: `Cargo.toml`, `Cargo.lock`, `macros/Cargo.toml`, and `docs/dependency-license-inventory.json` in `lazily-rs`.
+
+Confidence: high. Escalation: none. No additional backlog follow-up is needed because publication and registry verification are complete; CI is already running independently.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzmacroslicense]
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzmacroslicense] [lazily-rs] lazily-macros 0.23.0 on crates.io still declares MIT: it was published before the Apache-2.0 relicense (c3026be) and its version was never bumped. Bump lazily-macros to 0.23.1 (Cargo.lock refresh), make check, cargo publish -p lazily-macros --locked (passage token), verify crates.io shows Apache-2.0.
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

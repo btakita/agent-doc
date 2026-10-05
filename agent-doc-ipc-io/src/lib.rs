@@ -295,12 +295,14 @@ pub fn prune_stale_editor_sockets(project_root: &Path) -> Result<usize> {
         }
 
         let existed = path.exists();
-        let live = if name.starts_with(&format!("{SOCKET_FILENAME_PREFIX}-")) {
-            is_listener_active_for_pid(project_root, pid)
+        // `#netadv5` R3: only a positively-absent owner is pruned; a slow or
+        // refused-but-owner-alive endpoint is retained.
+        let prune = if name.starts_with(&format!("{SOCKET_FILENAME_PREFIX}-")) {
+            probe_listener_for_pid(project_root, pid) == ListenerProbe::Absent
         } else {
-            false
+            !owner_pid_alive(pid)
         };
-        if !live && existed {
+        if prune && existed {
             if path.exists() {
                 std::fs::remove_file(&path)
                     .with_context(|| format!("remove stale editor socket {}", path.display()))?;
@@ -311,20 +313,129 @@ pub fn prune_stale_editor_sockets(project_root: &Path) -> Result<usize> {
     Ok(removed)
 }
 
+/// Whether the editor listener for `pid` is answering connects right now.
+///
+/// `true` only on a completed connect. A slow or refused connect returns
+/// `false` (not proven live, so callers retain their intent and retry), but the
+/// socket file is unlinked **only** on positive evidence that its owner is gone
+/// (`#netadv5` R3): see [`probe_listener_for_pid`].
 pub fn is_listener_active_for_pid(project_root: &Path, pid: u64) -> bool {
+    matches!(probe_listener_for_pid(project_root, pid), ListenerProbe::Live)
+}
+
+/// What one connect attempt learned about the editor listener for a pid.
+///
+/// `#netadv5` R3: a connect timeout is **not** a verdict. On a Coder workspace
+/// (JetBrains Remote Dev + Zscaler) a live editor's accept loop can stall past
+/// the 3s watchdog; the old probe unlinked the socket on *any* connect error,
+/// and the listener then reads an unlinked name as "dead for good". Only a
+/// connect that the kernel refused (or a missing path) **and** an owner pid that
+/// no longer exists is evidence enough to delete the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListenerProbe {
+    /// The connect completed.
+    Live,
+    /// No socket file, or the connect was refused and the owner pid is gone.
+    /// The stale file (if any) has been unlinked.
+    Absent,
+    /// The connect timed out, or was refused while the owner pid is still
+    /// alive (e.g. mid listener restart). Unknown: retry later, never unlink.
+    Unknown,
+}
+
+/// How a single connect attempt failed, reduced to the evidence it carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectFailure {
+    /// The kernel answered: nothing is bound (`ECONNREFUSED` / `ENOENT`).
+    Refused,
+    /// No answer within the watchdog, or an error that proves nothing.
+    Inconclusive,
+}
+
+/// Marker error for a connect watchdog that fired; distinguishes "slow" from
+/// "refused" without string matching.
+#[derive(Debug)]
+struct ConnectTimedOut(String);
+
+impl std::fmt::Display for ConnectTimedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ConnectTimedOut {}
+
+fn classify_connect_failure(error: &anyhow::Error) -> ConnectFailure {
+    if error.chain().any(|cause| cause.is::<ConnectTimedOut>()) {
+        return ConnectFailure::Inconclusive;
+    }
+    let refused = error.chain().any(|cause| {
+        cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+        })
+    });
+    if refused {
+        ConnectFailure::Refused
+    } else {
+        ConnectFailure::Inconclusive
+    }
+}
+
+/// Whether `pid` names a running process. Without a way to tell (no `/proc`
+/// and no `kill`), answer `true`: an unknown owner must never authorize unlink.
+fn owner_pid_alive(pid: u64) -> bool {
+    if Path::new("/proc/self").exists() {
+        return Path::new(&format!("/proc/{pid}")).exists();
+    }
+    match std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) => status.success(),
+        Err(_) => true,
+    }
+}
+
+/// Pure decision for [`probe_listener_for_pid`]: the probe verdict and whether
+/// the socket file may be unlinked.
+fn listener_probe_verdict(
+    connect: std::result::Result<(), ConnectFailure>,
+    owner_alive: impl FnOnce() -> bool,
+) -> (ListenerProbe, bool) {
+    match connect {
+        Ok(()) => (ListenerProbe::Live, false),
+        Err(ConnectFailure::Inconclusive) => (ListenerProbe::Unknown, false),
+        Err(ConnectFailure::Refused) if owner_alive() => (ListenerProbe::Unknown, false),
+        Err(ConnectFailure::Refused) => (ListenerProbe::Absent, true),
+    }
+}
+
+/// Probe the editor listener for `pid`, unlinking its socket file only on
+/// positive evidence that the owner is gone (`#netadv5` R3).
+pub fn probe_listener_for_pid(project_root: &Path, pid: u64) -> ListenerProbe {
+    probe_listener_for_pid_with(project_root, pid, try_connect_for_pid, owner_pid_alive)
+}
+
+fn probe_listener_for_pid_with<S>(
+    project_root: &Path,
+    pid: u64,
+    connect: impl FnOnce(&Path, u64) -> Result<S>,
+    owner_alive: impl FnOnce(u64) -> bool,
+) -> ListenerProbe {
     let sock = socket_path_for_pid(project_root, pid);
     if !sock.exists() {
-        return false;
+        return ListenerProbe::Absent;
     }
-    // Try connecting — if it succeeds, the listener is active
-    match try_connect_for_pid(project_root, pid) {
-        Ok(_) => true,
-        Err(_) => {
-            // Stale socket file — clean it up
-            let _ = std::fs::remove_file(&sock);
-            false
-        }
+    let outcome = connect(project_root, pid)
+        .map(|_| ())
+        .map_err(|error| classify_connect_failure(&error));
+    let (verdict, unlink) = listener_probe_verdict(outcome, || owner_alive(pid));
+    if unlink {
+        let _ = std::fs::remove_file(&sock);
     }
+    verdict
 }
 
 /// Connect to the socket. Returns a stream for sending messages.
@@ -453,11 +564,13 @@ where
     });
     match rx.recv_timeout(connect_timeout) {
         Ok(result) => result,
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(anyhow::anyhow!(
-            "IPC connect timeout ({}ms) for {}",
-            connect_timeout.as_millis(),
-            path.display()
-        )),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(anyhow::Error::new(ConnectTimedOut(format!(
+                "IPC connect timeout ({}ms) for {}",
+                connect_timeout.as_millis(),
+                path.display()
+            ))))
+        }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
             Err(anyhow::anyhow!("IPC connect thread disconnected"))
         }
@@ -1787,6 +1900,88 @@ mod tests {
 
         assert_eq!(prune_stale_editor_sockets(dir.path()).unwrap(), 1);
         assert!(!stale.exists());
+    }
+
+    /// `#netadv5` R3: a slow peer whose connect exceeds the 3s watchdog must
+    /// not have its socket unlinked, and a later connect that completes must
+    /// read it live again (eventual progress).
+    #[test]
+    fn slow_listener_connect_timeout_never_unlinks_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let live_pid = u64::from(std::process::id()) + 1_000_000;
+        let sock = socket_path_for_pid(root, live_pid);
+        std::fs::write(&sock, b"").unwrap();
+
+        // The peer is slow: the connect watchdog fires (simulated without
+        // spending the real 3s). The owner pid is alive.
+        let slow = |_: &Path, _: u64| -> Result<()> {
+            Err(anyhow::Error::new(ConnectTimedOut(
+                "IPC connect timeout (3000ms)".to_string(),
+            )))
+        };
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, slow, |_| true),
+            ListenerProbe::Unknown
+        );
+        assert!(sock.exists(), "a connect timeout must never unlink");
+
+        // Even with an owner we cannot see, a timeout is not evidence.
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, slow, |_| false),
+            ListenerProbe::Unknown
+        );
+        assert!(sock.exists(), "a timeout is not evidence even for a dead pid");
+
+        // Refused while the owner is alive (listener restarting): retained.
+        let refused = |_: &Path, _: u64| -> Result<()> {
+            Err(anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+                .context("failed to connect to IPC socket"))
+        };
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, refused, |_| true),
+            ListenerProbe::Unknown
+        );
+        assert!(sock.exists(), "refused with a live owner must not unlink");
+
+        // Eventual progress: the slow peer answers on a later probe.
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, |_: &Path, _: u64| Ok(()), |_| true),
+            ListenerProbe::Live
+        );
+
+        // Positive evidence: refused AND the owner pid is gone.
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, refused, |_| false),
+            ListenerProbe::Absent
+        );
+        assert!(!sock.exists(), "refused + dead owner is the only unlink");
+    }
+
+    #[test]
+    fn connect_failure_classification_separates_slow_from_refused() {
+        let timed_out = anyhow::Error::new(ConnectTimedOut("t".into()));
+        assert_eq!(classify_connect_failure(&timed_out), ConnectFailure::Inconclusive);
+        let refused = anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+            .context("ctx");
+        assert_eq!(classify_connect_failure(&refused), ConnectFailure::Refused);
+        let missing = anyhow::Error::new(std::io::Error::from(ErrorKind::NotFound));
+        assert_eq!(classify_connect_failure(&missing), ConnectFailure::Refused);
+        let other = anyhow::Error::new(std::io::Error::from(ErrorKind::PermissionDenied));
+        assert_eq!(classify_connect_failure(&other), ConnectFailure::Inconclusive);
+    }
+
+    /// The real watchdog error is typed, so it classifies as inconclusive.
+    #[test]
+    fn real_connect_watchdog_error_is_typed_timeout() {
+        let path = Path::new("/nonexistent/slow.sock");
+        let err = run_connect_with_timeout(path, Duration::from_millis(20), || -> Result<()> {
+            std::thread::sleep(Duration::from_millis(500));
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(classify_connect_failure(&err), ConnectFailure::Inconclusive);
     }
 
     /// Wait until `path` accepts a connection, or give up.

@@ -287,6 +287,30 @@ plus a weakly fair resend it proves `Completes`. Each wedge is must-violate:
 
 `scripts/run_tla.sh` copies library modules (`libraries=(NetChannel)`) next to
 the models that instance them.
+## Hot-path models over `NetChannel` (`#netadv3`)
+
+Each module below re-checks a hot-path protocol with every cross-process step
+split into a send and a receive over `NetChannel`. Safety is checked under
+`[][Next]_vars` alone (full adversary, no fairness). Liveness is checked under
+`FairLossy` plus weak fairness on the protocol's own (re)send actions. Where
+strong fairness per message is too slow over two versions or a reconnect, the
+liveness run uses smaller bounds and a separate `*Safety` config (listed in
+`must_pass` in `scripts/run_tla.sh`) checks the invariants with the larger ones.
+The atomic modules stay: they prove each protocol's decision table, and the Net
+modules prove the transport around it.
+
+| Module | Hops | Wedges (each MUST violate) |
+|---|---|---|
+| `VisibleDeliveryReceiptNet` | wake, projection ACK, recovery request/refusal, native save/receipt | `WakeOneShot` (F9), `RecoveryLatch` (F10), `SaveOneShot` (F13/F12), `StaleAck` (receipts keyed by content), `TimeoutRefusal` (R2, fix in `#netadv5`) |
+| `EditorReplicaStrandNet` | re-registration request/receipt | `Latch` (ERS-1: a budget whose receipts were all lost latches self-heal forever), `GiveUpRefusal` (R2/R3 class, `#netadv5`) |
+| `RecycleSettleDispatchNet` | settle-wait RPC, one request per connection | `Unreachable` (RSD-1: two lost round trips refused a pending recycle), `Ttl` (R9: TTL read as proof, `#netadv5`) |
+| `AgentDocCloseoutNet` | closeout owner claim and heartbeat | `OneShotClaim` (F4), `HeartbeatBreak` (F5a), `IgnoreLoss` (F5b), `Fence` (ADC-fence, not fixed: needs a commit fenced by owner id; `FencedTarget` is the passing target) |
+| `PassiveTmuxSyncNet` | editor focus observation and its reply | `AdvanceFirst` (F14/F15: tracking advances before the swap), `Reorder` (sequence fence) |
+| `LifecycleSequence` | lifecycle, heartbeat and queue-control level updates | `Reorder` (SIM-F1/SIM-F2: generation-only fence, last arrival wins) |
+
+Each module also has a reach config that must be violated, so the happy path
+stays reachable over the lossy channel.
+
 ## Network channel assumptions
 
 Audit `#netadv1`, 2026-10-05. The deployment design point is a Coder remote

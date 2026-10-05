@@ -22,6 +22,18 @@ projections, and tmux transcript inference.
   path validates commands and records durable intent quickly; slow work runs in
   document actors, supervisor adapters, or background workers.
 
+### Bootstrap publication is adoptable before status hydration (GH #146)
+
+The project socket is the controller launch publication edge. A launch-claim
+waiter first adopts a stable, identity-compatible controller status when one is
+available. If the claim wait expires after a competing launcher has published
+the socket but before that controller can return a complete status receipt, the
+waiter adopts the connected socket and lets the caller's real RPC observe the
+domain result. It must not launch a duplicate controller or replace the real
+document-level refusal with `controller launch already in progress` / address
+collision noise. An active status that is explicitly non-adoptable remains
+fail-closed; socket-only adoption applies only while status is not yet ready.
+
 ## In-process actors
 
 - The dispatch actor is the only admission point for mutating commands. It

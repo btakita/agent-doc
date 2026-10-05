@@ -49,6 +49,61 @@ pub enum AuthorityRecoveryDecision {
     FailClosed,
 }
 
+/// Why the IPC build-mismatch recovery definitively refused another editor
+/// native-library reload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildMismatchRefusal {
+    SenderExecutableReplaced,
+    ReloadAlreadyRequested,
+}
+
+/// Facts used to choose terminal guidance after attached-editor authority
+/// recovery is exhausted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttachedEditorRecoveryFacts {
+    pub build_mismatch_refusal: Option<BuildMismatchRefusal>,
+    pub plugin_bytes_superseded: bool,
+    pub endpoints_found: bool,
+    pub all_endpoints_unreachable: bool,
+}
+
+/// The only terminal actions an attached-editor refusal may prescribe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachedEditorRecoveryDecision {
+    /// The command sender is the stale side. Replacing editor bytes cannot
+    /// resolve the mismatch; wait for the route-owned supervisor replacement.
+    WaitForSenderRecycle,
+    /// A reload already landed against this listener build and the mismatch
+    /// survived it. Wait for a new endpoint generation instead of repeating it.
+    WaitForEndpointGeneration,
+    RestartEditor,
+    ReregisterEditor,
+    ReloadEditor,
+}
+
+/// Decide terminal recovery without consulting presentation strings.
+pub const fn decide_attached_editor_recovery(
+    facts: AttachedEditorRecoveryFacts,
+) -> AttachedEditorRecoveryDecision {
+    if let Some(refusal) = facts.build_mismatch_refusal {
+        return match refusal {
+            BuildMismatchRefusal::SenderExecutableReplaced => {
+                AttachedEditorRecoveryDecision::WaitForSenderRecycle
+            }
+            BuildMismatchRefusal::ReloadAlreadyRequested => {
+                AttachedEditorRecoveryDecision::WaitForEndpointGeneration
+            }
+        };
+    }
+    if facts.plugin_bytes_superseded || facts.all_endpoints_unreachable {
+        AttachedEditorRecoveryDecision::RestartEditor
+    } else if !facts.endpoints_found {
+        AttachedEditorRecoveryDecision::ReregisterEditor
+    } else {
+        AttachedEditorRecoveryDecision::ReloadEditor
+    }
+}
+
 /// Decide the next read-authority transition.
 ///
 /// The load-bearing invariant is that disk is reachable only after the editor is
@@ -102,6 +157,71 @@ pub const fn decide_authority_recovery(facts: AuthorityRecoveryFacts) -> Authori
 mod tests {
     use super::*;
 
+    #[test]
+    fn definitive_build_mismatch_refusals_override_reload_shaped_fallbacks() {
+        let base = AttachedEditorRecoveryFacts {
+            build_mismatch_refusal: None,
+            plugin_bytes_superseded: false,
+            endpoints_found: true,
+            all_endpoints_unreachable: false,
+        };
+
+        assert_eq!(
+            decide_attached_editor_recovery(AttachedEditorRecoveryFacts {
+                build_mismatch_refusal: Some(BuildMismatchRefusal::SenderExecutableReplaced),
+                ..base
+            }),
+            AttachedEditorRecoveryDecision::WaitForSenderRecycle,
+        );
+        assert_eq!(
+            decide_attached_editor_recovery(AttachedEditorRecoveryFacts {
+                build_mismatch_refusal: Some(BuildMismatchRefusal::ReloadAlreadyRequested),
+                ..base
+            }),
+            AttachedEditorRecoveryDecision::WaitForEndpointGeneration,
+        );
+    }
+
+    #[test]
+    fn attached_editor_terminal_recovery_table_is_exhaustive() {
+        use AttachedEditorRecoveryDecision::{
+            ReloadEditor, ReregisterEditor, RestartEditor, WaitForEndpointGeneration,
+            WaitForSenderRecycle,
+        };
+
+        let cases = [
+            (
+                Some(BuildMismatchRefusal::SenderExecutableReplaced),
+                false,
+                true,
+                false,
+                WaitForSenderRecycle,
+            ),
+            (
+                Some(BuildMismatchRefusal::ReloadAlreadyRequested),
+                false,
+                true,
+                false,
+                WaitForEndpointGeneration,
+            ),
+            (None, true, true, false, RestartEditor),
+            (None, false, true, true, RestartEditor),
+            (None, false, false, false, ReregisterEditor),
+            (None, false, true, false, ReloadEditor),
+        ];
+        for (build_mismatch_refusal, superseded, endpoints_found, unreachable, expected) in cases {
+            assert_eq!(
+                decide_attached_editor_recovery(AttachedEditorRecoveryFacts {
+                    build_mismatch_refusal,
+                    plugin_bytes_superseded: superseded,
+                    endpoints_found,
+                    all_endpoints_unreachable: unreachable,
+                }),
+                expected,
+            );
+        }
+    }
+
     fn decide(
         observation: AuthorityObservation,
         editor_open: bool,
@@ -128,19 +248,21 @@ mod tests {
     fn all_facts() -> impl Iterator<Item = AuthorityRecoveryFacts> {
         OBSERVATIONS.into_iter().flat_map(|observation| {
             [false, true].into_iter().flat_map(move |editor_open| {
-                [false, true].into_iter().flat_map(move |retries_remaining| {
-                    [false, true].into_iter().flat_map(move |rebuild| {
-                        [false, true]
-                            .into_iter()
-                            .map(move |refused| AuthorityRecoveryFacts {
-                                observation,
-                                editor_open,
-                                retries_remaining,
-                                rebuild_after_retry_exhaustion: rebuild,
-                                endpoint_definitively_refused: refused,
-                            })
+                [false, true]
+                    .into_iter()
+                    .flat_map(move |retries_remaining| {
+                        [false, true].into_iter().flat_map(move |rebuild| {
+                            [false, true]
+                                .into_iter()
+                                .map(move |refused| AuthorityRecoveryFacts {
+                                    observation,
+                                    editor_open,
+                                    retries_remaining,
+                                    rebuild_after_retry_exhaustion: rebuild,
+                                    endpoint_definitively_refused: refused,
+                                })
+                        })
                     })
-                })
             })
         })
     }

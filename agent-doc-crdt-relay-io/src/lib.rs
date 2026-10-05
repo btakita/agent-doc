@@ -5058,6 +5058,16 @@ pub struct ReplicaSignalRoute {
     pub editor_pid: u64,
 }
 
+/// A live route whose build-mismatch recovery was definitively refused.
+///
+/// This preserves the typed refusal emitted by the IPC adapter so terminal
+/// guidance does not have to infer it from an ops-log line.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ReplicaSignalBuildMismatchRefusal {
+    pub route: ReplicaSignalRoute,
+    pub refusal: agent_doc_ipc_io::BuildMismatchRecoveryRefusal,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicaSignalOutcome {
     /// Distinct live editor routes discovered from reliable-sync liveness and
@@ -5069,6 +5079,7 @@ pub struct ReplicaSignalOutcome {
     /// Routes rejected specifically because sender and listener builds differ
     /// and the reload-only compatibility request also failed.
     pub build_mismatches: Vec<ReplicaSignalRoute>,
+    pub build_mismatch_refusals: Vec<ReplicaSignalBuildMismatchRefusal>,
     /// Live native-save registrations fenced before delivery because their
     /// reported plugin generation did not exactly match this controller.
     pub generation_mismatches: usize,
@@ -5320,6 +5331,7 @@ pub fn request_native_save_for_current_projection(
         found,
         notified,
         build_mismatches,
+        build_mismatch_refusals: Vec::new(),
         generation_mismatches: generation_mismatches.len(),
         definitive_refusals: native_save_definitive_refusals,
     };
@@ -5578,6 +5590,7 @@ fn signal_crdt_replica_event_counting_inner(
     let mut notified = 0usize;
     let mut definitive_refusals = 0usize;
     let mut build_mismatches = Vec::new();
+    let mut build_mismatch_refusals = Vec::new();
     for route in routes {
         let payload = serde_json::json!({
             "type": agent_doc_ipc_protocol::EditorIntent::DeliverCrdtRemote.as_str(),
@@ -5626,6 +5639,12 @@ fn signal_crdt_replica_event_counting_inner(
                         ),
                     );
                 }
+                if let Some(refusal) = agent_doc_ipc_io::build_mismatch_recovery_refusal(&error) {
+                    build_mismatch_refusals.push(ReplicaSignalBuildMismatchRefusal {
+                        route: route.clone(),
+                        refusal,
+                    });
+                }
                 // A live listener that answers and rejects is a terminal answer,
                 // not a deferral. Counting it lets the authority resolver tell
                 // "the editor will not serve this document" apart from "nothing
@@ -5652,6 +5671,7 @@ fn signal_crdt_replica_event_counting_inner(
         found,
         notified,
         build_mismatches,
+        build_mismatch_refusals,
         generation_mismatches: 0,
         definitive_refusals,
     };
@@ -5809,6 +5829,7 @@ mod tests {
                 definitive_refusals: refusals,
                 generation_mismatches: mismatches,
                 build_mismatches: Vec::new(),
+                build_mismatch_refusals: Vec::new(),
             };
             assert_eq!(outcome.classify(), expected, "classify {found}/{notified}");
             let token = outcome.diagnosis();
@@ -6223,6 +6244,7 @@ mod tests {
                 found,
                 notified,
                 build_mismatches: Vec::new(),
+                build_mismatch_refusals: Vec::new(),
                 generation_mismatches,
                 definitive_refusals,
             };
@@ -6324,6 +6346,7 @@ mod tests {
                             found,
                             notified,
                             build_mismatches: Vec::new(),
+                            build_mismatch_refusals: Vec::new(),
                             generation_mismatches,
                             definitive_refusals,
                         };
@@ -6352,6 +6375,7 @@ mod tests {
                 found: 0,
                 notified: 0,
                 build_mismatches: Vec::new(),
+                build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
             }
@@ -6364,6 +6388,7 @@ mod tests {
                 found: 1,
                 notified: 0,
                 build_mismatches: Vec::new(),
+                build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
             }
@@ -6376,6 +6401,7 @@ mod tests {
                 found: 3,
                 notified: 1,
                 build_mismatches: Vec::new(),
+                build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
             }
@@ -6388,6 +6414,7 @@ mod tests {
                 found: 2,
                 notified: 2,
                 build_mismatches: Vec::new(),
+                build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
             }
@@ -6399,6 +6426,7 @@ mod tests {
                 found: 1,
                 notified: 0,
                 build_mismatches: Vec::new(),
+                build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 1,
                 definitive_refusals: 0,
             }
@@ -6501,6 +6529,7 @@ mod tests {
             found: routes.len() + mismatches.len(),
             notified: 0,
             build_mismatches: Vec::new(),
+            build_mismatch_refusals: Vec::new(),
             generation_mismatches: mismatches.len(),
             definitive_refusals: 0,
         };
@@ -10403,6 +10432,7 @@ mod tests {
                 found: 1,
                 notified: 0,
                 build_mismatches: Vec::new(),
+                build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 1,
             };
@@ -10433,6 +10463,7 @@ mod tests {
                 found: 1,
                 notified: 1,
                 build_mismatches: Vec::new(),
+                build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
             };

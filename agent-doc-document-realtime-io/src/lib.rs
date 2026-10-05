@@ -7990,17 +7990,33 @@ fn clear_terminal_missing_replica_rebuild(file: &std::path::Path) {
 /// actually lands clears the refusal for free rather than latching it forever.
 /// Only a rejected IPC receipt records here: a timeout or missing socket is
 /// retryable and must keep failing closed.
+#[derive(Clone, PartialEq, Eq)]
+struct EditorEndpointRecoveryRefusal {
+    witness: EditorReplicaLivenessWitness,
+    build_mismatch_refusal: Option<agent_doc_turn::authority_recovery::BuildMismatchRefusal>,
+    editor_pids: Vec<u64>,
+}
+
 static EDITOR_ENDPOINT_DEFINITIVELY_REFUSED: std::sync::LazyLock<
-    Mutex<std::collections::HashMap<std::path::PathBuf, EditorReplicaLivenessWitness>>,
+    Mutex<std::collections::HashMap<std::path::PathBuf, EditorEndpointRecoveryRefusal>>,
 > = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 fn record_editor_endpoint_definitive_refusal(
     file: &std::path::Path,
     witness: EditorReplicaLivenessWitness,
+    build_mismatch_refusal: Option<agent_doc_turn::authority_recovery::BuildMismatchRefusal>,
+    editor_pids: Vec<u64>,
 ) {
     EDITOR_ENDPOINT_DEFINITIVELY_REFUSED
         .lock()
-        .insert(file.to_path_buf(), witness);
+        .insert(
+            file.to_path_buf(),
+            EditorEndpointRecoveryRefusal {
+                witness,
+                build_mismatch_refusal,
+                editor_pids,
+            },
+        );
 }
 
 fn clear_editor_endpoint_definitive_refusal(file: &std::path::Path) {
@@ -8012,10 +8028,23 @@ fn clear_editor_endpoint_definitive_refusal(file: &std::path::Path) {
 /// Stale by construction once the witness advances: a newer registration means a
 /// different endpoint answered, so the old refusal proves nothing about it.
 fn editor_endpoint_definitively_refused(file: &std::path::Path) -> bool {
+    editor_endpoint_recovery_refusal(file).is_some_and(|refusal| {
+        // A sender/listener build mismatch is a definitive refusal of the
+        // reload effect, not proof that the editor stopped serving its buffer.
+        // It must remain fail-closed until the sender generation changes.
+        refusal.build_mismatch_refusal.is_none()
+    })
+}
+
+fn editor_endpoint_recovery_refusal(
+    file: &std::path::Path,
+) -> Option<EditorEndpointRecoveryRefusal> {
+    let current = editor_replica_liveness_witness(file);
     EDITOR_ENDPOINT_DEFINITIVELY_REFUSED
         .lock()
         .get(file)
-        .is_some_and(|refused| *refused == editor_replica_liveness_witness(file))
+        .filter(|refused| refused.witness == current)
+        .cloned()
 }
 
 /// A verified healthy observation supersedes both missing-replica recovery
@@ -8056,7 +8085,12 @@ fn reobserve_missing_editor_replica_with_reregistration(
                 editor_replica_accepted_unserved_corroborated(file, &paused_witness),
             )
         {
-            record_editor_endpoint_definitive_refusal(file, paused_witness);
+            record_editor_endpoint_definitive_refusal(
+                file,
+                paused_witness,
+                None,
+                Vec::new(),
+            );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -8099,9 +8133,26 @@ fn reobserve_missing_editor_replica_with_reregistration(
             // an attachment latch for an endpoint that will not serve this
             // document. Retrying is what never converged.
             Ok(outcome) if outcome.notified == 0 && outcome.definitive_refusals > 0 => {
+                let build_mismatch_refusal = outcome.build_mismatch_refusals.first().map(|refused| {
+                    match refused.refusal {
+                        agent_doc_ipc_io::BuildMismatchRecoveryRefusal::SenderExecutableReplaced => {
+                            agent_doc_turn::authority_recovery::BuildMismatchRefusal::SenderExecutableReplaced
+                        }
+                        agent_doc_ipc_io::BuildMismatchRecoveryRefusal::ReloadAlreadyRequested => {
+                            agent_doc_turn::authority_recovery::BuildMismatchRefusal::ReloadAlreadyRequested
+                        }
+                    }
+                });
+                let editor_pids = outcome
+                    .build_mismatch_refusals
+                    .iter()
+                    .map(|refused| refused.route.editor_pid)
+                    .collect();
                 record_editor_endpoint_definitive_refusal(
                     file,
                     editor_replica_liveness_witness(file),
+                    build_mismatch_refusal,
+                    editor_pids,
                 );
                 answered = true;
                 format!("definitively_refused:{}", outcome.definitive_refusals)
@@ -8451,7 +8502,20 @@ fn attached_editor_refusal_remedy(file: &std::path::Path) -> String {
         .map(|(_, pid)| *pid)
         .filter(|pid| !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, u64::from(*pid)))
         .collect::<Vec<_>>();
-    attached_editor_refusal_remedy_from(&superseded, &editors, &unreachable)
+    let refusal = editor_endpoint_recovery_refusal(file);
+    let blocking_document = refusal.as_ref().and_then(|refusal| {
+        agent_doc_controller_io::project_controller::native_reload_blocking_document_for_editor_pids(
+            file,
+            &refusal.editor_pids,
+        )
+    });
+    attached_editor_refusal_remedy_from(
+        &superseded,
+        &editors,
+        &unreachable,
+        refusal.and_then(|refusal| refusal.build_mismatch_refusal),
+        blocking_document.as_deref(),
+    )
 }
 
 /// The attached-editor refusal: the editor still holds the document but its
@@ -8499,19 +8563,9 @@ fn attached_editor_refusal_remedy_from(
     superseded: &[agent_doc_fs::plugin_jar::SupersededEditor],
     editors: &[(String, u32)],
     unreachable: &[u32],
+    build_mismatch_refusal: Option<agent_doc_turn::authority_recovery::BuildMismatchRefusal>,
+    blocking_document: Option<&std::path::Path>,
 ) -> String {
-    if let Some(editor) = superseded.first() {
-        return format!(
-            "plugin_bytes_superseded: live {kind} editor pid {pid} is executing superseded \
-             plugin bytes ({detail}), so it cannot serve this document's replica; disk is not \
-             adopted because that editor's buffer may still hold unsaved text. {remedy} Then \
-             retry the same command; a captured response is re-delivered, not lost (#84).",
-            kind = editor.editor_kind,
-            pid = editor.pid,
-            detail = editor.detail,
-            remedy = editor.remedy(),
-        );
-    }
     let pids = editors
         .iter()
         .map(|(kind, pid)| format!("{kind} pid {pid}"))
@@ -8521,23 +8575,87 @@ fn attached_editor_refusal_remedy_from(
     } else {
         pids.join(", ")
     };
-    if !editors.is_empty() && editors.iter().all(|(_, pid)| unreachable.contains(pid)) {
-        return format!(
-            "Remedy: {holder} holds the document but its agent-doc IPC endpoint no longer \
-             accepts connections, so `agent-doc admin reload-lib` cannot reach it (it reports \
-             the endpoint unavailable and fails). Restart that editor so it re-registers its \
-             replica, then retry the same command; a captured response is re-delivered, not \
-             lost (#84, GH #94)."
-        );
+    let decision = agent_doc_turn::authority_recovery::decide_attached_editor_recovery(
+        agent_doc_turn::authority_recovery::AttachedEditorRecoveryFacts {
+            build_mismatch_refusal,
+            plugin_bytes_superseded: !superseded.is_empty(),
+            endpoints_found: !editors.is_empty(),
+            all_endpoints_unreachable: !editors.is_empty()
+                && editors.iter().all(|(_, pid)| unreachable.contains(pid)),
+        },
+    );
+    match decision {
+        agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::WaitForSenderRecycle => {
+            let blocker = blocking_document
+                .map(|file| {
+                    format!(
+                        " The process-scoped native reload is also deferred by the open cycle on \
+                         {}; that document's route-owned supervisor will re-arm it at its next \
+                         idle boundary.",
+                        file.display(),
+                    )
+                })
+                .unwrap_or_default();
+            format!(
+                "sender_executable_replaced: the command sender is executing replaced agent-doc \
+                 bytes, so reloading {holder} cannot resolve this build mismatch. A safe-boundary \
+                 supervisor recycle is already scheduled; let the current route-owned cycle \
+                 reach its next idle boundary, then retry the same command.{blocker} The earlier \
+                 editor-native recovery was definitively refused because it cannot change the \
+                 stale sender generation (GH #146)."
+            )
+        }
+        agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::WaitForEndpointGeneration => {
+            format!(
+                "reload_already_requested_for_listener_build: {holder} already accepted a native \
+                 reload for this listener generation and the mismatch survived it. Wait for the \
+                 editor endpoint to publish a new generation, then retry the same command. The \
+                 same recovery was definitively refused for this generation and must not be \
+                 repeated (GH #146)."
+            )
+        }
+        agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::RestartEditor => {
+            if let Some(editor) = superseded.first() {
+                format!(
+                    "plugin_bytes_superseded: live {kind} editor pid {pid} is executing superseded \
+                     plugin bytes ({detail}), so it cannot serve this document's replica; disk is \
+                     not adopted because that editor's buffer may still hold unsaved text. \
+                     {remedy} Then retry the same command; a captured response is re-delivered, \
+                     not lost (#84).",
+                    kind = editor.editor_kind,
+                    pid = editor.pid,
+                    detail = editor.detail,
+                    remedy = editor.remedy(),
+                )
+            } else {
+                format!(
+                    "Remedy: {holder} holds the document but its agent-doc IPC endpoint no longer \
+                     accepts connections, so `agent-doc admin reload-lib` cannot reach it (it \
+                     reports the endpoint unavailable and fails). Restart that editor so it \
+                     re-registers its replica, then retry the same command; a captured response is \
+                     re-delivered, not lost (#84, GH #94)."
+                )
+            }
+        }
+        agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReregisterEditor => {
+            format!(
+                "Remedy: {holder} holds the document but no live editor endpoint is registered, so \
+                 `agent-doc admin reload-lib` cannot deliver a repair. Reopen this file's editor \
+                 tab, or restart the editor, so the plugin re-registers its replica; then retry the \
+                 same command."
+            )
+        }
+        agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReloadEditor => {
+            // GH #131 (`#replicaunservedremedy`): the reload-lib instruction is owned by
+            // the write-ownership predicate, so the retained-write refusal for the same
+            // observation cannot forbid what this gate prescribes.
+            format!(
+                "Remedy: {holder} holds the document but is not serving its replica, and no plugin \
+                 byte replacement explains it. {}",
+                agent_doc_turn::write_ownership::editor_replica_recovery()
+            )
+        }
     }
-    // GH #131 (`#replicaunservedremedy`): the reload-lib instruction is owned by
-    // the write-ownership predicate, so the retained-write refusal for the same
-    // observation cannot forbid what this gate prescribes.
-    format!(
-        "Remedy: {holder} holds the document but is not serving its replica, and no plugin \
-         byte replacement explains it. {}",
-        agent_doc_turn::write_ownership::editor_replica_recovery()
-    )
 }
 
 /// Read-path resolution when an attached editor cannot answer.
@@ -9547,6 +9665,8 @@ mod tests {
             std::slice::from_ref(&editor),
             &[("jetbrains".into(), 4242)],
             &[],
+            None,
+            None,
         );
         assert!(remedy.starts_with("plugin_bytes_superseded"), "{remedy}");
         assert!(remedy.contains("pid 4242"), "{remedy}");
@@ -9574,7 +9694,7 @@ mod tests {
             detail: "jar unlinked".into(),
             restart_verdict: Some("dynamic upgrade unavailable: plugin cannot unload".into()),
         };
-        let remedy = attached_editor_refusal_remedy_from(&[editor], &[], &[]);
+        let remedy = attached_editor_refusal_remedy_from(&[editor], &[], &[], None, None);
         assert!(
             remedy.contains("Restart the editor to load them"),
             "{remedy}"
@@ -9586,11 +9706,59 @@ mod tests {
     /// the holding editor instead of only the mechanism.
     #[test]
     fn attached_editor_refusal_names_a_remedy_without_superseded_bytes() {
-        let remedy = attached_editor_refusal_remedy_from(&[], &[("jetbrains".into(), 7)], &[]);
+        let remedy = attached_editor_refusal_remedy_from(
+            &[],
+            &[("jetbrains".into(), 7)],
+            &[],
+            None,
+            None,
+        );
         assert!(remedy.contains("jetbrains pid 7"), "{remedy}");
         assert!(remedy.contains("agent-doc admin reload-lib"), "{remedy}");
-        let unnamed = attached_editor_refusal_remedy_from(&[], &[], &[]);
+        let unnamed = attached_editor_refusal_remedy_from(&[], &[], &[], None, None);
         assert!(unnamed.contains("the attached editor"), "{unnamed}");
+    }
+
+    /// GH #146: terminal guidance must consume the typed refusal emitted by the
+    /// notify path. Recommending the same native reload that path has already
+    /// proved incapable of changing the stale sender creates a permanent loop.
+    #[test]
+    fn attached_editor_refusal_does_not_repeat_definitively_refused_reload() {
+        let remedy = attached_editor_refusal_remedy_from(
+            &[],
+            &[("jetbrains".into(), 4242)],
+            &[],
+            Some(
+                agent_doc_turn::authority_recovery::BuildMismatchRefusal::SenderExecutableReplaced,
+            ),
+            Some(std::path::Path::new("/project/tasks/other-open-cycle.md")),
+        );
+
+        assert!(remedy.contains("sender_executable_replaced"), "{remedy}");
+        assert!(remedy.contains("safe-boundary supervisor recycle"), "{remedy}");
+        assert!(remedy.contains("other-open-cycle.md"), "{remedy}");
+        assert!(remedy.contains("route-owned supervisor"), "{remedy}");
+        assert!(
+            !remedy.contains("agent-doc admin reload-lib"),
+            "a definitively refused effect must not be prescribed again: {remedy}",
+        );
+    }
+
+    #[test]
+    fn attached_editor_refusal_waits_for_generation_after_reload_was_spent() {
+        let remedy = attached_editor_refusal_remedy_from(
+            &[],
+            &[("jetbrains".into(), 4242)],
+            &[],
+            Some(
+                agent_doc_turn::authority_recovery::BuildMismatchRefusal::ReloadAlreadyRequested,
+            ),
+            None,
+        );
+
+        assert!(remedy.contains("reload_already_requested"), "{remedy}");
+        assert!(remedy.contains("new generation"), "{remedy}");
+        assert!(!remedy.contains("agent-doc admin reload-lib"), "{remedy}");
     }
 
     /// GH #94: when the holding editor's IPC endpoint is gone, reload-lib
@@ -9617,8 +9785,13 @@ mod tests {
 
     #[test]
     fn attached_editor_refusal_names_restart_when_endpoint_is_unreachable() {
-        let remedy =
-            attached_editor_refusal_remedy_from(&[], &[("jetbrains".into(), 836968)], &[836968]);
+        let remedy = attached_editor_refusal_remedy_from(
+            &[],
+            &[("jetbrains".into(), 836968)],
+            &[836968],
+            None,
+            None,
+        );
         assert!(remedy.contains("jetbrains pid 836968"), "{remedy}");
         assert!(remedy.contains("Restart that editor"), "{remedy}");
         assert!(remedy.contains("cannot reach it"), "{remedy}");
@@ -9632,6 +9805,8 @@ mod tests {
             &[],
             &[("jetbrains".into(), 1), ("vscode".into(), 2)],
             &[1],
+            None,
+            None,
         );
         assert!(
             mixed.contains("Run `agent-doc admin reload-lib`"),
@@ -12488,6 +12663,8 @@ mod tests {
             &[],
             &[("jetbrains".to_string(), 4242)],
             &[],
+            None,
+            None,
         );
         assert!(
             gate.contains(recovery),

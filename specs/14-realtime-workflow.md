@@ -295,6 +295,27 @@ the row idempotently and is the only recovery that clears degradation, recycle
 and unregister state together. `formal/tla/EditorTransportHealth.tla` checks
 these invariants and carries must-fail wedge and reachability configurations.
 
+### Definitive recovery refusals constrain terminal guidance (GH #146)
+
+A build-mismatch recovery refusal is a typed effect receipt, not diagnostic
+prose. `sender_executable_replaced` proves an editor-native reload cannot change
+the stale command sender; `reload_already_requested_for_listener_build` proves
+the same listener generation has already spent that effect. The replica-signal
+outcome carries the refusal and route pid into the document recovery witness.
+Every terminal attached-editor error, including `compact` current-document
+resolution, derives its instruction from that witness through
+`authority_recovery::decide_attached_editor_recovery`. It must never prescribe
+the effect the receipt definitively refused.
+
+For a replaced sender, the terminal instruction names the already-scheduled
+route-owned supervisor recycle and its next idle boundary. The native reload
+planner remains the owner of process-scoped admission; when another document's
+open cycle defers that editor pid, the terminal projection names that blocking
+document. This blocker lookup is a one-shot failure-boundary observation: it
+reuses the reload effect's planner and admission predicate, performs no reload,
+and does not create a second long-lived state model. A newer editor registration
+advances the liveness witness and invalidates the refusal.
+
 ### Retained-write guidance must terminate (GH #131 reopened)
 
 Every instruction an agent can receive about a retained write is a step in a

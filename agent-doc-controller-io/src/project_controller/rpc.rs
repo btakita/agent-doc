@@ -12464,8 +12464,32 @@ fn reload_library_process_scope(
     scope: NativeReloadScope,
     lib_version: &str,
 ) -> ReloadLibraryFanoutReport {
+    let (report, processes) = plan_live_native_reload_process_scope(scope, lib_version);
+    reload_library_processes(
+        report,
+        processes,
+        lib_version,
+        agent_doc_ipc_io::is_listener_active_for_pid,
+        |endpoint, pid| {
+            agent_doc_ipc_io::send_reload_library_to_editor(
+                &endpoint.project_root,
+                pid,
+                &endpoint.editor_id,
+                lib_version,
+            )
+        },
+    )
+}
+
+fn plan_live_native_reload_process_scope(
+    scope: NativeReloadScope,
+    lib_version: &str,
+) -> (
+    ReloadLibraryFanoutReport,
+    BTreeMap<u64, EditorNativeReloadProcess>,
+) {
     let supervisor_documents = scope.supervisor_documents.clone();
-    let (report, processes) = plan_reload_library_process_scope(
+    plan_reload_library_process_scope(
         scope,
         lib_version,
         |project_root| project_root_use_evidence(project_root, &supervisor_documents),
@@ -12482,21 +12506,40 @@ fn reload_library_process_scope(
             }
         },
         agent_doc_ipc_io::discover_listening_editor_pids,
-    );
-    reload_library_processes(
-        report,
-        processes,
-        lib_version,
-        agent_doc_ipc_io::is_listener_active_for_pid,
-        |endpoint, pid| {
-            agent_doc_ipc_io::send_reload_library_to_editor(
-                &endpoint.project_root,
-                pid,
-                &endpoint.editor_id,
-                lib_version,
-            )
-        },
     )
+}
+
+/// Name the open document cycle that currently defers native replacement for
+/// any of `editor_pids`.
+///
+/// This is the read-only half of the same process-scoped planner used by the
+/// reload effect. Terminal recovery guidance consumes it so it cannot describe
+/// the requested document as the blocker when a sibling document owns the open
+/// cycle.
+pub fn native_reload_blocking_document_for_editor_pids(
+    seed_document: &Path,
+    editor_pids: &[u64],
+) -> Option<PathBuf> {
+    if editor_pids.is_empty() {
+        return None;
+    }
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(seed_document);
+    let (_, mut processes) = plan_live_native_reload_process_scope(
+        native_reload_scope(Some(&project_root)),
+        env!("CARGO_PKG_VERSION"),
+    );
+    for pid in editor_pids.iter().copied().collect::<BTreeSet<_>>() {
+        let Some(process) = processes.remove(&pid) else {
+            continue;
+        };
+        if let crate::project_controller::NativeReloadProcessAdmission::Defer {
+            blocking_document,
+        } = crate::project_controller::native_reload_process_admission(process.documents)
+        {
+            return Some(blocking_document);
+        }
+    }
+    None
 }
 
 /// Injectable planning half of [`reload_library_process_scope`]: enumerate each
@@ -13153,18 +13196,35 @@ fn connect_or_launch_with_claim_wait_and_before_claim(
     let launch_claim = match LaunchClaim::acquire_blocking(project_root, launch_claim_wait) {
         Ok(claim) => claim,
         Err(err) => {
-            if let Ok(active_status) = status(project_root)
-                && active_status.active
-            {
-                let current_binary = current_binary_identity().ok();
-                if active_controller_status_is_adoptable(&active_status, current_binary.as_ref()) {
-                    log_launch_claim_waiter_adopted(project_root, &active_status, "timeout");
-                    reap_stale_duplicate_controllers(
-                        project_root,
-                        active_status.pid,
-                        active_status.controller_generation.unwrap_or(1),
-                    );
-                    return connect(project_root);
+            match status(project_root) {
+                Ok(active_status) if active_status.active => {
+                    let current_binary = current_binary_identity().ok();
+                    if active_controller_status_is_adoptable(
+                        &active_status,
+                        current_binary.as_ref(),
+                    ) {
+                        log_launch_claim_waiter_adopted(project_root, &active_status, "timeout");
+                        reap_stale_duplicate_controllers(
+                            project_root,
+                            active_status.pid,
+                            active_status.controller_generation.unwrap_or(1),
+                        );
+                        return connect(project_root);
+                    }
+                }
+                // A competing launcher may have published the socket while its
+                // status request is still hydrating. `ensure_controller_running`
+                // needs only a connected command plane; the caller's real RPC
+                // then surfaces the document blocker. Adopting that socket keeps
+                // launch-claim contention from masking the recovery refusal.
+                _ => {
+                    if let Ok(stream) = connect(project_root) {
+                        agent_doc_ops_log_io::log_op(
+                            project_root,
+                            "controller_launch_claim_waiter_adopted_published_socket phase=timeout status=not_ready",
+                        );
+                        return Ok(stream);
+                    }
                 }
             }
             return Err(err);
@@ -38324,6 +38384,68 @@ mod tests {
         let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         server.join().unwrap().unwrap();
+    }
+
+    /// GH #146: publishing the command-plane socket and serving a complete
+    /// status receipt are separate launch phases. Claim contention must adopt
+    /// the socket in that interval so the caller's real RPC can report the
+    /// document-level blocker instead of a bootstrap-lock error.
+    #[test]
+    fn connect_or_launch_adopts_published_socket_before_status_is_ready() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let held_claim = LaunchClaim::acquire(&project_root).unwrap();
+        let mut server = None;
+        let mut release_server = None;
+
+        let stream = connect_or_launch_with_claim_wait_and_before_claim(
+            &project_root,
+            LaunchMode::Lazy,
+            Duration::ZERO,
+            || {
+                let sock = socket_path(&project_root);
+                std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+                let name = sock.to_fs_name::<GenericFilePath>().unwrap();
+                let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+                let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+                release_server = Some(release_tx);
+                server = Some(std::thread::spawn(move || {
+                    // The status probe reaches the newly-published socket, but
+                    // the controller is still hydrating and closes without a
+                    // receipt. The following raw connect is the adoption.
+                    {
+                        let status_stream = listener.accept().unwrap();
+                        let (reader_half, _writer_half) = status_stream.split();
+                        let mut request = String::new();
+                        BufReader::new(reader_half)
+                            .read_line(&mut request)
+                            .unwrap();
+                        assert!(request.contains("status"), "{request}");
+                    }
+                    let _adopted_stream = listener.accept().unwrap();
+                    release_rx.recv().unwrap();
+                }));
+            },
+        )
+        .expect("the published socket should be adopted while status hydrates");
+
+        drop(stream);
+        release_server.unwrap().send(()).unwrap();
+        server.unwrap().join().unwrap();
+        drop(held_claim);
+
+        let ops_log = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            ops_log.contains(
+                "controller_launch_claim_waiter_adopted_published_socket phase=timeout status=not_ready"
+            ),
+            "published-socket adoption proof marker missing:\n{ops_log}",
+        );
+        assert!(
+            !ops_log.contains("controller launch already in progress"),
+            "the launch race must not shadow the caller's real RPC:\n{ops_log}",
+        );
     }
 
     #[test]

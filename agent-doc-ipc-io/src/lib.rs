@@ -1271,11 +1271,8 @@ pub fn send_message_to_pid_recovering_build_mismatch(
                     .as_deref()
                     .map(|build| reload_already_requested_for_listener_build(editor_pid, build)),
             );
-            if let Some(reason) = decision.refusal() {
-                return Err(handshake_error.context(format!(
-                    "IPC build mismatch recovery withheld reload_library ({reason}): \
-                     reloading the editor cannot resolve this mismatch"
-                )));
+            if let Some(refusal) = decision.refusal() {
+                return Err(handshake_error.context(BuildMismatchRecoveryRefused { refusal }));
             }
             match send_reload_library_to_editor(project_root, editor_pid, editor_id, lib_version) {
                 Ok(true) => {
@@ -1315,24 +1312,69 @@ static BUILD_MISMATCH_RELOADS: std::sync::LazyLock<
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BuildMismatchReloadDecision {
     Reload,
+    /// The typed receipt explains why repeating the reload cannot converge.
+    Refuse(BuildMismatchRecoveryRefusal),
+}
+
+impl BuildMismatchReloadDecision {
+    fn refusal(self) -> Option<BuildMismatchRecoveryRefusal> {
+        match self {
+            Self::Reload => None,
+            Self::Refuse(refusal) => Some(refusal),
+        }
+    }
+}
+
+/// A build-mismatch recovery the sender has proved cannot be fixed by asking
+/// the editor to reload its native library again.
+///
+/// This is the typed receipt consumed by terminal recovery guidance. Keeping it
+/// in the IPC adapter prevents downstream callers from reconstructing policy
+/// from the human-readable error text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuildMismatchRecoveryRefusal {
     /// This process runs an executable that has since been replaced on disk, so
-    /// the mismatch is the sender's. The editor's reload loads the installed
-    /// library, which it already runs: every replica restarts and the mismatch
-    /// survives, forever, once per notify.
+    /// the mismatch is the sender's. The editor already runs the installed
+    /// library; reloading it cannot change the stale sender.
     SenderExecutableReplaced,
     /// A reload was already requested for this editor while it reported this
     /// same listener build, and the mismatch outlived it.
     ReloadAlreadyRequested,
 }
 
-impl BuildMismatchReloadDecision {
-    fn refusal(self) -> Option<&'static str> {
+impl BuildMismatchRecoveryRefusal {
+    pub const fn token(self) -> &'static str {
         match self {
-            Self::Reload => None,
-            Self::SenderExecutableReplaced => Some("sender_executable_replaced"),
-            Self::ReloadAlreadyRequested => Some("reload_already_requested_for_listener_build"),
+            Self::SenderExecutableReplaced => "sender_executable_replaced",
+            Self::ReloadAlreadyRequested => "reload_already_requested_for_listener_build",
         }
     }
+}
+
+#[derive(Debug)]
+struct BuildMismatchRecoveryRefused {
+    refusal: BuildMismatchRecoveryRefusal,
+}
+
+impl std::fmt::Display for BuildMismatchRecoveryRefused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "IPC build mismatch recovery withheld reload_library ({}): reloading the editor cannot resolve this mismatch",
+            self.refusal.token(),
+        )
+    }
+}
+
+impl std::error::Error for BuildMismatchRecoveryRefused {}
+
+/// The definitive build-mismatch refusal carried by `error`, if any.
+pub fn build_mismatch_recovery_refusal(
+    error: &anyhow::Error,
+) -> Option<BuildMismatchRecoveryRefusal> {
+    error
+        .downcast_ref::<BuildMismatchRecoveryRefused>()
+        .map(|refused| refused.refusal)
 }
 
 /// `reload_already_requested` is `None` when the mismatch carried no listener
@@ -1342,9 +1384,13 @@ fn build_mismatch_reload_decision(
     reload_already_requested: Option<bool>,
 ) -> BuildMismatchReloadDecision {
     if sender_executable_replaced {
-        BuildMismatchReloadDecision::SenderExecutableReplaced
+        BuildMismatchReloadDecision::Refuse(
+            BuildMismatchRecoveryRefusal::SenderExecutableReplaced,
+        )
     } else if reload_already_requested == Some(true) {
-        BuildMismatchReloadDecision::ReloadAlreadyRequested
+        BuildMismatchReloadDecision::Refuse(
+            BuildMismatchRecoveryRefusal::ReloadAlreadyRequested,
+        )
     } else {
         BuildMismatchReloadDecision::Reload
     }
@@ -2595,6 +2641,10 @@ mod tests {
             "unexpected repeat error: {repeat:#}"
         );
         assert!(is_ipc_build_mismatch_error(&repeat));
+        assert_eq!(
+            build_mismatch_recovery_refusal(&repeat),
+            Some(BuildMismatchRecoveryRefusal::ReloadAlreadyRequested),
+        );
         assert_eq!(reloads_reached.load(Ordering::SeqCst), 1);
         assert!(!mutation_reached.load(Ordering::SeqCst));
 
@@ -2616,11 +2666,15 @@ mod tests {
         );
         assert_eq!(
             build_mismatch_reload_decision(true, Some(false)),
-            BuildMismatchReloadDecision::SenderExecutableReplaced
+            BuildMismatchReloadDecision::Refuse(
+                BuildMismatchRecoveryRefusal::SenderExecutableReplaced,
+            )
         );
         assert_eq!(
             build_mismatch_reload_decision(false, Some(true)),
-            BuildMismatchReloadDecision::ReloadAlreadyRequested
+            BuildMismatchReloadDecision::Refuse(
+                BuildMismatchRecoveryRefusal::ReloadAlreadyRequested,
+            )
         );
         assert_eq!(BuildMismatchReloadDecision::Reload.refusal(), None);
         assert!(

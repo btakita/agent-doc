@@ -13,6 +13,7 @@ use agent_doc_sqlite::state_store::{
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerAdminReceiptView {
@@ -106,6 +107,25 @@ pub trait AdminControllerEffects {
         reason: &str,
     ) -> Result<(usize, usize)>;
 
+    fn close_stale_or_idle_actors_with_liveness(
+        &self,
+        root: &Path,
+        pane_alive: &mut dyn FnMut(&str) -> bool,
+        idle_for: Option<Duration>,
+        dry_run: bool,
+        caller: &str,
+        reason: &str,
+    ) -> Result<(usize, usize)>;
+
+    fn close_stale_or_idle_actors_with_tmux(
+        &self,
+        root: &Path,
+        idle_for: Option<Duration>,
+        dry_run: bool,
+        caller: &str,
+        reason: &str,
+    ) -> Result<(usize, usize)>;
+
     fn admin_handoff(
         &self,
         root: &Path,
@@ -130,6 +150,8 @@ pub struct ReapAllStaleSummary {
     pub project_root: String,
     pub reaped: usize,
     pub kept: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_for_secs: Option<u64>,
     pub reason: String,
 }
 
@@ -345,11 +367,22 @@ pub fn reap_all_stale_with_liveness(
     pane_alive: impl FnMut(&str) -> bool,
     reason: &str,
 ) -> Result<ReapAllStaleSummary> {
+    reap_all_stale_with_liveness_and_idle(effects, root, pane_alive, None, reason)
+}
+
+pub fn reap_all_stale_with_liveness_and_idle(
+    effects: &impl AdminControllerEffects,
+    root: &Path,
+    pane_alive: impl FnMut(&str) -> bool,
+    idle_for: Option<Duration>,
+    reason: &str,
+) -> Result<ReapAllStaleSummary> {
     let stored_reason = format!("manual_reap_all_stale {reason}");
     let mut pane_alive = pane_alive;
-    let (reaped, kept) = effects.close_stale_dead_pane_actors_with_liveness(
+    let (reaped, kept) = effects.close_stale_or_idle_actors_with_liveness(
         root,
         &mut pane_alive,
+        idle_for,
         false,
         "admin",
         &stored_reason,
@@ -358,6 +391,7 @@ pub fn reap_all_stale_with_liveness(
         project_root: root.display().to_string(),
         reaped,
         kept,
+        idle_for_secs: idle_for.map(|duration| duration.as_secs()),
         reason: stored_reason,
     })
 }
@@ -368,22 +402,45 @@ pub fn reap_all_stale(
     reason: &str,
     json: bool,
 ) -> Result<()> {
+    reap_all_stale_with_idle(effects, project_root, None, reason, json)
+}
+
+pub fn reap_all_stale_with_idle(
+    effects: &impl AdminControllerEffects,
+    project_root: Option<&Path>,
+    idle_for: Option<Duration>,
+    reason: &str,
+    json: bool,
+) -> Result<()> {
     let root = agent_doc_project_root_io::project_root_or_cwd(project_root)?;
     let stored_reason = format!("manual_reap_all_stale {reason}");
-    let (reaped, kept) =
-        effects.close_stale_dead_pane_actors_with_tmux(&root, false, "admin", &stored_reason)?;
+    let (reaped, kept) = effects.close_stale_or_idle_actors_with_tmux(
+        &root,
+        idle_for,
+        false,
+        "admin",
+        &stored_reason,
+    )?;
     let summary = ReapAllStaleSummary {
         project_root: root.display().to_string(),
         reaped,
         kept,
+        idle_for_secs: idle_for.map(|duration| duration.as_secs()),
         reason: stored_reason,
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&summary)?);
     } else {
         println!(
-            "admin_reap_all_stale accepted project_root={} reaped={} kept={} reason={}",
-            summary.project_root, summary.reaped, summary.kept, summary.reason
+            "admin_reap_all_stale accepted project_root={} reaped={} kept={} idle_for_secs={} reason={}",
+            summary.project_root,
+            summary.reaped,
+            summary.kept,
+            summary
+                .idle_for_secs
+                .map(|seconds| seconds.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            summary.reason
         );
     }
     Ok(())
@@ -504,6 +561,34 @@ mod tests {
             anyhow::bail!("unused")
         }
 
+        fn close_stale_or_idle_actors_with_liveness(
+            &self,
+            _root: &Path,
+            pane_alive: &mut dyn FnMut(&str) -> bool,
+            idle_for: Option<Duration>,
+            dry_run: bool,
+            caller: &str,
+            reason: &str,
+        ) -> Result<(usize, usize)> {
+            self.close_calls.borrow_mut().push(format!(
+                "{dry_run}:{caller}:{reason}:{}:{}",
+                pane_alive("%dead"),
+                idle_for.map(|duration| duration.as_secs()).unwrap_or(0)
+            ));
+            Ok((1, 2))
+        }
+
+        fn close_stale_or_idle_actors_with_tmux(
+            &self,
+            _root: &Path,
+            _idle_for: Option<Duration>,
+            _dry_run: bool,
+            _caller: &str,
+            _reason: &str,
+        ) -> Result<(usize, usize)> {
+            anyhow::bail!("unused")
+        }
+
         fn admin_handoff(
             &self,
             _root: &Path,
@@ -579,7 +664,30 @@ mod tests {
         assert_eq!(summary.reason, "manual_reap_all_stale operator");
         assert_eq!(
             effects.close_calls.borrow().as_slice(),
-            ["false:admin:manual_reap_all_stale operator:false"]
+            ["false:admin:manual_reap_all_stale operator:false:0"]
+        );
+    }
+
+    #[test]
+    fn reap_all_stale_passes_explicit_idle_threshold() {
+        let effects = FakeEffects {
+            close_calls: RefCell::new(Vec::new()),
+        };
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let summary = reap_all_stale_with_liveness_and_idle(
+            &effects,
+            dir.path(),
+            |_| true,
+            Some(Duration::from_secs(86_400)),
+            "operator",
+        )
+        .unwrap();
+
+        assert_eq!(summary.idle_for_secs, Some(86_400));
+        assert_eq!(
+            effects.close_calls.borrow().as_slice(),
+            ["false:admin:manual_reap_all_stale operator:true:86400"]
         );
     }
 }

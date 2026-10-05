@@ -461,6 +461,8 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
             "admin",
             "reap",
             "--all-stale",
+            "--idle-for",
+            "5d",
             "--project-root",
             root.to_str().unwrap(),
             "--reason",
@@ -474,6 +476,7 @@ fn test_cli_admin_reap_all_stale_reports_summary_and_guards_tmux_unavailable() {
         .clone();
     let summary: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(summary["reason"], "manual_reap_all_stale cli bulk reap");
+    assert_eq!(summary["idle_for_secs"], 5 * 24 * 60 * 60);
     let reaped = summary["reaped"].as_u64().unwrap();
     assert!(
         reaped <= 1,

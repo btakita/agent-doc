@@ -1187,6 +1187,33 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         )
     }
 
+    fn close_stale_or_idle_actors_with_liveness(
+        &self,
+        root: &Path,
+        pane_alive: &mut dyn FnMut(&str) -> bool,
+        idle_for: Option<Duration>,
+        dry_run: bool,
+        caller: &str,
+        reason: &str,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_controller_io::project_controller::close_stale_or_idle_actors_for_caller(
+            root, pane_alive, idle_for, dry_run, caller, reason,
+        )
+    }
+
+    fn close_stale_or_idle_actors_with_tmux(
+        &self,
+        root: &Path,
+        idle_for: Option<Duration>,
+        dry_run: bool,
+        caller: &str,
+        reason: &str,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_controller_io::project_controller::close_stale_or_idle_actors_with_tmux_for_caller(
+            root, idle_for, dry_run, caller, reason,
+        )
+    }
+
     fn admin_handoff(
         &self,
         root: &Path,
@@ -3489,6 +3516,11 @@ enum AdminAction {
         /// Reap every non-closed actor whose pane is no longer alive
         #[arg(long)]
         all_stale: bool,
+        /// Also reap live-pane actors whose document and actor transition have
+        /// both been idle for this duration (for example `30m`, `24h`, `5d`).
+        /// Requires `--all-stale`.
+        #[arg(long, value_name = "DURATION", value_parser = parse_admin_duration)]
+        idle_for: Option<Duration>,
         /// Reap by session id instead of document
         #[arg(long)]
         session: Option<String>,
@@ -3610,6 +3642,37 @@ enum AdminAction {
         #[arg(long)]
         json: bool,
     },
+}
+
+fn parse_admin_duration(value: &str) -> Result<Duration, String> {
+    let value = value.trim();
+    let split = value
+        .find(|character: char| !character.is_ascii_digit())
+        .unwrap_or(value.len());
+    let (amount, unit) = value.split_at(split);
+    let amount = amount
+        .parse::<u64>()
+        .map_err(|_| format!("invalid duration `{value}`: expected a positive integer"))?;
+    if amount == 0 {
+        return Err(format!(
+            "invalid duration `{value}`: duration must be non-zero"
+        ));
+    }
+    let multiplier = match unit {
+        "" | "s" => 1,
+        "m" => 60,
+        "h" => 60 * 60,
+        "d" => 24 * 60 * 60,
+        _ => {
+            return Err(format!(
+                "invalid duration `{value}`: supported suffixes are s, m, h, and d"
+            ));
+        }
+    };
+    amount
+        .checked_mul(multiplier)
+        .map(Duration::from_secs)
+        .ok_or_else(|| format!("invalid duration `{value}`: value is too large"))
 }
 
 #[derive(Subcommand)]
@@ -6541,6 +6604,7 @@ fn try_main() -> anyhow::Result<()> {
                 AdminAction::Reap {
                     document,
                     all_stale,
+                    idle_for,
                     session,
                     pane,
                     project_root,
@@ -6558,13 +6622,17 @@ fn try_main() -> anyhow::Result<()> {
                                 "admin reap --all-stale cannot be combined with a document, --session, --pane, or --observed-generation"
                             );
                         }
-                        agent_doc_admin_io::reap_all_stale(
+                        agent_doc_admin_io::reap_all_stale_with_idle(
                             &admin_effects,
                             project_root.as_deref(),
+                            idle_for,
                             &reason,
                             json,
                         )
                     } else {
+                        if idle_for.is_some() {
+                            anyhow::bail!("admin reap --idle-for requires --all-stale");
+                        }
                         let observed_generation = observed_generation.ok_or_else(|| {
                         anyhow::anyhow!(
                             "admin reap requires --observed-generation unless --all-stale is used"

@@ -17,7 +17,7 @@ use crate::dispatch_start::{
 };
 use crate::supervisor_runtime::supervisor_socket_path;
 use agent_doc_controller::dispatch::{
-    DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy, PASS_THROUGH_STRANDED_DRAFT_SETTLE,
+    DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy,
     PassThroughStrandedDraftAction, PassThroughStrandedDraftFacts,
     PassThroughStrandedDraftLogFacts, PreDispatchStrandedDraftAction,
     PreDispatchStrandedDraftFacts, RouteSubmitObservation, RoutedDispatchStartProof,
@@ -541,6 +541,7 @@ fn repair_pass_through_stranded_draft(
     let mut clear_observations = 0usize;
     let mut settled = false;
     let mut capture_failed = false;
+    let settle = agent_doc_controller::dispatch::pass_through_stranded_draft_settle();
     loop {
         let (draft_visible, pane_busy) = match agent_doc_tmux_io::capture_pane(tmux, pane) {
             Ok(content) => (
@@ -576,14 +577,14 @@ fn repair_pass_through_stranded_draft(
                     clear_observations += 1;
                 }
                 settled = true;
-                std::thread::sleep(PASS_THROUGH_STRANDED_DRAFT_SETTLE);
+                std::thread::sleep(settle);
                 continue;
             }
             PassThroughStrandedDraftAction::EnterResubmit => {
                 enters_sent += 1;
                 clear_observations = 0;
                 send_pass_through_stranded_draft_enter(tmux, file, pane, harness);
-                std::thread::sleep(PASS_THROUGH_STRANDED_DRAFT_SETTLE);
+                std::thread::sleep(settle);
                 continue;
             }
             _ => {}

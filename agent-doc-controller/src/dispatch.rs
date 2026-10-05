@@ -2977,6 +2977,24 @@ pub fn direct_pane_max_enter_resubmits() -> usize {
 /// composer may be read as `Cleared` and before a visible draft may be read as
 /// stranded.
 pub const PASS_THROUGH_STRANDED_DRAFT_SETTLE: Duration = Duration::from_millis(150);
+/// `#netadv5` R8: override for [`PASS_THROUGH_STRANDED_DRAFT_SETTLE`]
+/// (milliseconds). The window is localhost-tuned; a remote workspace whose TUI
+/// renders slower raises it so an empty-looking composer is not read early.
+pub const PASS_THROUGH_STRANDED_DRAFT_SETTLE_ENV: &str = "AGENT_DOC_PASS_THROUGH_SETTLE_MS";
+
+pub fn pass_through_stranded_draft_settle_from_env_value(value: Option<&str>) -> Duration {
+    value
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(PASS_THROUGH_STRANDED_DRAFT_SETTLE)
+}
+
+pub fn pass_through_stranded_draft_settle() -> Duration {
+    pass_through_stranded_draft_settle_from_env_value(
+        std::env::var(PASS_THROUGH_STRANDED_DRAFT_SETTLE_ENV).ok().as_deref(),
+    )
+}
 pub const PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS_DEFAULT: usize = 3;
 
 pub fn pass_through_stranded_draft_max_enter_resubmits_from_env_value(
@@ -4225,6 +4243,22 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(!dispatch_should_coalesce_in_flight(true, true));
         assert!(!dispatch_should_coalesce_in_flight(false, false));
         assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+
+    #[test]
+    fn pass_through_settle_is_configurable_for_slow_hosts() {
+        assert_eq!(
+            pass_through_stranded_draft_settle_from_env_value(None),
+            PASS_THROUGH_STRANDED_DRAFT_SETTLE
+        );
+        assert_eq!(
+            pass_through_stranded_draft_settle_from_env_value(Some("600")),
+            Duration::from_millis(600)
+        );
+        assert_eq!(
+            pass_through_stranded_draft_settle_from_env_value(Some("0")),
+            PASS_THROUGH_STRANDED_DRAFT_SETTLE
+        );
     }
 
     #[test]

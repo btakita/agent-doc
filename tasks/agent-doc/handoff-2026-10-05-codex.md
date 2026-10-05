@@ -35,13 +35,19 @@ Another session has uncommitted edits there.
 | `do [#netadv1]` channel-assumption audit | `netadv1` @ fd64518b3 | DONE (docs only). See docs/reference/network-channel-audit.md: 12 ranked risks R1-R12 and 23 one-shot candidate fixes F1-F23, plus a README table. Top risks: R1, a 1s focus timeout SIGKILLs a busy controller; R2, a slow attach is treated as a definitive refusal and drops the editor from the cut; R3, a slow connect deletes a live socket file. netadv5 is unblocked. Convert F1-F23 into backlog items. Note: every channel is workspace-local and Zscaler sits only between the thin client and the backend, so the danger is a short timeout being read as a verdict | — |
 | `do [#netadv2]` NetChannel.tla | `netadv2` @ 6fdaa8607 | DONE. `make tla` green, 25 modules; 4 wedges and the Reach config fail on their intended properties. API is in formal/tla/README.md. Delivery fairness is strong (SF) per message. netadv3 is now unblocked on its netadv2 side | — |
 | `do [#netadv4]` SimWorld network layer | `netadv4` @ 179fe13bf | DONE, NOT YET MERGED. `make check` green (11033 passed); new crate agent-doc-sim-net, profiles local/coder_zscaler/hostile, `make sim-net` wired into `make check`. Findings: SIM-F1 lifecycle/heartbeat last-arrival-wins (routed to netadv3), SIM-F2 queue controls same (netadv3), SIM-F3 dispatch has no idempotency key, so a duplicate trigger is injected (routed to netadv5). Not covered yet: document edits, closeout and restart paths aren't routed through the net layer | — |
-| `do [#netadv7]` cargo-fuzz + proptest | `netadv7` | IN PROGRESS | — |
+| `do [#netadv7]` cargo-fuzz + proptest | `netadv7` @ 23630efd4 | DONE. 5 fuzz targets, 7 parser/decoder bugs fixed with regressions, TLA-tied proptest model tests (SupervisorGenerationTransition, IpcBuildIdentity), opt-in `make fuzz`, corpus replay in `make check` | — |
 | `do [#netadv3]` re-check hot-path models over NetChannel + fix one-shot defects F1-F23 | `netadv3` (from batch-0505) | IN PROGRESS; see HANDOFF.md | — |
 | `do [#netadv5]` timeout-as-verdict fixes R1-R3,R5-R9 + RTT budget tests | `netadv5` (from batch-0505) | IN PROGRESS; see HANDOFF.md | — |
-| `do [#netadv6]` deterministic simulation fuzzing | not started | READY (netadv4 done; build on agent-doc-sim-net) | netadv4 |
+| `do [#netadv6]` deterministic simulation fuzzing | `netadv6` (from netadv4) | IN PROGRESS; see HANDOFF.md | — |
 | `release + publish` | — | HELD | integration below |
 
 Plan for all netadv items: `tasks/agent-doc/plan-network-adversarial-correctness.md`.
+
+## Batch status (updated)
+
+- `batch-0505` → agent-doc `main` @ 8c3e97beb: pushed and INSTALLED (JB plugin 0.2.496), superproject bump 8ee08fd571. Closed: jbstagefallback, alt+shift, netadv1, netadv2. GH #136 is fixed, but its head stays claimed (`coordinator:fixed-awaiting-release`) until the release; then close the issue.
+- `batch2` (worktree ../batch2, from main): netadv4 + netadv7 merged (.PHONY union-resolved); `make check` was running. Next: ff main to batch2, push, `make install` FROM THE batch2 WORKTREE (the main checkout has another session's uncommitted agent-doc-start-runtime-io edit), --done netadv4 netadv7.
+- Remaining: netadv3, netadv5, netadv6 (in progress), then release. New backlog: `gh136follow`, `claimstrike` (a claimed free-text head isn't struck on a Queue-prompt echo; release the claim first).
 
 ## Step 2: integrate serially, one install per batch
 

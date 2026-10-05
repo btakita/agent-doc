@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.460
+
+- **The development loop now uses tiered, content-addressed verification.** Iteration can run affected-scope
+  `make check-fast`, while the final integrated/version-projected tree runs one authoritative `make check`. Release
+  validation reuses that proof only when the repository and toolchain fingerprint still match, and retains
+  `make tmux-ci` as a separate gate.
+- **Lazy controller memory and idle actors are bounded (GH #141).** Terminal state-plane history, completed async
+  command results, and document-scoped channels are compacted or reaped instead of accumulating indefinitely.
+  `admin reap --all-stale --idle-for <duration>` can also reclaim live-pane actors whose documents have remained idle.
+- **Controller deadline failures preserve state events (GH #142).** State-plane publication now applies to the live
+  reactive projection before returning, retries refused current-epoch persistence with bounded backoff, and keeps
+  failures visible instead of silently losing document-authority state.
+- **Pane visibility survives stale supervisor recovery.** Replacement preserves a visible, still-owned harness pane,
+  while stale or hidden ownership is diagnosed and reconciled without collapsing the document's visible tmux layout.
+- **Foreground layout supersession is terminal and actionable (GH #143).** A newer foreground layout retires the
+  passive route lease immediately, and exhausted route diagnostics identify the winning publisher/process instead of
+  repeatedly spending the convergence budget on an already-obsolete generation.
+
 ## 0.35.459
 
 - **Backlog lifecycle moves no longer strand malformed item residue.** State-based moves carry an item's full logical

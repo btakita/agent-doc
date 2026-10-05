@@ -5403,6 +5403,9 @@ struct RouteModel {
     starting_timeout: Option<(u64, String)>,
     queue_control: QueueControlState,
     recovery_marker_keys: BTreeSet<String>,
+    /// `#netadv5` R8: durable (state.db `dispatch_request_keys`) record of every
+    /// dispatch request key the controller applied.
+    applied_dispatch_keys: BTreeSet<u64>,
     supervisor_lease_generation: Option<u64>,
     /// `#jbdisprecycle`: the project supervisor is mid-`execve` recycle right now
     /// (lib-install auto-recycle / operator restart). Models the project-scoped
@@ -5425,6 +5428,7 @@ impl RouteModel {
             starting_timeout: None,
             queue_control: QueueControlState::Resumed,
             recovery_marker_keys: BTreeSet::new(),
+            applied_dispatch_keys: BTreeSet::new(),
             supervisor_lease_generation: Some(1),
             recycle_inflight: false,
             socket: SupervisorSocket::Live,
@@ -5576,6 +5580,9 @@ struct Coverage {
     route_dispatch_acceptances: usize,
     route_dispatch_proofs: usize,
     route_dispatch_coalesced: usize,
+    /// `#netadv5` R8: retransmitted dispatch copies answered from the durable
+    /// request-key record without a second injection.
+    route_dispatch_duplicates_answered: usize,
     protected_prompt_route_blocks: usize,
     /// `#rdypoll` (§D / img_52): count of REAL trigger injections into the harness
     /// composer. Mirrors the production `dispatch_inject attempt=N` ops.log marker
@@ -5871,6 +5878,7 @@ impl Coverage {
         self.route_dispatch_acceptances += other.route_dispatch_acceptances;
         self.route_dispatch_proofs += other.route_dispatch_proofs;
         self.route_dispatch_coalesced += other.route_dispatch_coalesced;
+        self.route_dispatch_duplicates_answered += other.route_dispatch_duplicates_answered;
         self.dispatch_injects += other.dispatch_injects;
         self.session_clears += other.session_clears;
         self.deferred_clear_duplicate_suppressed += other.deferred_clear_duplicate_suppressed;
@@ -5985,9 +5993,13 @@ struct SimWorld {
     ops_log: Vec<String>,
     next_prompt: usize,
     coverage: Coverage,
+    /// `#netadv4`: adversarial channel for cross-process messages. `None` is the
+    /// perfect `local` channel (every pre-existing scenario).
+    net: Option<net::SimWorldNet>,
 }
 
 mod engine;
+mod net;
 mod steering_delivery_model;
 
 #[derive(Debug)]
@@ -6319,8 +6331,12 @@ impl CorpusRun {
 fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
     let run = SimWorld::run_seed_corpus(FAST_CORPUS_SEEDS, FAST_CORPUS_STEPS).unwrap();
     run.assert_within_budget(FAST_CORPUS_BUDGET, "fast simulator corpus");
-    let coverage = run.coverage;
+    assert_fast_corpus_coverage(&run.coverage);
+}
 
+/// The fast corpus's coverage floor, shared by the `local` run and the
+/// `#netadv4` adversarial-network runs of the same schedules.
+fn assert_fast_corpus_coverage(coverage: &Coverage) {
     assert!(
         coverage.commits > 0,
         "seed corpus must include valid committed closeouts"

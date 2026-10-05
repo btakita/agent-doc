@@ -73,5 +73,6 @@ tokio = { version = "1", features = ["io-util", "net", "rt-multi-thread", "sync"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 [dev-dependencies]
+agent-doc-sim-net = { path = "../agent-doc-sim-net", version = "0.35.456" }
 rusqlite = { version = "0.40", features = ["bundled"] }
 tempfile = "3"

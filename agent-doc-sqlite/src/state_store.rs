@@ -798,6 +798,18 @@ WHERE fact_type <> 'document_authority_observed';
             timestamp INTEGER NOT NULL
         );
 
+        -- `#netadv5` R8: durable dispatch idempotency. One row per applied
+        -- dispatch request key; a retransmitted copy is answered from
+        -- `outcome_json` instead of injecting a second trigger. Survives
+        -- controller restart (unlike the in-memory command map).
+        CREATE TABLE IF NOT EXISTS dispatch_request_keys (
+            document_id TEXT NOT NULL,
+            request_key TEXT NOT NULL,
+            outcome_json TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            PRIMARY KEY (document_id, request_key)
+        );
+
         CREATE TABLE IF NOT EXISTS projection_diagnostics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             projection TEXT NOT NULL,
@@ -4281,6 +4293,47 @@ pub fn mark_open_dispatches_consumed_as_of(
     Ok(settled + swept)
 }
 
+/// How long an applied dispatch request key is remembered. Far beyond any
+/// retransmit horizon (the controller RPC retries once; a recycle handoff waits
+/// up to minutes), yet bounded so the table cannot grow without limit.
+pub const DISPATCH_REQUEST_KEY_RETENTION_SECS: i64 = 7 * 24 * 60 * 60;
+
+/// `#netadv5` R8: the recorded outcome of an applied dispatch request key.
+pub fn load_dispatch_request_outcome(
+    conn: &Connection,
+    document_id: &str,
+    request_key: &str,
+) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT outcome_json FROM dispatch_request_keys WHERE document_id = ?1 AND request_key = ?2",
+            params![document_id, request_key],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
+/// `#netadv5` R8: record the outcome of an applied dispatch request key. The
+/// first writer wins (`INSERT OR IGNORE`), so a racing duplicate can never
+/// overwrite the original outcome. Expired keys are pruned on the way.
+pub fn record_dispatch_request_outcome(
+    conn: &Connection,
+    document_id: &str,
+    request_key: &str,
+    outcome_json: &str,
+) -> Result<()> {
+    let now = sqlite_i64(timestamp_secs(), "dispatch request key timestamp")?;
+    conn.execute(
+        "DELETE FROM dispatch_request_keys WHERE timestamp < ?1",
+        params![now.saturating_sub(DISPATCH_REQUEST_KEY_RETENTION_SECS)],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO dispatch_request_keys (document_id, request_key, outcome_json, timestamp) VALUES (?1, ?2, ?3, ?4)",
+        params![document_id, request_key, outcome_json, now],
+    )?;
+    Ok(())
+}
+
 pub fn insert_dispatch_attempt_in_db(
     conn: &Connection,
     attempt: &DispatchAttemptInsert<'_>,
@@ -5462,6 +5515,23 @@ mod tests {
     // for every document — live repro 2026-07-18: 18 rows aged 34-50h kept a stale
     // `controller serve` alive across two days, so a freshly-installed binary could
     // never be promoted.
+    /// `#netadv5` R8: the first applied outcome per key wins and survives;
+    /// a racing duplicate cannot overwrite it.
+    #[test]
+    fn dispatch_request_key_records_first_outcome_durably() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        initialize_state_db(&conn)?;
+        assert_eq!(load_dispatch_request_outcome(&conn, "doc", "k1")?, None);
+        record_dispatch_request_outcome(&conn, "doc", "k1", "{\"first\":1}")?;
+        record_dispatch_request_outcome(&conn, "doc", "k1", "{\"second\":2}")?;
+        assert_eq!(
+            load_dispatch_request_outcome(&conn, "doc", "k1")?.as_deref(),
+            Some("{\"first\":1}")
+        );
+        assert_eq!(load_dispatch_request_outcome(&conn, "other", "k1")?, None);
+        Ok(())
+    }
+
     #[test]
     fn stale_unproven_dispatch_does_not_pin_the_recycle_gate() -> Result<()> {
         let conn = Connection::open_in_memory()?;

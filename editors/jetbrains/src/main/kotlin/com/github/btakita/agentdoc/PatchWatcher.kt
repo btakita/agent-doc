@@ -445,6 +445,8 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Return values match the FFI v2 contract:
      * - 0 → receipt `{"status":"rejected"}` (apply failed)
      * - 1 → receipt `{"status":"applied"}` (apply succeeded with content change)
+     * - 3 → receipt `{"status":"deferred"}` (`#netadv5` R2: bounded wait elapsed,
+     *   still running; not a refusal)
      * - 2 → receipt `{"status":"applied","reason":"already_applied"}` (patch text
      *   already present in live buffer; binary skips file-IPC fallback so a
      *   duplicate response heading cannot land)
@@ -580,17 +582,19 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val expectedHash =
                     extractStringField(json, "expected_content_hash") ?: return APPLY_FAILED
                 val expectedLen = extractIntField(json, "expected_content_len") ?: return APPLY_FAILED
+                val persistPending = java.util.concurrent.atomic.AtomicBoolean(false)
                 if (CrdtReplicaManager.persistCurrentVisibleRevision(
                         project,
                         file,
                         expectedHash,
                         expectedLen,
+                        persistPending,
                     )
                 ) {
                     recordDocumentActivity(file, "socket-persist-current")
                     APPLY_APPLIED
                 } else {
-                    APPLY_FAILED
+                    timeoutAwareReceiptUtil(pending = persistPending.get())
                 }
             }
             EditorIntent.DeliverCrdtRemote.token -> {
@@ -611,11 +615,13 @@ class PatchWatcher(private val project: Project) : Disposable {
                 // #editorreplicareregister: a reliable editor can outlive its relay
                 // membership. Only this typed recovery event republishes the current
                 // editor-owned buffer; routine projection wakeups remain drain-only.
+                val reregisterPending = java.util.concurrent.atomic.AtomicBoolean(false)
                 val reregistered = if (shouldReregisterForRemoteEventUtil(reasonToken)) {
                     CrdtReplicaManager.refreshOpenDocumentReplicaForRecoveryAndWait(
                         project,
                         file,
                         "crdt-remote-editor-replica-reregister",
+                        reregisterPending,
                     )
                 } else {
                     true
@@ -640,6 +646,14 @@ class PatchWatcher(private val project: Project) : Disposable {
                 TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "socket-crdt-remote")
                 if (reregistered) {
                     APPLY_APPLIED
+                } else if (reregisterPending.get()) {
+                    // `#netadv5` R2: the attach is still running past the bounded
+                    // wait (slow EDT / remote-dev lag). Slow is not refused.
+                    LOG.warn(
+                        "[socket] deliver_crdt_remote deferred cause=reregister_attach_pending file=$file " +
+                            "reason=${reasonToken ?: "-"}",
+                    )
+                    APPLY_DEFERRED
                 } else {
                     LOG.warn(
                         "[socket] deliver_crdt_remote rejected cause=reregister_not_attached file=$file " +
@@ -1760,6 +1774,14 @@ class PatchWatcher(private val project: Project) : Disposable {
         const val APPLY_FAILED = 0
         const val APPLY_APPLIED = 1
         const val APPLY_ALREADY_APPLIED = 2
+        /// `#netadv5` R2: receipt `{"status":"deferred"}`. The plugin's own bounded
+        /// wait elapsed while the action is still running; never a refusal.
+        const val APPLY_DEFERRED = 3
+
+        /// `#netadv5` R2: the receipt for a `false` result. A bounded wait that
+        /// elapsed is "slow, still trying" (deferred); only a real refusal is failed.
+        fun timeoutAwareReceiptUtil(pending: Boolean): Int =
+            if (pending) APPLY_DEFERRED else APPLY_FAILED
 
         /** Compute SHA256 hex of content bytes — mirrors debounce::content_hash in the Rust binary. */
         fun contentHash(content: String): String {

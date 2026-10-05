@@ -11,7 +11,7 @@ use agent_doc_controller::dispatch::{
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_recycle_inflight_message, dispatch_only_sent_console_message,
     dispatch_only_sent_log_message, dispatch_proof_failed_event,
-    recycle_inflight_unsettled_verdict, routed_dispatch_start_timeout_for_binary,
+    recycle_inflight_unsettled_verdict_with_owner, routed_dispatch_start_timeout_for_binary,
 };
 use agent_doc_harness::HarnessConfig;
 
@@ -61,7 +61,29 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
     // its own (the TTL policy stays in `agent-doc-controller`).
     loop {
         let ttl_secs = recycle_inflight_settle_ttl_secs();
-        match recycle_inflight_unsettled_verdict(marked_secs, now_secs(), ttl_secs) {
+        // `#netadv5` R9: the TTL alone is a timer; abandonment needs the
+        // supervisor to be gone.
+        let supervisor_alive =
+            agent_doc_supervisor_io::process::supervisor_pid_for_doc(Path::new(file_path)).is_some();
+        match recycle_inflight_unsettled_verdict_with_owner(
+            marked_secs,
+            now_secs(),
+            ttl_secs,
+            supervisor_alive,
+        ) {
+            RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling => {
+                return Err(recycle_inflight_refusal(
+                    file,
+                    pane,
+                    harness_binary,
+                    &reason,
+                    marked_secs,
+                    recycle_epoch,
+                    started.elapsed().as_millis(),
+                    attempt,
+                    "recycle_ttl_elapsed_supervisor_alive (retry later; if it never settles, `agent-doc admin recycle` or restart the supervisor)",
+                ));
+            }
             RecycleInflightUnsettledVerdict::ProceedAbandoned => {
                 agent_doc_ops_log_io::log_op(
                     file,

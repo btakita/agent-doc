@@ -2103,6 +2103,40 @@ impl RawMode {
     fn resume(&self) {}
 }
 
+/// `#netadv5` R8: persisted admitted-inject key for one supervisor session.
+fn durable_prompt_dispatch_key_path(project_root: &Path, session_id: &str) -> PathBuf {
+    project_root
+        .join(".agent-doc/supervisor")
+        .join(format!("inject-admission-{session_id}.key"))
+}
+
+/// A prompt inject is a duplicate when its key matches the in-memory
+/// admission or the durable one that survived a re-exec.
+fn prompt_dispatch_key_is_duplicate(memory: Option<&str>, durable: Option<&str>, key: &str) -> bool {
+    memory == Some(key) || durable == Some(key)
+}
+
+fn store_durable_prompt_dispatch_key_at(path: &Path, key: &str) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // Write-then-rename so a crash never leaves a torn key.
+    let tmp = path.with_extension("key.tmp");
+    if std::fs::write(&tmp, key).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+fn clear_durable_prompt_dispatch_key_at(path: &Path, only_key: Option<&str>) {
+    let matches = match only_key {
+        None => true,
+        Some(key) => std::fs::read_to_string(path).is_ok_and(|stored| stored.trim() == key),
+    };
+    if matches {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// Shared writer handle: outer Mutex guards replace/clear, inner Mutex guards concurrent writes.
 type SharedWriter = Mutex<Option<Arc<Mutex<SharedPtyWriter>>>>;
 
@@ -2479,6 +2513,23 @@ impl SupervisorShared {
         ))
     }
 
+    /// `#netadv5` R8: where the admitted inject key is persisted so a supervisor
+    /// re-exec (which loses process memory) still recognises a late duplicate
+    /// of an inject whose 10s effect receipt timed out after delivery.
+    fn durable_prompt_dispatch_key_path(&self) -> Option<PathBuf> {
+        let runtime = self.actor_runtime.as_ref()?;
+        Some(durable_prompt_dispatch_key_path(
+            &runtime.project_root,
+            &runtime.session_id,
+        ))
+    }
+
+    fn clear_durable_prompt_dispatch_key(&self, only_key: Option<&str>) {
+        if let Some(path) = self.durable_prompt_dispatch_key_path() {
+            clear_durable_prompt_dispatch_key_at(&path, only_key);
+        }
+    }
+
     fn begin_prompt_dispatch_projection(
         &self,
         source: &str,
@@ -2487,17 +2538,32 @@ impl SupervisorShared {
         let Some(key) = self.prompt_dispatch_projection_key(source, bytes) else {
             return agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Untracked;
         };
+        let durable_path = self.durable_prompt_dispatch_key_path();
         let mut projection = self.prompt_dispatch_projection.lock();
-        if projection
-            .as_ref()
-            .is_some_and(|current| current.key == key)
-        {
+        let durable_key = durable_path
+            .as_deref()
+            .and_then(|path| std::fs::read_to_string(path).ok());
+        if prompt_dispatch_key_is_duplicate(
+            projection.as_ref().map(|current| current.key.as_str()),
+            durable_key.as_deref().map(str::trim),
+            &key,
+        ) {
+            if projection.is_none() {
+                // Re-exec: adopt the durable admission back into memory.
+                *projection = Some(PromptDispatchProjection {
+                    key: key.clone(),
+                    admitted_at: std::time::Instant::now(),
+                });
+            }
             return agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Duplicate { key };
         }
         *projection = Some(PromptDispatchProjection {
             key: key.clone(),
             admitted_at: std::time::Instant::now(),
         });
+        if let Some(path) = durable_path.as_deref() {
+            store_durable_prompt_dispatch_key_at(path, &key);
+        }
         self.prompt_dispatch_epoch.fetch_add(1, Ordering::Relaxed);
         agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Accepted { key }
     }
@@ -2522,6 +2588,7 @@ impl SupervisorShared {
     }
 
     fn clear_prompt_dispatch_projection_on_failure(&self, key: &str) {
+        self.clear_durable_prompt_dispatch_key(Some(key));
         let mut projection = self.prompt_dispatch_projection.lock();
         if projection
             .as_ref()
@@ -2542,6 +2609,7 @@ impl SupervisorShared {
         let Some(key) = self.prompt_dispatch_projection_key(source, bytes) else {
             return false;
         };
+        self.clear_durable_prompt_dispatch_key(Some(&key));
         let mut projection = self.prompt_dispatch_projection.lock();
         if projection
             .as_ref()
@@ -2636,6 +2704,7 @@ impl SupervisorShared {
                 *self.actor_state.lock() = Some(record.state);
                 if record.state == agent_doc_controller::actor::ActorState::Ready {
                     *self.prompt_dispatch_projection.lock() = None;
+                    self.clear_durable_prompt_dispatch_key(None);
                 }
             }
             Err(err) => {

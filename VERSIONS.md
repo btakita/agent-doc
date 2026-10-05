@@ -2,6 +2,31 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.455
+
+- **An operator unstrike of a queue head survives (`#unstrikelost`).** Preflight queue maintenance re-struck any head
+  struck in the committed snapshot but live in the current queue, so an operator re-arming a struck head looked like a
+  stale editor re-emit and was silently struck again. Both the maintenance pass and the closeout merge
+  (`reconcile_list_item_lifecycle`, the 3-way `document_cell` join) now replay the operator's recorded editor ops onto
+  the committed base; a head the operator's own ops leave live stays live (`queue_operator_rearm_preserved`). Without
+  that evidence the stale-buffer re-strike guard is unchanged.
+- **Non-IPC delivery failures feed transport health (GH #131 follow-up, `#gh131nonipc`).** A divergent visible-write
+  refusal and a `serialized_atomic_write` projection retention are now typed `SocketDeliveryFailure` outcomes recorded
+  in `editor_transport_health`. An editor endpoint is treated as unregistered after 3 consecutive refusals
+  (`editor_endpoint_unregistered_after_refusals`), reset by a proven delivery, with a 60s probe so a restarted editor is
+  not locked out; an ACK no longer clears an open refusal run.
+- **A deliberately SIGTERM'd supervisor stays dead (GH #133 follow-up, `#gh133sigterm`).** The supervisor records a
+  pid+generation-scoped intentional-exit marker on SIGTERM (and on `admin kill-supervisor`), which the controller
+  watchdog honours (`reason=intentional_exit`); recycle/replace clears its own marker before cold-starting, and a crash
+  still respawns. Stashed idle owned supervisors are still not reaped (now explicit in `specs/supervisor.md`).
+- **Expired `turn_active` leases are reclaimed (GH #135).** Rows past `TURN_ACTIVE_TTL_SECS` are swept by age from
+  preflight auto-GC and `agent-doc gc`, and a read that finds an expired row deletes it, so a lease whose pane died
+  before its idle hook no longer lives forever.
+- **JetBrains restart staging can no longer delete the plugin (`#jbstagebackup`, plugin 0.2.493).** The staged
+  `action.script` now probe-unzips the package into a sibling dir before deleting the installed plugin, so a vanished
+  or corrupt zip or a full disk stops the script before any deletion. Preflight repairs doomed stagings, probe dirs and
+  orphan agent-doc zips (`jetbrains_plugin_staging_repaired`), skipping a plugins dir whose install lock is held.
+
 ## 0.35.454
 
 - **JetBrains plugin no longer vanishes on IDE restart (`#jbpluginvanish`, plugin 0.2.491).** A stale restart staging

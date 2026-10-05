@@ -16,6 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
+queue: go
 ---
 
 ## Status
@@ -563,18 +564,75 @@ It already refused `1.0` and 2^63; my first draft of the docs said otherwise, an
 **An agent-doc hook glitch, noted for the record:** a background-task completion notice was flagged by the hook as an operator chat prompt (`#chatprompt`). It wasn't operator input, so I didn't record it in the exchange.
 
 The exchange is past 480 lines; not stopping the queue for it.
+
+### Re: #lzwiremodel7, Kotlin and Rust union lowering + delta in both — opus-5-5 · 2026-10-04T23:06-04:00
+
+> **Queue prompt:**
+>
+> do [#lzwiremodel7]
+
+**Done.** Every backend now generates unions, and `delta` is generated into all four bindings that have a backend: Python, Go, Kotlin and Rust. Following the `#subagents` preset, Kotlin and Rust each had their own subagent, working in their own lazily-spec worktree and binding worktree outside the IDE tree. I merged the two generator branches and resolved the conflicts in the docs and tests. With the merged generator, all 8 generated files (receipts and delta × 4 bindings) are byte-identical. The bindings were pushed first, then spec.
+
+| Repo | Commit | What changed |
+|---|---|---|
+| lazily-rs | `598f8f2` | `src/generated/delta.rs` replaces 339 hand-written lines in `ipc.rs` |
+| lazily-kt | `6908d95` | `DeltaWireGen.kt` replaces 515 lines in `Ipc.kt`; behaviour moved to `DeltaSemantics.kt` |
+| lazily-spec | `f705efd`, `5b866d1`, `90a2498` | Kotlin backend, Rust backend, merge |
+
+**Rust: NodeAdd.key handled without changing the wire.** lazily-rs omits an absent `NodeAdd.key` in JSON and msgpack, but Postcard is positional and always writes it. serde's derive can't make a field's presence depend on the codec. So a union with an optional field now derives only `Deserialize` and gets a generated `Serialize`. Each arm writes what the derive would write, except it skips the field only when `serializer.is_human_readable()`. A new target option, `codec_aware_optional`, turns this on, and without it the backend refuses an optional field.
+- **Wire unchanged:** 12 frames, covering every variant and form, encode identically before and after in JSON, json-intern, msgpack and Postcard. A test pins the Postcard bytes.
+- **Not vacuous:** making the key emit only when present broke 2 tests, and making it always emit broke 1.
+- **Decoding:** the only behaviour change is that unknown keys in op bodies and in `Delta` are now refused; the old decoder accepted and ignored them. lazily-rs already decoded the full u64 range and checked bytes.
+
+**Kotlin: `NodeId` stays `Long`.** Kotlin gets the same `int64` option as Go: decoding refuses anything past 2^63-1, and encoding refuses negatives. Each union becomes a sealed interface with a data class per variant, and a data object for the `Opaque` unit variant. Byte arrays compare by content.
+- **Exceptions:** a new `decode_error` option routes every refusal through `IpcDecodeException.Malformed`. The old decoder raised a mix of that, bare `IllegalArgumentException` and `NumberFormatException`.
+- **Factories:** they are now extensions on the generated companion objects. The old `DeltaOp.CellSet(node, bytes)` call still works through an `invoke` operator.
+- **Behaviour change for callers:** Kotlin callers in other packages must now import these extensions, and Java callers lose them as member methods.
+- **What the old decoder accepted.** Checked against `origin/main`, it accepted all of these, and they're now refused:
+  - unknown keys;
+  - negative ids and epochs;
+  - an id, epoch or byte written as a JSON string;
+  - `1e2` as an id;
+  - `{"Opaque": ...}`;
+  - a number where `type_tag` or `key` belongs.
+- **`NodeKey.fromJson` (hand-written) now refuses a non-string.** It used to read `5` as the key `"5"`, and this also affects `CrdtOp` and `NodeSnapshot`.
+
+**Line count.** Neither binding saves lines.
+
+| | Removed | Generated | Backend added |
+|---|---|---|---|
+| Kotlin | 515 | 566 | ~430 |
+| Rust | 339 | 219 | ~200 |
+
+Kotlin also moved 146 lines of behaviour back to `DeltaSemantics.kt`. In both, the gain is one source of truth and the strictness above.
+
+**Verification:**
+- **lazily-rs `make check`:** exit 0, with 7262 tests passed and 0 failed across 936 test binaries. A new target, `test-delta-wire-codegen`, is wired into `check`, CI and ci-reach. The first run failed only because ci-reach didn't yet list that new target.
+- **lazily-kt `make check`:** exit 0, with 533 tests and 0 failures. The generated file passes `spotlessCheck` unchanged. Removing the unknown-key check from the generated decoder made a test fail.
+- **lazily-spec on the merge:** `make -k check` exits 0 with 384 tests, including 47 generator tests. `wire_codegen --check` passes for all 8 generated files.
+- **CI:** lazily-go from `#lzwiremodel6` is green. The rs, kt and spec runs for this push were in progress at closeout.
+
+**Found, not fixed:**
+- **Rust (pre-existing on `main`):** a `ShmBlobRef` with the default `backend: shm` can't be decoded back from Postcard. The field is skipped in every codec, including the positional one. The fix is the same `is_human_readable` branch, but it changes Postcard bytes for default-backend descriptors. That's a decision about whether anything stored or a peer depends on the current form, so I filed it as `#lzshmblobpostcard`.
+- **Kotlin:** `ShmBlobRef` stays hand-written and still accepts an unknown key or an integer written as a string. It's noted in the docs.
+
+**Cleanup for you:** please run `rm -rf ~/.cache/claude-qops` (Rust build caches, now about 74 GB). The delete hook blocks me from removing it.
+
+Next is the queued `release + publish`. The exchange is past 530 lines; not stopping the queue for it.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzwiremodel7]~~
+- release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwiremodel7] [recommended, lazily-spec] Seventh wire-model step: union lowering for Kotlin and Rust, then lower delta there. Kotlin: a sealed hierarchy plus a Kotlin equivalent of Go's int64 option (NodeId stays Long, refuse past 2^63-1) instead of a ULong migration. Rust: an enum with struct variants plus a codec-aware optional field (NodeAdd.key omitted in self-describing codecs, kept in Postcard), which a plain serde derive cannot express. Design: src/lazily-spec/docs/wire-codegen.md (Go union lowering; When to add a surface).
+- [ ] [#lzshmblobpostcard] [lazily-rs] A ShmBlobRef with the default backend (shm) cannot round-trip through Postcard: skip_serializing_if = BlobBackendKind::is_default omits the field in EVERY codec, but Postcard is positional, so decode hits DeserializeUnexpectedEnd. Pre-existing on main (found by #lzwiremodel7). Fix the same way as NodeAdd.key: omit only when serializer.is_human_readable(). That changes Postcard bytes for default-backend descriptors, so check whether any persisted Postcard data or peer depends on the current form first.
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

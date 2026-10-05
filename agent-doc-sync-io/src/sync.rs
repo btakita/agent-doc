@@ -2722,7 +2722,6 @@ fn sanitize_cross_root_layout(
     (sanitized, dropped)
 }
 
-#[allow(clippy::too_many_arguments)]
 /// `#netadv5` R7: acquire the sync lock and apply
 /// [`agent_doc_sync::sync_lock_disposition`]. `Ok(Some(guard))` proceeds,
 /// `Ok(None)` is the quiet safe-passive skip, and `Err` is a retryable abort:
@@ -2761,6 +2760,7 @@ pub(crate) fn acquire_sync_lock_for_mode(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_with_options_internal_at_root(
     project_root: &Path,
     col_args: &[String],

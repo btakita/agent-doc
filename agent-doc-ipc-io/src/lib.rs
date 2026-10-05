@@ -65,6 +65,12 @@ pub mod editor_target;
 const SOCKET_FILENAME_PREFIX: &str = "ipc";
 const LEGACY_SOCKET_FILENAME_PREFIX: &str = "agent-doc";
 
+/// `#netadv5` RTT budget: serial round trips one editor intent costs over this
+/// transport — the `ipc_hello` build handshake, then the intent and its
+/// receipt(s). Pinned by `editor_intent_costs_two_serial_round_trips`; hot-path
+/// budgets elsewhere multiply this per editor send.
+pub const EDITOR_INTENT_SERIAL_ROUND_TRIPS: usize = 2;
+
 /// Optional project-specific directory for editor AF_UNIX sockets.
 ///
 /// Coder volumes backed by 9p or a network filesystem may persist
@@ -1921,6 +1927,78 @@ mod tests {
 
         assert_eq!(prune_stale_editor_sockets(dir.path()).unwrap(), 1);
         assert!(!stale.exists());
+    }
+
+    /// Raw editor endpoint that counts the client's serial round trips: every
+    /// request line the client writes and then waits on is one round trip.
+    #[cfg(unix)]
+    fn counting_editor_endpoint(
+        root: &Path,
+        replies_per_message: Vec<serde_json::Value>,
+    ) -> (
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        let path = socket_path(root);
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let connections = std::sync::Arc::new(AtomicUsize::new(0));
+        let round_trips = std::sync::Arc::new(AtomicUsize::new(0));
+        let (c, r) = (connections.clone(), round_trips.clone());
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { return };
+                c.fetch_add(1, SeqCst);
+                let mut writer = stream.try_clone().unwrap();
+                let mut reader = BufReader::new(stream);
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    r.fetch_add(1, SeqCst);
+                    let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+                    let replies = if value["type"] == "ipc_hello" {
+                        vec![ipc_hello_ack_message(&local_ipc_identity())]
+                    } else {
+                        replies_per_message.clone()
+                    };
+                    for reply in replies {
+                        writeln!(writer, "{reply}").unwrap();
+                    }
+                }
+            }
+        });
+        (connections, round_trips)
+    }
+
+    /// `#netadv5` RTT budget: one editor intent (e.g. `deliver_crdt_remote`,
+    /// `persist_current`, `apply_canonical`) costs exactly ONE connection and
+    /// TWO serial round trips — the build handshake and the intent itself. An
+    /// early `accepted` receipt rides the same round trip; it must never become
+    /// a third request.
+    #[cfg(unix)]
+    #[test]
+    fn editor_intent_costs_two_serial_round_trips() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let (connections, round_trips) = counting_editor_endpoint(
+            &root,
+            vec![
+                serde_json::json!({"type": "receipt", "status": "accepted"}),
+                serde_json::json!({"type": "receipt", "status": "applied"}),
+            ],
+        );
+        let msg = serde_json::json!({"type": "deliver_crdt_remote", "file": "/tmp/plan.md"});
+        send_message(&root, &msg).unwrap().expect("terminal receipt");
+        assert_eq!(connections.load(SeqCst), 1, "one connection per intent");
+        assert_eq!(
+            round_trips.load(SeqCst),
+            EDITOR_INTENT_SERIAL_ROUND_TRIPS,
+            "handshake + intent; the early receipt is not a round trip"
+        );
     }
 
     /// `#netadv5` R3: a slow peer whose connect exceeds the 3s watchdog must

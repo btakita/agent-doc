@@ -3164,6 +3164,34 @@ pub fn pass_through_stranded_draft_log_line(facts: PassThroughStrandedDraftLogFa
     )
 }
 
+/// `#netadv5` R8: what a route does when it pressed `Enter` on a stranded
+/// draft and the controller did not project admission within the bounded wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrandedDraftUnobservedAdmission {
+    /// The composer no longer holds this trigger: the `Enter` was consumed and
+    /// the turn is (or will be) admitted. Report submitted-unproven; never
+    /// inject a second trigger.
+    SubmittedUnproven,
+    /// The composer still holds this exact trigger: the `Enter` was not
+    /// consumed yet. Retry later (the next route re-presses `Enter` on the same
+    /// draft); appending a fresh trigger would duplicate the prompt.
+    RetryLater,
+}
+
+/// A slow admission projection is not proof of non-admission. Only the pane
+/// re-observed still holding the identical draft is evidence the submit did
+/// not land, and even then the remedy is a retry, never a second trigger.
+pub fn stranded_draft_unobserved_admission_followup(
+    after: PreDispatchStrandedDraftAction,
+) -> StrandedDraftUnobservedAdmission {
+    match after {
+        PreDispatchStrandedDraftAction::ResubmitStrandedDraft => {
+            StrandedDraftUnobservedAdmission::RetryLater
+        }
+        _ => StrandedDraftUnobservedAdmission::SubmittedUnproven,
+    }
+}
+
 /// What a routed dispatch should do about the composer state it observes
 /// *before* it injects anything (`#strandeddraftresubmit`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4197,6 +4225,22 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(!dispatch_should_coalesce_in_flight(true, true));
         assert!(!dispatch_should_coalesce_in_flight(false, false));
         assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+
+    #[test]
+    fn stranded_draft_admission_timeout_never_authorizes_a_second_trigger() {
+        use PreDispatchStrandedDraftAction as A;
+        assert_eq!(
+            stranded_draft_unobserved_admission_followup(A::ResubmitStrandedDraft),
+            StrandedDraftUnobservedAdmission::RetryLater
+        );
+        for consumed in [A::DispatchFresh, A::DeferPaneBusy, A::ObserveUnavailable] {
+            assert_eq!(
+                stranded_draft_unobserved_admission_followup(consumed),
+                StrandedDraftUnobservedAdmission::SubmittedUnproven,
+                "{consumed:?}"
+            );
+        }
     }
 
     #[test]

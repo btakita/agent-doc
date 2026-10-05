@@ -753,11 +753,12 @@ fn clear_agent_owned_composer_notice(
 ///
 /// Returns `Ok(Some(proof))` when the stranded draft was submitted and the
 /// controller then projected turn admission — the routed request is running, so
-/// the caller must NOT inject. Returns `Ok(None)` in every other case (nothing
-/// stranded, unobservable pane, busy pane, submit-key failure, or no admission
-/// within the bounded window) so the normal dispatch path runs exactly as
-/// before. Falling through is deliberately safe: the post-dispatch repair still
-/// owns a draft this call creates.
+/// the caller must NOT inject. When `Enter` was sent but admission was not
+/// observed in the bounded window (`#netadv5` R8), it returns submitted-unproven
+/// if the draft left the composer, or a retryable error if the identical draft
+/// is still there — never `Ok(None)`, which would inject a second trigger.
+/// Returns `Ok(None)` only when nothing was submitted (nothing stranded,
+/// unobservable pane, busy pane, submit-key failure).
 fn try_pre_dispatch_stranded_draft_submit(
     tmux: &Tmux,
     file: &Path,
@@ -846,19 +847,43 @@ fn try_pre_dispatch_stranded_draft_submit(
         }
         None => {
             // "Could not observe admission" must stay distinct from "the draft
-            // was not submitted" (`#idlerevisionreactive`). Neither claims the
-            // dispatch, so the normal path runs and owns the outcome.
+            // was not submitted" (`#idlerevisionreactive`).
+            //
+            // `#netadv5` R8: falling through to the normal path used to send the
+            // FULL trigger again, so a slow admission projection (a loaded
+            // workspace, Coder + Zscaler) duplicated the prompt. Re-observe the
+            // composer instead: only the identical draft still sitting there is
+            // evidence the Enter did not land, and even then the remedy is a
+            // retry of the same Enter, never a second trigger.
+            let after = observe_pre_dispatch_stranded_draft(tmux, pane, harness, &trigger);
+            let followup =
+                agent_doc_controller::dispatch::stranded_draft_unobserved_admission_followup(after);
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_pre_dispatch_stranded_draft_admission_unobserved file={} pane={} harness={} timeout_ms={} note=falling through to the normal dispatch path",
+                    "route_pre_dispatch_stranded_draft_admission_unobserved file={} pane={} harness={} timeout_ms={} after={} followup={:?} note=never re-injecting the trigger",
                     file.display(),
                     pane,
                     harness.binary,
                     timeout.as_millis(),
+                    after.as_str(),
+                    followup,
                 ),
             );
-            Ok(None)
+            match followup {
+                agent_doc_controller::dispatch::StrandedDraftUnobservedAdmission::SubmittedUnproven => {
+                    Ok(Some(RoutedDispatchStartProof::TransportSubmittedOnly))
+                }
+                agent_doc_controller::dispatch::StrandedDraftUnobservedAdmission::RetryLater => {
+                    anyhow::bail!(
+                        "pane {pane} composer still holds the unsubmitted {} trigger after Enter; \
+                         admission was not observed within {}ms. Retry later — route never \
+                         appends a second trigger to a stranded draft.",
+                        file.display(),
+                        timeout.as_millis()
+                    )
+                }
+            }
         }
     }
 }

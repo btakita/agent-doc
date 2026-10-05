@@ -22,6 +22,7 @@ pub mod idle_reconcile;
 pub mod idle_revision;
 pub mod idle_watch;
 pub mod input;
+pub mod intentional_exit;
 pub mod ipc_protocol;
 pub mod lifecycle;
 pub mod recycle_inflight;

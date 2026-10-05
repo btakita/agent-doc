@@ -14783,6 +14783,32 @@ fn controller_supervisor_watchdog_tick(
             halt_notified.remove(&document_id);
             continue;
         }
+        // Gate: a deliberately terminated supervisor is not a crash
+        // (`#gh133sigterm`, GH #133 follow-up). Its SIGTERM handler (or a
+        // requested self-kill) recorded a marker naming exactly this pid and
+        // generation; the controller replacement path clears the marker its own
+        // kill produced, so only operator intent reaches here.
+        let intentional_exit = supervisor_watchdog_intentional_exit_decision(
+            &conn,
+            &document_id,
+            supervisor_pid,
+            record.generation,
+        );
+        if !intentional_exit.allows_restart() {
+            if binding_skip_notified.insert(format!("{document_id}:{supervisor_pid}")) {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!(
+                        "controller_supervisor_watchdog_skip document={document_id} session={} pane={} generation={} dead_pid={supervisor_pid} reason={}",
+                        record.session_id,
+                        record.pane_id,
+                        record.generation,
+                        intentional_exit.as_str(),
+                    ),
+                );
+            }
+            continue;
+        }
         // Gate: a live tmux pane must still exist (the pane-loss path is owned by
         // route/sync `record_session_loss`, not the crash watchdog), and it must
         // still hold a visible column (`#watchdogbindinglive`, GH #133).
@@ -14938,6 +14964,24 @@ fn controller_supervisor_watchdog_tick(
             }
         }
     }
+}
+
+/// `#gh133sigterm`: read the durable intentional-exit marker for a dead
+/// supervisor. An unreadable row cannot prove intent, so it reads as a crash.
+fn supervisor_watchdog_intentional_exit_decision(
+    conn: &state_store::Connection,
+    document_id: &str,
+    dead_pid: u32,
+    generation: u64,
+) -> agent_doc_supervisor::intentional_exit::IntentionalExitDecision {
+    agent_doc_supervisor::intentional_exit::watchdog_intentional_exit_decision(
+        agent_doc_supervisor_io::intentional_exit::load_intentional_exit_from_db(conn, document_id)
+            .ok()
+            .flatten()
+            .as_ref(),
+        dead_pid,
+        generation,
+    )
 }
 
 /// `#watchdogbindinglive` (GH #133): observe whether `pane` sits in a `stash`
@@ -27074,6 +27118,11 @@ fn drive_supervisor_replacement_background(
         ),
     );
     reap_dead_supervisor_socket(&work.file, &socket);
+    // `#gh133sigterm`: the kill above was controller intent to CONTINUE this
+    // document, not operator intent to stop it. Clear the marker the old
+    // supervisor's SIGTERM handler (or self-kill) recorded, so a failed cold
+    // start below still leaves the crash watchdog able to recover it.
+    clear_replacement_intentional_exit(&work);
     let pane = cold_start_supervisor_replacement(&work)?;
     agent_doc_ops_log_io::log_op(
         &work.file,
@@ -27088,6 +27137,35 @@ fn drive_supervisor_replacement_background(
         ),
     );
     Ok(())
+}
+
+/// `#gh133sigterm`: clear the intentional-exit marker left by the supervisor a
+/// controller replacement just stopped. Best effort: a failure only means the
+/// watchdog keeps honouring a pid that is already dead and replaced.
+#[cfg_attr(all(feature = "test-support", not(test)), allow(dead_code))]
+fn clear_replacement_intentional_exit(work: &SupervisorReplacementWork) {
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &work.project_root,
+        &work.file.to_string_lossy(),
+    );
+    let outcome = agent_doc_supervisor_io::intentional_exit::clear_intentional_exit(
+        &work.project_root,
+        &document_id,
+    );
+    agent_doc_ops_log_io::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_intentional_exit_cleared session={} generation={} receipt_id={} outcome={}",
+            work.session_id,
+            work.generation,
+            work.operator_receipt_id,
+            match &outcome {
+                Ok(true) => "cleared".to_string(),
+                Ok(false) => "absent".to_string(),
+                Err(err) => format!("failed error={err}"),
+            }
+        ),
+    );
 }
 
 #[cfg(not(any(test, feature = "test-support")))]
@@ -28018,6 +28096,98 @@ mod tests {
             &resumed
         )));
         assert!(!supervisor_watchdog_blocked_by_queue_control(None));
+    }
+
+    fn intentional_exit_fixture() -> (tempfile::TempDir, PathBuf, String) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, "# doc\n").unwrap();
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &file.to_string_lossy(),
+        );
+        (dir, file, document_id)
+    }
+
+    fn sigterm_identity(
+        root: &Path,
+        document_id: &str,
+        pid: u32,
+    ) -> agent_doc_supervisor_io::intentional_exit::IntentionalExitIdentity {
+        agent_doc_supervisor_io::intentional_exit::IntentionalExitIdentity {
+            project_root: root.to_path_buf(),
+            document_id: document_id.to_string(),
+            supervisor_pid: pid,
+            generation: 5,
+            pane_id: "%3".to_string(),
+            session_id: "session".to_string(),
+        }
+    }
+
+    /// `#gh133sigterm`: a supervisor whose SIGTERM handler recorded a marker for
+    /// exactly this dead pid + generation is NOT respawned by the watchdog,
+    /// while a crash (no marker) still is.
+    #[test]
+    fn supervisor_watchdog_honours_deliberate_sigterm_but_restarts_a_crash() {
+        let (dir, _file, document_id) = intentional_exit_fixture();
+        let conn = state_store::open_state_db(dir.path()).unwrap();
+
+        let crash = supervisor_watchdog_intentional_exit_decision(&conn, &document_id, 4242, 5);
+        assert!(
+            crash.allows_restart(),
+            "crash without a marker must respawn"
+        );
+
+        agent_doc_supervisor_io::intentional_exit::record_intentional_exit(
+            &sigterm_identity(dir.path(), &document_id, 4242),
+            "SIGTERM",
+        )
+        .unwrap();
+        let deliberate =
+            supervisor_watchdog_intentional_exit_decision(&conn, &document_id, 4242, 5);
+        assert_eq!(
+            deliberate,
+            agent_doc_supervisor::intentional_exit::IntentionalExitDecision::Intentional
+        );
+        assert!(
+            !deliberate.allows_restart(),
+            "deliberate SIGTERM must not respawn"
+        );
+
+        // The marker is pid-scoped: a later generation's crash still respawns.
+        let later = supervisor_watchdog_intentional_exit_decision(&conn, &document_id, 5151, 6);
+        assert!(later.allows_restart());
+    }
+
+    /// `#gh133sigterm`: the controller replacement path SIGTERMs the old
+    /// supervisor and then cold-starts the new one. It clears the marker its own
+    /// kill produced, so replacement is never mistaken for operator intent.
+    #[test]
+    fn controller_replacement_clears_intentional_exit_before_cold_start() {
+        let (dir, file, document_id) = intentional_exit_fixture();
+        agent_doc_supervisor_io::intentional_exit::record_intentional_exit(
+            &sigterm_identity(dir.path(), &document_id, 4242),
+            "SIGTERM",
+        )
+        .unwrap();
+        let work = SupervisorReplacementWork {
+            project_root: dir.path().to_path_buf(),
+            file,
+            session_id: "session".to_string(),
+            pane_id: "%3".to_string(),
+            generation: 5,
+            mode: "continue".to_string(),
+            force: true,
+            operator_receipt_id: 1,
+        };
+        clear_replacement_intentional_exit(&work);
+        let conn = state_store::open_state_db(dir.path()).unwrap();
+        assert!(
+            supervisor_watchdog_intentional_exit_decision(&conn, &document_id, 4242, 5)
+                .allows_restart(),
+            "a controller replacement is not operator intent"
+        );
     }
 
     #[test]

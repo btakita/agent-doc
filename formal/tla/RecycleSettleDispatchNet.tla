@@ -28,12 +28,14 @@ KNOBS (one wedge each; scripts/run_tla.sh asserts every wedge MUST violate)
                         unreachable controller is not a pending-recycle
                         verdict; back off and re-arm
                         (RecycleSettleDispatchNetUnreachableWedge).
-  TtlIsProof            R9 (code owned by #netadv5): an elapsed TTL is read as
-                        "the settle was lost" while the supervisor is alive and
-                        about to settle, so the trigger is injected across the
-                        hot-reload boundary (RecycleSettleDispatchNetTtlWedge).
-                        FALSE = abandon only on positive evidence that the
-                        supervisor died (`#recycleinflightwedge`).
+  TtlIsProof            R9 (fixed in code by #netadv5): an elapsed TTL is read
+                        as "the settle was lost" while the supervisor is alive
+                        and about to settle, so the trigger is injected across
+                        the hot-reload boundary (RecycleSettleDispatchNetTtlWedge).
+                        FALSE = the shipped fix: abandon only once the TTL has
+                        elapsed AND the supervisor process is gone; with it
+                        alive the TTL ends the wait in a RETRYABLE refusal
+                        (`RefuseOwnerStillRecycling`), never an injection.
 
 Each RPC is one request per connection (`rpc.rs`), so a reply can only answer
 the request that opened its connection. `Arm` opens a new connection: it flips
@@ -51,16 +53,18 @@ VARIABLES
     net, gen, delivered,   \* NetChannel (CLI <-> controller)
     recycle,      \* durable: "inflight" | "settled"
     supAlive,     \* the recycling supervisor is alive (it will settle)
-    ttlFired,     \* PRE-FIX only: an arbitrary local "TTL elapsed" event
+    ttlFired,     \* the local "TTL elapsed" event (a bound on waiting only)
     gate,         \* "waiting" | "delivered" | "proceeded" | "refused"
     outstanding,  \* the CLI has an RPC in flight
     conn,         \* the current RPC connection (alternating identity)
     lost,         \* consecutive lost round trips (0..2)
-    injectedLive  \* history: a trigger was injected while a LIVE recycle was inflight
+    injectedLive, \* history: a trigger was injected while a LIVE recycle was inflight
+    lostRefusal   \* history: a stamped recycle was refused on lost round trips
 
 C == INSTANCE NetChannel
 
-protoVars == <<recycle, supAlive, ttlFired, gate, outstanding, conn, lost, injectedLive>>
+protoVars == <<recycle, supAlive, ttlFired, gate, outstanding, conn, lost,
+               injectedLive, lostRefusal>>
 vars == <<net, gen, delivered, protoVars>>
 
 Conns == {0, 1}
@@ -81,6 +85,7 @@ TypeOK ==
     /\ conn \in Conns
     /\ lost \in 0..2
     /\ injectedLive \in BOOLEAN
+    /\ lostRefusal \in BOOLEAN
 
 Init ==
     /\ C!ChannelInit
@@ -92,6 +97,7 @@ Init ==
     /\ conn = 0
     /\ lost = 0
     /\ injectedLive = FALSE
+    /\ lostRefusal = FALSE
 
 ---------------------------------------------------------------------------
 (* SUPERVISOR. It settles (weakly fair) unless it dies first (environment). *)
@@ -100,22 +106,22 @@ Settle ==
     /\ supAlive
     /\ recycle' = "settled"
     /\ UNCHANGED <<net, gen, delivered, supAlive, ttlFired, gate, outstanding,
-                   conn, lost, injectedLive>>
+                   conn, lost, injectedLive, lostRefusal>>
 
 SupervisorDies ==
     /\ recycle = "inflight"
     /\ supAlive
     /\ supAlive' = FALSE
     /\ UNCHANGED <<net, gen, delivered, recycle, ttlFired, gate, outstanding,
-                   conn, lost, injectedLive>>
+                   conn, lost, injectedLive, lostRefusal>>
 
-\* PRE-FIX clock: the TTL may elapse at ANY point, alive supervisor or not.
+\* The TTL may elapse at ANY point, alive supervisor or not. Weakly fair:
+\* time passes, but no safety argument depends on WHEN.
 TtlElapses ==
-    /\ TtlIsProof
     /\ ~ttlFired
     /\ ttlFired' = TRUE
     /\ UNCHANGED <<net, gen, delivered, recycle, supAlive, gate, outstanding,
-                   conn, lost, injectedLive>>
+                   conn, lost, injectedLive, lostRefusal>>
 
 AdversaryStep == C!Adversary /\ UNCHANGED protoVars
 
@@ -131,7 +137,8 @@ Arm ==
     /\ conn' = 1 - conn
     /\ net' = C!Put([m \in DOMAIN net \ OnConn(conn) |-> net[m]], Req(1 - conn))
     /\ delivered' = {}
-    /\ UNCHANGED <<gen, recycle, supAlive, ttlFired, gate, lost, injectedLive>>
+    /\ UNCHANGED <<gen, recycle, supAlive, ttlFired, gate, lost, injectedLive,
+                   lostRefusal>>
 
 \* The RPC wait expired with nothing left in flight: a lost round trip.
 GiveUp ==
@@ -141,6 +148,7 @@ GiveUp ==
     /\ outstanding' = FALSE
     /\ lost' = IF lost < 2 THEN lost + 1 ELSE 2
     /\ gate' = IF UnreachableIsRefusal /\ lost + 1 >= 2 THEN "refused" ELSE gate
+    /\ lostRefusal' = (lostRefusal \/ (gate' = "refused" /\ Stamped))
     /\ UNCHANGED <<net, gen, delivered, recycle, supAlive, ttlFired, conn,
                    injectedLive>>
 
@@ -151,19 +159,33 @@ Unstamped ==
     /\ recycle = "inflight"
     /\ gate' = "refused"
     /\ UNCHANGED <<net, gen, delivered, recycle, supAlive, ttlFired,
-                   outstanding, conn, lost, injectedLive>>
+                   outstanding, conn, lost, injectedLive, lostRefusal>>
 
-\* Proceed past a recycle whose settle was LOST. Fixed: only on positive
-\* evidence the supervisor died. Pre-fix: on the TTL alone.
+\* Proceed past a recycle whose settle was LOST: the TTL elapsed and (R9) the
+\* supervisor process is gone. Pre-R9: on the TTL alone.
 Abandon ==
     /\ gate = "waiting"
     /\ Stamped
     /\ recycle = "inflight"
-    /\ IF TtlIsProof THEN ttlFired ELSE ~supAlive
+    /\ ttlFired
+    /\ TtlIsProof \/ ~supAlive
     /\ gate' = "proceeded"
     /\ injectedLive' = (injectedLive \/ supAlive)
     /\ UNCHANGED <<net, gen, delivered, recycle, supAlive, ttlFired,
-                   outstanding, conn, lost>>
+                   outstanding, conn, lost, lostRefusal>>
+
+\* R9: past the TTL with the supervisor still alive, stop waiting with a
+\* retryable refusal ("retry later"). Safe: nothing is injected.
+RefuseOwnerStillRecycling ==
+    /\ gate = "waiting"
+    /\ Stamped
+    /\ recycle = "inflight"
+    /\ ttlFired
+    /\ supAlive
+    /\ ~TtlIsProof
+    /\ gate' = "refused"
+    /\ UNCHANGED <<net, gen, delivered, recycle, supAlive, ttlFired,
+                   outstanding, conn, lost, injectedLive, lostRefusal>>
 
 ---------------------------------------------------------------------------
 (* RECEIVERS.                                                               *)
@@ -185,7 +207,7 @@ GateRecvReply(c, p) ==
                           /\ injectedLive' = (injectedLive \/ recycle = "inflight")
                      ELSE UNCHANGED <<gate, injectedLive>>
           ELSE UNCHANGED <<outstanding, lost, gate, injectedLive>>
-    /\ UNCHANGED <<recycle, supAlive, ttlFired, conn>>
+    /\ UNCHANGED <<recycle, supAlive, ttlFired, conn, lostRefusal>>
 
 Done == Terminal /\ UNCHANGED vars
 
@@ -198,6 +220,7 @@ Next ==
     \/ GiveUp
     \/ Unstamped
     \/ Abandon
+    \/ RefuseOwnerStillRecycling
     \/ \E c \in Conns : ControllerRecvReq(c)
     \/ \E c \in Conns, p \in {"inflight", "settled"} : GateRecvReply(c, p)
     \/ Done
@@ -206,6 +229,8 @@ Spec ==
     /\ Init
     /\ [][Next]_vars
     /\ WF_vars(Settle)
+    /\ WF_vars(TtlElapses)
+    /\ WF_vars(RefuseOwnerStillRecycling)
     /\ WF_vars(Arm)
     /\ WF_vars(GiveUp)
     /\ WF_vars(Unstamped)
@@ -215,8 +240,10 @@ Spec ==
 ---------------------------------------------------------------------------
 (* SAFETY (no fairness, full adversary).                                    *)
 
-\* The atomic module's main invariant survives a lossy network.
-StampedRecycleNeverRefuses == gate = "refused" => ~Stamped
+\* The atomic module's main invariant survives a lossy network: a stamped
+\* recycle is refused only by the R9 retry-later verdict (TTL elapsed while
+\* its supervisor is still alive), never by lost messages.
+StampedRecycleNeverRefuses == ~lostRefusal
 
 \* The gate exists so no trigger is typed across a LIVE hot-reload boundary.
 NeverInjectsAcrossLiveRecycle == ~injectedLive

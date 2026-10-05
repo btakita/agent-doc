@@ -17,6 +17,9 @@ THE HOPS (audit P3, P4, P2/P8, docs/reference/network-channel-audit.md)
                                      content it proves (cumulative hash)
   controller --Recover----> editor   `claim_nonconverging_recovery` re-register
   editor     --Refuse-----> controller the endpoint ANSWERED and refused
+  editor     --Deferred---> controller `{"status":"deferred"}` (#netadv5 R2): a
+                                     slow attach or a coalesced re-register;
+                                     the endpoint is still trying
   controller --Save(v)----> editor   `persist_current` for the receipted cut
   editor     --Saved(v)---> controller native-save receipt (`disk_persisted`)
 
@@ -46,9 +49,12 @@ KNOBS (one wedge each; scripts/run_tla.sh asserts every wedge MUST violate)
                         in code: cumulative content-hash ACK, hash/len CAS on
                         save). FALSE = a stale ACK or save receipt for an older
                         cut is applied to the newer one: SAFETY wedge.
-  TimeoutIsRefusal  R2/F2 (owned by #netadv5): an unanswered recovery is
-                        classified as a definitive refusal. Safety wedge:
-                        a still-serving replica is dropped from the cut.
+  TimeoutIsRefusal  R2/F2 (fixed in code by #netadv5): an unanswered recovery,
+                        or a `deferred` receipt from a slow but serving
+                        endpoint, is classified as a definitive refusal.
+                        Safety wedge: a still-serving replica is dropped from
+                        the cut. FALSE = the shipped `deferred` status, which
+                        never reaches `DropFromDeliveryCut`.
 
 Safety holds under `[][Next]_vars` alone (no fairness, full adversary).
 Liveness holds under `FairLossy` plus weak fairness on the controller's own
@@ -88,10 +94,11 @@ Versions == 1..MaxVersion
 Wake == [t |-> "wake", v |-> 0]
 Recover == [t |-> "recover", v |-> 0]
 Refuse == [t |-> "refuse", v |-> 0]
+Deferred == [t |-> "deferred", v |-> 0]
 Ack(v) == [t |-> "ack", v |-> v]
 Save(v) == [t |-> "save", v |-> v]
 Saved(v) == [t |-> "saved", v |-> v]
-Msgs == {Wake, Recover, Refuse}
+Msgs == {Wake, Recover, Refuse, Deferred}
         \cup {Ack(v) : v \in Versions}
         \cup {Save(v) : v \in Versions}
         \cup {Saved(v) : v \in Versions}
@@ -264,8 +271,10 @@ EditorRecvWake ==
 EditorRecvRecover ==
     /\ Recover \in C!InFlight
     /\ IF mode = "serves"
-          THEN /\ ev' = cv     \* re-register: state-vector bootstrap
-               /\ C!DeliverAndSend(Recover, Ack(cv))
+          THEN \/ /\ ev' = cv     \* re-register: state-vector bootstrap
+                  /\ C!DeliverAndSend(Recover, Ack(cv))
+               \/ /\ C!DeliverAndSend(Recover, Deferred)   \* slow attach
+                  /\ UNCHANGED ev
           ELSE /\ C!DeliverAndSend(Recover, Refuse)
                /\ UNCHANGED ev
     /\ UNCHANGED <<cv, pending, streak, member, signaled, refused, saveSentV,
@@ -298,6 +307,15 @@ ControllerRecvRefuse ==
     /\ UNCHANGED <<cv, pending, streak, member, signaled, saveSentV, settledV,
                    mode, ev, diskV>>
 
+\* A deferred receipt is "slow, still trying": no verdict. Pre-R2 it was read
+\* as a rejection.
+ControllerRecvDeferred ==
+    /\ Deferred \in C!InFlight
+    /\ C!Deliver(Deferred)
+    /\ refused' = (refused \/ TimeoutIsRefusal)
+    /\ UNCHANGED <<cv, pending, streak, member, signaled, saveSentV, settledV,
+                   mode, ev, diskV>>
+
 ControllerRecvSaved(v) ==
     /\ Saved(v) \in C!InFlight
     /\ C!Deliver(Saved(v))
@@ -311,6 +329,7 @@ Recv ==
     \/ \E v \in Versions : EditorRecvSave(v)
     \/ \E v \in Versions : ControllerRecvAck(v)
     \/ ControllerRecvRefuse
+    \/ ControllerRecvDeferred
     \/ \E v \in Versions : ControllerRecvSaved(v)
 
 Next ==

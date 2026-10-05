@@ -170,6 +170,9 @@ must_violate=(
     RecycleSettleDispatch:RecycleSettleDispatchWedge
     RecycleSettleDispatch:RecycleSettleDispatchReach
     RecycleSettleDispatch:RecycleSettleDispatchUnstampedReach
+    # `#netadv5` R9: an elapsed TTL is not proof the settle was lost; with the
+    # supervisor alive, proceeding would inject across a live hot-reload.
+    RecycleSettleDispatch:RecycleSettleDispatchTtlWedge
     # GH #136 — a stale stash supervisor pane admitted as a layout column on the
     # strength of a recycle request that was never consumed. One wedge PER FIX
     # (overdue bound, no-widen, first-unconsumed clock, non-lapsing fan-out,

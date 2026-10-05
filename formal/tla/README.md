@@ -301,15 +301,21 @@ modules prove the transport around it.
 
 | Module | Hops | Wedges (each MUST violate) |
 |---|---|---|
-| `VisibleDeliveryReceiptNet` | wake, projection ACK, recovery request/refusal, native save/receipt | `WakeOneShot` (F9), `RecoveryLatch` (F10), `SaveOneShot` (F13/F12), `StaleAck` (receipts keyed by content), `TimeoutRefusal` (R2, fix in `#netadv5`) |
-| `EditorReplicaStrandNet` | re-registration request/receipt | `Latch` (ERS-1: a budget whose receipts were all lost latches self-heal forever), `GiveUpRefusal` (R2/R3 class, `#netadv5`) |
-| `RecycleSettleDispatchNet` | settle-wait RPC, one request per connection | `Unreachable` (RSD-1: two lost round trips refused a pending recycle), `Ttl` (R9: TTL read as proof, `#netadv5`) |
+| `VisibleDeliveryReceiptNet` | wake, projection ACK, recovery request with refused/`deferred` answers, native save/receipt | `WakeOneShot` (F9), `RecoveryLatch` (F10), `SaveOneShot` (F13/F12), `StaleAck` (receipts keyed by content), `TimeoutRefusal` (R2: a timeout or `deferred` read as a refusal; fixed by `#netadv5`) |
+| `EditorReplicaStrandNet` | re-registration request with refused/accepted/`deferred` answers | `Latch` (ERS-1: a budget whose receipts were all lost latches self-heal forever), `GiveUpRefusal` (R2/R3 class, fixed by `#netadv5`) |
+| `RecycleSettleDispatchNet` | settle-wait RPC, one request per connection | `Unreachable` (RSD-1: two lost round trips refused a pending recycle), `Ttl` (R9: TTL read as proof; fixed by `#netadv5`, abandonment needs the supervisor gone) |
 | `AgentDocCloseoutNet` | closeout owner claim and heartbeat | `OneShotClaim` (F4), `HeartbeatBreak` (F5a), `IgnoreLoss` (F5b), `Fence` (ADC-fence, not fixed: needs a commit fenced by owner id; `FencedTarget` is the passing target) |
 | `PassiveTmuxSyncNet` | editor focus observation and its reply | `AdvanceFirst` (F14/F15: tracking advances before the swap), `Reorder` (sequence fence) |
 | `LifecycleSequence` | lifecycle, heartbeat and queue-control level updates | `Reorder` (SIM-F1/SIM-F2: generation-only fence, last arrival wins) |
 
 Each module also has a reach config that must be violated, so the happy path
 stays reachable over the lossy channel.
+
+The atomic `RecycleSettleDispatch` no longer treats an elapsed TTL as a fact
+(`#netadv5` R9): abandonment needs the supervisor to be gone, and past the TTL
+with it alive the gate refuses with a retryable verdict
+(`RefuseOwnerStillRecycling`). `RecycleSettleDispatchTtlWedge` restores the old
+reading and must violate `NeverProceedsPastALiveRecycle`.
 
 ## Network channel assumptions
 
@@ -352,7 +358,7 @@ For the D/Du/R/Rc column (Drop, Duplicate, Reorder, Reconnect): `y` = yes,
 | PlanClosureContract | shared sets; `Closeout` reads `planned` (129-131) | - / - / - / - | none | n/a |
 | ReactiveTopology | in-process; effect + receipt in one action (73-88) | - / p / p (generation fence 78, 90-96) / - | none (MaxGeneration bounds the environment) | n/a (in-process) |
 | RealtimeSteeringStop | `StopHook` reads `steering` SV (70-77) | - / - / - / - | none | n/a |
-| RecycleSettleDispatch | settle-wait RPC = SV read of supervisor `recycle` that always returns by `WaitBudget` (91-99) | - / - / - / p | **`Ttl`, `WaitBudget`, `ASSUME Ttl > WaitBudget` (44-56)**; `Abandoned` treats `age > Ttl` as proof of loss (114-119) | **yes**, and it treats elapsed time as fact |
+| RecycleSettleDispatch | settle-wait RPC = SV read of supervisor `recycle` that always returns by `WaitBudget` (91-99) | - / - / - / p | **`Ttl`, `WaitBudget`, `ASSUME Ttl > WaitBudget` (44-56)**; `Abandoned` treated `age > Ttl` as proof of loss (114-119). **Updated `#netadv3`:** abandonment now needs the supervisor gone; the TTL only ends a wait in a retryable refusal. Network re-model: `RecycleSettleDispatchNet` | yes for the transport (see the Net module) |
 | RefusedSaveOperatorAction | `RecoveryPass` request + instant nondeterministic answer (129-135) | p (`delivery_failed_to_all`, 94) / - / - / - | `MaxPasses` (88), for finiteness | yes. Every refusal is assumed authentic |
 | ResponseCheckpoint | `visibleSeq := producedSeq` instantly visible (42-44); `Seal` SV (53-54) | - / p (46-48) / - / - | none | **yes** |
 | RetainedProjectionHold | `ControllerIngest` SV (139-144); `Register` decides over buffer+shadow+canon atomically (120-125, 166-179) | p (lag, forced by WF 191) / p (157-162) / - / p | none | **yes** |

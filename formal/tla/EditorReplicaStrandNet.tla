@@ -15,7 +15,9 @@ A resolve that finds the replica missing spends a budget of
 `MaxReregisterAttempts` synchronous attempts. Each attempt sends `Req` and
 waits for its receipt:
 
-  serves  -> the editor re-registers (`Registered`): the replica is back
+  serves  -> the editor re-registers (`Registered`): the replica is back,
+             or answers `Deferred` (`{"status":"deferred"}`, #netadv5 R2): a
+             slow attach or a coalesced re-register, still trying
   refuses -> `Refuse`  (a rejected receipt: definitive)
   accepts -> `Accept`  (answered YES; the replica never appears)
   silent  -> nothing
@@ -37,9 +39,10 @@ KNOBS (one wedge each; scripts/run_tla.sh asserts every wedge MUST violate)
                    pauses self-heal forever at an unchanged witness, so an
                    endpoint that DOES answer is never demoted
                    (EditorReplicaStrandNetLatchWedge).
-  GiveUpIsRefusal  the timeout-as-verdict class (R2/R3, owned by #netadv5):
-                   an unanswered attempt counted as a refusal demotes a
-                   SERVING endpoint whose receipts were merely lost
+  GiveUpIsRefusal  the timeout-as-verdict class (R2/R3, fixed in code by
+                   #netadv5): an unanswered attempt, or a `deferred` receipt,
+                   counted as a refusal demotes a SERVING endpoint whose
+                   receipts were merely lost or slow
                    (EditorReplicaStrandNetGiveUpRefusalWedge).
 
 Safety holds under `[][Next]_vars` alone. Liveness holds under `FairLossy`
@@ -63,15 +66,16 @@ VARIABLES
     accepted,      \* answered acceptances received (capped)
     latched,       \* self-heal exhausted at the (unchanged) liveness witness
     corroborated,  \* a second resolve saw the accepted-unserved latch
-    authority      \* "none" | "editor" | "disk"
+    authority,     \* "none" | "editor" | "disk"
+    attaching      \* editor: a deferred (slow) attach is still in progress
 
 C == INSTANCE NetChannel
 
 protoVars == <<reloaded, replica, mode, registration, attempts, waiting,
-               refusals, accepted, latched, corroborated, authority>>
+               refusals, accepted, latched, corroborated, authority, attaching>>
 vars == <<net, gen, delivered, protoVars>>
 
-Msgs == {"req", "refuse", "accept", "registered"}
+Msgs == {"req", "refuse", "accept", "registered", "deferred"}
 
 Cap(x) == IF x >= 2 THEN 2 ELSE x + 1
 
@@ -88,6 +92,7 @@ TypeOK ==
     /\ latched \in BOOLEAN
     /\ corroborated \in BOOLEAN
     /\ authority \in {"none", "editor", "disk"}
+    /\ attaching \in BOOLEAN
 
 Init ==
     /\ C!ChannelInit
@@ -102,6 +107,7 @@ Init ==
     /\ latched = FALSE
     /\ corroborated = FALSE
     /\ authority = "editor"
+    /\ attaching = FALSE
 
 ---------------------------------------------------------------------------
 (* ENVIRONMENT (no fairness). The swap may land in ANY mode, including a   *)
@@ -114,7 +120,7 @@ LibraryReload ==
     /\ mode' \in Modes
     /\ authority' = "none"
     /\ UNCHANGED <<net, gen, delivered, registration, attempts, waiting,
-                   refusals, accepted, latched, corroborated>>
+                   refusals, accepted, latched, corroborated, attaching>>
 
 AdversaryStep == C!Adversary /\ UNCHANGED protoVars
 
@@ -131,16 +137,16 @@ SendAttempt ==
     /\ waiting' = TRUE
     /\ C!Send("req")
     /\ UNCHANGED <<reloaded, replica, mode, registration, refusals, accepted,
-                   latched, corroborated, authority>>
+                   latched, corroborated, authority, attaching>>
 
 \* The receipt wait expired with nothing left in flight for the attempt.
 GiveUp ==
     /\ waiting
-    /\ C!InFlight \cap {"req", "refuse", "accept", "registered"} = {}
+    /\ C!InFlight \cap Msgs = {}
     /\ waiting' = FALSE
     /\ refusals' = IF GiveUpIsRefusal THEN Cap(refusals) ELSE refusals
     /\ UNCHANGED <<net, gen, delivered, reloaded, replica, mode, registration,
-                   attempts, accepted, latched, corroborated, authority>>
+                   attempts, accepted, latched, corroborated, authority, attaching>>
 
 \* The budget is spent. An answered budget is latched (the shipped memo);
 \* an UNANSWERED one is re-armed for a later resolve under the fix.
@@ -155,7 +161,7 @@ Exhaust ==
           ELSE /\ latched' = TRUE
                /\ UNCHANGED attempts
     /\ UNCHANGED <<net, gen, delivered, reloaded, replica, mode, registration,
-                   waiting, refusals, accepted, corroborated, authority>>
+                   waiting, refusals, accepted, corroborated, authority, attaching>>
 
 \* The next resolve at the same witness corroborates accepted-unserved.
 RecordUnservedObservation ==
@@ -165,7 +171,7 @@ RecordUnservedObservation ==
     /\ ~corroborated
     /\ corroborated' = TRUE
     /\ UNCHANGED <<net, gen, delivered, reloaded, replica, mode, registration,
-                   attempts, waiting, refusals, accepted, latched, authority>>
+                   attempts, waiting, refusals, accepted, latched, authority, attaching>>
 
 DemoteOnRejection ==
     /\ registration = "attached"
@@ -174,7 +180,7 @@ DemoteOnRejection ==
     /\ refusals > 0
     /\ registration' = "detached"
     /\ UNCHANGED <<net, gen, delivered, reloaded, replica, mode, attempts,
-                   waiting, refusals, accepted, latched, corroborated, authority>>
+                   waiting, refusals, accepted, latched, corroborated, authority, attaching>>
 
 DemoteOnAcceptanceWithoutService ==
     /\ registration = "attached"
@@ -183,14 +189,14 @@ DemoteOnAcceptanceWithoutService ==
     /\ corroborated
     /\ registration' = "detached"
     /\ UNCHANGED <<net, gen, delivered, reloaded, replica, mode, attempts,
-                   waiting, refusals, accepted, latched, corroborated, authority>>
+                   waiting, refusals, accepted, latched, corroborated, authority, attaching>>
 
 ResolveOnEditor ==
     /\ replica = "present"
     /\ authority # "editor"
     /\ authority' = "editor"
     /\ UNCHANGED <<net, gen, delivered, reloaded, replica, mode, registration,
-                   attempts, waiting, refusals, accepted, latched, corroborated>>
+                   attempts, waiting, refusals, accepted, latched, corroborated, attaching>>
 
 DescendToDisk ==
     /\ replica = "missing"
@@ -198,18 +204,30 @@ DescendToDisk ==
     /\ authority # "disk"
     /\ authority' = "disk"
     /\ UNCHANGED <<net, gen, delivered, reloaded, replica, mode, registration,
-                   attempts, waiting, refusals, accepted, latched, corroborated>>
+                   attempts, waiting, refusals, accepted, latched, corroborated, attaching>>
 
 ---------------------------------------------------------------------------
 (* RECEIVERS: each takes its message off the wire whenever it is in flight. *)
 
 EditorRecvReq ==
     /\ "req" \in C!InFlight
-    /\ CASE mode = "serves"  -> C!DeliverAndSend("req", "registered")
-         [] mode = "refuses" -> C!DeliverAndSend("req", "refuse")
-         [] mode = "accepts" -> C!DeliverAndSend("req", "accept")
-         [] OTHER            -> C!Deliver("req")
-    /\ UNCHANGED protoVars
+    /\ CASE mode = "serves"  -> \/ C!DeliverAndSend("req", "registered")
+                                   /\ UNCHANGED attaching
+                                \/ C!DeliverAndSend("req", "deferred")
+                                   /\ attaching' = TRUE
+         [] mode = "refuses" -> C!DeliverAndSend("req", "refuse") /\ UNCHANGED attaching
+         [] mode = "accepts" -> C!DeliverAndSend("req", "accept") /\ UNCHANGED attaching
+         [] OTHER            -> C!Deliver("req") /\ UNCHANGED attaching
+    /\ UNCHANGED <<reloaded, replica, mode, registration, attempts, waiting,
+                   refusals, accepted, latched, corroborated, authority, attaching>>
+
+\* The slow attach a `deferred` receipt announced lands (editor-local, fair).
+AttachLands ==
+    /\ attaching
+    /\ attaching' = FALSE
+    /\ C!Send("registered")
+    /\ UNCHANGED <<reloaded, replica, mode, registration, attempts, waiting,
+                   refusals, accepted, latched, corroborated, authority, attaching>>
 
 \* An answer counts only for the attempt that is waiting for it (the receipt
 \* is synchronous on its connection); a straggler is discarded.
@@ -219,9 +237,21 @@ AgentRecvRefuse ==
     /\ IF waiting
           THEN /\ refusals' = Cap(refusals)
                /\ waiting' = FALSE
-          ELSE UNCHANGED <<refusals, waiting>>
+          ELSE UNCHANGED <<refusals, waiting, attaching>>
     /\ UNCHANGED <<reloaded, replica, mode, registration, attempts, accepted,
-                   latched, corroborated, authority>>
+                   latched, corroborated, authority, attaching>>
+
+\* `deferred`: an answer, but not a verdict. It ends the attempt like a lost
+\* receipt does, so the budget logic treats it as unanswered.
+AgentRecvDeferred ==
+    /\ "deferred" \in C!InFlight
+    /\ C!Deliver("deferred")
+    /\ IF waiting
+          THEN /\ waiting' = FALSE
+               /\ refusals' = IF GiveUpIsRefusal THEN Cap(refusals) ELSE refusals
+          ELSE UNCHANGED <<refusals, waiting, attaching>>
+    /\ UNCHANGED <<reloaded, replica, mode, registration, attempts, accepted,
+                   latched, corroborated, authority, attaching>>
 
 AgentRecvAccept ==
     /\ "accept" \in C!InFlight
@@ -229,9 +259,9 @@ AgentRecvAccept ==
     /\ IF waiting
           THEN /\ accepted' = Cap(accepted)
                /\ waiting' = FALSE
-          ELSE UNCHANGED <<accepted, waiting>>
+          ELSE UNCHANGED <<accepted, waiting, attaching>>
     /\ UNCHANGED <<reloaded, replica, mode, registration, attempts, refusals,
-                   latched, corroborated, authority>>
+                   latched, corroborated, authority, attaching>>
 
 \* A registration that lands is level state: it heals regardless of which
 \* attempt asked, and clears every recovery memo.
@@ -247,10 +277,11 @@ AgentRecvRegistered ==
                /\ latched' = FALSE
                /\ corroborated' = FALSE
           ELSE UNCHANGED <<replica, attempts, waiting, refusals, accepted,
-                           latched, corroborated>>
-    /\ UNCHANGED <<reloaded, mode, registration, authority>>
+                           latched, corroborated, attaching>>
+    /\ UNCHANGED <<reloaded, mode, registration, authority, attaching>>
 
-Recv == EditorRecvReq \/ AgentRecvRefuse \/ AgentRecvAccept \/ AgentRecvRegistered
+Recv == EditorRecvReq \/ AttachLands \/ AgentRecvRefuse \/ AgentRecvAccept \/ AgentRecvDeferred
+        \/ AgentRecvRegistered
 
 Next ==
     \/ LibraryReload
@@ -276,6 +307,7 @@ Spec ==
     /\ WF_vars(DemoteOnAcceptanceWithoutService)
     /\ WF_vars(ResolveOnEditor)
     /\ WF_vars(DescendToDisk)
+    /\ WF_vars(AttachLands)
     /\ C!FairLossy(Msgs)
 
 ---------------------------------------------------------------------------

@@ -61,7 +61,11 @@ NEW, fixed (model fidelity, all `expect clean` seeds):
    (DuplicateVisibleResponse with no/an earlier visible response); precondition now
    requires the duplicated response to be the last exchange block. An adjacent
    duplicate is never committed (seed guards it).
-5. Oracle bug (not product): liveness flagged a consumed request followed by a bare
+5. `committed_response_count_exceeds_distinct_captures` (15-min budget, seed 1004404):
+   snapshot-save fault recovery copied the CURRENT document (a duplicate response that
+   arrived after the commit) into the reviewed baseline. Fixed: the fault records the
+   committed content (`interrupted_commit_head`) and recovery restores from it.
+6. Oracle bug (not product): liveness flagged a consumed request followed by a bare
    `MarkSupervisorBinaryStale`; consumption now resets the obligation.
 
 NEW, open (allow-listed, needs the sibling F1 fix to cover it):
@@ -73,6 +77,11 @@ NEW, open (allow-listed, needs the sibling F1 fix to cover it):
   A per-generation report sequence alone does not order against controller-local
   transitions; those must bump the generation or advance the fence.
 
+## Budgets run
+- 15 min, base seed 1000000, 160 steps: 42216 schedules; one NEW kind (item 5, fixed).
+  Known counts: F1 out-of-order 22619, overwrote_local_transition 9199, F1 dispatch
+  3469, F3 1583, F2 907, GH136 widen 12585, GH136 lapse 2.
+- 5 min, base seed 7000000, after the fix: 13052 schedules, no new kinds.
+
 ## Status
-Milestone 1 committed (explorer, oracles, shrinker, seeds, make sim-fuzz).
-In progress: 15-min long budget; then `make check` with explicit exit capture.
+Milestones committed. Remaining: `make check` with explicit exit capture.

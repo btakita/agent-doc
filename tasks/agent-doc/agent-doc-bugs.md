@@ -624,7 +624,7 @@ Fixed and installed. Commit `ab3e68a3a` (GH #116, plugin 0.2.485) moved the Agen
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~do [#jbstagefallback]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.
-- The alt+shift agent-doc menu is not coming up.
+- ~~The alt+shift agent-doc menu is not coming up.~~
 - ~~do [#netadv1]~~
 - ~~do [#netadv2]~~
 - do [#netadv3]

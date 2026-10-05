@@ -2333,6 +2333,27 @@ impl SupervisorShared {
         }
     }
 
+    /// `#gh133sigterm`: the identity a deliberate exit of this supervisor is
+    /// recorded under, so the controller watchdog does not respawn it.
+    fn intentional_exit_identity(
+        &self,
+    ) -> Option<agent_doc_supervisor_io::intentional_exit::IntentionalExitIdentity> {
+        let runtime = self.actor_runtime.as_ref()?;
+        Some(
+            agent_doc_supervisor_io::intentional_exit::IntentionalExitIdentity {
+                project_root: runtime.project_root.clone(),
+                document_id: agent_doc_session_actor_io::canonical_document_id_in(
+                    &runtime.project_root,
+                    &runtime.file.to_string_lossy(),
+                ),
+                supervisor_pid: self.supervisor_pid,
+                generation: runtime.generation,
+                pane_id: runtime.pane_id.clone(),
+                session_id: runtime.session_id.clone(),
+            },
+        )
+    }
+
     fn mark_route_owned_dispatch_promoted(&self) {
         self.route_owned_dispatch_promoted
             .store(true, Ordering::Relaxed);

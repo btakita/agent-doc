@@ -7,6 +7,7 @@ pub mod config;
 pub mod cwd;
 pub mod detection;
 pub mod env;
+pub mod intentional_exit;
 pub mod ipc;
 pub mod process;
 pub mod recycle_request;

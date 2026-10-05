@@ -2492,6 +2492,7 @@ dependencies = [
  "parking_lot",
  "portable-pty",
  "serde_json",
+ "signal-hook",
  "tempfile",
  "tmux-router",
 ]

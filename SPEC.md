@@ -60,6 +60,15 @@
   re-provisions it on demand, so resurrecting it only undoes the kill. An
   unresolvable window fails closed. The skip is logged once per document and
   dead pid as `controller_supervisor_watchdog_skip reason=binding_not_live`.
+- A deliberately terminated supervisor is not a crash (`#gh133sigterm`, GH #133
+  follow-up). The supervisor's `SIGTERM` handler (and a requested self-kill)
+  records a durable `supervisor_intentional_exit` marker in `state.db` naming its
+  exact pid and generation, then exits exactly as before (status 143). The
+  watchdog never respawns that pid, even in a visible column, and logs
+  `controller_supervisor_watchdog_skip reason=intentional_exit`. The marker is
+  pid-scoped, so a later generation's crash still restarts; the controller
+  replacement path clears the marker its own kill produced before cold-starting
+  the successor, and a newly registered supervisor clears any earlier one.
 - With `agent_doc_per_component_convergence` explicitly enabled, the commit
   candidate uses the same exact retained expected→target ownership set as the
   terminal convergence gate. Every owned component must already equal current

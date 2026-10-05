@@ -3211,6 +3211,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         "[agent-doc] supervisor self-kill requested; tearing down the harness child and exiting"
                     );
                     agent_doc_supervisor_io::selfkill::clear_self_kill_request(&path);
+                    // `#gh133sigterm`: a requested kill is deliberate — record it so
+                    // the controller watchdog does not resurrect this supervisor. A
+                    // controller replacement that drove this kill clears it before
+                    // cold-starting its successor.
+                    if let Some(identity) = shared.intentional_exit_identity() {
+                        let marker = match agent_doc_supervisor_io::intentional_exit::record_intentional_exit(
+                            &identity,
+                            "self_kill_request",
+                        ) {
+                            Ok(()) => "recorded".to_string(),
+                            Err(err) => format!("failed error={}", format!("{err:#}").replace('\n', "\\n")),
+                        };
+                        log_event(
+                            &mut session_log,
+                            &format!("supervisor_intentional_exit signal=self_kill_request marker={marker}"),
+                        );
+                    }
                     #[cfg(unix)]
                     if child_pid > 0 {
                         unsafe {

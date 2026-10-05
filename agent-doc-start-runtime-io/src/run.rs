@@ -1027,6 +1027,14 @@ pub fn run_with_reap_policy_resume_and_harness(
             actor_record.state.as_str()
         ),
     );
+    install_intentional_exit_handler(
+        &project_root,
+        &canonical,
+        &session_id,
+        &pane_id,
+        actor_record.generation,
+        &mut session_log,
+    );
     if post_start_document_model_ensure {
         log_event(
             &mut session_log,
@@ -2581,6 +2589,77 @@ pub fn run_with_reap_policy_resume_and_harness(
         let _ = agent_doc_tmux_io::kill_pane(&tmux, &pane_id);
     }
     Ok(())
+}
+
+/// `#gh133sigterm` (GH #133 follow-up): make a deliberate `SIGTERM` durable.
+///
+/// Without a handler the controller watchdog cannot tell a `kill <pid>` from a
+/// crash and respawns the supervisor whenever its pane still fills a visible
+/// column. Registration is the point at which this generation's identity is
+/// authoritative, so it first clears any earlier generation's marker (a newly
+/// started supervisor supersedes a prior exit) and then installs the handler
+/// that records this pid's own marker before the default SIGTERM exit.
+fn install_intentional_exit_handler(
+    project_root: &std::path::Path,
+    canonical: &std::path::Path,
+    session_id: &str,
+    pane_id: &str,
+    generation: u64,
+    session_log: &mut Option<SessionLog>,
+) {
+    use agent_doc_supervisor_io::intentional_exit::{
+        IntentionalExitIdentity, IntentionalExitRecordOutcome, clear_intentional_exit,
+        install_sigterm_intentional_exit_handler,
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        project_root,
+        &canonical.to_string_lossy(),
+    );
+    if let Err(err) = clear_intentional_exit(project_root, &document_id) {
+        log_event(
+            session_log,
+            &format!("supervisor_intentional_exit_clear_failed error={err:#}"),
+        );
+    }
+    let identity = IntentionalExitIdentity {
+        project_root: project_root.to_path_buf(),
+        document_id,
+        supervisor_pid: std::process::id(),
+        generation,
+        pane_id: pane_id.to_string(),
+        session_id: session_id.to_string(),
+    };
+    let ops_file = canonical.to_path_buf();
+    let installed = install_sigterm_intentional_exit_handler(
+        identity,
+        agent_doc_supervisor_io::intentional_exit::HANDLER_WRITE_BUDGET,
+        move |identity, outcome| {
+            let (status, detail) = match outcome {
+                IntentionalExitRecordOutcome::Recorded => ("recorded", String::new()),
+                IntentionalExitRecordOutcome::TimedOut => ("timed_out", String::new()),
+                IntentionalExitRecordOutcome::Failed(err) => {
+                    ("failed", format!(" error={}", err.replace('\n', "\\n")))
+                }
+            };
+            agent_doc_ops_log_io::log_op(
+                &ops_file,
+                &format!(
+                    "supervisor_intentional_exit signal=SIGTERM pid={} session={} pane={} generation={} marker={status}{detail}",
+                    identity.supervisor_pid,
+                    identity.session_id,
+                    identity.pane_id,
+                    identity.generation,
+                ),
+            );
+        },
+    );
+    match installed {
+        Ok(()) => log_event(session_log, "supervisor_sigterm_handler_installed"),
+        Err(err) => log_event(
+            session_log,
+            &format!("supervisor_sigterm_handler_install_failed error={err:#}"),
+        ),
+    }
 }
 
 #[cfg(test)]

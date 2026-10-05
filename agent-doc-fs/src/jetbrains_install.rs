@@ -332,15 +332,29 @@ pub fn purge_pending_stagings_for(
             }
             let zips: Vec<PathBuf> = doomed.iter().map(|(_, zip)| zip.clone()).collect();
             let any_unzip_survives = unzips.len() > doomed.len();
+            // `#jbstagebackup`: a guarded staging also probe-unzips its package into
+            // a scratch dir and then deletes that dir; both go with the staging.
+            let probes: Vec<PathBuf> = lines
+                .iter()
+                .filter_map(|line| parse_unzip_line(line))
+                .filter(|(zip, destination)| {
+                    zips.iter().any(|purged| same_dir(zip, purged))
+                        && !same_dir(destination, plugins_dir)
+                })
+                .map(|(_, destination)| destination)
+                .collect();
             let mut kept = Vec::with_capacity(lines.len());
             let mut removed_lines = 0;
             for (index, line) in lines.iter().enumerate() {
                 let trimmed = line.trim();
                 let remove = if doomed.iter().any(|(at, _)| *at == index) {
                     true
+                } else if let Some((zip, _)) = parse_unzip_line(trimmed) {
+                    zips.iter().any(|purged| same_dir(&zip, purged))
                 } else if let Some(path) = trimmed.strip_prefix("delete:") {
                     let path = Path::new(path);
                     zips.iter().any(|zip| same_dir(path, zip))
+                        || probes.iter().any(|probe| same_dir(path, probe))
                         || (!any_unzip_survives && same_dir(path, &plugin_dir))
                 } else {
                     false
@@ -381,6 +395,189 @@ pub fn purge_pending_stagings_for(
         }
     }
     Ok(purged)
+}
+
+/// `#jbstagebackup`: prefix of the scratch directory a guarded staging's probe
+/// unzip extracts into at IDE start (a hidden sibling of the plugins directory;
+/// mirrors `JetBrainsPluginUpgradeAction.PROBE_DIR_PREFIX`).
+pub const PROBE_DIR_PREFIX: &str = ".agent-doc-jetbrains-probe-";
+
+/// `#jbstagebackup`: how old an unreferenced staged package must be before
+/// [`repair_jetbrains_stagings`] deletes it. The staging writes its package
+/// before its script, so a fresh package with no script yet is in flight.
+pub const ORPHANED_STAGED_PACKAGE_MIN_AGE: std::time::Duration =
+    std::time::Duration::from_secs(10 * 60);
+
+/// `#jbstagebackup`: one repair [`repair_jetbrains_stagings`] made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StagingRepair {
+    /// A doomed staging (package gone) was removed from a pending-install script.
+    PurgedDoomed {
+        plugins_dir: PathBuf,
+        purged: PurgedStagings,
+    },
+    /// A probe scratch dir left by a restart whose probe unzip aborted the script.
+    RemovedProbeDir { dir: PathBuf },
+    /// A staged package no pending-install script can reference any more (that
+    /// IDE has no `action.script`): an aborted or superseded staging's leftover.
+    RemovedOrphanedPackage { zip: PathBuf },
+}
+
+/// `#jbstagebackup`: the operator-facing description of a [`StagingRepair`].
+pub fn staging_repair_message(repair: &StagingRepair) -> String {
+    match repair {
+        StagingRepair::PurgedDoomed {
+            plugins_dir,
+            purged,
+        } => format!(
+            "Removed a DOOMED JetBrains staging for {} from {}: its package ({}) is gone, so the next IDE start would have deleted the plugin and installed nothing. The installed plugin is kept; re-run `agent-doc plugin update jetbrains` to stage the upgrade again.",
+            plugins_dir.display(),
+            purged.script.display(),
+            purged
+                .zips
+                .iter()
+                .map(|zip| zip.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        StagingRepair::RemovedProbeDir { dir } => format!(
+            "Removed a leftover JetBrains staging probe directory {} (a restart aborted a staged upgrade before touching the installed plugin).",
+            dir.display()
+        ),
+        StagingRepair::RemovedOrphanedPackage { zip } => format!(
+            "Removed an orphaned JetBrains staged package {} (no pending-install script references it).",
+            zip.display()
+        ),
+    }
+}
+
+/// `#jbstagebackup`: like [`lock_jetbrains_install`] but never waits: `None`
+/// while another agent-doc process installs into `plugins_dir`.
+pub fn try_lock_jetbrains_install(plugins_dir: &Path) -> anyhow::Result<Option<std::fs::File>> {
+    use anyhow::Context as _;
+    use fs2::FileExt as _;
+    let path = plugins_dir.join(INSTALL_LOCK_FILE);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("Failed to open JetBrains install lock {}", path.display()))?;
+    match file.try_lock_exclusive() {
+        Ok(()) => Ok(Some(file)),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::WouldBlock
+                || error.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error)
+            .with_context(|| format!("Failed to lock JetBrains install lock {}", path.display())),
+    }
+}
+
+/// `#jbstagebackup`: repair pending JetBrains stagings without waiting for the
+/// next `agent-doc plugin install` (run from preflight).
+///
+/// - For every existing plugins dir whose install lock is free: purge doomed
+///   stagings ([`StagingPurge::Doomed`]) and remove leftover probe dirs beside
+///   it. A held lock means an install is running, and it purges doomed
+///   stagings itself.
+/// - In every IDE system dir with no `plugins/action.script`: remove agent-doc
+///   staged packages older than [`ORPHANED_STAGED_PACKAGE_MIN_AGE`]. With no
+///   script nothing can unzip them, so they are leftovers of a consumed,
+///   aborted or superseded staging (the stale fixed-name `0.2.469` zip).
+///
+/// Never touches a package a script still names: deleting one under a legacy
+/// unguarded staging is exactly what destroys the plugin at restart.
+pub fn repair_jetbrains_stagings(
+    plugins_dirs: &[PathBuf],
+    system_roots: &[PathBuf],
+    now: std::time::SystemTime,
+) -> Vec<StagingRepair> {
+    let mut repairs = Vec::new();
+    for plugins_dir in plugins_dirs {
+        if !plugins_dir.is_dir() {
+            continue;
+        }
+        let Ok(Some(_lock)) = try_lock_jetbrains_install(plugins_dir) else {
+            continue;
+        };
+        if let Ok(purged) =
+            purge_pending_stagings_for(plugins_dir, system_roots, StagingPurge::Doomed)
+        {
+            repairs.extend(
+                purged
+                    .into_iter()
+                    .map(|purged| StagingRepair::PurgedDoomed {
+                        plugins_dir: plugins_dir.clone(),
+                        purged,
+                    }),
+            );
+        }
+        let Some(parent) = plugins_dir.parent() else {
+            continue;
+        };
+        let Ok(entries) = std::fs::read_dir(parent) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            // Deleting a probe dir is always safe: if a restart is extracting into
+            // it right now, its probe unzip fails and the script stops before any
+            // delete of the installed plugin.
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(PROBE_DIR_PREFIX)
+                && entry.file_type().is_ok_and(|kind| kind.is_dir())
+                && std::fs::remove_dir_all(entry.path()).is_ok()
+            {
+                repairs.push(StagingRepair::RemovedProbeDir { dir: entry.path() });
+            }
+        }
+    }
+    for root in system_roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if !is_jetbrains_ide_data_dir(&entry.file_name().to_string_lossy()) {
+                continue;
+            }
+            let temp_dir = entry.path().join("plugins");
+            if temp_dir.join("action.script").exists() {
+                continue;
+            }
+            let Ok(packages) = std::fs::read_dir(&temp_dir) else {
+                continue;
+            };
+            for package in packages.flatten() {
+                let zip = package.path();
+                if staged_zip_version(&zip).is_none() || !zip.is_file() {
+                    continue;
+                }
+                let old_enough = std::fs::metadata(&zip)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|modified| now.duration_since(modified).ok())
+                    .is_some_and(|age| age >= ORPHANED_STAGED_PACKAGE_MIN_AGE);
+                if old_enough && std::fs::remove_file(&zip).is_ok() {
+                    repairs.push(StagingRepair::RemovedOrphanedPackage { zip });
+                }
+            }
+        }
+    }
+    repairs
+}
+
+/// `#jbstagebackup`: [`repair_jetbrains_stagings`] over every known JetBrains
+/// plugins dir and system root.
+pub fn repair_all_jetbrains_stagings() -> Vec<StagingRepair> {
+    repair_jetbrains_stagings(
+        &jetbrains_plugin_dirs(),
+        &jetbrains_system_roots(),
+        std::time::SystemTime::now(),
+    )
 }
 
 /// GH #115: marker line recording the plugin version the plugins directory held
@@ -979,6 +1176,169 @@ mod tests {
         std::fs::remove_file(&viable).unwrap();
         purge_pending_stagings_for(&plugins, &roots, StagingPurge::Doomed).unwrap();
         assert!(!script.exists(), "an emptied script is removed");
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// `#jbstagebackup`: a guarded staging block (probe unzip + probe delete
+    /// ahead of the plugin delete) as `JetBrainsPluginUpgradeAction` writes it.
+    fn guarded_block(plugins: &Path, zip: &Path) -> String {
+        let stem = zip
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .trim_start_matches("agent-doc-jetbrains-")
+            .trim_end_matches(".zip")
+            .to_string();
+        let probe = plugins
+            .parent()
+            .unwrap()
+            .join(format!("{PROBE_DIR_PREFIX}{stem}"));
+        format!(
+            "unzip:{z}:{probe}\ndelete:{probe}\ndelete:{p}/agent-doc-jetbrains\nunzip:{z}:{p}\ndelete:{z}\n",
+            z = zip.display(),
+            probe = probe.display(),
+            p = plugins.display()
+        )
+    }
+
+    /// `#jbstagebackup`: purging a doomed guarded staging removes its probe
+    /// lines too, and leaves a foreign plugin's commands alone.
+    #[test]
+    fn purge_doomed_removes_a_guarded_staging_whole() {
+        let (tmp, plugins, system, script_dir) = gh115_fixture("purge-guarded");
+        let roots = vec![system.clone()];
+        let script = script_dir.join("action.script");
+        let gone = script_dir.join("agent-doc-jetbrains-0.2.493+aa.zip");
+        let foreign = format!("delete:{}/other-plugin\n", plugins.display());
+        std::fs::write(
+            &script,
+            format!("{foreign}{}", guarded_block(&plugins, &gone)),
+        )
+        .unwrap();
+
+        let purged = purge_pending_stagings_for(&plugins, &roots, StagingPurge::Doomed).unwrap();
+
+        assert_eq!(purged.len(), 1);
+        assert_eq!(purged[0].removed_lines, 5);
+        assert_eq!(std::fs::read_to_string(&script).unwrap(), foreign);
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    fn age(path: &Path, secs: u64) {
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(secs);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    /// `#jbstagebackup`: preflight's repair purges a doomed staging (package
+    /// gone) instead of only warning, and removes a leftover probe dir.
+    #[test]
+    fn repair_purges_a_doomed_staging_and_a_leftover_probe() {
+        let (tmp, plugins, system, script_dir) = gh115_fixture("repair-doomed");
+        let roots = vec![system.clone()];
+        let script = script_dir.join("action.script");
+        let gone = script_dir.join("agent-doc-jetbrains-0.2.493+aa.zip");
+        std::fs::write(&script, guarded_block(&plugins, &gone)).unwrap();
+        let probe = plugins
+            .parent()
+            .unwrap()
+            .join(format!("{PROBE_DIR_PREFIX}0.2.492+zz"));
+        std::fs::create_dir_all(probe.join("agent-doc-jetbrains/lib")).unwrap();
+        assert!(matches!(
+            staged_install_failure(&plugins, &roots),
+            Some(StagedInstallFailure::Doomed { .. })
+        ));
+
+        let repairs =
+            repair_jetbrains_stagings(&[plugins.clone()], &roots, std::time::SystemTime::now());
+
+        assert!(
+            repairs
+                .iter()
+                .any(|repair| matches!(repair, StagingRepair::PurgedDoomed { .. })),
+            "{repairs:?}"
+        );
+        assert!(repairs.contains(&StagingRepair::RemovedProbeDir { dir: probe.clone() }));
+        assert!(!script.exists(), "the emptied script is removed");
+        assert!(!probe.exists());
+        assert_eq!(staged_install_failure(&plugins, &roots), None);
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// `#jbstagebackup`: a healthy staging, its package, and a package a script
+    /// still names are never touched.
+    #[test]
+    fn repair_leaves_a_healthy_staging_untouched() {
+        let (tmp, plugins, system, script_dir) = gh115_fixture("repair-healthy");
+        let roots = vec![system.clone()];
+        let script = script_dir.join("action.script");
+        let viable = script_dir.join("agent-doc-jetbrains-0.2.493+bb.zip");
+        std::fs::write(&viable, b"pkg").unwrap();
+        age(&viable, 3600);
+        let body = guarded_block(&plugins, &viable);
+        std::fs::write(&script, &body).unwrap();
+
+        let repairs =
+            repair_jetbrains_stagings(&[plugins.clone()], &roots, std::time::SystemTime::now());
+
+        assert_eq!(repairs, Vec::new());
+        assert_eq!(std::fs::read_to_string(&script).unwrap(), body);
+        assert!(viable.is_file());
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// `#jbstagebackup`: with no pending-install script, an old agent-doc
+    /// package is an orphan (the stale fixed-name 0.2.469 zip) and is removed;
+    /// a fresh one may belong to a staging in flight and is kept, and foreign
+    /// packages are never touched.
+    #[test]
+    fn repair_removes_only_old_orphaned_packages() {
+        let (tmp, plugins, system, script_dir) = gh115_fixture("repair-orphan");
+        let roots = vec![system.clone()];
+        let stale = script_dir.join("agent-doc-jetbrains-0.2.469.zip");
+        let fresh = script_dir.join("agent-doc-jetbrains-0.2.493+cc.zip");
+        let foreign = script_dir.join("IdeaVIM.zip");
+        for zip in [&stale, &fresh, &foreign] {
+            std::fs::write(zip, b"pkg").unwrap();
+        }
+        age(&stale, 3600);
+        age(&foreign, 3600);
+
+        let repairs =
+            repair_jetbrains_stagings(&[plugins.clone()], &roots, std::time::SystemTime::now());
+
+        assert_eq!(
+            repairs,
+            vec![StagingRepair::RemovedOrphanedPackage { zip: stale.clone() }]
+        );
+        assert!(!stale.exists());
+        assert!(fresh.is_file());
+        assert!(foreign.is_file());
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// `#jbstagebackup`: an install in progress holds the lock and does its own
+    /// purge; the repair waits for nothing and changes nothing.
+    #[test]
+    fn repair_skips_a_plugins_dir_whose_install_lock_is_held() {
+        let (tmp, plugins, system, script_dir) = gh115_fixture("repair-locked");
+        let roots = vec![system.clone()];
+        let script = script_dir.join("action.script");
+        let gone = script_dir.join("agent-doc-jetbrains-0.2.493+dd.zip");
+        let body = guarded_block(&plugins, &gone);
+        std::fs::write(&script, &body).unwrap();
+        let held = lock_jetbrains_install(&plugins).unwrap();
+
+        let repairs =
+            repair_jetbrains_stagings(&[plugins.clone()], &roots, std::time::SystemTime::now());
+
+        assert_eq!(repairs, Vec::new());
+        assert_eq!(std::fs::read_to_string(&script).unwrap(), body);
+        drop(held);
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 

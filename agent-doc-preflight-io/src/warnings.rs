@@ -521,10 +521,37 @@ pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
 /// delete) the plugin without installing its replacement. It needs no live
 /// registration: a destroyed install has no plugin left to register, which is
 /// exactly why `stale_plugin` stayed silent while the IDE had no agent-doc plugin.
+///
+/// `#jbstagebackup`: doomed stagings are repaired (purged) first rather than only
+/// reported, so a restart between this preflight and the next install cannot
+/// delete the plugin; each repair surfaces once as `jetbrains_plugin_staging_repaired`.
 pub fn jetbrains_staged_install_failure_warnings() -> Vec<PreflightWarning> {
-    staged_install_failure_warnings_from(
+    let mut warnings = staging_repair_warnings_from(
+        agent_doc_fs::jetbrains_install::repair_all_jetbrains_stagings(),
+    );
+    warnings.extend(staged_install_failure_warnings_from(
         agent_doc_fs::jetbrains_install::jetbrains_staged_install_failures(),
-    )
+    ));
+    warnings
+}
+
+/// Pure core of the `#jbstagebackup` repair warnings. Only a purged doomed
+/// staging is operator-relevant (its upgrade must be staged again); removed
+/// leftovers are housekeeping and stay silent.
+pub fn staging_repair_warnings_from(
+    repairs: Vec<agent_doc_fs::jetbrains_install::StagingRepair>,
+) -> Vec<PreflightWarning> {
+    use agent_doc_fs::jetbrains_install::{StagingRepair, staging_repair_message};
+    repairs
+        .into_iter()
+        .filter(|repair| matches!(repair, StagingRepair::PurgedDoomed { .. }))
+        .map(|repair| PreflightWarning {
+            code: "jetbrains_plugin_staging_repaired".to_string(),
+            message: staging_repair_message(&repair),
+            document_agent: None,
+            active_harness: None,
+        })
+        .collect()
 }
 
 /// Pure core of [`jetbrains_staged_install_failure_warnings`].
@@ -717,6 +744,40 @@ mod tests {
             "the (deleted) suffix must classify without needing either inode"
         );
         assert!(deleted.is_superseded());
+    }
+
+    /// `#jbstagebackup`: a purged doomed staging surfaces once with the restage
+    /// remedy; housekeeping removals stay silent.
+    #[test]
+    fn staging_repairs_warn_only_for_a_purged_doomed_staging() {
+        use agent_doc_fs::jetbrains_install::{PurgedStagings, StagingRepair};
+        let dir = std::path::PathBuf::from("/h/.local/share/JetBrains/IntelliJIdea2026.3");
+        let warnings = super::staging_repair_warnings_from(vec![
+            StagingRepair::PurgedDoomed {
+                plugins_dir: dir.clone(),
+                purged: PurgedStagings {
+                    script: "/c/IntelliJIdea2026.3/plugins/action.script".into(),
+                    zips: vec![
+                        "/c/IntelliJIdea2026.3/plugins/agent-doc-jetbrains-0.2.493+a.zip".into(),
+                    ],
+                    removed_lines: 5,
+                },
+            },
+            StagingRepair::RemovedProbeDir {
+                dir: "/h/.local/share/JetBrains/.agent-doc-jetbrains-probe-0.2.493+a".into(),
+            },
+            StagingRepair::RemovedOrphanedPackage {
+                zip: "/c/IntelliJIdea2026.3/plugins/agent-doc-jetbrains-0.2.469.zip".into(),
+            },
+        ]);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, "jetbrains_plugin_staging_repaired");
+        assert!(warnings[0].message.contains("DOOMED"));
+        assert!(
+            warnings[0]
+                .message
+                .contains("agent-doc plugin update jetbrains")
+        );
     }
 
     /// GH #115: each staged-install failure gets its own warning code and the

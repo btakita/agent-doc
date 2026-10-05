@@ -33,3 +33,7 @@ formal/**/lake-manifest.json
 *.wasm
 *.gz
 *.tar
+
+# cargo-fuzz scratch (corpus/ and regressions/ are committed)
+fuzz/artifacts/
+fuzz/coverage/

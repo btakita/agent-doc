@@ -1,0 +1,1 @@
+{"file":"tasks/sample.md","frontmatter":"agent_doc_format: template\n","patches":[{"component":"exchange","content":"### Re: lorem\n\nipsum\n"}],"type":"apply_canonical"}

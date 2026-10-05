@@ -4053,10 +4053,12 @@ fn agent_projection_integrity_valid(content: &str) -> bool {
     let boundary_singleton = boundary_count <= 1
         && agent_doc_template::collapse_adjacent_boundary_markers(content)
             .is_ok_and(|normalized| normalized == content);
-    let single_exchange = agent_doc_template::repair_duplicate_exchange_opener(content)
-        .ok()
-        .flatten()
-        .is_none();
+    // A nested exchange is an `Err` from the repair (`#netadv7`), never a
+    // single exchange: integrity must fail closed on it.
+    let single_exchange = matches!(
+        agent_doc_template::repair_duplicate_exchange_opener(content),
+        Ok(None)
+    );
     boundary_singleton && single_exchange
 }
 

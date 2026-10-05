@@ -143,8 +143,9 @@ members = [
     "agent-doc-markdown-lossless",
     "agent-doc-merge",
     "agent-doc-merge-io",
+    "agent-doc-fuzz-harness",
 ]
-exclude = ["editors/zed"]
+exclude = ["editors/zed", "fuzz"]
 
 
 [package]

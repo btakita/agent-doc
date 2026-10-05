@@ -1,0 +1,61 @@
+# cargo-fuzz crate (`#netadv7`). Deliberately NOT a member of the root
+# workspace (see `exclude` in ../Cargo.toml): libFuzzer needs nightly and
+# sanitizer flags, and `cargo build` / `make check` must stay on stable.
+# The harness logic lives in ../agent-doc-fuzz-harness, which IS a workspace
+# member and replays fuzz/corpus + fuzz/regressions on stable.
+#
+#   make fuzz                    # every target, FUZZ_SECONDS each (default 60)
+#   cargo +nightly fuzz run ipc_wire fuzz/corpus/ipc_wire -- -max_total_time=60
+[package]
+name = "agent-doc-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+agent-doc-fuzz-harness = { path = "../agent-doc-fuzz-harness" }
+
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "ipc_wire"
+path = "fuzz_targets/ipc_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "markdown_patch"
+path = "fuzz_targets/markdown_patch.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frontmatter"
+path = "fuzz_targets/frontmatter.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crdt_update"
+path = "fuzz_targets/crdt_update.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crdt_edits"
+path = "fuzz_targets/crdt_edits.rs"
+test = false
+doc = false
+bench = false

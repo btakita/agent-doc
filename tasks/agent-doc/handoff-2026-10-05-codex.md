@@ -46,7 +46,8 @@ Plan for all netadv items: `tasks/agent-doc/plan-network-adversarial-correctness
 ## Batch status (updated)
 
 - `batch-0505` → agent-doc `main` @ 8c3e97beb: pushed and INSTALLED (JB plugin 0.2.496), superproject bump 8ee08fd571. Closed: jbstagefallback, alt+shift, netadv1, netadv2. GH #136 is fixed, but its head stays claimed (`coordinator:fixed-awaiting-release`) until the release; then close the issue.
-- `batch2` (worktree ../batch2, from main): netadv4 + netadv7 merged (.PHONY union-resolved); `make check` was running. Next: ff main to batch2, push, `make install` FROM THE batch2 WORKTREE (the main checkout has another session's uncommitted agent-doc-start-runtime-io edit), --done netadv4 netadv7.
+- `batch2` → agent-doc `main` @ e8990627c: netadv4 + netadv7, `make check` green (11064 passed), pushed and INSTALLED from the batch2 worktree. netadv4/netadv7 closed.
+- `gh136follow` dispatched (worktree ../gh136follow from main): items (a)-(e).
 - Remaining: netadv3, netadv5, netadv6 (in progress), then release. New backlog: `gh136follow`, `claimstrike` (a claimed free-text head isn't struck on a Queue-prompt echo; release the claim first).
 
 ## Step 2: integrate serially, one install per batch

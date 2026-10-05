@@ -824,7 +824,7 @@ Verification passed: targeted repair/flow/session-check suites, the 7,920-test a
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - #gh-fix https://github.com/btakita/agent-doc/issues/144
-- #gh-fix https://github.com/btakita/agent-doc/issues/145
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/145~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/146
 - release + publish
 <!-- /agent:queue -->

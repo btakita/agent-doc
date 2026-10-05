@@ -61,10 +61,13 @@ Steering received:
 
 ## Remaining
 
-1. Unit tests in rpc.rs for `layout_columns_without_gated_documents` / `focus_outside_gated_documents`.
-2. SPEC.md text for GH #136 (bounded focus exception, gated acknowledgement, remote/Zscaler design point, env knob).
-3. `cargo clippy` + `make check` (capture `$?`, grep `FAILED`); concurrent `make test` collisions are not reds.
-4. Final commit referencing GH #136; update this file.
+1. DONE: rpc.rs tests `gh136_gated_documents_are_excluded_from_convergence_and_focus`,
+   `gh136_gated_receipt_field_defaults_for_older_peers`.
+2. DONE: spec text in `specs/07-session-tmux-commands.md` (stale column bullets) + SPEC.md pane-layout bullet.
+3. DONE: `make check` EXIT=0 (nextest 11027 passed, 265 skipped; clippy clean; all TLA incl. StaleColumnRecycle
+   + 7 non-vacuity configs). Concurrent `make test` collisions are not reds. Do NOT use `git stash` in this worktree: the stash list is shared with other
+   worktrees (an accidental pop applied someone else's autostash; reverted, their stash@{0} preserved).
+4. DONE: final commit referencing GH #136.
 5. Not addressed (out of scope / report as unresolved): editor_surface publishing 3 columns comes from the editor's own
    observation (`SurfaceIntent::Sync` uses `surface.columns`); the "60s focus settle" root cause was not isolated; the
    generation-reset `superseded` race (issue section "1061.md focus is a collapse"); old stale supervisors running
@@ -76,4 +79,4 @@ Steering received:
 - `cargo test -p agent-doc-supervisor --lib recycle_request` -> 5 passed
 - `cargo test -p agent-doc-supervisor-io --lib recycle_request` -> passing (8 incl. new)
 - TLA: `make tla` (or see command loop in this file's history); target/tla jar downloaded with pinned sha.
-- Known failing: none known yet; full `make check` not yet run.
+- Known failing: none. `make check` EXIT=0.

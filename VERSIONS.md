@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.456
+
+- **Retained-write guidance terminates (GH #131 reopened).** Three recovery loops are closed, all derived from the shared
+  `write_ownership` predicate:
+  - A pending-only tracked-work write (`--done/--pending-gate ... --pending-only`) whose response is already committed
+    is absorbed into a pending-only commit continuation instead of being refused by the retained-write deferral, and
+    `session-check` commits it once delivery converges (`absorb_retained_pending_only_mutation`).
+  - `session-check` no longer names a repair the write path refuses (`tracked_work_repair_admission`); when the editor
+    endpoint rejects or the replica is unserved it prints the editor recovery first.
+  - The integrity gate and the retained-write guidance now agree on `admin reload-lib`: a new `ReplicaUnserved` verdict
+    renders the single `editor_replica_recovery()` sentence, and the deferral no longer forbids reload-lib when
+    `session-check` reports an unserved replica.
+  - Preflight no longer refuses turn admission because a pending-only intent's base already contains a committed
+    captured response; the intent that introduced the body still owns it.
+- **Release parity row restored.** `editors/release-parity.tsv` gained the missing v0.35.455 row (`make check`'s
+  `editor-parity` gate was red on `main`).
+
 ## 0.35.455
 
 - **An operator unstrike of a queue head survives (`#unstrikelost`).** Preflight queue maintenance re-struck any head

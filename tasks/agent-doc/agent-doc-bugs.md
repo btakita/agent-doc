@@ -844,6 +844,16 @@ For a stale sender, compact now names the scheduled safe-boundary route-owned su
 The controller launch waiter also adopts an already-published command-plane socket before status hydration completes, while an explicitly active but non-adoptable controller remains fail-closed. This prevents the launch race from masking the actual document recovery refusal.
 
 Focused authority-recovery, IPC mismatch, relay outcome, attached-editor, native-reload, and launch-race tests passed. The integrated `make check-fast` proof passed strict workspace clippy, all 7,926 affected tests, the full batched controller/session tail, doctests, and documentation audit.
+
+### Re: Response
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/147
+
+Fixed and closed [#147](https://github.com/btakita/agent-doc/issues/147) on `main` in `a499c3c0a`.
+
+The harness now represents Claude's empty `Message @subagent…` composer as a typed `AgentAddressed` state. Dispatch-only, supervisor-owned, and ordinary direct-pane submission paths all refuse before transport and report the exact unblocker `clear_pane_agent_addressing`, preventing session triggers from being silently delivered to a subagent.
+
+Verification passed: the full repository gate completed with 9,571 Rust tests plus editor, bootstrap, Lean, and TLA checks; the affected harness/controller/route suites also passed after the final direct-pane guard and again after integration.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
@@ -856,7 +866,7 @@ Focused authority-recovery, IPC mismatch, relay outcome, attached-editor, native
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/144~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/145~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/146~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/147
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/147~~
 - release + publish
 <!-- /agent:queue -->
 

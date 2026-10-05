@@ -788,7 +788,7 @@ The previously visible backlog cruft is gone. The remaining rows are genuine ope
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~do [#claimmarker]~~
-- I renamed betterstack.md to observability.md. Run Agent Doc failed: refusing duplicate session identity 0b281660-be9c-4f2d-9a1d-f5ce38aa88a9 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md: first durable owner is /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/betterstack.md in pane  (registered state-event:577209)
+- ~~I renamed betterstack.md to observability.md. Run Agent Doc failed: refusing duplicate session identity 0b281660-be9c-4f2d-9a1d-f5ce38aa88a9 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md: first durable owner is /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/betterstack.md in pane  (registered state-event:577209)~~
 - do [#releasecyclefast]
 - Is there a command to see the agent-doc version + plugin version(s)? If not, we need a cli + plugin command to see the versions.
 - #gh-fix https://github.com/btakita/agent-doc/issues/144

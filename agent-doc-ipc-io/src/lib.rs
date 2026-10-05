@@ -736,6 +736,13 @@ fn send_message_with_timeout_inner_with_identity(
                             receipt
                         ));
                     }
+                    SocketReceiptClassification::Deferred => {
+                        return Err(anyhow::anyhow!(
+                            "{}: {}",
+                            IPC_RECEIPT_DEFERRED_PREFIX,
+                            receipt
+                        ));
+                    }
                     SocketReceiptClassification::Unsupported => {
                         return Err(anyhow::anyhow!(
                             "IPC receipt unsupported legacy response: {}; update/reinstall the editor plugin/native library so it publishes lazily transport receipts",
@@ -837,6 +844,18 @@ pub fn is_ipc_receipt_rejected_error(error: &anyhow::Error) -> bool {
 /// [`is_ipc_receipt_rejected_error`].
 const IPC_RECEIPT_REJECTED_PREFIX: &str = "IPC receipt rejected";
 
+/// `#netadv5` R2: the endpoint answered "slow, still trying". Distinct from
+/// [`IPC_RECEIPT_REJECTED_PREFIX`] so [`is_ipc_receipt_rejected_error`] never
+/// counts it as a definitive refusal.
+const IPC_RECEIPT_DEFERRED_PREFIX: &str = "IPC receipt deferred";
+
+/// Whether `error` is a deferred ("slow, still trying") receipt.
+pub fn is_ipc_receipt_deferred_error(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().starts_with(IPC_RECEIPT_DEFERRED_PREFIX))
+}
+
 fn send_legacy_reload_to_pid(
     project_root: &Path,
     pid: u64,
@@ -872,9 +891,11 @@ fn send_legacy_reload_to_pid(
             match classify_socket_receipt(&receipt) {
                 SocketReceiptClassification::Applied => Ok(Some(receipt)),
                 SocketReceiptClassification::AlreadyApplied => Ok(Some(receipt)),
-                SocketReceiptClassification::Pending => Err(anyhow::anyhow!(
-                    "legacy reload returned non-terminal receipt: {receipt}"
-                )),
+                SocketReceiptClassification::Pending | SocketReceiptClassification::Deferred => {
+                    Err(anyhow::anyhow!(
+                        "legacy reload returned non-terminal receipt: {receipt}"
+                    ))
+                }
                 SocketReceiptClassification::Rejected
                 | SocketReceiptClassification::Unsupported => Err(anyhow::anyhow!(
                     "legacy reload rejected or unsupported: {receipt}"
@@ -3073,6 +3094,47 @@ mod tests {
             msg.get("content").is_none() && msg.get("patches").is_none(),
             "observe_lazily_current must not carry document mutation payload: {msg}"
         );
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    /// `#netadv5` R2: an editor whose replica attach exceeds its bounded wait
+    /// answers `deferred`. The sender must surface that as a retryable deferral,
+    /// never as a definitive refusal, and a later attempt makes progress.
+    #[test]
+    fn deferred_receipt_from_a_slow_attach_is_not_a_definitive_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let attempts = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let attempts_for_listener = attempts.clone();
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, move |_msg| {
+                // First attempt: the replica attach is still running past the
+                // plugin's 750ms wait. Second attempt: it has landed.
+                if attempts_for_listener.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    Some(agent_doc_ipc_protocol::DEFERRED_RECEIPT_LINE.to_string())
+                } else {
+                    Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
+                }
+            })
+            .ok();
+        });
+        thread::sleep(Duration::from_millis(100));
+
+        let msg = serde_json::json!({"type": "deliver_crdt_remote", "file": "/tmp/plan.md"});
+        let first = send_message(&root, &msg).unwrap_err();
+        assert!(is_ipc_receipt_deferred_error(&first), "{first:#}");
+        assert!(
+            !is_ipc_receipt_rejected_error(&first),
+            "a deferred receipt must never count as a definitive refusal: {first:#}"
+        );
+
+        let second = send_message(&root, &msg).unwrap();
+        assert!(second.is_some(), "the retry after a deferral must make progress");
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);

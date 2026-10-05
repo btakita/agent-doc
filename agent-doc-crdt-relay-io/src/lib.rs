@@ -5956,6 +5956,24 @@ mod tests {
         );
     }
 
+    /// `#netadv5` R2: an editor whose replica attach (750ms) or document-lane
+    /// save (5s) outlived its bounded wait answers `deferred`. That is a slow
+    /// endpoint, not a refusal, so it must never count toward
+    /// `DefinitivelyRefusedByAll` / `DropFromDeliveryCut`.
+    #[test]
+    fn a_deferred_receipt_from_a_slow_editor_is_never_a_definitive_answer() {
+        let deferred = anyhow::anyhow!(
+            "IPC receipt deferred: {}",
+            agent_doc_ipc_protocol::DEFERRED_RECEIPT_LINE
+        );
+        assert!(agent_doc_ipc_io::is_ipc_receipt_deferred_error(&deferred));
+        assert!(!agent_doc_ipc_io::is_ipc_receipt_rejected_error(&deferred));
+        assert!(!recovering_send_error_is_definitive(
+            agent_doc_ipc_io::is_ipc_receipt_rejected_error(&deferred),
+            agent_doc_ipc_io::is_ipc_build_mismatch_error(&deferred),
+        ));
+    }
+
     /// `#refusedreceiptveto`: the disposition must follow the classification.
     ///
     /// `definitively_refused_by_all` already documented that the caller must

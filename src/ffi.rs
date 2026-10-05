@@ -721,6 +721,8 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
 ///   (plugin detected the patch is already in the live buffer and chose NOT
 ///   to re-apply; binary skips redundant CP delivery so a duplicate response
 ///   heading cannot land).
+/// - `3` → receipt `{"type":"receipt","status":"deferred"}` (`#netadv5` R2: the
+///   plugin's bounded wait elapsed; slow, still trying, never a refusal).
 ///
 /// Plugins should prefer v2 when available.
 ///
@@ -757,6 +759,9 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener_v2(
             2 => Some(
                 r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#.to_string(),
             ),
+            // `#netadv5` R2: the plugin's own bounded wait elapsed (replica
+            // attach, document lane). Slow, not refused.
+            3 => Some(agent_doc_ipc_protocol::DEFERRED_RECEIPT_LINE.to_string()),
             _ => Some(r#"{"type":"receipt","status":"rejected"}"#.to_string()),
         }
     })

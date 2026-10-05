@@ -18,8 +18,8 @@ coordinator assigned here.
 | R | State | Change | Test |
 |---|---|---|---|
 | R3 | done | `agent-doc-ipc-io`: `probe_listener_for_pid` → `Live/Absent/Unknown`; typed `ConnectTimedOut`; unlink only on refused/ENOENT + owner pid gone; `prune_stale_editor_sockets` uses it | `slow_listener_connect_timeout_never_unlinks_socket`, `connect_failure_classification_separates_slow_from_refused`, `real_connect_watchdog_error_is_typed_timeout` |
-| R1 | todo | | |
-| R2 | todo | | |
+| R1 | done | `rpc.rs` `ensure_serving_controller` → `ensure_serving_controller_with` + `classify_serving_probe` (`Serving/NotBound/Unresponsive`); reap only on `NotBound` (ECONNREFUSED/ENOENT); timeout/reset → `controller_self_heal_deferred` + `CONTROLLER_BUSY_RETRY_LATER` error (FFI returns 0, JB rethrows, focus retried). No JB change needed. | `slow_status_receipt_never_reaps_a_busy_controller`, `refused_status_connect_is_positive_evidence_for_relaunch` |
+| R2 | done | New receipt `{"status":"deferred"}` (`SocketReceiptClassification::Deferred`, `DEFERRED_RECEIPT_LINE`, `is_ipc_receipt_deferred_error`); FFI v2 code `3`; JB `APPLY_DEFERRED` for attach-await timeout, coalesced re-register, and persist document-lane timeout. Not counted by `is_ipc_receipt_rejected_error` → never `DropFromDeliveryCut`. JB 0.2.497. | ipc-io `deferred_receipt_from_a_slow_attach_is_not_a_definitive_refusal`; protocol `classify_socket_receipt_separates_deferred_from_rejected`; crdt-relay-io `a_deferred_receipt_from_a_slow_editor_is_never_a_definitive_answer`; JB `PatchWatcherDeferredReceiptTest` (gradle exit 0) |
 | R5 | todo | | |
 | R6 | todo | | |
 | R7 | todo | | |

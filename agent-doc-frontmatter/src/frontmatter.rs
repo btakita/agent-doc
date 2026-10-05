@@ -1678,6 +1678,19 @@ fn canonical_for_write(fm: &Frontmatter) -> std::borrow::Cow<'_, Frontmatter> {
     if fm.queue_active.is_none() {
         return std::borrow::Cow::Borrowed(fm);
     }
+    // `#netadv7` fuzz crasher: a `queue:` value that is not a control
+    // (`queue: e`, or one being typed) does not win at parse time —
+    // `normalize_queue_control` leaves the legacy flag in force. Dropping the
+    // flag here therefore changed the queue state on the next read. Keep both
+    // keys until `queue:` holds a real control; never rewrite the operator's
+    // `queue:` text.
+    if fm
+        .queue
+        .as_deref()
+        .is_some_and(|raw| QueueControl::parse(raw).is_none())
+    {
+        return std::borrow::Cow::Borrowed(fm);
+    }
     let mut canonical = fm.clone();
     // `#queuestopremove`: an inactive legacy flag writes no control at all.
     if canonical.queue.is_none() && fm.queue_active == Some(true) {
@@ -2916,6 +2929,26 @@ mod tests {
         let preserved = write_preserving(content, &fm, body).unwrap();
         let (reparsed, _) = parse(&preserved).unwrap();
         assert_eq!(preset(&reparsed), preset(&fm), "{preserved:?}");
+    }
+
+    /// `#netadv7` fuzz crasher (minimized): an unparseable `queue:` value beside
+    /// the legacy `queue_active:` flag. `parse` keeps the flag in force, but
+    /// `write` dropped it, so one write changed the queue state.
+    #[test]
+    fn write_keeps_legacy_queue_flag_beside_unparseable_queue_value() {
+        for flag in ["true", "false"] {
+            let content = format!("---\nqueue: e\nqueue_active: {flag}\n---\n");
+            let (fm, body) = parse(&content).unwrap();
+            assert_eq!(fm.queue_active, Some(flag == "true"));
+            for written in [
+                write(&fm, body).unwrap(),
+                write_preserving(&content, &fm, body).unwrap(),
+            ] {
+                let (reparsed, _) = parse(&written).unwrap();
+                assert_eq!(reparsed.queue_active, fm.queue_active, "{written:?}");
+                assert_eq!(reparsed.queue.as_deref(), Some("e"), "{written:?}");
+            }
+        }
     }
 
     #[test]

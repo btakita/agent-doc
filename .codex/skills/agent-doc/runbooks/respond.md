@@ -272,6 +272,9 @@ harness label (`codex`, `claude`) as the model name, and never omit it. The
 timestamp is local time with its UTC offset, `YYYY-MM-DDTHH:MM±HH:MM`, taken when
 you begin composing the response; if you genuinely cannot resolve a clock, emit the
 model alone (`### Re: topic — opus-5`) rather than a dangling separator.
+The agent authors this attribution from the preflight contract; the production
+write path preserves the complete heading through
+`agent_doc_template::response_materialization::canonicalize_strict_closeout_response_heading`.
 
 **The heading must contain exactly ONE spaced em dash.** That is why the timestamp
 joins the model with ` · ` instead of a second ` — `. Four parsers read this

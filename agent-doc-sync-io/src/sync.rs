@@ -4834,6 +4834,7 @@ fn run_with_options_internal_at_root(
             &crate::layout_column_audit::StaleColumnGateInput {
                 col_args,
                 focus,
+                target_window: window,
                 pre_resolved: &pre_resolved_panes,
                 registry_pane: &gate_registry_pane,
                 before: &pane_windows_before_router,

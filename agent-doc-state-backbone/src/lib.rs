@@ -1440,6 +1440,42 @@ impl DocumentStateProjection {
         .then_some(capture)
     }
 
+    /// Whether `intent` merely builds on a response its capture's cycle already
+    /// committed (GH #131, `#retainedcommittedbody`).
+    ///
+    /// A deferred write pins `closeout.captured_response` as its continuation,
+    /// so a tracked-work-only write issued AFTER the response committed (a
+    /// `write --done <id> --pending-only --commit` repair) pinned the committed
+    /// capture too — and its target contains the response body for the plain
+    /// reason that the document already did. While its editor delivery stayed
+    /// unconverged, that intent read as "a retained document-write effect still
+    /// owns the prior captured response", so every new preflight was refused,
+    /// even though the response was in HEAD and nothing this intent could
+    /// deliver would add it.
+    ///
+    /// Ownership belongs to the transition that INTRODUCES the response: an
+    /// intent whose own base already materializes it, for a capture whose cycle
+    /// is committed, delivers only its own (tracked-work) delta. Conservative on
+    /// both halves: an intent with no recorded base, or a cycle that is not
+    /// committed, keeps the old reading. A response-bearing intent earlier in
+    /// the journal (whose base lacks the body) still owns it, so the race in
+    /// which a cycle crossed `committed` before its response was delivered keeps
+    /// blocking exactly as before.
+    fn intent_builds_on_committed_response(
+        &self,
+        intent: &DocumentWriteIntentProjection,
+        capture: &CapturedResponseProjection,
+    ) -> bool {
+        self.closeout.cycle_id.as_deref() == Some(capture.cycle_id.as_str())
+            && self.closeout.phase == Some(CyclePhase::Committed)
+            && intent.expected_content.as_deref().is_some_and(|base| {
+                agent_doc_turn::response_replay::response_materialized_in_content(
+                    &capture.response_body,
+                    base,
+                )
+            })
+    }
+
     pub fn retained_captured_response_write(&self) -> Option<&DocumentWriteIntentProjection> {
         let retains_capture = |pending: &&DocumentWriteIntentProjection| {
             pending
@@ -1452,6 +1488,7 @@ impl DocumentStateProjection {
                             &capture.response_body,
                             &pending.target_content,
                         )
+                        && !self.intent_builds_on_committed_response(pending, capture)
                         && !self.write_intent_converged(pending)
                 })
         };
@@ -8560,6 +8597,201 @@ mod tests {
                 .as_ref()
                 .map(|checkpoint| checkpoint.checkpoint_sequence),
             Some(3),
+        );
+    }
+
+    /// GH #131 (shape 3): preflight refused every new turn with "a retained
+    /// document-write effect still owns the prior captured response" while the
+    /// response was already committed and the only retained intent was a later
+    /// `write --done <id> --pending-only --commit` repair whose editor delivery
+    /// had not converged. Replays the exact fact order through the same reducer
+    /// the controller's `ingest_state_event` gate reads.
+    #[test]
+    fn pending_only_intent_over_committed_response_does_not_block_admission() {
+        let document_hash = "doc-gh131-admission";
+        let cycle_1 = "cycle-gh131-committed";
+        let cycle_2 = "cycle-gh131-next";
+        let response = "### Re: turn lease sweep — gpt-5\n\nThe committed response.\n";
+        let committed = format!(
+            "# Session\n\n<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- [ ] [#turnleasesweep] sweep\n<!-- /agent:backlog -->\n",
+            response.trim_end()
+        );
+        let done_target = committed.replace("- [ ] [#turnleasesweep] sweep\n", "");
+        let mut ledger = EventLedger::new();
+        let preflight = |id: &str, cycle: &str| {
+            state_event(
+                id,
+                StateFact::PreflightStarted {
+                    document_hash: document_hash.into(),
+                    cycle_id: cycle.into(),
+                    session_id: Some("session-gh131".into()),
+                    tracked_work_maintenance_required: Some(false),
+                },
+            )
+        };
+        ledger.append(preflight("preflight-1", cycle_1));
+        ledger.append(state_event(
+            "capture-1",
+            StateFact::ResponseCaptured {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                capture_id: "capture-gh131".into(),
+                response_sha256: "response-gh131-sha".into(),
+                response_body: Some(response.into()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        ));
+        ledger.append(state_event(
+            "write-applied-1",
+            StateFact::WriteApplied {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                patch_id: Some("patch-gh131".into()),
+                file_hash: None,
+                snapshot_hash: None,
+            },
+        ));
+        ledger.append(state_event(
+            "commit-1",
+            StateFact::CommitObserved {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                commit: "ba7696e".into(),
+                file_hash: None,
+                snapshot_hash: None,
+            },
+        ));
+        // The pending-only repair: its base is the committed document, which
+        // already carries the response; only the done reap is new.
+        ledger.append(state_event(
+            "write-pending-only",
+            StateFact::DocumentWriteDeferred {
+                document_hash: document_hash.into(),
+                intent_id: "intent-pending-only".into(),
+                expected_hash: "committed-hash".into(),
+                expected_content: Some(committed.clone()),
+                target_hash: "done-target-hash".into(),
+                target_content: done_target,
+                source: "pending_status_write".into(),
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
+            },
+        ));
+
+        let retained = ledger.project_document(document_hash).unwrap();
+        assert!(
+            retained.document.pending_write.is_some(),
+            "the pending-only intent itself stays retained until its delivery converges"
+        );
+        assert!(
+            retained.retained_captured_response_write().is_none(),
+            "an intent whose base already carries the committed response owns only its own delta"
+        );
+
+        ledger.append(preflight("preflight-2", cycle_2));
+        let admitted = ledger.project_document(document_hash).unwrap();
+        assert_eq!(
+            admitted.closeout.cycle_id.as_deref(),
+            Some(cycle_2),
+            "turn admission must not be refused over a response that is already committed"
+        );
+    }
+
+    /// The conservative half of the same rule: a response-bearing intent whose
+    /// base LACKS the body still owns the capture even after the cycle crossed
+    /// `committed`, and a later pending-only intent does not launder that away.
+    #[test]
+    fn response_bearing_intent_still_owns_capture_after_cycle_commits() {
+        let document_hash = "doc-gh131-still-owned";
+        let cycle_1 = "cycle-gh131-owned";
+        let response = "### Re: undelivered — gpt-5\n\nNot yet delivered.\n";
+        let with_body = format!(
+            "# Session\n\n<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            response.trim_end()
+        );
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "preflight-1",
+            StateFact::PreflightStarted {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                session_id: Some("session-owned".into()),
+                tracked_work_maintenance_required: Some(false),
+            },
+        ));
+        ledger.append(state_event(
+            "capture-1",
+            StateFact::ResponseCaptured {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                capture_id: "capture-owned".into(),
+                response_sha256: "response-owned-sha".into(),
+                response_body: Some(response.into()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        ));
+        ledger.append(state_event(
+            "write-response",
+            StateFact::DocumentWriteDeferred {
+                document_hash: document_hash.into(),
+                intent_id: "intent-response".into(),
+                expected_hash: "base".into(),
+                expected_content: Some("# Session\n".into()),
+                target_hash: "target-response".into(),
+                target_content: with_body.clone(),
+                source: "finalize".into(),
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
+            },
+        ));
+        ledger.append(state_event(
+            "write-applied-1",
+            StateFact::WriteApplied {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                patch_id: None,
+                file_hash: None,
+                snapshot_hash: None,
+            },
+        ));
+        ledger.append(state_event(
+            "commit-1",
+            StateFact::CommitObserved {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                commit: "head-without-body".into(),
+                file_hash: None,
+                snapshot_hash: None,
+            },
+        ));
+        ledger.append(state_event(
+            "write-pending-only",
+            StateFact::DocumentWriteDeferred {
+                document_hash: document_hash.into(),
+                intent_id: "intent-pending-only".into(),
+                expected_hash: "target-response".into(),
+                expected_content: Some(with_body.clone()),
+                target_hash: "target-pending-only".into(),
+                target_content: format!(
+                    "{with_body}\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+                ),
+                source: "pending_status_write".into(),
+                reason: DocumentWriteDeferredReason::EditorProjectionPending,
+            },
+        ));
+        let projected = ledger.project_document(document_hash).unwrap();
+        assert_eq!(
+            projected
+                .retained_captured_response_write()
+                .map(|pending| pending.intent_id.as_str()),
+            Some("intent-response"),
+            "the intent that introduces the response still owns it"
         );
     }
 

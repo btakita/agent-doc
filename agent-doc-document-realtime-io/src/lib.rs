@@ -6461,11 +6461,20 @@ pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<(
             // site could report a durable holder for a document nothing was
             // holding. Ask the same predicate `session-check` and the write path
             // ask, so an agent gets one answer whichever refusal it reaches first.
+            // GH #131 (`#replicaunservedremedy`): this observation IS "the
+            // editor holds the document but is not serving its replica" — the
+            // exact fact `session-check`'s integrity gate prescribes `admin
+            // reload-lib` for. Carry it into the predicate so this refusal
+            // names that recovery instead of forbidding it.
             agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
                 return Err(await_editor_replica_no_disk_write(format!(
                     "visible document write for {} is retained by the lazy delivery projection; the attached editor replica is not registered, so no snapshot or commit effect is eligible. {}",
                     file.display(),
-                    retained_write_remedy_for(file),
+                    agent_doc_turn::write_ownership::retained_write_remedy(
+                        agent_doc_capture_io::retained_write_ownership(file)
+                            .with_replica_unserved(true),
+                        &file.display().to_string(),
+                    ),
                 )));
             }
             agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
@@ -6477,6 +6486,30 @@ pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<(
             }
         }
     }
+}
+
+/// Whether the editor that holds `file` is observed not serving its replica
+/// (GH #131, `#replicaunservedremedy`).
+///
+/// The same observation [`guard_visible_delivery_convergence`] refuses on and
+/// the attached-editor integrity gate prescribes `admin reload-lib` for, exposed
+/// so `session-check` can ask the write-ownership predicate the question the
+/// write path will ask before naming a repair. Unobservable reads as served:
+/// this fact may only remove a remedy's promise, never invent a recovery.
+pub fn editor_replica_unserved(file: &Path) -> bool {
+    matches!(
+        query_live_editor_authority(file, "replica_service_probe"),
+        Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+    )
+}
+
+/// The write-ownership facts as the write path's own delivery refusal would
+/// read them, including the observed replica service (GH #131).
+pub fn observed_retained_write_ownership(
+    file: &Path,
+) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
+    agent_doc_capture_io::retained_write_ownership(file)
+        .with_replica_unserved(editor_replica_unserved(file))
 }
 
 fn defer_visible_delivery_projection(
@@ -8364,11 +8397,13 @@ fn attached_editor_refusal_remedy_from(
              lost (#84, GH #94)."
         );
     }
+    // GH #131 (`#replicaunservedremedy`): the reload-lib instruction is owned by
+    // the write-ownership predicate, so the retained-write refusal for the same
+    // observation cannot forbid what this gate prescribes.
     format!(
         "Remedy: {holder} holds the document but is not serving its replica, and no plugin \
-         byte replacement explains it. Run `agent-doc admin reload-lib` so the editor \
-         re-registers its replica, then retry the same command; restart that editor only if \
-         the retry is refused again (#84)."
+         byte replacement explains it. {}",
+        agent_doc_turn::write_ownership::editor_replica_recovery()
     )
 }
 
@@ -12238,6 +12273,56 @@ mod tests {
             .expect("the exact target must remain retained");
         assert_eq!(pending.target_content, target);
         assert_eq!(pending.reason, "editor_delivery_worker_stale");
+    }
+
+    /// GH #131 shape 2, on the real refusal builder: an attached editor whose
+    /// replica is not registered is exactly the state `session-check`'s
+    /// integrity gate prescribes `admin reload-lib` for. On 0.35.453 this
+    /// refusal derived the self-completing deferral and forbade `admin
+    /// reload-lib` for the same document, and the forbidden command was the one
+    /// that worked. Both texts must now carry the one recovery the
+    /// write-ownership predicate owns.
+    #[test]
+    fn an_unserved_replica_refusal_names_the_integrity_gate_recovery() {
+        let (_dir, file, _canonical) = temp_doc("# Session\n");
+        let identity = "test-gh131-unserved-replica";
+        seed_reliable_sync_open_without_registration(&file, identity);
+
+        assert!(
+            editor_replica_unserved(&file),
+            "an attached editor with no registered replica is not serving it"
+        );
+        let observed = observed_retained_write_ownership(&file);
+        assert!(observed.replica_unserved, "{observed:?}");
+
+        let err = guard_visible_delivery_convergence(&file, "gh131_unserved_replica")
+            .expect_err("an unserved replica cannot converge");
+        let message = format!("{err:#}");
+        let recovery = agent_doc_turn::write_ownership::editor_replica_recovery();
+        assert!(message.contains(recovery), "{message}");
+        assert!(
+            !message.contains("`admin recycle`, or `admin reload-lib`"),
+            "the refusal must not forbid the integrity gate's recovery: {message}"
+        );
+        assert!(
+            !message.contains("deferral, not a lost response"),
+            "an unserved replica never converges on its own: {message}"
+        );
+        assert!(
+            !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&message),
+            "callers must not defer bookkeeping past an unserved replica: {message}"
+        );
+
+        let gate = attached_editor_refusal_remedy_from(
+            &[],
+            &[("jetbrains".to_string(), 4242)],
+            &[],
+        );
+        assert!(
+            gate.contains(recovery),
+            "the integrity gate renders the same owned recovery: {gate}"
+        );
+        seed_reliable_sync_close(&file, identity);
     }
 
     #[test]

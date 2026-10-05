@@ -595,13 +595,22 @@ pub fn precommit_pending_done_check_with_options(
                 ids
             ),
         );
+        // GH #131 (`#trackedrepairterminates`): name the follow-up through the
+        // write-ownership predicate so it is never a command the write path
+        // refuses in the current state.
+        let repair = agent_doc_turn::write_ownership::tracked_work_repair_instruction(
+            agent_doc_document_realtime_io::observed_retained_write_ownership(file),
+            &file.display().to_string(),
+            &format!(
+                "agent-doc write --commit {} --backlog-only {hint}",
+                file.display()
+            ),
+        );
         eprintln!(
             "[finalize] warn: response appears to complete existing pending {ids} \
              but no matching `--done` or `--backlog-gate` was recorded this cycle; \
              the response is already written, so this cycle commits.\n\
-             [finalize] hint: if the item is complete, follow up with \
-             `agent-doc write --commit {} --backlog-only {hint}`",
-            file.display()
+             [finalize] hint: if the item is complete, follow up with {repair}"
         );
         return Ok(());
     }

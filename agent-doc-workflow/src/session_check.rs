@@ -2,6 +2,10 @@ use agent_doc_element_backlog::guard_policy::BacklogGuardOutcome;
 use agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode;
 use agent_doc_turn::CyclePhase;
 use agent_doc_turn::op_log::OpsLogEvent;
+// GH #131 (`#trackedrepairterminates`): a guard names a tracked-work-only repair
+// through the write-ownership predicate, so it never names a command the write
+// path refuses in the current state.
+use agent_doc_turn::write_ownership::{RetainedWriteOwnership, tracked_work_repair_instruction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuardResult {
@@ -38,10 +42,12 @@ pub fn pending_done_guard_result(
     file: &str,
     missing: &[String],
     mode: PendingCaptureGuardMode,
+    ownership: RetainedWriteOwnership,
 ) -> GuardResult {
     let ids = hash_refs(missing);
     let hint = done_flags(missing);
     let repair = format!("agent-doc write {file} {hint} --pending-only --commit");
+    let repair = tracked_work_repair_instruction(ownership, file, &repair);
     let warn_line = format!(
         "[session-check] warn: response appears to complete existing pending {ids} but no matching `--done` was recorded this cycle"
     );
@@ -50,11 +56,11 @@ pub fn pending_done_guard_result(
         PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
             warn_line,
             format!(
-                "[session-check] hint: repair with `{repair}` or add `pending_done_guard: off` for this document when the item should stay open"
+                "[session-check] hint: repair with {repair} or add `pending_done_guard: off` for this document when the item should stay open"
             ),
         ]),
         PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
-            "{}\n[session-check] hint: repair with `{repair}` or set pending_done_guard = \"warn\" to downgrade",
+            "{}\n[session-check] hint: repair with {repair} or set pending_done_guard = \"warn\" to downgrade",
             warn_line.replacen("[session-check] warn:", "[session-check] error:", 1),
         )),
         PendingCaptureGuardMode::Off => GuardResult::None,
@@ -163,10 +169,12 @@ pub fn expect_done_or_gate_guard_result(
     file: &str,
     unresolved: &[String],
     mode: PendingCaptureGuardMode,
+    ownership: RetainedWriteOwnership,
 ) -> GuardResult {
     let ids = hash_refs(unresolved);
     let done_hint = done_flags(unresolved);
     let repair = format!("agent-doc write {file} {done_hint} --pending-only --commit");
+    let repair = tracked_work_repair_instruction(ownership, file, &repair);
     let warn_line = format!(
         "[session-check] warn: `do #id` directive resolved this cycle but tracked target {ids} is still open in agent:backlog with no `--done`, `--pending-gate`, or kept-open edit recorded"
     );
@@ -175,11 +183,11 @@ pub fn expect_done_or_gate_guard_result(
         PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
             warn_line,
             format!(
-                "[session-check] hint: repair with `{repair}`, run `--pending-gate <id>` if review/external validation remains, or add `pending_done_guard: off` when the item should stay open"
+                "[session-check] hint: repair with {repair}, run `--pending-gate <id>` if review/external validation remains, or add `pending_done_guard: off` when the item should stay open"
             ),
         ]),
         PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
-            "{}\n[session-check] hint: repair with `{repair}`, run `--pending-gate <id>` if review/external validation remains, or set pending_done_guard = \"warn\" to downgrade",
+            "{}\n[session-check] hint: repair with {repair}, run `--pending-gate <id>` if review/external validation remains, or set pending_done_guard = \"warn\" to downgrade",
             warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
         )),
         PendingCaptureGuardMode::Off => GuardResult::None,
@@ -190,6 +198,7 @@ pub fn blocked_closeout_followup_guard_result(
     file: &str,
     unresolved: &[String],
     mode: PendingCaptureGuardMode,
+    ownership: RetainedWriteOwnership,
 ) -> GuardResult {
     let ids = hash_refs(unresolved);
     let edit_hint = unresolved
@@ -202,6 +211,7 @@ pub fn blocked_closeout_followup_guard_result(
         .map(|id| format!("--backlog-add-after {id} \"<id>=<concrete next step>\""))
         .unwrap_or_default();
     let repair = format!("agent-doc write {file} {edit_hint} --pending-only --commit");
+    let repair = tracked_work_repair_instruction(ownership, file, &repair);
     let warn_line = format!(
         "[session-check] warn: `do #id` closeout reported blocked / still-needed work but gated tracked target {ids} out of agent:backlog with no kept-open edit, new follow-up item, or explicit no-follow-up justification — the remaining steps live only in prose"
     );
@@ -210,12 +220,12 @@ pub fn blocked_closeout_followup_guard_result(
         PendingCaptureGuardMode::Warn => GuardResult::Warn(vec![
             warn_line,
             format!(
-                "[session-check] hint: keep the work tracked with `{repair}`, split a new follow-up via `{add_after_hint}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or add `{}`",
+                "[session-check] hint: keep the work tracked with {repair}, split a new follow-up via `{add_after_hint}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or add `{}`",
                 agent_doc_turn::closeout_signal::BLOCKED_CLOSEOUT_FOLLOWUP_GUARD_SUPPRESS_MARKER
             ),
         ]),
         PendingCaptureGuardMode::Strict => GuardResult::Error(format!(
-            "{}\n[session-check] hint: keep the work tracked with `{repair}`, split a new follow-up via `{add_after_hint}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or set pending_done_guard = \"warn\" to downgrade",
+            "{}\n[session-check] hint: keep the work tracked with {repair}, split a new follow-up via `{add_after_hint}`, add an explicit \"no additional backlog follow-up is needed because ...\" phrase for a true review-only gate, or set pending_done_guard = \"warn\" to downgrade",
             warn_line.replacen("[session-check] warn:", "[session-check] INTERRUPTED:", 1),
         )),
         PendingCaptureGuardMode::Off => GuardResult::None,

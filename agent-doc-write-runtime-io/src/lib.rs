@@ -2533,6 +2533,11 @@ fn run_command_inner_within_pass(
     prewrite_lint_gate(file, &options, commit_mode)?;
 
     if options.pending_only {
+        // GH #131 (`#trackedrepairterminates`): the retained intent that exists
+        // BEFORE this envelope runs is not this write's. Only a new one proves
+        // this envelope reached the editor authority.
+        let prior_retained_intent = agent_doc_document_realtime_io::pending_document_write(file)
+            .map(|pending| pending.intent_id);
         let mutation_result = apply_pending_and_status_mutations(
             file,
             &options,
@@ -2541,29 +2546,20 @@ fn run_command_inner_within_pass(
             commit_mode != CommitMode::None || captured_finalize_continuation_owns_commit(&options),
         );
         if let Err(error) = mutation_result {
-            // A tracked-work-only commit can retain its exact editor-owned
-            // target before reaching the git effect. Persist that downstream
-            // effect identity in cycle state so session-check resumes the same
-            // commit after reactive editor/disk convergence instead of
-            // requiring another write/preflight cycle.
-            if commit_mode != CommitMode::None
-                && error_requests_retry_without_disk(&error)
-                && let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
-            {
-                agent_doc_cycle_state_io::record_pending_only_commit_target(
-                    file,
-                    &pending.target_hash,
-                )
-                .context("failed to retain pending-only git commit continuation")?;
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "pending_only_commit_continuation_retained file={} target_hash={} intent_id={} retry=session_check_state_edge",
-                        file.display(),
-                        pending.target_hash,
-                        pending.intent_id,
-                    ),
+            if let Some(target_hash) = absorb_retained_pending_only_mutation(
+                file,
+                commit_mode,
+                &error,
+                prior_retained_intent.as_deref(),
+            )? {
+                eprintln!(
+                    "[write] {}",
+                    agent_doc_turn::write_ownership::pending_only_absorbed_notice(
+                        &file.display().to_string(),
+                        &target_hash,
+                    )
                 );
+                return Ok(());
             }
             return Err(error);
         }
@@ -3302,6 +3298,92 @@ fn run_command_inner_within_pass(
 /// captured the new response first and only then discovered the historical
 /// delivery sink. Every rejected retry therefore left another captured-only
 /// orphan behind the same already-answered heading.
+/// Settle a tracked-work-only (`--pending-only`) mutation that failed with a
+/// retained-write refusal. Returns the absorbed target hash when the write may
+/// report success instead of refusing (GH #131, `#trackedrepairterminates`).
+///
+/// Always persists the pending-only commit continuation for a retained target,
+/// so `session-check` resumes the exact commit after convergence. On 0.35.453
+/// that continuation was recorded only for retry-without-disk refusals, so a
+/// `retained=delivery_projection_pending` refusal left the `--done` mutation in
+/// the editor authority with nothing to commit it, and the refusal's remedy
+/// ("run `session-check`") led to a guard that named this same command again.
+///
+/// `prior_retained_intent` is the retained intent that existed BEFORE this
+/// envelope ran; only a new one proves this envelope reached the authority.
+/// The decision itself is [`agent_doc_turn::write_ownership::pending_only_retention`].
+fn absorb_retained_pending_only_mutation(
+    file: &Path,
+    commit_mode: CommitMode,
+    error: &anyhow::Error,
+    prior_retained_intent: Option<&str>,
+) -> Result<Option<String>> {
+    let message = format!("{error:#}");
+    let own_retained_intent = agent_doc_document_realtime_io::pending_document_write(file)
+        .filter(|pending| prior_retained_intent != Some(pending.intent_id.as_str()));
+    // A converging delivery projection retains this envelope exactly as a
+    // retry-without-disk refusal does, but carries a different token; it must
+    // keep the same downstream commit continuation.
+    let delivery_projection_retained =
+        agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&message)
+            && own_retained_intent.is_some();
+    let mut continuation_target = None;
+    // A tracked-work-only commit can retain its exact editor-owned target
+    // before reaching the git effect. Persist that downstream effect identity
+    // in cycle state so session-check resumes the same commit after reactive
+    // editor/disk convergence instead of requiring another write/preflight
+    // cycle.
+    if commit_mode != CommitMode::None
+        && (error_requests_retry_without_disk(error) || delivery_projection_retained)
+        && let Some(pending) = own_retained_intent
+            .clone()
+            .or_else(|| agent_doc_document_realtime_io::pending_document_write(file))
+    {
+        let recorded =
+            agent_doc_cycle_state_io::record_pending_only_commit_target(file, &pending.target_hash)
+                .context("failed to retain pending-only git commit continuation")?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "pending_only_commit_continuation_retained file={} target_hash={} intent_id={} retry=session_check_state_edge",
+                file.display(),
+                pending.target_hash,
+                pending.intent_id,
+            ),
+        );
+        if recorded.is_some() {
+            continuation_target = Some(pending.target_hash.clone());
+        }
+    }
+    // Refusing here sent the agent to `session-check`, whose tracked-work guard
+    // sent it straight back to this command. When the envelope is durably
+    // retained beside an already-committed response and its commit
+    // continuation is recorded, re-running cannot add anything.
+    let response_committed = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten()
+        .is_some_and(|state| !state.phase.is_open());
+    let retention = agent_doc_turn::write_ownership::pending_only_retention(
+        &message,
+        response_committed,
+        delivery_projection_retained,
+        continuation_target.is_some(),
+    );
+    match (retention, continuation_target) {
+        (agent_doc_turn::write_ownership::PendingOnlyRetention::Absorbed, Some(target_hash)) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "pending_only_mutation_absorbed_by_retained_continuation file={} target_hash={target_hash} response_committed=true",
+                    file.display(),
+                ),
+            );
+            Ok(Some(target_hash))
+        }
+        _ => Ok(None),
+    }
+}
+
 fn guard_historical_retained_write_before_new_capture(
     file: &Path,
     commit_mode: CommitMode,
@@ -3985,6 +4067,12 @@ fn finalize_template_closeout_content(
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
     agent_doc_document_realtime_io::atomic_write_through_authority(path, content)
 }
+
+// GH #131: kept in its own file because the CP-hub source-shape guard
+// forbids direct relay mutation calls in this crate's lib.rs, and the test
+// must register a real editor replica.
+#[cfg(test)]
+mod gh131_pending_only_tests;
 
 #[cfg(test)]
 mod tests {

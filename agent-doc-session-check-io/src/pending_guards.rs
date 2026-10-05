@@ -272,7 +272,14 @@ pub fn check_pending_done_guard(file: &Path, rc: &CycleContext) -> Result<GuardR
     };
 
     let file_display = doc.key().display().to_string();
-    Ok(agent_doc_workflow::session_check::pending_done_guard_result(&file_display, &missing, mode))
+    Ok(
+        agent_doc_workflow::session_check::pending_done_guard_result(
+            &file_display,
+            &missing,
+            mode,
+            agent_doc_document_realtime_io::observed_retained_write_ownership(file),
+        ),
+    )
 }
 
 #[cfg(test)]

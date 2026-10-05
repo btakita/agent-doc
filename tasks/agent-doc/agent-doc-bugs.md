@@ -844,7 +844,6 @@ For a stale sender, compact now names the scheduled safe-boundary route-owned su
 The controller launch waiter also adopts an already-published command-plane socket before status hydration completes, while an explicitly active but non-adoptable controller remains fail-closed. This prevents the launch race from masking the actual document recovery refusal.
 
 Focused authority-recovery, IPC mismatch, relay outcome, attached-editor, native-reload, and launch-race tests passed. The integrated `make check-fast` proof passed strict workspace clippy, all 7,926 affected tests, the full batched controller/session tail, doctests, and documentation audit.
-
 ### Re: Response
 
 > **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/147

@@ -2,6 +2,31 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.461
+
+- **Claude composer routing no longer mistakes agent-addressing chrome for an operator draft (GH #147).** The
+  permanent `Message @agent…` placeholder is classified as empty chrome, while agent-addressing mode itself blocks
+  session-trigger injection with the real clear-addressing remedy. Routed `agent-doc` triggers can no longer be
+  silently delivered to an unrelated subagent.
+- **Retained-response recovery now terminates instead of looping (GH #144, GH #145).** `session-check` treats an
+  unregistered endpoint with no live editor as an unowned write and names the supported stranded-write recovery.
+  Invalid captures containing transcript prompts or multiple response headings are quarantined before replay, and
+  refusal-state guidance no longer prescribes a response write that admission rules prohibit.
+- **Definitive editor recovery refusals remain authoritative (GH #146).** Compact and closeout guidance consume the
+  typed build-mismatch refusal: a stale sender waits for its already-scheduled safe-boundary supervisor recycle, a
+  spent listener reload waits for a new endpoint generation, and process-scoped deferral names the other document
+  whose open cycle is blocking recovery. Retained native-save refusals also preserve the recoverable response path
+  instead of stranding the document.
+- **Session identity and queue state survive interrupted transitions.** Durable session renames carry identity across
+  every state path and heal partially rekeyed records; stop-hook recovery resolves the current queue head, claimed
+  heads are marked in progress, and unmarked continuation text is preserved through queue convergence.
+- **Pane focus remains stable across stale interaction recovery.** Reconciliation preserves the focused live pane
+  while stale ownership and layout state are repaired.
+- **Release proofs are content-addressed and independently reusable.** Full `make check` and `make tmux-ci` receipts
+  bind repository bytes to their complete toolchain fingerprints, survive metadata-only release commits, and
+  invalidate independently. The full installer now uses the resolved release artifact directory and the freshly built
+  binary for executable, library, skill, and editor-package installation; the tree also passes Rust 1.97 clippy.
+
 ## 0.35.460
 
 - **The development loop now uses tiered, content-addressed verification.** Iteration can run affected-scope

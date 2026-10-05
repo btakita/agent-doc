@@ -830,6 +830,20 @@ The ownership invariant is now: a retained write is self-completing only while a
 `RetainedWriteOwnership` remains the policy owner. The observed realtime adapter joins durable transport health with the current replica count, `session-check` preserves those observed facts instead of rebuilding ownership from four cycle booleans, and commit-side guards consume the same observed predicate so the command named by the remedy is admitted by the write path. The reactive topology is transport-health and live-authority sources -> observed ownership -> shared verdict -> session-check/commit effects; no poller or second policy owner was added.
 
 Regression coverage exercises the pure verdict, the real unregister-threshold plus zero-live-replica adapter, the terminal authority/disk divergence diagnostic, the commit-side guard, and every statically enumerated retained-write refusal. All affected crate suites passed: 995 tests across `agent-doc-turn`, `agent-doc-document-realtime-io`, `agent-doc-session-check-io`, `agent-doc-commit-io`, and `agent-doc-codex-stop-io`, plus strict clippy with warnings denied.
+
+### Re: GitHub issue #146 — gpt-5
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/146
+
+Fixed by the requested dedicated subagent, integrated, verified, pushed, and closed in commit `37a0bbeb0` on `origin/main`.
+
+The invariant is now: terminal recovery guidance must never prescribe an effect that the same recovery receipt has already definitively rejected. IPC emits typed `SenderExecutableReplaced` and `ReloadAlreadyRequested` receipts; the relay preserves the route and editor PID; document recovery retains the receipt against its liveness witness; and `agent-doc-turn::authority_recovery` is the single pure policy owner for the rendered terminal decision.
+
+For a stale sender, compact now names the scheduled safe-boundary route-owned supervisor recycle, not `admin reload-lib`, and it identifies the sibling document whose open cycle defers the process-scoped replacement. A reload already spent against the same listener build waits for a new endpoint generation. Superseded/unreachable endpoints still name editor restart, missing endpoints name re-registration, and only the remaining recoverable case names reload. Build mismatch stays fail-closed so an editor buffer is never incorrectly demoted to disk authority.
+
+The controller launch waiter also adopts an already-published command-plane socket before status hydration completes, while an explicitly active but non-adoptable controller remains fail-closed. This prevents the launch race from masking the actual document recovery refusal.
+
+Focused authority-recovery, IPC mismatch, relay outcome, attached-editor, native-reload, and launch-race tests passed. The integrated `make check-fast` proof passed strict workspace clippy, all 7,926 affected tests, the full batched controller/session tail, doctests, and documentation audit.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
@@ -841,7 +855,8 @@ Regression coverage exercises the pure verdict, the real unregister-threshold pl
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/144~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/145~~ — auto-struck: answered this cycle (#ftstrike)
-- #gh-fix https://github.com/btakita/agent-doc/issues/146
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/146~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/147
 - release + publish
 <!-- /agent:queue -->
 

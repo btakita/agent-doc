@@ -373,5 +373,3 @@ Notes:
 
 <!-- completed work archived in tasks/agent-doc/agent-doc-bugs.done.md -->
 <!-- /agent:done -->
-
-- release + publish

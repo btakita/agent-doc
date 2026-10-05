@@ -35,21 +35,27 @@
 //!    [`StaleRecycleRequestState::Pending`] and only when promoting it does not
 //!    widen the target window. An idle supervisor that left its request
 //!    unconsumed past [`STALE_RECYCLE_CONSUME_BOUND_SECS`] is `Overdue`, and its
-//!    stash pane stays in the stash. See [`stale_focus_admission`] for the
-//!    transition function and `formal/tla/StaleColumnRecycle.tla` for the model.
-//! 5. The stale-supervisor consequence: the pane is neither killed nor reaped.
-//!    The existing safe-boundary recycle is requested — the supervisor re-execs
-//!    onto the installed build at its next idle boundary, preserving the harness
-//!    child and the pane id — and the request now stays live past its TTL while
-//!    the supervisor is still stale, so a long open cycle cannot make it lapse.
+//!    stash pane stays in the stash. That elapsed bound controls layout admission
+//!    only; it never authorises replacement. See [`stale_focus_admission`] for
+//!    the transition function and `formal/tla/StaleColumnRecycle.tla` for the
+//!    model.
+//! 5. The stale-supervisor consequence is owned by the controller. While a turn
+//!    is active the durable safe-boundary request remains the only action. Once
+//!    the same pane is proven idle, positive `/proc/<pid>/exe` unlinked evidence
+//!    authorises exactly one forced continuation replacement for that PID. The
+//!    layout gate never kills or reaps a process directly, and no wall-clock age
+//!    is an input to the replacement decision.
 
 use crate::sync::{PaneOccupant, pane_occupant_for_document};
 use agent_doc_controller::dispatch::is_stash_window_name;
+use agent_doc_controller::supervisor_replacement::{
+    StaleIdleSupervisorFacts, StaleIdleSupervisorRecovery, decide_stale_idle_supervisor_recovery,
+};
 pub use agent_doc_supervisor::recycle_request::{
     STALE_RECYCLE_CONSUME_BOUND_SECS, StaleRecycleRequestState,
 };
 use agent_doc_turn::turn_status::STALE_SUPERVISOR_PANE_MARKER;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -303,6 +309,90 @@ fn claim_stale_column_recycle(ledger_key: &str, now: Instant) -> bool {
     true
 }
 
+fn stale_idle_supervisor_replacements() -> &'static Mutex<HashSet<u32>> {
+    static REPLACEMENTS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
+    REPLACEMENTS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// GH #136(c): old supervisors cannot consume the durable recycle request that
+/// was added after they started. Once `/proc/<pid>/exe` positively proves the
+/// binary was replaced and the harness-owned turn marker proves the pane idle,
+/// ask the project controller to replace that exact supervisor once. There is
+/// intentionally no elapsed-time input to this authorization.
+fn request_stale_idle_supervisor_replacement(
+    file: &Path,
+    pane: &str,
+    freshness: &PaneSupervisorFreshness,
+    turn_active: bool,
+) -> Option<String> {
+    // Revalidate the exact process witness at the idle boundary. The decision is
+    // deliberately clock-free: time may bound layout admission, never process
+    // replacement. The controller remains the sole owner of the lifecycle
+    // transition; this path only submits one request for this exact stale PID.
+    let PaneSupervisorFreshness::Stale {
+        supervisor_pid: Some(pid),
+        evidence,
+    } = freshness
+    else {
+        return None;
+    };
+    let binary_unlinked =
+        *evidence == "binary_replaced" && supervisor_binary_replaced(*pid) == Some(true);
+    let mut claims = stale_idle_supervisor_replacements()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match decide_stale_idle_supervisor_recovery(StaleIdleSupervisorFacts {
+        binary_unlinked,
+        turn_active,
+        replacement_claimed: claims.contains(pid),
+    }) {
+        StaleIdleSupervisorRecovery::NotStale => {
+            Some("controller_replacement_skipped_unproven_stale".to_string())
+        }
+        StaleIdleSupervisorRecovery::DeferTurnActive => None,
+        StaleIdleSupervisorRecovery::AlreadyClaimed => {
+            Some("controller_replacement_already_requested".to_string())
+        }
+        StaleIdleSupervisorRecovery::ReplaceOnce => {
+            claims.insert(*pid);
+            drop(claims);
+            let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
+            else {
+                stale_idle_supervisor_replacements()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(pid);
+                return Some("controller_replacement_skipped_no_project_root".to_string());
+            };
+            let request =
+                agent_doc_controller_io::project_controller::SupervisorReplacementRequest {
+                    file: file.to_path_buf(),
+                    mode: "continue".to_string(),
+                    force: true,
+                };
+            match agent_doc_controller_io::project_controller::request_supervisor_replacement(
+                &project_root,
+                request,
+            ) {
+                Ok(receipt) => Some(format!(
+                    "controller_replacement_requested:pid={pid}:pane={pane}:receipt={}",
+                    receipt.operator_receipt.receipt_id
+                )),
+                Err(err) => {
+                    stale_idle_supervisor_replacements()
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .remove(pid);
+                    Some(format!(
+                        "controller_replacement_failed:pid={pid}:error={}",
+                        format!("{err:#}").replace('\n', "\\n")
+                    ))
+                }
+            }
+        }
+    }
+}
+
 /// GH #121: what the pre-selection gate does with one column's candidate pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnAdmission {
@@ -347,8 +437,10 @@ impl ColumnAdmission {
 /// focused column. Pure data so the transition function can be enumerated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StaleFocusFacts {
-    /// The pane currently sits in a stash window (admitting it is a promotion).
-    pub in_stash: bool,
+    /// The pane is not (provably) in the layout's target window, so admitting
+    /// it MOVES it there: a stash pane, or (GH #136 follow-up e) a pane in any
+    /// other window.
+    pub outside_target_window: bool,
     /// The recycle request is overdue (idle past the consumption bound).
     pub recycle_overdue: bool,
     /// Columns the plan would realise if this pane were admitted.
@@ -366,17 +458,18 @@ pub struct StaleFocusFacts {
 /// Invariants (enumerated exhaustively in the tests and model-checked in
 /// `formal/tla/StaleColumnRecycle.tla`):
 ///
-/// * a stash pane is never promoted while its recycle is overdue;
-/// * a stash pane is never promoted when that widens the target window past
+/// * a pane outside the target window (stash or any other window) is never
+///   moved in while its recycle is overdue;
+/// * such a pane is never moved in when that widens the target window past
 ///   `max(window_panes, 1)` (unknown counts as empty);
 /// * a live turn is never displaced (GH #124);
-/// * a pane already visible is never moved by this rule — only promotion out
-///   of the stash is bounded, so a visible stale pane cannot flap.
+/// * a pane already in the target window is never moved by this rule — only
+///   moving a pane IN is bounded, so a visible stale pane cannot flap.
 pub fn stale_focus_admission(facts: StaleFocusFacts) -> ColumnAdmission {
     if facts.displaces_live_turn {
         return ColumnAdmission::ExcludeStaleFocusedLiveTurn;
     }
-    if !facts.in_stash {
+    if !facts.outside_target_window {
         return ColumnAdmission::AdmitStaleFocused;
     }
     if facts.recycle_overdue {
@@ -440,11 +533,14 @@ pub struct ColumnGateFacts {
     /// The pane is the column's own (not bound to another document).
     pub own_pane: bool,
     pub is_focus: bool,
-    /// GH #136: the pane currently sits in a stash window.
-    pub in_stash: bool,
+    /// GH #136: the pane sits outside the target window (a stash window, or —
+    /// follow-up e — any other window), so admitting it moves it in.
+    pub outside_target_window: bool,
     /// GH #136: the recycle request's lifecycle state (meaningful only for a
     /// stale own pane; `NotRequested` otherwise).
     pub recycle: StaleRecycleRequestState,
+    /// A fresh harness-owned marker proves this pane is still mid-turn.
+    pub turn_active: bool,
 }
 
 /// Pure gate plan: one admission (plus the live-turn panes it would have
@@ -506,7 +602,7 @@ pub fn plan_column_admissions(
                 .collect();
             let displaced = live_turn_panes_displaced(&live_elsewhere, &others);
             let admission = stale_focus_admission(StaleFocusFacts {
-                in_stash: fact.in_stash,
+                outside_target_window: fact.outside_target_window,
                 recycle_overdue: fact.recycle.is_overdue(),
                 realised_columns: realised.len(),
                 window_panes,
@@ -605,6 +701,8 @@ pub struct StaleColumnGateInput<'a> {
     pub col_args: &'a [String],
     /// The focused document, when the caller named one.
     pub focus: Option<&'a str>,
+    /// The resolved layout target window (`@N`), when known.
+    pub target_window: Option<&'a str>,
     /// Panes sync proved and is about to hand to tmux-router.
     pub pre_resolved: &'a HashMap<PathBuf, String>,
     /// Durable-registry pane per file, as tmux-router would look it up.
@@ -635,7 +733,9 @@ pub struct StaleColumnGateInput<'a> {
 ///
 /// Returns the column arguments tmux-router should realise, and the documents
 /// it excluded (GH #136: the effect's acknowledgement of what it will not
-/// build). Never moves, kills, or reaps a pane.
+/// build). The gate never directly moves, kills, or reaps a pane; when stale
+/// idle recovery is authorized it delegates the lifecycle transition to the
+/// project controller.
 pub fn gate_stale_column_panes(
     tmux: &Tmux,
     input: &StaleColumnGateInput<'_>,
@@ -666,14 +766,15 @@ pub fn gate_stale_column_panes(
             }
         };
         let is_focus = focus.as_ref() == Some(&path_identity(&file));
-        let in_stash = input
-            .before
-            .get(&pane)
-            .is_some_and(|snapshot| is_stash_window_name(&snapshot.window_name));
+        // GH #136 follow-up (e): bounded wherever the pane is parked, not
+        // only in a `stash` window.
+        let outside_target_window =
+            pane_outside_target_window(input.before.get(&pane), input.target_window);
         // GH #136: one ledger read per stale own pane, before this pass makes
         // any request, so the classification reflects what the consumer had.
+        let turn_active = own_pane && freshness.is_stale() && (input.pane_turn_active)(&pane);
         let recycle = if own_pane && freshness.is_stale() {
-            observe_stale_recycle_request(&file, (input.pane_turn_active)(&pane))
+            observe_stale_recycle_request(&file, turn_active)
         } else {
             StaleRecycleRequestState::NotRequested
         };
@@ -683,8 +784,9 @@ pub fn gate_stale_column_panes(
             freshness,
             own_pane,
             is_focus,
-            in_stash,
+            outside_target_window,
             recycle,
+            turn_active,
         });
         sources.push(pre_resolved);
     }
@@ -736,14 +838,18 @@ pub fn gate_stale_column_panes(
         } else {
             ColumnPaneSource::Registry
         };
-        let action = request_stale_column_recycle(
-            file,
-            pane,
-            freshness,
-            "layout_column_gate",
-            Some(&fact.recycle),
-        )
-        .unwrap_or_else(|| "none".to_string());
+        let action =
+            request_stale_idle_supervisor_replacement(file, pane, freshness, fact.turn_active)
+                .or_else(|| {
+                    request_stale_column_recycle(
+                        file,
+                        pane,
+                        freshness,
+                        "layout_column_gate",
+                        Some(&fact.recycle),
+                    )
+                })
+                .unwrap_or_else(|| "none".to_string());
         let line = format!(
             "{record} file={} pane={} source={} window={} supervisor={} admission={admission_token} reason=stale_supervisor action={action} (GH #121)",
             file.display(),
@@ -758,7 +864,10 @@ pub fn gate_stale_column_panes(
         // ops log and stderr get it only when the recycle is (re)requested, so a
         // tab-switch storm cannot flood them with the same verdict.
         crate::append_sync_log(&line);
-        if action.starts_with("safe_boundary_recycle_requested") {
+        if action.starts_with("safe_boundary_recycle_requested")
+            || action.starts_with("controller_replacement_requested")
+            || action.starts_with("controller_replacement_failed")
+        {
             eprintln!("[sync] warning: {line}");
             agent_doc_ops_log_io::log_op(file, &line);
         }
@@ -781,27 +890,70 @@ pub struct StaleColumnGateOutcome {
 /// One tmux pane's window and title, captured in a single `list-panes -a`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PaneWindowSnapshot {
+    /// tmux window id (`@N`), the identity the layout target is resolved to.
+    pub window_id: String,
     pub window_name: String,
     pub title: String,
 }
 
-const PANE_SNAPSHOT_FORMAT: &str = "#{pane_id}\t#{window_name}\t#{pane_title}";
+const PANE_SNAPSHOT_FORMAT: &str = "#{pane_id}\t#{window_id}\t#{window_name}\t#{pane_title}";
 
-/// Parse `list-panes -a -F '#{pane_id}\t#{window_name}\t#{pane_title}'`.
+/// Parse `list-panes -a -F '#{pane_id}\t#{window_id}\t#{window_name}\t#{pane_title}'`.
 pub fn parse_pane_window_snapshot(output: &str) -> HashMap<String, PaneWindowSnapshot> {
     output
         .lines()
         .filter_map(|line| {
-            let mut fields = line.splitn(3, '\t');
+            let mut fields = line.splitn(4, '\t');
             let pane = fields.next()?.trim();
             if pane.is_empty() {
                 return None;
             }
+            let window_id = fields.next().unwrap_or_default().trim().to_string();
             let window_name = fields.next().unwrap_or_default().to_string();
             let title = fields.next().unwrap_or_default().to_string();
-            Some((pane.to_string(), PaneWindowSnapshot { window_name, title }))
+            Some((
+                pane.to_string(),
+                PaneWindowSnapshot {
+                    window_id,
+                    window_name,
+                    title,
+                },
+            ))
         })
         .collect()
+}
+
+/// GH #136 follow-up (e): whether admitting a pane as a column MOVES it into
+/// the layout's target window — a stash pane, or a pane in any other window
+/// (another session's window, a second agent-doc window, a detached scratch
+/// window). The GH #136 bound used to apply to `stash` windows only, so a stale
+/// pane parked anywhere else was promoted unbounded, widening the window or
+/// riding an overdue request.
+///
+/// Total and conservative: a pane whose origin is unknown (absent from the
+/// snapshot) is NOT proven to be in the target window, so it counts as
+/// outside. With no resolved target window only a stash window is known to be
+/// elsewhere.
+pub fn pane_outside_target_window(
+    snapshot: Option<&PaneWindowSnapshot>,
+    target_window: Option<&str>,
+) -> bool {
+    let Some(snapshot) = snapshot else {
+        return true;
+    };
+    if is_stash_window_name(&snapshot.window_name) {
+        return true;
+    }
+    match target_window
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+    {
+        Some(target) if target.starts_with('@') && !snapshot.window_id.is_empty() => {
+            snapshot.window_id != target
+        }
+        Some(target) => snapshot.window_id != target && snapshot.window_name != target,
+        None => false,
+    }
 }
 
 /// Snapshot every pane's window and title. An unreachable tmux yields an empty
@@ -1147,7 +1299,7 @@ mod tests {
                         ),
                         own_pane: true,
                         is_focus: doc == focus,
-                        in_stash: !self.window.contains(&pane),
+                        outside_target_window: !self.window.contains(&pane),
                         // A request made this pass: inside its bound.
                         recycle: if replaced {
                             StaleRecycleRequestState::Pending {
@@ -1158,6 +1310,7 @@ mod tests {
                         } else {
                             StaleRecycleRequestState::NotRequested
                         },
+                        turn_active: self.live_turn.contains(&pane),
                     }
                 })
                 .collect();
@@ -1409,14 +1562,14 @@ mod tests {
     #[test]
     fn gh136_stale_focus_admission_transition_table_is_exhaustive() {
         let mut cases = 0usize;
-        for in_stash in [false, true] {
+        for outside_target_window in [false, true] {
             for recycle_overdue in [false, true] {
                 for displaces_live_turn in [false, true] {
                     for realised_columns in 1..=5usize {
                         for window_panes in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
                             cases += 1;
                             let facts = StaleFocusFacts {
-                                in_stash,
+                                outside_target_window,
                                 recycle_overdue,
                                 realised_columns,
                                 window_panes,
@@ -1439,22 +1592,25 @@ mod tests {
                             // I1: a live turn is never displaced.
                             assert!(!(admitted && displaces_live_turn), "{facts:?}");
                             // I2: never promoted out of the stash while overdue.
-                            assert!(!(admitted && in_stash && recycle_overdue), "{facts:?}");
+                            assert!(
+                                !(admitted && outside_target_window && recycle_overdue),
+                                "{facts:?}"
+                            );
                             // I3: a stash promotion never widens the window.
                             assert!(
                                 !(admitted
-                                    && in_stash
+                                    && outside_target_window
                                     && realised_columns > window_panes.unwrap_or(0).max(1)),
                                 "{facts:?}"
                             );
                             // I4: a visible pane is never moved by this rule
                             // (no flap): only the live-turn guard can exclude it.
-                            if !in_stash && !displaces_live_turn {
+                            if !outside_target_window && !displaces_live_turn {
                                 assert!(admitted, "{facts:?}");
                             }
                             // Liveness of the exception: a stash pane with a
                             // pending request that replaces a column is admitted.
-                            if in_stash
+                            if outside_target_window
                                 && !recycle_overdue
                                 && !displaces_live_turn
                                 && realised_columns <= window_panes.unwrap_or(0).max(1)
@@ -1546,12 +1702,13 @@ mod tests {
                         ),
                         own_pane: true,
                         is_focus: doc == focus,
-                        in_stash: !self.window.contains(&pane),
+                        outside_target_window: !self.window.contains(&pane),
                         recycle: if stale {
                             self.recycle_state()
                         } else {
                             StaleRecycleRequestState::NotRequested
                         },
+                        turn_active: stale && self.stale_pane_turn_active,
                     }
                 })
                 .collect();
@@ -1751,10 +1908,10 @@ mod tests {
         // column), titled `⚠ STALE SUPERVISOR`, supervisor exe inode differs
         // from the installed one, moved from `stash` into `agent-doc`.
         let before = parse_pane_window_snapshot(
-            "%66\tstash\t⚠ STALE SUPERVISOR ⟳ agent-doc: turn in progress\n%416\tagent-doc\t⟳ agent-doc: turn in progress\n",
+            "%66\t@2\tstash\t⚠ STALE SUPERVISOR ⟳ agent-doc: turn in progress\n%416\t@1\tagent-doc\t⟳ agent-doc: turn in progress\n",
         );
         let after = parse_pane_window_snapshot(
-            "%66\tagent-doc\t⚠ STALE SUPERVISOR\n%416\tagent-doc\t⟳ agent-doc: turn in progress\n",
+            "%66\t@1\tagent-doc\t⚠ STALE SUPERVISOR\n%416\t@1\tagent-doc\t⟳ agent-doc: turn in progress\n",
         );
         let origin = before.get("%66").map(|s| s.window_name.as_str());
         let final_window = after.get("%66").map(|s| s.window_name.as_str());
@@ -1866,11 +2023,182 @@ mod tests {
 
     #[test]
     fn pane_snapshot_parser_keeps_titles_with_tabs_and_skips_blank_lines() {
-        let parsed = parse_pane_window_snapshot("%1\tagent-doc\ta\tb\n\n%2\tstash\t\n");
+        let parsed = parse_pane_window_snapshot("%1\t@1\tagent-doc\ta\tb\n\n%2\t@2\tstash\t\n");
+        assert_eq!(parsed["%1"].window_id, "@1");
         assert_eq!(parsed["%1"].window_name, "agent-doc");
         assert_eq!(parsed["%1"].title, "a\tb");
         assert_eq!(parsed["%2"].window_name, "stash");
         assert_eq!(parsed["%2"].title, "");
         assert_eq!(parsed.len(), 2);
+    }
+
+    // ---------------------------------------------------------------------
+    // GH #136 follow-up (e): stale panes in non-`stash` windows.
+    // ---------------------------------------------------------------------
+
+    fn snapshot(window_id: &str, window_name: &str) -> PaneWindowSnapshot {
+        PaneWindowSnapshot {
+            window_id: window_id.to_string(),
+            window_name: window_name.to_string(),
+            title: String::new(),
+        }
+    }
+
+    #[test]
+    fn gh136e_every_window_but_the_target_counts_as_outside() {
+        let target = Some("@1");
+        // The target window itself: admitting the pane moves nothing.
+        assert!(!pane_outside_target_window(
+            Some(&snapshot("@1", "agent-doc")),
+            target
+        ));
+        // A stash window, whatever the target.
+        assert!(pane_outside_target_window(
+            Some(&snapshot("@2", "stash")),
+            target
+        ));
+        assert!(pane_outside_target_window(
+            Some(&snapshot("@2", "stash")),
+            None
+        ));
+        // Any OTHER non-stash window — the case GH #136 left unbounded.
+        assert!(pane_outside_target_window(
+            Some(&snapshot("@7", "scratch")),
+            target
+        ));
+        assert!(pane_outside_target_window(
+            Some(&snapshot("@9", "agent-doc")),
+            target
+        ));
+        // Unknown origin is not proof of visibility.
+        assert!(pane_outside_target_window(None, target));
+        // A name-form target still matches by name.
+        assert!(!pane_outside_target_window(
+            Some(&snapshot("@1", "agent-doc")),
+            Some("agent-doc")
+        ));
+        // No resolved target: only a stash window is known to be elsewhere.
+        assert!(!pane_outside_target_window(
+            Some(&snapshot("@7", "scratch")),
+            None
+        ));
+    }
+
+    /// The GH #136 world with the stale `%41` parked in a non-stash window
+    /// (`@7 scratch`) instead of `stash`. The bound must be identical: no
+    /// widening, no promotion on an overdue request, and a pane already in
+    /// the target window is never moved by it.
+    #[test]
+    fn gh136e_stale_pane_in_a_non_stash_window_is_bounded_like_a_stash_pane() {
+        let before: HashMap<String, PaneWindowSnapshot> = [
+            ("%434".to_string(), snapshot("@1", "agent-doc")),
+            ("%430".to_string(), snapshot("@1", "agent-doc")),
+            ("%41".to_string(), snapshot("@7", "scratch")),
+        ]
+        .into_iter()
+        .collect();
+        let target = Some("@1");
+        let window_panes = || Some(2usize);
+        let fact = |doc: &str, pane: &str, stale: bool, recycle| ColumnGateFacts {
+            file: PathBuf::from(doc),
+            pane: pane.to_string(),
+            freshness: classify_pane_supervisor_freshness(Some(20488), Some(stale), false),
+            own_pane: true,
+            is_focus: doc == "tasks/pmt2/mr/1099.md",
+            outside_target_window: pane_outside_target_window(before.get(pane), target),
+            recycle,
+            turn_active: false,
+        };
+        let pending = StaleRecycleRequestState::Pending {
+            reason: "stale_supervisor_turn_stage".to_string(),
+            age_secs: 5,
+            deferred_by_turn: false,
+        };
+        let overdue = StaleRecycleRequestState::Overdue {
+            reason: "install_fanout".to_string(),
+            age_secs: 80_071,
+        };
+        let plan = |facts: &[ColumnGateFacts]| -> Vec<ColumnAdmission> {
+            plan_column_admissions(facts, &window_panes, &Vec::new)
+                .into_iter()
+                .map(|(admission, _)| admission)
+                .collect()
+        };
+
+        // Widening from a non-stash window: refused even while pending.
+        let widen = [
+            fact("tasks/pmt2/mr/1099.md", "%41", true, pending.clone()),
+            fact(
+                "tasks/agent-doc/agent-doc.ad.md",
+                "%434",
+                false,
+                StaleRecycleRequestState::NotRequested,
+            ),
+            fact(
+                "tasks/pmt2/tickets/2222.md",
+                "%430",
+                false,
+                StaleRecycleRequestState::NotRequested,
+            ),
+        ];
+        assert_eq!(
+            plan(&widen)[0],
+            ColumnAdmission::ExcludeStaleFocusedWouldWiden
+        );
+
+        // Replacing a column while pending: admitted (the GH #136 exception).
+        let replace = [
+            fact("tasks/pmt2/mr/1099.md", "%41", true, pending),
+            fact(
+                "tasks/agent-doc/agent-doc.ad.md",
+                "%434",
+                false,
+                StaleRecycleRequestState::NotRequested,
+            ),
+        ];
+        assert_eq!(plan(&replace)[0], ColumnAdmission::AdmitStaleFocused);
+
+        // Overdue: never moved in from a non-stash window either.
+        let overdue_replace = [
+            fact("tasks/pmt2/mr/1099.md", "%41", true, overdue.clone()),
+            fact(
+                "tasks/agent-doc/agent-doc.ad.md",
+                "%434",
+                false,
+                StaleRecycleRequestState::NotRequested,
+            ),
+        ];
+        assert_eq!(
+            plan(&overdue_replace)[0],
+            ColumnAdmission::ExcludeStaleFocusedRecycleOverdue
+        );
+
+        // Already in the target window: never moved by the bound (no flap),
+        // even overdue and even when the plan is wider than the window.
+        let mut visible_before = before.clone();
+        visible_before.insert("%41".to_string(), snapshot("@1", "agent-doc"));
+        let visible = ColumnGateFacts {
+            outside_target_window: pane_outside_target_window(visible_before.get("%41"), target),
+            ..fact("tasks/pmt2/mr/1099.md", "%41", true, overdue)
+        };
+        assert!(!visible.outside_target_window);
+        assert_eq!(
+            plan(&[
+                visible,
+                fact(
+                    "tasks/agent-doc/agent-doc.ad.md",
+                    "%434",
+                    false,
+                    StaleRecycleRequestState::NotRequested
+                ),
+                fact(
+                    "tasks/pmt2/tickets/2222.md",
+                    "%430",
+                    false,
+                    StaleRecycleRequestState::NotRequested
+                ),
+            ])[0],
+            ColumnAdmission::AdmitStaleFocused
+        );
     }
 }

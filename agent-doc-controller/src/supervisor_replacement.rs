@@ -178,6 +178,43 @@ pub struct SupervisorReplacementEscalationFacts {
     pub initial_host_stale: bool,
 }
 
+/// Controller-owned recovery for a supervisor that predates the durable recycle
+/// request protocol. This decision deliberately has no clock input: elapsed
+/// time cannot authorize replacing a live process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StaleIdleSupervisorRecovery {
+    NotStale,
+    DeferTurnActive,
+    AlreadyClaimed,
+    ReplaceOnce,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StaleIdleSupervisorFacts {
+    /// Positive `/proc/<pid>/exe` evidence that the mapped executable was
+    /// unlinked by an install.
+    pub binary_unlinked: bool,
+    /// A fresh harness-owned turn marker still names the pane.
+    pub turn_active: bool,
+    /// This controller generation already dispatched recovery for this exact
+    /// supervisor pid.
+    pub replacement_claimed: bool,
+}
+
+pub const fn decide_stale_idle_supervisor_recovery(
+    facts: StaleIdleSupervisorFacts,
+) -> StaleIdleSupervisorRecovery {
+    if !facts.binary_unlinked {
+        StaleIdleSupervisorRecovery::NotStale
+    } else if facts.turn_active {
+        StaleIdleSupervisorRecovery::DeferTurnActive
+    } else if facts.replacement_claimed {
+        StaleIdleSupervisorRecovery::AlreadyClaimed
+    } else {
+        StaleIdleSupervisorRecovery::ReplaceOnce
+    }
+}
+
 pub const fn decide_supervisor_replacement_escalation(
     facts: SupervisorReplacementEscalationFacts,
 ) -> SupervisorReplacementEscalation {
@@ -285,6 +322,31 @@ pub fn parse_supervisor_replacement_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gh136c_stale_idle_recovery_is_total_and_clock_free() {
+        for binary_unlinked in [false, true] {
+            for turn_active in [false, true] {
+                for replacement_claimed in [false, true] {
+                    let actual = decide_stale_idle_supervisor_recovery(StaleIdleSupervisorFacts {
+                        binary_unlinked,
+                        turn_active,
+                        replacement_claimed,
+                    });
+                    let expected = if !binary_unlinked {
+                        StaleIdleSupervisorRecovery::NotStale
+                    } else if turn_active {
+                        StaleIdleSupervisorRecovery::DeferTurnActive
+                    } else if replacement_claimed {
+                        StaleIdleSupervisorRecovery::AlreadyClaimed
+                    } else {
+                        StaleIdleSupervisorRecovery::ReplaceOnce
+                    };
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
 
     #[test]
     fn supervisor_replacement_defaults_to_continue_without_force() {

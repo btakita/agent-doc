@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet LifecycleSequence)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet LifecycleSequence LayoutWidthBound)
 
 # Library modules: INSTANCE'd by the models above, never checked on their own
 # (no Spec, no .cfg). They only need to sit next to the importing model.
@@ -226,6 +226,11 @@ must_violate=(
     PassiveTmuxSyncNet:PassiveTmuxSyncNetReach
     LifecycleSequence:LifecycleSequenceReorderWedge
     LifecycleSequence:LifecycleSequenceReach
+    # GH #136(a): every publisher runs over NetChannel. The wedge proves the
+    # derived clamp carries the safety invariant; reach proves explicit editor
+    # widening and a later derived trim both remain possible under adversity.
+    LayoutWidthBound:LayoutWidthBoundWedge
+    LayoutWidthBound:LayoutWidthBoundReach
 )
 
 for module in "${modules[@]}"; do

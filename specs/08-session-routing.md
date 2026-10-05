@@ -18,6 +18,26 @@ Await diagnostics still distinguish an unstarted effect, an in-flight effect, a
 pending retry, absent state, and operator ownership. A newer generation that
 removes the routed document is supersession and fails closed.
 
+Supervisor freshness and replacement are separate controller facts. Freshness
+is positive only when the route-owned supervisor PID still maps a linked
+executable; staleness is positive only when that PID's `/proc/<pid>/exe` is
+unlinked. Titles, version strings, request age, and elapsed wall time are not
+replacement authority. A stale supervisor with an active harness-owned turn is
+deferred behind its durable safe-boundary request. A stale supervisor observed
+idle is submitted once per exact PID to the controller's forced continuation
+replacement path. Failed submission is retryable; successful submission stays
+claimed so repeated layout observations cannot create a replacement storm.
+
+The retained pane-layout graph is also the width authority. A positive editor
+split observation may widen it. A route, escalation, recycle settlement, or
+other derived publisher must clamp its publication to
+`max(min(retained, observed + gated), asserted, 1)`, or to
+`max(retained, asserted, 1)` when no live observation exists. The generation
+fence rejects stale publications, and state-plane delay, loss, duplication,
+reordering, or reconnect cannot turn derived intent into widening authority.
+These guarantees are modeled by `formal/tla/LayoutWidthBound.tla`, which
+instances the shared `NetChannel` transport adversary.
+
 ## Registry
 
 The controller registry in `.agent-doc/state.db` maps each canonical document

@@ -619,12 +619,35 @@ Kotlin also moved 146 lines of behaviour back to `DeltaSemantics.kt`. In both, t
 **Cleanup for you:** please run `rm -rf ~/.cache/claude-qops` (Rust build caches, now about 74 GB). The delete hook blocks me from removing it.
 
 Next is the queued `release + publish`. The exchange is past 530 lines; not stopping the queue for it.
+
+### Re: #lzshmblobpostcard, ShmBlobRef default backend in Postcard — opus-5-5 · 2026-10-04T23:17-04:00
+
+> **Queue prompt:**
+>
+> do [#lzshmblobpostcard]
+
+**Fixed and pushed as lazily-rs `210bdfc`.**
+
+**The open question answered itself.** I'd filed this asking whether any stored data or peer depended on the current Postcard bytes. Nothing can: a Postcard-encoded descriptor with the default backend never decoded at all. So no stored frame or peer could have relied on that form, and changing it breaks nothing.
+
+**The fix.** `ShmBlobRef` used `skip_serializing_if = "BlobBackendKind::is_default"`, which drops `backend: shm` in every codec. Postcard is positional, so the encoding came out one field short, and decoding failed with `DeserializeUnexpectedEnd`. The decoder already read the field by position in binary codecs; only the encoder was wrong.
+- `ShmBlobRef` now has a hand-written `Serialize` that omits the default only when `serializer.is_human_readable()`. That's the same rule `DeltaOp::NodeAdd` uses for its `key`.
+- JSON and msgpack bytes are unchanged. A test checks that the JSON has no `backend` and the msgpack descriptor still has 5 keys.
+
+**Verification:**
+- **New test** `default_backend_blob_round_trips_in_every_codec`: a default-backend descriptor round-trips through Postcard, JSON and msgpack, both inside a `Delta` and on its own. `delta_wire_codegen.rs` no longer has to use the `arrow` backend just to survive Postcard.
+- **Not vacuous:** putting the old rule back makes that test fail, and it passes again after restoring.
+- **lazily-rs `make check`:** exit 0, with 7263 tests passed and 0 failed across 936 test binaries.
+- **Other bindings:** lazily-cpp is the only other binding with a positional codec, and it always writes `backend`, so it never had this bug.
+
+Next is the queued `release + publish`.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzshmblobpostcard]~~
 - ~~do [#lzwiremodel7]~~
 - release + publish
 <!-- /agent:queue -->
@@ -632,7 +655,6 @@ Next is the queued `release + publish`. The exchange is past 530 lines; not stop
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzshmblobpostcard] [lazily-rs] A ShmBlobRef with the default backend (shm) cannot round-trip through Postcard: skip_serializing_if = BlobBackendKind::is_default omits the field in EVERY codec, but Postcard is positional, so decode hits DeserializeUnexpectedEnd. Pre-existing on main (found by #lzwiremodel7). Fix the same way as NodeAdd.key: omit only when serializer.is_human_readable(). That changes Postcard bytes for default-backend descriptors, so check whether any persisted Postcard data or peer depends on the current form first.
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

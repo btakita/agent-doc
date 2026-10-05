@@ -9,7 +9,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-prompt_presets:
+presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#agent-doc-causes': Fix agent-doc causes
   '#do-backlog': /goal do backlog items
@@ -750,6 +750,34 @@ All GitHub work is complete and closed:
 agent-doc v0.35.460 is tagged and pushed at commit `50338a9234a86c4289313ccb468fe3802245e3ae`; the installed binary and library report 0.35.460. The corrected final-tree `make check` passed (`tart-ad01f9664c`), the post-commit release check passed (`tart-21cc50a818`), and tmux CI passed (`tart-0c10633285`). GitHub Release, PyPI, Homebrew, and main-CI workflows were still running at the required one-time publication inspection; v0.35.459 remains the last fully publication-verified release until those jobs finish.
 
 All eight answered queue heads were consumed and the queue is drained. The exchange remains large; I did not compact it without an explicit compact request.
+
+### Re: claimed markers, pane routing, and observability rename — gpt-5 · 2026-10-05T16:47-04:00
+
+> **Chat prompt (#chatprompt):** also Fix in subagent: • Blocked by hook
+>   └ agent-doc Stop hook kept an active `agent:queue auto` moving for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/roseshield.md. The next queue prompt is "🚧 do [#backlogqueueitems]". Continue THIS turn in-pane: answer that prompt in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/roseshield.md and persist with `agent-doc finalize /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/roseshield.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/roseshield.md`). Do NOT run `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/roseshield.md` from this pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the final answer yet.
+> **Chat prompt (#chatprompt):** Also fix in subagent: devops.md tmux pane auto-focus not working. Also, there is currently only 1 tmux pane with 2 documents (agent-doc-bugs.md|devops.md)
+> **Chat prompt (#chatprompt):** cont
+> **Chat prompt (#chatprompt):** Also fix Run Agent Doc on observability.md: refusing duplicate session identity 0b281660-be9c-4f2d-9a1d-f5ce38aa88a9 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md: first durable owner is /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/betterstack.md in pane  (registered state-event:577209)
+> **Chat prompt (#chatprompt):** › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md
+>
+> • Agent-doc refused admission because this pane’s execution-authority generation does not match the document owner. I’ll run the permitted read-only session check, relay any pending steering verbatim, and stop without writing the document.
+
+> **Queue prompt:** do [#claimmarker]
+> **Queue prompt:** I renamed betterstack.md to observability.md. Run Agent Doc failed: refusing duplicate session identity 0b281660-be9c-4f2d-9a1d-f5ce38aa88a9 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md: first durable owner is /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/betterstack.md in pane  (registered state-event:577209)
+
+All requested fixes are implemented, pushed to `origin/main`, and installed locally.
+
+The claimed-item marker behavior is now correct. Commit `faa7f7a83` projects transient `🚧` onto every live worker-claimed queue head as well as the independently selected inline head, mirrors id-backed markers into tracked work, keeps claims nonselectable, and clears only the ended marker after release, expiry, or removal. The regression covers one selected head plus two simultaneous claims, release, and expiry. Strict clippy passed, all 215 preflight tests passed, and the authoritative full `make check` passed 9,561 workspace tests plus the batched controller/session suites, 193 VS Code tests, cross-editor SimWorld, and the TLA+ models.
+
+The roseshield Stop-hook loop is fixed on main in `27ebc9bf6`. The hook now chooses the continuation from current editor/CRDT authority rather than stale disk queue state and strips transient `🚧` from the prompt it returns, so it cannot keep re-serving the completed `#backlogqueueitems` head.
+
+The devops pane-focus bug is fixed on main in `a22ac8ca6`. Stale-pane admission now consults the owner project root and the live WaitingInput supervisor instead of an unrelated caller-root expiry marker. The repair restored separate panes without killing a session; the devops pane remains alive and recoverable in the stash when a later editor layout supersedes it.
+
+The betterstack-to-observability rename collision is fixed on main in `5a1e210ad` plus the idempotent partial-replay repair `a74dfa44d`. Rename now rewrites the canonical path embedded in durable identity events even when the registry/hash rows were already moved by an earlier partial attempt. State event `577209` now owns `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md` under the same UUID, so the old `betterstack.md` path is no longer a competing durable owner. The existing pane was preserved; the newly installed binary/library scheduled stale supervisors and the one mid-cycle editor endpoint for safe idle-boundary refresh rather than force-killing them.
+
+The public release is agent-doc `v0.35.460`. These final marker and rename repairs are newer commits on `main` under the same version and have not been published as a second release yet. No tmux-router change, tag, or publication was made as part of this work.
+
+The previously visible backlog cruft is gone. The remaining rows are genuine open work (`#releasecyclefast` and any newly queued operator requests), not orphaned completed residue.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
@@ -759,13 +787,16 @@ All eight answered queue heads were consumed and the queue is drained. The excha
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#claimmarker]
+- ~~do [#claimmarker]~~
+- I renamed betterstack.md to observability.md. Run Agent Doc failed: refusing duplicate session identity 0b281660-be9c-4f2d-9a1d-f5ce38aa88a9 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md: first durable owner is /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/betterstack.md in pane  (registered state-event:577209)
 - do [#releasecyclefast]
+- Is there a command to see the agent-doc version + plugin version(s)? If not, we need a cli + plugin command to see the versions.
+- #gh-fix https://github.com/btakita/agent-doc/issues/144
+- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#claimmarker] [recommended] [agent-doc] Project the transient 🚧 in-progress marker onto every live claimed queue head; remove it on release or expiry; keep it out of item identity and keep claimed heads non-selectable, with spec and regression coverage.
 - [ ] [#releasecyclefast] [recommended] [agent-doc] Finish release-cycle acceleration: run cheap version and editor-parity preflight before the full suite; make full-check receipts independent of commit metadata when repository bytes and toolchains match; reuse tmux-ci proof; and make install-full honor external CARGO_TARGET_DIR, with regressions.
 <!-- /agent:backlog -->
 

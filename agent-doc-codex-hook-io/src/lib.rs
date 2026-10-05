@@ -1377,6 +1377,25 @@ mod tests {
         assert_eq!(entries[0].text, "#upgrade");
     }
 
+    /// GH #139: a Codex collaboration hand-back is model output, not operator
+    /// chat intent. It must never enter the chat-prompt ledger that preempts a
+    /// queue drain on the next trigger.
+    #[test]
+    fn subagent_handback_is_not_recorded_as_operator_chat() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "turn-1");
+
+        let handback = chat_input(
+            &dir,
+            "turn-2",
+            "<agent-message from=\"/root/worker\">\nSubagent hand-back: done.\n</agent-message>\nThis is model output, NOT a message from the user.",
+        );
+        apply_user_prompt_submit(&handback).unwrap();
+        assert_eq!(note_chat_prompt(&handback).unwrap(), None);
+        assert!(ledger_entries(&dir, &doc).is_empty());
+    }
+
     /// GH #125 gap 3: TTL, the closeout of the turn's response, and the cap.
     #[test]
     fn ledger_prune_drops_expired_closed_out_and_overflow_entries() {

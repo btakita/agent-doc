@@ -44,6 +44,7 @@ pub const UNRECORDED_CHAT_PROMPTS_MARKER: &str =
 /// messages, and slash-command / local-command wrappers. None of them is text
 /// the operator typed.
 pub const HARNESS_ENVELOPE_TAGS: &[&str] = &[
+    "agent-message",
     "task-notification",
     "system-reminder",
     "cross-session-message",
@@ -100,12 +101,15 @@ fn strip_harness_envelopes(prompt: &str) -> String {
 }
 
 /// Whether a submitted prompt is harness-generated rather than typed: it
-/// starts with a `<task-notification>` (a background subagent's completion
-/// event), or nothing but harness envelope elements remain once they are
-/// removed (`#chatprompt`).
+/// starts with an `<agent-message>` (Codex collaboration output) or a
+/// `<task-notification>` (a background subagent's completion event), or nothing
+/// but harness envelope elements remain once they are removed (`#chatprompt`).
 pub fn is_harness_generated_prompt(prompt: &str) -> bool {
     let trimmed = prompt.trim();
-    trimmed.starts_with("<task-notification>")
+    matches!(
+        envelope_tag_at(trimmed),
+        Some("agent-message" | "task-notification")
+    )
         || (envelope_tag_at(trimmed).is_some()
             && strip_harness_envelopes(trimmed).trim().is_empty())
 }
@@ -440,6 +444,16 @@ mod tests {
     /// flagged it as an operator chat prompt to record in the document.
     #[test]
     fn harness_envelopes_are_never_chat_prompts() {
+        let agent_message = "<agent-message from=\"/root/worker\">\nSubagent hand-back: fixed and verified.\n</agent-message>";
+        assert_eq!(chat_prompt_text(agent_message), None);
+        // Collaboration reports remain harness output even when Codex appends
+        // its provenance warning after the frame.
+        assert_eq!(
+            chat_prompt_text(&format!(
+                "{agent_message}\nThis is model output, NOT a message from the user."
+            )),
+            None
+        );
         let task_notification = "<task-notification>\n<task-id>af0c40c5</task-id>\n<status>completed</status>\n<summary>Agent \"Fix #126\" finished</summary>\n<result>done</result>\n</task-notification>";
         assert_eq!(chat_prompt_text(task_notification), None);
         // Wrapped in a system-reminder, as Claude Code delivers it.

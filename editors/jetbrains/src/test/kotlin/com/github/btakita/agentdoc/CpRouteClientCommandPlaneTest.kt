@@ -259,7 +259,7 @@ class CpRouteClientCommandPlaneTest {
         assertEquals("agent-doc/pane-layout/desired/v1", node.key?.path)
         val desired =
             JsonParser.parseString(
-                String((node.state as NodeState.Payload).toByteArray(), Charsets.UTF_8),
+                String((node.state as NodeState.Payload).bytes, Charsets.UTF_8),
             ).asJsonObject
         assertEquals("/proj/tasks/one.md", desired.getAsJsonArray("columns")[0].asString)
         assertEquals("/proj/tasks/two.md", desired.get("focus").asString)
@@ -274,7 +274,7 @@ class CpRouteClientCommandPlaneTest {
             val message = IpcMessage.decodeJson(publication.get("message_json").asString)
             val node = (message as IpcMessage.SnapshotMessage).snapshot.nodes.single()
             return JsonParser.parseString(
-                String((node.state as NodeState.Payload).toByteArray(), Charsets.UTF_8),
+                String((node.state as NodeState.Payload).bytes, Charsets.UTF_8),
             ).asJsonObject
         }
         val unknown = desiredOf(

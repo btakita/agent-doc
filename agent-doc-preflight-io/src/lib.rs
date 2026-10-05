@@ -5237,11 +5237,17 @@ pub fn run_queue_maintenance_with_coin_gate(
 
     let mut in_progress_markers_changed = false;
     // `#queueclaim`: a head claimed by a worker outside the in-session loop (a
-    // dispatched subagent) is in flight; this cycle must not select, mark, or
-    // consume it. `#closeout-steering`: likewise a new subagent-intent line
-    // the cycle must dispatch (`queue_subagent_dispatch`). Both leave the
-    // projection BEFORE it picks heads, so the next head runs inline instead
-    // of the cycle selecting nothing.
+    // dispatched subagent) is in flight. It remains outside the selectable
+    // projection, but its visible `🚧` marker joins the selected heads below
+    // (`#claimmarker`). `#closeout-steering`: likewise a new subagent-intent
+    // line the cycle must dispatch (`queue_subagent_dispatch`). Both leave the
+    // selection projection BEFORE it picks heads, so the next head runs inline
+    // instead of the cycle selecting nothing.
+    let claimed_queue_prompt_texts = if activation.active {
+        agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(file, &current_content)
+    } else {
+        Vec::new()
+    };
     let claimed_queue_items = if activation.active {
         agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &current_content)
     } else {
@@ -5320,10 +5326,12 @@ pub fn run_queue_maintenance_with_coin_gate(
             !agent_doc_queue_io::subagent_dispatch::is_dispatch_item(&subagent_dispatch, prompt)
         })
         .collect();
+    let mut in_progress_queue_prompt_texts = active_queue_prompt_texts.clone();
+    in_progress_queue_prompt_texts.extend(claimed_queue_prompt_texts);
     if activation.active
         && let Err(err) = agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
             file,
-            &active_queue_prompt_texts
+            &in_progress_queue_prompt_texts
                 .iter()
                 .map(|text| strip_priority_markers(text))
                 .collect::<Vec<_>>(),
@@ -5344,7 +5352,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     if let Some((new_body, marked_entries)) =
         agent_doc_queue::document_queue::project_prompts_in_progress(
             &marker_body,
-            &active_queue_prompt_texts,
+            &in_progress_queue_prompt_texts,
         )?
     {
         current_content = {
@@ -10935,6 +10943,74 @@ mod tests {
     }
 
     #[test]
+    fn claimed_queue_heads_project_in_progress_until_release_or_expiry() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#selected]\n",
+            "- do [#claimed-a]\n",
+            "- do [#claimed-b]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, "#claimed-a", "subagent:a", 600).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, "#claimed-b", "subagent:b", 600).unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            state.selected_queue_prompts,
+            vec!["do [#selected]".to_string()],
+            "claimed heads must stay outside active-head selection"
+        );
+        let marked = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            marked.contains("- 🚧 do [#selected]\n- 🚧 do [#claimed-a]\n- 🚧 do [#claimed-b]"),
+            "selected and every live claimed head should be visibly in progress:\n{marked}"
+        );
+        let projected = load_projected_in_progress_queue_heads(&doc);
+        assert_eq!(
+            projected.len(),
+            3,
+            "all binary markers need retarget receipts"
+        );
+        assert!(projected.contains("do [#claimed-a]"));
+        assert!(projected.contains("do [#claimed-b]"));
+
+        agent_doc_queue_io::queue_claim::release(&doc, "#claimed-b")
+            .unwrap()
+            .expect("claimed-b should release");
+        run_queue_maintenance(&doc, None).unwrap();
+        let released = std::fs::read_to_string(&doc).unwrap();
+        assert!(released.contains("- 🚧 do [#claimed-a]\n- do [#claimed-b]"));
+
+        expire_queue_claims(dir.path(), &doc);
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            state.selected_queue_prompts,
+            vec!["do [#selected]".to_string()]
+        );
+        let expired = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            expired.contains("- 🚧 do [#selected]\n- do [#claimed-a]\n- do [#claimed-b]"),
+            "release and expiry must clear only their transient claim markers:\n{expired}"
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_marks_first_in_session_drainable_head_in_progress() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
@@ -13996,7 +14072,10 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains(&format!("- ~~{done}~~")), "{updated}");
-        assert!(updated.contains(&format!("- {pending}\n")), "{updated}");
+        assert!(
+            updated.contains(&format!("- 🚧 {pending}\n")),
+            "the deferred live claim stays visibly in progress:\n{updated}"
+        );
         let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
         let owners: Vec<&str> = ledger.claims.iter().map(|c| c.owner.as_str()).collect();
         assert_eq!(

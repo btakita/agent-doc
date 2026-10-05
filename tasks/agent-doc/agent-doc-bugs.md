@@ -540,6 +540,22 @@ These three are held on dependencies, under coordinator claims with a 4h TTL so 
 - `#netadv6` needs the `netadv4` network layer.
 
 Still in flight: GH #136. `#jbstagefallback` and the alt+shift menu fix are merged on `batch-0505`. The release stays held until GH #136 lands. If the network batch is ready by then, it ships in the same release; otherwise in the next one.
+
+### Re: handoff to Codex before the weekly token limit — opus-5-5 · 2026-10-05T00:35-04:00
+
+> **Chat prompt (#chatprompt):** We are almost at the week token limit. Make sure Codex can successfully pickup all subagents + tasks.
+
+Everything in flight is now durable and visible to Codex:
+
+- **All 5 running subagents checkpointed.** `gh136`, `netadv1`, `netadv2`, `netadv4` and `netadv7` each have a WIP commit plus a `HANDOFF.md` at the worktree root (goal, done, remaining, commands). They keep working and re-commit at each milestone, so whatever finishes before the limit is also saved.
+- **Integration branch:** `batch-0505` already holds `#jbstagefallback` + the alt+shift menu fix (plugin 0.2.496, JB suite 714/0).
+- **Handoff doc:** `tasks/agent-doc/handoff-2026-10-05-codex.md` (commit `247ee9b4d6`) has the item → worktree → state → dependency table, the merge order, the JetBrains version-conflict recipe, `make check` → one `make install` → release steps, and the network-correctness requirements from this session.
+- **Codex skill refreshed** to 0.35.456 (it was at 0.35.455).
+- **Queue entry point:** `#codexhandoff` is at the head of the queue and unclaimed, so Codex's preflight selects it first and it points at the handoff doc.
+
+**The one trap:** the other heads are still claimed by this session (subagent claims have a ~2h TTL, coordinator claims ~4h), and claimed heads are invisible to preflight. Step 0 of the handoff tells Codex to check that no Claude subagent is still writing, then `agent-doc queue release` each claim it takes over. Without that, Codex would sit idle until the TTLs expire.
+
+Both rules carry over: never two agents in one worktree, and never edit the main `src/agent-doc` checkout directly (another session has uncommitted edits there).
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -564,6 +580,7 @@ Still in flight: GH #136. `#jbstagefallback` and the alt+shift menu fix are merg
 
 
 <!-- agent:backlog priority -->
+- [ ] [#codexhandoff] [agent-doc] Codex pickup of the 2026-10-05 Claude subagent batch: read tasks/agent-doc/handoff-2026-10-05-codex.md. Step 0: confirm no Claude subagent is still writing (pgrep -x claude; git log -1 in each worktree), then agent-doc queue release the claims you take over. Resume gh136/netadv1/netadv2/netadv4/netadv7 from each worktree's HANDOFF.md under ~/work/btakita/agent-doc-wt/, then the held netadv3/5/6, integrate serially into batch-0505, make check, one make install, then release + publish.
 - [ ] [#netadv1] [agent-doc][formal] Channel-assumption audit: for each TLA+ model in formal/tla/ and each IPC protocol, record channel assumption (atomic/FIFO/reliable/lossy), timeouts on the correctness path, and serial round-trip count; rank timing-dependent protocols. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv2] [agent-doc][formal] Shared adversarial NetChannel.tla (deliver/drop/duplicate/reconnect + fair variant) with Wedge cfgs proving it catches a known timing bug. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv3] [agent-doc][formal] Re-check hot-path models (VisibleDeliveryReceipt, EditorReplicaStrand, PassiveTmuxSync, RecycleSettleDispatch, AgentDocCloseout, GH 136 layout/recycle) over NetChannel; fix every counterexample with SimWorld replay coverage. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md

@@ -33,7 +33,7 @@ Another session has uncommitted edits there.
 | alt+shift agent-doc menu | merged into `batch-0505` (from `altshiftmenu` @ ce8c1707b) | DONE. Restores Alt+Space on the XWin keymap; the operator should confirm "alt+shift" meant Alt+Space | — |
 | `#gh-fix` GH #136 (stale stash supervisor pane admitted as a layout column) | `gh136` | IN PROGRESS. See HANDOFF.md. Operator steering: formal state machine, adversarial channel, Coder+Zscaler latency, durable recycle request plus idempotent consumer, Wedge cfg for the fire-and-forget stall | — |
 | `do [#netadv1]` channel-assumption audit | `netadv1` | IN PROGRESS or done; see HANDOFF.md | — |
-| `do [#netadv2]` NetChannel.tla | `netadv2` | IN PROGRESS | — |
+| `do [#netadv2]` NetChannel.tla | `netadv2` @ 6fdaa8607 | DONE. `make tla` green, 25 modules; 4 wedges and the Reach config fail on their intended properties. API is in formal/tla/README.md. Delivery fairness is strong (SF) per message. netadv3 is now unblocked on its netadv2 side | — |
 | `do [#netadv4]` SimWorld network layer | `netadv4` | IN PROGRESS | — |
 | `do [#netadv7]` cargo-fuzz + proptest | `netadv7` | IN PROGRESS | — |
 | `do [#netadv3]` re-check hot-path models over NetChannel | not started | HELD | netadv2, gh136 |

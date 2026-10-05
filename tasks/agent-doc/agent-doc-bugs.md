@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -712,6 +713,7 @@ The exchange is large, but the active queue was drained rather than stalled for 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- There is leftover cruft in the `agent:backlog`. Fix agent-doc causes.
 <!-- /agent:queue -->
 
 

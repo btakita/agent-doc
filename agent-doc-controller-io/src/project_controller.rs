@@ -260,6 +260,13 @@ pub struct ControllerTmuxLayoutSyncReceipt {
     pub applied: bool,
     pub reason: String,
     pub columns: Vec<String>,
+    /// Generation of the pane-layout projection represented by this receipt.
+    /// Older peers and direct tmux adapters may not have graph provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_generation: Option<u64>,
+    /// Publisher of `layout_generation` (`route`, `command`, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_publisher: Option<String>,
     #[serde(default)]
     pub window: Option<String>,
     #[serde(default)]
@@ -2661,6 +2668,8 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
             applied: true,
             reason: "test_runtime".to_string(),
             columns: invocation.columns,
+            layout_generation: None,
+            layout_publisher: None,
             window: invocation.window,
             focus: invocation.focus,
             no_autostart: invocation.no_autostart,

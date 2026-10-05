@@ -394,6 +394,8 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                 applied: sync_report.applied,
                 reason: sync_report.reason,
                 columns: invocation.columns,
+                layout_generation: None,
+                layout_publisher: None,
                 window: invocation.window,
                 focus: invocation.focus,
                 no_autostart: invocation.no_autostart,

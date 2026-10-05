@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use agent_doc_document::queue_projection::strip_in_progress_marker;
+use agent_doc_document::queue_projection::{has_in_progress_marker, strip_in_progress_marker};
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
 use agent_doc_frontmatter::frontmatter;
@@ -256,7 +256,11 @@ pub fn required_continuation_excluding_claimed(
     // `🚧` is a transient UI projection, never part of queue identity or the
     // prompt handed back to a harness. Other live-head projections in this
     // module already normalize it; keep the continuation contract consistent.
-    let head_prompt = strip_in_progress_marker(&head.text);
+    let head_prompt = if has_in_progress_marker(&head.text) {
+        strip_in_progress_marker(&head.text)
+    } else {
+        head.text.clone()
+    };
     let head_id = extract_head_id(&head_prompt);
     let reason = if queue_component.attrs.contains_key("go") {
         "active `agent:queue go` still has a ready head prompt after a clean closeout"
@@ -1550,7 +1554,7 @@ mod tests {
     /// operator action, not a wait for one, so it must not read as deferred.
     #[test]
     fn an_operator_answered_head_is_not_deferred() {
-        let doc = format!(concat!(
+        let doc = concat!(
             "<!-- agent:queue preset=\"x\" priority go -->\n",
             "- do [#fpeoptimizedprofileacceptance]: I lift the push hold\n",
             "<!-- /agent:queue -->\n\n",
@@ -1560,7 +1564,8 @@ mod tests {
             "<!-- agent:review -->\n",
             "- [/] [#fpeoptimizedprofileacceptance] [operator-verify] repeat the workload\n",
             "<!-- /agent:review -->\n",
-        ),);
+        )
+        .to_string();
         let answered = operator_answered_head_ids(&doc);
         assert!(
             answered.contains("fpeoptimizedprofileacceptance"),
@@ -1662,8 +1667,6 @@ mod tests {
         assert!(!out.required);
         assert_eq!(out.guidance.as_deref(), Some(RECYCLE_YIELD_GUIDANCE));
     }
-
-    use super::*;
 
     fn doc_with_backlog(queue_prompts: &[&str], backlog_items: &[&str]) -> String {
         let queue: String = queue_prompts.iter().map(|p| format!("- {p}\n")).collect();
@@ -2806,6 +2809,17 @@ mod tests {
 
         assert_eq!(continuation.head_prompt, "do [#a]");
         assert_eq!(continuation.head_id.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn required_continuation_preserves_unmarked_head_whitespace() {
+        let content = doc_with_backlog(&["  /clear  "], &[]);
+
+        let continuation = required_continuation(&content, Some(&content))
+            .unwrap()
+            .expect("unmarked head remains drainable");
+
+        assert_eq!(continuation.head_prompt, "  /clear  ");
     }
 
     /// `#queueclaim`: when every remaining head is claimed, no continuation is

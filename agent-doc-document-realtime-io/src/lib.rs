@@ -1089,6 +1089,70 @@ fn atomic_write_rebased_through_authority_inner(
 /// remains fail-closed: an advancing editor cut returns immediately while the
 /// original target stays retained, and a target that never converges exhausts
 /// the existing projection deadline and remains retained.
+/// `#gh131nonipc` — a `serialized_atomic_write` that retains because the
+/// editor never projected the canonical target never touched the socket, so it
+/// recorded nothing against editor transport health and could not drive
+/// degraded/recycle however often it repeated. Feed the same typed recorder the
+/// socket path uses, as a [`SocketDeliveryFailure::ProjectionUnconverged`]
+/// outcome: it accrues a failure toward degradation and carries (neither
+/// extends nor ends) an open refusal run.
+///
+/// Best effort and fail-quiet: a process that may not open the state database
+/// (the editor FFI host) has not looked, and not looking is not a failure.
+///
+/// [`SocketDeliveryFailure::ProjectionUnconverged`]: agent_doc_ipc_protocol::SocketDeliveryFailure::ProjectionUnconverged
+fn record_serialized_write_projection_unconverged(path: &Path, content_hash: &str) {
+    let Some(project_root) = transport_health_project_root(path) else {
+        return;
+    };
+    if let Err(err) = agent_doc_write_converge_io::record_ipc_socket_ack_failure(
+        &project_root,
+        path,
+        Some(content_hash),
+        "serialized_atomic_write",
+        agent_doc_ipc_protocol::SocketDeliveryFailure::ProjectionUnconverged,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "serialized_atomic_write_transport_health_record_failed file={} error={err:#}",
+                path.display()
+            ),
+        );
+    }
+}
+
+/// `#gh131nonipc` — the success that resets the failure votes the retention
+/// above accrues. Without it, sporadic retentions on a document whose writes
+/// rarely use the socket would add up across days into a spurious degradation.
+fn clear_editor_transport_health_after_proven_projection(path: &Path, reason: &str) {
+    let Some(project_root) = transport_health_project_root(path) else {
+        return;
+    };
+    if let Err(err) =
+        agent_doc_write_converge_io::clear_ipc_socket_ack_timeouts(&project_root, path, reason)
+    {
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "serialized_atomic_write_transport_health_clear_failed file={} error={err:#}",
+                path.display()
+            ),
+        );
+    }
+}
+
+fn transport_health_project_root(path: &Path) -> Option<std::path::PathBuf> {
+    if agent_doc_sqlite::state_store::state_db_connections_forbidden_for_process() {
+        return None;
+    }
+    let canonical = path.canonicalize().ok()?;
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    agent_doc_sqlite::state_store::state_db_path(&project_root)
+        .exists()
+        .then_some(project_root)
+}
+
 fn await_serialized_atomic_write_projection(
     path: &Path,
     target_hash: &str,
@@ -1336,6 +1400,7 @@ fn atomic_write_rebased_through_authority_body(
                 editor_receipt =
                     await_visible_editor_projection_receipt(path, &relay_write.content_hash)?;
                 if !editor_receipt {
+                    record_serialized_write_projection_unconverged(path, &relay_write.content_hash);
                     return Err(retained_refusal(
                         path,
                         format!(
@@ -1355,6 +1420,7 @@ fn atomic_write_rebased_through_authority_body(
                 editor_receipt =
                     await_visible_editor_projection_receipt(path, &relay_write.content_hash)?;
                 if !editor_receipt {
+                    record_serialized_write_projection_unconverged(path, &relay_write.content_hash);
                     return Err(retained_refusal(
                         path,
                         format!(
@@ -1423,6 +1489,10 @@ fn atomic_write_rebased_through_authority_body(
                         &relay_write.content_hash,
                         "serialized_atomic_write_projection",
                     )?;
+                    clear_editor_transport_health_after_proven_projection(
+                        path,
+                        "serialized_atomic_write_projection",
+                    );
                     agent_doc_ops_log_io::log_op(
                         path,
                         &format!(
@@ -3223,7 +3293,8 @@ pub fn adopt_verified_editor_receipt_by_cells_within(
                 _ => String::new(),
             };
             anyhow::bail!(
-                "{source}: refusing editor receipt that diverges from controller canonical for {} (canonical_hash={}, editor_hash={}, waited_ms={}, revisions={}{cells}); retained canonical projection remains authoritative",
+                "{source}: {} for {} (canonical_hash={}, editor_hash={}, waited_ms={}, revisions={}{cells}); retained canonical projection remains authoritative",
+                agent_doc_ipc_protocol::EDITOR_RECEIPT_DIVERGENCE_REFUSAL,
                 file.display(),
                 agent_doc_hash::content_hash(&canonical),
                 agent_doc_hash::content_hash(text),
@@ -6763,8 +6834,14 @@ mod retained_refusal_token_tests {
             !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&rejected),
             "an endpoint that answered NO is not a converging replica: {rejected}"
         );
-        assert!(rejected.contains("REJECTED the delivery receipt"), "{rejected}");
-        assert!(rejected.contains("restart or reload the editor"), "{rejected}");
+        assert!(
+            rejected.contains("REJECTED the delivery receipt"),
+            "{rejected}"
+        );
+        assert!(
+            rejected.contains("restart or reload the editor"),
+            "{rejected}"
+        );
         assert!(
             !rejected.contains("deferral, not a lost response")
                 && !rejected.contains("`admin recycle`, or `admin reload-lib`"),
@@ -11435,6 +11512,71 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
         let pending = pending_document_write(&file).expect("retained write intent");
         assert_eq!(pending.target_hash, agent_doc_hash::content_hash(target));
+    }
+
+    /// `#gh131nonipc`: a `serialized_atomic_write` retained because the editor
+    /// never projected the target never touches the socket, so it used to
+    /// record nothing in `editor_transport_health` and could not drive
+    /// degraded/recycle however often it repeated. It now feeds the same typed
+    /// recorder as a projection-unconverged outcome, and a repeat degrades.
+    #[test]
+    fn serialized_atomic_write_retention_records_transport_health() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody\n\n### Re: retained\n\nExactly once.\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        // The recorder only writes where a state database exists; it never
+        // creates one as a side effect of a refusal.
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).expect("state db"));
+        let identity = "test-atomic-retained-health";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let err = atomic_write_through_authority(&file, target).unwrap_err();
+        assert!(format!("{err:#}").contains("binary-owned write"), "{err:#}");
+
+        let load = || {
+            let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).expect("state db");
+            agent_doc_sqlite::state_store::load_editor_transport_health_from_db(
+                &conn,
+                &agent_doc_fs::document_state_hash(&file).expect("hash"),
+            )
+            .expect("load health")
+            .expect("the retention must be recorded against transport health")
+        };
+        let health = load();
+        assert_eq!(health.last_transport, "serialized_atomic_write");
+        assert_eq!(health.consecutive_timeouts, 1);
+        assert_eq!(
+            health.consecutive_rejections, 0,
+            "a retention is no evidence that the endpoint refused"
+        );
+        assert!(!health.degraded);
+
+        let _ = atomic_write_through_authority(&file, target).unwrap_err();
+        let health = load();
+        assert!(
+            health.consecutive_timeouts >= 2 && health.degraded,
+            "repeated retentions must reach degraded so the recycle can arm: {health:?}"
+        );
+    }
+
+    /// `#gh131nonipc`: the divergence refusal is authored from the protocol's
+    /// phrase, so the transport classifier routes it as a refused receipt.
+    #[test]
+    fn editor_receipt_divergence_refusal_classifies_as_a_refused_receipt() {
+        let message = format!(
+            "socket_visible_write: {} for /p/doc.md (canonical_hash=a, editor_hash=b)",
+            agent_doc_ipc_protocol::EDITOR_RECEIPT_DIVERGENCE_REFUSAL
+        );
+        assert!(
+            message.contains("refusing editor receipt that diverges from controller canonical")
+        );
+        assert_eq!(
+            agent_doc_ipc_protocol::classify_socket_delivery_failure(&message),
+            Some(agent_doc_ipc_protocol::SocketDeliveryFailure::VisibleWriteDiverged)
+        );
     }
 
     #[test]

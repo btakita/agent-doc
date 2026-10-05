@@ -15,22 +15,23 @@ use agent_doc_flow_io::closeout::cycle_already_committed;
 use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, FullContentIpcMode, build_ipc_node_patches_json,
-    effective_unmatched_for_patch_payload, is_already_applied_receipt_error_message,
-    classify_socket_delivery_failure,
+    classify_socket_delivery_failure, effective_unmatched_for_patch_payload,
+    is_already_applied_receipt_error_message,
 };
 use agent_doc_template as template;
 use agent_doc_template::stale_baseline::patch_touches_exchange;
 use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_write_converge_io::{
     AlreadyAppliedSocketSnapshotContext, checkpoint_ipc_baseline_nonfatal,
-    clear_ipc_socket_ack_timeouts, dedupe_ipc_snapshot_content, full_content_ipc_scope_allows,
+    clear_ipc_socket_ack_timeouts, dedupe_ipc_snapshot_content,
+    editor_delivery_endpoint_unregistered, full_content_ipc_scope_allows,
     guard_ipc_snapshot_adoption_against_live_prompt_drift,
     guard_ipc_snapshot_adoption_against_prompt_duplication,
     guard_ipc_snapshot_adoption_against_response_contamination,
     ipc_repair_decision_from_visible_write, log_full_content_ipc_disabled,
     log_ipc_snapshot_adoption_allowed, log_ipcfullprompt_corruption_if_any,
     log_write_wedge_requests_supervisor_recycle, mark_visible_write_live_buffer_synced_after_write,
-    materialize_missing_response_for_socket_visible_write_drift,
+    materialize_missing_response_for_socket_visible_write_drift, note_ipc_socket_ack,
     persist_already_applied_socket_content_ours_snapshot,
     poll_visible_write_content_lazily_event_or_projection,
     prefer_visible_content_over_stale_visible_write_snapshot,
@@ -121,7 +122,8 @@ fn fold_visible_write_into_canonical(
         std::time::Duration::from_millis(
             agent_doc_document_realtime_io::EDITOR_RECEIPT_OWNED_CELL_PENDING_MS,
         ),
-    )?;
+    )
+    .inspect_err(|err| record_visible_write_refusal(file, patch_id, source, err))?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -134,6 +136,37 @@ fn fold_visible_write_into_canonical(
         ),
     );
     Ok(adopted)
+}
+
+/// `#gh131nonipc` — a refused visible-write receipt happens AFTER the socket
+/// send succeeded, so the send's error branch never saw it and it recorded
+/// nothing against editor transport health: the endpoint could keep answering
+/// with divergent receipts forever without ever degrading. Classify the refusal
+/// through the same typed outcome and feed the same recorder. Best effort: the
+/// refusal itself still propagates unchanged.
+fn record_visible_write_refusal(file: &Path, patch_id: &str, source: &str, err: &anyhow::Error) {
+    let Some(failure) = classify_socket_delivery_failure(format!("{err:#}")) else {
+        return;
+    };
+    let Ok(canonical) = file.canonicalize() else {
+        return;
+    };
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    match record_ipc_socket_ack_failure(&project_root, file, Some(patch_id), source, failure) {
+        Ok(true) => {
+            eprintln!(
+                "[write] IPC listener degraded for {} after repeated {source} {}s",
+                file.display(),
+                failure.as_str()
+            );
+            log_write_wedge_requests_supervisor_recycle(file, source);
+        }
+        Ok(false) => {}
+        Err(record_err) => eprintln!(
+            "[write] WARNING: {source} {} record failed (non-fatal): {record_err}",
+            failure.as_str()
+        ),
+    }
 }
 
 /// A repaired editor receipt is downstream proof of a binary-authored component
@@ -448,6 +481,36 @@ fn try_ipc_inner(
     let editor_delivery_target =
         editor_delivery_target.expect("delivery admission proves a live targeted editor endpoint");
 
+    // `#gh131nonipc`: an endpoint whose last N deliveries were refused (receipt
+    // rejections or refused visible-write receipts, unbroken by a timeout and
+    // not cleared by a proven delivery) is treated as unregistered: sending to
+    // it again is a known refusal, so take the same fallback as a detached
+    // document and let the write recover through document authority. The skip
+    // expires into a single probe after a bounded window, so a restarted editor
+    // is not shut out by its predecessor's record.
+    if editor_delivery_endpoint_unregistered(&project_root, file) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_editor_delivery_skipped file={} patch_id={} editor_pid={} reason=endpoint_unregistered_after_refusals threshold={} action=document_authority_fallback (#gh131nonipc)",
+                file.display(),
+                patch_id,
+                editor_delivery_target.pid,
+                agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD,
+            ),
+        );
+        eprintln!(
+            "[write] editor endpoint for {} refused its last {} deliveries — treating it as unregistered and recovering through document authority",
+            file.display(),
+            agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD,
+        );
+        return Ok(IpcResult {
+            success: false,
+            patch_id,
+            skipped_committed_cycle: false,
+        });
+    }
+
     // Delivery is a single targeted state-machine transition. The endpoint pid
     // comes from the same Lazily registration as the editor id; unavailable or
     // slow endpoints retain the transition for retry and never create a second
@@ -566,7 +629,9 @@ fn try_ipc_inner(
         ) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC patch delivered");
-                clear_ipc_socket_ack_timeouts(&project_root, file, "socket_ack")?;
+                // `#gh131nonipc`: the ACK is liveness, not delivery proof; an
+                // open refusal run survives it until the visible write proves.
+                note_ipc_socket_ack(&project_root, file, "socket_ack")?;
                 // Poll for lazily-backed visible-write proof (published by the
                 // editor after the Document API applies the patch).
                 let visible_write = poll_visible_write_content_lazily_event_or_projection(
@@ -824,6 +889,17 @@ fn try_ipc_inner(
                             &repair_decision.snapshot_content,
                         );
                     }
+                    // `#gh131nonipc`: a proven visible write is the success that
+                    // resets the refusal run (and every other health vote).
+                    if let Err(e) = clear_ipc_socket_ack_timeouts(
+                        &project_root,
+                        file,
+                        "socket_visible_write_proven",
+                    ) {
+                        eprintln!(
+                            "[write] WARNING: transport health clear after proven visible write failed (non-fatal): {e}"
+                        );
+                    }
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
@@ -1011,4 +1087,69 @@ fn try_ipc_inner(
         patch_id,
         skipped_committed_cycle: false,
     })
+}
+
+#[cfg(test)]
+mod gh131nonipc_tests {
+    use super::*;
+
+    /// `#gh131nonipc`: the `socket_visible_write` divergence refusal happens
+    /// after the socket ACK, so the send's error branch never saw it. The
+    /// refusal hook routes it into the typed transport-health recorder as a
+    /// refused receipt; an unrelated error records nothing.
+    #[test]
+    fn a_refused_visible_write_receipt_is_recorded_against_transport_health() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, "---\nsession: gh131nonipc\n---\n\nbody\n").unwrap();
+        let project_root =
+            agent_doc_project_root_io::resolve_ipc_project_root(&file.canonicalize().unwrap());
+        let load = || {
+            agent_doc_controller_io::project_controller::load_editor_transport_health(
+                &project_root,
+                &agent_doc_fs::document_state_hash(&file).unwrap(),
+            )
+            .unwrap()
+        };
+
+        record_visible_write_refusal(
+            &file,
+            "p0",
+            "socket_visible_write",
+            &anyhow::anyhow!("editor bridge connect failed"),
+        );
+        assert!(load().is_none(), "an unclassified error is not evidence");
+
+        let refusal = anyhow::anyhow!(
+            "socket_visible_write: {} for {} (canonical_hash=a, editor_hash=b)",
+            agent_doc_ipc_protocol::EDITOR_RECEIPT_DIVERGENCE_REFUSAL,
+            file.display()
+        );
+        record_visible_write_refusal(&file, "p1", "socket_visible_write", &refusal);
+        let health = load().expect("the refusal must be recorded");
+        assert_eq!(health.last_transport, "socket_visible_write");
+        assert_eq!(health.consecutive_timeouts, 1);
+        assert_eq!(health.consecutive_rejections, 1);
+
+        for i in 1..agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD {
+            record_visible_write_refusal(
+                &file,
+                &format!("p{}", i + 1),
+                "socket_visible_write",
+                &refusal,
+            );
+        }
+        let health = load().unwrap();
+        assert!(health.degraded);
+        assert_eq!(
+            health.consecutive_rejections,
+            agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD
+        );
+        assert!(
+            editor_delivery_endpoint_unregistered(&project_root, &file),
+            "N consecutive refused receipts unregister the endpoint, so the next \
+             write skips the socket and recovers through document authority"
+        );
+    }
 }

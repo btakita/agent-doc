@@ -33474,4 +33474,44 @@ fn every_wedge_recording_site_classifies_rejections_too() {
         "expected both known wedge-recording sites to still record failures; if a site \
          moved, update this list rather than letting the guard silently check nothing"
     );
+    // `#gh131nonipc`: two failure shapes never reached a socket error branch, so
+    // they recorded nothing and could not drive degraded/recycle. Each must feed
+    // the same typed recorder.
+    let transport = std::fs::read_to_string("agent-doc-write-ipc-io/src/transport.rs")
+        .expect("read write-ipc transport");
+    assert!(
+        transport.contains(
+            ".inspect_err(|err| record_visible_write_refusal(file, patch_id, source, err))"
+        ),
+        "a refused `socket_visible_write` receipt must be recorded against transport health"
+    );
+    let realtime = std::fs::read_to_string("agent-doc-document-realtime-io/src/lib.rs")
+        .expect("read document-realtime-io");
+    assert!(
+        realtime.contains("record_ipc_socket_ack_failure(")
+            && realtime.contains("SocketDeliveryFailure::ProjectionUnconverged")
+            && realtime
+                .matches("record_serialized_write_projection_unconverged(path, &relay_write.content_hash);")
+                .count()
+                == 2,
+        "both `serialized_atomic_write` no-projection retentions must feed the typed recorder"
+    );
+    // An ACK is liveness, not delivery proof: clearing the record on it erased
+    // every refusal before the next one landed, so the run never exceeded one.
+    for (site, needle) in [
+        (
+            "agent-doc-write-ipc-io/src/transport.rs",
+            "note_ipc_socket_ack(&project_root, file, \"socket_ack\")",
+        ),
+        (
+            "agent-doc-write-ipc-io/src/lib.rs",
+            "note_ipc_socket_ack(&project_root, file, \"reposition_socket_ack\")",
+        ),
+    ] {
+        let source = std::fs::read_to_string(site).unwrap_or_else(|e| panic!("read {site}: {e}"));
+        assert!(
+            source.contains(needle),
+            "{site}: an ACK must not clear an open refusal run"
+        );
+    }
 }

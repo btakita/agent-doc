@@ -67,15 +67,16 @@ where
                 live_editors,
                 delivery_converged,
                 ..
-            })) => match agent_doc_debounce::current_authority_admission(true, delivery_converged)
-            {
-                CurrentAuthorityAdmission::Admit => (true, "lazily_current"),
-                CurrentAuthorityAdmission::AdmitWhileDeliveryPending => {
-                    admit_while_delivery_pending(file, live_editors, start, &mut signal);
-                    return Ok(());
+            })) => {
+                match agent_doc_debounce::current_authority_admission(true, delivery_converged) {
+                    CurrentAuthorityAdmission::Admit => (true, "lazily_current"),
+                    CurrentAuthorityAdmission::AdmitWhileDeliveryPending => {
+                        admit_while_delivery_pending(file, live_editors, start, &mut signal);
+                        return Ok(());
+                    }
+                    CurrentAuthorityAdmission::WaitForAuthority => (false, "authority_unavailable"),
                 }
-                CurrentAuthorityAdmission::WaitForAuthority => (false, "authority_unavailable"),
-            },
+            }
             Ok(Some(CurrentText::EditorAttachedMissingReplica)) => (false, "missing_replica"),
             Ok(Some(CurrentText::EditorSyncPending)) => (false, "current_pending"),
             Err(_) => (false, "authority_unavailable"),
@@ -174,11 +175,17 @@ mod tests {
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "settled prompt\n").unwrap();
 
+        // A filesystem debounce would wait at least the whole idle window, so
+        // make that window far larger than any scheduler stall: the assertion
+        // then separates "debounced" from "dispatched now" under CPU load
+        // instead of racing a 50ms wall clock (it flaked at 129ms under
+        // parallel `make check` runs).
+        let idle_window = Duration::from_secs(5);
         let start = Instant::now();
-        await_idle_with_max_wait(&doc, Duration::from_millis(50), Duration::from_millis(2000))
+        await_idle_with_max_wait(&doc, idle_window, Duration::from_secs(10))
             .expect("detached Lazily authority authorizes immediate dispatch");
         assert!(
-            start.elapsed() < Duration::from_millis(50),
+            start.elapsed() < idle_window / 2,
             "route must not impose a filesystem debounce when Lazily is detached (elapsed {:?})",
             start.elapsed()
         );
@@ -281,7 +288,9 @@ mod tests {
             ("missing_replica", || {
                 Ok(Some(CurrentText::EditorAttachedMissingReplica))
             }),
-            ("current_pending", || Ok(Some(CurrentText::EditorSyncPending))),
+            ("current_pending", || {
+                Ok(Some(CurrentText::EditorSyncPending))
+            }),
             ("authority_unavailable", || {
                 anyhow::bail!("controller unreachable")
             }),

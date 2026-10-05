@@ -14529,11 +14529,22 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
         "the fast affected-scope tier and authoritative full-check receipt must stay wired"
     );
     assert!(
-        makefile.contains("release-check: tmux-ci")
+        makefile.contains("release-preflight: version-sync")
+            && makefile.contains("scripts/check_editor_parity.py")
+            && makefile.contains("release-check: release-preflight")
             && makefile.contains("scripts/dev-check.py verify-full-check")
+            && makefile.contains("scripts/dev-check.py verify-tmux-ci")
+            && makefile.contains("scripts/dev-check.py record-tmux-ci")
             && makefile.contains("release: release-check")
             && !makefile.contains("release: check"),
-        "release must retain tmux-ci while reusing only a matching full-check proof"
+        "release must run cheap parity preflight before independently reusing matching full-check and tmux-ci proofs"
+    );
+    assert!(
+        makefile.contains("--target-dir \"$(CARGO_TARGET_DIR_ABS)\" --bin agent-doc --lib")
+            && makefile.contains(
+                "CARGO_TARGET_DIR=\"$(CARGO_TARGET_DIR_ABS)\" \"$(CARGO_TARGET_DIR_ABS)/release/agent-doc\" lib-install --profile release"
+            ),
+        "install-full must build and install the binary and library from the resolved external target directory"
     );
     assert!(
         makefile.contains("NEXTEST_NON_BATCHED_FILTER")
@@ -14555,7 +14566,10 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
     assert!(
         helper.contains("reverse.setdefault(dependency_id")
             && helper.contains("repository_fingerprint")
-            && helper.contains("workspace_members"),
+            && helper.contains("workspace_members")
+            && helper.contains("\"tmux-ci\":")
+            && helper.contains("tool == \"tmux\"")
+            && !helper.contains("git\", \"ls-files\", \"--stage\""),
         "affected-package closure and content-addressed proof logic must remain explicit"
     );
 }

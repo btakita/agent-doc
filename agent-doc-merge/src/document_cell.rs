@@ -1112,6 +1112,16 @@ fn compose_occurrence(
                     // Preserve a newer operator revision before joining an old
                     // completion or replaying selection decoration onto it.
                     Some(t.clone())
+                } else if lifecycle_governed
+                    && let Some(rearmed) = crate::crdt::operator_rearm_override(
+                        o,
+                        t,
+                        base_map.get(id).map(|b| b.as_str()),
+                    )
+                {
+                    // `#unstrikelost`: an operator-op-proven un-strike re-arms the
+                    // head; it is not a stale re-emit for the join below.
+                    Some(rearmed)
                 } else if lifecycle_governed {
                     // Lifecycle-aware join (`Live < Struck`). Classify each side's
                     // visible lifecycle and join: if exactly one side is at the
@@ -3394,6 +3404,29 @@ working on it
             "struck side must win:\n{body}"
         );
         assert_eq!(live_count(body, "do [#zz]"), 0);
+        assert!(out.conflicts.is_empty());
+    }
+
+    /// `#unstrikelost`: the same shape with operator op evidence for the item —
+    /// the operator un-struck it, so the live re-arm governs the join.
+    #[test]
+    fn operator_rearmed_unstrike_beats_unchanged_struck_side_cell_path() {
+        let base =
+            "<!-- agent:queue -->\n- ~~release + publish~~\n- do [#zz] q\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:queue -->\n- ~~release + publish~~\n- ~~do [#zz] q~~\n<!-- /agent:queue -->\n";
+        let theirs =
+            "<!-- agent:queue -->\n- release + publish\n- do [#zz] q\n<!-- /agent:queue -->\n";
+        let keys = crate::crdt::operator_rearmed_queue_item_keys(base, theirs);
+        let out =
+            crate::crdt::with_operator_rearmed_queue_items(keys, || merge_3way(base, ours, theirs));
+        assert!(!out.fell_back);
+        let body = component_body(&out.merged_text, "queue");
+        assert!(body.contains("- release + publish\n"), "{body}");
+        assert!(!body.contains("~~release + publish~~"), "{body}");
+        assert!(
+            body.contains("~~do [#zz] q~~"),
+            "the agent's own strike still lands:\n{body}"
+        );
         assert!(out.conflicts.is_empty());
     }
 

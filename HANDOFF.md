@@ -11,10 +11,16 @@ R8, R9 (F1, F2, F3, F6, F19, F20) and round-trip budget tests.
 
 ## Status
 
-- [ ] 1. Port StaleColumnRecycle's plain-set channel onto NetChannel
-- [ ] 2. Net models: VisibleDeliveryReceipt, EditorReplicaStrand, RecycleSettleDispatch, AgentDocCloseout, PassiveTmuxSync
-- [ ] 3. Code fixes for counterexamples (+ regression + Wedge cfg each)
+- [x] 1. Port StaleColumnRecycle's plain-set channel onto NetChannel
+- [x] 2. Net models: VisibleDeliveryReceiptNet, EditorReplicaStrandNet, RecycleSettleDispatchNet,
+      AgentDocCloseoutNet, PassiveTmuxSyncNet, plus LifecycleSequence (SIM-F1/F2); all
+      registered in scripts/run_tla.sh (modules, must_pass, must_violate)
+- [ ] 3. Code fixes: DONE F9, F10, F13, ERS-1, RSD-1. TODO F4/F5, SIM-F1/F2, F14/F15,
+      then F11, F16, F17, F18, F21 if time
 - [ ] 4. `make tla` + `make check` green, exit status captured
+- [x] netadv5 merged into netadv3 (b3d316b41); only HANDOFF.md conflicted. netadv5 brought
+      netadv4's sim-net crate with it. Models updated for netadv5's `deferred` receipt and
+      R9 (TTL is not proof), including the ATOMIC RecycleSettleDispatch (+ TtlWedge).
 
 ## Plan / ids
 
@@ -27,10 +33,11 @@ Models (formal/tla, run by scripts/run_tla.sh):
 - VisibleDeliveryReceiptNet: wedges F9 (WakeOneShot), F10 (RecoveryLatch),
   F13/F12 (SaveOneShot), StaleAck (receipt keying), TimeoutRefusal (R2, netadv5).
 - EditorReplicaStrandNet: wedges ERS-1 (Latch), GiveUpRefusal (R2/R3, netadv5).
-- TODO: RecycleSettleDispatchNet (RSD-1 unreachable-controller read as refusal;
-  R9 TTL-as-proof wedge, netadv5), AgentDocCloseoutNet (F4/F5 lease),
-  PassiveTmuxSyncNet (F14/F15 focus graph advances before effect),
-  LifecycleSequence (SIM-F1/F2 seq fence).
+- RecycleSettleDispatchNet: wedges RSD-1 (Unreachable), Ttl (R9, fixed by netadv5).
+- AgentDocCloseoutNet: wedges F4 (OneShotClaim), F5a (HeartbeatBreak), F5b (IgnoreLoss),
+  ADC-fence (Fence; NOT fixed, FencedTarget is the passing target design).
+- PassiveTmuxSyncNet: wedges F14/F15 (AdvanceFirst), Reorder (seq fence, in code).
+- LifecycleSequence: wedge SIM-F1/F2 (Reorder).
 
 Code fixes planned (in order): F10, F9, F13, ERS-1, RSD-1, F4/F5, SIM-F1/F2
 (merge netadv4 first), then F11, F16, F17, F18, F14/F15, F21 if time allows.
@@ -43,9 +50,17 @@ Code fixes planned (in order): F10, F9, F13, ERS-1, RSD-1, F4/F5, SIM-F1/F2
 - EditorReplicaStrandNet + 4 cfgs; TLC: positive passes; Latch wedge trace = budget whose
   receipts were all dropped -> Exhaust latches -> stuck (ERS-1).
 
+- make tla (scripts/run_tla.sh) EXIT=0 before the netadv5 merge: 78 non-vacuity obligations.
+- Fixes committed: c87bd9785 (F10+F9), 4c1bf92f3 (F13), 9e41b5a32 (ERS-1), 4eba411a9 (RSD-1).
+
 ## Remaining items
 
-(filled in as work proceeds)
+- VDRN-post-ack: an endpoint that stops serving AFTER its projection ACK left but before
+  the native save is never dropped (the save path has no refusal->drop edge); found by
+  removing the `ev # cv` scope guard in VisibleDeliveryReceiptNet. Needs a save-side
+  refusal classification (RefusedSaveOperatorAction territory).
+- ADC-fence: one-commit-per-cycle needs the commit fenced by the owner id at the server;
+  no heartbeat fix can provide it (AgentDocCloseoutNetFenceWedge).
 
 ---
 

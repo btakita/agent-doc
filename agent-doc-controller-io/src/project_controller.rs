@@ -3790,8 +3790,17 @@ enum RetainedTransitionCompletion {
     Applied(bool),
 }
 
-/// `#retainedsaveretry`: most refused attempts re-claimed for one epoch. A new
-/// epoch (any further edit or delivery) restarts the count.
+/// `#retainedsaveretry`: refused attempts re-claimed on a growing backoff for
+/// one epoch before the delay settles at its cap. A new epoch (any further
+/// edit or delivery) restarts the count.
+///
+/// `#netadv3` F13: this used to be a hard budget. After it, the retained save
+/// waited for a delivery or generation edge that an idle document never
+/// produces, so one lost save request or receipt past the budget left the
+/// retained write (and every preflight it blocks) waiting forever. The retry
+/// is now level-triggered: it continues at the capped delay for as long as
+/// the refused epoch is still the desired one
+/// (`formal/tla/VisibleDeliveryReceiptNet.tla`, `SaveOneShot` wedge).
 const RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES: u32 = 8;
 
 /// Backoff before re-claim attempt `attempt` (1-based): 1s doubling, capped at 30s.
@@ -3818,11 +3827,10 @@ fn retained_persistence_retry_step(
     if entry.0 != epoch {
         *entry = (epoch, 0);
     }
-    if entry.1 >= RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES {
-        return None;
-    }
-    entry.1 += 1;
-    Some(retained_persistence_retry_delay(entry.1))
+    entry.1 = entry.1.saturating_add(1);
+    Some(retained_persistence_retry_delay(
+        entry.1.min(RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES),
+    ))
 }
 
 /// Wait out the backoff off every lock, then re-claim the refused epoch.
@@ -19884,7 +19892,7 @@ mod retained_persistence_retry_tests {
     use super::*;
 
     #[test]
-    fn a_refused_current_epoch_retries_on_a_bounded_backoff() {
+    fn a_refused_current_epoch_retries_on_a_capped_backoff_until_superseded() {
         // `#retainedsaveretry`: 2026-10-01 the editor refused the save during a
         // plugin reload and nothing re-armed it, so preflight refused every cycle.
         let mut retries = std::collections::HashMap::new();
@@ -19899,11 +19907,16 @@ mod retained_persistence_retry_tests {
             Some(Duration::from_secs(30)),
             "the backoff is capped"
         );
-        assert_eq!(
-            retained_persistence_retry_step(&mut retries, "doc", 7, false, false),
-            None,
-            "the retry budget is bounded per epoch"
-        );
+        // `#netadv3` F13: past the growing phase the retry stays at the cap
+        // for as long as the epoch is still refused; it never gives up and
+        // waits for an edge an idle document will not produce.
+        for _ in 0..32 {
+            assert_eq!(
+                retained_persistence_retry_step(&mut retries, "doc", 7, false, false),
+                Some(Duration::from_secs(30)),
+                "a refused current epoch keeps retrying at the capped delay"
+            );
+        }
         assert_eq!(
             retained_persistence_retry_step(&mut retries, "doc", 8, false, false),
             Some(Duration::from_secs(1)),

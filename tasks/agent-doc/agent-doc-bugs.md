@@ -715,7 +715,7 @@ The exchange is large, but the active queue was drained rather than stalled for 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~Pick up from claude code sessions that were interrupted by weekly limit. Subagents were running.~~
 - ~~do [#jbstagefallback]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.~~
 - ~~The alt+shift agent-doc menu is not coming up.~~
 - ~~do [#netadv1]~~
 - ~~do [#netadv2]~~

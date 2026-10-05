@@ -2,8 +2,8 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
-  codex: 01a0fd09-a13c-75b1-aa00-0e20ce0bd034
-agent: claude
+  codex: 01a10ac4-43d9-7292-a0c9-54c6148b42bb
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -653,6 +653,7 @@ It also adds TLA-tied proptest model tests (SupervisorGenerationTransition, IpcB
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- Pick up from claude code sessions that were interrupted by weekly limit. Subagents were running.
 - ~~do [#jbstagefallback]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.
 - ~~The alt+shift agent-doc menu is not coming up.~~
@@ -665,15 +666,17 @@ It also adds TLA-tied proptest model tests (SupervisorGenerationTransition, IpcB
 - ~~do [#netadv7]~~
 - do [#claimstrike]
 - do [#gh136follow]
+- #gh-fix https://github.com/btakita/agent-doc/issues/137
+- #gh-fix https://github.com/btakita/agent-doc/issues/138: use formal logic
 - release + publish
-- do [#codexhandoff]
+- 🚧 do [#codexhandoff]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
 - [ ] [#claimstrike] [agent-doc] A free-text queue head still held by a queue claim is not struck when the response quotes it as a Queue prompt; post-commit session-check then INTERRUPTS with completed free-text queue residue and needs preflight+commit repair. Repro 2026-10-05: alt+shift head claimed by subagent:altshiftmenu, answered, not struck; releasing the claim and then preflight+commit struck it. Fix: a Queue-prompt echo of a claimed head releases the claim and strikes in the same finalize (or finalize refuses up front), with a regression test.
 - [ ] [#gh136follow] [agent-doc] GH 136 follow-ups the fix left open: (a) enforce columns <= observed_panes for ALL layout publishers, including editor_surface; (b) investigate the 60s focus settle and the superseded gen-reset race on 1061.md; (c) a one-time recycle path for supervisors already stale on old code; (d) republish the layout when a recycle completes; (e) bound stale panes in non-stash windows. Context: tasks/agent-doc/handoff-2026-10-05-codex.md
-- [ ] [#codexhandoff] [agent-doc] Codex pickup of the 2026-10-05 Claude subagent batch: read tasks/agent-doc/handoff-2026-10-05-codex.md. Step 0: confirm no Claude subagent is still writing (pgrep -x claude; git log -1 in each worktree), then agent-doc queue release the claims you take over. Resume gh136/netadv1/netadv2/netadv4/netadv7 from each worktree's HANDOFF.md under ~/work/btakita/agent-doc-wt/, then the held netadv3/5/6, integrate serially into batch-0505, make check, one make install, then release + publish.
+- [ ] 🚧 [#codexhandoff] [agent-doc] Codex pickup of the 2026-10-05 Claude subagent batch: read tasks/agent-doc/handoff-2026-10-05-codex.md. Step 0: confirm no Claude subagent is still writing (pgrep -x claude; git log -1 in each worktree), then agent-doc queue release the claims you take over. Resume gh136/netadv1/netadv2/netadv4/netadv7 from each worktree's HANDOFF.md under ~/work/btakita/agent-doc-wt/, then the held netadv3/5/6, integrate serially into batch-0505, make check, one make install, then release + publish.
 - [ ] [#netadv3] [agent-doc][formal] Re-check hot-path models (VisibleDeliveryReceipt, EditorReplicaStrand, PassiveTmuxSync, RecycleSettleDispatch, AgentDocCloseout, GH 136 layout/recycle) over NetChannel; fix every counterexample with SimWorld replay coverage. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv5] [agent-doc] Latency budget enforcement: per hot path (focus/layout projection, response delivery, closeout ACK) assert serial round-trip count; replace fixed sleeps/settle windows on correctness paths with ack-driven transitions. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv6] [agent-doc][simworld] Deterministic simulation fuzzing: seeded explorer over SimWorld (interleavings, network faults, edits, recycles, crashes, reconnects) checking TLA-derived invariant oracles each step; shrink failing seeds into committed regression seeds; short budget in make check, long nightly CI run. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md

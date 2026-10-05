@@ -814,6 +814,10 @@ The invariant is now: only a single replay-safe assistant response may enter the
 The reactive topology is capture fact -> closeout recovery classification -> repair/quarantine effect -> retired capture plus abandoned-cycle facts. No polling or second policy owner was added. Capture, flow, repair, session-check, and IPC model adapters were updated; ambient `git status` dirt is no longer presented as cycle-attributed side effects without a cycle-owned baseline.
 
 Verification passed: targeted repair/flow/session-check suites, the 7,920-test affected suite, and authoritative `make check` with 9,563 tests, editor parity and cross-editor harnesses, TLA+ safety/non-vacuity models, docs audit, and packaging checks. `make install` installed the new CLI/library build and dynamically converged JetBrains v0.2.498 and VS Code v0.2.80 without requiring an IDEA restart.
+
+### Re: GitHub issue #146 — gpt-5
+
+Yes. GitHub issue [#146](https://github.com/btakita/agent-doc/issues/146) is currently running in the dedicated `/root/gh146_compact` subagent, using an isolated worktree based on the latest `origin/main`. It owns the compact/remedy fix only; I will review and integrate its commit, rerun the relevant checks, and include it in the next release rather than letting the subagent publish independently.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 

@@ -5980,6 +5980,10 @@ struct SimWorld {
     trace: Vec<SimCommand>,
     doc: String,
     snapshot: String,
+    /// `#netadv6`: the content a commit wrote to HEAD when the snapshot save after
+    /// it was interrupted; recovery restores the snapshot from it, not from the
+    /// (possibly since-edited) working document.
+    interrupted_commit_head: Option<String>,
     phase: CyclePhase,
     captured_response: Option<String>,
     pending_fault: Option<FaultPoint>,

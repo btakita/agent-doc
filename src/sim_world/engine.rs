@@ -12,6 +12,7 @@ impl SimWorld {
             seed,
             trace: Vec::new(),
             snapshot: doc.clone(),
+            interrupted_commit_head: None,
             doc,
             phase: CyclePhase::Idle,
             captured_response: None,
@@ -2787,6 +2788,7 @@ impl SimWorld {
         }
         if self.take_fault(FaultPoint::SnapshotSave) {
             self.phase = CyclePhase::Interrupted(FaultPoint::SnapshotSave);
+            self.interrupted_commit_head = Some(self.doc.clone());
             bail!(
                 "fault point {:?} interrupted snapshot save; seed={} trace={:?}",
                 FaultPoint::SnapshotSave,
@@ -2927,7 +2929,14 @@ impl SimWorld {
                 self.try_commit()?;
             }
             FaultPoint::SnapshotSave => {
-                self.snapshot = self.doc.clone();
+                // `#netadv6`: the commit already reached HEAD; the snapshot is the
+                // committed content. Copying the CURRENT document would bake any
+                // text that arrived after the commit (a replayed duplicate response,
+                // an operator edit) into the reviewed baseline without a closeout.
+                self.snapshot = self
+                    .interrupted_commit_head
+                    .take()
+                    .unwrap_or_else(|| self.doc.clone());
                 self.phase = CyclePhase::Committed;
             }
             FaultPoint::SessionCheck => {

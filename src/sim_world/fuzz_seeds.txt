@@ -86,6 +86,19 @@ step Commit
 step DuplicateVisibleResponse
 step Commit
 
+# Recovery from a snapshot-save fault copied the CURRENT document (holding a
+# duplicate response that arrived after the commit) into the reviewed baseline.
+# Found by the 15-min long budget (seed 1004404).
+=== netadv6-snapshot-save-recovery-uses-committed-content
+expect clean
+profile local
+step CrashAt(SnapshotSave)
+step CaptureResponse
+step ApplyCapturedResponse
+step Commit
+step DuplicateVisibleResponse
+step Recover
+
 # ---- Known open defects: must keep reproducing until fixed -----------------
 
 === known-stale_actor_lifecycle_applied_out_of_order-seed2

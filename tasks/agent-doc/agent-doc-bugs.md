@@ -336,6 +336,19 @@ Notes:
 **Deferred:** I claimed this as `subagent:gh135` and sent it to a background subagent. It works in the worktree `~/worktrees/agent-doc-gh135`, on branch `gh135`. The fix is an age-based sweep that deletes `turn_active` leases older than `TURN_ACTIVE_TTL_SECS`, run from the preflight auto-GC boundary, so a lease whose pane has died is still removed. It comes with spec and tests. Under `#gh-fix` ("fix then close+release"), I'll close the issue after the batch release, not before.
 
 The four earlier subagents (`#unstrikelost`, `#gh131nonipc`, `#gh133sigterm`, `#jbstagebackup`) are still running and are waiting on their `make check` runs. **release + publish** stays with me until all five branches are merged. The exchange section is large (298 lines, 15 responses), but I'm not compacting while the queue is active.
+
+### Re: release status — opus-5-5 · 2026-10-04T22:46-04:00
+
+> **Chat prompt (#chatprompt):** did you release + publish?
+
+Not yet. Nothing is tagged or published, and `main` is still at v0.35.454. The release head is still claimed by me (`subagent:release-coordinator`). I'm holding it until the integrated batch passes a full suite run.
+
+All five branches, plus the `#unstrikelost` follow-up, are merged into the integration branch `integ455` (worktree `agent-doc-wt/integ455`). I'm running `make check` on it now, without retries: 11,010 tests across 180 binaries. Once it passes, I will:
+
+1. fast-forward `main` and push;
+2. run `make install` once and recycle;
+3. bump the version and add the `VERSIONS.md` entry, then tag v0.35.455 (pushing the tag publishes to GitHub Releases and PyPI);
+4. close GH #135, which is what `#gh-fix` asks for, and mark `#unstrikelost`, `#gh131nonipc`, `#gh133sigterm` and `#jbstagebackup` done.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 

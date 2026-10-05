@@ -328,6 +328,14 @@ Notes:
 - The main `src/agent-doc` checkout has an uncommitted `agent-doc-start-runtime-io/src/lib.rs` from another session. The subagents work from `origin/main` and don't touch it.
 - There's a stray `- release + publish` line under `## Completed / Reaped`, after the `agent:done` block. It sits outside every managed component, so the queue ignores it. Delete it if it was a mis-paste.
 - Backlog line 333 (`6local-splice-batch 3 splices …`) is a truncated fragment from earlier. It has no `[#id]` checkbox, so it was there before this cycle.
+
+### Re: GH #135 dispatched — opus-5-5 · 2026-10-04T22:01-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/135
+
+**Deferred:** I claimed this as `subagent:gh135` and sent it to a background subagent. It works in the worktree `~/worktrees/agent-doc-gh135`, on branch `gh135`. The fix is an age-based sweep that deletes `turn_active` leases older than `TURN_ACTIVE_TTL_SECS`, run from the preflight auto-GC boundary, so a lease whose pane has died is still removed. It comes with spec and tests. Under `#gh-fix` ("fix then close+release"), I'll close the issue after the batch release, not before.
+
+The four earlier subagents (`#unstrikelost`, `#gh131nonipc`, `#gh133sigterm`, `#jbstagebackup`) are still running and are waiting on their `make check` runs. **release + publish** stays with me until all five branches are merged. The exchange section is large (298 lines, 15 responses), but I'm not compacting while the queue is active.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -341,6 +349,7 @@ Notes:
 - do [#gh131nonipc]
 - do [#gh133sigterm]
 - do [#jbstagebackup]
+- #gh-fix https://github.com/btakita/agent-doc/issues/135
 - release + publish
 <!-- /agent:queue -->
 

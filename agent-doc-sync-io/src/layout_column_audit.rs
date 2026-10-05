@@ -35,21 +35,27 @@
 //!    [`StaleRecycleRequestState::Pending`] and only when promoting it does not
 //!    widen the target window. An idle supervisor that left its request
 //!    unconsumed past [`STALE_RECYCLE_CONSUME_BOUND_SECS`] is `Overdue`, and its
-//!    stash pane stays in the stash. See [`stale_focus_admission`] for the
-//!    transition function and `formal/tla/StaleColumnRecycle.tla` for the model.
-//! 5. The stale-supervisor consequence: the pane is neither killed nor reaped.
-//!    The existing safe-boundary recycle is requested — the supervisor re-execs
-//!    onto the installed build at its next idle boundary, preserving the harness
-//!    child and the pane id — and the request now stays live past its TTL while
-//!    the supervisor is still stale, so a long open cycle cannot make it lapse.
+//!    stash pane stays in the stash. That elapsed bound controls layout admission
+//!    only; it never authorises replacement. See [`stale_focus_admission`] for
+//!    the transition function and `formal/tla/StaleColumnRecycle.tla` for the
+//!    model.
+//! 5. The stale-supervisor consequence is owned by the controller. While a turn
+//!    is active the durable safe-boundary request remains the only action. Once
+//!    the same pane is proven idle, positive `/proc/<pid>/exe` unlinked evidence
+//!    authorises exactly one forced continuation replacement for that PID. The
+//!    layout gate never kills or reaps a process directly, and no wall-clock age
+//!    is an input to the replacement decision.
 
 use crate::sync::{PaneOccupant, pane_occupant_for_document};
 use agent_doc_controller::dispatch::is_stash_window_name;
+use agent_doc_controller::supervisor_replacement::{
+    StaleIdleSupervisorFacts, StaleIdleSupervisorRecovery, decide_stale_idle_supervisor_recovery,
+};
 pub use agent_doc_supervisor::recycle_request::{
     STALE_RECYCLE_CONSUME_BOUND_SECS, StaleRecycleRequestState,
 };
 use agent_doc_turn::turn_status::STALE_SUPERVISOR_PANE_MARKER;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -303,6 +309,90 @@ fn claim_stale_column_recycle(ledger_key: &str, now: Instant) -> bool {
     true
 }
 
+fn stale_idle_supervisor_replacements() -> &'static Mutex<HashSet<u32>> {
+    static REPLACEMENTS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
+    REPLACEMENTS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// GH #136(c): old supervisors cannot consume the durable recycle request that
+/// was added after they started. Once `/proc/<pid>/exe` positively proves the
+/// binary was replaced and the harness-owned turn marker proves the pane idle,
+/// ask the project controller to replace that exact supervisor once. There is
+/// intentionally no elapsed-time input to this authorization.
+fn request_stale_idle_supervisor_replacement(
+    file: &Path,
+    pane: &str,
+    freshness: &PaneSupervisorFreshness,
+    turn_active: bool,
+) -> Option<String> {
+    // Revalidate the exact process witness at the idle boundary. The decision is
+    // deliberately clock-free: time may bound layout admission, never process
+    // replacement. The controller remains the sole owner of the lifecycle
+    // transition; this path only submits one request for this exact stale PID.
+    let PaneSupervisorFreshness::Stale {
+        supervisor_pid: Some(pid),
+        evidence,
+    } = freshness
+    else {
+        return None;
+    };
+    let binary_unlinked =
+        *evidence == "binary_replaced" && supervisor_binary_replaced(*pid) == Some(true);
+    let mut claims = stale_idle_supervisor_replacements()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match decide_stale_idle_supervisor_recovery(StaleIdleSupervisorFacts {
+        binary_unlinked,
+        turn_active,
+        replacement_claimed: claims.contains(pid),
+    }) {
+        StaleIdleSupervisorRecovery::NotStale => {
+            Some("controller_replacement_skipped_unproven_stale".to_string())
+        }
+        StaleIdleSupervisorRecovery::DeferTurnActive => None,
+        StaleIdleSupervisorRecovery::AlreadyClaimed => {
+            Some("controller_replacement_already_requested".to_string())
+        }
+        StaleIdleSupervisorRecovery::ReplaceOnce => {
+            claims.insert(*pid);
+            drop(claims);
+            let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
+            else {
+                stale_idle_supervisor_replacements()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(pid);
+                return Some("controller_replacement_skipped_no_project_root".to_string());
+            };
+            let request =
+                agent_doc_controller_io::project_controller::SupervisorReplacementRequest {
+                    file: file.to_path_buf(),
+                    mode: "continue".to_string(),
+                    force: true,
+                };
+            match agent_doc_controller_io::project_controller::request_supervisor_replacement(
+                &project_root,
+                request,
+            ) {
+                Ok(receipt) => Some(format!(
+                    "controller_replacement_requested:pid={pid}:pane={pane}:receipt={}",
+                    receipt.operator_receipt.receipt_id
+                )),
+                Err(err) => {
+                    stale_idle_supervisor_replacements()
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .remove(pid);
+                    Some(format!(
+                        "controller_replacement_failed:pid={pid}:error={}",
+                        format!("{err:#}").replace('\n', "\\n")
+                    ))
+                }
+            }
+        }
+    }
+}
+
 /// GH #121: what the pre-selection gate does with one column's candidate pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnAdmission {
@@ -449,6 +539,8 @@ pub struct ColumnGateFacts {
     /// GH #136: the recycle request's lifecycle state (meaningful only for a
     /// stale own pane; `NotRequested` otherwise).
     pub recycle: StaleRecycleRequestState,
+    /// A fresh harness-owned marker proves this pane is still mid-turn.
+    pub turn_active: bool,
 }
 
 /// Pure gate plan: one admission (plus the live-turn panes it would have
@@ -641,7 +733,9 @@ pub struct StaleColumnGateInput<'a> {
 ///
 /// Returns the column arguments tmux-router should realise, and the documents
 /// it excluded (GH #136: the effect's acknowledgement of what it will not
-/// build). Never moves, kills, or reaps a pane.
+/// build). The gate never directly moves, kills, or reaps a pane; when stale
+/// idle recovery is authorized it delegates the lifecycle transition to the
+/// project controller.
 pub fn gate_stale_column_panes(
     tmux: &Tmux,
     input: &StaleColumnGateInput<'_>,
@@ -678,8 +772,9 @@ pub fn gate_stale_column_panes(
             pane_outside_target_window(input.before.get(&pane), input.target_window);
         // GH #136: one ledger read per stale own pane, before this pass makes
         // any request, so the classification reflects what the consumer had.
+        let turn_active = own_pane && freshness.is_stale() && (input.pane_turn_active)(&pane);
         let recycle = if own_pane && freshness.is_stale() {
-            observe_stale_recycle_request(&file, (input.pane_turn_active)(&pane))
+            observe_stale_recycle_request(&file, turn_active)
         } else {
             StaleRecycleRequestState::NotRequested
         };
@@ -691,6 +786,7 @@ pub fn gate_stale_column_panes(
             is_focus,
             outside_target_window,
             recycle,
+            turn_active,
         });
         sources.push(pre_resolved);
     }
@@ -742,14 +838,18 @@ pub fn gate_stale_column_panes(
         } else {
             ColumnPaneSource::Registry
         };
-        let action = request_stale_column_recycle(
-            file,
-            pane,
-            freshness,
-            "layout_column_gate",
-            Some(&fact.recycle),
-        )
-        .unwrap_or_else(|| "none".to_string());
+        let action =
+            request_stale_idle_supervisor_replacement(file, pane, freshness, fact.turn_active)
+                .or_else(|| {
+                    request_stale_column_recycle(
+                        file,
+                        pane,
+                        freshness,
+                        "layout_column_gate",
+                        Some(&fact.recycle),
+                    )
+                })
+                .unwrap_or_else(|| "none".to_string());
         let line = format!(
             "{record} file={} pane={} source={} window={} supervisor={} admission={admission_token} reason=stale_supervisor action={action} (GH #121)",
             file.display(),
@@ -764,7 +864,10 @@ pub fn gate_stale_column_panes(
         // ops log and stderr get it only when the recycle is (re)requested, so a
         // tab-switch storm cannot flood them with the same verdict.
         crate::append_sync_log(&line);
-        if action.starts_with("safe_boundary_recycle_requested") {
+        if action.starts_with("safe_boundary_recycle_requested")
+            || action.starts_with("controller_replacement_requested")
+            || action.starts_with("controller_replacement_failed")
+        {
             eprintln!("[sync] warning: {line}");
             agent_doc_ops_log_io::log_op(file, &line);
         }
@@ -1207,6 +1310,7 @@ mod tests {
                         } else {
                             StaleRecycleRequestState::NotRequested
                         },
+                        turn_active: self.live_turn.contains(&pane),
                     }
                 })
                 .collect();
@@ -1604,6 +1708,7 @@ mod tests {
                         } else {
                             StaleRecycleRequestState::NotRequested
                         },
+                        turn_active: stale && self.stale_pane_turn_active,
                     }
                 })
                 .collect();
@@ -2002,6 +2107,7 @@ mod tests {
             is_focus: doc == "tasks/pmt2/mr/1099.md",
             outside_target_window: pane_outside_target_window(before.get(pane), target),
             recycle,
+            turn_active: false,
         };
         let pending = StaleRecycleRequestState::Pending {
             reason: "stale_supervisor_turn_stage".to_string(),

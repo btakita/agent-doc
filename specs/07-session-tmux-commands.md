@@ -17,6 +17,26 @@ fresh watch loop. A reopen awaiting that transition uses the complete controller
 settlement budget plus transport margin; it never injects across an unsettled
 boundary or inherits the shorter ordinary-RPC deadline.
 
+Layout sync treats a stale route-owned supervisor as a process-identity fact,
+not an age heuristic. Only a live supervisor PID whose `/proc/<pid>/exe` is
+unlinked is positively stale. During a harness-owned active turn, sync leaves
+the pane and child intact and refreshes the durable safe-boundary recycle
+request. At the first observed idle boundary, sync asks the project controller
+once for a forced continuation replacement of that exact stale PID. The
+controller owns replacement; the layout gate never kills or reaps directly,
+and no elapsed-time threshold authorizes the request. A failed controller
+submission releases the claim so a later sync may retry.
+
+Every derived layout publisher is width-bounded before publication. Given
+`retained` columns, `observed` live panes, `gated` explicitly admitted columns,
+and `asserted` columns, the derived bound is
+`max(min(retained, observed + gated), asserted, 1)`; without an observation it
+is `max(retained, asserted, 1)`. Only a positive editor split observation may
+widen beyond that derived bound. Stale generations are ignored, stale panes
+outside the target window cannot add width, and reconnect, duplicate, delayed,
+or reordered state-plane delivery does not relax the bound. Recycle settlement
+may republish the retained intent, but remains subject to the same rule.
+
 ## start
 
 `agent-doc start <FILE> [--force]`

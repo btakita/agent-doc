@@ -33511,6 +33511,29 @@ fn every_wedge_recording_site_classifies_rejections_too() {
                 == 2,
         "both `serialized_atomic_write` no-projection retentions must feed the typed recorder"
     );
+    // GH #138: the replica-notify and native-save paths produce typed
+    // definitive-refusal counts rather than returning the socket error itself.
+    // Their aggregate outcome must still enter the same shared recorder, and a
+    // proven notification/save must clear that episode.
+    let relay =
+        std::fs::read_to_string("agent-doc-crdt-relay-io/src/lib.rs").expect("read crdt relay");
+    for transport in ["crdt_replica_notify", "native_editor_save_request"] {
+        assert!(
+            relay.contains(transport),
+            "the {transport} outcome must retain a stable health transport label"
+        );
+    }
+    assert!(
+        relay.contains("record_replica_signal_transport_health(")
+            && relay.contains("agent_doc_editor_transport_health_io::record_failure(")
+            && relay.contains("agent_doc_editor_transport_health_io::clear_after_proven_delivery("),
+        "replica/native-save refusals and successes must share transport-health transitions"
+    );
+    assert!(
+        transport.contains("\"socket_already_applied\"")
+            && transport.contains("SocketDeliveryFailure::ProjectionUnconverged"),
+        "already_applied without a visible response receipt must accrue an unproven-projection failure"
+    );
     // An ACK is liveness, not delivery proof: clearing the record on it erased
     // every refusal before the next one landed, so the run never exceeded one.
     for (site, needle) in [

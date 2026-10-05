@@ -5083,6 +5083,55 @@ pub struct ReplicaSignalOutcome {
     pub definitive_refusals: usize,
 }
 
+/// Fold one completed replica/native-save delivery attempt into the shared
+/// editor transport-health machine. The network loop itself never retries:
+/// this is one bounded effect after the attempt, so health accounting adds no
+/// IPC latency or blocking retry path.
+fn record_replica_signal_transport_health(
+    file: &Path,
+    delivery_id: Option<&str>,
+    transport: &str,
+    outcome: &ReplicaSignalOutcome,
+) -> Result<()> {
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(file);
+    if outcome.notified > 0 {
+        return agent_doc_editor_transport_health_io::clear_after_proven_delivery(
+            &project_root,
+            file,
+            transport,
+        );
+    }
+    if outcome.definitive_refusals == 0 {
+        return Ok(());
+    }
+    let degraded = agent_doc_editor_transport_health_io::record_failure(
+        &project_root,
+        file,
+        delivery_id,
+        transport,
+        agent_doc_ipc_protocol::SocketDeliveryFailure::Rejected,
+        |consecutive_failures| {
+            agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures(
+                consecutive_failures,
+                true,
+                agent_doc_ipc_protocol::EDITOR_TRANSPORT_DEGRADE_FAILURE_THRESHOLD,
+            )
+        },
+    )?;
+    if degraded {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "replica_signal_transport_degraded file={} transport={} definitive_refusals={} action=supervisor_observes_editor_transport_health",
+                file.display(),
+                transport,
+                outcome.definitive_refusals,
+            ),
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NativeSaveGenerationMismatch {
     route: ReplicaSignalRoute,
@@ -5267,13 +5316,20 @@ pub fn request_native_save_for_current_projection(
             }
         }
     }
-    Ok(ReplicaSignalOutcome {
+    let outcome = ReplicaSignalOutcome {
         found,
         notified,
         build_mismatches,
         generation_mismatches: generation_mismatches.len(),
         definitive_refusals: native_save_definitive_refusals,
-    })
+    };
+    record_replica_signal_transport_health(
+        &canonical,
+        Some(expected_content_hash),
+        "native_editor_save_request",
+        &outcome,
+    )?;
+    Ok(outcome)
 }
 
 /// How a signal outcome classifies, independent of its printed token.
@@ -5592,13 +5648,20 @@ fn signal_crdt_replica_event_counting_inner(
             }
         }
     }
-    Ok(ReplicaSignalOutcome {
+    let outcome = ReplicaSignalOutcome {
         found,
         notified,
         build_mismatches,
         generation_mismatches: 0,
         definitive_refusals,
-    })
+    };
+    record_replica_signal_transport_health(
+        &canonical,
+        Some(reason.token()),
+        "crdt_replica_notify",
+        &outcome,
+    )?;
+    Ok(outcome)
 }
 
 /// Controller-owned disk-change transition. The watcher already routes through
@@ -10324,5 +10387,63 @@ mod tests {
             matches!(current, CurrentText::Current { ref text, .. } if text == "# Plan\n\nGOOD\n"),
             "a settled reconcile must adopt the disk change: {current:?}"
         );
+    }
+
+    #[test]
+    fn definitive_replica_and_native_save_refusals_share_transport_health() {
+        for transport in ["crdt_replica_notify", "native_editor_save_request"] {
+            let (dir, file) = temp_doc(&format!("{transport}.md"));
+            std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+            std::fs::write(
+                &file,
+                format!("---\nsession: {transport}\n---\n\n# Session\n"),
+            )
+            .unwrap();
+            let refusal = ReplicaSignalOutcome {
+                found: 1,
+                notified: 0,
+                build_mismatches: Vec::new(),
+                generation_mismatches: 0,
+                definitive_refusals: 1,
+            };
+            for attempt in 0..agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD {
+                record_replica_signal_transport_health(
+                    &file,
+                    Some(&format!("attempt-{attempt}")),
+                    transport,
+                    &refusal,
+                )
+                .unwrap();
+            }
+            let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+            let hash = agent_doc_fs::document_state_hash(&file).unwrap();
+            let health = agent_doc_sqlite::state_store::load_editor_transport_health_from_db(
+                &conn, &hash,
+            )
+            .unwrap()
+            .unwrap();
+            assert!(health.degraded, "{transport} must drive degradation");
+            assert_eq!(
+                health.consecutive_rejections,
+                agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD,
+                "{transport} must reach the endpoint-unregistration threshold"
+            );
+
+            let success = ReplicaSignalOutcome {
+                found: 1,
+                notified: 1,
+                build_mismatches: Vec::new(),
+                generation_mismatches: 0,
+                definitive_refusals: 0,
+            };
+            record_replica_signal_transport_health(&file, Some("success"), transport, &success)
+                .unwrap();
+            assert!(
+                agent_doc_sqlite::state_store::load_editor_transport_health_from_db(&conn, &hash)
+                    .unwrap()
+                    .is_none(),
+                "a proven {transport} success must recover the whole health episode"
+            );
+        }
     }
 }

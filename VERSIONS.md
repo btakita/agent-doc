@@ -9,6 +9,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   strict closeout canonicalization as the production owner that preserves agent-authored model attribution and local
   timestamps, with a regression that writes an attributed/timestamped heading through closeout into a real session
   document.
+- **Relay refusals feed editor transport health (GH #138).** Definitive refusals from
+  `crdt_replica_notify` and `native_editor_save_request` now enter the same typed health transition as socket writes,
+  so two failures degrade and arm recycle, three consecutive refusals unregister the endpoint, and a proven delivery
+  clears the episode. `socket_already_applied` without a visible response receipt now records
+  `ProjectionUnconverged` instead of remaining invisible to degradation. The transition is covered by a focused TLA+
+  model with must-fail refusal-drop and unregister-reach configurations.
 - **Retained-write guidance terminates (GH #131 reopened).** Three recovery loops are closed, all derived from the shared
   `write_ownership` predicate:
   - A pending-only tracked-work write (`--done/--pending-gate ... --pending-only`) whose response is already committed

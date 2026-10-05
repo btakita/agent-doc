@@ -111,6 +111,14 @@ Its reach config asserts the negation of a save through a still-serving live
 editor and must be violated, proving the fix did not quietly route every document
 through the detached-write path instead.
 
+`EditorTransportHealth.tla` models the durable health episode shared by socket
+writes, CRDT replica notifications and native editor saves. Definitive rejection
+extends both failure and refusal counts, timeout resets only the refusal run,
+degradation and the recycle latch are monotone within an episode, the refusal
+threshold unregisters the endpoint, and proven success idempotently clears the
+episode. Its wedge drops the definitive-refusal transition and must violate the
+accounting invariant; its reach config must find the unregistered state.
+
 `PlanClosureContract.tla` checks what a dispatch plan may assert was completed.
 The other modules model liveness wedges — a reachable state with no outgoing
 transition. This one models the opposite: a transition enabled when it should
@@ -360,6 +368,7 @@ For the D/Du/R/Rc column (Drop, Duplicate, Reorder, Reconnect): `y` = yes,
 | RealtimeSteeringStop | `StopHook` reads `steering` SV (70-77) | - / - / - / - | none | n/a |
 | RecycleSettleDispatch | settle-wait RPC = SV read of supervisor `recycle` that always returns by `WaitBudget` (91-99) | - / - / - / p | **`Ttl`, `WaitBudget`, `ASSUME Ttl > WaitBudget` (44-56)**; `Abandoned` treated `age > Ttl` as proof of loss (114-119). **Updated `#netadv3`:** abandonment now needs the supervisor gone; the TTL only ends a wait in a retryable refusal. Network re-model: `RecycleSettleDispatchNet` | yes for the transport (see the Net module) |
 | RefusedSaveOperatorAction | `RecoveryPass` request + instant nondeterministic answer (129-135) | p (`delivery_failed_to_all`, 94) / - / - / - | `MaxPasses` (88), for finiteness | yes. Every refusal is assumed authentic |
+| EditorTransportHealth | one bounded observed outcome per transition; SQLite duplicate persist is a stutter on health state | - / p (`DuplicatePersist`) / - / - | `DegradeThreshold`=2, `UnregisterThreshold`=3 | yes. Received outcomes are assumed authentic |
 | ResponseCheckpoint | `visibleSeq := producedSeq` instantly visible (42-44); `Seal` SV (53-54) | - / p (46-48) / - / - | none | **yes** |
 | RetainedProjectionHold | `ControllerIngest` SV (139-144); `Register` decides over buffer+shadow+canon atomically (120-125, 166-179) | p (lag, forced by WF 191) / p (157-162) / - / p | none | **yes** |
 | RetainedTransitionFixedPoint | `Settle` reads the editor cut atomically (97-109) | - / y (the subject) / - / - | none | **yes**. A stale cut read is exactly the duplicate it prevents |

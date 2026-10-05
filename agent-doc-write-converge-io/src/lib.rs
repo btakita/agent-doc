@@ -4492,7 +4492,8 @@ pub fn live_prompt_drift_convergence_frontmatter(
     }
 }
 
-pub const IPC_DEWEDGE_TIMEOUT_THRESHOLD: u64 = 2;
+pub const IPC_DEWEDGE_TIMEOUT_THRESHOLD: u64 =
+    agent_doc_ipc_protocol::EDITOR_TRANSPORT_DEGRADE_FAILURE_THRESHOLD;
 
 fn editor_transport_health_for_current_session(
     project_root: &Path,
@@ -4558,104 +4559,20 @@ pub fn record_ipc_socket_ack_failure(
     transport: &str,
     failure: SocketDeliveryFailure,
 ) -> Result<bool> {
-    let failure_kind = failure.as_str();
-    let prior = editor_transport_health_for_current_session(project_root, file)?;
-    let prior_timeouts = prior
-        .as_ref()
-        .and_then(|value| value.get("consecutive_timeouts").and_then(|v| v.as_u64()))
-        .unwrap_or(0);
-    let prior_rejections = prior
-        .as_ref()
-        .and_then(|value| value.get("consecutive_rejections").and_then(|v| v.as_u64()))
-        .unwrap_or(0);
-    // `#gh131nonipc`: the run's movement is owned by the typed outcome — a
-    // refusal extends it, a non-socket retention carries it, a timeout ends it.
-    let consecutive_rejections = failure.next_refusal_run(prior_rejections);
-    let endpoint_unregistered = consecutive_rejections
-        >= agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD;
-    // `#midturn-wedge-recycle`: preserve the once-per-episode recycle guard across
-    // marker rewrites. If a mid-turn recycle was already attempted for this wedge
-    // episode, further accruing timeouts must NOT reset it — re-recycling a binary
-    // that a recycle already failed to un-wedge would spin. The flag is cleared only
-    // when the whole marker is removed (a proven-live receipt self-heal).
-    let prior_recycle_attempted = prior
-        .as_ref()
-        .and_then(|value| value.get("recycle_attempted").and_then(|v| v.as_bool()))
-        .unwrap_or(false);
-    let consecutive_timeouts = prior_timeouts.saturating_add(1);
-    // An endpoint unregistered by its refusal run is degraded by definition,
-    // whatever the shared failure counter says.
-    let degraded = endpoint_unregistered
-        || agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures(
-            consecutive_timeouts,
-            true,
-            IPC_DEWEDGE_TIMEOUT_THRESHOLD,
-        );
-    let document_hash = agent_doc_fs::document_state_hash(file)?;
-    // `#gh131nonipc`: `updated_at_secs` is also the clock of the unregister
-    // probe window. An outcome that carries the refusal run without evidence
-    // (a non-socket retention while the endpoint is skipped) must not restart
-    // that window, or the skip could never expire into its probe.
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
-    let updated_at_secs = match (
-        failure.refusal_run_effect(),
-        prior
-            .as_ref()
-            .and_then(|value| value.get("updated_at_secs").and_then(|v| v.as_u64())),
-    ) {
-        (agent_doc_ipc_protocol::RefusalRunEffect::Preserve, Some(prior_at))
-            if consecutive_rejections > 0 =>
-        {
-            prior_at
-        }
-        _ => now_secs,
-    };
-    agent_doc_controller_io::project_controller::upsert_editor_transport_health(
+    agent_doc_editor_transport_health_io::record_failure(
         project_root,
-        &agent_doc_controller_io::project_controller::EditorTransportHealthRecord {
-            document_hash,
-            session_id: agent_doc_frontmatter_io::session::read_session_id(file)
-                .unwrap_or_else(|| "-".to_string()),
-            consecutive_timeouts,
-            degraded,
-            recycle_attempted: prior_recycle_attempted,
-            last_delivery_id: patch_id.map(str::to_string),
-            last_transport: transport.to_string(),
-            updated_at_secs,
-            consecutive_rejections,
-        },
-    )?;
-    agent_doc_ops_log_io::log_op(
         file,
-        &format!(
-            "ipc_socket_ack_failure_recorded file={} transport={} kind={} patch_id={} consecutive_failures={} consecutive_rejections={} degraded={} (#rejectioncountswedge)",
-            file.display(),
-            transport,
-            failure_kind,
-            patch_id.unwrap_or("-"),
-            consecutive_timeouts,
-            consecutive_rejections,
-            degraded
-        ),
-    );
-    if endpoint_unregistered && prior_rejections < consecutive_rejections {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "editor_endpoint_unregistered_after_refusals file={} transport={} kind={} consecutive_rejections={} threshold={} probe_after_secs={} action=route_through_document_authority (#gh131nonipc)",
-                file.display(),
-                transport,
-                failure_kind,
-                consecutive_rejections,
-                agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD,
-                agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS,
-            ),
-        );
-    }
-    Ok(degraded)
+        patch_id,
+        transport,
+        failure,
+        |consecutive_failures| {
+            agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures(
+                consecutive_failures,
+                true,
+                IPC_DEWEDGE_TIMEOUT_THRESHOLD,
+            )
+        },
+    )
 }
 
 /// `#gh131nonipc` — a socket ACK proves the endpoint is alive, not that the
@@ -4716,21 +4633,11 @@ pub fn editor_delivery_endpoint_unregistered(project_root: &Path, file: &Path) -
 }
 
 fn clear_editor_transport_health(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
-    let document_hash = agent_doc_fs::document_state_hash(file)?;
-    if agent_doc_controller_io::project_controller::clear_editor_transport_health(
+    agent_doc_editor_transport_health_io::clear_after_proven_delivery(
         project_root,
-        &document_hash,
-    )? {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "ipc_socket_ack_timeouts_cleared file={} reason={}",
-                file.display(),
-                reason
-            ),
-        );
-    }
-    Ok(())
+        file,
+        reason,
+    )
 }
 
 pub fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &str) -> Result<()> {

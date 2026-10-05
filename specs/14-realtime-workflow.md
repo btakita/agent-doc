@@ -242,15 +242,16 @@ do not prove that older snapshot text should overwrite newer operator text.
 
 Every unproven editor delivery is recorded against the document's
 `editor_transport_health` row through ONE typed recorder
-(`record_ipc_socket_ack_failure`, keyed by `SocketDeliveryFailure`). The
+(`agent_doc_editor_transport_health_io::record_failure`; the write-converge compatibility entrypoint
+is `record_ipc_socket_ack_failure`, both keyed by `SocketDeliveryFailure`). The
 outcome type decides both how it counts toward degradation and how it moves the
 trailing refusal run (`consecutive_rejections`, GH #131):
 
 | Outcome | Site | Failure counter | Refusal run |
 |---|---|---|---|
-| `Rejected` (`IPC receipt rejected`) | socket send error | +1 | extend |
+| `Rejected` (`IPC receipt rejected`) | socket send error, `crdt_replica_notify`, or `native_editor_save_request` | +1 | extend |
 | `VisibleWriteDiverged` (receipt refused as divergent from canonical) | `socket_visible_write` adoption, after the ACK | +1 | extend |
-| `ProjectionUnconverged` (editor never projected the target) | `serialized_atomic_write` retention, no socket | +1 | carry unchanged |
+| `ProjectionUnconverged` (editor never projected the target) | `serialized_atomic_write` retention or `socket_already_applied` without a visible response receipt | +1 | carry unchanged |
 | `Timeout` / `Unsupported` | socket send error | +1 | reset |
 
 `#gh131nonipc`: the two middle rows never reached a socket error branch, so they
@@ -258,6 +259,11 @@ used to record nothing and could not drive `degraded` or the one-shot
 `#midturn-wedge-recycle`. A refused visible-write receipt is classified from the
 protocol-owned phrase `EDITOR_RECEIPT_DIVERGENCE_REFUSAL`; a non-socket
 retention is evidence of neither refusal nor acceptance, so it carries the run.
+GH #138 extends that same invariant to the two relay paths whose typed
+`definitive_refusals` outcome previously stopped at the log line. A batch with
+any definitive refusal and no proven delivery records one refusal transition;
+any successful route clears the episode. The fold happens once after the
+bounded send loop and adds no retry or wait.
 
 - A socket ACK is liveness, not delivery proof. With no refusal run open it
   clears the row (timeouts self-heal as before); with a run open it leaves the
@@ -267,7 +273,8 @@ retention is evidence of neither refusal nor acceptance, so it carries the run.
 - A proven delivery is the success that clears the row: a proven
   `socket_visible_write` (`socket_visible_write_proven`), an editor-convergence
   writeback, or a `serialized_atomic_write` whose exact editor projection was
-  natively saved.
+  natively saved. A proven CRDT notification, native editor save, or
+  `socket_already_applied` visible response also clears the same episode.
 - After `EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD` (3) consecutive refusals
   the endpoint counts as **unregistered** for delivery: the row is degraded
   regardless of the failure counter (`editor_endpoint_unregistered_after_refusals`),
@@ -281,6 +288,12 @@ retention is evidence of neither refusal nor acceptance, so it carries the run.
   carried-over retention does not restart the window. The row does not store
   the endpoint pid, so the window is what keeps a restarted editor from being
   shut out by its predecessor's record.
+
+The pure transition preserves the one-shot `recycle_attempted` latch across
+every failure and makes `degraded` monotone inside an episode. Success deletes
+the row idempotently and is the only recovery that clears degradation, recycle
+and unregister state together. `formal/tla/EditorTransportHealth.tla` checks
+these invariants and carries must-fail wedge and reachability configurations.
 
 ### Retained-write guidance must terminate (GH #131 reopened)
 

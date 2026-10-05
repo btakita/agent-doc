@@ -576,6 +576,11 @@ impl SocketDeliveryFailure {
 /// another send is a known waste rather than a retry.
 pub const EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD: u64 = 3;
 
+/// Number of consecutive unproven deliveries that marks a nominally-active
+/// editor transport degraded and arms its one-shot recycle. Kept below the
+/// unregister threshold so recovery is attempted before sends are skipped.
+pub const EDITOR_TRANSPORT_DEGRADE_FAILURE_THRESHOLD: u64 = 2;
+
 /// `#gh131nonipc` — how long an unregistered endpoint stays skipped after the
 /// most recent failure recorded against it before one probe delivery is
 /// attempted again.

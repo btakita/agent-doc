@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet LifecycleSequence LayoutWidthBound)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet LifecycleSequence LayoutWidthBound EditorTransportHealth)
 
 # Library modules: INSTANCE'd by the models above, never checked on their own
 # (no Spec, no .cfg). They only need to sit next to the importing model.
@@ -231,6 +231,11 @@ must_violate=(
     # widening and a later derived trim both remain possible under adversity.
     LayoutWidthBound:LayoutWidthBoundWedge
     LayoutWidthBound:LayoutWidthBoundReach
+    # GH #138: two refusal-producing editor paths logged their definitive NO
+    # without moving transport health. Wedge proves that transition carries the
+    # invariant; Reach proves the unregister state remains attainable.
+    EditorTransportHealth:EditorTransportHealthWedge
+    EditorTransportHealth:EditorTransportHealthReach
 )
 
 for module in "${modules[@]}"; do

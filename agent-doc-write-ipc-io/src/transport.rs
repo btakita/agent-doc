@@ -14,9 +14,9 @@ use agent_doc_flow::types::{FlowOutcome, FlowStage};
 use agent_doc_flow_io::closeout::cycle_already_committed;
 use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{
-    AlreadyAppliedSnapshotOutcome, FullContentIpcMode, build_ipc_node_patches_json,
-    classify_socket_delivery_failure, effective_unmatched_for_patch_payload,
-    is_already_applied_receipt_error_message,
+    AlreadyAppliedSnapshotOutcome, FullContentIpcMode, SocketDeliveryFailure,
+    build_ipc_node_patches_json, classify_socket_delivery_failure,
+    effective_unmatched_for_patch_payload, is_already_applied_receipt_error_message,
 };
 use agent_doc_template as template;
 use agent_doc_template::stale_baseline::patch_touches_exchange;
@@ -1002,7 +1002,7 @@ fn try_ipc_inner(
                     agent_doc_template::response_materialization::response_materialization_probe(
                         patches, unmatched,
                     );
-                if persist_already_applied_socket_content_ours_snapshot(
+                let already_applied_outcome = persist_already_applied_socket_content_ours_snapshot(
                     effects,
                     AlreadyAppliedSocketSnapshotContext {
                         file,
@@ -1013,13 +1013,28 @@ fn try_ipc_inner(
                         normalize_prefix_lines,
                         expected_response: &expected_response,
                     },
-                )? == AlreadyAppliedSnapshotOutcome::Persisted
-                {
+                )?;
+                if already_applied_outcome == AlreadyAppliedSnapshotOutcome::Persisted {
+                    clear_ipc_socket_ack_timeouts(
+                        &project_root,
+                        file,
+                        "socket_already_applied_visible_response_proven",
+                    )?;
                     return Ok(IpcResult {
                         success: true,
                         patch_id,
                         skipped_committed_cycle: false,
                     });
+                }
+                let degraded = record_ipc_socket_ack_failure(
+                    &project_root,
+                    file,
+                    Some(&patch_id),
+                    "socket_already_applied",
+                    SocketDeliveryFailure::ProjectionUnconverged,
+                )?;
+                if degraded {
+                    log_write_wedge_requests_supervisor_recycle(file, "socket_already_applied");
                 }
                 eprintln!(
                     "[write] socket already_applied lacked an authoritative editor receipt containing the response — retaining the response operation for CP retry"

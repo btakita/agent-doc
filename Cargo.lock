@@ -582,6 +582,7 @@ version = "0.35.456"
 dependencies = [
  "agent-doc-debounce",
  "agent-doc-document-realtime",
+ "agent-doc-editor-transport-health-io",
  "agent-doc-element",
  "agent-doc-fs",
  "agent-doc-hash",
@@ -593,6 +594,7 @@ dependencies = [
  "agent-doc-reliable-sync-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
+ "agent-doc-supervisor",
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
@@ -797,6 +799,19 @@ dependencies = [
  "lazily 0.57.1",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "agent-doc-editor-transport-health-io"
+version = "0.35.456"
+dependencies = [
+ "agent-doc-frontmatter-io",
+ "agent-doc-fs",
+ "agent-doc-ipc-protocol",
+ "agent-doc-ops-log-io",
+ "agent-doc-sqlite",
+ "anyhow",
+ "tempfile",
 ]
 
 [[package]]
@@ -2907,6 +2922,7 @@ dependencies = [
  "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-editor-transport-health-io",
  "agent-doc-element",
  "agent-doc-element-exchange",
  "agent-doc-element-exchange-io",

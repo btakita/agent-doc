@@ -30,6 +30,7 @@ agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.456" }
 agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.456" }
 agent-doc-element-exchange-io = { path = "../agent-doc-element-exchange-io", version = "0.35.456" }
+agent-doc-editor-transport-health-io = { path = "../agent-doc-editor-transport-health-io", version = "0.35.456" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.456" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.456" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.456" }

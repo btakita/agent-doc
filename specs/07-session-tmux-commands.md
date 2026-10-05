@@ -224,12 +224,17 @@ whose route-owned supervisor maps a superseded binary gets one
 freshness, and the candidates. A pane bound to another document is reported as
 `layout_column_pane_foreign_document` and never touched. A stale supervisor in
 the column's own pane (its `/proc/<pid>/exe` names an unlinked file) is gated
-out BEFORE tmux-router selects it (GH #121, `layout_column_pane_excluded`) and
-is never reaped: the layout path requests the existing safe-boundary recycle, at
-most once per supervisor per ten minutes. The focused document's stale pane is
-admitted (`layout_column_pane_stale_focus_admitted`) only when realising it
-stashes no pane in the target window that holds a fresh turn-active lease — a
-live agent pane is never stashed in favour of a stale-supervisor pane (GH #124,
+out BEFORE tmux-router selects or promotes it (GH #121,
+`layout_column_pane_excluded`) and is never reaped: the layout path requests the
+existing safe-boundary recycle, at most once per supervisor per ten minutes.
+A desired stale pane already in the target window is the zero-movement
+exception (`layout_column_pane_stale_visible_preserved`): it remains in the
+router input while the recycle is pending, because gating it out would itself
+stash a visible live session during an install. The focused document's stale
+pane outside the target window is admitted
+(`layout_column_pane_stale_focus_admitted`) only when realising it stashes no
+pane in the target window that holds a fresh turn-active lease — a live agent
+pane is never stashed in favour of a stale-supervisor pane (GH #124,
 `admission=excluded_focused_live_turn_protected:<panes>`). When every column is
 gated out the current layout is preserved.
 - The focus exception is bounded (GH #136). It is granted on the strength of

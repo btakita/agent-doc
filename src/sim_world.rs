@@ -5985,9 +5985,13 @@ struct SimWorld {
     ops_log: Vec<String>,
     next_prompt: usize,
     coverage: Coverage,
+    /// `#netadv4`: adversarial channel for cross-process messages. `None` is the
+    /// perfect `local` channel (every pre-existing scenario).
+    net: Option<net::SimWorldNet>,
 }
 
 mod engine;
+mod net;
 mod steering_delivery_model;
 
 #[derive(Debug)]
@@ -6319,8 +6323,12 @@ impl CorpusRun {
 fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
     let run = SimWorld::run_seed_corpus(FAST_CORPUS_SEEDS, FAST_CORPUS_STEPS).unwrap();
     run.assert_within_budget(FAST_CORPUS_BUDGET, "fast simulator corpus");
-    let coverage = run.coverage;
+    assert_fast_corpus_coverage(&run.coverage);
+}
 
+/// The fast corpus's coverage floor, shared by the `local` run and the
+/// `#netadv4` adversarial-network runs of the same schedules.
+fn assert_fast_corpus_coverage(coverage: &Coverage) {
     assert!(
         coverage.commits > 0,
         "seed corpus must include valid committed closeouts"

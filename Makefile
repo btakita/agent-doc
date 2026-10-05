@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net cross-editor-simworld editor-parity tmux-ci clippy check python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -71,7 +71,7 @@ release-version:
 # Prefer cargo-nextest when installed; it runs test binaries concurrently while
 # preserving Cargo's integration-test environment. Fall back to Cargo's own
 # runner rather than reimplementing test execution.
-test sim-medium cross-editor-simworld dev-harness-test editor-parity tmux-ci check: export TMPDIR := $(AGENT_DOC_TEST_TMPDIR)
+test sim-medium sim-net cross-editor-simworld dev-harness-test editor-parity tmux-ci check: export TMPDIR := $(AGENT_DOC_TEST_TMPDIR)
 
 $(VSCODE_NODE_LOCK): editors/vscode/package.json editors/vscode/package-lock.json
 	npm ci --prefix editors/vscode
@@ -106,6 +106,21 @@ test:
 sim-medium:
 	@log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-sim-medium.XXXXXX.log"); \
 	if ! $(CARGO_CLEAN_ENV) cargo test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget --quiet -- --ignored --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
+		cat "$$log"; \
+		rm -f "$$log"; \
+		exit 1; \
+	fi; \
+	rm -f "$$log"
+
+# `#netadv4`: the fast corpus schedules (seeds 0..512) under the seeded
+# `coder_zscaler` and `hostile` network profiles, each across the fixed net seeds
+# in `src/sim_world/net.rs` (NET_CORPUS_SEEDS). Structural invariants and the
+# corpus coverage floor must hold; any oracle finding class outside
+# KNOWN_OPEN_NET_FINDINGS fails the run. Scripted scenarios can be replayed under a
+# profile ad hoc: AGENT_DOC_SIM_NET_PROFILE=hostile AGENT_DOC_SIM_NET_SEED=3 cargo test sim_world::
+sim-net:
+	@log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-sim-net.XXXXXX.log"); \
+	if ! $(CARGO_CLEAN_ENV) cargo test --bin agent-doc sim_world::net::tests::closeout_sim_net_ --quiet -- --ignored --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
 		cat "$$log"; \
 		rm -f "$$log"; \
 		exit 1; \
@@ -246,7 +261,7 @@ lean:
 # the release process runs `make check`, so leaving the installed-surface audit
 # out of it let 0.35.224 ship with harness runbooks several versions behind the
 # binary while every version marker matched.
-check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
+check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity python-bootstrap-test lean tla
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
 audit-docs:

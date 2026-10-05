@@ -111,6 +111,7 @@ dependencies = [
  "agent-doc-session-check-io",
  "agent-doc-session-registry",
  "agent-doc-session-registry-io",
+ "agent-doc-sim-net",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-start-io",
@@ -544,6 +545,7 @@ dependencies = [
  "agent-doc-secret-redact",
  "agent-doc-session-actor-io",
  "agent-doc-session-registry-io",
+ "agent-doc-sim-net",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
@@ -2186,6 +2188,10 @@ dependencies = [
  "tempfile",
  "tmux-router",
 ]
+
+[[package]]
+name = "agent-doc-sim-net"
+version = "0.35.456"
 
 [[package]]
 name = "agent-doc-skill-harness"

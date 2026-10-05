@@ -41385,7 +41385,23 @@ mod install_fanout_idle_root_tests {
         launched: RefCell<Vec<PathBuf>>,
         recycled: RefCell<Vec<PathBuf>>,
         delivered: RefCell<Vec<(PathBuf, u64)>>,
+        /// `#netadv4`: the status RPC and the reload delivery cross this channel.
+        /// `None` is the perfect `local` channel every pre-existing test uses.
+        net: Option<RefCell<SimNet<FanoutLink, ()>>>,
+        /// Every reload copy an editor actually received, duplicates included.
+        editor_received: RefCell<Vec<(PathBuf, u64)>>,
     }
+
+    use agent_doc_sim_net::{Delivery, NetEvent, NetProfile, SimNet};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum FanoutLink {
+        Status,
+        Reload,
+    }
+
+    /// The caller's read timeout for one fan-out RPC.
+    const FANOUT_RPC_TIMEOUT_MS: u64 = 2_000;
 
     impl SimWorld {
         fn new(roots: &[(&str, SimRoot)]) -> Self {
@@ -41405,7 +41421,53 @@ mod install_fanout_idle_root_tests {
                 launched: RefCell::default(),
                 recycled: RefCell::default(),
                 delivered: RefCell::default(),
+                net: None,
+                editor_received: RefCell::default(),
             }
+        }
+
+        fn with_net(mut self, profile: NetProfile, seed: u64) -> Self {
+            // The fan-out makes one attempt per endpoint (no retransmit), so the
+            // channel is fire-and-forget: a lost or stalled request is a timeout.
+            self.net = (profile != NetProfile::Local)
+                .then(|| RefCell::new(SimNet::for_profile(profile, seed, Delivery::FireAndForget)));
+            self
+        }
+
+        /// One request over the channel. Returns the number of copies the
+        /// receiver got and whether the caller saw a reply before its timeout.
+        fn rpc(&self, link: FanoutLink) -> (usize, Result<()>) {
+            let Some(net) = &self.net else {
+                return (1, Ok(()));
+            };
+            let mut net = net.borrow_mut();
+            let id = net.send(link, ());
+            let mut copies = 0;
+            let mut first_latency = None;
+            let mut events = net.advance_until_delivered(id);
+            // Duplicates of this request that land within the caller's window.
+            events.extend(net.advance(FANOUT_RPC_TIMEOUT_MS));
+            for event in events {
+                if let NetEvent::Deliver {
+                    id: event_id,
+                    sent_at_ms,
+                    delivered_at_ms,
+                    ..
+                } = event
+                    && event_id == id
+                {
+                    copies += 1;
+                    first_latency.get_or_insert(delivered_at_ms - sent_at_ms);
+                }
+            }
+            let reply = match first_latency {
+                Some(latency) if latency <= FANOUT_RPC_TIMEOUT_MS => Ok(()),
+                Some(latency) => Err(anyhow::anyhow!(
+                    "{link:?} reply timed out (delivered after {latency}ms)"
+                )),
+                None => Err(anyhow::anyhow!("{link:?} request lost: timed out")),
+            };
+            (copies, reply)
         }
 
         fn root(&self, name: &str) -> PathBuf {
@@ -41439,6 +41501,11 @@ mod install_fanout_idle_root_tests {
             access: InstallFanoutControllerAccess,
         ) -> Result<ControllerReliableSyncStatusResponse> {
             let sim = self.roots[root];
+            let (copies, reply) = self.rpc(FanoutLink::Status);
+            if copies == 0 {
+                // The request never reached the controller side: no launch, no reply.
+                return Err(reply.unwrap_err());
+            }
             if !sim.controller_running {
                 match access {
                     InstallFanoutControllerAccess::MayLaunch => {
@@ -41464,14 +41531,16 @@ mod install_fanout_idle_root_tests {
                     }])
                 })
                 .unwrap_or_else(|| serde_json::json!([]));
-            Ok(serde_json::from_value(serde_json::json!({
+            let status = serde_json::from_value(serde_json::json!({
                 "plane_open_docs": [],
                 "plane_open_paths": [],
                 "plane_live_docs": [],
                 "registrations": registrations,
                 "registry_open_docs": [],
                 "per_doc_pids": [],
-            }))?)
+            }))?;
+            reply?;
+            Ok(status)
         }
 
         fn listening(&self, root: &Path) -> Vec<u64> {
@@ -41500,6 +41569,13 @@ mod install_fanout_idle_root_tests {
                 "0.0.0-sim",
                 |root, pid| self.roots[root].editor_pid == Some(pid),
                 |endpoint, pid| {
+                    let (copies, reply) = self.rpc(FanoutLink::Reload);
+                    for _ in 0..copies {
+                        self.editor_received
+                            .borrow_mut()
+                            .push((endpoint.project_root.clone(), pid));
+                    }
+                    reply?;
                     self.delivered
                         .borrow_mut()
                         .push((endpoint.project_root.clone(), pid));
@@ -41612,6 +41688,68 @@ mod install_fanout_idle_root_tests {
             !world
                 .launched()
                 .contains(&world.root("idle-with-controller"))
+        );
+    }
+
+    /// `#netadv4`: the install fan-out over a Coder+Zscaler or hostile channel.
+    /// Status RPCs and reload deliveries are delayed, dropped, duplicated and
+    /// stalled. Safety must not move: an idle root is never launched, and the
+    /// report never claims a delivery the editor did not receive. Loss may only
+    /// turn into an honest, named failure.
+    #[test]
+    fn install_fanout_under_adversarial_net_stays_safe_and_accounts_every_endpoint() {
+        let mut faulted_runs = 0;
+        let mut duplicate_reloads = 0;
+        let mut late_reply_failures = 0;
+        for profile in NetProfile::ADVERSARIAL {
+            for seed in 0..48u64 {
+                let world = world().with_net(profile, seed);
+                let report = world.run_reload(world.scope());
+                let launched = world.launched();
+                assert!(
+                    launched
+                        .iter()
+                        .all(|root| *root == world.root("supervised")),
+                    "{profile} seed {seed}: launched {launched:?}"
+                );
+                assert!(launched.len() <= 1, "{profile} seed {seed}: {launched:?}");
+                let delivered = world.delivered.borrow().clone();
+                let received = world.editor_received.borrow().clone();
+                assert_eq!(report.delivered, delivered.len(), "{profile} seed {seed}");
+                assert!(
+                    delivered.iter().all(|entry| received.contains(entry)),
+                    "{profile} seed {seed}: reported delivery the editor never received"
+                );
+                assert!(
+                    delivered
+                        .iter()
+                        .all(|(root, pid)| *root == world.root("edited") && *pid == 4242),
+                    "{profile} seed {seed}: {delivered:?}"
+                );
+                // Every failure is named (GH #94): no bare counter increments.
+                assert_eq!(
+                    report.failed,
+                    report.failures.len(),
+                    "{profile} seed {seed}"
+                );
+                if report.failed > 0 || report.delivered == 0 {
+                    faulted_runs += 1;
+                }
+                if received.len() > delivered.len() && report.failed > 0 {
+                    late_reply_failures += 1;
+                }
+                if received.len() > 1 {
+                    duplicate_reloads += 1;
+                }
+            }
+        }
+        eprintln!(
+            "install fan-out net runs: faulted={faulted_runs} duplicate_reloads={duplicate_reloads} \
+             reloaded_but_reported_failed={late_reply_failures}"
+        );
+        assert!(
+            faulted_runs > 0,
+            "the adversarial channel must actually fault some runs"
         );
     }
 

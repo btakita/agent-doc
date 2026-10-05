@@ -2,6 +2,11 @@ use super::*;
 
 impl SimWorld {
     pub(crate) fn new(seed: u64) -> Self {
+        Self::new_local(seed).with_env_net(net::NetMode::Rpc)
+    }
+
+    /// A world on the perfect `local` channel, ignoring the environment.
+    pub(crate) fn new_local(seed: u64) -> Self {
         let doc = template_doc("");
         Self {
             seed,
@@ -36,12 +41,42 @@ impl SimWorld {
             ops_log: Vec::new(),
             next_prompt: 1,
             coverage: Coverage::default(),
+            net: None,
+        }
+    }
+
+    /// `#netadv4`: honour `AGENT_DOC_SIM_NET_PROFILE` / `AGENT_DOC_SIM_NET_SEED`.
+    fn with_env_net(self, mode: net::NetMode) -> Self {
+        match net::env_net_profile() {
+            Some((profile, net_seed)) => {
+                let seed = self.seed;
+                self.with_net(profile, net_seed ^ seed.rotate_left(17), mode)
+            }
+            None => self,
         }
     }
 
     pub(crate) fn run_seed(seed: u64, steps: usize) -> Result<Coverage> {
+        let world = Self::new_local(seed).with_env_net(net::NetMode::Async);
+        Ok(Self::run_seed_world(world, steps)?.coverage)
+    }
+
+    /// `#netadv4`: one corpus schedule with its cross-process messages routed
+    /// through `profile`. The schedule RNG is untouched, so the command sequence
+    /// is the same as the `local` run of `seed`; only delivery differs.
+    pub(crate) fn run_seed_with_net(
+        seed: u64,
+        steps: usize,
+        profile: agent_doc_sim_net::NetProfile,
+        net_seed: u64,
+    ) -> Result<Self> {
+        let world = Self::new_local(seed).with_net(profile, net_seed, net::NetMode::Async);
+        Self::run_seed_world(world, steps)
+    }
+
+    pub(crate) fn run_seed_world(mut world: Self, steps: usize) -> Result<Self> {
+        let seed = world.seed;
         let mut rng = DeterministicRng::new(seed);
-        let mut world = Self::new(seed);
         for _ in 0..steps {
             let command = match rng.next_usize(60) {
                 0 => SimCommand::EditPrompt,
@@ -107,10 +142,15 @@ impl SimWorld {
             world.apply(command)?;
             world.assert_structural_invariants()?;
         }
+        if world.net.is_some() {
+            // Fairness: every retransmitted message eventually arrives.
+            world.net_drain()?;
+            world.assert_structural_invariants()?;
+        }
         if let Err(err) = world.strict_closeout_invariants() {
             world.coverage.record_block(&err.to_string());
         }
-        Ok(world.coverage)
+        Ok(world)
     }
 
     pub(crate) fn run_seed_corpus(seeds: std::ops::Range<u64>, steps: usize) -> Result<CorpusRun> {
@@ -133,6 +173,24 @@ impl SimWorld {
     }
 
     pub(crate) fn apply(&mut self, command: SimCommand) -> Result<()> {
+        if self.net.is_none() {
+            return self.apply_local(command);
+        }
+        // Stragglers due by now land first, then this step.
+        self.net_tick()?;
+        match net::link_for(command) {
+            Some(link) => self.send_over_net(link, command),
+            None => {
+                let before = (self.route.durable.generation, self.route.durable.lifecycle);
+                let result = self.apply_local(command);
+                self.net_note_local_step(before);
+                result
+            }
+        }
+    }
+
+    /// Apply one step at its receiver (or locally when it crosses no hop).
+    pub(crate) fn apply_local(&mut self, command: SimCommand) -> Result<()> {
         self.trace.push(command);
         match command {
             SimCommand::EditPrompt => {
@@ -255,41 +313,38 @@ impl SimWorld {
                 self.bind_route_owner();
             }
             SimCommand::SupervisorReady => {
-                if let Err(err) = self.transition_supervisor(
-                    self.route.durable.generation,
-                    SupervisorLifecycle::Ready,
-                ) {
+                if let Err(err) = self
+                    .transition_supervisor(self.observed_generation(), SupervisorLifecycle::Ready)
+                {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::SupervisorBusy => {
                 if let Err(err) = self
-                    .transition_supervisor(self.route.durable.generation, SupervisorLifecycle::Busy)
+                    .transition_supervisor(self.observed_generation(), SupervisorLifecycle::Busy)
                 {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::SupervisorWaitingInput => {
                 if let Err(err) = self.transition_supervisor(
-                    self.route.durable.generation,
+                    self.observed_generation(),
                     SupervisorLifecycle::WaitingInput,
                 ) {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::SupervisorBlocked => {
-                if let Err(err) = self.transition_supervisor(
-                    self.route.durable.generation,
-                    SupervisorLifecycle::Blocked,
-                ) {
+                if let Err(err) = self
+                    .transition_supervisor(self.observed_generation(), SupervisorLifecycle::Blocked)
+                {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::SupervisorClosed => {
-                if let Err(err) = self.transition_supervisor(
-                    self.route.durable.generation,
-                    SupervisorLifecycle::Closed,
-                ) {
+                if let Err(err) = self
+                    .transition_supervisor(self.observed_generation(), SupervisorLifecycle::Closed)
+                {
                     self.coverage.record_block(&err.to_string());
                 }
             }
@@ -318,7 +373,7 @@ impl SimWorld {
                 }
             }
             SimCommand::StaleSupervisorUpdate => {
-                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                let stale_generation = self.observed_generation().saturating_sub(1);
                 if let Err(err) =
                     self.transition_supervisor(stale_generation, SupervisorLifecycle::Ready)
                 {
@@ -375,14 +430,14 @@ impl SimWorld {
                 }
             }
             SimCommand::AdminPauseQueue => {
-                if let Err(err) = self
-                    .admin_queue_control(QueueControlState::Paused, self.route.durable.generation)
+                if let Err(err) =
+                    self.admin_queue_control(QueueControlState::Paused, self.observed_generation())
                 {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::AdminPauseQueueStale => {
-                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                let stale_generation = self.observed_generation().saturating_sub(1);
                 if let Err(err) =
                     self.admin_queue_control(QueueControlState::Paused, stale_generation)
                 {
@@ -390,29 +445,29 @@ impl SimWorld {
                 }
             }
             SimCommand::AdminResumeQueue => {
-                if let Err(err) = self
-                    .admin_queue_control(QueueControlState::Resumed, self.route.durable.generation)
+                if let Err(err) =
+                    self.admin_queue_control(QueueControlState::Resumed, self.observed_generation())
                 {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::AdminDrainQueue => {
                 if let Err(err) = self
-                    .admin_queue_control(QueueControlState::Draining, self.route.durable.generation)
+                    .admin_queue_control(QueueControlState::Draining, self.observed_generation())
                 {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::AdminHandoff => {
                 if let Err(err) = self.admin_handoff(
-                    self.route.durable.generation,
-                    format!("%handoff{}", self.route.durable.generation + 1),
+                    self.observed_generation(),
+                    format!("%handoff{}", self.observed_generation() + 1),
                 ) {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::AdminHandoffStale => {
-                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                let stale_generation = self.observed_generation().saturating_sub(1);
                 if let Err(err) =
                     self.admin_handoff(stale_generation, "%stale-admin-handoff".to_string())
                 {
@@ -420,29 +475,26 @@ impl SimWorld {
                 }
             }
             SimCommand::AdminReap => {
-                if let Err(err) = self.admin_reap(self.route.durable.generation) {
+                if let Err(err) = self.admin_reap(self.observed_generation()) {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::AdminReapStale => {
-                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                let stale_generation = self.observed_generation().saturating_sub(1);
                 if let Err(err) = self.admin_reap(stale_generation) {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::SupervisorHeartbeatReattach => {
                 if let Err(err) = self.supervisor_heartbeat_reattach(
-                    self.route.durable.generation,
-                    format!(
-                        "%heartbeat{}",
-                        self.route.durable.generation.saturating_add(1)
-                    ),
+                    self.observed_generation(),
+                    format!("%heartbeat{}", self.observed_generation().saturating_add(1)),
                 ) {
                     self.coverage.record_block(&err.to_string());
                 }
             }
             SimCommand::SupervisorHeartbeatStale => {
-                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                let stale_generation = self.observed_generation().saturating_sub(1);
                 if let Err(err) =
                     self.supervisor_heartbeat_reattach(stale_generation, "%stale-heartbeat")
                 {

@@ -120,6 +120,7 @@ members = [
     "agent-doc-state-wire",
     "agent-doc-status-io",
     "agent-doc-stream-io",
+    "agent-doc-sim-net",
     "agent-doc-test-support",
     "agent-doc-turn",
     "agent-doc-turn-executor",
@@ -339,6 +340,7 @@ agent-doc-hash = { path = "agent-doc-hash", version = "0.35.456" }
 agent-doc-controller-io = { path = "agent-doc-controller-io", version = "0.35.456", features = ["test-support"] }
 agent-doc-document-realtime-io = { path = "agent-doc-document-realtime-io", version = "0.35.456", features = ["test-support"] }
 agent-doc-element-queue = { path = "agent-doc-element-queue", version = "0.35.456" }
+agent-doc-sim-net = { path = "agent-doc-sim-net", version = "0.35.456" }
 agent-doc-test-support = { path = "agent-doc-test-support", version = "0.35.456" }
 lazily-sim = { package = "lazily", git = "https://github.com/lazily-hub/lazily-rs.git", rev = "92656d6840e9171b3e55a9e6b11205f820ec984c" }
 assert_cmd = "2"

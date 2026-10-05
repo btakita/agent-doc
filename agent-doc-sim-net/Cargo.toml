@@ -1,0 +1,11 @@
+[package]
+name = "agent-doc-sim-net"
+version = "0.35.456"
+edition = "2024"
+description = "Seeded deterministic network-conditions layer for agent-doc SimWorld simulators"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
+
+[lib]
+name = "agent_doc_sim_net"

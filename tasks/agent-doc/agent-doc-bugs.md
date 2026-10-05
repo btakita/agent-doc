@@ -790,6 +790,18 @@ Implemented by a dedicated subagent and integrated on main through `8c12896cc`.
 Verification: self-test, release preflight, external-target dry run, final authoritative `make check` (9,561 workspace tests plus controller/session tail, 193 VS Code tests, cross-editor tests, and TLA+ checks) and `make tmux-ci` all passed. Final CLI/library/editor integration installed locally. Commits `370645adf`, `66b4f2795`, `4220df2cb`, and `8c12896cc` are pushed to `origin/main`.
 
 No new public version was released in this continuation; the public release remains v0.35.460.
+
+### Re: version commands — gpt-5 · 2026-10-05T17:23-04:00
+
+> **Queue prompt:** Is there a command to see the agent-doc version + plugin version(s)? If not, we need a cli + plugin command to see the versions.
+
+Yes. The existing commands and editor actions cover both views:
+
+- `agent-doc version` prints the running CLI version, build ID, executable, paired native library, and the JetBrains, VS Code, and Zed plugin versions that this CLI expects. Add `--json` for the stable `agent-doc-build-info-v1` payload.
+- `agent-doc plugin list` prints the installed JetBrains and VS Code plugin versions and their installation identities.
+- In JetBrains and VS Code, run **About Agent Doc** from the Agent Doc menu/popup or command surface. It shows the running plugin version together with the CLI and loaded native-library identity and warns about mismatches.
+
+On this machine the CLI is `0.35.460`; it expects JetBrains `0.2.498`, VS Code `0.2.80`, and Zed `0.1.1`. The installed versions reported by `plugin list` are JetBrains `0.2.498` and VS Code `0.2.80`.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
@@ -802,7 +814,7 @@ No new public version was released in this continuation; the public release rema
 - ~~do [#claimmarker]~~
 - ~~I renamed betterstack.md to observability.md. Run Agent Doc failed: refusing duplicate session identity 0b281660-be9c-4f2d-9a1d-f5ce38aa88a9 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md: first durable owner is /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/betterstack.md in pane  (registered state-event:577209)~~
 - ~~do [#releasecyclefast]~~
-- Is there a command to see the agent-doc version + plugin version(s)? If not, we need a cli + plugin command to see the versions.
+- ~~Is there a command to see the agent-doc version + plugin version(s)? If not, we need a cli + plugin command to see the versions.~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/144
  - #gh-fix https://github.com/btakita/agent-doc/issues/145
 - release + publish

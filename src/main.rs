@@ -404,6 +404,11 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                     .into_iter()
                     .map(|(file, pane)| (file.to_string_lossy().to_string(), pane))
                     .collect(),
+                gated_documents: sync_report
+                    .gated_documents
+                    .into_iter()
+                    .map(|file| file.to_string_lossy().to_string())
+                    .collect(),
             },
         )
     }

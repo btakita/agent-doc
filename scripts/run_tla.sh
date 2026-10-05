@@ -35,7 +35,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -154,6 +154,18 @@ must_violate=(
     RecycleSettleDispatch:RecycleSettleDispatchWedge
     RecycleSettleDispatch:RecycleSettleDispatchReach
     RecycleSettleDispatch:RecycleSettleDispatchUnstampedReach
+    # GH #136 — a stale stash supervisor pane admitted as a layout column on the
+    # strength of a recycle request that was never consumed. One wedge PER FIX
+    # (overdue bound, no-widen, first-unconsumed clock, non-lapsing fan-out,
+    # durable level-triggered request instead of a droppable notification);
+    # reach proves the focus exception and consumption both stay reachable.
+    StaleColumnRecycle:StaleColumnRecycleOverdueWedge
+    StaleColumnRecycle:StaleColumnRecycleWidenWedge
+    StaleColumnRecycle:StaleColumnRecycleRefreshWedge
+    StaleColumnRecycle:StaleColumnRecycleLapseWedge
+    StaleColumnRecycle:StaleColumnRecycleDropWedge
+    StaleColumnRecycle:StaleColumnRecycleReach
+    StaleColumnRecycle:StaleColumnRecycleConsumeReach
 )
 
 for module in "${modules[@]}"; do

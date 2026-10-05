@@ -1388,7 +1388,6 @@ fn run_with_options_to_writer_in_pass(
         agent_doc_workflow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
     let directive_target_ids =
         agent_doc_queue::queue_directive::do_directive_target_ids(&prompt_targets);
-    let checkpoint_queue_task_id = directive_target_ids.first().map(String::as_str);
     let mut added_diff_lines = prompt_diff_result
         .as_ref()
         .map(|d| agent_doc_prompt_contract::collect_added_diff_lines(d))
@@ -1508,6 +1507,42 @@ fn run_with_options_to_writer_in_pass(
             .is_some_and(|affectedness| {
                 !affectedness.turn_affected && !affectedness.classified.is_empty()
             });
+
+    // Queue selection is a projection of the same turn inputs as the contract.
+    // Compute it before persisting the cycle checkpoint so a prompt that
+    // preempts this drain cannot leave queue-task closeout obligations behind
+    // for a head the contract deliberately did not select (GH #139).
+    let mut user_intent_prompt_changes = compute_user_intent_prompt_changes(
+        &prompt_bearing_changes,
+        diff_from_queue_head_only,
+        op_affectedness.as_ref(),
+    );
+    if prompt_edit_independent_of_active_turn {
+        user_intent_prompt_changes.clear();
+    }
+    let document_user_intent_prompt_changes = user_intent_prompt_changes.clone();
+    for prompt in chat_prompts.iter().chain(absorbed_steering_prompts.iter()) {
+        if !user_intent_prompt_changes
+            .iter()
+            .any(|change| change.text.trim() == prompt)
+        {
+            user_intent_prompt_changes.push(agent_doc_diff::PromptBearingChange {
+                kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
+                text: prompt.clone(),
+            });
+        }
+    }
+    let exchange_prompt_preempts_queue =
+        agent_doc_workflow::session_cycle::prompt_changes_preempt_queue(
+            &user_intent_prompt_changes,
+            queue_state.queue_active == Some(true),
+            &queue_state.queue_prompts,
+        );
+    let selected_directive_target_ids = if exchange_prompt_preempts_queue {
+        Vec::new()
+    } else {
+        directive_target_ids
+    };
 
     // #nm1x: persist the scope so the later finalize-path drift gate (a separate
     // process invocation) can intersect incoming document ops against the same
@@ -1688,7 +1723,7 @@ fn run_with_options_to_writer_in_pass(
     // lifecycle outcome before closeout. Record them so `session-check` can fail
     // closed when a directive clears the queue but leaves its target `[ ]`.
     let expect_done_or_gate_ids = {
-        if directive_target_ids.is_empty() {
+        if selected_directive_target_ids.is_empty() {
             Vec::new()
         } else {
             let open_backlog: std::collections::HashSet<String> =
@@ -1703,7 +1738,7 @@ fn run_with_options_to_writer_in_pass(
                 .cloned()
                 .collect::<std::collections::HashSet<String>>();
             agent_doc_queue::queue_directive::filter_expect_done_or_gate_ids(
-                &directive_target_ids,
+                &selected_directive_target_ids,
                 &open_backlog,
                 &synced_queue_ids,
             )
@@ -1918,12 +1953,21 @@ fn run_with_options_to_writer_in_pass(
         .context("preflight effect graph did not reach its terminal projection")?;
 
     if !options.probe {
-        let mut checkpoint_prompt_targets = prompt_targets.clone();
+        let mut checkpoint_prompt_targets = if exchange_prompt_preempts_queue
+            && diff_from_queue_head_only
+        {
+            Vec::new()
+        } else {
+            prompt_targets.clone()
+        };
         push_unique_strings(&mut checkpoint_prompt_targets, chat_prompts.clone());
         push_unique_strings(
             &mut checkpoint_prompt_targets,
             absorbed_steering_prompts.clone(),
         );
+        let checkpoint_queue_task_id = selected_directive_target_ids
+            .first()
+            .map(String::as_str);
         agent_doc_cycle_state_io::record_turn_checkpoint(
             file,
             &checkpoint_prompt_targets,
@@ -1990,14 +2034,6 @@ fn run_with_options_to_writer_in_pass(
     crate::progress::enter("owner_pane_detection")?;
     // `#queue-no-stop-unrelated-edit`: compute before owner-pane detection so
     // same-pane recursion signals use only prompt changes that affect this turn.
-    let mut user_intent_prompt_changes = compute_user_intent_prompt_changes(
-        &prompt_bearing_changes,
-        diff_from_queue_head_only,
-        op_affectedness.as_ref(),
-    );
-    if prompt_edit_independent_of_active_turn {
-        user_intent_prompt_changes.clear();
-    }
     // #exchange-active-prompt-marker: once preflight has selected the exact
     // prompt targets for this turn, publish that working state into the live
     // exchange tail. The pure exchange transformation preserves Markdown
@@ -2005,7 +2041,7 @@ fn run_with_options_to_writer_in_pass(
     // carry `❯ 🚧` inside the heading text, and list/fenced regions are never
     // decorated. Probe mode remains side-effect-free.
     if !options.probe {
-        let active_exchange_prompt_targets = user_intent_prompt_changes
+        let active_exchange_prompt_targets = document_user_intent_prompt_changes
             .iter()
             .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
             .map(|change| change.text.clone())
@@ -2077,27 +2113,8 @@ fn run_with_options_to_writer_in_pass(
     // drain. An operator adding a directive to `agent:queue` under go mode is
     // queueing work, not competing with the queue, and must not stall it.
     // `#chatprompt` (GH #125): a chat prompt is operator intent for this turn.
-    // Added after the active-prompt marker projection (the prompt is not in the
-    // document to mark) and before the queue preemption decision (the operator
-    // asked for this turn's work, so it runs before the next queue head).
-    let document_user_intent_prompt_changes = user_intent_prompt_changes.clone();
-    for prompt in chat_prompts.iter().chain(absorbed_steering_prompts.iter()) {
-        if !user_intent_prompt_changes
-            .iter()
-            .any(|change| change.text.trim() == prompt)
-        {
-            user_intent_prompt_changes.push(agent_doc_diff::PromptBearingChange {
-                kind: agent_doc_diff::PromptBearingChangeKind::PromptTarget,
-                text: prompt.clone(),
-            });
-        }
-    }
-    let exchange_prompt_preempts_queue =
-        agent_doc_workflow::session_cycle::prompt_changes_preempt_queue(
-            &user_intent_prompt_changes,
-            queue_state.queue_active == Some(true),
-            &queue_state.queue_prompts,
-        );
+    // It participates in the queue-preemption decision above, but not the
+    // active-prompt marker projection because it is not in the document.
     if !options.probe {
         let selected_free_text_queue_heads = if exchange_prompt_preempts_queue {
             Vec::new()
@@ -3596,6 +3613,83 @@ mod tests {
         assert_eq!(state.chat_prompts, vec!["#upgrade".to_string()]);
         assert!(state.prompt_targets.contains(&"#upgrade".to_string()));
     }
+
+    /// GH #139: an operator chat prompt preempts a synthesized queue head, and
+    /// the persisted checkpoint must use that same selection verdict. Otherwise
+    /// `session-check` demands completion of a `do [#id]` target that this cycle
+    /// never selected.
+    #[test]
+    fn preflight_chat_preemption_releases_unselected_queue_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "- do [#active]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#active] active work\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(
+            &doc,
+            PreflightOptions {
+                chat_prompts: vec!["Answer the operator before draining the queue.".to_string()],
+                ..PreflightOptions::default()
+            },
+            &mut output,
+        )
+        .unwrap();
+        let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(contract["queue_continuation_required"], false, "{contract:#}");
+        assert!(
+            contract
+                .get("selected_queue_prompts")
+                .is_none_or(|prompts| prompts.as_array().is_some_and(Vec::is_empty)),
+            "{contract:#}"
+        );
+
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.queue_task_id, None);
+        assert!(
+            state.expect_done_or_gate_ids.is_empty(),
+            "preempted queue target must not become a closeout obligation: {:?}",
+            state.expect_done_or_gate_ids
+        );
+        assert!(
+            !state
+                .prompt_targets
+                .iter()
+                .any(|target| target.contains("do [#active]")),
+            "unselected queue head must not remain in the checkpoint: {:?}",
+            state.prompt_targets
+        );
+        assert!(
+            state
+                .prompt_targets
+                .contains(&"Answer the operator before draining the queue.".to_string())
+        );
+    }
     /// `#steerbaselineabsorb` (agent-doc-bugs.md, 2026-10-04): the operator
     /// finished `testing to see` as `testing to see if you pick this up.` while
     /// `respond` was committing. The commit absorbed the line, the closeout
@@ -4150,6 +4244,11 @@ mod tests {
             state.queue_task_id.as_deref(),
             Some("#active"),
             "baselined unresolved exchange prompt must preempt active queue head"
+        );
+        assert!(
+            state.expect_done_or_gate_ids.is_empty(),
+            "preempted queue target must not become a closeout obligation: {:?}",
+            state.expect_done_or_gate_ids
         );
         assert!(
             state

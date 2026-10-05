@@ -452,6 +452,12 @@ Three heads went to background subagents. Each one is claimed and has its own wo
 > **Queue prompt:** release + publish
 
 **Deferred:** this release needs to ship the three fixes above. It runs after I've merged their branches, run `make check` and `make install`. GH #136 closes only after the release (`#gh-fix` → fix then closerelease).
+
+### Re: release held until subagent batch integrates — opus-5-5 · 2026-10-05T00:17-04:00
+
+> **Queue prompt:** release + publish
+
+**Deferred:** this release has to ship the three subagent fixes (`#jbstagefallback`, GH #136, alt+shift menu), and all three are still running. I've claimed the head as `coordinator:after-subagent-integration` with a 3h TTL so the loop stops re-entering for it. Re-entering would only produce no-op cycles, and there have already been 2 in the last 30 minutes. Once the subagents report back, I'll merge their branches one at a time, run `make check` and one `make install`, then release this claim and cut the release.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 

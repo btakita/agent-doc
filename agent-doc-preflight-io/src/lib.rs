@@ -4593,14 +4593,20 @@ pub fn run_queue_maintenance_with_coin_gate(
                 _ => None,
             })
             .collect();
-        // `#deferstrike`: a head an active worker claim holds is owned by that
-        // worker; an earlier echo that reported its dispatch is not its answer.
+        // `#claimstrike`: a worker claim does not exempt a head from this
+        // catch-up. The strike set must equal the session-check residue set,
+        // which ignores claims; exempting claimed heads left a completed,
+        // claimed head that INTERRUPTed every closeout until the claim was
+        // released by hand. An echo that only reported dispatch is a deferral
+        // (`latest_free_text_head_echo_is_deferral`) and stays queued. The
+        // struck heads' claims are released below.
         let claimed_heads = agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(
             file,
             &current_content,
         );
         let claimed =
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
+        let mut struck_claimed_heads: Vec<String> = Vec::new();
         let mut struck_count = 0usize;
         let new_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = activation
             .entries_after
@@ -4623,10 +4629,12 @@ pub fn run_queue_maintenance_with_coin_gate(
                                     &exchange_text,
                                     &p.text,
                                 )
-                                && !claimed.claims(&p.text)
                                 && committed_free_text.contains(&gate_norm(&p.text)) =>
                 {
                     struck_count += 1;
+                    if claimed.claims(&p.text) {
+                        struck_claimed_heads.push(p.text.clone());
+                    }
                     // #qftstuck: a struck head is no longer in progress — drop the
                     // cosmetic `🚧` marker so it does not linger inside the
                     // strikethrough (`set_first_prompt_in_progress` re-applies it to
@@ -4669,6 +4677,17 @@ pub fn run_queue_maintenance_with_coin_gate(
                     file.display(),
                 ),
             );
+            // `#claimstrike`: the answered head's claim ends with its strike.
+            // Never fatal: a claim on a closed head is inert, and closeout
+            // reconciliation prunes it.
+            for head in &struck_claimed_heads {
+                if let Err(err) = agent_doc_queue_io::queue_claim::release_closed_head(file, head) {
+                    eprintln!(
+                        "[preflight] WARNING: could not release the claim on a struck free-text head in {}: {err:#}",
+                        file.display()
+                    );
+                }
+            }
             // If the strike emptied the live head set, mirror the id-backed
             // done-strike drain-clear so the queue does not report active with an
             // empty prompt set (#drained-done-queue-clear).
@@ -13925,6 +13944,65 @@ mod tests {
         assert!(
             active.iter().any(|t| t.contains("do [#beta]")),
             "unanswered id-backed head must remain an active Prompt:\nactive={active:?}"
+        );
+    }
+
+    /// `#claimstrike` (live, 2026-10-05): a committed `Queue prompt` echo with
+    /// no deferral completes a claimed free-text head too. Exempting claimed
+    /// heads from this catch-up disagreed with the session-check residue guard
+    /// (which ignores claims), so the repair needed a hand `queue release`
+    /// first. A head whose latest echo is a deferral stays queued and claimed.
+    #[test]
+    fn run_queue_maintenance_strikes_claimed_answered_head_and_keeps_deferred_one() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let done = "Alt+Shift+Menu does not open the agent-doc action menu";
+        let pending = "Ctrl+Shift+A palette entry is missing for agent-doc";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue: start\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: menu — opus\n\n",
+                "> **Queue prompt:** {done}\n\n",
+                "Integrated the subagent's fix; the menu opens again.\n\n",
+                "### Re: palette — opus\n\n",
+                "> **Queue prompt:** {pending}\n\n",
+                "**Deferred:** dispatched to subagent:palette; not landed yet.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {done}\n",
+                "- {pending}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            done = done,
+            pending = pending,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, done, "subagent:altshiftmenu", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, pending, "subagent:palette", 3600).unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains(&format!("- ~~{done}~~")), "{updated}");
+        assert!(updated.contains(&format!("- {pending}\n")), "{updated}");
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+        let owners: Vec<&str> = ledger.claims.iter().map(|c| c.owner.as_str()).collect();
+        assert_eq!(
+            owners,
+            vec!["subagent:palette"],
+            "the struck head's claim is released; the deferred head stays claimed"
         );
     }
 

@@ -345,6 +345,25 @@ pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
     Ok(released)
 }
 
+/// Release the claim on a head the binary itself just closed (`#claimstrike`:
+/// a finalize strike of an answered free-text head). Unlike [`release`] this
+/// never resolves `head` against the live queue: the head is no longer live,
+/// so resolution would only miss (and could cross the controller socket for
+/// an editor-authority lookup inside closeout). The ledger matches by the
+/// shared claim identity, which is marker-invariant.
+pub fn release_closed_head(file: &Path, head: &str) -> Result<Option<QueueClaim>> {
+    let released = mutate_ledger(file, |ledger| Ok(ledger.release(head)))?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_release released={} item_bytes={} reason=closed_by_strike",
+            released.is_some(),
+            head.trim().len()
+        ),
+    );
+    Ok(released)
+}
+
 /// Active claims for `file` judged against `content`: expired claims and claims
 /// on items no longer in the queue are excluded.
 pub fn active_claims_for_content(file: &Path, content: &str) -> Result<Vec<QueueClaim>> {

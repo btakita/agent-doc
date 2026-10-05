@@ -229,22 +229,17 @@ fn late_answered_free_text_strike_capture(
     if agent_doc_queue::queue_heads::active_free_text_queue_heads(committed_content).is_empty() {
         return Ok(None);
     }
-    // `#deferstrike`: a head an active worker claim holds is never struck, so
-    // it is never part of the late strike this recovery proves either.
-    let claimed_heads = agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(
-        file,
+    // `#claimstrike`: the late strike this recovery proves is the finalize
+    // strike, which judges the response alone (a worker claim does not hold an
+    // answered head back).
+    let Some(projection) = agent_doc_queue::queue_consume::project_answered_free_text_strike(
         committed_content,
-    );
-    let Some(projection) =
-        agent_doc_queue::queue_consume::project_answered_free_text_strike_excluding_claimed(
-            committed_content,
-            &response_body,
-            // Committed HEAD is the historical fence. Reusing the pre-response
-            // baseline can change queue node keys after the Exchange insertion and
-            // hide the exact late strike this recovery is proving.
-            None,
-            &claimed_heads,
-        )?
+        &response_body,
+        // Committed HEAD is the historical fence. Reusing the pre-response
+        // baseline can change queue node keys after the Exchange insertion and
+        // hide the exact late strike this recovery is proving.
+        None,
+    )?
     else {
         return Ok(None);
     };
@@ -284,7 +279,6 @@ fn late_answered_free_text_strike_capture(
         current_content,
         &response_body,
         capture_owned,
-        &claimed_heads,
     )?;
     Ok(recurring.then_some(LateAnsweredFreeTextStrike::Recurring(capture_id)))
 }
@@ -303,17 +297,15 @@ fn answered_free_text_head_recurs(
     current_content: &str,
     response_body: &str,
     capture_owned: bool,
-    claimed_heads: &[String],
 ) -> Result<bool> {
     if !capture_owned || current_content == committed_content {
         return Ok(false);
     }
     Ok(
-        !agent_doc_queue::queue_consume::answered_free_text_head_node_keys_excluding_claimed(
+        !agent_doc_queue::queue_consume::answered_free_text_head_node_keys(
             current_content,
             response_body,
             Some(committed_content),
-            claimed_heads,
         )?
         .is_empty(),
     )
@@ -3391,7 +3383,7 @@ mod visible_response_absorb_tests {
         let head = "- Fix https://github.com/btakita/agent-doc/issues/59. release + publish\n";
         let committed = with_queue(ANSWER, head);
         let current = with_queue(ANSWER, &format!("{head}- do [#other]\n"));
-        assert!(!answered_free_text_head_recurs(&committed, &current, ANSWER, false, &[]).unwrap());
+        assert!(!answered_free_text_head_recurs(&committed, &current, ANSWER, false).unwrap());
     }
 
     /// With a capture owned by the committed cycle, the strike was projected, so
@@ -3401,7 +3393,7 @@ mod visible_response_absorb_tests {
         let head = "- Fix https://github.com/btakita/agent-doc/issues/59. release + publish\n";
         let committed = with_queue(ANSWER, head);
         let current = with_queue(ANSWER, &format!("{head}- do [#other]\n"));
-        assert!(answered_free_text_head_recurs(&committed, &current, ANSWER, true, &[]).unwrap());
+        assert!(answered_free_text_head_recurs(&committed, &current, ANSWER, true).unwrap());
     }
 
     /// `#visibleresponseabsorb`: agent-doc-bugs.md 2026-09-29 18:29. The response was

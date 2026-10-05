@@ -17,7 +17,7 @@ use agent_doc_queue::{
         consume_queue_prompts_by_exact_spans, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
-        project_answered_free_text_strike_excluding_claimed, queue_consume_count_for_done_ids,
+        project_answered_free_text_strike, queue_consume_count_for_done_ids,
         queue_consume_node_ops, queue_mark_done_node_ops, queue_prompt_node_keys_for_count,
         queue_prompt_node_keys_for_done_ids, strike_all_noise_queue_heads,
     },
@@ -909,14 +909,14 @@ pub fn strike_answered_free_text_queue_heads(
     let baseline = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
-    // `#deferstrike`: never strike a head an active worker claim holds.
+    // `#claimstrike`: an answered head is struck even when a worker claim holds
+    // it (the coordinator echoing a head its subagent finished is the normal
+    // `#queuesubagents` flow); a deferral next to the echo is what keeps a
+    // quoted head queued. Read the claims now so the struck heads' claims are
+    // released in this same closeout.
     let claimed_heads = crate::queue_claim::claimed_live_head_texts_for_content(file, &content);
-    let Some(projected) = project_answered_free_text_strike_excluding_claimed(
-        &content,
-        response_body,
-        baseline.as_deref(),
-        &claimed_heads,
-    )?
+    let Some(projected) =
+        project_answered_free_text_strike(&content, response_body, baseline.as_deref())?
     else {
         return Ok(0);
     };
@@ -929,12 +929,7 @@ pub fn strike_answered_free_text_queue_heads(
     // converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "free-text strike snapshot sync") {
         Some(snap) => {
-            match project_answered_free_text_strike_excluding_claimed(
-                &snap,
-                response_body,
-                baseline.as_deref(),
-                &claimed_heads,
-            ) {
+            match project_answered_free_text_strike(&snap, response_body, baseline.as_deref()) {
                 Ok(snapshot) => snapshot.map(|projected| projected.target_content),
                 Err(err) => {
                     log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
@@ -997,9 +992,17 @@ pub fn strike_answered_free_text_queue_heads(
     // prefix, so a struck line is auditable as an explained auto-strike.
     if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(&content, "queue") {
         let key_set: std::collections::HashSet<&str> = keys.iter().map(String::as_str).collect();
+        let claimed =
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
         for node in nodes {
             if !key_set.contains(node.node_key.as_str()) {
                 continue;
+            }
+            // `#claimstrike`: the answer completes the claimed work, so the
+            // claim ends with the strike instead of outliving it until a later
+            // prune. Never fatal: a claim on a closed head is inert anyway.
+            if claimed.claims(node.item.text.trim()) {
+                release_claim_on_struck_head(file, node.item.text.trim());
             }
             let prefix: String = node.item.text.trim().chars().take(48).collect();
             agent_doc_ops_log_io::log_op(
@@ -1013,6 +1016,23 @@ pub fn strike_answered_free_text_queue_heads(
         }
     }
     Ok(keys.len())
+}
+
+/// Release the worker claim on a free-text head this closeout struck as
+/// answered (`#claimstrike`). Logged either way; a failure is reported, never
+/// fatal, because a claim on a closed head is inert and closeout prunes it.
+fn release_claim_on_struck_head(file: &Path, head: &str) {
+    match crate::queue_claim::release_closed_head(file, head) {
+        Ok(Some(claim)) => eprintln!(
+            "[queue] released {}'s claim on the answered free-text head it struck (#claimstrike)",
+            claim.owner
+        ),
+        Ok(None) => {}
+        Err(err) => eprintln!(
+            "[queue] WARNING: could not release the claim on a struck free-text head in {}: {err:#}",
+            file.display()
+        ),
+    }
 }
 
 /// Recover an answered-head projection from the durable captured response.
@@ -4517,6 +4537,154 @@ mod core_tests {
         assert!(
             !exchange.content(&after_again).contains("auto-struck"),
             "the auto-strike note must never target exchange:\n{after_again}"
+        );
+    }
+
+    /// `#claimstrike` fixture (live, 2026-10-05): the coordinator claimed a
+    /// free-text head for a subagent (`agent-doc queue claim --owner
+    /// subagent:altshiftmenu`), the subagent finished, and the coordinator's
+    /// response echoed the head as its `> **Queue prompt:**`.
+    const CLAIMSTRIKE_HEAD: &str =
+        "Alt+Shift+Menu does not open the agent-doc action menu in the JB plugin";
+
+    fn claimstrike_doc(dir: &Path, response: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        let doc = dir.join("claimstrike.md");
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- {}\n",
+                "- do [#laterwork]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response, CLAIMSTRIKE_HEAD,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (_, claim) =
+            crate::queue_claim::claim(&doc, CLAIMSTRIKE_HEAD, "subagent:altshiftmenu", 3600)
+                .unwrap();
+        assert_eq!(claim.owner, "subagent:altshiftmenu");
+        doc
+    }
+
+    fn claimstrike_completed_residue(content: &str, response: &str) -> Vec<String> {
+        agent_doc_queue::queue_closeout_guard::free_text_queue_head_provenance_decision(
+            &[CLAIMSTRIKE_HEAD.to_string()],
+            content,
+            Some(response),
+        )
+        .map(|decision| decision.completed_residue)
+        .unwrap_or_default()
+    }
+
+    #[test]
+    fn claimstrike_claimed_free_text_head_answered_by_echo_is_struck_and_released() {
+        let dir = tempfile::tempdir().unwrap();
+        let response = format!(
+            "### Re: altshiftmenu — opus\n\n> **Queue prompt:** {CLAIMSTRIKE_HEAD}\n\n\
+             Integrated the subagent's fix: the menu action is bound again and covered by a test.\n"
+        );
+        let doc = claimstrike_doc(dir.path(), &response);
+        let before = std::fs::read_to_string(&doc).unwrap();
+        // Pre-fix shape: the session-check residue guard already judges the
+        // echoed, claimed head completed.
+        assert_eq!(
+            claimstrike_completed_residue(&before, &response),
+            vec![CLAIMSTRIKE_HEAD.to_string()]
+        );
+
+        let struck = strike_answered_free_text_queue_heads(&doc, &response, true).unwrap();
+        assert_eq!(
+            struck, 1,
+            "the claimed, answered head is struck in finalize"
+        );
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains(&format!(
+                "- ~~{CLAIMSTRIKE_HEAD}~~ — auto-struck: answered this cycle (#ftstrike)"
+            )),
+            "{after}"
+        );
+        assert!(after.contains("- do [#laterwork]\n"), "{after}");
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty(),
+            "the same finalize releases the struck head's claim"
+        );
+        assert!(
+            claimstrike_completed_residue(&after, &response).is_empty(),
+            "session-check sees no completed residue after the strike"
+        );
+    }
+
+    #[test]
+    fn claimstrike_claimed_free_text_head_with_deferred_echo_stays_claimed() {
+        let dir = tempfile::tempdir().unwrap();
+        let response = format!(
+            "### Re: dispatch — opus\n\n> **Queue prompt:** {CLAIMSTRIKE_HEAD}\n\n\
+             **Deferred:** dispatched to subagent:altshiftmenu in its own worktree; \
+             the fix has not landed.\n"
+        );
+        let doc = claimstrike_doc(dir.path(), &response);
+        let before = std::fs::read_to_string(&doc).unwrap();
+
+        let struck = strike_answered_free_text_queue_heads(&doc, &response, true).unwrap();
+        assert_eq!(struck, 0, "a deferred echo keeps the head queued");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+        let ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert_eq!(ledger.claims.len(), 1, "the claim stays");
+        assert_eq!(ledger.claims[0].owner, "subagent:altshiftmenu");
+        assert!(
+            claimstrike_completed_residue(&before, &response).is_empty(),
+            "a deferred echo is not completed residue"
+        );
+    }
+
+    /// `#claimstrike` control: the id-backed path (`do [#id]` + `--done`)
+    /// completes a claimed head regardless of its claim, as it did live; the
+    /// closed head's claim is then pruned at closeout reconciliation.
+    #[test]
+    fn claimstrike_claimed_id_backed_head_completes_by_done_id() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#altshiftmenu]\n",
+            "- do [#tail]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        crate::queue_claim::claim(&doc, "#altshiftmenu", "subagent:altshiftmenu", 3600).unwrap();
+
+        let marked =
+            mark_completed_queue_prompts_for_done_ids(&doc, &["altshiftmenu".to_string()], true)
+                .unwrap();
+        assert_eq!(marked, 1);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- ~~do [#altshiftmenu]~~\n"), "{updated}");
+        assert!(updated.contains("- do [#tail]\n"), "{updated}");
+        assert_eq!(
+            crate::queue_claim::prune_closed_claims(&doc, &updated).unwrap(),
+            1,
+            "the completed head's claim closes with it"
         );
     }
 

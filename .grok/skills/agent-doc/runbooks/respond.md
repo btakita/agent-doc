@@ -184,19 +184,23 @@ different — they strike by id via `--done <id>` regardless of position and nee
 quote.
 
 **Quoting a free-text head you are NOT finishing this cycle (`#deferstrike`).** The
-quote alone reads as "answered" and strikes the head. To keep it queued, either:
-- **Claim it** (preferred, structural): `agent-doc queue claim <FILE> --item "<head>"
-  --owner <owner>` (`subagent:<label>`, or `coordinator:integration` for work you
-  integrate yourself). A head with a live claim is never auto-struck, by this
-  cycle's `#ftstrike` or by preflight's residue strike, and the pre-write gate does
-  not demand evidence for it even if this cycle selected it. Release the claim
-  (`agent-doc queue release <FILE> --item "<head>"`) before the cycle that answers it.
-- **Defer it explicitly:** follow the `> **Queue prompt:**` quote with a paragraph
-  that opens with the bold lead `**Deferred:**` (any `**Deferred…**` lead, such as
-  `**Deferred, not done:**`, counts) and says what it waits for. Plain phrasing such
-  as "not done yet", "keep this head open", "dispatched to a subagent" or "waits
-  for" in the quote's paragraph is also read as a deferral, but the bold lead is the
-  contract.
+quote alone reads as "answered" and strikes the head. To keep it queued, follow the
+`> **Queue prompt:**` quote with a paragraph that opens with the bold lead
+`**Deferred:**` (any `**Deferred…**` lead, such as `**Deferred, not done:**`,
+counts) and says what it waits for. Plain phrasing such as "not done yet", "keep
+this head open", "dispatched to a subagent" or "waits for" in the quote's paragraph
+is also read as a deferral, but the bold lead is the contract.
+
+**Claimed heads (`#claimstrike`).** A worker claim (`agent-doc queue claim <FILE>
+--item "<head>" --owner subagent:<label>`) says who owns the work; it does not keep
+a quoted head queued. When a subagent finishes a claimed free-text head and you echo
+it as `> **Queue prompt:**` with no deferral, finalize strikes the head and releases
+its claim in the same closeout, and preflight's residue strike does the same for an
+echo already committed. You do not need `agent-doc queue release` first. While the
+worker is still running, quote the head only with a `**Deferred:**` paragraph (or do
+not quote it): the claim stays, and the pre-write gate does not demand evidence for a
+claimed head this cycle selected. `do [#id]` heads complete by `--done <id>` whether
+or not they are claimed.
 
 **Annotated `#id` heads are operator steering — answer the annotation (`#qheadannotation`).**
 The canonical backlog-mirror head is `do [#id]`. When the operator appends their own

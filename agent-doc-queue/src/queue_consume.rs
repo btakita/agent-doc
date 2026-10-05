@@ -676,24 +676,16 @@ pub fn answered_free_text_head_node_keys(
     response_body: &str,
     baseline: Option<&str>,
 ) -> Result<Vec<String>> {
-    answered_free_text_head_node_keys_excluding_claimed(content, response_body, baseline, &[])
-}
-
-/// [`answered_free_text_head_node_keys`] that never selects a head an active
-/// worker claim holds (`#deferstrike`).
-///
-/// A claim is the structural statement that a worker (a subagent, or the
-/// coordinator's own integration step) still owns the head. A response that
-/// quotes the head only to report that dispatch is not its answer, so the
-/// claim outranks the quote. The claim owner releases it
-/// (`agent-doc queue release`) before the closing cycle answers the head.
-pub fn answered_free_text_head_node_keys_excluding_claimed(
-    content: &str,
-    response_body: &str,
-    baseline: Option<&str>,
-    claimed_heads: &[String],
-) -> Result<Vec<String>> {
-    let claimed = crate::queue_claim::ClaimedQueueItems::none().with_heads(claimed_heads);
+    // `#claimstrike` (live, 2026-10-05): a worker claim does NOT hold an
+    // answered head back. A claim says who owns the work; the response's
+    // `> **Queue prompt:**` echo says that work is finished, and the
+    // `#ftstrikedefer` deferral detection below is what keeps a quoted head
+    // that is still outstanding (dispatched, `**Deferred:**`) queued. Skipping
+    // claimed heads here (`#deferstrike`) diverged from the session-check
+    // residue guard, which judges the same echo without claims: the cycle
+    // committed with the head unstruck, then session-check INTERRUPTED on
+    // completed residue (`#qheadresidue`). The struck head's claim is released
+    // by the caller (finalize) or pruned as closed at closeout reconciliation.
     if response_body.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -753,9 +745,6 @@ pub fn answered_free_text_head_node_keys_excluding_claimed(
             continue;
         }
         if struck_texts.contains(&normalize_queue_prompt_text(text)) {
-            continue;
-        }
-        if claimed.claims(text) {
             continue;
         }
         // `#bugautostruck`: the in-progress marker proves only which queue head
@@ -1160,28 +1149,11 @@ pub fn project_answered_free_text_strike(
     response_body: &str,
     baseline: Option<&str>,
 ) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
-    project_answered_free_text_strike_excluding_claimed(content, response_body, baseline, &[])
-}
-
-/// [`project_answered_free_text_strike`] that leaves every head in
-/// `claimed_heads` (live heads an active worker claim holds) queued
-/// (`#deferstrike`).
-pub fn project_answered_free_text_strike_excluding_claimed(
-    content: &str,
-    response_body: &str,
-    baseline: Option<&str>,
-    claimed_heads: &[String],
-) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
     if response_body.trim().is_empty() {
         return Ok(None);
     }
     agent_doc_frontmatter::frontmatter::parse(content)?;
-    let node_keys = answered_free_text_head_node_keys_excluding_claimed(
-        content,
-        response_body,
-        baseline,
-        claimed_heads,
-    )?;
+    let node_keys = answered_free_text_head_node_keys(content, response_body, baseline)?;
     if node_keys.is_empty() {
         return Ok(None);
     }
@@ -1984,41 +1956,6 @@ mod tests {
     );
 
     #[test]
-    fn deferstrike_claimed_head_is_never_struck_even_when_quoted() {
-        let claimed = vec!["release + publish".to_string()];
-        let keys = answered_free_text_head_node_keys_excluding_claimed(
-            DEFERSTRIKE_DOC,
-            DEFERSTRIKE_ANSWER,
-            Some(DEFERSTRIKE_DOC),
-            &claimed,
-        )
-        .unwrap();
-        assert!(keys.is_empty(), "a claimed head stays queued: {keys:?}");
-        assert!(
-            project_answered_free_text_strike_excluding_claimed(
-                DEFERSTRIKE_DOC,
-                DEFERSTRIKE_ANSWER,
-                Some(DEFERSTRIKE_DOC),
-                &claimed,
-            )
-            .unwrap()
-            .is_none()
-        );
-        // The in-progress marker does not change the claim identity.
-        let marked = DEFERSTRIKE_DOC.replace("- release + publish", "- 🚧 release + publish");
-        assert!(
-            answered_free_text_head_node_keys_excluding_claimed(
-                &marked,
-                DEFERSTRIKE_ANSWER,
-                Some(&marked),
-                &claimed,
-            )
-            .unwrap()
-            .is_empty()
-        );
-    }
-
-    #[test]
     fn deferstrike_quoted_head_with_concrete_deferral_is_not_struck() {
         let keys = answered_free_text_head_node_keys(
             DEFERSTRIKE_DOC,
@@ -2052,13 +1989,16 @@ mod tests {
         );
     }
 
+    /// `#claimstrike`: the strike selection judges the response alone. A
+    /// quoted head with no deferral is answered whether or not a worker claim
+    /// holds it (the claim is released by finalize); the in-progress marker
+    /// does not change that.
     #[test]
-    fn deferstrike_quoted_and_answered_unclaimed_head_is_struck() {
-        let keys = answered_free_text_head_node_keys_excluding_claimed(
+    fn deferstrike_quoted_and_answered_head_is_struck() {
+        let keys = answered_free_text_head_node_keys(
             DEFERSTRIKE_DOC,
             DEFERSTRIKE_ANSWER,
             Some(DEFERSTRIKE_DOC),
-            &[],
         )
         .unwrap();
         assert_eq!(keys.len(), 1, "the answered head is struck: {keys:?}");
@@ -2070,17 +2010,13 @@ mod tests {
         .unwrap()
         .expect("answered head projects a strike");
         assert!(projected.target_content.contains("~~release + publish~~"));
-        // A claim on a DIFFERENT head does not hold this one back.
+        let marked = DEFERSTRIKE_DOC.replace("- release + publish", "- 🚧 release + publish");
         assert_eq!(
-            answered_free_text_head_node_keys_excluding_claimed(
-                DEFERSTRIKE_DOC,
-                DEFERSTRIKE_ANSWER,
-                Some(DEFERSTRIKE_DOC),
-                &["do [#ghbrew]".to_string()],
-            )
-            .unwrap()
-            .len(),
-            1
+            answered_free_text_head_node_keys(&marked, DEFERSTRIKE_ANSWER, Some(&marked))
+                .unwrap()
+                .len(),
+            1,
+            "the in-progress marker does not hide an answered head"
         );
     }
 

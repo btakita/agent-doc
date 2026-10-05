@@ -21,6 +21,12 @@ fn inputs(kind: &str, target: &str) -> Vec<PathBuf> {
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_file())
+        .filter(|path| {
+            !path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with('.'))
+        })
         .collect();
     files.sort();
     files

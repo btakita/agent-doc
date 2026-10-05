@@ -1635,8 +1635,40 @@ pub fn ensure_session_with_ssh_resolver(
 /// `queue_active` on parse), and a doc with no queue state writes neither.
 pub fn write(fm: &Frontmatter, body: &str) -> Result<String> {
     let fm = canonical_for_write(fm);
-    let yaml = serde_yaml::to_string(fm.as_ref())?;
+    let yaml = fence_safe_yaml(serde_yaml::to_string(fm.as_ref())?, fm.as_ref());
     Ok(format!("---\n{}---\n{}", yaml, body))
+}
+
+/// The YAML region `parse` will read back from `---\n{yaml}---\n`: the closing
+/// fence is found at the `\n---` that ends the last line, so the region stops
+/// BEFORE that final line break.
+fn region_as_parsed(yaml: &str) -> &str {
+    yaml.strip_suffix('\n').unwrap_or(yaml)
+}
+
+/// Whether `yaml`, read back the way `parse` reads it, records exactly `fm`.
+fn yaml_reads_back_as(yaml: &str, fm: &Frontmatter) -> bool {
+    let Ok(parsed) = deserialize_frontmatter_yaml(region_as_parsed(yaml)) else {
+        return false;
+    };
+    matches!(
+        (serde_yaml::to_value(&parsed), serde_yaml::to_value(fm)),
+        (Ok(read), Ok(written)) if read == written
+    )
+}
+
+/// `#netadv7` fuzz crasher: a value ending in a line break (a multi-line prompt
+/// preset) serialises as a `|` block scalar whose final line break is the one
+/// `parse` strips with the closing fence, so the value lost its trailing `\n`
+/// on every write → parse cycle that left it as the last key. A blank line
+/// before the fence keeps the block's final line break inside the region. It
+/// is only added when needed, so ordinary documents are byte-identical.
+fn fence_safe_yaml(yaml: String, fm: &Frontmatter) -> String {
+    if yaml_reads_back_as(&yaml, fm) {
+        yaml
+    } else {
+        format!("{yaml}\n")
+    }
 }
 
 /// Fold the deprecated `queue_active` flag onto the canonical `queue` control
@@ -1780,12 +1812,7 @@ fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String
     // to exactly what `write` would have recorded. Anything else (a key block
     // boundary the line splitter misread) falls back to full re-serialisation,
     // which is always self-consistent.
-    let reparsed = deserialize_frontmatter_yaml(&preserved).ok()?;
-    let mut reparsed = reparsed;
-    normalize_queue_control(&mut reparsed);
-    (serde_yaml::to_value(canonical_for_write(&reparsed).as_ref()).ok()?
-        == serde_yaml::to_value(canonical.as_ref()).ok()?)
-        .then_some(preserved)
+    yaml_reads_back_as(&preserved, canonical.as_ref()).then_some(preserved)
 }
 
 /// `#netadv7` fuzz crasher: YAML (libyaml, YAML 1.1) breaks lines on a bare
@@ -2864,6 +2891,31 @@ mod tests {
         let (claimed_fm, _) = parse(&claimed).unwrap();
         assert_eq!(claimed_fm.session.as_deref(), Some("sample-session"));
         assert_eq!(claimed_fm.agent, fm.agent);
+    }
+
+    /// `#netadv7` fuzz crasher (minimized): a multi-line preset that was NOT the
+    /// last key keeps its trailing line break, but `write` emits it last as a
+    /// `|` block whose final line break the closing fence swallowed, so every
+    /// write → parse cycle changed the preset text.
+    #[test]
+    fn write_keeps_trailing_line_break_of_a_last_block_scalar() {
+        let content = "---\nprompt_presets:\n  '#a': |\n    line\nagent: claude\n---\nbody\n";
+        let (fm, body) = parse(content).unwrap();
+        let preset = |fm: &Frontmatter| {
+            serde_yaml::to_value(fm).unwrap()["prompt_presets"]["#a"]
+                .as_str()
+                .map(str::to_string)
+        };
+        assert_eq!(preset(&fm).as_deref(), Some("line\n"));
+        let written = write(&fm, body).unwrap();
+        let (reparsed, rebody) = parse(&written).unwrap();
+        assert_eq!(rebody, body);
+        assert_eq!(preset(&reparsed), preset(&fm), "{written:?}");
+        assert_eq!(write(&reparsed, rebody).unwrap(), written, "write is a fixed point");
+
+        let preserved = write_preserving(content, &fm, body).unwrap();
+        let (reparsed, _) = parse(&preserved).unwrap();
+        assert_eq!(preset(&reparsed), preset(&fm), "{preserved:?}");
     }
 
     #[test]

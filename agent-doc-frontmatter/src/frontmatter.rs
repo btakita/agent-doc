@@ -1699,7 +1699,17 @@ struct FrontmatterBlock {
 /// original cannot be preserved byte-precisely and the caller should fall back
 /// to full re-serialisation.
 fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String> {
-    let old_yaml = raw_frontmatter_yaml(original)?;
+    // `#netadv7` fuzz crasher: this used `raw_frontmatter_yaml`, whose splitter
+    // disagrees with `parse` on an EMPTY block (`---\n---\n`, which clearing the
+    // last key legitimately leaves). `raw_frontmatter_yaml` skipped the empty
+    // block and ran to the next `\n---` in the BODY (any markdown rule line), so
+    // the body up to that rule was re-emitted as frontmatter AND kept as body.
+    // Split with the same function `parse` uses, so the region this rewrites is
+    // exactly the region `parse` read `fm` from.
+    let (old_yaml, _) = split_frontmatter(original).ok()??;
+    if has_non_lf_yaml_line_break(old_yaml) {
+        return None;
+    }
     let canonical = canonical_for_write(fm);
     let mut new_map = match serde_yaml::to_value(canonical.as_ref()).ok()? {
         serde_yaml::Value::Mapping(m) => m,
@@ -1761,10 +1771,36 @@ fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String
         }
         out.push(render_frontmatter_key(key_str, value)?);
     }
-    if out.is_empty() {
-        return Some(String::new());
-    }
-    Some(format!("{}\n", out.join("\n")))
+    let preserved = if out.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", out.join("\n"))
+    };
+    // `#netadv7`: the byte-preserving splice is only trusted when it re-parses
+    // to exactly what `write` would have recorded. Anything else (a key block
+    // boundary the line splitter misread) falls back to full re-serialisation,
+    // which is always self-consistent.
+    let reparsed = deserialize_frontmatter_yaml(&preserved).ok()?;
+    let mut reparsed = reparsed;
+    normalize_queue_control(&mut reparsed);
+    (serde_yaml::to_value(canonical_for_write(&reparsed).as_ref()).ok()?
+        == serde_yaml::to_value(canonical.as_ref()).ok()?)
+        .then_some(preserved)
+}
+
+/// `#netadv7` fuzz crasher: YAML (libyaml, YAML 1.1) breaks lines on a bare
+/// `\r`, NEL, LS and PS as well as `\n`, but the key-block splitter here works
+/// on `\n` lines. A value holding a bare `\r` (`agent: e\rs:`) hid the `agent`
+/// key from the splitter, which then appended a second `agent:` block and made
+/// the document unparsable (`duplicate field agent`). Such a region cannot be
+/// preserved byte-for-byte by a `\n` splitter, so it is re-serialised instead.
+fn has_non_lf_yaml_line_break(yaml: &str) -> bool {
+    let bytes = yaml.as_bytes();
+    bytes
+        .iter()
+        .enumerate()
+        .any(|(index, byte)| *byte == b'\r' && bytes.get(index + 1) != Some(&b'\n'))
+        || yaml.contains(['\u{85}', '\u{2028}', '\u{2029}'])
 }
 
 /// `#presetsalias`: keep the operator's spelling of the prompt-presets key.
@@ -2787,6 +2823,48 @@ fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#netadv7` fuzz crasher (minimized): an empty frontmatter block followed
+    /// by a body whose first lines read as YAML (`key: value`) and then a
+    /// markdown rule. `write_preserving` split the document with a different
+    /// function than `parse` and copied the body up to the rule into the
+    /// frontmatter, duplicating it.
+    #[test]
+    fn write_preserving_empty_block_with_body_rule_keeps_body_once() {
+        let content = "---\n---\nintro: notes\n---\nmore\n";
+        let (fm, body) = parse(content).unwrap();
+        assert_eq!(body, "intro: notes\n---\nmore\n");
+        let written = write_preserving(content, &fm, body).unwrap();
+        let (_, rebody) = parse(&written).unwrap();
+        assert_eq!(rebody, body, "body must survive exactly once:\n{written}");
+        assert_eq!(written.matches("intro").count(), 1, "{written}");
+
+        let claimed = set_session_id(content, "sample-session").unwrap();
+        let (claimed_fm, claimed_body) = parse(&claimed).unwrap();
+        assert_eq!(claimed_fm.session.as_deref(), Some("sample-session"));
+        assert_eq!(claimed_body, body, "claim must not duplicate the body:\n{claimed}");
+    }
+
+    /// `#netadv7` fuzz crasher (minimized): a bare `\r` inside a value is a YAML
+    /// line break, so `agent: e\rs:` is two keys to libyaml but one line to the
+    /// key-block splitter. `write_preserving` then appended a second `agent:`
+    /// and the written document no longer parsed (`duplicate field agent`).
+    #[test]
+    fn write_preserving_bare_cr_line_break_stays_parseable() {
+        let content = "---\nagent_doc_session: 0\nagent: e\rs:\n  '#p':\n  '#p':\n---\n";
+        let (fm, body) = parse(content).unwrap();
+        let written = write_preserving(content, &fm, body).unwrap();
+        let (reparsed, rebody) = parse(&written)
+            .unwrap_or_else(|err| panic!("written document must parse: {err}\n{written:?}"));
+        assert_eq!(rebody, body);
+        assert_eq!(reparsed.agent, fm.agent);
+        assert_eq!(reparsed.session, fm.session);
+
+        let claimed = set_session_id(content, "sample-session").unwrap();
+        let (claimed_fm, _) = parse(&claimed).unwrap();
+        assert_eq!(claimed_fm.session.as_deref(), Some("sample-session"));
+        assert_eq!(claimed_fm.agent, fm.agent);
+    }
 
     #[test]
     fn harness_resume_map_reads_only_requested_harness() {

@@ -391,6 +391,27 @@ Follow-ups and notes:
 - **`jbstagefallback` (backlog):** when IntelliJ's command classes cannot be built, the plugin falls back to `installAfterRestart`, which still writes the old, unprotected order. It is added to the backlog and the queue.
 - **Flaky test:** `finalize_editor_absent_replays_operator_deleted_struck_queue_rows` failed under load in two separate subagent runs. It passed in the clean integrated run. If it shows up again, it is worth checking for a timing dependency.
 - **Size:** the exchange section is large (over 300 lines); I am not compacting while the queue is active.
+
+### Re: GH #131 reopened, dispatched; release held — opus-5-5 · 2026-10-04T23:23-04:00
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/131
+
+**Deferred:** I claimed this as `subagent:gh131reopen` and sent it to a background subagent. It works in `~/worktrees/agent-doc-gh131reopen` on branch `gh131reopen`, starting from v0.35.455. The reopened issue (comment 2026-10-05T03:05Z) shows the recovery guidance never terminates:
+
+1. **The two repairs point at each other.** `session-check` names `write --done <id> --pending-only --commit`. That command refuses with the retained-write deferral, which sends you back to `session-check`.
+2. **`admin reload-lib` is both required and forbidden.** The integrity gate prescribes it, and it was the step that actually worked. The retained-write guidance forbids it.
+3. **Preflight refuses the whole turn.** It rejects turns because a retained write still owns a captured response, even though that response is already committed in HEAD.
+
+v0.35.455 already made the transport degrade on refusals (the `#gh131nonipc` fix). This round has three goals:
+- a pending-only mutation for an already-committed response is no longer blocked by that response's retained write;
+- `session-check` and the write path give consistent recovery advice, including on `reload-lib`, derived from the shared ownership predicate;
+- preflight admits the turn while that write finishes.
+
+Each of the three shapes gets a regression test that fails without the fix. This turn's own earlier closeout hit shape 1 (`tracked-work mutations ... retained`, then a refused close).
+
+> **Queue prompt:** release + publish
+
+**Deferred:** I claimed this as `subagent:release-coordinator`. v0.35.455 is already out: the GitHub Release has 8 assets and PyPI has 0.35.455. This head stays queued for **v0.35.456**, which I'll cut after merging `gh131reopen`, running a clean `make check` and one `make install`. GH #131 gets closed at that release.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -399,13 +420,9 @@ Follow-ups and notes:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#unstrikelost]
-- do [#gh131nonipc]
-- do [#gh133sigterm]
-- do [#jbstagebackup]
-- #gh-fix https://github.com/btakita/agent-doc/issues/135
-- release + publish
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+- #gh-fix https://github.com/btakita/agent-doc/issues/131
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 

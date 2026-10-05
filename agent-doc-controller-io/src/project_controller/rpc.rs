@@ -31930,6 +31930,7 @@ mod tests {
                     pane_id: None,
                     window_id: None,
                     generation: None,
+                    sequence: None,
                     state: None,
                     caller: Some("supervisor".to_string()),
                     reason: Some("watch_loop_started".to_string()),

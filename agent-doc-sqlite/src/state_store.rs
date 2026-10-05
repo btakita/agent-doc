@@ -4038,21 +4038,6 @@ fn rekey_document_state_in_db_with_policy(
             "state event {event_id} indexed under {old_document_hash} embeds a different document hash"
         );
         *embedded_hash = serde_json::Value::String(new_document_hash.to_string());
-        if let Some((old_path, new_path)) = canonical_path_transition
-            && payload
-                .pointer("/fact/type")
-                .and_then(serde_json::Value::as_str)
-                == Some("document_session_identity_observed")
-            && payload
-                .pointer("/fact/canonical_path")
-                .and_then(serde_json::Value::as_str)
-                == Some(old_path)
-        {
-            let embedded_path = payload
-                .pointer_mut("/fact/canonical_path")
-                .expect("identity observation path was just matched");
-            *embedded_path = serde_json::Value::String(new_path.to_string());
-        }
         let rewritten = serde_json::to_string(&payload)
             .with_context(|| format!("serialize rekeyed state event {event_id}"))?;
         let changed = tx
@@ -4067,6 +4052,67 @@ fn rekey_document_state_in_db_with_policy(
             changed == 1,
             "state event {event_id} changed concurrently during document rekey"
         );
+    }
+
+    // A previous binary could rekey the indexed/embedded document hash while
+    // leaving the session-identity fact's canonical path behind. Scan the
+    // destination lineage after the hash move so both a fresh rename and an
+    // idempotent retry heal that partially converged state.
+    if let Some((old_path, new_path)) = canonical_path_transition {
+        let destination_payloads = {
+            let mut statement = tx
+                .prepare(
+                    "SELECT id, event_id, payload_json
+                     FROM state_events
+                     WHERE document_hash = ?1
+                     ORDER BY id",
+                )
+                .context("prepare destination identity path repair scan")?;
+            statement
+                .query_map([new_document_hash], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .context("scan destination identity paths")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("collect destination identity paths")?
+        };
+        for (row_id, event_id, payload_json) in destination_payloads {
+            let mut payload: serde_json::Value = serde_json::from_str(&payload_json)
+                .with_context(|| format!("parse state event {event_id} during path repair"))?;
+            if payload
+                .pointer("/fact/type")
+                .and_then(serde_json::Value::as_str)
+                != Some("document_session_identity_observed")
+                || payload
+                    .pointer("/fact/canonical_path")
+                    .and_then(serde_json::Value::as_str)
+                    != Some(old_path)
+            {
+                continue;
+            }
+            let embedded_path = payload
+                .pointer_mut("/fact/canonical_path")
+                .expect("identity observation path was just matched");
+            *embedded_path = serde_json::Value::String(new_path.to_string());
+            let rewritten = serde_json::to_string(&payload)
+                .with_context(|| format!("serialize repaired identity event {event_id}"))?;
+            let changed = tx
+                .execute(
+                    "UPDATE state_events
+                     SET payload_json = ?1
+                     WHERE id = ?2 AND document_hash = ?3",
+                    params![rewritten, row_id, new_document_hash],
+                )
+                .with_context(|| format!("repair identity path in state event {event_id}"))?;
+            anyhow::ensure!(
+                changed == 1,
+                "state event {event_id} changed concurrently during identity path repair"
+            );
+        }
     }
 
     if allow_destination_history && !event_payloads.is_empty() {
@@ -6197,6 +6243,51 @@ mod tests {
         );
         assert!(load_state_event_peer_acks_from_db(&conn, "old-hash")?.is_empty());
         assert!(load_state_event_peer_acks_from_db(&conn, "new-hash")?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn path_transition_retry_repairs_identity_path_already_on_destination_hash() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let payload = serde_json::json!({
+            "event_id": "partially-rekeyed-identity",
+            "fact": {
+                "type": "document_session_identity_observed",
+                "document_hash": "new-hash",
+                "canonical_path": "/project/tasks/old.md",
+                "session_id": "rename-session"
+            }
+        })
+        .to_string();
+        insert_state_event_in_db(
+            &conn,
+            &StateEventInsert {
+                event_id: "partially-rekeyed-identity",
+                document_hash: "new-hash",
+                domain: "document",
+                fact_type: "document_session_identity_observed",
+                payload_json: &payload,
+            },
+        )?;
+
+        let report = merge_document_state_for_path_transition_in_db(
+            &conn,
+            "old-hash",
+            "new-hash",
+            "/project/tasks/old.md",
+            "/project/tasks/new.md",
+        )?;
+
+        assert_eq!(report.state_events_rekeyed, 0);
+        let events = load_state_events_from_db(&conn, Some("new-hash"))?;
+        let repaired: serde_json::Value = serde_json::from_str(&events[0].payload_json)?;
+        assert_eq!(
+            repaired
+                .pointer("/fact/canonical_path")
+                .and_then(serde_json::Value::as_str),
+            Some("/project/tasks/new.md"),
+        );
         Ok(())
     }
 

@@ -55,6 +55,7 @@ agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.35.454" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.35.454" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.454" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.454" }
+agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.454" }
 agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.454" }
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }

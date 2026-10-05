@@ -224,6 +224,27 @@ pub fn run_database_only(root: Option<&Path>, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
+/// Sweep expired `turn_active` coordination leases (GH #135). Best-effort: a
+/// state.db error is reported and never fails the rest of GC.
+fn sweep_expired_turn_active_leases(project_root: &Path, dry_run: bool) -> (usize, usize) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let result = if dry_run {
+        agent_doc_turn_status_io::count_expired_turn_active_markers_at(project_root, now)
+    } else {
+        agent_doc_turn_status_io::sweep_expired_turn_active_markers_at(project_root, now)
+    };
+    match result {
+        Ok(deleted) => (deleted, 0),
+        Err(error) => {
+            eprintln!("[gc] turn_active lease sweep warning: {error:#}");
+            (0, 0)
+        }
+    }
+}
+
 pub fn run_with_controller_effects(
     root: Option<&Path>,
     dry_run: bool,
@@ -316,6 +337,23 @@ pub fn run_with_controller_effects(
     }
     total_deleted += typing_deleted;
     total_skipped += typing_kept;
+
+    // Sweep expired turn-active leases (GH #135). Age-keyed, not pane-keyed:
+    // a pane that died before its idle hook can never clear its own row.
+    let (turn_deleted, turn_kept) = sweep_expired_turn_active_leases(&project_root, dry_run);
+    if turn_deleted > 0 {
+        eprintln!(
+            "[gc] turn_active leases: {} expired {}",
+            turn_deleted,
+            if dry_run {
+                "would be deleted"
+            } else {
+                "deleted"
+            }
+        );
+    }
+    total_deleted += turn_deleted;
+    total_skipped += turn_kept;
 
     // Clean stale status files (>24 hours)
     let (status_deleted, status_kept) = clean_stale_ephemeral_files(
@@ -967,6 +1005,52 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry};
+
+    /// GH #135: `agent-doc gc` sweeps expired turn-active leases by age, and a
+    /// dry run only counts them.
+    #[test]
+    fn gc_sweeps_expired_turn_active_leases_and_dry_run_only_counts() {
+        use agent_doc_sqlite::state_store::{
+            CoordinationLeaseRecord, load_coordination_leases_for_scope_kind_from_db,
+            open_state_db, upsert_coordination_lease_in_db,
+        };
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let conn = open_state_db(root).unwrap();
+        for (pane, heartbeat) in [("%53", now - 292_943), ("%434", now - 144)] {
+            upsert_coordination_lease_in_db(
+                &conn,
+                &CoordinationLeaseRecord {
+                    scope_kind: "turn_active".to_string(),
+                    scope_id: pane.to_string(),
+                    holder: pane.to_string(),
+                    holder_pid: None,
+                    heartbeat_secs: heartbeat,
+                },
+            )
+            .unwrap();
+        }
+        let panes = || -> Vec<String> {
+            let mut ids: Vec<String> =
+                load_coordination_leases_for_scope_kind_from_db(&conn, "turn_active")
+                    .unwrap()
+                    .into_iter()
+                    .map(|lease| lease.scope_id)
+                    .collect();
+            ids.sort();
+            ids
+        };
+
+        assert_eq!(sweep_expired_turn_active_leases(root, true), (1, 0));
+        assert_eq!(panes(), vec!["%434".to_string(), "%53".to_string()]);
+        assert_eq!(sweep_expired_turn_active_leases(root, false), (1, 0));
+        assert_eq!(panes(), vec!["%434".to_string()]);
+    }
 
     #[test]
     fn clean_orphaned_handoff_sockets_reaps_dead_pid_keeps_live() {

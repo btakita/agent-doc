@@ -9558,7 +9558,8 @@ fn handle_editor_route_rpc(
         bootstrap,
         runtime,
         layout_invocation,
-        PaneLayoutClaim::route(layout_mode.claim(), plane_basis),
+        PaneLayoutClaim::route(layout_mode.claim(), plane_basis)
+            .asserting(layout_merge.route_columns),
         route_deadline.saturating_duration_since(Instant::now()),
     )?;
     let (layout_receipt, layout_observations) = await_editor_route_layout_gates(
@@ -19118,6 +19119,12 @@ pub(crate) fn handle_supervisor_recycle_settled(
     runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    // GH #136 follow-up (d): a freshly started supervisor reports this on
+    // every start (retried until accepted), whether or not a request was
+    // outstanding, so the layout hook runs before the idempotent early return.
+    if let Some(file) = request.file.as_deref() {
+        republish_pane_layout_after_recycle(bootstrap, runtime, file);
+    }
     let document_hash = supervisor_recycle_request_document_hash(bootstrap, &request);
     let current = runtime.supervisor_recycle_projection_for(document_hash.as_deref())?;
     let event_hash = document_hash
@@ -19155,6 +19162,58 @@ pub(crate) fn handle_supervisor_recycle_settled(
         ),
     );
     Ok(projection)
+}
+
+/// GH #136 follow-up (d): republish the retained desired layout when the
+/// supervisor of a document the last layout pass gated out has recycled.
+///
+/// The gate already re-runs on every pass, so all this does is cause one: a
+/// `FreshIntent` of the unchanged retained invocation, published as
+/// `recycle_settled` (a derived publisher, so it can never widen). The new pass
+/// re-reads freshness and admits the pane only if it now reads fresh; a pane
+/// still stale is gated again by a newer pass. Decided by
+/// [`agent_doc_controller::pane_layout::recycle_settle_republishes_layout`].
+fn republish_pane_layout_after_recycle(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    file: &Path,
+) {
+    let project_root = &bootstrap.project_root;
+    let settled_id = canonical_layout_document_id(project_root, &file.to_string_lossy());
+    let was_gated = |gated: &[String]| {
+        gated
+            .iter()
+            .any(|document| canonical_layout_document_id(project_root, document) == settled_id)
+    };
+    if !runtime.claim_pane_layout_recycle_republish(&was_gated) {
+        return;
+    }
+    let Some(desired) = runtime.pane_layout_desired() else {
+        return;
+    };
+    let generation = desired.generation;
+    let result = publish_pane_layout_desired_invocation(
+        bootstrap,
+        runtime,
+        desired.invocation,
+        desired.source_plane_version,
+        PaneLayoutPublication::FreshIntent,
+        PaneLayoutPublisher::RecycleSettled,
+    );
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &match result {
+            Ok((republished, _)) => format!(
+                "pane_layout_recycle_settled_republished document={} gated_generation={generation} generation={} (GH #136)",
+                file.display(),
+                republished.generation,
+            ),
+            Err(error) => format!(
+                "pane_layout_recycle_settled_republish_failed document={} gated_generation={generation} error={error:#} (GH #136)",
+                file.display(),
+            ),
+        },
+    );
 }
 
 struct RetainedWriteObservationBasis {
@@ -21463,13 +21522,22 @@ fn escalate_focus_to_structural_layout(
             .map(|desired| desired.invocation.column_order)
             .unwrap_or_default();
     }
+    // GH #136 follow-up (a): an escalation is a derived publisher, but when it
+    // carries the editor surface's own visible columns it asserts all of them
+    // (that is the editor's observation); from the retained layout it asserts
+    // only the focused document.
+    let asserted_columns = if source == "editor_surface" {
+        invocation.columns.len()
+    } else {
+        1
+    };
     if let Err(error) = publish_pane_layout_desired_invocation(
         bootstrap,
         runtime,
         invocation,
         None,
         PaneLayoutPublication::CoalesceIdentical,
-        PaneLayoutPublisher::Escalation,
+        PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).asserting(asserted_columns),
     ) {
         agent_doc_ops_log_io::log_op(
             &bootstrap.project_root,
@@ -23577,6 +23645,12 @@ fn pane_layout_effect_worker(
             &gated_documents,
         );
         if effect_result.is_ok() {
+            // GH #136 follow-up (a)/(d): retain what this pass gated so the
+            // width bound counts it as accounted for and a recycle of one of
+            // these documents republishes the layout.
+            runtime.record_pane_layout_gated(desired.generation, gated_documents.clone());
+        }
+        if effect_result.is_ok() {
             runtime.record_pane_layout_structural_assignment(
                 &desired,
                 actor_bindings.clone(),
@@ -25159,10 +25233,22 @@ fn publish_pane_layout_desired_invocation(
         &desired_columns,
         invocation.column_order,
     );
+    // GH #136 follow-up (a): every publisher is width-bounded against what the
+    // last layout pass accounted for — a derived publication (escalation,
+    // `ensure` route, recycle republish) never widens it; a positive editor
+    // split observation may, and is logged so every widening is attributable.
+    let ordered_columns = bound_pane_layout_publication_width(
+        &bootstrap.project_root,
+        runtime,
+        &claim,
+        retained.as_ref(),
+        ordered.columns,
+        invocation.focus.as_deref(),
+    );
     // The desired Lazily fact is durable before the effect graph sees it.
     // Tmux and crash-state sidecars are projections, never fallback inputs.
-    store_layout_state(&bootstrap.project_root, &ordered.columns)?;
-    invocation.columns = ordered.columns;
+    store_layout_state(&bootstrap.project_root, &ordered_columns)?;
+    invocation.columns = ordered_columns;
     invocation.column_order = ordered.order;
 
     let desired = runtime.set_pane_layout_desired(
@@ -25198,6 +25284,125 @@ fn publish_pane_layout_desired_invocation(
     }
     publish_pane_layout_status(runtime);
     Ok((desired, invocation))
+}
+
+/// GH #136 follow-up (a): apply [`agent_doc_controller::pane_layout::bound_layout_width`]
+/// to one publication and log what it decided. Pure but for the ops-log line;
+/// every input is local to the controller (no editor message order, timing or
+/// delivery participates).
+fn bound_pane_layout_publication_width(
+    project_root: &Path,
+    runtime: &ControllerRuntime,
+    claim: &PaneLayoutClaim,
+    retained: Option<&PaneLayoutDesired>,
+    columns: Vec<String>,
+    focus: Option<&str>,
+) -> Vec<String> {
+    use agent_doc_controller::pane_layout::{
+        LayoutWidthDecision, LayoutWidthExtent, bound_layout_width,
+    };
+    let memory = runtime.pane_layout_width_memory();
+    let retained_generation = retained.map(|desired| desired.generation);
+    let retained_columns = retained
+        .map(|desired| desired.invocation.columns.len())
+        .unwrap_or_default();
+    // Only the pass that realised the RETAINED generation speaks for it.
+    let observed_panes = memory
+        .observed_panes
+        .filter(|_| Some(memory.observed_generation) == retained_generation);
+    let gated_columns = if Some(memory.gated_generation) == retained_generation {
+        layout_columns_holding_documents(project_root, &columns, &memory.gated_documents)
+    } else {
+        0
+    };
+    let extent = LayoutWidthExtent {
+        observed_panes,
+        gated_columns,
+        retained_columns,
+        asserted_columns: claim.asserted_column_count(),
+    };
+    let authority = claim.width_authority();
+    let focus_id = focus.map(|focus| canonical_layout_document_id(project_root, focus));
+    let holds_focus = |column: &str| {
+        focus_id.as_ref().is_some_and(|focus_id| {
+            column
+                .split(',')
+                .map(str::trim)
+                .filter(|file| !file.is_empty())
+                .any(|file| canonical_layout_document_id(project_root, file) == *focus_id)
+        })
+    };
+    // The pure bound matches the focus column by exact text; resolve it to the
+    // column's own spelling first so absolute and root-relative forms agree.
+    let focus_column = columns.iter().find(|column| holds_focus(column)).cloned();
+    let focus_token = focus_column.as_deref().and_then(|column| {
+        column
+            .split(',')
+            .map(str::trim)
+            .find(|file| {
+                focus_id.as_ref().is_some_and(|focus_id| {
+                    canonical_layout_document_id(project_root, file) == *focus_id
+                })
+            })
+            .map(str::to_string)
+    });
+    let incoming = columns.len();
+    let (bounded, decision) =
+        bound_layout_width(&columns, focus_token.as_deref(), authority, extent);
+    let observed = extent
+        .observed_panes
+        .map_or_else(|| "unknown".to_string(), |panes| panes.to_string());
+    match decision {
+        LayoutWidthDecision::Within | LayoutWidthDecision::DerivedWithinAccounted { .. } => {}
+        LayoutWidthDecision::Widened { observed_bound } => agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "pane_layout_publication_widened publisher={} authority={} columns={incoming} observed_panes={observed} observed_bound={observed_bound} retained_columns={retained_columns} (GH #136)",
+                claim.publisher.label(),
+                authority.label(),
+            ),
+        ),
+        LayoutWidthDecision::Trimmed {
+            derived_bound,
+            dropped,
+        } => agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "pane_layout_publication_width_bounded publisher={} authority={} columns={incoming} published_columns={} observed_panes={observed} gated_columns={gated_columns} retained_columns={retained_columns} asserted_columns={} derived_bound={derived_bound} dropped={dropped:?} (GH #136)",
+                claim.publisher.label(),
+                authority.label(),
+                bounded.len(),
+                extent.asserted_columns,
+            ),
+        ),
+    }
+    bounded
+}
+
+/// GH #136 follow-up (a): how many of `columns` hold one of `documents`
+/// (canonical identity).
+fn layout_columns_holding_documents(
+    project_root: &Path,
+    columns: &[String],
+    documents: &[String],
+) -> usize {
+    if documents.is_empty() {
+        return 0;
+    }
+    let documents: Vec<String> = documents
+        .iter()
+        .map(|file| canonical_layout_document_id(project_root, file))
+        .collect();
+    columns
+        .iter()
+        .filter(|column| {
+            column
+                .split(',')
+                .map(str::trim)
+                .filter(|file| !file.is_empty())
+                .any(|file| documents.contains(&canonical_layout_document_id(project_root, file)))
+        })
+        .count()
 }
 
 /// `layoutpublisherarbiter`: one `pane_layout_publication_superseded` line per
@@ -30626,6 +30831,192 @@ mod tests {
                 .map(str::to_string)
                 .collect()
         }
+    }
+
+    impl RouteLayoutFixture {
+        /// GH #136 follow-up: what the pass realising `generation` observed.
+        fn observe(&self, generation: u64, panes: usize, gated: &[&str]) {
+            self.runtime
+                .record_pane_layout_observation(PaneLayoutObservation {
+                    generation,
+                    actor_bindings: self.runtime.pane_layout_actor_bindings(),
+                    report: layout_sync_state_report(
+                        false,
+                        "pane_count_mismatch",
+                        Vec::new(),
+                        Vec::new(),
+                        (0..panes)
+                            .map(|index| format!("%{}", 900 + index))
+                            .collect(),
+                        LayoutSyncStateTarget::default(),
+                    ),
+                });
+            self.runtime.record_pane_layout_gated(
+                generation,
+                gated.iter().map(|name| self.id(name)).collect(),
+            );
+        }
+
+        fn settle(&self, name: &str) {
+            let _ = handle_supervisor_recycle_settled(
+                &self.bootstrap,
+                self.runtime.as_ref(),
+                ControllerRequest {
+                    command: "supervisor_recycle_settled".to_string(),
+                    file: Some(self.path(name)),
+                    session_id: None,
+                    pane_id: None,
+                    window_id: None,
+                    generation: None,
+                    state: None,
+                    caller: Some("supervisor".to_string()),
+                    reason: Some("watch_loop_started".to_string()),
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: None,
+                },
+            );
+        }
+    }
+
+    /// GH #136 follow-up (a): the issue's escalation republished a 3-column
+    /// retained layout against 2 observed panes. When the third column is one
+    /// the pass deliberately gated (a stale supervisor) it is accounted for and
+    /// republished unchanged; when tmux simply did not realise it, a derived
+    /// publication may not re-request it — `columns <= observed + gated`.
+    #[test]
+    fn gh136a_focus_escalation_is_bounded_by_what_the_retained_pass_accounted_for() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
+        let three = fixture.plugin(&["alpha", "beta", "gamma"], "alpha", 10);
+        fixture.observe(three.generation, 2, &["gamma"]);
+        escalate_focus_to_structural_layout(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            &fixture.id("gamma"),
+            &[],
+            "actor_pane_not_visible",
+        );
+        assert_eq!(
+            fixture.desired_columns(),
+            vec![fixture.id("alpha"), fixture.id("beta"), fixture.id("gamma")],
+            "a gated column is accounted for, not a widening"
+        );
+        assert!(
+            !fixture
+                .ops_log()
+                .contains("pane_layout_publication_width_bounded"),
+            "{}",
+            fixture.ops_log()
+        );
+
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
+        let three = fixture.plugin(&["alpha", "beta", "gamma"], "alpha", 10);
+        fixture.observe(three.generation, 2, &[]);
+        escalate_focus_to_structural_layout(
+            &fixture.bootstrap,
+            fixture.runtime.as_ref(),
+            &fixture.id("gamma"),
+            &[],
+            "actor_pane_not_visible",
+        );
+        let desired = fixture.runtime.pane_layout_desired().unwrap();
+        assert_eq!(
+            desired.provenance.publisher,
+            PaneLayoutPublisher::Escalation
+        );
+        assert_eq!(
+            fixture.desired_columns(),
+            vec![fixture.id("alpha"), fixture.id("gamma")],
+            "the focus column is kept, the rightmost other dropped"
+        );
+        assert!(
+            fixture.ops_log().contains(
+                "pane_layout_publication_width_bounded publisher=escalation authority=derived columns=3 published_columns=2 observed_panes=2 gated_columns=0"
+            ),
+            "{}",
+            fixture.ops_log()
+        );
+    }
+
+    /// GH #136 follow-up (a): an observation of a stale generation never
+    /// bounds a newer one — a route racing the effect reads `unknown` and
+    /// falls back to the retained width, so a split the editor just reported
+    /// is never trimmed before tmux has had a pass at it.
+    #[test]
+    fn gh136a_an_unobserved_retained_generation_is_bounded_by_its_own_width() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
+        let two = fixture.plugin(&["alpha", "beta"], "alpha", 10);
+        fixture.observe(two.generation, 2, &[]);
+        fixture.plugin(&["alpha", "beta", "gamma"], "alpha", 11);
+        fixture.route("gamma", &["gamma"], Some("ensure")).unwrap();
+        assert_eq!(
+            fixture.desired_columns(),
+            vec![fixture.id("alpha"), fixture.id("beta"), fixture.id("gamma")]
+        );
+        let ops = fixture.ops_log();
+        assert!(
+            !ops.contains("pane_layout_publication_width_bounded"),
+            "{ops}"
+        );
+        // The editor's own wider observation is published and attributable.
+        assert!(
+            ops.contains(
+                "pane_layout_publication_widened publisher=plugin_publication authority=editor_split_observation columns=3 observed_panes=2 observed_bound=2"
+            ),
+            "{ops}"
+        );
+    }
+
+    /// GH #136 follow-up (d): a recycle settling for a document the last pass
+    /// gated republishes the retained layout once — no editor event needed —
+    /// and a duplicated or retried settle, or one for an ungated document,
+    /// republishes nothing.
+    #[test]
+    fn gh136d_recycle_settle_republishes_a_gated_layout_exactly_once() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta", "gamma"]);
+        let three = fixture.plugin(&["alpha", "beta", "gamma"], "alpha", 10);
+        fixture.observe(three.generation, 2, &["gamma"]);
+
+        fixture.settle("beta");
+        assert_eq!(
+            fixture.runtime.pane_layout_desired().unwrap().generation,
+            three.generation,
+            "an ungated document's settle republishes nothing"
+        );
+
+        fixture.settle("gamma");
+        let republished = fixture.runtime.pane_layout_desired().unwrap();
+        assert!(republished.generation > three.generation);
+        assert_eq!(
+            republished.provenance.publisher,
+            PaneLayoutPublisher::RecycleSettled
+        );
+        assert_eq!(republished.invocation.columns, three.invocation.columns);
+        assert_eq!(republished.invocation.focus, three.invocation.focus);
+
+        // The retried settle (`#recyclesettleretry`) and a duplicate are no-ops.
+        fixture.settle("gamma");
+        fixture.settle("gamma");
+        assert_eq!(
+            fixture.runtime.pane_layout_desired().unwrap().generation,
+            republished.generation
+        );
+        assert_eq!(
+            fixture
+                .ops_log()
+                .matches("pane_layout_recycle_settled_republished")
+                .count(),
+            1,
+            "{}",
+            fixture.ops_log()
+        );
+
+        // Still stale after the republish: the new pass gates it again, and
+        // the NEXT settle republishes again (bounded by real settles).
+        fixture.observe(republished.generation, 2, &["gamma"]);
+        fixture.settle("gamma");
+        assert!(fixture.runtime.pane_layout_desired().unwrap().generation > republished.generation);
     }
 
     /// GH #126, the reported three-step repro, end to end through the route

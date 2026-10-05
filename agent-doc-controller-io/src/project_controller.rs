@@ -438,6 +438,9 @@ pub(crate) enum PaneLayoutPublisher {
     EditorSurface,
     /// An explicit `sync_tmux_layout` command (for example `Sync Tmux Pane`).
     Command,
+    /// GH #136 follow-up (d): the retained layout republished because a
+    /// supervisor whose column the last pass gated out has recycled.
+    RecycleSettled,
     /// A publication with no recorded publisher (tests, legacy callers).
     #[default]
     Unattributed,
@@ -451,6 +454,7 @@ impl PaneLayoutPublisher {
             Self::Escalation => "escalation",
             Self::EditorSurface => "editor_surface",
             Self::Command => "command",
+            Self::RecycleSettled => "recycle_settled",
             Self::Unattributed => "unattributed",
         }
     }
@@ -511,6 +515,10 @@ pub(crate) struct PaneLayoutClaim {
     /// A route's plane basis: the newest `pane_layout_desired` frame version on
     /// the plane when it published. `None` inherits the replaced basis.
     pub plane_basis: Option<u64>,
+    /// GH #136 follow-up (a): columns the publication itself asserts (an
+    /// `ensure` route's own `--col` count). `None` derives it from the
+    /// publisher (see [`PaneLayoutClaim::width_authority`]).
+    pub asserted_columns: Option<usize>,
 }
 
 impl From<PaneLayoutPublisher> for PaneLayoutClaim {
@@ -519,6 +527,7 @@ impl From<PaneLayoutPublisher> for PaneLayoutClaim {
             publisher,
             route: None,
             plane_basis: None,
+            asserted_columns: None,
         }
     }
 }
@@ -529,8 +538,61 @@ impl PaneLayoutClaim {
             publisher: PaneLayoutPublisher::Route,
             route: Some(route),
             plane_basis,
+            asserted_columns: None,
         }
     }
+
+    /// GH #136 follow-up (a): record how many columns the publication itself
+    /// asserts.
+    pub(crate) fn asserting(mut self, columns: usize) -> Self {
+        self.asserted_columns = Some(columns);
+        self
+    }
+
+    /// GH #136 follow-up (a): where this publication's column COUNT comes
+    /// from. A plugin publication, an `exact` route, an editor-surface `Sync`
+    /// and an explicit command each positively observe the editor's split; a
+    /// focus escalation, an `ensure` route and a recycle republish recompute
+    /// columns from retained state and so may never widen it.
+    pub(crate) fn width_authority(
+        &self,
+    ) -> agent_doc_controller::pane_layout::LayoutWidthAuthority {
+        use agent_doc_controller::pane_layout::LayoutWidthAuthority;
+        match (self.publisher, self.route) {
+            (PaneLayoutPublisher::Route, Some(PaneLayoutRouteClaim::Ensure))
+            | (PaneLayoutPublisher::Escalation, _)
+            | (PaneLayoutPublisher::RecycleSettled, _) => LayoutWidthAuthority::Derived,
+            _ => LayoutWidthAuthority::EditorSplitObservation,
+        }
+    }
+
+    /// Columns asserted by the publication: explicit, else one for a focus
+    /// escalation (its document), else none.
+    pub(crate) fn asserted_column_count(&self) -> usize {
+        self.asserted_columns.unwrap_or(match self.publisher {
+            PaneLayoutPublisher::Escalation => 1,
+            _ => 0,
+        })
+    }
+}
+
+/// GH #136 follow-up (a)/(d): what the last layout pass accounted for, kept
+/// across generations (the per-generation `observed` Source is reset by every
+/// publication, which is why 249 of 311 route projections in GH #136 logged
+/// `observed_panes=unknown`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PaneLayoutWidthMemory {
+    /// Panes in the target window at the last genuine tmux observation.
+    pub observed_panes: Option<usize>,
+    /// The desired generation that observation was made for.
+    pub observed_generation: u64,
+    /// Generation of the last pass that reported its gated documents.
+    pub gated_generation: u64,
+    /// Documents that pass deliberately did not realise (stale-column gate).
+    pub gated_documents: Vec<String>,
+    /// GH #136 follow-up (d): the gated pass a recycle settle last
+    /// republished, so a duplicated or retried settle republishes once.
+    pub republished_for_gated_generation: u64,
 }
 
 /// One publication displaced by another (`layoutpublisherarbiter`). Logged as
@@ -631,7 +693,8 @@ pub(crate) fn arbitrate_pane_layout_publication(
         .filter(|owner| *owner != PaneLayoutPublisher::Unattributed);
     let structure_owner = match (claim.publisher, claim.route) {
         (PaneLayoutPublisher::Route, Some(PaneLayoutRouteClaim::Ensure))
-        | (PaneLayoutPublisher::Escalation, _) => {
+        | (PaneLayoutPublisher::Escalation, _)
+        | (PaneLayoutPublisher::RecycleSettled, _) => {
             // Re-placing columns inside a structure keeps its owner, unless
             // the publication changed the count.
             match current {
@@ -1241,6 +1304,9 @@ struct ControllerPaneLayoutGraph {
     /// worker binds its own generation against this so the sync body can bail
     /// early when a newer layout supersedes the one it is applying.
     published_generation: Arc<AtomicU64>,
+    /// GH #136 follow-up (a)/(d): the last pass's observed width and gated
+    /// documents, retained across generations.
+    width_memory: Mutex<PaneLayoutWidthMemory>,
     waiters: Condvar,
     wait_lock: Mutex<()>,
 }
@@ -1390,6 +1456,7 @@ impl ControllerPaneLayoutGraph {
             supersessions: Mutex::new(Vec::new()),
             plane_seen: AtomicU64::new(0),
             published_generation: Arc::new(AtomicU64::new(0)),
+            width_memory: Mutex::new(PaneLayoutWidthMemory::default()),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
         }
@@ -1757,8 +1824,52 @@ impl ControllerPaneLayoutGraph {
         {
             self.ctx.set(&self.structural_receipt, None);
         }
+        // GH #136 follow-up (a): only a genuine tmux observation (a window
+        // always holds at least one pane) updates the retained width; a
+        // synthesized all-gated or failed-observation report does not.
+        if !observation.report.panes.is_empty() {
+            let mut memory = self.width_memory.lock();
+            if observation.generation >= memory.observed_generation {
+                memory.observed_generation = observation.generation;
+                memory.observed_panes = Some(observation.report.panes.len());
+            }
+        }
         self.ctx.set(&self.observed, Some(observation));
         self.waiters.notify_all();
+    }
+
+    /// GH #136 follow-up (a)/(d): record the documents a layout pass gated out.
+    fn record_gated(&self, generation: u64, gated_documents: Vec<String>) {
+        let mut memory = self.width_memory.lock();
+        if generation >= memory.gated_generation {
+            memory.gated_generation = generation;
+            memory.gated_documents = gated_documents;
+        }
+    }
+
+    fn width_memory(&self) -> PaneLayoutWidthMemory {
+        self.width_memory.lock().clone()
+    }
+
+    /// GH #136 follow-up (d): claim the right to republish for one gated
+    /// pass. Atomic with the decision so two concurrent settles cannot both
+    /// republish.
+    fn claim_recycle_republish(
+        &self,
+        settled_document_was_gated: &dyn Fn(&[String]) -> bool,
+    ) -> bool {
+        let desired_generation = self.desired().map(|desired| desired.generation);
+        let mut memory = self.width_memory.lock();
+        let fire = agent_doc_controller::pane_layout::recycle_settle_republishes_layout(
+            settled_document_was_gated(&memory.gated_documents),
+            memory.gated_generation,
+            desired_generation,
+            memory.republished_for_gated_generation,
+        );
+        if fire {
+            memory.republished_for_gated_generation = memory.gated_generation;
+        }
+        fire
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
@@ -7136,6 +7247,28 @@ impl ControllerRuntime {
 
     fn pane_layout_desired(&self) -> Option<PaneLayoutDesired> {
         self.pane_layout_graph.desired()
+    }
+
+    /// GH #136 follow-up (a)/(d): the last layout pass's observed width and
+    /// gated documents.
+    pub(crate) fn pane_layout_width_memory(&self) -> PaneLayoutWidthMemory {
+        self.pane_layout_graph.width_memory()
+    }
+
+    /// GH #136 follow-up (a)/(d): record what a layout pass gated out.
+    pub(crate) fn record_pane_layout_gated(&self, generation: u64, gated_documents: Vec<String>) {
+        self.pane_layout_graph
+            .record_gated(generation, gated_documents);
+    }
+
+    /// GH #136 follow-up (d): claim a recycle-settle republish (see
+    /// [`agent_doc_controller::pane_layout::recycle_settle_republishes_layout`]).
+    pub(crate) fn claim_pane_layout_recycle_republish(
+        &self,
+        settled_document_was_gated: &dyn Fn(&[String]) -> bool,
+    ) -> bool {
+        self.pane_layout_graph
+            .claim_recycle_republish(settled_document_was_gated)
     }
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]

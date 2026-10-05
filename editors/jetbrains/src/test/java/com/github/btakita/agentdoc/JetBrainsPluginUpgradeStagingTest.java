@@ -111,16 +111,23 @@ public class JetBrainsPluginUpgradeStagingTest {
 
         assertNotEquals("each staging gets its own package name", first, second);
         List<String[]> commands = described(script);
-        assertEquals(4, commands.size());
+        Path probe = JetBrainsPluginUpgradeAction.probeDirFor(pluginsDir, second);
+        assertEquals(6, commands.size());
         assertEquals("DeleteCommand", commands.get(0)[0]);
         assertEquals(pluginsDir.resolve("other-plugin").toString(), commands.get(0)[1]);
-        assertEquals("DeleteCommand", commands.get(1)[0]);
-        assertEquals(pluginsDir.resolve("agent-doc-jetbrains").toString(), commands.get(1)[1]);
-        assertEquals("UnzipCommand", commands.get(2)[0]);
-        assertEquals(second.toString(), commands.get(2)[1]);
-        assertEquals(pluginsDir.toString(), commands.get(2)[2]);
+        // `#jbstagebackup`: the probe unzip runs before anything deletes the installed plugin.
+        assertEquals("UnzipCommand", commands.get(1)[0]);
+        assertEquals(second.toString(), commands.get(1)[1]);
+        assertEquals(probe.toString(), commands.get(1)[2]);
+        assertEquals("DeleteCommand", commands.get(2)[0]);
+        assertEquals(probe.toString(), commands.get(2)[1]);
         assertEquals("DeleteCommand", commands.get(3)[0]);
-        assertEquals(second.toString(), commands.get(3)[1]);
+        assertEquals(pluginsDir.resolve("agent-doc-jetbrains").toString(), commands.get(3)[1]);
+        assertEquals("UnzipCommand", commands.get(4)[0]);
+        assertEquals(second.toString(), commands.get(4)[1]);
+        assertEquals(pluginsDir.toString(), commands.get(4)[2]);
+        assertEquals("DeleteCommand", commands.get(5)[0]);
+        assertEquals(second.toString(), commands.get(5)[1]);
         assertNoUnzipCanBeStranded(commands);
         assertFalse("the superseded package is cleaned up", Files.exists(first));
         assertTrue(Files.isRegularFile(second));
@@ -150,12 +157,12 @@ public class JetBrainsPluginUpgradeStagingTest {
         Path staged = stage(script, pluginsDir, tempDir);
 
         List<String[]> commands = described(script);
-        assertEquals(3, commands.size());
+        assertEquals(5, commands.size());
         long pluginDeletes = commands.stream()
             .filter(command -> command[0].equals("DeleteCommand") && command[1].equals(pluginDir.toString()))
             .count();
         assertEquals("exactly one delete of the plugin directory", 1, pluginDeletes);
-        assertEquals(staged.toString(), commands.get(1)[1]);
+        assertEquals(staged.toString(), commands.get(3)[1]);
         assertNoUnzipCanBeStranded(commands);
     }
 
@@ -183,8 +190,9 @@ public class JetBrainsPluginUpgradeStagingTest {
             pool.shutdownNow();
         }
         List<String[]> commands = described(script);
-        assertEquals(3, commands.size());
-        assertEquals("UnzipCommand", commands.get(1)[0]);
+        assertEquals(5, commands.size());
+        assertEquals("UnzipCommand", commands.get(0)[0]);
+        assertEquals("UnzipCommand", commands.get(3)[0]);
         assertNoUnzipCanBeStranded(commands);
         try (var listing = Files.list(tempDir)) {
             long packages = listing
@@ -221,5 +229,103 @@ public class JetBrainsPluginUpgradeStagingTest {
         assertTrue(JetBrainsPluginUpgradeAction.isStagedArchive("/c/agent-doc-jetbrains-0.2.481.zip"));
         assertFalse(JetBrainsPluginUpgradeAction.isStagedArchive("/c/other-plugin-1.0.zip"));
         assertFalse(JetBrainsPluginUpgradeAction.isStagedArchive("/d/agent-doc-jetbrains"));
+    }
+
+    /**
+     * Run {@code script} the way IntelliJ's {@code StartupActionScriptManager.executeActionScript}
+     * does at startup: in order, stopping at the first command that throws, then deleting the
+     * script either way.
+     */
+    private static Exception runAtRestart(Path script) throws Exception {
+        try {
+            for (StartupActionScriptManager.ActionCommand command : StartupActionScriptManager.loadActionScript(script)) {
+                command.execute();
+            }
+            return null;
+        } catch (Exception failure) {
+            return failure;
+        } finally {
+            Files.deleteIfExists(script);
+        }
+    }
+
+    private static Path installedPlugin(Path pluginsDir, String version) throws Exception {
+        Path jar = pluginsDir.resolve("agent-doc-jetbrains/lib/agent-doc-jetbrains-" + version + ".jar");
+        Files.createDirectories(jar.getParent());
+        Files.write(jar, new byte[] {9});
+        return jar;
+    }
+
+    /**
+     * `#jbstagebackup`: the 2026-10-04 incident shape. The staged package vanishes before the
+     * restart; the restart must keep the installed plugin instead of deleting it.
+     */
+    @Test
+    public void aStagingWhosePackageVanishesKeepsTheInstalledPluginAtRestart() throws Exception {
+        Path pluginsDir = pluginsDir();
+        Path tempDir = tempDir();
+        Path script = tempDir.resolve("action.script");
+        Path installed = installedPlugin(pluginsDir, "0.2.480");
+        Path staged = stage(script, pluginsDir, tempDir);
+
+        Files.delete(staged);
+        Exception failure = runAtRestart(script);
+
+        assertTrue("the probe unzip aborts the script", failure != null);
+        assertTrue("the installed plugin survives", Files.isRegularFile(installed));
+        assertFalse(
+            "no new generation appeared",
+            Files.exists(pluginsDir.resolve("agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.481.jar"))
+        );
+    }
+
+    /**
+     * `#jbstagebackup`: a package that cannot be extracted at restart (here truncated; a full
+     * disk fails the same probe extraction) aborts before the plugin delete.
+     */
+    @Test
+    public void aStagingThatCannotExtractKeepsTheInstalledPluginAtRestart() throws Exception {
+        Path pluginsDir = pluginsDir();
+        Path tempDir = tempDir();
+        Path script = tempDir.resolve("action.script");
+        Path installed = installedPlugin(pluginsDir, "0.2.480");
+        Path staged = stage(script, pluginsDir, tempDir);
+
+        Files.write(staged, new byte[] {'P', 'K', 3, 4, 0, 0});
+        Exception failure = runAtRestart(script);
+
+        assertTrue("the probe unzip aborts the script", failure != null);
+        assertTrue("the installed plugin survives", Files.isRegularFile(installed));
+    }
+
+    /** `#jbstagebackup`: a healthy staging still installs the new generation, leaving no probe. */
+    @Test
+    public void aHealthyStagingInstallsTheNewGenerationAtRestart() throws Exception {
+        Path pluginsDir = pluginsDir();
+        Path tempDir = tempDir();
+        Path script = tempDir.resolve("action.script");
+        Path installed = installedPlugin(pluginsDir, "0.2.480");
+        Path staged = stage(script, pluginsDir, tempDir);
+
+        Exception failure = runAtRestart(script);
+
+        assertEquals(null, failure);
+        assertFalse("the old generation is replaced", Files.exists(installed));
+        assertTrue(Files.isRegularFile(pluginsDir.resolve("agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.481.jar")));
+        assertFalse("the staged package is cleaned up", Files.exists(staged));
+        assertFalse(
+            "the probe extraction is cleaned up",
+            Files.exists(JetBrainsPluginUpgradeAction.probeDirFor(pluginsDir, staged))
+        );
+    }
+
+    @Test
+    public void probeDirIsAHiddenSiblingOfThePluginsDir() {
+        Path probe = JetBrainsPluginUpgradeAction.probeDirFor(
+            Path.of("/d/JetBrains/IntelliJIdea2026.3"), Path.of("/c/agent-doc-jetbrains-0.2.481+abc123.zip")
+        );
+        assertEquals(Path.of("/d/JetBrains/.agent-doc-jetbrains-probe-0.2.481+abc123"), probe);
+        assertTrue(JetBrainsPluginUpgradeAction.isProbeDir(probe.toString()));
+        assertFalse(JetBrainsPluginUpgradeAction.isProbeDir("/d/JetBrains/IntelliJIdea2026.3"));
     }
 }

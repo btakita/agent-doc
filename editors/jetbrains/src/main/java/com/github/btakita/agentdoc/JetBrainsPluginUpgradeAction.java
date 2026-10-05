@@ -191,7 +191,14 @@ public final class JetBrainsPluginUpgradeAction {
      * deleted the zip; the second block then deleted the freshly installed plugin and its unzip
      * found no zip, leaving the IDE with no agent-doc plugin at all. Now each staging copies to
      * a unique, verified zip and rewrites the script in one atomic save that drops every prior
-     * agent-doc staging and appends exactly one delete+unzip+cleanup block.
+     * agent-doc staging and appends exactly one guarded install block.
+     *
+     * `#jbstagebackup`: IntelliJ's executor runs the script's commands in order and stops at the
+     * first one that throws, then deletes the script. A delete+unzip block therefore removed the
+     * plugin whenever the unzip failed at restart (package vanished, disk full). The block now
+     * opens with a probe unzip of the same package into a scratch sibling of the plugins
+     * directory, so a missing, unreadable or unextractable package aborts the script before
+     * anything deletes the installed plugin. See {@link #stagingBlock}.
      *
      * @return receipt notes (prior stagings replaced, cleanup failures), empty when none
      */
@@ -265,11 +272,35 @@ public final class JetBrainsPluginUpgradeAction {
 
     private static final String PLUGIN_DIR_NAME = "agent-doc-jetbrains";
     private static final String STAGED_ARCHIVE_PREFIX = "agent-doc-jetbrains-";
+    /** `#jbstagebackup`: scratch directory a staging's probe unzip extracts into. */
+    static final String PROBE_DIR_PREFIX = ".agent-doc-jetbrains-probe-";
     private static final String SCRIPT_MANAGER_CLASS = "com.intellij.ide.startup.StartupActionScriptManager";
 
     /** GH #115: unique per staging, so no other staging's {@code delete:<zip>} can name it. */
     static String stagedArchiveName(String expectedVersion, String nonce) {
         return STAGED_ARCHIVE_PREFIX + expectedVersion + "+" + nonce + ".zip";
+    }
+
+    /**
+     * `#jbstagebackup`: the scratch directory the probe unzip of {@code staged} extracts into: a
+     * hidden sibling of the IDE plugins directory, so it shares that directory's filesystem (an
+     * extraction that fits there leaves room for the real one once the probe is deleted) and is
+     * never scanned as a plugin.
+     */
+    static Path probeDirFor(Path idePluginsPath, Path staged) {
+        String name = staged.getFileName().toString();
+        String stem = name.endsWith(".zip") ? name.substring(0, name.length() - ".zip".length()) : name;
+        Path absolute = idePluginsPath.toAbsolutePath().normalize();
+        Path parent = absolute.getParent() != null ? absolute.getParent() : absolute;
+        return parent.resolve(PROBE_DIR_PREFIX + stem.substring(Math.min(stem.length(), STAGED_ARCHIVE_PREFIX.length())));
+    }
+
+    static boolean isProbeDir(String path) {
+        if (path == null) {
+            return false;
+        }
+        Path name = Path.of(path).getFileName();
+        return name != null && name.toString().startsWith(PROBE_DIR_PREFIX);
     }
 
     static boolean isStagedArchive(String path) {
@@ -395,7 +426,7 @@ public final class JetBrainsPluginUpgradeAction {
             return isStagedArchive(source);
         }
         if (kind.equals("DeleteCommand")) {
-            return samePath(source, pluginDir) || isStagedArchive(source);
+            return samePath(source, pluginDir) || isStagedArchive(source) || isProbeDir(source);
         }
         return false;
     }
@@ -403,7 +434,7 @@ public final class JetBrainsPluginUpgradeAction {
     /**
      * GH #115: under the script manager's own monitor (its static mutators are
      * {@code synchronized} on the class, so no other writer in this JVM interleaves), drop every
-     * earlier agent-doc staging, append exactly one delete+unzip+cleanup block for {@code staged},
+     * earlier agent-doc staging, append exactly one guarded install block for {@code staged},
      * save the whole script to a temp file and rename it over the original, then reload and
      * verify the result. Superseded staged packages are deleted afterwards.
      *
@@ -452,7 +483,9 @@ public final class JetBrainsPluginUpgradeAction {
                 // Callable carries the installAfterRestart fallback.
                 fallback.call();
             }
-            verifyActionScriptStaging((List<?>) load.invoke(null, script), pluginDir, staged);
+            verifyActionScriptStaging(
+                (List<?>) load.invoke(null, script), pluginDir, idePluginsPath, staged, block != null
+            );
             if (removed > 0) {
                 notes.add("replaced a prior agent-doc staging (" + removed + " pending-install commands)");
             }
@@ -468,16 +501,29 @@ public final class JetBrainsPluginUpgradeAction {
     }
 
     /**
-     * delete(plugin dir), unzip(staged, plugins path), delete(staged) -- the block
-     * {@code PluginInstaller.installAfterRestart} writes, minus its second delete of the same
-     * directory. {@code null} when this build's command classes are not constructible.
+     * `#jbstagebackup`: the guarded install block
+     *
+     * <ol>
+     *   <li>unzip(staged, probe) -- proves at restart time that the package exists, reads and
+     *       fully extracts on the plugins filesystem; when it throws, IntelliJ stops executing
+     *       the script, so nothing below runs and the installed plugin is untouched;</li>
+     *   <li>delete(probe) -- frees the space the probe used;</li>
+     *   <li>delete(plugin dir), unzip(staged, plugins path), delete(staged) -- the block
+     *       {@code PluginInstaller.installAfterRestart} writes, minus its second delete of the
+     *       same directory.</li>
+     * </ol>
+     *
+     * {@code null} when this build's command classes are not constructible.
      */
     private static List<Object> stagingBlock(Class<?> scriptManager, Path pluginDir, Path idePluginsPath, Path staged) {
         try {
             ClassLoader loader = scriptManager.getClassLoader();
             Class<?> delete = Class.forName(SCRIPT_MANAGER_CLASS + "$DeleteCommand", true, loader);
             Class<?> unzip = Class.forName(SCRIPT_MANAGER_CLASS + "$UnzipCommand", true, loader);
+            Path probe = probeDirFor(idePluginsPath, staged);
             List<Object> block = new ArrayList<>();
+            block.add(unzip.getConstructor(Path.class, Path.class).newInstance(staged, probe));
+            block.add(delete.getConstructor(Path.class).newInstance(probe));
             block.add(delete.getConstructor(Path.class).newInstance(pluginDir));
             block.add(unzip.getConstructor(Path.class, Path.class).newInstance(staged, idePluginsPath));
             block.add(delete.getConstructor(Path.class).newInstance(staged));
@@ -507,40 +553,69 @@ public final class JetBrainsPluginUpgradeAction {
     }
 
     /**
-     * GH #115: the saved script must hold exactly one agent-doc unzip, of {@code staged}, whose
-     * package exists, and no delete of the plugin directory or of {@code staged} ahead of it
-     * beyond the block's own single delete.
+     * GH #115: the saved script must install exactly one agent-doc package, {@code staged}, whose
+     * package exists, with no delete of {@code staged} ahead of its install unzip.
+     *
+     * `#jbstagebackup`: when {@code guarded} (this module wrote the block), the script must also
+     * probe-unzip {@code staged} exactly once before its single delete of the plugin directory,
+     * so a package that cannot be extracted at restart aborts the script before that delete.
+     * The {@code installAfterRestart} fallback writes the platform's own unguarded block.
      */
-    static void verifyActionScriptStaging(List<?> commands, Path pluginDir, Path staged) {
-        int unzips = 0;
-        int pluginDeletesBeforeUnzip = 0;
-        boolean unzipSeen = false;
+    static void verifyActionScriptStaging(
+        List<?> commands,
+        Path pluginDir,
+        Path idePluginsPath,
+        Path staged,
+        boolean guarded
+    ) {
+        int installUnzips = 0;
+        int probeUnzips = 0;
+        int pluginDeletesBeforeInstall = 0;
         for (Object command : commands) {
             String[] described = describeCommand(command);
             if (described[0].equals("UnzipCommand") && isStagedArchive(described[1])) {
-                unzips++;
-                unzipSeen = true;
                 if (!samePath(described[1], staged)) {
                     throw new IllegalStateException(
                         "pending-install script still unzips another agent-doc package " + described[1]
                     );
                 }
-            } else if (described[0].equals("DeleteCommand") && !unzipSeen
-                && (samePath(described[1], pluginDir) || samePath(described[1], staged))) {
-                pluginDeletesBeforeUnzip++;
+                if (described[2] == null || samePath(described[2], idePluginsPath)) {
+                    installUnzips++;
+                } else {
+                    if (installUnzips == 0 && pluginDeletesBeforeInstall > 0) {
+                        throw new IllegalStateException(
+                            "pending-install script deletes " + pluginDir + " before probing " + staged
+                        );
+                    }
+                    probeUnzips++;
+                }
+            } else if (described[0].equals("DeleteCommand") && installUnzips == 0) {
                 if (samePath(described[1], staged)) {
                     throw new IllegalStateException("pending-install script deletes " + staged + " before unzipping it");
                 }
+                if (samePath(described[1], pluginDir)) {
+                    pluginDeletesBeforeInstall++;
+                    if (guarded && probeUnzips == 0) {
+                        throw new IllegalStateException(
+                            "pending-install script deletes " + pluginDir + " before probing " + staged
+                        );
+                    }
+                }
             }
         }
-        if (unzips != 1) {
+        if (installUnzips != 1) {
             throw new IllegalStateException(
-                "pending-install script holds " + unzips + " agent-doc unzip commands after staging; expected 1"
+                "pending-install script holds " + installUnzips + " agent-doc install unzips after staging; expected 1"
             );
         }
-        if (pluginDeletesBeforeUnzip > 2) {
+        if (guarded && probeUnzips != 1) {
             throw new IllegalStateException(
-                "pending-install script deletes " + pluginDir + " " + pluginDeletesBeforeUnzip + " times before its unzip"
+                "pending-install script holds " + probeUnzips + " agent-doc probe unzips after staging; expected 1"
+            );
+        }
+        if (pluginDeletesBeforeInstall > (guarded ? 1 : 2)) {
+            throw new IllegalStateException(
+                "pending-install script deletes " + pluginDir + " " + pluginDeletesBeforeInstall + " times before its unzip"
             );
         }
         if (!Files.isRegularFile(staged) || !Files.isReadable(staged)) {

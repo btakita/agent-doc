@@ -432,6 +432,43 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   live IDE, the package is still replaced on disk (directory removed and
   rewritten, so the live IDE keeps its old inodes) and the command succeeds
   with a restart-the-IDE warning naming the reason.
+- A JetBrains upgrade staged for the next IDE start can never remove the
+  installed plugin without installing its replacement (`#jbstagebackup`,
+  following GH #115 and `#jbpluginvanish`). IntelliJ's pending-install executor
+  (`StartupActionScriptManager.executeActionScript`, verified on 2024.2, 2025.2
+  and 2026.1 builds) runs `action.script` in order, STOPS at the first command
+  that throws, and deletes the script either way; it has no conditional
+  command. The platform's own `delete:<plugin dir>` + `unzip:<package>` block
+  therefore destroyed the plugin whenever the unzip failed at restart (package
+  vanished, unreadable, disk full). The staged block is instead:
+  1. `unzip:<package>:<probe>` — `<probe>` is `.agent-doc-jetbrains-probe-<v>+<nonce>`,
+     a hidden sibling of the IDE plugins directory (same filesystem, never
+     scanned as a plugin). A missing, corrupt or unextractable package throws
+     here and aborts the script before anything touches the installed plugin;
+  2. `delete:<probe>` — frees the space the probe used, so the real extraction
+     fits wherever the probe did;
+  3. `delete:<plugin dir>`, `unzip:<package>:<plugins>`, `delete:<package>`.
+  The staging verifies the saved script holds exactly one probe unzip, before
+  exactly one plugin-dir delete, before exactly one install unzip. Only the
+  `PluginInstaller.installAfterRestart` fallback (a build whose command classes
+  are not constructible) still writes the platform's unguarded block.
+  Rationale: a durable backup copy of the package would only cover the
+  "package vanished" cause and only if something restored it before the
+  restart; ordering the probe first closes the vanish AND full-disk causes at
+  the moment they matter, using the executor's own abort semantics, with no
+  extra state for agent-doc to keep alive.
+- Preflight repairs stagings instead of only warning (`#jbstagebackup`):
+  for each plugins directory whose install lock is free (a running install
+  purges doomed stagings itself), a doomed staging — its package gone — is
+  purged from a text-format `action.script` and reported once as
+  `jetbrains_plugin_staging_repaired`; leftover `.agent-doc-jetbrains-probe-*`
+  directories (a restart whose probe aborted) are removed; and agent-doc staged
+  packages older than 10 minutes in an IDE whose `plugins/action.script` no
+  longer exists are removed as orphans (nothing can unzip them). A package a
+  pending script still names is never deleted. Current IntelliJ builds save
+  `action.script` as a Java-serialized command array, which these text-format
+  readers cannot parse (they leave it untouched, by design); the guarded block
+  above is what protects those IDEs.
 - JetBrains install/update success reports the installed plugin package version
   from the extracted plugin JAR, matching `plugin list`, rather than reporting the
   enclosing agent-doc release tag.

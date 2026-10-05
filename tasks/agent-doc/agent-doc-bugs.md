@@ -556,6 +556,38 @@ Everything in flight is now durable and visible to Codex:
 **The one trap:** the other heads are still claimed by this session (subagent claims have a ~2h TTL, coordinator claims ~4h), and claimed heads are invisible to preflight. Step 0 of the handoff tells Codex to check that no Claude subagent is still writing, then `agent-doc queue release` each claim it takes over. Without that, Codex would sit idle until the TTLs expire.
 
 Both rules carry over: never two agents in one worktree, and never edit the main `src/agent-doc` checkout directly (another session has uncommitted edits there).
+
+### Re: cont — batch integration + netadv3/5 dispatched — opus-5-5 · 2026-10-05T00:52-04:00
+
+> **Chat prompt (#chatprompt):** cont
+
+Continuing.
+
+**Integrated into `batch-0505`:**
+- `gh136` @ `9bb7edb2b`: `make check` green in its own worktree (11,027 passed, clippy clean, TLA green including the new `StaleColumnRecycle.tla` with 5 wedges).
+- `netadv2` @ `6fdaa8607`: `NetChannel.tla` and `NetChannelRetransmit`, 4 wedges plus Reach.
+- `netadv1` @ `fd64518b3`: the channel audit, 12 ranked risks R1–R12 and 23 send-once defects F1–F23.
+
+The conflicts in `formal/tla/README.md` and `scripts/run_tla.sh` were additive on both sides, so I kept both (`StaleColumnRecycle NetChannelRetransmit` plus `libraries=(NetChannel)`). The branches' `HANDOFF.md` files were dropped. `make check` on the merged batch is running.
+
+**GH #136 root cause:** the request to restart the stale supervisor was durable but expired. A later install fan-out request superseded it and lapsed after 15 minutes, so the stale supervisor saw no live request. Separately, stash promotion had no limit. The fix:
+- requests caused by a replaced binary never expire;
+- a request is "pending" or "overdue", measured from the first unconsumed request;
+- a pure `stale_focus_admission` never widens the window, never promotes an overdue pane and never displaces a live turn;
+- the layout receipt carries `gated_documents`, so the controller settles in one attempt instead of retrying forever.
+
+Follow-ups the subagent left open:
+- enforce `columns <= observed_panes` for every publisher;
+- investigate the 60s focus settle and the gen-reset race on 1061.md;
+- supervisors already stale on old code still need a one-time recycle;
+- republish the layout after a recycle;
+- bound stale panes outside the `stash` window.
+
+**Now unblocked and dispatched**, each in its own worktree based on `batch-0505`:
+- `#netadv3`: port the hot-path models (VisibleDeliveryReceipt, EditorReplicaStrand, RecycleSettleDispatch, AgentDocCloseout, PassiveTmuxSync, StaleColumnRecycle) to `NetChannel`, and fix the counterexamples, starting with the send-once defects F1–F23.
+- `#netadv5`: stop timeouts being read as verdicts (R1 a 1s focus timeout kills a busy controller, R2 a slow attach drops the editor from the cut, R3 a slow connect deletes a live socket, R5, R6, R7, R8 duplicate prompt injection, R9 duplicate supervisor), plus tests that assert the round-trip count on hot paths.
+
+`netadv4` and `netadv7` are still running. The handoff doc stays current at each step (latest `641939ecdf`), and every worktree keeps a committed `HANDOFF.md`, so Codex can resume at any point.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -576,6 +608,7 @@ Both rules carry over: never two agents in one worktree, and never edit the main
 - do [#netadv6]
 - do [#netadv7]
 - release + publish
+- do [#codexhandoff]
 <!-- /agent:queue -->
 
 

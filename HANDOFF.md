@@ -27,11 +27,14 @@ list of one-shot-notification defects as candidate fixes (report only, don't fix
   reliable-sync/crdt-relay/JetBrains; tmux/focus/layout/supervisor). Results pending.
 
 ## Remaining
-1. Collect code-protocol agent results (3 pending: core IPC+controller rpc; reliable-sync/crdt-relay/JetBrains; tmux/focus/layout/supervisor). Redo if the session ended.
-2. DONE (f57d681b7): README table section `## Network channel assumptions` in formal/tla/README.md.
-3. Write docs/reference/network-channel-audit.md: per-protocol table, ranked risks, one-shot defect list.
-4. Add SUMMARY.md link; run `make audit-docs` if cheap.
-5. Commit; update this file; report branch, sha, top-10 risks, defect list.
+STATUS: COMPLETE (deliverables committed on branch netadv1).
+- formal/tla/README.md § Network channel assumptions (model table + cross-cutting gaps)
+- docs/reference/network-channel-audit.md (topology, protocol table P1-P15, round trips,
+  ranked risks R1-R12, candidate fixes F1-F23, timing appendix), linked from docs/SUMMARY.md
+Optional follow-ups for whoever picks this up:
+1. Trace the full closeout ACK chain round-trip count (only lower bound recorded).
+2. Confirm E4/R6 (no periodic supervisor lease heartbeat) with a broader grep.
+3. `make audit-docs` was not run (cargo build cost); docs-only change.
 
 ## Findings so far (raw, unverified for safety impact)
 Localhost-tuned timeouts on likely correctness paths:

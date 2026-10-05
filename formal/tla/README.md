@@ -285,6 +285,81 @@ plus a weakly fair resend it proves `Completes`. Each wedge is must-violate:
 
 `scripts/run_tla.sh` copies library modules (`libraries=(NetChannel)`) next to
 the models that instance them.
+## Network channel assumptions
+
+Audit `#netadv1`, 2026-10-05. The deployment design point is a Coder remote
+workspace (JetBrains Remote Dev) behind Zscaler. That means high and variable
+latency, silent half-open stalls, and lost messages. The full ranked audit of the
+code-side protocols is in
+[`docs/reference/network-channel-audit.md`](../../docs/reference/network-channel-audit.md).
+
+**Summary: no model proves safety over a lossy, delayed or stalling channel.** No
+model has a sequence or bag channel. None has an in-flight state where a request
+is outstanding with no answer, and none has a stale reply arriving after a newer
+request. Almost every cross-process receipt is one atomic action, usually a read
+of a variable the other party owns. That is an atomic-step assumption even where
+the prose says "message". Lines are `file:line` in this directory unless noted.
+
+Legend for the channel column:
+
+- **AS**: an atomic step. Sender and receiver change state in one action.
+- **SV**: the receiver reads the sender's state variable directly. This is still an atomic-step assumption.
+- **1-slot**: a single boolean mailbox that is delivered under weak fairness. It is a reliable channel and cannot lose a message.
+- **none**: no cross-process interaction is modelled.
+
+For the D/Du/R/Rc column (Drop, Duplicate, Reorder, Reconnect): `y` = yes,
+`p` = partial, `-` = no.
+
+| Model | Cross-process interaction: channel (cite) | D / Du / R / Rc | Constant that a safety property depends on | Safety proven only for a perfect network? |
+|---|---|---|---|---|
+| AdmissionSplitMerge | none. Fixed auth+disk snapshots in `Init` (106-113) | - / - / - / - | none | n/a. Assumes one consistent snapshot |
+| AgentDocCloseout | installer→editor `installCompleted` SV (37→47); editor restart SV (50→62); `RevalidateGeneration` SV (64). The ack is a local countdown, then `acked := TRUE` (67-74) | p / - / - / p | `MaxAckFailures` (29): after it runs out, the ack is decreed | **yes**. The ack always lands |
+| CloseoutChurn | all SV awaits. `ackLanded=TRUE` at Init (28); `replacementAckQueueEmpty := TRUE` by decree (124) | - / - / - / p | none | **yes**. A straight-line script |
+| ConflictReconciliation (+ Lean) | none. Merge is a pure function (133-138; `ConflictReconciliation.lean:95`) | - / p (identical edit applies once, 104-105) / - / - | none | n/a |
+| CrdtLineageFence | frames: 1-slot `staleFramePending`/`currentFramePending` (24-25, 86-105); `EditorNativeSave` `disk' = canonical` AS (128-132); `Commit` SV (209) | p (crash loss 150-167) / p (replay 169-187) / p (old-lineage frame 86-89) / p (lineage rotation 76-84) | none | **mostly**. Frames are never lost; save and commit are atomic cross-party reads |
+| EditorAuthorityLadder (+ Lean) | `Forward`/`Deliver` SV set-union syncs (118-121, 142-145); `RegisterForward` atomic exchange (149-154); `Handoff` reads every editor at once (167-169, 81-82); `deleted` is a **global, instantly visible tombstone set** (60) | implicit / implicit / implicit / p | none | Safe against skipped or repeated *state* syncs. **Not** safe once tombstones or the handoff cut can be stale |
+| EditorReplicaStrand | `Reregister*` request+answer is one AS reading endpoint `mode` (185-226) | p (permanent `"silent"`, 221-226) / - / - / p | `MaxReregisterAttempts` (108) gates demotion (246, 277) | **yes**. A slow-but-serving endpoint is not expressible |
+| IpcBuildIdentity | `Handshake` compares both identities in one step (131-137) | - / - / - / - | none | n/a. Assumes the identity arrives intact |
+| JetBrainsFileCache | reregister copies editor→canonical SV (104-108); save copies editor→disk SV (114-121); every request answered (96-99) | - / - / - / p | none | **yes** |
+| PaneExecutionAuthority | `Mutate` is an atomic check-and-set on owner (153-155); one rebind race (57-69) | - / - / - / p | one race only (`rebindUsed` 59) | yes (local IPC) |
+| PassiveTmuxSync | `actorBinding` SV with atomic swap (30-37) | - / - / - / - | none | yes (local) |
+| PlanClosureContract | shared sets; `Closeout` reads `planned` (129-131) | - / - / - / - | none | n/a |
+| ReactiveTopology | in-process; effect + receipt in one action (73-88) | - / p / p (generation fence 78, 90-96) / - | none (MaxGeneration bounds the environment) | n/a (in-process) |
+| RealtimeSteeringStop | `StopHook` reads `steering` SV (70-77) | - / - / - / - | none | n/a |
+| RecycleSettleDispatch | settle-wait RPC = SV read of supervisor `recycle` that always returns by `WaitBudget` (91-99) | - / - / - / p | **`Ttl`, `WaitBudget`, `ASSUME Ttl > WaitBudget` (44-56)**; `Abandoned` treats `age > Ttl` as proof of loss (114-119) | **yes**, and it treats elapsed time as fact |
+| RefusedSaveOperatorAction | `RecoveryPass` request + instant nondeterministic answer (129-135) | p (`delivery_failed_to_all`, 94) / - / - / - | `MaxPasses` (88), for finiteness | yes. Every refusal is assumed authentic |
+| ResponseCheckpoint | `visibleSeq := producedSeq` instantly visible (42-44); `Seal` SV (53-54) | - / p (46-48) / - / - | none | **yes** |
+| RetainedProjectionHold | `ControllerIngest` SV (139-144); `Register` decides over buffer+shadow+canon atomically (120-125, 166-179) | p (lag, forced by WF 191) / p (157-162) / - / p | none | **yes** |
+| RetainedTransitionFixedPoint | `Settle` reads the editor cut atomically (97-109) | - / y (the subject) / - / - | none | **yes**. A stale cut read is exactly the duplicate it prevents |
+| StopHookContinuation | local shared state | - / - / - / - | none | n/a |
+| StopHookFailClosed | local | - / - / - / - | none | n/a |
+| SupervisorGenerationTransition | `DrainIpc` is a boolean oracle; no in-flight messages (47-53) | - / - / - / p (63-73) | none | **yes**. "Drained" is decreed |
+| TransientRefusalLatch | `Served`/`Refused*` read `responder` SV (181-222); crash = immediate EOF (149-154, 204-210) | p / - / - / y (163-175) | **`MaxRetryAttempts`=3, `MaxFaults`=2** (102-103, cfg). `OnlyAuthoredVerdictsStop` (330) relies on MaxFaults < MaxRetryAttempts | **yes**. No outstanding-forever request |
+| VisibleDeliveryReceipt | 1-slot `pending` (102); `AckDelivery` applies the ack and drains the hub in one AS (192-199); recovery answers SV (213-261); `NativeSave` SV over hub+endpoint (287-294) | p (`PullWithoutAck` 182-188; a lost-after-apply ack cannot occur) / p (178-181) / - / p (disconnect 269-280, no reconnect) | **`MaxNonconvergence`** (97) via `HoldsBarrier` (120-123) gates the drop edge (275) | **yes**. Answers are instant and truthful |
+| `capture_closeout/CaptureCloseout.lean` | none. Pure `decide*` functions | p (late ack becomes `retainedForAsyncDelivery`, 94-110) / - / - / p (151-165) | `decideRetry` backoff (137-143) | n/a |
+| `wait_machine/WaitMachine.lean` | signals are `step` inputs (105-134) | - / - / - / - | **`globalHangCeiling = 10000` ms (41)**, `reinstallBudget` (44). `no_hang` (175) and `fail_closed_at_ceiling` (225) are bounded-time safety | n/a. Above ~10 s of latency, IPC-ack waits fail closed by design |
+| `wait_machine/RealtimeCycle.lean` | `acknowledge` sets `acked := s.visibleExact` (133), an SV read of the editor | - / p (`save_idempotent` 144) / - / - | none | **yes** for the ack. Faults live only in SimWorld `realtime_ipc_cycle_model` (`src/sim_world.rs`) |
+
+Cross-cutting gaps that netadv2/netadv3 must close:
+
+1. **A received refusal is believed.** EditorReplicaStrand (241-248),
+   VisibleDeliveryReceipt (226-233, 269-280) and TransientRefusalLatch
+   (`RefusedAuthored`, 216) each turn a refusal into irreversible demotion or a
+   drop. No model has a proxy error, a forged reset, or a stale reply to an
+   older request generation.
+2. **There is no half-open stall.** The only silence is EditorReplicaStrand's
+   permanent `"silent"` mode. Every other wait returns, either instantly or at a
+   budget.
+3. **Safety depends on a constant** in TransientRefusalLatch, RecycleSettleDispatch,
+   WaitMachine, VisibleDeliveryReceipt, EditorReplicaStrand and AgentDocCloseout.
+   This conflicts with the target property "no timeout value may be part of a
+   safety argument".
+4. **Vacuous invariants.** In each of these the variable is never written:
+   `RetainedResponseIsUnique` (AgentDocCloseout:27), `SingletonBoundary`
+   (JetBrainsFileCache:71), `StrictUnmarkedNeverMutates` (CloseoutChurn:54),
+   `PassiveSyncNeverAutostarts` (PassiveTmuxSync:25).
+5. **No liveness proof covers loss.** Liveness rests on weak fairness of the
+   delivery or answer actions themselves, not on re-sending over a lossy channel.
 
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream

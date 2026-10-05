@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.459
+
+- **Backlog lifecycle moves no longer strand malformed item residue.** State-based moves carry an item's full logical
+  block, including nested continuations and malformed flush-left spill, while preserving structural headings,
+  comments, and blank-line postludes. Backlog clear also removes orphan prose and fenced residue without deleting
+  structural scaffolding.
+- **Codex subagent handbacks stay out of operator intent (GH #139).** Collaboration `<agent-message>` frames are no
+  longer ledgered as operator chat, and preflight persists queue closeout obligations only after the final preemption
+  verdict selects that queue head.
+- **Hookless OpenCode sessions preserve chat prompts (GH #140).** The shared skill now makes the canonical
+  `> **Chat prompt (#chatprompt):** <verbatim prompt>` projection explicitly hook-independent, so OpenCode records
+  chat-originated operator input even when no harness hook is available.
+
 ## 0.35.458
 
 - **Opt-in simulator triage is safe under the CI ignored-test sweep.** The trace replay and finding-kind helpers now

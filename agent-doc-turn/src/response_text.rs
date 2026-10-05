@@ -48,36 +48,6 @@ pub const RESPONSE_ATTRIBUTION_SEPARATOR: &str = " · ";
 /// The spaced em dash that separates a response topic from its attribution.
 pub const RESPONSE_TOPIC_ATTRIBUTION_SEPARATOR: &str = " \u{2014} ";
 
-/// Build the attribution segment of a `### Re:` heading: model short name, then
-/// the response timestamp.
-///
-/// An empty timestamp yields the model alone, which is the pre-timestamp shape —
-/// so a harness that cannot resolve a clock degrades to the old heading instead of
-/// emitting a dangling separator.
-pub fn response_heading_attribution(model_short_name: &str, timestamp: &str) -> String {
-    let model = model_short_name.trim();
-    let timestamp = timestamp.trim();
-    if timestamp.is_empty() {
-        return model.to_string();
-    }
-    if model.is_empty() {
-        return timestamp.to_string();
-    }
-    format!("{model}{RESPONSE_ATTRIBUTION_SEPARATOR}{timestamp}")
-}
-
-/// Build a complete `### Re:` heading line.
-pub fn response_heading(topic: &str, model_short_name: &str, timestamp: &str) -> String {
-    let attribution = response_heading_attribution(model_short_name, timestamp);
-    if attribution.is_empty() {
-        return format!("### Re: {}", topic.trim());
-    }
-    format!(
-        "### Re: {}{RESPONSE_TOPIC_ATTRIBUTION_SEPARATOR}{attribution}",
-        topic.trim()
-    )
-}
-
 /// Split a `### Re:` heading's attribution segment into model and timestamp.
 ///
 /// Returns `None` when the heading carries no attribution at all. The timestamp is
@@ -433,7 +403,7 @@ mod tests {
     /// others silently.
     #[test]
     fn a_timestamped_heading_reads_the_same_through_every_parser() {
-        let heading = super::response_heading("do [#fix1]", "opus-5", "2026-09-11T23:45-04:00");
+        let heading = "### Re: do [#fix1] \u{2014} opus-5 \u{00B7} 2026-09-11T23:45-04:00";
         assert_eq!(
             heading,
             "### Re: do [#fix1] \u{2014} opus-5 \u{00B7} 2026-09-11T23:45-04:00"
@@ -473,7 +443,7 @@ mod tests {
     /// it rather than emit a dangling separator.
     #[test]
     fn an_untimestamped_heading_still_round_trips() {
-        let heading = super::response_heading("do [#fix1]", "gpt-5", "");
+        let heading = "### Re: do [#fix1] \u{2014} gpt-5";
         assert_eq!(heading, "### Re: do [#fix1] \u{2014} gpt-5");
         assert_eq!(
             super::response_heading_model_and_timestamp(&heading),
@@ -489,7 +459,7 @@ mod tests {
 
     #[test]
     fn heading_attribution_splits_into_model_and_timestamp() {
-        let heading = super::response_heading("topic", "opus-5", "2026-09-11T23:45-04:00");
+        let heading = "### Re: topic \u{2014} opus-5 \u{00B7} 2026-09-11T23:45-04:00";
         assert_eq!(
             super::response_heading_model_and_timestamp(&heading),
             Some(("opus-5", Some("2026-09-11T23:45-04:00")))

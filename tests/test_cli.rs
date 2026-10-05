@@ -16279,10 +16279,12 @@ fn test_dispatch_turn_start_is_recorded_on_the_busy_transition() {
 }
 
 /// `#timestampresponseheader`: the response-header contract is an instruction surface,
-/// so the rule has to live in SKILL.md and the respond runbook, and the format has to
-/// live in exactly one place in the binary. The cross-parser property itself is
-/// behaviour-tested by `a_timestamped_heading_reads_the_same_through_every_parser` in
-/// `agent-doc-turn`; this guard stops the instruction text and the owner from drifting.
+/// so the rule has to live in SKILL.md and the respond runbook. The agent authors the
+/// model and timestamp from its preflight contract; the production write canonicalizer
+/// must preserve the complete heading. The cross-parser property itself is behaviour-
+/// tested by `a_timestamped_heading_reads_the_same_through_every_parser` in
+/// `agent-doc-turn`; this guard stops the instruction text and production owner from
+/// drifting.
 #[test]
 fn test_response_header_timestamp_contract_is_documented_and_singly_owned() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -16292,8 +16294,6 @@ fn test_response_header_timestamp_contract_is_documented_and_singly_owned() {
     for required in [
         "pub const RESPONSE_ATTRIBUTION_SEPARATOR",
         "pub const RESPONSE_TOPIC_ATTRIBUTION_SEPARATOR",
-        "pub fn response_heading_attribution(",
-        "pub fn response_heading(",
         "pub fn response_heading_model_and_timestamp(",
         "pub fn response_heading_timestamp_is_wellformed(",
     ] {
@@ -16302,6 +16302,20 @@ fn test_response_header_timestamp_contract_is_documented_and_singly_owned() {
             "agent-doc-turn must own the response heading format: {required}"
         );
     }
+
+    assert!(
+        !response_text.contains("pub fn response_heading("),
+        "agent-doc-turn must not expose a test-only heading constructor that the production write path bypasses"
+    );
+
+    let write_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
+    let production_owner =
+        "agent_doc_template::response_materialization::canonicalize_strict_closeout_response_heading(";
+    assert!(
+        write_runtime.matches(production_owner).count() >= 2,
+        "strict closeout and tracked-work prevalidation must share the production heading canonicalizer"
+    );
 
     // The timestamp must NOT be joined with a second spaced em dash: three parsers
     // split the heading on the first one and `strip_re_heading_attribution` on the

@@ -2139,6 +2139,71 @@ mod tests {
         ));
     }
 
+    /// GH #137: the response-heading constructor in `agent-doc-turn` was never
+    /// called by production. Cover the real strict-closeout path instead: an
+    /// agent-authored model attribution and local timestamp must survive response
+    /// canonicalization, template patching, document write, and commit.
+    #[test]
+    fn gh137_strict_closeout_writes_attributed_timestamped_heading_to_session_document() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "session: gh137\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: merge\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Verify the response heading write path.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let heading = "### Re: GH #137 — gpt-5 · 2026-10-05T12:34-04:00";
+        let response = format!(
+            "<!-- patch:exchange -->\n{heading}\n\nProduction write-path coverage.\n<!-- /patch:exchange -->\n"
+        );
+        agent_doc_write_runtime_io::run_command_with_response(
+            agent_doc_write_command_io::CommandOptions::repair_replay(
+                &doc,
+                true,
+                false,
+                false,
+                &[],
+            ),
+            agent_doc_write_command_io::CommitMode::Required,
+            response,
+        )
+        .unwrap();
+
+        let written = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            written.contains(heading),
+            "written session document:\n{written}"
+        );
+        assert_eq!(written.matches(heading).count(), 1);
+        let committed = ProcessCommand::new("git")
+            .current_dir(dir.path())
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(committed.status.success());
+        let committed = String::from_utf8(committed.stdout).unwrap();
+        assert!(
+            committed.contains(heading),
+            "committed session document:\n{committed}"
+        );
+    }
+
     /// GH 91: ordinary `repair` (the route closeout drain's recovery step)
     /// replayed an unlandable capture into an append-format document — the
     /// template replay guard does not cover append documents. It must refuse

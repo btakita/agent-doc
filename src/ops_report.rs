@@ -832,6 +832,9 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
         None if let Some(site) = crdt_convergence_wait_site(event_name) => {
             format!("crdt convergence wait {site}")
         }
+        None if is_project_controller_critical_deadline(message) => {
+            "project controller 5s deadline expiry".to_string()
+        }
         _ => return None,
     };
 
@@ -1026,6 +1029,14 @@ fn cluster_seed(event: &ClassifiedEvent) -> Option<ClusterSeed> {
     let reason = event.fields.get("reason").map(String::as_str);
     let category = event.category.as_str();
 
+    if category == "project controller 5s deadline expiry" {
+        return Some(ClusterSeed {
+            family: "project controller deadline pressure",
+            severity: "high",
+            recommendation: "inspect the grouped record kinds and controller ingress slow-holder diagnostics; state-event publications retry once, while repeated expiries require controller recovery",
+        });
+    }
+
     if matches!(
         event.event_kind,
         Some(
@@ -1118,6 +1129,10 @@ fn cluster_seed(event: &ClassifiedEvent) -> Option<ClusterSeed> {
     }
 
     None
+}
+
+fn is_project_controller_critical_deadline(message: &str) -> bool {
+    message.contains("timed out after 5.0s waiting for project controller response")
 }
 
 fn severity_rank(severity: &str) -> usize {
@@ -1620,6 +1635,45 @@ mod tests {
             thread_link,
             "expected a bug cluster to retain Codex thread correlation keys: {:#?}",
             report.bug_clusters
+        );
+    }
+
+    #[test]
+    fn ops_summary_surfaces_project_controller_5s_deadline_rate_across_record_kinds() {
+        let root = Path::new("/repo");
+        let log = "\
+[300] document_authority_state_event_error file=/repo/tasks/a.md source=editor error=timed out after 5.0s waiting for project controller response
+[301] retained_write_settlement_local_fallback file=/repo/tasks/a.md source=preflight reason=timed out after 5.0s waiting for project controller response
+[302] controller_orphan_drain_worker_failed file=/repo/tasks/b.md error=timed out after 5.0s waiting for project controller response
+[303] controller_model_pressure_recorded file=/repo/tasks/a.md error=timed out after 0.8s waiting for project controller response
+";
+
+        let report =
+            summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
+
+        assert_eq!(
+            report.matched_events, 3,
+            "0.8s recorder noise stays excluded"
+        );
+        let deadline = report
+            .bug_clusters
+            .iter()
+            .find(|cluster| cluster.family == "project controller deadline pressure")
+            .expect("controller deadline cluster");
+        assert_eq!(deadline.severity, "high");
+        assert_eq!(deadline.count, 3);
+        assert_eq!(deadline.files, vec!["tasks/a.md", "tasks/b.md"]);
+        assert!(
+            deadline
+                .examples
+                .iter()
+                .any(|sample| { sample.contains("document_authority_state_event_error") })
+        );
+        assert!(
+            deadline
+                .examples
+                .iter()
+                .any(|sample| { sample.contains("controller_orphan_drain_worker_failed") })
         );
     }
 

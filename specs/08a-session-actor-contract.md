@@ -130,6 +130,16 @@ No legacy layout file is imported or emitted.
   and client-side response reads are bounded, each accepted client is handled
   independently, and readiness checks must release any idle controller stream
   before issuing a real RPC.
+- A controller response deadline must not silently discard a typed state event.
+  State-event publication may reconnect and retry exactly once because the
+  stable event id makes ingress idempotent; a second deadline remains a caller-
+  visible error. The retry is recorded as
+  `controller_state_event_deadline_retry`. Operational summaries group the
+  existing 5.0s expiry-bearing record kinds into the high-severity
+  `project controller deadline pressure` cluster, while the 0.8s model-pressure
+  recorder remains excluded from that critical family. Model-pressure cooldown
+  persistence may refresh during a continuous episode, but emits
+  `controller_model_pressure_recorded` only when a new episode begins.
 - Controller lazy launch must not trust a stale `current_exe()` path after a
   local binary replacement. If that path no longer exists, launch and bootstrap
   identity resolution fall back to the invoked command or `agent-doc` on `PATH`;

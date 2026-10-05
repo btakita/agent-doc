@@ -101,12 +101,47 @@ hello round trip, plus accepted/applied, plus at least 6 serial controller RPCs:
 registration lookups ×1-2, the visible-write status/await loop at ≥3 per
 iteration, and the canonical fold ≥1 (`agent-doc-write-ipc-io/src/transport.rs:354-1090`).
 
-**Closeout ACK.** Claim: 1 RPC, 15s. Heartbeat: 1 RPC every 100s. Release:
-1 RPC. Waiters long-poll for up to 30s (`rpc.rs:5314-5400`, `:63`). The full
-closeout chain was not traced, so treat these counts as a lower bound.
+**Closeout ACK.** Traced in `#netadv5` (finalize of a CRDT document with an
+attached editor, `run_stream`). Every non-embedded `request_controller*` call
+pays a `connect_or_launch` `status` round trip before its real request.
+
+| Step | Site | Serial round trips |
+|---|---|---|
+| Owner claim (`claim_closeout_owner_for_file`) | write-runtime-io `claim_foreground_closeout_owner`; `rpc.rs` claim | 2 (was 3: a redundant `ensure_controller_running` was removed in `#netadv5`; pinned by `CLOSEOUT_OWNER_CLAIM_SERIAL_ROUND_TRIPS`) |
+| Lease heartbeat | background thread every 100s | 2 each, not serial |
+| Stale-supervisor stage check | `recycle_stale_supervisor_for_turn_stage("finalize_write_start")` | 1-2 |
+| Live queue heads + pre-write guards | `observe_live_queue_heads`, `resolve_commit_mode`, lint | ≥5 (cycle-state projection reads over `send_ndjson_request_to_actor`) |
+| `response_cell_add` | `response_cell_via_controller_model_for_doc` | 3, plus nested `deliver_crdt_remote` 2 per editor inside the handler |
+| Materialize + canonical observe | `materialize_response_cell_projection` | ≥2 |
+| Visible-delivery receipt | `visible_editor_projection_receipt_for_target` + wake subscribe | 2, or ~5 per wait iteration |
+| Native save | `await_canonical_editor_projection_persisted` → `persist_current` (editor IPC, 2) + observes | ≈7 |
+| Commit barrier, `commit_document` (+ nested `refresh_vcs` 2 per editor), baseline record | `complete_required_closeout` | ≈7 |
+| Cycle commit, maintenance, clean-closeout, actor closeout, terminal proof | `closeout.rs:226-319` | ≥5 |
+| Owner release (`release_closeout_owner_for_file`) | `CloseoutOwnerGuard` drop | 2 (was 3; pinned by `CLOSEOUT_OWNER_RELEASE_SERIAL_ROUND_TRIPS`) |
+
+Floor: about 26 serial round trips after the `#netadv5` trim, realistically
+50 or more once the dynamic cycle-state projection reads are counted. The
+claim/release budget is asserted by
+`closeout_owner_claim_and_release_stay_within_round_trip_budget` through the
+per-thread probe `controller_round_trips_on_this_thread`. Each editor intent is
+asserted at 2 round trips (`EDITOR_INTENT_SERIAL_ROUND_TRIPS`,
+`editor_intent_costs_two_serial_round_trips`). The `send_ndjson_request_to_actor`
+funnel in `agent-doc-state-wire` is not yet counted.
+
+Fixed sleeps on this path: native-save fallback 25→250ms backoff
+(`agent-doc-document-realtime-io/src/lib.rs:1825`, bounded by
+`CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS`) and the CRDT write-frontier backoff
+(`:3999`). Both poll an observable state rather than deciding by time, but
+should become wake-driven.
 
 **Focus projection.** 1-2 plugin round trips (focus lane plus spanning lane),
-then about 12-16 serial subprocesses in the controller:
+then about 12-16 serial subprocesses in the controller. `#netadv5` trace of the
+`Focus` intent: 1 `i3-msg -t get_tree` (`rpc.rs:9879`; the second one runs only
+on the fenced async-focus path) and 14 tmux subprocesses (15 with
+`list-windows`), including three separate `list-panes -a` and two repeated
+`display-message #{window_id}`; no pane-snapshot scope is open. Not yet
+asserted by a test: the handler takes a concrete `tmux_router::Tmux`, so the
+`TmuxCommandRunner` fakes cannot be injected. Original audit list:
 
 - 2 × `i3-msg -t get_tree` (`rpc.rs:9857`, `:24681`)
 - `pane_alive` ×2, `pane_pid`, `pane_session`, `active_window`, `active_pane`, `pane_window`, `list-windows`

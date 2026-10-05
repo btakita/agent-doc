@@ -413,8 +413,17 @@ pub enum SocketReceiptClassification {
     /// not applied it yet. Liveness only; the sender must keep waiting for a
     /// terminal receipt.
     Pending,
+    /// `#netadv5` R2: terminal "slow, still trying" receipt. The endpoint
+    /// answered, but its own bounded wait (replica attach, document lane)
+    /// elapsed before the action finished. It is **not** a refusal: the
+    /// submitted work may still land, so the sender retries later and must
+    /// never count this toward a definitive-refusal verdict.
+    Deferred,
     Unsupported,
 }
+
+/// The receipt line for [`SocketReceiptClassification::Deferred`].
+pub const DEFERRED_RECEIPT_LINE: &str = r#"{"type":"receipt","status":"deferred"}"#;
 
 /// Classify a plugin-sent IPC receipt line.
 pub fn classify_socket_receipt(receipt: &str) -> SocketReceiptClassification {
@@ -445,6 +454,7 @@ pub fn classify_socket_receipt(receipt: &str) -> SocketReceiptClassification {
     match status {
         Some(s) if s.eq_ignore_ascii_case("applied") => SocketReceiptClassification::Applied,
         Some(s) if s.eq_ignore_ascii_case("rejected") => SocketReceiptClassification::Rejected,
+        Some(s) if s.eq_ignore_ascii_case("deferred") => SocketReceiptClassification::Deferred,
         _ => SocketReceiptClassification::Unsupported,
     }
 }
@@ -1586,6 +1596,18 @@ mod tests {
         assert_eq!(
             classify_socket_receipt(early_receipt_line()),
             SocketReceiptClassification::Pending
+        );
+    }
+
+    #[test]
+    fn classify_socket_receipt_separates_deferred_from_rejected() {
+        assert_eq!(
+            classify_socket_receipt(super::DEFERRED_RECEIPT_LINE),
+            SocketReceiptClassification::Deferred
+        );
+        assert_eq!(
+            classify_socket_receipt(r#"{"type":"receipt","status":"rejected"}"#),
+            SocketReceiptClassification::Rejected
         );
     }
 

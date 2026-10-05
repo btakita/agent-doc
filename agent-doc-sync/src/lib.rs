@@ -30,6 +30,48 @@ pub const SYNC_DOCTOR_REPAIR_BUDGET: Duration = Duration::from_millis(250);
 pub const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
 pub const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
 pub const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
+/// `#netadv5` R7: override for [`SYNC_LOCK_WAIT_BUDGET`] (milliseconds). Since a
+/// contended full sync now aborts retryably instead of proceeding unlocked, the
+/// wait gates progress, so slow hosts (Coder + Zscaler) may raise it.
+pub const SYNC_LOCK_WAIT_BUDGET_ENV: &str = "AGENT_DOC_SYNC_LOCK_WAIT_MS";
+
+/// The full-sync lock wait budget, honouring [`SYNC_LOCK_WAIT_BUDGET_ENV`].
+pub fn sync_lock_wait_budget_from_env_value(raw: Option<&str>) -> Duration {
+    raw.and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(SYNC_LOCK_WAIT_BUDGET)
+}
+
+/// `#netadv5` R7: what a sync does after its bounded lock wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncLockDisposition {
+    /// The lock is held (or no lock can exist for anyone): reconcile.
+    Proceed,
+    /// Safe-passive sync lost the race: skip, the next selection retries.
+    SkipPassive,
+    /// A full sync lost the race: abort with a retryable error. Mutual
+    /// exclusion must never end because a timer fired.
+    AbortRetryable,
+}
+
+/// Pure policy: `contended` is true only when another holder was observed.
+pub fn sync_lock_disposition(
+    mode: AutoStartMode,
+    acquired: bool,
+    contended: bool,
+) -> SyncLockDisposition {
+    if acquired || !contended {
+        return SyncLockDisposition::Proceed;
+    }
+    match mode {
+        AutoStartMode::SafePassive => SyncLockDisposition::SkipPassive,
+        AutoStartMode::Full => SyncLockDisposition::AbortRetryable,
+    }
+}
+
+/// Marker for the retryable full-sync lock-contention abort.
+pub const SYNC_LOCK_CONTENDED_RETRY_MARKER: &str = "sync_lock_contended_retry_later";
 /// Default stale bound for the cross-editor native sync guard.
 pub const DEFAULT_SYNC_LOCK_STALE_BOUND_MS: u64 = 45_000;
 
@@ -1177,6 +1219,35 @@ mod tests {
             message.contains("during auto-start.\n\ninvalid YAML frontmatter in tasks/bad.md"),
             "{message}"
         );
+    }
+
+    /// `#netadv5` R7: a contended full sync never proceeds without its lock.
+    #[test]
+    fn contended_full_sync_aborts_instead_of_running_unlocked() {
+        assert_eq!(
+            sync_lock_disposition(AutoStartMode::Full, false, true),
+            SyncLockDisposition::AbortRetryable
+        );
+        assert_eq!(
+            sync_lock_disposition(AutoStartMode::SafePassive, false, true),
+            SyncLockDisposition::SkipPassive
+        );
+        assert_eq!(
+            sync_lock_disposition(AutoStartMode::Full, true, false),
+            SyncLockDisposition::Proceed
+        );
+        // No lock file can exist for anyone (unwritable dir): no exclusion to lose.
+        assert_eq!(
+            sync_lock_disposition(AutoStartMode::Full, false, false),
+            SyncLockDisposition::Proceed
+        );
+        assert_eq!(sync_lock_wait_budget_from_env_value(None), SYNC_LOCK_WAIT_BUDGET);
+        assert_eq!(
+            sync_lock_wait_budget_from_env_value(Some("15000")),
+            Duration::from_secs(15)
+        );
+        assert_eq!(sync_lock_wait_budget_from_env_value(Some("0")), SYNC_LOCK_WAIT_BUDGET);
+        assert_eq!(sync_lock_wait_budget_from_env_value(Some("x")), SYNC_LOCK_WAIT_BUDGET);
     }
 
     #[test]

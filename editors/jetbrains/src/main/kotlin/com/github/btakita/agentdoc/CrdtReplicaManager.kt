@@ -1148,6 +1148,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         await: Boolean = false,
         forceRefresh: Boolean = false,
         requireFreshRegistration: Boolean = false,
+        // `#netadv5` R2: told when the bounded await elapsed with the attach still
+        // running, so the caller can answer "slow, still trying" instead of "refused".
+        onAwaitTimeout: (() -> Unit)? = null,
     ): Boolean {
         // TypingTracker reports the Lazily current-document projection after
         // each coalesced edit burst. Once this document already owns a live
@@ -1247,7 +1250,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 documentWorkers.forDocument(filePath).submit<Boolean> { attach() }
                     .get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             } catch (e: TimeoutException) {
-                log.warn("[crdt-replica] open-document attach timed out for $filePath after ${CRDT_AWAIT_ATTACH_TIMEOUT_MS}ms")
+                log.warn("[crdt-replica] open-document attach timed out for $filePath after ${CRDT_AWAIT_ATTACH_TIMEOUT_MS}ms (attach still running; receipt=deferred)")
+                onAwaitTimeout?.invoke()
                 false
             } catch (e: Exception) {
                 log.debug("[crdt-replica] open-document attach failed for $filePath: ${e.message}")
@@ -4211,6 +4215,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             filePath: String,
             expectedContentHash: String,
             expectedContentLen: Int,
+            // `#netadv5` R2: set when `false` is a document-lane timeout. The
+            // submitted save is not cancelled and may still land, so the receipt
+            // is "deferred", never a definitive save refusal.
+            pendingOut: AtomicBoolean? = null,
         ): Boolean {
             val manager = managerForFile(project, filePath) ?: run {
                 com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java).warn(
@@ -4244,8 +4252,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     result.get()
                 }.get(CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             } catch (_: TimeoutException) {
+                pendingOut?.set(true)
                 manager.log.warn(
-                    "[crdt-replica] native persist-current rejected reason=document_lane_timeout " +
+                    "[crdt-replica] native persist-current deferred reason=document_lane_timeout " +
                         "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen " +
                         "timeout_ms=$CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS",
                 )
@@ -4598,6 +4607,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             project: Project,
             filePath: String,
             reason: String,
+            // `#netadv5` R2: set when `false` means "slow, still trying" (attach
+            // still running past the bounded wait, or a re-register already in
+            // flight) rather than "this editor cannot attach".
+            pendingOut: AtomicBoolean? = null,
         ): Boolean {
             var captured: Triple<CrdtReplicaManager, String, Document>? = null
             var captureMiss: String? = null
@@ -4643,8 +4656,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val fileName = File(resolvedFilePath).name
             if (!manager.beginProjectionRecoveryReregister(resolvedFilePath)) {
                 manager.log.info(
-                    "[crdt-replica] coalesced projection-recovery re-register for $fileName reason=$reason receipt=not_attached",
+                    "[crdt-replica] coalesced projection-recovery re-register for $fileName reason=$reason receipt=deferred",
                 )
+                pendingOut?.set(true)
                 return false
             }
             manager.log.info(
@@ -4656,6 +4670,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 await = true,
                 forceRefresh = true,
                 requireFreshRegistration = true,
+                onAwaitTimeout = { pendingOut?.set(true) },
             )
             if (!attached) {
                 // The controller owns a bounded retry loop. A failed attempt must

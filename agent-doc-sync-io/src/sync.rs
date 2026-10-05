@@ -206,7 +206,7 @@ use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_supervisor::startup_miss::unresolved_startup_miss_blocks_autostart;
 use agent_doc_sync::{
     AutoStartMode, RENAME_DEBOUNCE_TTL_SECS, SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
-    SYNC_DOCTOR_REPAIR_BUDGET, SYNC_LOCK_WAIT_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET,
+    SYNC_DOCTOR_REPAIR_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET,
     SYNC_OWNERSHIP_PROOF_BUDGET, SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET,
     SYNC_PRUNE_SUBPHASE_BUDGET, SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
     SYNC_WINDOW_RESOLUTION_BUDGET, WindowIndexNormalizationPlan, auto_started_panes_summary,
@@ -2722,6 +2722,44 @@ fn sanitize_cross_root_layout(
     (sanitized, dropped)
 }
 
+/// `#netadv5` R7: acquire the sync lock and apply
+/// [`agent_doc_sync::sync_lock_disposition`]. `Ok(Some(guard))` proceeds,
+/// `Ok(None)` is the quiet safe-passive skip, and `Err` is a retryable abort:
+/// a full sync never reconciles stash/join-pane state without exclusion just
+/// because its wait budget elapsed.
+pub(crate) fn acquire_sync_lock_for_mode(
+    lock_path: &Path,
+    auto_start_mode: AutoStartMode,
+    wait_budget: Duration,
+    mut log: impl FnMut(String),
+) -> Result<Option<crate::SyncLockAcquire>> {
+    let start = Instant::now();
+    let guard = acquire_sync_lock(lock_path, wait_budget, &mut log);
+    let elapsed = start.elapsed();
+    let contended = matches!(guard, crate::SyncLockAcquire::Contended);
+    match agent_doc_sync::sync_lock_disposition(auto_start_mode, guard.is_acquired(), contended) {
+        agent_doc_sync::SyncLockDisposition::Proceed => Ok(Some(guard)),
+        agent_doc_sync::SyncLockDisposition::SkipPassive => {
+            let message =
+                agent_doc_sync::safe_passive_lock_contention_message(elapsed, wait_budget);
+            eprintln!("{}", message);
+            log(message);
+            Ok(None)
+        }
+        agent_doc_sync::SyncLockDisposition::AbortRetryable => {
+            let message = format!(
+                "{} lock={} elapsed_ms={} budget_ms={} action=retry (a full sync never runs without its lock)",
+                agent_doc_sync::SYNC_LOCK_CONTENDED_RETRY_MARKER,
+                lock_path.display(),
+                elapsed.as_millis(),
+                wait_budget.as_millis(),
+            );
+            log(message.clone());
+            anyhow::bail!(message)
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_with_options_internal_at_root(
     project_root: &Path,
@@ -2760,12 +2798,22 @@ fn run_with_options_internal_at_root(
     let sync_lock_wait_budget = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
         SYNC_LOCK_WAIT_LATENCY_BUDGET
     } else {
-        SYNC_LOCK_WAIT_BUDGET
+        agent_doc_sync::sync_lock_wait_budget_from_env_value(
+            std::env::var(agent_doc_sync::SYNC_LOCK_WAIT_BUDGET_ENV)
+                .ok()
+                .as_deref(),
+        )
     };
     let sync_lock_start = Instant::now();
-    let lock_guard = acquire_sync_lock(lock_path, sync_lock_wait_budget, |message| {
-        sync_log(&message);
-    });
+    let Some(lock_guard) = acquire_sync_lock_for_mode(
+        lock_path,
+        auto_start_mode,
+        sync_lock_wait_budget,
+        |message| sync_log(&message),
+    )?
+    else {
+        return Ok(());
+    };
     let sync_lock_elapsed = sync_lock_start.elapsed();
     log_sync_latency(
         focus,
@@ -2774,15 +2822,6 @@ fn run_with_options_internal_at_root(
         SYNC_LOCK_WAIT_LATENCY_BUDGET,
         auto_start_mode,
     );
-    if matches!(auto_start_mode, AutoStartMode::SafePassive) && !lock_guard.is_acquired() {
-        let message = agent_doc_sync::safe_passive_lock_contention_message(
-            sync_lock_elapsed,
-            sync_lock_wait_budget,
-        );
-        eprintln!("{}", message);
-        sync_log(&message);
-        return Ok(());
-    }
 
     // `#syncobscache`: with the sync lock held we own the layout, so tmux's
     // structural answers are coherent for the rest of this pass. Reconciliation
@@ -9422,6 +9461,54 @@ mod tests {
             agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
     }
+    /// `#netadv5` R7: a slow prior sync holds the lock past the wait budget.
+    /// The full sync must abort retryably (no unlocked reconcile), and once
+    /// the holder releases, a retry acquires and proceeds.
+    #[test]
+    fn contended_full_sync_aborts_then_progresses_after_release() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lock_path = tmp.path().join(".agent-doc/sync.lock");
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        let holder = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&holder).unwrap();
+
+        let err = acquire_sync_lock_for_mode(
+            &lock_path,
+            AutoStartMode::Full,
+            Duration::from_millis(80),
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains(agent_doc_sync::SYNC_LOCK_CONTENDED_RETRY_MARKER),
+            "{err:#}"
+        );
+        let passive = acquire_sync_lock_for_mode(
+            &lock_path,
+            AutoStartMode::SafePassive,
+            Duration::from_millis(20),
+            |_| {},
+        )
+        .unwrap();
+        assert!(passive.is_none(), "safe-passive contention skips quietly");
+
+        fs2::FileExt::unlock(&holder).unwrap();
+        let retried = acquire_sync_lock_for_mode(
+            &lock_path,
+            AutoStartMode::Full,
+            Duration::from_millis(80),
+            |_| {},
+        )
+        .unwrap()
+        .expect("the retry after release proceeds");
+        assert!(retried.is_acquired());
+    }
+
     #[test]
     fn acquire_sync_lock_times_out_when_lock_is_held() {
         let tmp = tempfile::TempDir::new().unwrap();

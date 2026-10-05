@@ -634,7 +634,23 @@ pub(crate) fn request_path_with_reason(path: &Path, command: &str, reason: &str)
     )
 }
 
+thread_local! {
+    static CONTROLLER_ROUND_TRIPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `#netadv5` RTT budget probe: serial controller-socket round trips issued by
+/// the calling thread (every request written and awaited through either
+/// request funnel). Hot-path tests diff this around one operation.
+pub fn controller_round_trips_on_this_thread() -> u64 {
+    CONTROLLER_ROUND_TRIPS.with(std::cell::Cell::get)
+}
+
+fn note_controller_round_trip() {
+    CONTROLLER_ROUND_TRIPS.with(|count| count.set(count.get() + 1));
+}
+
 fn request_path_json(path: &Path, request_value: serde_json::Value) -> Result<String> {
+    note_controller_round_trip();
     // `#preflightdeadline`: inside a preflight admission, no RPC may wait past
     // the admission deadline, and none may start once it is spent.
     let timeout = agent_doc_debounce::admission_deadline::clamp_or_exhausted(
@@ -1432,6 +1448,7 @@ fn request_controller_on_stream_with_timeout<T: DeserializeOwned>(
     timeout: Duration,
     stream: interprocess::local_socket::Stream,
 ) -> Result<T> {
+    note_controller_round_trip();
     // `#preflightdeadline`: every per-call timeout is clamped to the preflight
     // admission deadline (unchanged outside an admission), and a request is
     // refused before it is sent once that deadline is spent.
@@ -1929,10 +1946,32 @@ fn durable_actor_binding(
     load_actor_record(project_root, &document_id)
 }
 
+/// `#netadv5` R8: mint one idempotency key per logical dispatch request.
+fn mint_dispatch_request_key() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!(
+        "dr-{}-{}-{}",
+        std::process::id(),
+        nanos,
+        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
+}
+
 pub fn authorize_dispatch(
     project_root: &Path,
-    request: DispatchRequest,
+    mut request: DispatchRequest,
 ) -> Result<DispatchAuthorization> {
+    // `#netadv5` R8: key the request once; every retry below (transport drop,
+    // stale binary, stale-generation redirect) re-sends the same key, so a copy
+    // the controller already applied is answered, never re-injected.
+    request.diagnostic_payload = agent_doc_controller::dispatch::with_dispatch_request_key(
+        &request.diagnostic_payload,
+        &mint_dispatch_request_key(),
+    );
     // `#qflood`: every dispatch caller (route auto-start on file change, idle
     // queue continuation, `/loop`) funnels through here. Log the invocation —
     // command_kind / diagnostic_payload identify the caller — so an operator
@@ -5311,6 +5350,12 @@ pub fn new_closeout_owner_id(role: &str) -> String {
 ///
 /// The controller serializes the projection decision and fact append. SQLite is
 /// only the actor's persistence substrate and is never read by this client.
+/// `#netadv5` RTT budget: serial controller round trips for one closeout
+/// owner claim (also each lease heartbeat) and one release: the
+/// `connect_or_launch` liveness `status` plus the `command_plane_submit`.
+pub const CLOSEOUT_OWNER_CLAIM_SERIAL_ROUND_TRIPS: u64 = 2;
+pub const CLOSEOUT_OWNER_RELEASE_SERIAL_ROUND_TRIPS: u64 = 2;
+
 pub fn claim_closeout_owner_for_file(
     file: &Path,
     request: CloseoutOwnerClaimRequest,
@@ -5318,10 +5363,12 @@ pub fn claim_closeout_owner_for_file(
     use super::command_plane::{CloseoutOwnerClaimPayload, build_closeout_owner_claim_submit};
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
+    // `#netadv5` RTT budget: no separate `ensure_controller_running` here —
+    // `request_controller_with_timeout` already runs the same
+    // `connect_or_launch`, so the extra call only cost one more `status` round
+    // trip and connect on every claim and every lease heartbeat.
     #[cfg(feature = "test-support")]
     ensure_state_actor_for_tests(&project_root)?;
-    #[cfg(not(feature = "test-support"))]
-    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
     let document_path = file
         .canonicalize()
         .unwrap_or_else(|_| file.to_path_buf())
@@ -5365,7 +5412,10 @@ pub fn release_closeout_owner_for_file(
     use super::command_plane::{CloseoutOwnerReleasePayload, build_closeout_owner_release_submit};
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
-    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    // `#netadv5` RTT budget: `request_controller_with_timeout` already
+    // connects-or-launches; see `claim_closeout_owner_for_file`.
+    #[cfg(feature = "test-support")]
+    ensure_state_actor_for_tests(&project_root)?;
     let document_path = file
         .canonicalize()
         .unwrap_or_else(|_| file.to_path_buf())
@@ -12906,30 +12956,110 @@ pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -
 pub fn ensure_serving_controller(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
     // A successful connect proves only that the kernel accepted a socket. Focus
     // handoff reaches this boundary specifically after a request was not served,
-    // so require the controller's status receipt before adopting it. `status`
-    // falls back to process-backed inactive facts; only those verified
-    // same-project PIDs are reaped before the ordinary launch/adopt transition.
-    // This keeps ambiguous foreign sockets fail-closed while allowing an
-    // accepting-but-wedged controller to recover without operator intervention.
+    // so require the controller's status receipt before adopting it.
     // Do not call the public `status` projection here. Its inactive fallback
     // reads durable control-plane counts, and SQLite access is forbidden inside
     // a reloadable editor host. A direct status receipt is sufficient proof of
-    // service; on failure, process discovery supplies the only reap authority.
-    if request(project_root, "status")
-        .ok()
-        .and_then(|response| serde_json::from_str::<ControllerStatus>(&response).ok())
-        .is_some_and(|status| status.active)
-    {
-        let stream = connect(project_root)?;
-        drop(stream);
-        return Ok(());
+    // service.
+    //
+    // `#netadv5` R1: a status receipt that is merely *late* is not proof that
+    // the controller is wedged. On a slow workspace (Coder + Zscaler, a starved
+    // host, a hung tmux the controller is waiting on) a busy controller misses
+    // the 5s budget while it is mid-write, mid-closeout or mid-handoff, and the
+    // old code then SIGTERM/SIGKILLed it. Only positive evidence that nothing
+    // is bound (connect refused / socket missing) authorizes reaping verified
+    // same-project pids before the launch/adopt transition. A timeout returns
+    // a retryable "busy" error; the editor retries on its next request.
+    ensure_serving_controller_with(
+        project_root,
+        || request(project_root, "status"),
+        || {
+            for pid in discover_stale_duplicate_pids(project_root, None) {
+                reap_verified_controller_pid(project_root, pid, 0);
+            }
+        },
+        || {
+            let stream = connect_or_launch(project_root, launch_mode)?;
+            drop(stream);
+            Ok(())
+        },
+        || {
+            let stream = connect(project_root)?;
+            drop(stream);
+            Ok(())
+        },
+    )
+}
+
+/// What a `status` probe proved about the controller bound at the socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ServingProbe {
+    /// A parsed, active status receipt came back.
+    Serving,
+    /// The kernel refused the connect or the socket path is missing: nothing
+    /// is bound. Positive evidence the controller is not serving.
+    NotBound,
+    /// Connected but no usable receipt (timeout, reset, garbage). Unknown:
+    /// the controller may be busy. Never a verdict.
+    Unresponsive,
+}
+
+pub(crate) fn classify_serving_probe(result: &Result<String>) -> ServingProbe {
+    match result {
+        Ok(response) => {
+            if serde_json::from_str::<ControllerStatus>(response)
+                .is_ok_and(|status| status.active)
+            {
+                ServingProbe::Serving
+            } else {
+                ServingProbe::Unresponsive
+            }
+        }
+        Err(error) => {
+            let not_bound = error.chain().any(|cause| {
+                cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+                    matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+                })
+            });
+            if not_bound {
+                ServingProbe::NotBound
+            } else {
+                ServingProbe::Unresponsive
+            }
+        }
     }
-    for pid in discover_stale_duplicate_pids(project_root, None) {
-        reap_verified_controller_pid(project_root, pid, 0);
+}
+
+/// Error text for the retryable busy outcome of [`ensure_serving_controller`].
+pub const CONTROLLER_BUSY_RETRY_LATER: &str =
+    "controller_busy_retry_later: status receipt was late, controller left running";
+
+fn ensure_serving_controller_with(
+    project_root: &Path,
+    probe_status: impl FnOnce() -> Result<String>,
+    reap_unbound_duplicates: impl FnOnce(),
+    launch_or_adopt: impl FnOnce() -> Result<()>,
+    reconnect: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let probe = probe_status();
+    match classify_serving_probe(&probe) {
+        ServingProbe::Serving => reconnect(),
+        ServingProbe::NotBound => {
+            reap_unbound_duplicates();
+            launch_or_adopt()
+        }
+        ServingProbe::Unresponsive => {
+            let detail = match &probe {
+                Ok(_) => "unparsed_or_inactive_receipt".to_string(),
+                Err(error) => compact_controller_error(error),
+            };
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!("controller_self_heal_deferred reason=status_unresponsive detail={detail}"),
+            );
+            anyhow::bail!("{CONTROLLER_BUSY_RETRY_LATER}: {detail}")
+        }
     }
-    let stream = connect_or_launch(project_root, launch_mode)?;
-    drop(stream);
-    Ok(())
 }
 
 /// Wait for the controller socket to become connectable after a handoff drop.
@@ -17110,7 +17240,23 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
     };
     let stream = match connect(&project_root) {
         Ok(stream) => stream,
-        Err(_) => return false,
+        // `#netadv5` R5: a connect failure is evidence about the controller,
+        // not the editor. During a handoff/recycle the socket refuses while a
+        // controller process still exists and the editor is still attached.
+        Err(error) => {
+            // A socket path the OS can never bind is permanent, not transient:
+            // no editor can reach a controller there either.
+            if agent_doc_controller::paths::resolved_socket_path_rejection(&socket_path(
+                &project_root,
+            ))
+            .is_some()
+            {
+                return false;
+            }
+            return editor_live_on_controller_connect_failure(&error, || {
+                !crate::process::project_controller_pids(&project_root).is_empty()
+            });
+        }
     };
     let document_hash = agent_doc_hash::document_id_for_path(file);
     match request_controller_on_stream_with_timeout::<ControllerReliableSyncStatusResponse>(
@@ -17130,6 +17276,27 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
             true
         }
     }
+}
+
+/// `#netadv5` R5: the editor-liveness answer when the controller socket could
+/// not be connected after the local durable plane missed.
+///
+/// Only positive evidence that no controller exists at all — the kernel refused
+/// the connect (or the socket is missing) **and** no same-project controller
+/// process is running — lets the durable plane's "not live" stand. Anything
+/// else (a slow connect, a refusal while a controller process is mid-handoff)
+/// is unknown, and unknown fails closed as "live" so no disk replace is
+/// authorized behind an attached editor.
+pub(crate) fn editor_live_on_controller_connect_failure(
+    error: &anyhow::Error,
+    controller_process_present: impl FnOnce() -> bool,
+) -> bool {
+    let nothing_bound = error.chain().any(|cause| {
+        cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+        })
+    });
+    !nothing_bound || controller_process_present()
 }
 
 /// The hot-path CRDT authority for `file` (sidecar-retirement P3/P4).
@@ -20343,6 +20510,31 @@ pub(crate) fn handle_dispatch(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
+    // `#netadv5` R8 / `#netadv4` SIM-F3: a retransmitted copy of a dispatch
+    // request this controller already applied (its ACK was lost, so the caller
+    // re-sent) is answered with the original outcome and injects nothing. The
+    // key lives in state.db, so the answer survives a controller restart.
+    let request_key = agent_doc_controller::dispatch::dispatch_request_key(&diagnostic_payload)
+        .map(str::to_string);
+    if let Some(key) = request_key.as_deref() {
+        let conn = open_state_db(&bootstrap.project_root)?;
+        let recorded = state_store::load_dispatch_request_outcome(&conn, &document_id, key)?;
+        if agent_doc_controller::dispatch::dispatch_request_admission(recorded.is_some())
+            == agent_doc_controller::dispatch::DispatchRequestAdmission::DuplicateOfApplied
+            && let Some(outcome) = recorded
+        {
+            let original: DispatchAuthorization = serde_json::from_str(&outcome)
+                .context("failed to parse recorded dispatch request outcome")?;
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "dispatch_request_duplicate_answered key={} generation={} receipt_id={} action=no_inject",
+                    key, original.record.generation, original.receipt.receipt_id
+                ),
+            );
+            return Ok(original);
+        }
+    }
     // `#ctlstalebin` (#stuckhandoff2 follow-up): a controller whose own binary no
     // longer matches the installed agent-doc keeps running OLD code. `connect_or_launch`
     // hands cross-process callers to a fresh controller, but any dispatch that still
@@ -20793,11 +20985,21 @@ pub(crate) fn handle_dispatch(
             surface_observations,
         ),
     );
-    Ok(DispatchAuthorization {
+    let authorization = DispatchAuthorization {
         record,
         accepted_stage: accepted_stage.to_string(),
         receipt,
-    })
+    };
+    if let Some(key) = request_key.as_deref() {
+        let conn = open_state_db(&bootstrap.project_root)?;
+        state_store::record_dispatch_request_outcome(
+            &conn,
+            &document_id,
+            key,
+            &serde_json::to_string(&authorization)?,
+        )?;
+    }
+    Ok(authorization)
 }
 
 pub(crate) fn handle_session_status(
@@ -26901,12 +27103,33 @@ struct SupervisorReplacementWork {
     operator_receipt_id: u64,
 }
 
-#[cfg(not(any(test, feature = "test-support")))]
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SupervisorReplacementIpcStatus {
     Accepted,
     Dead,
     Failed,
+    /// `#netadv5` R9: live socket, late effect receipt — maybe accepted.
+    ResponseTimedOut,
+}
+
+/// `#netadv5` R9: classify a `restart` send error. A dead socket is positive
+/// evidence; a response timeout on a live socket means the supervisor took the
+/// command and may be executing it; anything else is a failure.
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn supervisor_replacement_ipc_error_status(
+    socket_dead: bool,
+    failure_kind: Option<agent_doc_supervisor_io::ipc::SupervisorCommandFailureKind>,
+) -> SupervisorReplacementIpcStatus {
+    if socket_dead {
+        SupervisorReplacementIpcStatus::Dead
+    } else if failure_kind
+        == Some(agent_doc_supervisor_io::ipc::SupervisorCommandFailureKind::ResponseTimeout)
+    {
+        SupervisorReplacementIpcStatus::ResponseTimedOut
+    } else {
+        SupervisorReplacementIpcStatus::Failed
+    }
 }
 
 /// `#restartlivepane`: refusing every live non-shell pane made "Restart Agent"
@@ -27114,6 +27337,9 @@ fn drive_supervisor_replacement_background(
         SupervisorReplacementIpcStatus::Accepted => SupervisorReplacementIpcOutcome::Accepted,
         SupervisorReplacementIpcStatus::Dead => SupervisorReplacementIpcOutcome::Dead,
         SupervisorReplacementIpcStatus::Failed => SupervisorReplacementIpcOutcome::Failed,
+        SupervisorReplacementIpcStatus::ResponseTimedOut => {
+            SupervisorReplacementIpcOutcome::ResponseTimedOut
+        }
     };
     match decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
         ipc_outcome,
@@ -27312,14 +27538,13 @@ fn request_supervisor_replacement_ipc(
             SupervisorReplacementIpcStatus::Failed
         }
         Err(err) => {
-            let status = if matches!(
-                agent_doc_supervisor_io::ipc::probe_socket(socket),
-                agent_doc_supervisor_io::ipc::SocketLiveness::Dead
-            ) {
-                SupervisorReplacementIpcStatus::Dead
-            } else {
-                SupervisorReplacementIpcStatus::Failed
-            };
+            let status = supervisor_replacement_ipc_error_status(
+                matches!(
+                    agent_doc_supervisor_io::ipc::probe_socket(socket),
+                    agent_doc_supervisor_io::ipc::SocketLiveness::Dead
+                ),
+                agent_doc_supervisor_io::ipc::supervisor_command_failure_kind(&err),
+            );
             agent_doc_ops_log_io::log_op(
                 &work.file,
                 &format!(
@@ -27964,6 +28189,263 @@ mod tests {
     #![allow(unused_imports)]
 
     use super::*;
+
+    /// `#netadv5` R1: a busy controller whose status receipt exceeds the 5s
+    /// budget must never be reaped. The ensure call defers with a retryable
+    /// error, and a later probe that answers adopts the same controller.
+    #[test]
+    fn slow_status_receipt_never_reaps_a_busy_controller() {
+        let root = tempfile::tempdir().unwrap();
+        let timed_out = || -> Result<String> {
+            Err(std::io::Error::new(
+                ErrorKind::TimedOut,
+                "timed out after 5.0s waiting for project controller response",
+            )
+            .into())
+        };
+        let reaped = std::cell::Cell::new(0);
+        let launched = std::cell::Cell::new(0);
+        let err = ensure_serving_controller_with(
+            root.path(),
+            timed_out,
+            || reaped.set(reaped.get() + 1),
+            || {
+                launched.set(launched.get() + 1);
+                Ok(())
+            },
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains(CONTROLLER_BUSY_RETRY_LATER));
+        assert_eq!(reaped.get(), 0, "a late receipt must not authorize a kill");
+        assert_eq!(launched.get(), 0, "a late receipt must not launch a duplicate");
+
+        // A reset mid-recycle is equally inconclusive.
+        let reset = || -> Result<String> {
+            Err(std::io::Error::from(ErrorKind::ConnectionReset).into())
+        };
+        assert!(
+            ensure_serving_controller_with(root.path(), reset, || reaped.set(9), || Ok(()), || Ok(()))
+                .is_err()
+        );
+        assert_eq!(reaped.get(), 0);
+
+        // Eventual progress: the controller finishes its work and answers.
+        let serving = || -> Result<String> { Ok(r#"{"active":true,"project_root":"/p","socket_path":"/p/.agent-doc/controller.sock"}"#.to_string()) };
+        assert_eq!(classify_serving_probe(&serving()), ServingProbe::Serving);
+        let reconnected = std::cell::Cell::new(false);
+        ensure_serving_controller_with(
+            root.path(),
+            serving,
+            || reaped.set(reaped.get() + 1),
+            || unreachable!("a serving controller is adopted, not relaunched"),
+            || {
+                reconnected.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(reconnected.get());
+        assert_eq!(reaped.get(), 0);
+    }
+
+    /// `#netadv5` R8 / `#netadv4` SIM-F3: a dispatch request whose ACK was lost
+    /// is re-sent with the same key. The controller already applied it, so the
+    /// copy is answered with the original outcome and no second receipt (no
+    /// second trigger) is created. A fresh key still dispatches normally.
+    #[test]
+    fn retransmitted_dispatch_request_is_answered_not_reinjected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/netadv5r8.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-r8\nagent: codex\n---\nBody\n")
+            .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(&doc, "session-r8", "%48", "@1", 1)
+            .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
+            &doc,
+            "session-r8",
+            "%48",
+            Some(1),
+            agent_doc_controller::actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: root.to_path_buf(),
+            socket_path: socket_path(root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity().unwrap()),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let request = |payload: &str| ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-r8".to_string()),
+            pane_id: Some("%48".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some(payload.to_string()),
+        };
+        let attempts = || -> i64 {
+            open_state_db(root)
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM dispatch_attempts", [], |row| row.get(0))
+                .unwrap()
+        };
+        let keyed =
+            agent_doc_controller::dispatch::with_dispatch_request_key("netadv5", "dr-test-1");
+        let first = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
+        let after_first = attempts();
+
+        // The ACK was lost; the caller retransmits the same request.
+        let copy = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
+        assert_eq!(copy, first, "a duplicate is answered with the original outcome");
+        assert_eq!(attempts(), after_first, "a duplicate never creates a second dispatch");
+
+        // Durable: a restarted controller (fresh schema memo) still answers it.
+        state_store::reset_state_db_schema_convergence_memo();
+        let after_restart = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
+        assert_eq!(after_restart, first);
+        assert_eq!(attempts(), after_first);
+        let ops_log = std::fs::read_to_string(doc.parent().unwrap().parent().unwrap().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(ops_log.contains("dispatch_request_duplicate_answered"), "{ops_log}");
+
+        // Eventual progress: a new logical request (new key) is evaluated fresh.
+        let fresh =
+            agent_doc_controller::dispatch::with_dispatch_request_key("netadv5", "dr-test-2");
+        let _ = handle_dispatch(&bootstrap, None, request(&fresh));
+        assert!(attempts() > after_first, "a new key is a new request");
+    }
+
+    /// `#netadv5` RTT budget for the closeout ACK lease: one claim and one
+    /// release each cost exactly their budgeted serial controller round trips.
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn closeout_owner_claim_and_release_stay_within_round_trip_budget() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/rtt.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-rtt\n---\nBody\n").unwrap();
+        // Warm the in-process controller so the measured calls see a serving one.
+        ensure_state_actor_for_tests(root).unwrap();
+
+        let before = controller_round_trips_on_this_thread();
+        let outcome = claim_closeout_owner_for_file(
+            &doc,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: None,
+                owner_id: "rtt-owner".to_string(),
+                owner_pid: std::process::id(),
+                role: CLOSEOUT_OWNER_ROLE_FOREGROUND_FINALIZE.to_string(),
+                now_secs: timestamp_secs(),
+                lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+        );
+        let claim_rtt = controller_round_trips_on_this_thread() - before;
+        assert_eq!(
+            claim_rtt, CLOSEOUT_OWNER_CLAIM_SERIAL_ROUND_TRIPS,
+            "claim outcome={outcome:?}"
+        );
+
+        let before = controller_round_trips_on_this_thread();
+        let released = release_closeout_owner_for_file(&doc, "cycle", "rtt-owner", "netadv5");
+        let release_rtt = controller_round_trips_on_this_thread() - before;
+        assert_eq!(
+            release_rtt, CLOSEOUT_OWNER_RELEASE_SERIAL_ROUND_TRIPS,
+            "release outcome={released:?}"
+        );
+    }
+
+    /// `#netadv5` R9: a restart whose receipt is late on a live socket is
+    /// "maybe accepted", never a failure that escalates to a cold start.
+    #[test]
+    fn late_supervisor_restart_receipt_is_maybe_accepted() {
+        use agent_doc_supervisor_io::ipc::SupervisorCommandFailureKind as K;
+        assert!(matches!(
+            supervisor_replacement_ipc_error_status(false, Some(K::ResponseTimeout)),
+            SupervisorReplacementIpcStatus::ResponseTimedOut
+        ));
+        assert!(matches!(
+            supervisor_replacement_ipc_error_status(true, Some(K::ResponseTimeout)),
+            SupervisorReplacementIpcStatus::Dead
+        ));
+        assert!(matches!(
+            supervisor_replacement_ipc_error_status(false, Some(K::Connect)),
+            SupervisorReplacementIpcStatus::Failed
+        ));
+        assert!(matches!(
+            supervisor_replacement_ipc_error_status(false, None),
+            SupervisorReplacementIpcStatus::Failed
+        ));
+    }
+
+    /// `#netadv5` R5: a controller that refuses connects mid-handoff is not
+    /// evidence that the editor closed. Only refused + no controller process
+    /// lets the durable plane's "not live" stand.
+    #[test]
+    fn controller_connect_failure_is_not_proof_of_no_live_editor() {
+        let refused = anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+            .context("failed to connect to project controller");
+        assert!(
+            editor_live_on_controller_connect_failure(&refused, || true),
+            "refused while a controller process exists (handoff) is unknown → live"
+        );
+        assert!(
+            !editor_live_on_controller_connect_failure(&refused, || false),
+            "refused with no controller process: the durable plane is authoritative"
+        );
+        let missing = anyhow::Error::new(std::io::Error::from(ErrorKind::NotFound));
+        assert!(!editor_live_on_controller_connect_failure(&missing, || false));
+        // A slow/blocked connect proves nothing, even without a visible process.
+        let slow = anyhow::Error::new(std::io::Error::from(ErrorKind::TimedOut));
+        assert!(editor_live_on_controller_connect_failure(&slow, || false));
+        let path_rejected = anyhow::anyhow!("socket path too long");
+        assert!(editor_live_on_controller_connect_failure(&path_rejected, || false));
+    }
+
+    /// Positive evidence (nothing bound) still recovers: reap verified
+    /// duplicates, then launch/adopt.
+    #[test]
+    fn refused_status_connect_is_positive_evidence_for_relaunch() {
+        let root = tempfile::tempdir().unwrap();
+        let refused = || -> Result<String> {
+            Err(anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+                .context("failed to connect to project controller"))
+        };
+        assert_eq!(classify_serving_probe(&refused()), ServingProbe::NotBound);
+        let order = std::cell::RefCell::new(Vec::new());
+        ensure_serving_controller_with(
+            root.path(),
+            refused,
+            || order.borrow_mut().push("reap"),
+            || {
+                order.borrow_mut().push("launch");
+                Ok(())
+            },
+            || unreachable!(),
+        )
+        .unwrap();
+        assert_eq!(*order.borrow(), vec!["reap", "launch"]);
+    }
 
     #[test]
     fn editor_route_terminal_reason_carries_the_route_blocker() {

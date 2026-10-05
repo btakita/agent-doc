@@ -783,6 +783,31 @@ pub fn supervisor_lease_is_fresh_and_alive(
     fresh_heartbeat && supervisor_process_alive
 }
 
+/// `#netadv5` R6: does a foreign supervisor lease still hold its document for
+/// the purpose of refusing a claim auto-force (a destructive takeover)?
+///
+/// The lease heartbeat is refreshed only on register, lifecycle transitions and
+/// status reconcile, never periodically, so a live supervisor that sits idle
+/// for longer than `stale_after` reads stale. Staleness is a timer, not
+/// evidence. The takeover therefore proceeds only on positive evidence that the
+/// holder is gone: the pid is dead, or it is alive but no longer the supervisor
+/// of this document (pid reuse / re-exec onto another document). A live pid
+/// whose command line still names this document holds regardless of heartbeat
+/// age.
+pub fn supervisor_lease_holds_against_takeover(
+    last_heartbeat: Option<u64>,
+    supervisor_process_alive: bool,
+    supervisor_process_owns_document: bool,
+    now: u64,
+    stale_after: Duration,
+) -> bool {
+    if !supervisor_process_alive {
+        return false;
+    }
+    supervisor_process_owns_document
+        || supervisor_lease_is_fresh_and_alive(last_heartbeat, true, now, stale_after)
+}
+
 /// `#supdrainlive` (GH #73) — whether the document's supervisor can actually
 /// receive a `deferred_for_supervisor_drain` hand-off.
 ///
@@ -1914,6 +1939,51 @@ mod tests {
                 launched_elapsed: Duration::from_secs(46),
                 ..base
             }
+        ));
+    }
+
+    /// `#netadv5` R6: an idle supervisor whose heartbeat aged past the 60s
+    /// window still holds its document while its pid is alive and still names
+    /// the document. Only a dead or re-purposed pid permits takeover.
+    #[test]
+    fn idle_supervisor_with_stale_heartbeat_still_holds_against_takeover() {
+        let stale_after = Duration::from_secs(60);
+        let now = 10_000;
+        let idle_for_hours = Some(now - 7_200);
+        assert!(
+            !supervisor_lease_is_fresh_and_alive(idle_for_hours, true, now, stale_after),
+            "precondition: the timer alone reads stale"
+        );
+        assert!(supervisor_lease_holds_against_takeover(
+            idle_for_hours,
+            true,
+            true,
+            now,
+            stale_after
+        ));
+        // Positive evidence: dead pid.
+        assert!(!supervisor_lease_holds_against_takeover(
+            idle_for_hours,
+            false,
+            true,
+            now,
+            stale_after
+        ));
+        // Positive evidence: alive pid that no longer supervises this document.
+        assert!(!supervisor_lease_holds_against_takeover(
+            idle_for_hours,
+            true,
+            false,
+            now,
+            stale_after
+        ));
+        // Fresh heartbeat holds even without cmdline evidence (non-Linux).
+        assert!(supervisor_lease_holds_against_takeover(
+            Some(now - 5),
+            true,
+            false,
+            now,
+            stale_after
         ));
     }
 

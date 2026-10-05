@@ -65,6 +65,12 @@ pub mod editor_target;
 const SOCKET_FILENAME_PREFIX: &str = "ipc";
 const LEGACY_SOCKET_FILENAME_PREFIX: &str = "agent-doc";
 
+/// `#netadv5` RTT budget: serial round trips one editor intent costs over this
+/// transport — the `ipc_hello` build handshake, then the intent and its
+/// receipt(s). Pinned by `editor_intent_costs_two_serial_round_trips`; hot-path
+/// budgets elsewhere multiply this per editor send.
+pub const EDITOR_INTENT_SERIAL_ROUND_TRIPS: usize = 2;
+
 /// Optional project-specific directory for editor AF_UNIX sockets.
 ///
 /// Coder volumes backed by 9p or a network filesystem may persist
@@ -295,12 +301,14 @@ pub fn prune_stale_editor_sockets(project_root: &Path) -> Result<usize> {
         }
 
         let existed = path.exists();
-        let live = if name.starts_with(&format!("{SOCKET_FILENAME_PREFIX}-")) {
-            is_listener_active_for_pid(project_root, pid)
+        // `#netadv5` R3: only a positively-absent owner is pruned; a slow or
+        // refused-but-owner-alive endpoint is retained.
+        let prune = if name.starts_with(&format!("{SOCKET_FILENAME_PREFIX}-")) {
+            probe_listener_for_pid(project_root, pid) == ListenerProbe::Absent
         } else {
-            false
+            !owner_pid_alive(pid)
         };
-        if !live && existed {
+        if prune && existed {
             if path.exists() {
                 std::fs::remove_file(&path)
                     .with_context(|| format!("remove stale editor socket {}", path.display()))?;
@@ -311,20 +319,129 @@ pub fn prune_stale_editor_sockets(project_root: &Path) -> Result<usize> {
     Ok(removed)
 }
 
+/// Whether the editor listener for `pid` is answering connects right now.
+///
+/// `true` only on a completed connect. A slow or refused connect returns
+/// `false` (not proven live, so callers retain their intent and retry), but the
+/// socket file is unlinked **only** on positive evidence that its owner is gone
+/// (`#netadv5` R3): see [`probe_listener_for_pid`].
 pub fn is_listener_active_for_pid(project_root: &Path, pid: u64) -> bool {
+    matches!(probe_listener_for_pid(project_root, pid), ListenerProbe::Live)
+}
+
+/// What one connect attempt learned about the editor listener for a pid.
+///
+/// `#netadv5` R3: a connect timeout is **not** a verdict. On a Coder workspace
+/// (JetBrains Remote Dev + Zscaler) a live editor's accept loop can stall past
+/// the 3s watchdog; the old probe unlinked the socket on *any* connect error,
+/// and the listener then reads an unlinked name as "dead for good". Only a
+/// connect that the kernel refused (or a missing path) **and** an owner pid that
+/// no longer exists is evidence enough to delete the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListenerProbe {
+    /// The connect completed.
+    Live,
+    /// No socket file, or the connect was refused and the owner pid is gone.
+    /// The stale file (if any) has been unlinked.
+    Absent,
+    /// The connect timed out, or was refused while the owner pid is still
+    /// alive (e.g. mid listener restart). Unknown: retry later, never unlink.
+    Unknown,
+}
+
+/// How a single connect attempt failed, reduced to the evidence it carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectFailure {
+    /// The kernel answered: nothing is bound (`ECONNREFUSED` / `ENOENT`).
+    Refused,
+    /// No answer within the watchdog, or an error that proves nothing.
+    Inconclusive,
+}
+
+/// Marker error for a connect watchdog that fired; distinguishes "slow" from
+/// "refused" without string matching.
+#[derive(Debug)]
+struct ConnectTimedOut(String);
+
+impl std::fmt::Display for ConnectTimedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ConnectTimedOut {}
+
+fn classify_connect_failure(error: &anyhow::Error) -> ConnectFailure {
+    if error.chain().any(|cause| cause.is::<ConnectTimedOut>()) {
+        return ConnectFailure::Inconclusive;
+    }
+    let refused = error.chain().any(|cause| {
+        cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(io.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound)
+        })
+    });
+    if refused {
+        ConnectFailure::Refused
+    } else {
+        ConnectFailure::Inconclusive
+    }
+}
+
+/// Whether `pid` names a running process. Without a way to tell (no `/proc`
+/// and no `kill`), answer `true`: an unknown owner must never authorize unlink.
+fn owner_pid_alive(pid: u64) -> bool {
+    if Path::new("/proc/self").exists() {
+        return Path::new(&format!("/proc/{pid}")).exists();
+    }
+    match std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) => status.success(),
+        Err(_) => true,
+    }
+}
+
+/// Pure decision for [`probe_listener_for_pid`]: the probe verdict and whether
+/// the socket file may be unlinked.
+fn listener_probe_verdict(
+    connect: std::result::Result<(), ConnectFailure>,
+    owner_alive: impl FnOnce() -> bool,
+) -> (ListenerProbe, bool) {
+    match connect {
+        Ok(()) => (ListenerProbe::Live, false),
+        Err(ConnectFailure::Inconclusive) => (ListenerProbe::Unknown, false),
+        Err(ConnectFailure::Refused) if owner_alive() => (ListenerProbe::Unknown, false),
+        Err(ConnectFailure::Refused) => (ListenerProbe::Absent, true),
+    }
+}
+
+/// Probe the editor listener for `pid`, unlinking its socket file only on
+/// positive evidence that the owner is gone (`#netadv5` R3).
+pub fn probe_listener_for_pid(project_root: &Path, pid: u64) -> ListenerProbe {
+    probe_listener_for_pid_with(project_root, pid, try_connect_for_pid, owner_pid_alive)
+}
+
+fn probe_listener_for_pid_with<S>(
+    project_root: &Path,
+    pid: u64,
+    connect: impl FnOnce(&Path, u64) -> Result<S>,
+    owner_alive: impl FnOnce(u64) -> bool,
+) -> ListenerProbe {
     let sock = socket_path_for_pid(project_root, pid);
     if !sock.exists() {
-        return false;
+        return ListenerProbe::Absent;
     }
-    // Try connecting — if it succeeds, the listener is active
-    match try_connect_for_pid(project_root, pid) {
-        Ok(_) => true,
-        Err(_) => {
-            // Stale socket file — clean it up
-            let _ = std::fs::remove_file(&sock);
-            false
-        }
+    let outcome = connect(project_root, pid)
+        .map(|_| ())
+        .map_err(|error| classify_connect_failure(&error));
+    let (verdict, unlink) = listener_probe_verdict(outcome, || owner_alive(pid));
+    if unlink {
+        let _ = std::fs::remove_file(&sock);
     }
+    verdict
 }
 
 /// Connect to the socket. Returns a stream for sending messages.
@@ -453,11 +570,13 @@ where
     });
     match rx.recv_timeout(connect_timeout) {
         Ok(result) => result,
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(anyhow::anyhow!(
-            "IPC connect timeout ({}ms) for {}",
-            connect_timeout.as_millis(),
-            path.display()
-        )),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(anyhow::Error::new(ConnectTimedOut(format!(
+                "IPC connect timeout ({}ms) for {}",
+                connect_timeout.as_millis(),
+                path.display()
+            ))))
+        }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
             Err(anyhow::anyhow!("IPC connect thread disconnected"))
         }
@@ -623,6 +742,13 @@ fn send_message_with_timeout_inner_with_identity(
                             receipt
                         ));
                     }
+                    SocketReceiptClassification::Deferred => {
+                        return Err(anyhow::anyhow!(
+                            "{}: {}",
+                            IPC_RECEIPT_DEFERRED_PREFIX,
+                            receipt
+                        ));
+                    }
                     SocketReceiptClassification::Unsupported => {
                         return Err(anyhow::anyhow!(
                             "IPC receipt unsupported legacy response: {}; update/reinstall the editor plugin/native library so it publishes lazily transport receipts",
@@ -724,6 +850,18 @@ pub fn is_ipc_receipt_rejected_error(error: &anyhow::Error) -> bool {
 /// [`is_ipc_receipt_rejected_error`].
 const IPC_RECEIPT_REJECTED_PREFIX: &str = "IPC receipt rejected";
 
+/// `#netadv5` R2: the endpoint answered "slow, still trying". Distinct from
+/// [`IPC_RECEIPT_REJECTED_PREFIX`] so [`is_ipc_receipt_rejected_error`] never
+/// counts it as a definitive refusal.
+const IPC_RECEIPT_DEFERRED_PREFIX: &str = "IPC receipt deferred";
+
+/// Whether `error` is a deferred ("slow, still trying") receipt.
+pub fn is_ipc_receipt_deferred_error(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().starts_with(IPC_RECEIPT_DEFERRED_PREFIX))
+}
+
 fn send_legacy_reload_to_pid(
     project_root: &Path,
     pid: u64,
@@ -759,9 +897,11 @@ fn send_legacy_reload_to_pid(
             match classify_socket_receipt(&receipt) {
                 SocketReceiptClassification::Applied => Ok(Some(receipt)),
                 SocketReceiptClassification::AlreadyApplied => Ok(Some(receipt)),
-                SocketReceiptClassification::Pending => Err(anyhow::anyhow!(
-                    "legacy reload returned non-terminal receipt: {receipt}"
-                )),
+                SocketReceiptClassification::Pending | SocketReceiptClassification::Deferred => {
+                    Err(anyhow::anyhow!(
+                        "legacy reload returned non-terminal receipt: {receipt}"
+                    ))
+                }
                 SocketReceiptClassification::Rejected
                 | SocketReceiptClassification::Unsupported => Err(anyhow::anyhow!(
                     "legacy reload rejected or unsupported: {receipt}"
@@ -1787,6 +1927,160 @@ mod tests {
 
         assert_eq!(prune_stale_editor_sockets(dir.path()).unwrap(), 1);
         assert!(!stale.exists());
+    }
+
+    /// Raw editor endpoint that counts the client's serial round trips: every
+    /// request line the client writes and then waits on is one round trip.
+    #[cfg(unix)]
+    fn counting_editor_endpoint(
+        root: &Path,
+        replies_per_message: Vec<serde_json::Value>,
+    ) -> (
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        let path = socket_path(root);
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let connections = std::sync::Arc::new(AtomicUsize::new(0));
+        let round_trips = std::sync::Arc::new(AtomicUsize::new(0));
+        let (c, r) = (connections.clone(), round_trips.clone());
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { return };
+                c.fetch_add(1, SeqCst);
+                let mut writer = stream.try_clone().unwrap();
+                let mut reader = BufReader::new(stream);
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    r.fetch_add(1, SeqCst);
+                    let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+                    let replies = if value["type"] == "ipc_hello" {
+                        vec![ipc_hello_ack_message(&local_ipc_identity())]
+                    } else {
+                        replies_per_message.clone()
+                    };
+                    for reply in replies {
+                        writeln!(writer, "{reply}").unwrap();
+                    }
+                }
+            }
+        });
+        (connections, round_trips)
+    }
+
+    /// `#netadv5` RTT budget: one editor intent (e.g. `deliver_crdt_remote`,
+    /// `persist_current`, `apply_canonical`) costs exactly ONE connection and
+    /// TWO serial round trips — the build handshake and the intent itself. An
+    /// early `accepted` receipt rides the same round trip; it must never become
+    /// a third request.
+    #[cfg(unix)]
+    #[test]
+    fn editor_intent_costs_two_serial_round_trips() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let (connections, round_trips) = counting_editor_endpoint(
+            &root,
+            vec![
+                serde_json::json!({"type": "receipt", "status": "accepted"}),
+                serde_json::json!({"type": "receipt", "status": "applied"}),
+            ],
+        );
+        let msg = serde_json::json!({"type": "deliver_crdt_remote", "file": "/tmp/plan.md"});
+        send_message(&root, &msg).unwrap().expect("terminal receipt");
+        assert_eq!(connections.load(SeqCst), 1, "one connection per intent");
+        assert_eq!(
+            round_trips.load(SeqCst),
+            EDITOR_INTENT_SERIAL_ROUND_TRIPS,
+            "handshake + intent; the early receipt is not a round trip"
+        );
+    }
+
+    /// `#netadv5` R3: a slow peer whose connect exceeds the 3s watchdog must
+    /// not have its socket unlinked, and a later connect that completes must
+    /// read it live again (eventual progress).
+    #[test]
+    fn slow_listener_connect_timeout_never_unlinks_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let live_pid = u64::from(std::process::id()) + 1_000_000;
+        let sock = socket_path_for_pid(root, live_pid);
+        std::fs::write(&sock, b"").unwrap();
+
+        // The peer is slow: the connect watchdog fires (simulated without
+        // spending the real 3s). The owner pid is alive.
+        let slow = |_: &Path, _: u64| -> Result<()> {
+            Err(anyhow::Error::new(ConnectTimedOut(
+                "IPC connect timeout (3000ms)".to_string(),
+            )))
+        };
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, slow, |_| true),
+            ListenerProbe::Unknown
+        );
+        assert!(sock.exists(), "a connect timeout must never unlink");
+
+        // Even with an owner we cannot see, a timeout is not evidence.
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, slow, |_| false),
+            ListenerProbe::Unknown
+        );
+        assert!(sock.exists(), "a timeout is not evidence even for a dead pid");
+
+        // Refused while the owner is alive (listener restarting): retained.
+        let refused = |_: &Path, _: u64| -> Result<()> {
+            Err(anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+                .context("failed to connect to IPC socket"))
+        };
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, refused, |_| true),
+            ListenerProbe::Unknown
+        );
+        assert!(sock.exists(), "refused with a live owner must not unlink");
+
+        // Eventual progress: the slow peer answers on a later probe.
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, |_: &Path, _: u64| Ok(()), |_| true),
+            ListenerProbe::Live
+        );
+
+        // Positive evidence: refused AND the owner pid is gone.
+        assert_eq!(
+            probe_listener_for_pid_with(root, live_pid, refused, |_| false),
+            ListenerProbe::Absent
+        );
+        assert!(!sock.exists(), "refused + dead owner is the only unlink");
+    }
+
+    #[test]
+    fn connect_failure_classification_separates_slow_from_refused() {
+        let timed_out = anyhow::Error::new(ConnectTimedOut("t".into()));
+        assert_eq!(classify_connect_failure(&timed_out), ConnectFailure::Inconclusive);
+        let refused = anyhow::Error::new(std::io::Error::from(ErrorKind::ConnectionRefused))
+            .context("ctx");
+        assert_eq!(classify_connect_failure(&refused), ConnectFailure::Refused);
+        let missing = anyhow::Error::new(std::io::Error::from(ErrorKind::NotFound));
+        assert_eq!(classify_connect_failure(&missing), ConnectFailure::Refused);
+        let other = anyhow::Error::new(std::io::Error::from(ErrorKind::PermissionDenied));
+        assert_eq!(classify_connect_failure(&other), ConnectFailure::Inconclusive);
+    }
+
+    /// The real watchdog error is typed, so it classifies as inconclusive.
+    #[test]
+    fn real_connect_watchdog_error_is_typed_timeout() {
+        let path = Path::new("/nonexistent/slow.sock");
+        let err = run_connect_with_timeout(path, Duration::from_millis(20), || -> Result<()> {
+            std::thread::sleep(Duration::from_millis(500));
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(classify_connect_failure(&err), ConnectFailure::Inconclusive);
     }
 
     /// Wait until `path` accepts a connection, or give up.
@@ -2878,6 +3172,47 @@ mod tests {
             msg.get("content").is_none() && msg.get("patches").is_none(),
             "observe_lazily_current must not carry document mutation payload: {msg}"
         );
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    /// `#netadv5` R2: an editor whose replica attach exceeds its bounded wait
+    /// answers `deferred`. The sender must surface that as a retryable deferral,
+    /// never as a definitive refusal, and a later attempt makes progress.
+    #[test]
+    fn deferred_receipt_from_a_slow_attach_is_not_a_definitive_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let attempts = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let attempts_for_listener = attempts.clone();
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, move |_msg| {
+                // First attempt: the replica attach is still running past the
+                // plugin's 750ms wait. Second attempt: it has landed.
+                if attempts_for_listener.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    Some(agent_doc_ipc_protocol::DEFERRED_RECEIPT_LINE.to_string())
+                } else {
+                    Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
+                }
+            })
+            .ok();
+        });
+        thread::sleep(Duration::from_millis(100));
+
+        let msg = serde_json::json!({"type": "deliver_crdt_remote", "file": "/tmp/plan.md"});
+        let first = send_message(&root, &msg).unwrap_err();
+        assert!(is_ipc_receipt_deferred_error(&first), "{first:#}");
+        assert!(
+            !is_ipc_receipt_rejected_error(&first),
+            "a deferred receipt must never count as a definitive refusal: {first:#}"
+        );
+
+        let second = send_message(&root, &msg).unwrap();
+        assert!(second.is_some(), "the retry after a deferral must make progress");
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);

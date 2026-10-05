@@ -152,6 +152,10 @@ pub enum SupervisorReplacementIpcOutcome {
     Accepted,
     Dead,
     Failed,
+    /// `#netadv5` R9: the live socket accepted the `restart` request but its
+    /// effect receipt did not arrive in time. The supervisor may well be
+    /// executing the restart; this is "maybe accepted", never a failure.
+    ResponseTimedOut,
 }
 
 /// Controller action after the supervisor IPC attempt.
@@ -186,6 +190,16 @@ pub const fn decide_supervisor_replacement_escalation(
         }
         (SupervisorReplacementIpcOutcome::Dead, _, _) => {
             SupervisorReplacementEscalation::EscalateColdStart
+        }
+        // `#netadv5` R9: a late receipt is not a refusal. Escalating to a cold
+        // start here launched a second supervisor beside one that was already
+        // re-exec'ing. Treat it exactly like an accepted request: the live
+        // supervisor owns it, and only an operator `force` may later escalate.
+        (SupervisorReplacementIpcOutcome::ResponseTimedOut, false, _) => {
+            SupervisorReplacementEscalation::AwaitAcceptedInPlace
+        }
+        (SupervisorReplacementIpcOutcome::ResponseTimedOut, true, _) => {
+            SupervisorReplacementEscalation::WaitThenEscalate
         }
         (SupervisorReplacementIpcOutcome::Failed, true, _)
         | (SupervisorReplacementIpcOutcome::Failed, false, true) => {
@@ -399,6 +413,41 @@ mod tests {
                 initial_host_stale: true,
             }),
             SupervisorReplacementEscalation::AwaitAcceptedInPlace
+        );
+    }
+
+    /// `#netadv5` R9: a restart receipt that arrives after the 10s effect
+    /// budget must never escalate to a cold start (a duplicate supervisor),
+    /// stale host or not.
+    #[test]
+    fn late_restart_receipt_never_escalates_to_cold_start() {
+        for initial_host_stale in [false, true] {
+            assert_eq!(
+                decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
+                    ipc_outcome: SupervisorReplacementIpcOutcome::ResponseTimedOut,
+                    force: false,
+                    initial_host_stale,
+                }),
+                SupervisorReplacementEscalation::AwaitAcceptedInPlace
+            );
+        }
+        assert_eq!(
+            decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
+                ipc_outcome: SupervisorReplacementIpcOutcome::ResponseTimedOut,
+                force: true,
+                initial_host_stale: true,
+            }),
+            SupervisorReplacementEscalation::WaitThenEscalate,
+            "only an operator force may escalate, and only after the wait"
+        );
+        // An explicit refusal (positive evidence) on a stale host still escalates.
+        assert_eq!(
+            decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
+                ipc_outcome: SupervisorReplacementIpcOutcome::Failed,
+                force: false,
+                initial_host_stale: true,
+            }),
+            SupervisorReplacementEscalation::EscalateColdStart
         );
     }
 

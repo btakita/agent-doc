@@ -31164,7 +31164,8 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             && sync_runtime_source.contains("WindowIndexNormalizationPlan")
             && sync_runtime_source.contains("plan_window_index_normalization")
             && sync_runtime_source.contains("use crate::acquire_sync_lock;")
-            && sync_runtime_source.contains("acquire_sync_lock(lock_path, sync_lock_wait_budget")
+            && sync_runtime_source.contains("acquire_sync_lock(lock_path, wait_budget")
+            && sync_runtime_source.contains("acquire_sync_lock_for_mode(")
             && sync_runtime_source
                 .contains("agent_doc_process_owner_io::process_tree_contains_pid(")
             && sync_runtime_source

@@ -672,6 +672,21 @@ without structural provenance retain the operator-owned protection.
   cross-project effect asks the owning controller for `provision_for_layout`,
   which returns a live binding without selecting or promoting it. A
   `sync --no-autostart` pass never requests missing-owner provisioning.
+- An accepted, monotonically ordered editor observation is the recovery
+  authority when the ordinary editor fold is idle but the Project Controller's
+  independent pane/session/actor projection still claims a contradictory
+  `converged` steady state. The controller derives an editor-state override that
+  republishes the editor's structural columns (or refocuses the selected actor
+  when focus is the only discrepancy). This exceptional projection requires a
+  non-zero editor sequence, a current accepted client generation, a non-empty
+  structural observation for layout repair, and an internal state explicitly in
+  `converged`; rejected/stale observations, unknown columns, absent observations,
+  and in-flight/retry state fail closed. It is scoped to session/layout/actor
+  placement and must never weaken text/CRDT convergence or write document text.
+  Every applied override emits `WARN agent_doc_invariant_defect
+  editor_state_override_applied`, asks the operator to file an agent-doc GitHub
+  issue, and carries only bounded evidence: document/state hashes, state-kind
+  labels, editor generation/sequence, steady generation, and recovery action.
 - Safe-passive editor sync should not prove whether live unregistered agent
   panes in stash are still owned. Live agent-pane ownership proof and
   kill-or-preserve decisions belong to full sync/repair paths.

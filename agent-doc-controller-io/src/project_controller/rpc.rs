@@ -118,6 +118,176 @@ pub(super) struct ControllerEditorSurfaceGraph {
     run_intent: ControllerEditorSurfaceIntentRunner,
 }
 
+/// Editor-authoritative recovery when two independently reactive projections
+/// disagree after both claim to be settled.
+///
+/// This is deliberately narrower than document authority: it can only
+/// republish editor-derived pane membership or focus. It never carries text,
+/// CRDT state, closeout state, or a disk-write action.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EditorStateOverrideProjection {
+    state_kinds: Vec<&'static str>,
+    action: SurfaceIntent,
+    old_state_hash: String,
+    new_state_hash: String,
+    steady_generation: u64,
+}
+
+impl EditorStateOverrideProjection {
+    fn recovery_action(&self) -> &'static str {
+        match self.action {
+            SurfaceIntent::Sync { .. } => "republish_editor_layout",
+            SurfaceIntent::Focus { .. } => "refocus_editor_document",
+            SurfaceIntent::Idle => "none",
+        }
+    }
+}
+
+/// Derive the exceptional editor-state override.
+///
+/// Positive evidence is load-bearing here: the controller must have accepted
+/// the observation through its `(client, generation, sequence)` fence, the
+/// sequence must be non-zero, the ordinary editor fold must consider the input
+/// idle, and the internal layout projection must call itself converged. Missing
+/// or in-flight internal state therefore cannot elect editor authority. This is
+/// a recovery projection for an invariant defect, not an alternate happy path.
+fn editor_state_override_projection(
+    observation: &EditorSurfaceObservation,
+    accepted: bool,
+    ordinary_receipt: &SurfaceObservationReceipt,
+    steady: Option<&ControllerPaneLayoutStateProjection>,
+) -> Option<EditorStateOverrideProjection> {
+    if !accepted
+        || observation.client_id.trim().is_empty()
+        || observation.sequence == 0
+        || !ordinary_receipt.intent.is_idle()
+    {
+        return None;
+    }
+    let steady = steady.filter(|state| state.phase == ControllerPaneLayoutPhase::Converged)?;
+    let surface = &observation.surface;
+    if surface.is_inert() {
+        return None;
+    }
+
+    let editor_columns = surface
+        .columns
+        .iter()
+        .map(|column| column.files.join(","))
+        .collect::<Vec<_>>();
+    let layout_disagrees =
+        !surface.focus_only && !editor_columns.is_empty() && editor_columns != steady.columns;
+
+    // A converged observation is the controller's joined session/actor view of
+    // the desired layout. Compare only when both sides positively observed a
+    // non-empty set; absence is not evidence of disagreement.
+    let editor_visible = surface.visible.iter().collect::<BTreeSet<_>>();
+    let observed_documents = steady
+        .observation
+        .as_ref()
+        .map(|report| report.actual_documents.iter().collect::<BTreeSet<_>>());
+    let actor_disagrees = !surface.focus_only
+        && !editor_visible.is_empty()
+        && observed_documents
+            .as_ref()
+            .is_some_and(|documents| !documents.is_empty() && *documents != editor_visible);
+
+    let focus_disagrees = !surface.preserve_focus
+        && steady
+            .observation
+            .as_ref()
+            .and_then(|report| report.focus.as_deref())
+            .is_some_and(|focus| focus != surface.focused);
+
+    let mut state_kinds = Vec::new();
+    if layout_disagrees {
+        state_kinds.push("session_layout");
+    }
+    if actor_disagrees {
+        state_kinds.push("actor_binding");
+    }
+    if focus_disagrees {
+        state_kinds.push("actor_focus");
+    }
+    if state_kinds.is_empty() {
+        return None;
+    }
+
+    let action = if layout_disagrees || actor_disagrees {
+        if editor_columns.is_empty() {
+            return None;
+        }
+        SurfaceIntent::Sync {
+            columns: surface.sync_columns(),
+            document: surface.focused.clone(),
+            preserve_focus: surface.preserve_focus,
+        }
+    } else {
+        SurfaceIntent::Focus {
+            document: surface.focused.clone(),
+        }
+    };
+    let old_state = format!(
+        "generation={};columns={:?};focus={:?};observed={:?}",
+        steady.generation,
+        steady.columns,
+        steady.focus,
+        steady
+            .observation
+            .as_ref()
+            .map(|report| (&report.actual_documents, &report.focus)),
+    );
+    let new_state = format!(
+        "columns={:?};focus={};visible={:?}",
+        editor_columns, surface.focused, surface.visible,
+    );
+    Some(EditorStateOverrideProjection {
+        state_kinds,
+        action,
+        old_state_hash: agent_doc_hash::short_content_hash(&old_state),
+        new_state_hash: agent_doc_hash::short_content_hash(&new_state),
+        steady_generation: steady.generation,
+    })
+}
+
+fn warn_editor_state_override(
+    project_root: &Path,
+    observation: &EditorSurfaceObservation,
+    projection: &EditorStateOverrideProjection,
+) {
+    let document_hash = agent_doc_hash::short_content_hash(&observation.surface.focused);
+    let state_kinds = projection.state_kinds.join(",");
+    let recovery_action = projection.recovery_action();
+    let message = format!(
+        "WARN agent_doc_invariant_defect editor_state_override_applied \
+         issue=https://github.com/btakita/agent-doc/issues/new \
+         prompt=please_file_an_agent_doc_github_issue \
+         document_hash={document_hash} state_kinds={state_kinds} \
+         old_state_hash={} new_state_hash={} editor_generation={} \
+         editor_sequence={} steady_generation={} recovery_action={recovery_action}",
+        projection.old_state_hash,
+        projection.new_state_hash,
+        observation.generation,
+        observation.sequence,
+        projection.steady_generation,
+    );
+    agent_doc_ops_log_io::log_op(project_root, &message);
+    tracing::warn!(
+        target: "agent_doc::invariant",
+        invariant = "editor_internal_steady_state_discrepancy",
+        document_hash,
+        state_kinds,
+        old_state_hash = projection.old_state_hash,
+        new_state_hash = projection.new_state_hash,
+        editor_generation = observation.generation,
+        editor_sequence = observation.sequence,
+        steady_generation = projection.steady_generation,
+        recovery_action,
+        github_issue = "https://github.com/btakita/agent-doc/issues/new",
+        "agent-doc invariant defect: editor state overrode internal steady state; please file an agent-doc GitHub issue"
+    );
+}
+
 fn editor_surface_client_family(client_id: &str) -> Option<&str> {
     let (family, process_id) = client_id.split_once("-pid:")?;
     (!family.is_empty() && !process_id.is_empty()).then_some(family)
@@ -22472,6 +22642,11 @@ fn handle_editor_surface_observe(
     };
     let diagnostic_focused = observation.surface.focused.clone();
     let diagnostic_visible = observation.surface.visible.clone();
+    // Capture the independent controller projection before this observation can
+    // publish a replacement. A settled disagreement against this snapshot is
+    // the invariant defect the override projection repairs.
+    let internal_steady_state = runtime.pane_layout_state_projection();
+    let override_observation = observation.clone();
     // `#tmuxautosyncreactive`: fold against the RETAINED tmux observation rather
     // than probing synchronously. The background `pane_layout_effect_worker`
     // refreshes it via `observe_tmux_for_project` after each structural
@@ -22486,6 +22661,20 @@ fn handle_editor_surface_observe(
     );
     if accepted && let Some(intent) = retry_intent {
         receipt.intent = intent;
+    }
+    if let Some(override_projection) = editor_state_override_projection(
+        &override_observation,
+        accepted,
+        &receipt,
+        internal_steady_state.as_ref(),
+    ) {
+        warn_editor_state_override(
+            &bootstrap.project_root,
+            &override_observation,
+            &override_projection,
+        );
+        receipt.intent = override_projection.action;
+        receipt.idle = false;
     }
     // `#surfaceobservesilent`: an observation the graph REJECTS produced no ops.log
     // line at all, and neither did a plain accepted `Idle`. A selection that
@@ -30904,6 +31093,193 @@ mod tests {
                 ("jetbrains-pid:42".to_string(), 101, 1),
                 ("vscode-pid:51".to_string(), 10, 1),
             ],
+        );
+    }
+
+    fn idle_surface_receipt() -> SurfaceObservationReceipt {
+        SurfaceObservationReceipt {
+            intent: SurfaceIntent::Idle,
+            idle: true,
+            outcome: None,
+            error: None,
+        }
+    }
+
+    fn converged_editor_steady_state(
+        columns: Vec<String>,
+        focus: &str,
+        actual_documents: Vec<String>,
+    ) -> ControllerPaneLayoutStateProjection {
+        ControllerPaneLayoutStateProjection {
+            generation: 41,
+            source_plane_version: Some(8),
+            phase: ControllerPaneLayoutPhase::Converged,
+            reason_code: ControllerPaneLayoutReasonCode::ObservedConvergence,
+            reason_detail: None,
+            columns: columns.clone(),
+            window: Some("@agent-doc".to_string()),
+            focus: Some(focus.to_string()),
+            observation: Some(ControllerTmuxLayoutSyncStateReport {
+                synced: true,
+                reason: "converged".to_string(),
+                expected_documents: columns,
+                actual_documents,
+                expected_panes: vec!["%1".to_string()],
+                panes: vec!["%1".to_string()],
+                operator_owned_documents: Vec::new(),
+                session_name: Some("agent-loop".to_string()),
+                window_id: Some("@agent-doc".to_string()),
+                window_name: Some("agent-doc".to_string()),
+                focus: Some(focus.to_string()),
+                expected_focus_pane: Some("%1".to_string()),
+                active_pane: Some("%1".to_string()),
+            }),
+            attempt: 1,
+        }
+    }
+
+    /// Deterministic regression for the live devops.md strand: the editor fold
+    /// had deduplicated its two-column surface while the independent controller
+    /// projection claimed a one-column steady state.
+    #[test]
+    fn fresh_idle_editor_projection_overrides_contradictory_steady_state() {
+        let bugs = "/project/tasks/agent-doc-bugs.md";
+        let devops = "/project/tasks/devops.md";
+        let observation = EditorSurfaceObservation {
+            client_id: "jetbrains-pid:4242".to_string(),
+            generation: 17,
+            sequence: 9,
+            surface: EditorSurface {
+                focused: devops.to_string(),
+                visible: vec![bugs.to_string(), devops.to_string()],
+                open: vec![devops.to_string(), bugs.to_string()],
+                columns: vec![SurfaceColumn::new([bugs]), SurfaceColumn::new([devops])],
+                force_reconcile: false,
+                focus_only: false,
+                preserve_focus: false,
+            },
+        };
+        let steady =
+            converged_editor_steady_state(vec![bugs.to_string()], bugs, vec![bugs.to_string()]);
+
+        let projection = editor_state_override_projection(
+            &observation,
+            true,
+            &idle_surface_receipt(),
+            Some(&steady),
+        )
+        .expect("fresh editor state overrides a contradictory converged projection");
+
+        assert_eq!(
+            projection.state_kinds,
+            vec!["session_layout", "actor_binding", "actor_focus"]
+        );
+        assert!(matches!(
+            projection.action,
+            SurfaceIntent::Sync { ref columns, ref document, preserve_focus: false }
+                if columns == &observation.surface.columns && document == devops
+        ));
+        assert_eq!(projection.steady_generation, 41);
+        assert_ne!(projection.old_state_hash, projection.new_state_hash);
+    }
+
+    #[test]
+    fn editor_state_override_fails_closed_without_positive_freshness_and_authority() {
+        let file = "/project/tasks/devops.md";
+        let mut observation = EditorSurfaceObservation {
+            client_id: "jetbrains-pid:4242".to_string(),
+            generation: 17,
+            sequence: 9,
+            surface: test_editor_surface(file),
+        };
+        observation.surface.force_reconcile = false;
+        let mut steady = converged_editor_steady_state(
+            vec!["/project/tasks/other.md".to_string()],
+            "/project/tasks/other.md",
+            vec!["/project/tasks/other.md".to_string()],
+        );
+        let receipt = idle_surface_receipt();
+
+        assert!(
+            editor_state_override_projection(&observation, false, &receipt, Some(&steady))
+                .is_none(),
+            "a rejected/stale editor fact has no override authority"
+        );
+        let ordinary_change = SurfaceObservationReceipt {
+            intent: SurfaceIntent::Focus {
+                document: file.to_string(),
+            },
+            idle: false,
+            outcome: None,
+            error: None,
+        };
+        assert!(
+            editor_state_override_projection(&observation, true, &ordinary_change, Some(&steady),)
+                .is_none(),
+            "normal editor convergence must run without exceptional override"
+        );
+        observation.client_id.clear();
+        assert!(
+            editor_state_override_projection(&observation, true, &receipt, Some(&steady)).is_none(),
+            "an unidentified editor fact has no authority"
+        );
+        observation.client_id = "jetbrains-pid:4242".to_string();
+        observation.sequence = 0;
+        assert!(
+            editor_state_override_projection(&observation, true, &receipt, Some(&steady)).is_none(),
+            "an unsequenced fact has no freshness evidence"
+        );
+        observation.sequence = 9;
+        steady.phase = ControllerPaneLayoutPhase::Applying;
+        assert!(
+            editor_state_override_projection(&observation, true, &receipt, Some(&steady)).is_none(),
+            "in-flight internal state is not a contradictory steady state"
+        );
+        steady.phase = ControllerPaneLayoutPhase::Converged;
+        observation.surface.columns.clear();
+        observation.surface.visible.clear();
+        assert!(
+            editor_state_override_projection(&observation, true, &receipt, Some(&steady)).is_none(),
+            "unknown editor layout cannot overwrite structural state"
+        );
+    }
+
+    #[test]
+    fn editor_state_override_warning_is_bounded_redacted_and_actionable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let private_path = "/private/customer/tasks/devops.md";
+        let observation = EditorSurfaceObservation {
+            client_id: "jetbrains-pid:4242".to_string(),
+            generation: 17,
+            sequence: 9,
+            surface: test_editor_surface(private_path),
+        };
+        let projection = EditorStateOverrideProjection {
+            state_kinds: vec!["session_layout", "actor_binding"],
+            action: SurfaceIntent::Sync {
+                columns: observation.surface.columns.clone(),
+                document: private_path.to_string(),
+                preserve_focus: false,
+            },
+            old_state_hash: "oldhash".to_string(),
+            new_state_hash: "newhash".to_string(),
+            steady_generation: 41,
+        };
+
+        warn_editor_state_override(dir.path(), &observation, &projection);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("WARN agent_doc_invariant_defect editor_state_override_applied"));
+        assert!(log.contains("please_file_an_agent_doc_github_issue"));
+        assert!(log.contains("https://github.com/btakita/agent-doc/issues/new"));
+        assert!(log.contains("editor_generation=17"));
+        assert!(log.contains("editor_sequence=9"));
+        assert!(log.contains("steady_generation=41"));
+        assert!(log.contains("recovery_action=republish_editor_layout"));
+        assert!(log.contains("old_state_hash=oldhash new_state_hash=newhash"));
+        assert!(
+            !log.contains(private_path),
+            "logs must not contain private document paths"
         );
     }
 

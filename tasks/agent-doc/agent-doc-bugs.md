@@ -644,7 +644,67 @@ It also adds TLA-tied proptest model tests (SupervisorGenerationTransition, IpcB
 - (e) bound stale panes in non-stash windows.
 
 **Still running:** `netadv3`, `netadv5`, `netadv6`, `gh136follow`. GH #136 and the release are held for the final batch. Handoff doc: `2e5ec57764`.
-<!-- agent:boundary:da65c2e1 -->
+> **Chat prompt (#chatprompt):** also fix: tmux pane auto-sync not working when I navigate away from agent-doc-bugs.md to tsift.md or to lazily.md
+>
+> **Chat prompt (#chatprompt):** Fix in a subagent
+
+### Re: tmux auto-sync and interrupted agent-doc batch — gpt-5 · 2026-10-05T06:13-04:00
+
+> **Queue prompt:** Pick up from claude code sessions that were interrupted by weekly limit. Subagents were running.
+
+Completed. I audited every interrupted Claude worktree, resumed the unfinished branches in delegated subagents, and integrated the completed work serially on the clean `batch3` worktree without touching the dirty main checkout.
+
+The requested tmux navigation fix was implemented in a subagent and integrated as `668f02c1f`. JetBrains navigation events were reaching the controller, but a Lazily layout-effect panic terminated the detached worker while leaving its `active` lease latched. Later navigation to `tsift.md` or `lazily.md` only replaced the pending revision and could never spawn another worker. The worker is now unwind-fenced: it releases a failed revision, transfers a newer racing revision to exactly one replacement, and does not hot-retry the failed revision. Its focused suite passed 45/45, and it is covered by the combined release gate.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.
+
+Fixed, released, and closed. The integrated work bounds retained layout width under adversarial delivery, reapplies retained editor effects only to matching observations, fences lifecycle/focus traffic by receiver-local ordering, replaces stale supervisors only at a proven idle boundary, and republishes after recycle. `LayoutWidthBound` and the network-channel models include positive safety checks plus required wedge/reach counterexamples.
+
+> **Queue prompt:** do [#netadv3]
+
+Completed: failed focus and surface effects are retained and reapplied once to the next matching observation; stale layout/focus traffic is invalidated, and success/refusal/move/retirement clears the intent.
+
+> **Queue prompt:** do [#netadv5]
+
+Completed and integrated: correctness paths no longer treat slow transport as a definitive verdict, and hot-path delivery/dispatch behavior is bounded and idempotent.
+
+> **Queue prompt:** do [#netadv6]
+
+Completed: the deterministic simulator now models independent IO clocks, receiver-local lifecycle ordering, and rejected deliveries correctly. Fresh fuzzing ran 2,395 schedules × 160 steps without a finding; the release short budget and nightly path are wired.
+
+> **Queue prompt:** do [#claimstrike]
+
+Completed: an answered claimed free-text queue head now releases and strikes atomically instead of returning as completed residue.
+
+> **Queue prompt:** do [#gh136follow]
+
+Completed: all five GH #136 follow-ups landed, including the all-publisher width bound, superseded-generation handling, one-shot stale-supervisor replacement, post-recycle republication, and non-stash window bounds.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/137
+
+Fixed, released, and closed. The dead test-only `response_heading` helper was removed; strict closeout canonicalization remains the production owner, and a real write/commit end-to-end test proves the attributed, timestamped heading reaches both the document and Git HEAD.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/138: use formal logic
+
+Fixed, released, and closed. Definitive CRDT/native-save refusals now enter one shared durable editor-transport-health transition. Two failures degrade and arm recycle, three consecutive refusals unregister, proven delivery clears idempotently, and an already-applied write without a visible receipt records `ProjectionUnconverged`. The `EditorTransportHealth` positive, wedge, and unregister-reach models all passed.
+
+> **Queue prompt:** release + publish
+
+Published. The final release is [v0.35.458](https://github.com/btakita/agent-doc/releases/tag/v0.35.458) at `ef76f6d30`, with all Linux, musl, Windows, JetBrains, VS Code, and checksum assets. PyPI `agent-doc==0.35.458` is live and its clean-install verification passed. The installed binary reports 0.35.458; JetBrains 0.2.498 is byte-converged and VS Code 0.2.80 is installed.
+
+> **Queue prompt:** do [#codexhandoff]
+
+Completed. The interrupted-session audit, delegated resumptions, serial integration, verification, release, publication, and issue closure are all finished.
+
+Verification on the exact release tree:
+
+- `make check`: exit 0; 11,133/11,133 native tests passed across 188 binaries, 270 skipped.
+- TLA+: every positive model passed and all 83 required wedge/reach witnesses fired.
+- `make tmux-ci`: exit 0; 33 live/ignored integration tests passed.
+- GitHub Release, PyPI, Pages, Book, and CI run `37289728900` all completed successfully; CI independently passed both `make check` and `make tmux-ci`.
+
+The exchange is large, but the active queue was drained rather than stalled for compaction, as required.
+<!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -653,33 +713,27 @@ It also adds TLA-tied proptest model tests (SupervisorGenerationTransition, IpcB
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- Pick up from claude code sessions that were interrupted by weekly limit. Subagents were running.
+- ~~Pick up from claude code sessions that were interrupted by weekly limit. Subagents were running.~~
 - ~~do [#jbstagefallback]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.
 - ~~The alt+shift agent-doc menu is not coming up.~~
 - ~~do [#netadv1]~~
 - ~~do [#netadv2]~~
-- do [#netadv3]
+- ~~do [#netadv3]~~
 - ~~do [#netadv4]~~
-- do [#netadv5]
-- do [#netadv6]
+- ~~do [#netadv5]~~
+- ~~do [#netadv6]~~
 - ~~do [#netadv7]~~
-- do [#claimstrike]
-- do [#gh136follow]
+- ~~do [#claimstrike]~~
+- ~~do [#gh136follow]~~
 - #gh-fix https://github.com/btakita/agent-doc/issues/137
 - #gh-fix https://github.com/btakita/agent-doc/issues/138: use formal logic
 - release + publish
-- 🚧 do [#codexhandoff]
+- ~~do [#codexhandoff]~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#claimstrike] [agent-doc] A free-text queue head still held by a queue claim is not struck when the response quotes it as a Queue prompt; post-commit session-check then INTERRUPTS with completed free-text queue residue and needs preflight+commit repair. Repro 2026-10-05: alt+shift head claimed by subagent:altshiftmenu, answered, not struck; releasing the claim and then preflight+commit struck it. Fix: a Queue-prompt echo of a claimed head releases the claim and strikes in the same finalize (or finalize refuses up front), with a regression test.
-- [ ] [#gh136follow] [agent-doc] GH 136 follow-ups the fix left open: (a) enforce columns <= observed_panes for ALL layout publishers, including editor_surface; (b) investigate the 60s focus settle and the superseded gen-reset race on 1061.md; (c) a one-time recycle path for supervisors already stale on old code; (d) republish the layout when a recycle completes; (e) bound stale panes in non-stash windows. Context: tasks/agent-doc/handoff-2026-10-05-codex.md
-- [ ] 🚧 [#codexhandoff] [agent-doc] Codex pickup of the 2026-10-05 Claude subagent batch: read tasks/agent-doc/handoff-2026-10-05-codex.md. Step 0: confirm no Claude subagent is still writing (pgrep -x claude; git log -1 in each worktree), then agent-doc queue release the claims you take over. Resume gh136/netadv1/netadv2/netadv4/netadv7 from each worktree's HANDOFF.md under ~/work/btakita/agent-doc-wt/, then the held netadv3/5/6, integrate serially into batch-0505, make check, one make install, then release + publish.
-- [ ] [#netadv3] [agent-doc][formal] Re-check hot-path models (VisibleDeliveryReceipt, EditorReplicaStrand, PassiveTmuxSync, RecycleSettleDispatch, AgentDocCloseout, GH 136 layout/recycle) over NetChannel; fix every counterexample with SimWorld replay coverage. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
-- [ ] [#netadv5] [agent-doc] Latency budget enforcement: per hot path (focus/layout projection, response delivery, closeout ACK) assert serial round-trip count; replace fixed sleeps/settle windows on correctness paths with ack-driven transitions. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
-- [ ] [#netadv6] [agent-doc][simworld] Deterministic simulation fuzzing: seeded explorer over SimWorld (interleavings, network faults, edits, recycles, crashes, reconnects) checking TLA-derived invariant oracles each step; shrink failing seeds into committed regression seeds; short budget in make check, long nightly CI run. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

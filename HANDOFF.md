@@ -76,4 +76,8 @@ profiles; closeout commits identical (272). Oracle findings:
 
 ## Commands / status
 - `make sim-net` -> EXIT=0.
-- `make check` pending (next step).
+- `make check` -> EXIT=0 (nextest 11033 passed, sim-medium, sim-net, editor-parity, tla, lean).
+
+## Status
+COMPLETE. Remaining items are the open product findings F1-F3 (protocol changes: per-generation
+lifecycle/queue-control sequence; idempotency key on dispatch requests).

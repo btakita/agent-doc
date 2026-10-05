@@ -196,9 +196,12 @@ dependencies = [
  "agent-doc-merge",
  "agent-doc-state-wire",
  "agent-doc-template",
+ "base64",
+ "rmp-serde",
  "serde",
  "serde_json",
  "serde_yaml",
+ "zstd",
 ]
 
 [[package]]

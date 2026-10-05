@@ -2982,15 +2982,30 @@ fn projected_open_closeout_message(
     )
 }
 
+pub const RETAINED_PENDING_NEEDS_OPERATOR_TOKEN: &str = "retained_pending_needs_operator=true";
+
+struct RetainedPendingWriteMessage<'a> {
+    intent_id: &'a str,
+    reason: &'a str,
+    source: &'a str,
+    target_hash: &'a str,
+    resume_reason: Option<&'a str>,
+    captured_closeout: bool,
+}
+
 fn retained_pending_write_message(
     file: &Path,
-    intent_id: &str,
-    reason: &str,
-    source: &str,
-    target_hash: &str,
-    resume_reason: Option<&str>,
-    captured_closeout: bool,
+    pending: RetainedPendingWriteMessage<'_>,
+    ownership: agent_doc_turn::write_ownership::RetainedWriteOwnership,
 ) -> String {
+    let RetainedPendingWriteMessage {
+        intent_id,
+        reason,
+        source,
+        target_hash,
+        resume_reason,
+        captured_closeout,
+    } = pending;
     let resume_detail = resume_reason
         .map(|reason| {
             format!(
@@ -2999,6 +3014,28 @@ fn retained_pending_write_message(
             )
         })
         .unwrap_or_default();
+
+    let verdict = ownership.with_retained_projection(true).verdict();
+    if matches!(
+        verdict,
+        agent_doc_turn::write_ownership::RetainedWriteVerdict::DeliveryRejected
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::ReplicaUnserved
+    ) {
+        let kind = if captured_closeout {
+            "response delivery"
+        } else {
+            "document projection"
+        };
+        return format!(
+            "[session-check] INTERRUPTED: binary-owned {kind} `{intent_id}` is retained for `{}` (reason={reason}, source={source}, target_hash={target_hash}); {RETAINED_PENDING_NEEDS_OPERATOR_TOKEN}.{} The exact intent remains durable and must not be recaptured or forced to disk. {}",
+            file.display(),
+            resume_detail,
+            agent_doc_turn::write_ownership::retained_write_remedy(
+                ownership.with_retained_projection(true),
+                &file.display().to_string(),
+            ),
+        );
+    }
 
     // `#retainednoeditor`: "resumes automatically after editor/controller delivery
     // converges" is only true while an editor replica can still project. When the
@@ -3259,12 +3296,15 @@ fn inspect_core_profiled(
         return Ok(SessionCheckStatus::Interrupted(
             retained_pending_write_message(
                 file,
-                &pending.intent_id,
-                pending.reason.token(),
-                pending.source.token(),
-                &pending.target_hash,
-                captured_resume_reason.as_deref(),
-                captured_closeout,
+                RetainedPendingWriteMessage {
+                    intent_id: &pending.intent_id,
+                    reason: pending.reason.token(),
+                    source: pending.source.token(),
+                    target_hash: &pending.target_hash,
+                    resume_reason: captured_resume_reason.as_deref(),
+                    captured_closeout,
+                },
+                agent_doc_document_realtime_io::observed_retained_write_ownership(file),
             ),
         ));
     }
@@ -4881,12 +4921,16 @@ mod terminal_convergence_tests {
         let file = Path::new("session.md");
         let message = retained_pending_write_message(
             file,
-            "intent-1",
-            "editor_projection_pending",
-            "write_stream",
-            "new",
-            None,
-            true,
+            RetainedPendingWriteMessage {
+                intent_id: "intent-1",
+                reason: "editor_projection_pending",
+                source: "write_stream",
+                target_hash: "new",
+                resume_reason: None,
+                captured_closeout: true,
+            },
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
+                .with_retained_projection(true),
         );
         assert!(message.contains("same capture will resume"));
         assert!(message.contains("Do not issue another closeout payload"));
@@ -4901,18 +4945,68 @@ mod terminal_convergence_tests {
         let file = Path::new("session.md");
         let message = retained_pending_write_message(
             file,
-            "intent-2",
-            "merge_unsaved_editor_cut_with_deferred_target",
-            "editor_reconnect",
-            "normalized",
-            None,
-            false,
+            RetainedPendingWriteMessage {
+                intent_id: "intent-2",
+                reason: "merge_unsaved_editor_cut_with_deferred_target",
+                source: "editor_reconnect",
+                target_hash: "normalized",
+                resume_reason: None,
+                captured_closeout: false,
+            },
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED
+                .with_retained_projection(true),
         );
         assert!(message.contains("binary-owned document projection"));
         assert!(message.contains("same intent will resume"));
         assert!(message.contains("Do not issue a closeout payload"));
         assert!(!message.contains("binary-owned response delivery"));
         assert!(!message.contains("same capture will resume"));
+    }
+
+    #[test]
+    fn retained_pending_rejection_reports_operator_gate_instead_of_automatic_retry() {
+        let file = Path::new("session.md");
+        let message = retained_pending_write_message(
+            file,
+            RetainedPendingWriteMessage {
+                intent_id: "intent-refused",
+                reason: "editor_projection_pending",
+                source: "serialized_atomic_write",
+                target_hash: "target",
+                resume_reason: Some(
+                    "retained target has not reached exact canonical/disk convergence",
+                ),
+                captured_closeout: true,
+            },
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
+                .with_retained_projection(true)
+                .with_delivery_rejected(true),
+        );
+
+        assert!(
+            message.contains(RETAINED_PENDING_NEEDS_OPERATOR_TOKEN),
+            "{message}"
+        );
+        assert!(
+            message.contains("REJECTED the delivery receipt"),
+            "{message}"
+        );
+        assert!(
+            message.contains("restart or reload the editor"),
+            "{message}"
+        );
+        assert!(
+            message.contains("exact intent remains durable"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("retry only `agent-doc session-check"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("same capture will resume automatically"),
+            "{message}"
+        );
     }
 
     #[test]

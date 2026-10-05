@@ -1128,6 +1128,29 @@ fn apply_bound_stop(
         // report from an older binary took; nothing below treats it as a failure.
         agent_doc_session_check_io::SessionCheckStatus::SteeringPending(reason)
         | agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
+            // A durable retained intent whose endpoint explicitly refused is
+            // no longer an automatic-retry state. On the first Stop, hand the
+            // exact operator remedy back to the agent so it can report the
+            // blocker. On the recursive Stop after that report, allow the
+            // answer through; repeating the same stop veto cannot create the
+            // editor endpoint transition the remedy requires.
+            if retained_closeout_needs_operator(&reason) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    "codex_stop_retained_closeout_needs_operator action=report_operator_blocker",
+                );
+                if input.stop_hook_active {
+                    return Ok(StopResponse::Continue { continue_: true });
+                }
+                return Ok(StopResponse::Block {
+                    decision: "block",
+                    reason: format!(
+                        "agent-doc Stop hook found a retained closeout that requires operator action for {}. {} Report this exact blocker and its recovery to the operator; do not resend or recapture the response, force disk, or keep retrying session-check. After reporting it, the recursive Stop may finish this turn while the durable capture remains retained.",
+                        file.display(),
+                        reason,
+                    ),
+                });
+            }
             // `#binaryownedfinalize`: once the response is durably captured, the
             // Stop hook is a status gate, not a request for another agent-authored
             // finalize attempt. Give the binary's keyed repair/commit operation a
@@ -1418,15 +1441,20 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
 }
 
 fn is_binary_owned_closeout_interruption(reason: &str) -> bool {
-    reason.contains("closeout blocked by `editor_convergence_required`")
-        || (reason.contains("editor_convergence_required")
-            && reason.contains("operator_text_authority_v1"))
-        || (reason.contains("binary-owned response delivery `")
-            && reason.contains(" is retained for `")
-            && reason.contains("Same-capture recovery remains pending"))
-        || (reason.contains("cycle `")
-            && reason.contains(" is still `write_applied`")
-            && reason.contains("response write landed but no terminal commit followed"))
+    !retained_closeout_needs_operator(reason)
+        && (reason.contains("closeout blocked by `editor_convergence_required`")
+            || (reason.contains("editor_convergence_required")
+                && reason.contains("operator_text_authority_v1"))
+            || (reason.contains("binary-owned response delivery `")
+                && reason.contains(" is retained for `")
+                && reason.contains("Same-capture recovery remains pending"))
+            || (reason.contains("cycle `")
+                && reason.contains(" is still `write_applied`")
+                && reason.contains("response write landed but no terminal commit followed")))
+}
+
+fn retained_closeout_needs_operator(reason: &str) -> bool {
+    reason.contains(agent_doc_session_check_io::RETAINED_PENDING_NEEDS_OPERATOR_TOKEN)
 }
 
 fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Option<StopResponse>> {
@@ -6779,6 +6807,15 @@ Reviewed the gated items.\n\
         assert!(!is_binary_owned_closeout_interruption(
             "[session-check] INTERRUPTED: cycle `cycle-1` is still `preflight_started` — cycle started but no write/commit followed."
         ));
+        let needs_operator = format!(
+            "[session-check] INTERRUPTED: binary-owned response delivery `intent-1` is retained; {}. The endpoint rejected delivery.",
+            agent_doc_session_check_io::RETAINED_PENDING_NEEDS_OPERATOR_TOKEN,
+        );
+        assert!(retained_closeout_needs_operator(&needs_operator));
+        assert!(
+            !is_binary_owned_closeout_interruption(&needs_operator),
+            "an operator-gated capture must not re-enter the automatic Stop retry loop"
+        );
     }
 
     #[test]

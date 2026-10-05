@@ -31,6 +31,33 @@ pub struct EditorTransportFailureTransition {
     pub endpoint_unregistered: bool,
 }
 
+/// Whether the current session's editor endpoint is temporarily excluded from
+/// delivery after a trailing run of explicit refusals.
+///
+/// This is the shared admission read for every targeted editor transport. The
+/// durable health row owns the refusal run; individual transports must not
+/// reimplement (or omit) the bounded probe policy.
+pub fn endpoint_unregistered(project_root: &Path, file: &Path) -> Result<bool> {
+    let session_id =
+        agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_else(|| "-".to_string());
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    let Some(health) =
+        agent_doc_sqlite::state_store::load_editor_transport_health_from_db(&conn, &document_hash)?
+            .filter(|health| health.session_id == session_id)
+    else {
+        return Ok(false);
+    };
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    Ok(agent_doc_ipc_protocol::editor_endpoint_unregistered(
+        health.consecutive_rejections,
+        now_secs.saturating_sub(health.updated_at_secs),
+    ))
+}
+
 pub fn failure_transition(
     prior: EditorTransportHealthState,
     failure: SocketDeliveryFailure,
@@ -254,6 +281,37 @@ mod tests {
             )
             .unwrap()
             .is_none()
+        );
+    }
+
+    #[test]
+    fn shared_admission_suppresses_the_current_sessions_refusing_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nsession: health-admission\n---\n\n# Session\n").unwrap();
+
+        for attempt in 0..agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD {
+            record_failure(
+                dir.path(),
+                &file,
+                Some(&format!("r{attempt}")),
+                "native_editor_save_request",
+                SocketDeliveryFailure::Rejected,
+                |_| false,
+            )
+            .unwrap();
+        }
+        assert!(endpoint_unregistered(dir.path(), &file).unwrap());
+
+        std::fs::write(
+            &file,
+            "---\nsession: replacement-session\n---\n\n# Session\n",
+        )
+        .unwrap();
+        assert!(
+            !endpoint_unregistered(dir.path(), &file).unwrap(),
+            "a prior session's refusal run must not fence a replacement endpoint"
         );
     }
 }

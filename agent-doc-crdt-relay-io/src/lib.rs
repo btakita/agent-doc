@@ -5092,6 +5092,11 @@ pub struct ReplicaSignalOutcome {
     /// left the authority resolver holding an attachment latch it could never
     /// open. See `formal/tla/EditorReplicaStrand.tla`.
     pub definitive_refusals: usize,
+    /// Delivery was intentionally not attempted because the shared durable
+    /// transport-health policy currently treats this endpoint as unregistered.
+    /// The bounded probe window will later admit one request; until then this
+    /// must not be mistaken for a fresh network failure or another refusal.
+    pub endpoint_unregistered: bool,
 }
 
 /// Fold one completed replica/native-save delivery attempt into the shared
@@ -5156,6 +5161,22 @@ fn native_save_capable_editor_kind(editor_kind: &str) -> bool {
         editor_kind.trim().to_ascii_lowercase().as_str(),
         "jetbrains" | "intellij" | "idea" | "jb" | "vscode" | "vs-code" | "code"
     )
+}
+
+fn suppressed_native_save_outcome(
+    endpoint_unregistered: bool,
+    found: usize,
+    generation_mismatches: usize,
+) -> Option<ReplicaSignalOutcome> {
+    endpoint_unregistered.then(|| ReplicaSignalOutcome {
+        found,
+        notified: 0,
+        build_mismatches: Vec::new(),
+        build_mismatch_refusals: Vec::new(),
+        generation_mismatches,
+        definitive_refusals: 0,
+        endpoint_unregistered: true,
+    })
 }
 
 /// Split liveness-plane registrations into those whose editor process is live
@@ -5264,6 +5285,30 @@ pub fn request_native_save_for_current_projection(
 
     let found = routes.len() + generation_mismatches.len();
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    // The durable refusal run is the endpoint-admission authority shared with
+    // socket writes. Re-sending persist_current while this verdict is active
+    // can only ask the same listener to repeat its explicit NO and, worse,
+    // moves the refusal timestamp so the bounded probe window never opens.
+    // Return a typed suppressed outcome; the retained controller keeps the
+    // exact projection durable while session-check surfaces the operator gate.
+    if let Some(outcome) = suppressed_native_save_outcome(
+        agent_doc_editor_transport_health_io::endpoint_unregistered(&project_root, &canonical)
+            .unwrap_or(false),
+        found,
+        generation_mismatches.len(),
+    ) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "native_editor_save_request_skipped file={} content_hash={} routes_found={} reason=endpoint_unregistered_after_refusals threshold={} action=await_bounded_probe_or_endpoint_recovery",
+                canonical.display(),
+                expected_content_hash,
+                found,
+                agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD,
+            ),
+        );
+        return Ok(outcome);
+    }
     let mut notified = 0usize;
     let mut native_save_definitive_refusals = 0usize;
     let mut build_mismatches = Vec::new();
@@ -5334,6 +5379,7 @@ pub fn request_native_save_for_current_projection(
         build_mismatch_refusals: Vec::new(),
         generation_mismatches: generation_mismatches.len(),
         definitive_refusals: native_save_definitive_refusals,
+        endpoint_unregistered: false,
     };
     record_replica_signal_transport_health(
         &canonical,
@@ -5360,6 +5406,9 @@ pub enum ReplicaSignalClass {
     NoLiveRegistration,
     /// Every live route was fenced on a plugin generation mismatch.
     PluginGenerationMismatch(usize),
+    /// The shared refusal-run policy suppressed this targeted delivery until
+    /// its bounded probe window opens.
+    EndpointUnregistered(usize),
     /// Every live route ANSWERED and refused.
     DefinitivelyRefusedByAll(usize),
     /// Routes exist but none could be reached: a delivery fault.
@@ -5395,6 +5444,9 @@ impl ReplicaSignalOutcome {
     /// Classify this outcome once; [`Self::diagnosis`] and
     /// [`Self::nonconverging_disposition`] both derive from it.
     pub fn classify(&self) -> ReplicaSignalClass {
+        if self.endpoint_unregistered {
+            return ReplicaSignalClass::EndpointUnregistered(self.found);
+        }
         match (self.found, self.notified) {
             (0, _) => ReplicaSignalClass::NoLiveRegistration,
             (found, 0) if self.generation_mismatches == found => {
@@ -5423,6 +5475,9 @@ impl ReplicaSignalOutcome {
             ReplicaSignalClass::NoLiveRegistration => "no_live_registration".to_string(),
             ReplicaSignalClass::PluginGenerationMismatch(found) => {
                 format!("plugin_generation_mismatch:{found}")
+            }
+            ReplicaSignalClass::EndpointUnregistered(found) => {
+                format!("endpoint_unregistered_after_refusals:{found}")
             }
             ReplicaSignalClass::DefinitivelyRefusedByAll(found) => {
                 format!("definitively_refused_by_all:{found}")
@@ -5463,6 +5518,7 @@ impl ReplicaSignalClass {
         match self {
             Self::NoLiveRegistration
             | Self::PluginGenerationMismatch(_)
+            | Self::EndpointUnregistered(_)
             | Self::DeliveryFailedToAll(_)
             | Self::DefinitivelyRefusedByAll(_) => true,
             Self::PartiallyRequested { .. } | Self::Requested(_) => false,
@@ -5495,6 +5551,9 @@ impl ReplicaSignalClass {
         match name {
             "no_live_registration" => Some(Self::NoLiveRegistration),
             "plugin_generation_mismatch" => Some(Self::PluginGenerationMismatch(counts(rest)?.0)),
+            "endpoint_unregistered_after_refusals" => {
+                Some(Self::EndpointUnregistered(counts(rest)?.0))
+            }
             "definitively_refused_by_all" => Some(Self::DefinitivelyRefusedByAll(counts(rest)?.0)),
             "delivery_failed_to_all" => Some(Self::DeliveryFailedToAll(counts(rest)?.0)),
             "requested" => match counts(rest)? {
@@ -5518,6 +5577,7 @@ impl ReplicaSignalOutcome {
             }
             ReplicaSignalClass::NoLiveRegistration
             | ReplicaSignalClass::PluginGenerationMismatch(_)
+            | ReplicaSignalClass::EndpointUnregistered(_)
             | ReplicaSignalClass::DeliveryFailedToAll(_) => NonconvergingReplicaDisposition::Retry,
         }
     }
@@ -5674,6 +5734,7 @@ fn signal_crdt_replica_event_counting_inner(
         build_mismatch_refusals,
         generation_mismatches: 0,
         definitive_refusals,
+        endpoint_unregistered: false,
     };
     record_replica_signal_transport_health(
         &canonical,
@@ -5792,6 +5853,10 @@ mod tests {
             ReplicaSignalClass::PluginGenerationMismatch(1).needs_operator_inspection(),
             "an exact plugin/binary generation fence cannot clear while both installed generations stay unchanged"
         );
+        assert!(
+            ReplicaSignalClass::EndpointUnregistered(1).needs_operator_inspection(),
+            "a refusal-run admission fence requires endpoint recovery or the bounded probe"
+        );
     }
 
     /// The consumer holds only the logged diagnosis string, so the token must
@@ -5830,6 +5895,7 @@ mod tests {
                 generation_mismatches: mismatches,
                 build_mismatches: Vec::new(),
                 build_mismatch_refusals: Vec::new(),
+                endpoint_unregistered: false,
             };
             assert_eq!(outcome.classify(), expected, "classify {found}/{notified}");
             let token = outcome.diagnosis();
@@ -5851,6 +5917,40 @@ mod tests {
         assert_eq!(
             ReplicaSignalClass::from_diagnosis_token("something_new"),
             None
+        );
+
+        let suppressed = ReplicaSignalOutcome {
+            found: 1,
+            notified: 0,
+            definitive_refusals: 0,
+            generation_mismatches: 0,
+            build_mismatches: Vec::new(),
+            build_mismatch_refusals: Vec::new(),
+            endpoint_unregistered: true,
+        };
+        assert_eq!(
+            suppressed.classify(),
+            ReplicaSignalClass::EndpointUnregistered(1)
+        );
+        assert_eq!(
+            ReplicaSignalClass::from_diagnosis_token(&suppressed.diagnosis()),
+            Some(ReplicaSignalClass::EndpointUnregistered(1))
+        );
+    }
+
+    #[test]
+    fn native_save_suppresses_a_refusing_endpoint_until_the_probe_window() {
+        let suppressed = suppressed_native_save_outcome(true, 1, 0)
+            .expect("the durable unregister verdict suppresses delivery");
+        assert_eq!(
+            suppressed.classify(),
+            ReplicaSignalClass::EndpointUnregistered(1)
+        );
+        assert_eq!(suppressed.notified, 0);
+        assert_eq!(suppressed.definitive_refusals, 0);
+        assert!(
+            suppressed_native_save_outcome(false, 1, 0).is_none(),
+            "an expired window admits exactly the ordinary native-save path"
         );
     }
 
@@ -6247,6 +6347,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches,
                 definitive_refusals,
+                endpoint_unregistered: false,
             };
 
         assert_eq!(
@@ -6349,6 +6450,7 @@ mod tests {
                             build_mismatch_refusals: Vec::new(),
                             generation_mismatches,
                             definitive_refusals,
+                            endpoint_unregistered: false,
                         };
                         let drops = outcome.nonconverging_disposition()
                             == NonconvergingReplicaDisposition::DropFromDeliveryCut;
@@ -6378,6 +6480,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                endpoint_unregistered: false,
             }
             .diagnosis(),
             "no_live_registration",
@@ -6391,6 +6494,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                endpoint_unregistered: false,
             }
             .diagnosis(),
             "delivery_failed_to_all:1",
@@ -6404,6 +6508,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                endpoint_unregistered: false,
             }
             .diagnosis(),
             "requested:1/3",
@@ -6417,6 +6522,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                endpoint_unregistered: false,
             }
             .diagnosis(),
             "requested:2"
@@ -6429,6 +6535,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 1,
                 definitive_refusals: 0,
+                endpoint_unregistered: false,
             }
             .diagnosis(),
             "plugin_generation_mismatch:1"
@@ -6532,6 +6639,7 @@ mod tests {
             build_mismatch_refusals: Vec::new(),
             generation_mismatches: mismatches.len(),
             definitive_refusals: 0,
+            endpoint_unregistered: false,
         };
         assert_eq!(outcome.diagnosis(), "no_live_registration");
 
@@ -10435,6 +10543,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 1,
+                endpoint_unregistered: false,
             };
             for attempt in 0..agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD {
                 record_replica_signal_transport_health(
@@ -10466,6 +10575,7 @@ mod tests {
                 build_mismatch_refusals: Vec::new(),
                 generation_mismatches: 0,
                 definitive_refusals: 0,
+                endpoint_unregistered: false,
             };
             record_replica_signal_transport_health(&file, Some("success"), transport, &success)
                 .unwrap();

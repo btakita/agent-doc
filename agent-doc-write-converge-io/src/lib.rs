@@ -4611,33 +4611,11 @@ pub fn note_ipc_socket_ack(project_root: &Path, file: &Path, reason: &str) -> Re
 /// elapsed. A missing or unreadable record is "registered" (not looked is not
 /// refused).
 pub fn editor_delivery_endpoint_unregistered(project_root: &Path, file: &Path) -> bool {
-    let Some(value) = editor_transport_health_for_current_session(project_root, file)
-        .ok()
-        .flatten()
-    else {
-        return false;
-    };
-    let refusals = value
-        .get("consecutive_rejections")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let updated_at = value
-        .get("updated_at_secs")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
-    agent_doc_ipc_protocol::editor_endpoint_unregistered(refusals, now.saturating_sub(updated_at))
+    agent_doc_editor_transport_health_io::endpoint_unregistered(project_root, file).unwrap_or(false)
 }
 
 fn clear_editor_transport_health(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
-    agent_doc_editor_transport_health_io::clear_after_proven_delivery(
-        project_root,
-        file,
-        reason,
-    )
+    agent_doc_editor_transport_health_io::clear_after_proven_delivery(project_root, file, reason)
 }
 
 pub fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &str) -> Result<()> {

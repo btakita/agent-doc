@@ -14,11 +14,20 @@ document-mutation boundary for the cycle, not an intermediate checkpoint. After
 same turn. Codex hooks in user-level `$CODEX_HOME/hooks.json` plus project-local `.codex/config.toml` are a
 fail-closed backstop, not a replacement for explicit closeout.
 
-## Agent harnesses own full-suite verification
+## Agent harnesses own tiered verification
 
-If you changed code, tests, build logic, or instruction surfaces, run the full
-project verification suite explicitly after edits and before `finalize` /
-`write --commit`. Do not rely on a pre-commit hook. Do not waive red suites as
+Use `make check-fast` during implementation. It maps changed Rust packages to
+their transitive reverse dependents and checks that affected scope, while
+dispatching relevant editor, Python, and generated-document checks. It is an
+iteration aid, not release proof.
+
+After integration and any release-version projection, run exactly one
+authoritative `make check` before `finalize` / `write --commit`. A successful
+run records a worktree-local fingerprint of repository bytes and toolchain
+identities. `make release` may reuse that proof only while the fingerprint still
+matches; otherwise it runs `make check` itself. It always keeps `make tmux-ci`
+as a separate release gate. Do not pre-run another full suite merely because
+release is next. Do not rely on a pre-commit hook or waive red suites as
 "unrelated" or "flaky".
 
 Capture two independent proofs when the runner exposes a failure tally:

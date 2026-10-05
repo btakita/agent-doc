@@ -14436,7 +14436,7 @@ fn test_release_cadence_applies_only_to_macos_assets() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let makefile = fs::read_to_string(manifest_dir.join("Makefile")).unwrap();
     assert!(
-        makefile.contains("release: check")
+        makefile.contains("release: release-check")
             && !makefile.contains("release: release-macos-cadence-check")
             && makefile.contains("python3 scripts/agent-doc-dev verify-macos-release-cadence"),
         "normal tags must remain on demand while exposing a macOS-only cadence check"
@@ -14515,6 +14515,48 @@ fn test_release_cadence_applies_only_to_macos_assets() {
             && spec_words.contains("four automated Linux and Windows targets")
             && spec_words.contains("Operator-built Darwin artifacts"),
         "the on-demand hosted-release and weekly Darwin policy must remain specified"
+    );
+}
+
+#[test]
+fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let makefile = fs::read_to_string(manifest_dir.join("Makefile")).unwrap();
+    assert!(
+        makefile.contains("check-fast:")
+            && makefile.contains("scripts/dev-check.py run")
+            && makefile.contains("scripts/dev-check.py record-full-check"),
+        "the fast affected-scope tier and authoritative full-check receipt must stay wired"
+    );
+    assert!(
+        makefile.contains("release-check: tmux-ci")
+            && makefile.contains("scripts/dev-check.py verify-full-check")
+            && makefile.contains("release: release-check")
+            && !makefile.contains("release: check"),
+        "release must retain tmux-ci while reusing only a matching full-check proof"
+    );
+    assert!(
+        makefile.contains("NEXTEST_NON_BATCHED_FILTER")
+            && makefile.contains("BATCHED_TEST_PACKAGE_ARGS")
+            && makefile.contains("$(CARGO_CMD) test $(BATCHED_TEST_PACKAGE_ARGS)"),
+        "controller-heavy packages must avoid nextest's process-per-test startup"
+    );
+
+    let wrapper = fs::read_to_string(manifest_dir.join("scripts/with-cargo-cache")).unwrap();
+    assert!(
+        wrapper.contains("CARGO_TARGET_DIR=\"$PWD/target\"")
+            && wrapper.contains("command -v sccache")
+            && wrapper.contains("SCCACHE_DIR=\"$cache_home/agent-doc/sccache\"")
+            && wrapper.contains("${RUSTC_WRAPPER+x}"),
+        "worktrees must keep separate targets while sharing only optional compiler cache entries"
+    );
+
+    let helper = fs::read_to_string(manifest_dir.join("scripts/dev-check.py")).unwrap();
+    assert!(
+        helper.contains("reverse.setdefault(dependency_id")
+            && helper.contains("repository_fingerprint")
+            && helper.contains("workspace_members"),
+        "affected-package closure and content-addressed proof logic must remain explicit"
     );
 }
 

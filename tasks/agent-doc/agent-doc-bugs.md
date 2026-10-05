@@ -19,7 +19,6 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -713,23 +712,6 @@ The exchange is large, but the active queue was drained rather than stalled for 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~Pick up from claude code sessions that were interrupted by weekly limit. Subagents were running.~~
-- ~~do [#jbstagefallback]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/136: Use formal logic to make the fix & the state transitions provably correct. Make sure the effects are provably reliable and have low latency.~~
-- ~~The alt+shift agent-doc menu is not coming up.~~
-- ~~do [#netadv1]~~
-- ~~do [#netadv2]~~
-- ~~do [#netadv3]~~
-- ~~do [#netadv4]~~
-- ~~do [#netadv5]~~
-- ~~do [#netadv6]~~
-- ~~do [#netadv7]~~
-- ~~do [#claimstrike]~~
-- ~~do [#gh136follow]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/137
-- #gh-fix https://github.com/btakita/agent-doc/issues/138: use formal logic
-- release + publish
-- ~~do [#codexhandoff]~~
 <!-- /agent:queue -->
 
 

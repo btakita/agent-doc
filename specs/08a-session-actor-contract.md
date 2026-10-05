@@ -100,6 +100,12 @@ Later phases may refine caller values without changing the field names.
 - `.agent-doc/state.db` is the only actor and registry authority. Route, start,
   and sync ask the project controller for the actor binding; no actor JSON
   projection or compatibility reader participates in normal or recovery paths.
+- A pane id is durable ownership identity, but its tmux window id is observed
+  placement. A surviving pane may move between `agent-doc` and `stash` without
+  changing ownership. Actor-binding reads, route lookup, and focus must
+  reconcile a live pane's current window into both the actor row and registry
+  before consuming that placement. This correction preserves session, pane,
+  generation, lifecycle state, harness, and last-transition provenance.
 - Editor layout memory is controller state too. Sync reads and writes the
 remembered column layout through `.agent-doc/state.db` `layout_states` rows.
 No legacy layout file is imported or emitted.
@@ -117,6 +123,10 @@ No legacy layout file is imported or emitted.
   identity, route probes and submits with the recorded harness protocol. This
   prevents a desired Claude projection from sending Claude input to a live
   Codex actor (and applies symmetrically to OpenCode).
+- Window reconciliation is not a harness transition. In particular, a pane
+  move adjacent to Claude Code-to-Codex restart/switch activity must not infer
+  the harness from frontmatter or reset lifecycle state; only the successful
+  child-establishment writeback changes transport identity.
 - Every successful harness child establishment, including initial spawn and
   recycle adoption, must persist the normalized actual child identity to the
   generation-fenced actor record. This replaces a launch-time `default` guess

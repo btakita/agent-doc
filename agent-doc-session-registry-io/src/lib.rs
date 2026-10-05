@@ -100,6 +100,32 @@ pub fn lookup_file_entry_in(base_dir: &Path, file: &Path) -> Result<Option<Regis
     Ok(registry.get(&registry_key).cloned())
 }
 
+/// Refresh the durable window identity for an existing pane binding.
+///
+/// Tmux keeps a pane id stable across `join-pane`, `move-pane`, and
+/// `break-pane`, but those operations change its window id. This updates the
+/// observed fact without re-registering or re-electing the document owner.
+pub fn rebind_pane_window_in(base_dir: &Path, pane_id: &str, live_window: &str) -> Result<bool> {
+    let live_window = live_window.trim();
+    if pane_id.trim().is_empty() || live_window.is_empty() {
+        return Ok(false);
+    }
+    let registry_path = registry_path_in(base_dir);
+    let _lock = RegistryLock::acquire(&registry_path)?;
+    let mut registry = load_in(base_dir)?;
+    let mut changed = false;
+    for entry in registry.values_mut().filter(|entry| entry.pane == pane_id) {
+        if entry.window != live_window {
+            entry.window = live_window.to_string();
+            changed = true;
+        }
+    }
+    if changed {
+        save_in(base_dir, &registry)?;
+    }
+    Ok(changed)
+}
+
 /// Project the durable ownership claim for a document-carried session identity.
 ///
 /// A copied markdown document can carry another document's session UUID. The
@@ -362,6 +388,40 @@ mod tests {
         assert_eq!(entry.pane, "%80");
         assert_eq!(entry.window, "@12");
         assert_eq!(loaded.len(), 1);
+    }
+
+    #[test]
+    fn rebind_pane_window_updates_only_the_matching_physical_pane() {
+        let dir = TempDir::new().unwrap();
+        let mut registry = Registry::new();
+        let mut moved = entry("moved-session", "%80", "moved.md");
+        moved.window = "@2".to_string();
+        let mut sibling = entry("sibling-session", "%81", "sibling.md");
+        sibling.window = "@2".to_string();
+        registry.insert("moved.md".to_string(), moved);
+        registry.insert("sibling.md".to_string(), sibling);
+        save_in(dir.path(), &registry).unwrap();
+
+        assert!(rebind_pane_window_in(dir.path(), "%80", "@1").unwrap());
+        assert!(!rebind_pane_window_in(dir.path(), "%80", "@1").unwrap());
+
+        let loaded = load_in(dir.path()).unwrap();
+        assert_eq!(
+            loaded
+                .values()
+                .find(|entry| entry.pane == "%80")
+                .unwrap()
+                .window,
+            "@1"
+        );
+        assert_eq!(
+            loaded
+                .values()
+                .find(|entry| entry.pane == "%81")
+                .unwrap()
+                .window,
+            "@2"
+        );
     }
 
     #[test]

@@ -408,19 +408,12 @@ pub fn repair_pane_window_binding(file: &Path) -> Result<Option<String>> {
 }
 
 fn refresh_drifted_pane_window_binding(tmux: &Tmux, file: &Path) -> Result<Option<String>> {
-    refresh_drifted_pane_window_binding_with_origin(
-        tmux,
-        file,
-        "session-doctor",
-        "live_window_rebind",
-    )
+    refresh_drifted_pane_window_binding_with_origin(tmux, file)
 }
 
 fn refresh_drifted_pane_window_binding_with_origin(
     tmux: &Tmux,
     file: &Path,
-    caller: &str,
-    reason: &str,
 ) -> Result<Option<String>> {
     let base_dir = match agent_doc_fs::find_project_root_canonical(file) {
         Some(root) => root,
@@ -455,18 +448,20 @@ fn refresh_drifted_pane_window_binding_with_origin(
 
     let recorded = record.window_id.clone();
     if actor_drifted {
-        agent_doc_session_actor_io::project_binding_in(
+        agent_doc_session_actor_io::set_record_window_in(
             &base_dir,
             &file_key,
             &record.session_id,
             &record.pane_id,
             &live_window,
-            caller,
-            reason,
         )?;
     }
     if registry_drifted {
-        rebind_registry_pane_window(&base_dir, &record.pane_id, &live_window)?;
+        agent_doc_session_registry_io::rebind_pane_window_in(
+            &base_dir,
+            &record.pane_id,
+            &live_window,
+        )?;
     }
 
     Ok(Some(format!(
@@ -494,12 +489,7 @@ fn refresh_synced_pane_window_bindings(
         if !seen.insert(file.clone()) {
             continue;
         }
-        if let Some(note) = refresh_drifted_pane_window_binding_with_origin(
-            tmux,
-            file,
-            "sync",
-            "post_layout_live_window_rebind",
-        )? {
+        if let Some(note) = refresh_drifted_pane_window_binding_with_origin(tmux, file)? {
             sync_log(&format!(
                 "post_sync_window_binding_rebound file={} note={}",
                 file.display(),
@@ -518,29 +508,6 @@ fn registry_window_for_pane(base_dir: &Path, pane: &str) -> Result<Option<String
         .values()
         .find(|entry| entry.pane == pane)
         .map(|entry| entry.window.clone()))
-}
-
-/// Point the registry entry for `pane` at `live_window`, under the registry lock.
-fn rebind_registry_pane_window(base_dir: &Path, pane: &str, live_window: &str) -> Result<()> {
-    let registry_path = agent_doc_session_registry_io::registry_path_in(base_dir);
-    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
-    let mut registry = agent_doc_session_registry_io::load_in(base_dir)?;
-    let Some(key) = registry
-        .iter()
-        .find(|(_, entry)| entry.pane == pane)
-        .map(|(key, _)| key.clone())
-    else {
-        return Ok(());
-    };
-    let Some(entry) = registry.get_mut(&key) else {
-        return Ok(());
-    };
-    if entry.window == live_window {
-        return Ok(());
-    }
-    entry.window = live_window.to_string();
-    agent_doc_session_registry_io::save_in(base_dir, &registry)?;
-    Ok(())
 }
 
 fn recover_jb_cache_conflict_cancel_commit_boundary(file: &Path) -> Result<Option<String>> {
@@ -11497,7 +11464,7 @@ mod tests {
         let doc = root.join("tasks/bound.md");
         std::fs::write(
             &doc,
-            "---\nagent_doc_session: bound-session\nagent_doc_format: template\n---\n",
+            "---\nagent_doc_session: bound-session\nagent_doc_format: template\nagent: codex\n---\n",
         )
         .unwrap();
         let _cwd = ScopedCurrentDir::set(root);
@@ -11532,6 +11499,17 @@ mod tests {
             &root.to_string_lossy(),
         )
         .unwrap();
+        let busy = agent_doc_session_actor_io::transition_state_in(
+            root,
+            &file_key,
+            "bound-session",
+            &pane,
+            Some(1),
+            agent_doc_controller::actor::ActorState::Busy,
+            "supervisor",
+            "codex_dispatch_started",
+        )
+        .unwrap();
         assert_ne!(
             live_window, STALE_WINDOW,
             "fixture must actually be drifted"
@@ -11551,6 +11529,12 @@ mod tests {
             .expect("record survives the rebind");
         assert_eq!(record.window_id, live_window);
         assert_eq!(record.pane_id, pane, "the pane binding itself is unchanged");
+        assert_eq!(record.state, agent_doc_controller::actor::ActorState::Busy);
+        assert_eq!(record.harness, "codex");
+        assert_eq!(
+            record.last_transition, busy.last_transition,
+            "placement repair must not erase harness/lifecycle provenance"
+        );
         assert_eq!(
             registry_window_for_pane(root, &pane).unwrap().as_deref(),
             Some(live_window.as_str()),

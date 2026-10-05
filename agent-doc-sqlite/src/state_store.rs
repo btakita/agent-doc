@@ -4577,6 +4577,58 @@ pub fn store_actor_record_tx(
     })
 }
 
+/// Refresh only the observed tmux window of the current pane owner.
+///
+/// Pane reparenting does not represent an ownership or lifecycle transition,
+/// so this keeps the actor's generation, state, harness, and last transition
+/// intact. The immediate transaction prevents a same-generation lifecycle or
+/// harness write from being overwritten by a stale read/replace cycle.
+pub fn rebind_actor_window_tx(
+    conn: &mut Connection,
+    document_id: &str,
+    session_id: &str,
+    pane_id: &str,
+    window_id: &str,
+) -> Result<ActorStoreWrite> {
+    let window_id = window_id.trim();
+    if window_id.is_empty() {
+        anyhow::bail!("actor window rebind requires a non-empty window id");
+    }
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let current = load_actor_record_from_db(&tx, document_id)?
+        .with_context(|| format!("missing authoritative actor record for {document_id}"))?;
+    if current.session_id != session_id || current.pane_id != pane_id {
+        anyhow::bail!(
+            "stale actor window writeback for {}: session {} pane {} no longer owns generation {} (current session {} pane {})",
+            document_id,
+            session_id,
+            pane_id,
+            current.generation,
+            current.session_id,
+            current.pane_id,
+        );
+    }
+    if current.window_id == window_id {
+        tx.commit()?;
+        return Ok(ActorStoreWrite {
+            record: current,
+            evicted_document_ids: Vec::new(),
+        });
+    }
+    tx.execute(
+        "UPDATE documents SET window_id = ?1 WHERE document_id = ?2",
+        params![window_id, document_id],
+    )?;
+    let record = load_actor_record_from_db(&tx, document_id)?.with_context(|| {
+        format!("actor record disappeared during window rebind for {document_id}")
+    })?;
+    tx.commit()?;
+    Ok(ActorStoreWrite {
+        record,
+        evicted_document_ids: Vec::new(),
+    })
+}
+
 /// `#actorprune`: hard-delete a dead actor record and its history/lease rows.
 ///
 /// `close_stale_starting_actors` only TRANSITIONS `Starting` actors to `Closed`;

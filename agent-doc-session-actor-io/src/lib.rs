@@ -369,6 +369,32 @@ pub fn set_record_harness_in(
     )
 }
 
+/// Refresh the physical tmux window for an existing pane binding without
+/// changing ownership, lifecycle state, or harness transport identity.
+pub fn set_record_window_in(
+    base_dir: &Path,
+    document_id: &str,
+    session_id: &str,
+    pane_id: &str,
+    window_id: &str,
+) -> Result<ActorRecord> {
+    Ok(set_record_window_write_in(base_dir, document_id, session_id, pane_id, window_id)?.record)
+}
+
+/// Variant used by the project controller so the accepted durable correction
+/// can be published into its in-process actor graph without reopening SQLite.
+pub fn set_record_window_write_in(
+    base_dir: &Path,
+    document_id: &str,
+    session_id: &str,
+    pane_id: &str,
+    window_id: &str,
+) -> Result<agent_doc_controller::actor::ActorStoreWrite> {
+    let document_id = canonical_document_id_in(base_dir, document_id);
+    let mut conn = state_store::open_state_db(base_dir)?;
+    state_store::rebind_actor_window_tx(&mut conn, &document_id, session_id, pane_id, window_id)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn transition_state_in(
     base_dir: &Path,
@@ -1108,6 +1134,62 @@ mod tests {
         // rewrite the harness out from under the real owner.
         assert!(set_record_harness_direct(&file, "session-hsw2", "%99", "claude").is_err());
         assert!(set_record_harness_direct(&file, "other-session", "%30", "claude").is_err());
+    }
+
+    #[test]
+    fn set_record_window_preserves_harness_state_and_generation() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-window\nagent: codex\n---\nBody\n",
+        );
+        record_session_start(&file, "session-window", "%30", "@2", 1).unwrap();
+        let busy = transition_state(
+            &file,
+            "session-window",
+            "%30",
+            ActorState::Busy,
+            "test",
+            "busy",
+        )
+        .unwrap();
+
+        let corrected = set_record_window_in(
+            tmp.path(),
+            &file.to_string_lossy(),
+            "session-window",
+            "%30",
+            "@1",
+        )
+        .unwrap();
+
+        assert_eq!(corrected.window_id, "@1");
+        assert_eq!(corrected.generation, busy.generation);
+        assert_eq!(corrected.state, ActorState::Busy);
+        assert_eq!(corrected.harness, "codex");
+        assert_eq!(corrected.last_transition, busy.last_transition);
+        assert_eq!(
+            set_record_window_in(
+                tmp.path(),
+                &file.to_string_lossy(),
+                "session-window",
+                "%30",
+                "@1",
+            )
+            .unwrap(),
+            corrected
+        );
+        assert!(
+            set_record_window_in(
+                tmp.path(),
+                &file.to_string_lossy(),
+                "session-window",
+                "%99",
+                "@3",
+            )
+            .is_err()
+        );
     }
 
     #[test]

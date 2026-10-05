@@ -188,6 +188,11 @@ may republish the retained intent, but remains subject to the same rule.
   evaluated. Restart uses typed `ProvisionOnly` startup policy so pane
   creation/start/selection completes inside the short focus RPC; harness
   readiness and the safe-passive layout pass settle asynchronously.
+- Before focus evaluates visibility, it re-observes the authoritative pane's
+  tmux window and repairs stale actor/registry placement. Tmux pane reparenting
+  preserves `%pane` while changing `@window`; stale durable window metadata
+  must not prevent focus mirroring or make a pane appear visible in its former
+  window.
 Provision-only startup may split only beside a pane already visible in the
 `agent-doc` window; a durable registration in `stash` is ownership evidence,
 never a geometry anchor.

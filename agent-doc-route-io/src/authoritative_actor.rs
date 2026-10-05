@@ -1071,14 +1071,13 @@ pub fn load_authoritative_actor_for_registered_pane(
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
     let base_dir = registry_base_dir_for_dispatch(file_path);
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(&base_dir, file_path);
-    let record = agent_doc_controller_io::project_controller::load_actor_store(&base_dir)?
-        .values()
-        .find(|record| {
-            record.document_id == document_id
-                && record.session_id == session_id
-                && record.pane_id == pane
-        })
-        .cloned();
+    let record =
+        agent_doc_controller_io::project_controller::authoritative_actor_binding(&base_dir, file)?
+            .filter(|record| {
+                record.document_id == document_id
+                    && record.session_id == session_id
+                    && record.pane_id == pane
+            });
     let Some(record) = record else {
         return Ok(None);
     };

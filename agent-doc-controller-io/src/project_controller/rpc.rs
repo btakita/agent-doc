@@ -2005,7 +2005,15 @@ pub fn authoritative_actor_binding_with_deadline(
             &file.to_string_lossy(),
         );
         return Ok(match runtime.actor_record(&document_id)? {
-            Some(record) => AuthoritativeActorBindingObservation::Found(record),
+            Some(record) => {
+                AuthoritativeActorBindingObservation::Found(reconcile_actor_window_binding(
+                    project_root,
+                    Some(runtime.as_ref()),
+                    file,
+                    record,
+                    "authoritative_actor_deadline_read",
+                )?)
+            }
             None => AuthoritativeActorBindingObservation::Missing,
         });
     }
@@ -2035,7 +2043,18 @@ pub fn authoritative_actor_binding(
             project_root,
             &file.to_string_lossy(),
         );
-        return runtime.actor_record(&document_id);
+        return runtime
+            .actor_record(&document_id)?
+            .map(|record| {
+                reconcile_actor_window_binding(
+                    project_root,
+                    Some(runtime.as_ref()),
+                    file,
+                    record,
+                    "authoritative_actor_read",
+                )
+            })
+            .transpose();
     }
     #[cfg(any(test, feature = "test-support"))]
     {
@@ -2043,7 +2062,17 @@ pub fn authoritative_actor_binding(
             project_root,
             &file.to_string_lossy(),
         );
-        load_actor_record(project_root, &document_id)
+        load_actor_record(project_root, &document_id)?
+            .map(|record| {
+                reconcile_actor_window_binding(
+                    project_root,
+                    None,
+                    file,
+                    record,
+                    "authoritative_actor_read",
+                )
+            })
+            .transpose()
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
@@ -18192,6 +18221,112 @@ pub(crate) fn actor_record_from_authority(
     }
 }
 
+fn corrected_actor_window_record(
+    record: &agent_doc_controller::actor::ActorRecord,
+    live_window: &str,
+) -> Option<agent_doc_controller::actor::ActorRecord> {
+    agent_doc_controller::pane_layout::pane_window_binding_drifted(
+        &record.window_id,
+        Some(live_window),
+    )
+    .then(|| {
+        let mut corrected = record.clone();
+        corrected.window_id = live_window.to_string();
+        corrected
+    })
+}
+
+/// Reconcile a durable pane/window projection from the pane's physical tmux
+/// identity before a read, route, or focus decision consumes it.
+fn reconcile_actor_window_binding(
+    project_root: &Path,
+    runtime: Option<&ControllerRuntime>,
+    file: &Path,
+    record: agent_doc_controller::actor::ActorRecord,
+    reason: &str,
+) -> Result<agent_doc_controller::actor::ActorRecord> {
+    if record.pane_id.trim().is_empty() {
+        return Ok(record);
+    }
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let Some(live_window) = agent_doc_tmux_io::target_window_id(&tmux, &record.pane_id) else {
+        return Ok(record);
+    };
+    let live_window = live_window.trim();
+    if live_window.is_empty() {
+        return Ok(record);
+    }
+    let recorded_window = record.window_id.clone();
+    let actor_changed = corrected_actor_window_record(&record, live_window).is_some();
+    let resolved = if actor_changed {
+        // This partial update takes an immediate SQLite transaction and
+        // revalidates the session/pane owner. It therefore cannot overwrite a
+        // concurrent same-generation harness or lifecycle transition.
+        let write = agent_doc_session_actor_io::set_record_window_write_in(
+            project_root,
+            &record.document_id,
+            &record.session_id,
+            &record.pane_id,
+            live_window,
+        )?;
+        publish_runtime_after_actor_write(runtime, &write);
+        write.record
+    } else {
+        record
+    };
+    let registry_changed = agent_doc_session_registry_io::rebind_pane_window_in(
+        project_root,
+        &resolved.pane_id,
+        live_window,
+    )?;
+    if actor_changed || registry_changed {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "pane_window_binding_reconciled pane={} recorded_window={} live_window={} registry_changed={} reason={}",
+                resolved.pane_id, recorded_window, live_window, registry_changed, reason,
+            ),
+        );
+    }
+    Ok(resolved)
+}
+
+#[cfg(test)]
+mod pane_window_binding_reconcile_tests {
+    use super::*;
+    use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
+
+    #[test]
+    fn live_window_correction_preserves_owner_and_harness_switch_state() {
+        let stale = ActorRecord {
+            document_id: "/project/tasks/devops.md".to_string(),
+            session_id: "session-devops".to_string(),
+            generation: 41,
+            pane_id: "%125".to_string(),
+            window_id: "@2".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Busy,
+            last_transition: ActorLastTransition {
+                caller: "supervisor".to_string(),
+                reason: "agent_harness_switch_writeback".to_string(),
+                timestamp: 9,
+                prior_generation: 41,
+                new_generation: 41,
+            },
+        };
+        let corrected = corrected_actor_window_record(&stale, "@1").unwrap();
+
+        assert_eq!(corrected.window_id, "@1");
+        assert_eq!(corrected.pane_id, stale.pane_id);
+        assert_eq!(corrected.session_id, stale.session_id);
+        assert_eq!(corrected.generation, stale.generation);
+        assert_eq!(corrected.harness, "codex");
+        assert_eq!(corrected.state, ActorState::Busy);
+        assert_eq!(corrected.last_transition, stale.last_transition);
+        assert!(corrected_actor_window_record(&corrected, "@1").is_none());
+    }
+}
+
 pub(crate) fn publish_runtime_after_actor_write(
     runtime: Option<&ControllerRuntime>,
     write: &agent_doc_controller::actor::ActorStoreWrite,
@@ -20961,7 +21096,17 @@ pub(crate) fn handle_actor_binding(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let record = actor_record_from_authority(bootstrap, runtime, &document_id)?;
+    let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
+        .map(|record| {
+            reconcile_actor_window_binding(
+                &bootstrap.project_root,
+                runtime,
+                &file,
+                record,
+                "actor_binding_rpc",
+            )
+        })
+        .transpose()?;
     Ok(match record {
         Some(record) => ActorBindingResponse {
             status: ActorBindingStatus::Bound,
@@ -25409,10 +25554,30 @@ fn handle_focus_document_pane_with_policy(
         &bootstrap.project_root,
         &canonical.to_string_lossy(),
     );
-    let actor_record = actor_record_from_authority(bootstrap, runtime, &document_id)?;
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let actor_record = actor_record_from_authority(bootstrap, runtime, &document_id)?
+        .map(|record| {
+            reconcile_actor_window_binding(
+                &bootstrap.project_root,
+                runtime,
+                &canonical,
+                record,
+                "focus_boundary",
+            )
+        })
+        .transpose()?;
     let registry_entry =
         agent_doc_session_registry_io::lookup_file_entry_in(&bootstrap.project_root, &canonical)?;
-    let tmux = agent_doc_tmux_io::configured_tmux();
+    if actor_record.is_none()
+        && let Some(entry) = registry_entry.as_ref()
+        && let Some(live_window) = agent_doc_tmux_io::target_window_id(&tmux, &entry.pane)
+    {
+        agent_doc_session_registry_io::rebind_pane_window_in(
+            &bootstrap.project_root,
+            &entry.pane,
+            &live_window,
+        )?;
+    }
     let session_id =
         current_document_session_id(&canonical, actor_record.as_ref(), registry_entry.as_ref());
     let proven_live_owner = session_id

@@ -9001,12 +9001,27 @@ pub fn fresh_foreign_supervisor_lease_holds_document(
     if !status::supervisor_lease_pid_is_foreign(lease.supervisor_pid, self_pid) {
         return false;
     }
-    status::supervisor_lease_is_fresh_and_alive(
+    // `#netadv5` R6: heartbeat age is a timer, not evidence; an idle live
+    // supervisor that still names this document keeps holding it.
+    let supervisor_owns_document = lease.supervisor_pid.is_some_and(|pid| {
+        crate::process::open_supervisor_document(pid).is_some_and(|document| {
+            same_document_path(&document, Path::new(document_id))
+        })
+    });
+    status::supervisor_lease_holds_against_takeover(
         lease.last_heartbeat,
         lease.supervisor_pid.is_some_and(process_is_alive),
+        supervisor_owns_document,
         now,
         stale_after,
     )
+}
+
+fn same_document_path(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
 }
 
 pub fn close_stale_starting_actors_for_caller(

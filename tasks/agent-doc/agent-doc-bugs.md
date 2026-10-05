@@ -714,6 +714,8 @@ The exchange is large, but the active queue was drained rather than stalled for 
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - There is leftover cruft in the `agent:backlog`. Fix agent-doc causes.
+- #gh-fix https://github.com/btakita/agent-doc/issues/139
+- #gh-fix https://github.com/btakita/agent-doc/issues/140
 <!-- /agent:queue -->
 
 

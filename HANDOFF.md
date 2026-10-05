@@ -10,15 +10,23 @@ Wedge cfgs: (a) fire-and-forget violates liveness, (b) non-idempotent receiver v
 (c) no generation check applies a stale message. Wire into scripts/run_tla.sh must_violate; document in formal/tla/README.md.
 
 ## Done
-- Studied conventions: scripts/run_tla.sh (modules list + must_violate Module:Config list; copies only Module.tla/.cfg
-  into a temp dir, so a library module like NetChannel.tla must be copied explicitly), README.md, RealtimeSteeringStop*.cfg.
+1. formal/tla/NetChannel.tla — library (INSTANCE'd, not in modules list). Vars net (bag), gen, delivered.
+   API: ChannelInit, ChannelTypeOK(Msgs), Send(m), Deliver(m), DeliverAndSend(m,r), Drop, Duplicate,
+   Reconnect, Adversary, InFlight, chanVars, FairLossy(Msgs) (= \A m: SF_chanVars(Delivered(m, Msgs))).
+2. formal/tla/NetChannelRetransmit.tla + .cfg (positive), Reach, FireAndForgetWedge, DuplicateWedge,
+   StaleGenWedge, UnfairWedge cfgs.
+3. scripts/run_tla.sh: NetChannelRetransmit in modules, new libraries=(NetChannel) copied, 5 must_violate entries.
+4. formal/tla/README.md: "Adversarial network: NetChannel" section.
+5. `make tla` EXIT=0: 25 modules pass, all must_violate confirmed incl. 5 NetChannelRetransmit ones.
+   Positive run 32,443 distinct states, ~6s.
+
+## Findings
+- TLC 1.7.4 cannot check a temporal formula built from an operator ARGUMENT (FairLossy(Msgs, Recv(_), v) ->
+  "TLC cannot handle the temporal formula"), even without INSTANCE. Hence the `delivered` marker variable,
+  so the channel itself names the receive step; Drop sets delivered' = {} so loss never counts as delivery.
+- SF action for fairness must pin every channel var (TLC computes ENABLED by generating successors), hence
+  Delivered(m, Msgs) enumerates net' over {Take} \cup {Put(Take, r) : r \in Msgs}.
+- WF is insufficient for fair-lossy: Drop interrupts enabledness between resends, so SF per message.
 
 ## Remaining
-1. Write NetChannel.tla (library, INSTANCE'd; not in modules list) — copy it in run_tla.sh.
-2. Write NetChannelRetransmit.tla + .cfg, Reach cfg, 3 Wedge cfgs.
-3. Add to run_tla.sh modules + must_violate.
-4. README section.
-5. Run `make tla` (downloads tla2tools 1.7.4 into target/tla), commit.
-
-## Status
-Checkpoint commit only; nothing modeled yet.
+None (final commit on branch netadv2; not pushed/merged/installed).

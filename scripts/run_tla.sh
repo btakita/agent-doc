@@ -35,7 +35,11 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge NetChannelRetransmit)
+
+# Library modules: INSTANCE'd by the models above, never checked on their own
+# (no Spec, no .cfg). They only need to sit next to the importing model.
+libraries=(NetChannel)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -154,11 +158,26 @@ must_violate=(
     RecycleSettleDispatch:RecycleSettleDispatchWedge
     RecycleSettleDispatch:RecycleSettleDispatchReach
     RecycleSettleDispatch:RecycleSettleDispatchUnstampedReach
+    # `#netadv2`: the shared adversarial channel (NetChannel) must have teeth.
+    # One wedge per obligation the channel imposes on a protocol over it:
+    # fire-and-forget stalls on a Drop, a non-idempotent receiver applies a
+    # Duplicate twice, a receiver without a generation check applies a message
+    # that survived a Reconnect, and without FairLossy the adversary may drop
+    # every resend forever. Reach proves the positive run completes after the
+    # adversary actually duplicated and carried a message across a reconnect.
+    NetChannelRetransmit:NetChannelRetransmitFireAndForgetWedge
+    NetChannelRetransmit:NetChannelRetransmitDuplicateWedge
+    NetChannelRetransmit:NetChannelRetransmitStaleGenWedge
+    NetChannelRetransmit:NetChannelRetransmitUnfairWedge
+    NetChannelRetransmit:NetChannelRetransmitReach
 )
 
 for module in "${modules[@]}"; do
     cp "${repo_root}/formal/tla/${module}.tla" "${work_dir}/"
     cp "${repo_root}/formal/tla/${module}.cfg" "${work_dir}/"
+done
+for library in "${libraries[@]}"; do
+    cp "${repo_root}/formal/tla/${library}.tla" "${work_dir}/"
 done
 for entry in "${must_violate[@]}"; do
     cp "${repo_root}/formal/tla/${entry#*:}.cfg" "${work_dir}/"

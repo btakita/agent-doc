@@ -192,6 +192,80 @@ line-based `Semantic` rung keeps both of two different edits of one item.
 `equals_authority` is no substitute for the guard; `AdmissionSplitMergeReach.cfg`
 must show disk-only additions still land.
 
+## Adversarial network: `NetChannel`
+
+Most models above collapse "A sends, B receives" into one atomic transition,
+which silently assumes the network is reliable, ordered and instantaneous.
+`NetChannel.tla` is a library module that makes the network an explicit
+adversary instead (`#netadv2`, plan: `tasks/agent-doc/plan-network-adversarial-correctness.md`).
+
+- `net` is a bag (multiset) of in-flight messages, so any in-flight message may
+  be delivered next: delay and reordering are free.
+- Adversary actions, with no fairness at all: `Drop` (loss, including a silent
+  half-open proxy stall), `Duplicate`, and `Reconnect`, which bumps the
+  connection generation `gen` and discards any subset of in-flight messages.
+  The rest survive and arrive later, stale.
+- `MaxCopies` caps copies per message (an extra copy coalesces, which is just a
+  Drop) and `MaxGen` caps reconnects, so state spaces stay finite. Drop is
+  unbounded.
+- `FairLossy(Msgs)` is the fair-lossy assumption: a message put in flight
+  infinitely often is eventually delivered. It is strong fairness per message,
+  because Drop interrupts enabledness between resends, so weak fairness would
+  never fire. It promises nothing for a message sent finitely often.
+
+### Using it from a model
+
+```tla
+VARIABLES net, gen, delivered, ...your vars...
+C == INSTANCE NetChannel          \* binds MaxCopies, MaxGen, net, gen, delivered
+
+Init == C!ChannelInit /\ ...
+\* send:    C!Send(m)                    /\ your update
+\* receive: C!Deliver(m)                 /\ your handler       (consume only)
+\*          C!DeliverAndSend(m, reply)   /\ your handler       (e.g. data -> ack)
+Next == \/ ... \/ \E m \in C!InFlight : Recv(m)
+        \/ (C!Adversary /\ UNCHANGED yourVars)
+        \* or (C!Reconnect /\ OnReconnect) to resync from durable state
+Spec == Init /\ [][Next]_vars /\ WF_vars(Resend) /\ C!FairLossy(Msgs)
+TypeOK == C!ChannelTypeOK(Msgs) /\ ...
+```
+
+Rules the module relies on:
+
+- Every step either uses one `C!` channel action or leaves
+  `C!chanVars` (`net`, `gen`, `delivered`) unchanged.
+- The receive action for a message is enabled whenever that message is in
+  flight. A receiver may discard a stale or duplicate message, but it must take
+  it off the wire, or `FairLossy` would rule out behaviours that really happen.
+- Stamp messages with `gen` yourself and compare on receipt. Safety must hold
+  under `[][Next]_vars` alone. Fairness is only for liveness, and progress needs
+  a fair resend (or a pull/resync) because the channel never retries for you.
+- To migrate an atomic IPC step `A ==> B`, split it into a send action and a
+  receive action keyed by an idempotency key (sequence number or generation).
+  The receiver keeps that key in durable state that survives `Reconnect`.
+
+`NetChannelRetransmit.tla` is the reference protocol and template:
+resend-until-ack with a receiver that applies at most once per
+(sequence, generation). Under the fully adversarial channel it proves
+`ExactlyOnce`, `NoStaleApply` and `AckedImpliesApplied`. Under `FairLossy`
+plus a weakly fair resend it proves `Completes`. Each wedge is must-violate:
+
+- `NetChannelRetransmitFireAndForgetWedge` (send once, `MaxGen = 0`): one Drop
+  stalls it, so `Completes` is violated;
+- `NetChannelRetransmitDuplicateWedge` (non-idempotent receiver): a Duplicate is
+  applied twice, so `ExactlyOnce` is violated;
+- `NetChannelRetransmitStaleGenWedge` (no generation check): a message that
+  survived a Reconnect is applied, so `NoStaleApply` is violated;
+- `NetChannelRetransmitUnfairWedge` (no `FairLossy`, fair resend only): the
+  adversary drops every resend forever, so `Completes` is violated, which shows
+  the liveness proof rests on the channel assumption;
+- `NetChannelRetransmitReach` must be violated: the positive run completes
+  after the adversary really did duplicate a message and carry one across a
+  reconnect.
+
+`scripts/run_tla.sh` copies library modules (`libraries=(NetChannel)`) next to
+the models that instance them.
+
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream
 artifact into `target/tla/` and verifies its SHA-256 digest.

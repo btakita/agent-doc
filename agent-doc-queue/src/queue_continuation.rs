@@ -253,7 +253,10 @@ pub fn required_continuation_excluding_claimed(
     let Some(head) = continuation_head_skipping_answered_residue(content, claimed) else {
         return Ok(None);
     };
-    let head_prompt = head.text;
+    // `🚧` is a transient UI projection, never part of queue identity or the
+    // prompt handed back to a harness. Other live-head projections in this
+    // module already normalize it; keep the continuation contract consistent.
+    let head_prompt = strip_in_progress_marker(&head.text);
     let head_id = extract_head_id(&head_prompt);
     let reason = if queue_component.attrs.contains_key("go") {
         "active `agent:queue go` still has a ready head prompt after a clean closeout"
@@ -2791,6 +2794,18 @@ mod tests {
             1
         );
         assert_eq!(claimed_head_count(&content, &claimed), 1);
+    }
+
+    #[test]
+    fn required_continuation_strips_transient_in_progress_marker() {
+        let content = doc_with_backlog(&["🚧 do [#a]"], &["- [ ] [#a] first"]);
+
+        let continuation = required_continuation(&content, Some(&content))
+            .unwrap()
+            .expect("marked head remains drainable");
+
+        assert_eq!(continuation.head_prompt, "do [#a]");
+        assert_eq!(continuation.head_id.as_deref(), Some("a"));
     }
 
     /// `#queueclaim`: when every remaining head is claimed, no continuation is

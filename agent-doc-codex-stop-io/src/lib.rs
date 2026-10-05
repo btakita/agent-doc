@@ -2819,8 +2819,25 @@ fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
     // Single source of truth: the shared queue-continuation detector
     // (#codex-auto-queue-stalled-final-gate). Keeps the Stop-hook continuation
     // decision identical to the durable marker and `session-check` gate.
-    Ok(agent_doc_queue_io::queue_continuation::detect(file)?
-        .map(|continuation| continuation.head_prompt))
+    //
+    // The Stop hook already has an editor-authoritative content resolver. Do
+    // not drop back to the file-backed adapter here: a native editor save may
+    // still be converging after finalize has reaped the completed head, and
+    // rereading disk would re-serve that stale head even though the CRDT model
+    // already exposes the next one (`#stopcurrentqueuehead`).
+    // This is deliberately uncached. Earlier phases in the same Stop-hook
+    // invocation may have completed a repair/write after memoizing the
+    // pre-write projection; continuation selection is the final gate and must
+    // re-resolve authority after those mutations.
+    let content = resolve_document_content_uncached(file, "stop_active_auto_queue_head")?;
+    active_auto_queue_prompt_for_content(file, &content)
+}
+
+fn active_auto_queue_prompt_for_content(file: &Path, content: &str) -> Result<Option<String>> {
+    Ok(
+        agent_doc_queue_io::queue_continuation::detect_for_content(file, content)?
+            .map(|continuation| continuation.head_prompt),
+    )
 }
 
 fn open_cycle_started_from_unchanged_file(file: &Path) -> Result<bool> {
@@ -4014,6 +4031,46 @@ Done.\n\
             assert!(rendered.contains("same owner pane continues only after"));
             assert!(rendered.contains("needs_operator"));
         }
+    }
+
+    /// `#stopcurrentqueuehead`: a native editor save can lag the authoritative
+    /// CRDT projection after closeout has reaped the completed head. The Stop
+    /// hook must continue from that authoritative projection instead of
+    /// re-serving the stale on-disk head.
+    #[test]
+    fn auto_queue_prompt_uses_editor_authoritative_content_over_stale_disk() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let document_with_head = |head: &str| {
+            format!(
+                "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+                 ## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n\
+                 ## Queue\n\n<!-- agent:queue go -->\n- {head}\n<!-- /agent:queue -->\n"
+            )
+        };
+        let stale_disk = document_with_head("🚧 do [#backlogqueueitems]");
+        let authoritative = document_with_head("do [#rsprereq]");
+        fs::write(&doc, stale_disk).unwrap();
+
+        assert_eq!(
+            active_auto_queue_prompt_for_content(&doc, &authoritative)
+                .unwrap()
+                .as_deref(),
+            Some("do [#rsprereq]")
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            document_with_head("🚧 do [#backlogqueueitems]"),
+            "Stop-hook observation must not force the editor-owned cut to disk"
+        );
+        let source = include_str!("lib.rs");
+        let resolver = source
+            .split("fn active_auto_queue_prompt(file: &Path)")
+            .nth(1)
+            .unwrap();
+        let resolver = &resolver[..resolver.find("\nfn ").unwrap()];
+        assert!(resolver.contains("resolve_document_content_uncached("));
+        assert!(resolver.contains("active_auto_queue_prompt_for_content(file, &content)"));
     }
 
     #[test]

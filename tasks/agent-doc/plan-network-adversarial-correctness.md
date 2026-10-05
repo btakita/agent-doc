@@ -73,6 +73,23 @@ hot-path protocol to have these properties:
    seeded network-conditions layer (latency distribution, jitter, reorder, drop,
    duplicate, reconnect) with a Coder+Zscaler profile, and run the conformance
    suites under it in `make check`.
+6. **netadv6 — deterministic simulation fuzzing.** Builds on netadv4. A seeded
+   explorer drives SimWorld through random schedules: process interleavings, network
+   faults, editor edits, recycles/installs, crashes and reconnects. After every step
+   it checks invariant oracles, the same safety properties the TLA+ models state
+   (unique owner, no lost operator text, exactly-once commit, recycle request
+   eventually consumed under fairness). A failing seed is shrunk to a minimal trace
+   and committed as a permanent regression seed. `make check` runs a short fixed
+   budget plus every regression seed; a nightly CI job runs a long budget on fresh
+   seeds and opens an issue with the shrunk trace on failure.
+7. **netadv7 — coverage-guided fuzzing of untrusted input.** `cargo-fuzz` targets
+   for the bytes that cross a process or network boundary: IPC wire decode, the
+   markdown component/patch parsers, frontmatter, and CRDT op decode. Oracles: no
+   panics, and lossless round-trips where the parser claims them. Corpus seeded from
+   real `.agent-doc/logs` traffic (redacted), with crashers promoted to unit tests.
+   proptest is already used in 3 places; extend it to the pure state-transition
+   functions that the TLA+ models describe (model-based testing: the same transition
+   table drives both).
 5. **netadv5 — latency budget enforcement.** For each hot path, a test asserts the
    serial round-trip count. Fixed sleeps or settle windows on correctness paths are
    replaced with ack-driven transitions.

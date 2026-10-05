@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -307,6 +308,26 @@ All four were fixed by background subagents in separate worktrees, then merged s
 **Defect found → `#unstrikelost` (added):** your 14:13 unstrike of `release + publish` was undone by the 14:31 session-doc commit, although no response had answered that head. It only ran because I noticed the queue was empty with no release done.
 
 **Issue watch:** still polling for issues above #134.
+
+### Re: queue fan-out — #unstrikelost, #gh131nonipc, #gh133sigterm, #jbstagebackup, release — opus-5-5 · 2026-10-04T21:48-04:00
+
+Queue preset `#subagents #spec-test-build-install-commit-push`. I'm coordinating: each item is claimed and sent to its own background subagent. Each subagent has its own git worktree in `~/worktrees/agent-doc-<id>`, branched from `origin/main`, and pushes its own branch. Subagents do not run `make install` or release anything.
+
+| Head | Owner | Branch |
+|---|---|---|
+| `#unstrikelost` | subagent:unstrikelost | `unstrikelost` |
+| `#gh131nonipc` | subagent:gh131nonipc | `gh131nonipc` |
+| `#gh133sigterm` | subagent:gh133sigterm | `gh133sigterm` |
+| `#jbstagebackup` | subagent:jbstagebackup | `jbstagebackup` |
+
+> **Queue prompt:** release + publish
+
+**Deferred:** I claimed this one (`subagent:release-coordinator`) but am not running it in a subagent, because subagents never cut releases. When all four branches report back, I'll merge them into `main` one at a time, run `make check`, run one `make install`, then do the version bump, tag and publish myself.
+
+Notes:
+- The main `src/agent-doc` checkout has an uncommitted `agent-doc-start-runtime-io/src/lib.rs` from another session. The subagents work from `origin/main` and don't touch it.
+- There's a stray `- release + publish` line under `## Completed / Reaped`, after the `agent:done` block. It sits outside every managed component, so the queue ignores it. Delete it if it was a mis-paste.
+- Backlog line 333 (`6local-splice-batch 3 splices …`) is a truncated fragment from earlier. It has no `[#id]` checkbox, so it was there before this cycle.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -315,7 +336,12 @@ All four were fixed by background subagents in separate worktrees, then merged s
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- do [#unstrikelost]
+- do [#gh131nonipc]
+- do [#gh133sigterm]
+- do [#jbstagebackup]
+- release + publish
 <!-- /agent:queue -->
 
 
@@ -347,3 +373,5 @@ All four were fixed by background subagents in separate worktrees, then merged s
 
 <!-- completed work archived in tasks/agent-doc/agent-doc-bugs.done.md -->
 <!-- /agent:done -->
+
+- release + publish

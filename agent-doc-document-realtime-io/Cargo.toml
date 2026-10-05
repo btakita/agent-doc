@@ -46,6 +46,7 @@ agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.454" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.454" }
 agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.454" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.454" }
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.454" }
 agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.454" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.35.454" }
@@ -58,6 +59,5 @@ tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.454" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.454" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.454" }

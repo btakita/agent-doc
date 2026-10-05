@@ -127,7 +127,10 @@ impl fmt::Display for IpcHandshakeError {
                 "IPC protocol mismatch: listener={expected}, client={received}"
             ),
             Self::BuildMismatch { listener, client } => {
-                write!(f, "IPC build mismatch: listener={listener}, client={client}")
+                write!(
+                    f,
+                    "IPC build mismatch: listener={listener}, client={client}"
+                )
             }
         }
     }
@@ -462,7 +465,7 @@ pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
         || message.as_ref().contains("IPC receipt unsupported")
 }
 
-/// Why an editor socket delivery failed to prove itself (GH #131,
+/// Why an editor delivery failed to prove itself (GH #131,
 /// `#idlerevisionreactive`).
 ///
 /// The outcomes are kept DISTINCT on purpose. "I looked and got no answer"
@@ -471,6 +474,18 @@ pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
 /// rejecting endpoint — strictly MORE informative than a silent one — produced
 /// strictly LESS recovery: the write retained forever waiting for a convergence
 /// the editor was refusing to grant.
+///
+/// `#gh131nonipc`: two of the failure shapes in GH #131 never reached the socket
+/// send's error branch, so they recorded nothing against editor transport
+/// health and could not drive degraded/recycle. They are typed here too, so
+/// every site feeds the same recorder:
+///
+/// - [`Self::VisibleWriteDiverged`] — the endpoint acknowledged the socket
+///   patch, but its visible-write receipt contradicted controller canonical and
+///   the authority refused it (`socket_visible_write`).
+/// - [`Self::ProjectionUnconverged`] — a write that never used the socket
+///   (`serialized_atomic_write`) was retained because the editor never
+///   projected the canonical target within its budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketDeliveryFailure {
     /// No terminal receipt arrived within the budget.
@@ -480,6 +495,27 @@ pub enum SocketDeliveryFailure {
     Rejected,
     /// The endpoint answered with a legacy/unknown receipt shape.
     Unsupported,
+    /// The endpoint answered with a visible-write receipt that diverges from
+    /// controller canonical, and the authority refused to adopt it. Like
+    /// [`Self::Rejected`], the endpoint answered and the answer cannot converge.
+    VisibleWriteDiverged,
+    /// A non-socket write was retained because the editor never projected the
+    /// canonical target. No answer either way: it accrues a failure but says
+    /// nothing about whether the endpoint is refusing.
+    ProjectionUnconverged,
+}
+
+/// How one delivery failure moves the trailing run of endpoint refusals
+/// (`editor_transport_health.consecutive_rejections`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusalRunEffect {
+    /// The endpoint answered and refused: the run grows by one.
+    Extend,
+    /// No new evidence about refusal: the run is carried unchanged.
+    Preserve,
+    /// Evidence the endpoint is merely slow or speaks another shape: the run
+    /// ends, because only an unbroken run proves the endpoint is refusing.
+    Reset,
 }
 
 impl SocketDeliveryFailure {
@@ -489,25 +525,84 @@ impl SocketDeliveryFailure {
             Self::Timeout => "timeout",
             Self::Rejected => "rejection",
             Self::Unsupported => "unsupported",
+            Self::VisibleWriteDiverged => "visible_write_divergence",
+            Self::ProjectionUnconverged => "projection_unconverged",
         }
     }
 
-    /// The endpoint answered, and the answer was NO.
+    /// The endpoint answered, and the answer was a refusal.
     pub const fn is_definitive_rejection(self) -> bool {
-        matches!(self, Self::Rejected)
+        matches!(self.refusal_run_effect(), RefusalRunEffect::Extend)
+    }
+
+    /// How this outcome moves the trailing refusal run.
+    pub const fn refusal_run_effect(self) -> RefusalRunEffect {
+        match self {
+            Self::Rejected | Self::VisibleWriteDiverged => RefusalRunEffect::Extend,
+            Self::ProjectionUnconverged => RefusalRunEffect::Preserve,
+            Self::Timeout | Self::Unsupported => RefusalRunEffect::Reset,
+        }
+    }
+
+    /// The refusal run after this outcome, given the run before it.
+    pub const fn next_refusal_run(self, prior: u64) -> u64 {
+        match self.refusal_run_effect() {
+            RefusalRunEffect::Extend => prior.saturating_add(1),
+            RefusalRunEffect::Preserve => prior,
+            RefusalRunEffect::Reset => 0,
+        }
     }
 }
 
-/// Classify a rendered socket-send error into a typed delivery failure.
+/// `#gh131nonipc` — how many CONSECUTIVE endpoint refusals (receipt rejections
+/// and refused visible-write receipts, unbroken by a timeout and not cleared by
+/// a proven delivery) make the editor endpoint count as unregistered for this
+/// document's writes.
 ///
-/// `None` means the error is not a receipt outcome at all (connect failure,
+/// Bounded and above the degradation bar (two failures): degradation arms the
+/// one-shot supervisor recycle, while unregistering stops sending to the
+/// endpoint at all and routes writes through document authority, as if the
+/// document were detached. Three unbroken refusals is the point at which
+/// another send is a known waste rather than a retry.
+pub const EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD: u64 = 3;
+
+/// `#gh131nonipc` — how long an unregistered endpoint stays skipped after the
+/// most recent failure recorded against it before one probe delivery is
+/// attempted again.
+///
+/// The health record does not carry the endpoint's pid, so a restarted editor
+/// (the observed recovery in GH #131) is indistinguishable from the refusing
+/// one by identity. A bounded probe window keeps the skip from becoming
+/// permanent: the probe either proves delivery (clearing the run) or refuses
+/// once more (extending it and restarting the window).
+pub const EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS: u64 = 60;
+
+/// Pure verdict: is the editor endpoint unregistered for delivery, given its
+/// trailing refusal run and the seconds since the most recent recorded failure?
+pub const fn editor_endpoint_unregistered(
+    consecutive_refusals: u64,
+    secs_since_last_failure: u64,
+) -> bool {
+    consecutive_refusals >= EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD
+        && secs_since_last_failure < EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS
+}
+
+/// The stable phrase the document authority uses when it refuses an editor
+/// visible-write receipt that diverges from controller canonical. Owned here so
+/// the refusing site and [`classify_socket_delivery_failure`] cannot drift.
+pub const EDITOR_RECEIPT_DIVERGENCE_REFUSAL: &str =
+    "refusing editor receipt that diverges from controller canonical";
+
+/// Classify a rendered delivery error into a typed delivery failure.
+///
+/// `None` means the error is not a delivery outcome at all (connect failure,
 /// handshake mismatch, ...), which is not evidence about the endpoint's answer.
-pub fn classify_socket_delivery_failure(
-    message: impl AsRef<str>,
-) -> Option<SocketDeliveryFailure> {
+pub fn classify_socket_delivery_failure(message: impl AsRef<str>) -> Option<SocketDeliveryFailure> {
     let message = message.as_ref();
     if message.contains("IPC receipt rejected") {
         Some(SocketDeliveryFailure::Rejected)
+    } else if message.contains(EDITOR_RECEIPT_DIVERGENCE_REFUSAL) {
+        Some(SocketDeliveryFailure::VisibleWriteDiverged)
     } else if is_socket_receipt_timeout_error(message) {
         Some(SocketDeliveryFailure::Timeout)
     } else if message.contains("IPC receipt unsupported") {
@@ -1313,6 +1408,65 @@ mod tests {
         );
         assert_eq!(classify_socket_delivery_failure("connection refused"), None);
         assert_eq!(SocketDeliveryFailure::Rejected.as_str(), "rejection");
+    }
+
+    /// `#gh131nonipc`: the two non-socket shapes from GH #131 are typed
+    /// outcomes with a defined effect on the refusal run — a refused
+    /// visible-write receipt extends it, a non-socket retention carries it.
+    #[test]
+    fn non_socket_retention_outcomes_are_typed_and_move_the_refusal_run() {
+        use super::{
+            EDITOR_RECEIPT_DIVERGENCE_REFUSAL, RefusalRunEffect, SocketDeliveryFailure,
+            classify_socket_delivery_failure,
+        };
+        let refused = format!(
+            "socket_visible_write: {EDITOR_RECEIPT_DIVERGENCE_REFUSAL} for /p/doc.md (canonical_hash=a, editor_hash=b)"
+        );
+        assert_eq!(
+            classify_socket_delivery_failure(&refused),
+            Some(SocketDeliveryFailure::VisibleWriteDiverged)
+        );
+        assert!(SocketDeliveryFailure::VisibleWriteDiverged.is_definitive_rejection());
+        assert!(!SocketDeliveryFailure::ProjectionUnconverged.is_definitive_rejection());
+        assert_eq!(
+            SocketDeliveryFailure::ProjectionUnconverged.refusal_run_effect(),
+            RefusalRunEffect::Preserve
+        );
+        assert_eq!(SocketDeliveryFailure::Rejected.next_refusal_run(2), 3);
+        assert_eq!(
+            SocketDeliveryFailure::VisibleWriteDiverged.next_refusal_run(1),
+            2
+        );
+        assert_eq!(
+            SocketDeliveryFailure::ProjectionUnconverged.next_refusal_run(2),
+            2
+        );
+        assert_eq!(SocketDeliveryFailure::Timeout.next_refusal_run(2), 0);
+        assert_eq!(SocketDeliveryFailure::Unsupported.next_refusal_run(2), 0);
+    }
+
+    /// `#gh131nonipc`: the unregister verdict needs N unbroken refusals and
+    /// expires into a probe after a bounded window.
+    #[test]
+    fn an_endpoint_is_unregistered_only_after_n_consecutive_refusals() {
+        use super::{
+            EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS,
+            EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD, editor_endpoint_unregistered,
+        };
+        const _: () = assert!(EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD >= 2);
+        let n = EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD;
+        assert!(!editor_endpoint_unregistered(0, 0));
+        assert!(!editor_endpoint_unregistered(n - 1, 0));
+        assert!(editor_endpoint_unregistered(n, 0));
+        assert!(editor_endpoint_unregistered(n + 5, 0));
+        assert!(editor_endpoint_unregistered(
+            n,
+            EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS - 1
+        ));
+        assert!(
+            !editor_endpoint_unregistered(n, EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS),
+            "the skip must expire into a probe, never become permanent"
+        );
     }
 
     use super::{

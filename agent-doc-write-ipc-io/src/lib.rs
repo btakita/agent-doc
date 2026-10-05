@@ -12,7 +12,7 @@ use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{EditorIntent, classify_socket_delivery_failure};
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_template::stale_baseline::is_append_mode_component;
-use agent_doc_write_converge_io::{clear_ipc_socket_ack_timeouts, record_ipc_socket_ack_failure};
+use agent_doc_write_converge_io::{note_ipc_socket_ack, record_ipc_socket_ack_failure};
 use anyhow::Result;
 use std::path::Path;
 
@@ -421,9 +421,8 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> BoundaryRepositionAttempt {
 
     match result {
         Ok(true) => {
-            if let Err(e) =
-                clear_ipc_socket_ack_timeouts(&project_root, file, "reposition_socket_ack")
-            {
+            // `#gh131nonipc`: an ACK is liveness, not delivery proof.
+            if let Err(e) = note_ipc_socket_ack(&project_root, file, "reposition_socket_ack") {
                 eprintln!(
                     "[commit] IPC reposition timeout clear failed (non-fatal): {}",
                     e
@@ -450,8 +449,13 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> BoundaryRepositionAttempt {
             // endpoint accrued nothing here. Use the typed classification so a
             // rejection counts (and is remembered as one) like the other sites.
             if let Some(failure) = classify_socket_delivery_failure(e.to_string()) {
-                match record_ipc_socket_ack_failure(&project_root, file, None, "reposition", failure)
-                {
+                match record_ipc_socket_ack_failure(
+                    &project_root,
+                    file,
+                    None,
+                    "reposition",
+                    failure,
+                ) {
                     Ok(true) => {
                         eprintln!(
                             "[commit] IPC listener degraded for {} after repeated reposition receipt {}s",

@@ -4516,6 +4516,7 @@ fn editor_transport_health_for_current_session(
                 "recycle_attempted": health.recycle_attempted,
                 "last_patch_id": health.last_delivery_id.as_deref().unwrap_or("-"),
                 "last_transport": health.last_transport,
+                "updated_at_secs": health.updated_at_secs,
             })
         }),
     )
@@ -4567,11 +4568,11 @@ pub fn record_ipc_socket_ack_failure(
         .as_ref()
         .and_then(|value| value.get("consecutive_rejections").and_then(|v| v.as_u64()))
         .unwrap_or(0);
-    let consecutive_rejections = if failure.is_definitive_rejection() {
-        prior_rejections.saturating_add(1)
-    } else {
-        0
-    };
+    // `#gh131nonipc`: the run's movement is owned by the typed outcome — a
+    // refusal extends it, a non-socket retention carries it, a timeout ends it.
+    let consecutive_rejections = failure.next_refusal_run(prior_rejections);
+    let endpoint_unregistered = consecutive_rejections
+        >= agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD;
     // `#midturn-wedge-recycle`: preserve the once-per-episode recycle guard across
     // marker rewrites. If a mid-turn recycle was already attempted for this wedge
     // episode, further accruing timeouts must NOT reset it — re-recycling a binary
@@ -4582,12 +4583,36 @@ pub fn record_ipc_socket_ack_failure(
         .and_then(|value| value.get("recycle_attempted").and_then(|v| v.as_bool()))
         .unwrap_or(false);
     let consecutive_timeouts = prior_timeouts.saturating_add(1);
-    let degraded = agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures(
-        consecutive_timeouts,
-        true,
-        IPC_DEWEDGE_TIMEOUT_THRESHOLD,
-    );
+    // An endpoint unregistered by its refusal run is degraded by definition,
+    // whatever the shared failure counter says.
+    let degraded = endpoint_unregistered
+        || agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures(
+            consecutive_timeouts,
+            true,
+            IPC_DEWEDGE_TIMEOUT_THRESHOLD,
+        );
     let document_hash = agent_doc_fs::document_state_hash(file)?;
+    // `#gh131nonipc`: `updated_at_secs` is also the clock of the unregister
+    // probe window. An outcome that carries the refusal run without evidence
+    // (a non-socket retention while the endpoint is skipped) must not restart
+    // that window, or the skip could never expire into its probe.
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    let updated_at_secs = match (
+        failure.refusal_run_effect(),
+        prior
+            .as_ref()
+            .and_then(|value| value.get("updated_at_secs").and_then(|v| v.as_u64())),
+    ) {
+        (agent_doc_ipc_protocol::RefusalRunEffect::Preserve, Some(prior_at))
+            if consecutive_rejections > 0 =>
+        {
+            prior_at
+        }
+        _ => now_secs,
+    };
     agent_doc_controller_io::project_controller::upsert_editor_transport_health(
         project_root,
         &agent_doc_controller_io::project_controller::EditorTransportHealthRecord {
@@ -4599,10 +4624,7 @@ pub fn record_ipc_socket_ack_failure(
             recycle_attempted: prior_recycle_attempted,
             last_delivery_id: patch_id.map(str::to_string),
             last_transport: transport.to_string(),
-            updated_at_secs: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_secs())
-                .unwrap_or_default(),
+            updated_at_secs,
             consecutive_rejections,
         },
     )?;
@@ -4619,7 +4641,78 @@ pub fn record_ipc_socket_ack_failure(
             degraded
         ),
     );
+    if endpoint_unregistered && prior_rejections < consecutive_rejections {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_endpoint_unregistered_after_refusals file={} transport={} kind={} consecutive_rejections={} threshold={} probe_after_secs={} action=route_through_document_authority (#gh131nonipc)",
+                file.display(),
+                transport,
+                failure_kind,
+                consecutive_rejections,
+                agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD,
+                agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS,
+            ),
+        );
+    }
     Ok(degraded)
+}
+
+/// `#gh131nonipc` — a socket ACK proves the endpoint is alive, not that the
+/// write was delivered: the visible-write receipt that follows it can still be
+/// refused (`socket_visible_write` divergence). Clearing the whole health record
+/// on the ACK erased every refusal before the next one was recorded, so the run
+/// could never exceed one and neither the degradation bar nor the unregister
+/// threshold was reachable from that shape.
+///
+/// So the ACK clears the record only when no refusal run is open (the previous
+/// behaviour: liveness clears timeouts). With a run open the record is kept
+/// until a PROVEN delivery clears it via [`clear_ipc_socket_ack_timeouts`].
+pub fn note_ipc_socket_ack(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
+    let prior_rejections = editor_transport_health_for_current_session(project_root, file)?
+        .and_then(|value| value.get("consecutive_rejections").and_then(|v| v.as_u64()))
+        .unwrap_or(0);
+    if prior_rejections == 0 {
+        return clear_editor_transport_health(project_root, file, reason);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_socket_ack_kept_refusal_run file={} reason={} consecutive_rejections={} note=ack_is_liveness_not_delivery_proof (#gh131nonipc)",
+            file.display(),
+            reason,
+            prior_rejections,
+        ),
+    );
+    Ok(())
+}
+
+/// `#gh131nonipc` — whether this document's editor endpoint currently counts as
+/// unregistered for delivery: its trailing refusal run reached
+/// [`agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD`] and
+/// the bounded probe window since the most recent recorded failure has not
+/// elapsed. A missing or unreadable record is "registered" (not looked is not
+/// refused).
+pub fn editor_delivery_endpoint_unregistered(project_root: &Path, file: &Path) -> bool {
+    let Some(value) = editor_transport_health_for_current_session(project_root, file)
+        .ok()
+        .flatten()
+    else {
+        return false;
+    };
+    let refusals = value
+        .get("consecutive_rejections")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let updated_at = value
+        .get("updated_at_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    agent_doc_ipc_protocol::editor_endpoint_unregistered(refusals, now.saturating_sub(updated_at))
 }
 
 fn clear_editor_transport_health(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
@@ -5287,7 +5380,7 @@ mod tests {
                 "finalize",
                 SocketDeliveryFailure::Rejected
             )
-                .unwrap(),
+            .unwrap(),
             "the first rejection only records health state"
         );
         assert!(
@@ -5298,7 +5391,7 @@ mod tests {
                 "finalize",
                 SocketDeliveryFailure::Rejected
             )
-                .unwrap(),
+            .unwrap(),
             "a second consecutive rejection must mark the listener degraded"
         );
         assert!(editor_ipc_write_wedged(dir.path(), &doc));
@@ -5339,7 +5432,9 @@ mod tests {
         let doc = dir.path().join("test.md");
         fs::write(&doc, "---\nsession: reject-run\n---\n\ncontent").unwrap();
 
-        assert!(!agent_doc_capture_io::editor_delivery_endpoint_rejected(&doc));
+        assert!(!agent_doc_capture_io::editor_delivery_endpoint_rejected(
+            &doc
+        ));
         record_ipc_socket_ack_failure(
             dir.path(),
             &doc,
@@ -5369,9 +5464,282 @@ mod tests {
             SocketDeliveryFailure::Rejected,
         )
         .unwrap();
-        assert!(agent_doc_capture_io::editor_delivery_endpoint_rejected(&doc));
+        assert!(agent_doc_capture_io::editor_delivery_endpoint_rejected(
+            &doc
+        ));
         clear_ipc_socket_ack_timeouts(dir.path(), &doc, "delivery_receipt").unwrap();
-        assert!(!agent_doc_capture_io::editor_delivery_endpoint_rejected(&doc));
+        assert!(!agent_doc_capture_io::editor_delivery_endpoint_rejected(
+            &doc
+        ));
+    }
+
+    fn gh131nonipc_doc(session: &str) -> (TempDir, std::path::PathBuf) {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, format!("---\nsession: {session}\n---\n\ncontent")).unwrap();
+        (dir, doc)
+    }
+
+    fn gh131nonipc_health(
+        project_root: &Path,
+        doc: &Path,
+    ) -> agent_doc_controller_io::project_controller::EditorTransportHealthRecord {
+        agent_doc_controller_io::project_controller::load_editor_transport_health(
+            project_root,
+            &agent_doc_fs::document_state_hash(doc).unwrap(),
+        )
+        .unwrap()
+        .expect("a transport health record")
+    }
+
+    /// `#gh131nonipc`: a refused visible-write receipt (`socket_visible_write`
+    /// divergence) never reached the socket error branch, so it accrued nothing.
+    /// Routed through the typed recorder it counts toward degradation AND
+    /// extends the same refusal run a receipt rejection does.
+    #[test]
+    fn a_refused_visible_write_receipt_accrues_transport_health() {
+        let (dir, doc) = gh131nonipc_doc("diverge-run");
+        assert!(
+            !record_ipc_socket_ack_failure(
+                dir.path(),
+                &doc,
+                Some("p1"),
+                "socket_visible_write",
+                SocketDeliveryFailure::VisibleWriteDiverged,
+            )
+            .unwrap()
+        );
+        let health = gh131nonipc_health(dir.path(), &doc);
+        assert_eq!(health.consecutive_timeouts, 1);
+        assert_eq!(health.consecutive_rejections, 1);
+        assert_eq!(health.last_transport, "socket_visible_write");
+        assert!(
+            agent_doc_capture_io::editor_delivery_endpoint_rejected(&doc),
+            "a refused receipt is an answer, not silence"
+        );
+        assert!(
+            record_ipc_socket_ack_failure(
+                dir.path(),
+                &doc,
+                Some("p2"),
+                "socket_visible_write",
+                SocketDeliveryFailure::VisibleWriteDiverged,
+            )
+            .unwrap(),
+            "two consecutive refused receipts must degrade the transport"
+        );
+        assert!(editor_ipc_write_wedge_needs_recycle(dir.path(), &doc));
+    }
+
+    /// `#gh131nonipc`: a `serialized_atomic_write` retention never touched the
+    /// socket. Routed through the recorder it counts toward degradation (so it
+    /// can drive the recycle) but carries the refusal run unchanged — it is no
+    /// evidence either way about whether the endpoint is refusing.
+    #[test]
+    fn a_serialized_write_retention_accrues_failures_and_carries_the_refusal_run() {
+        let (dir, doc) = gh131nonipc_doc("retain-run");
+        record_ipc_socket_ack_failure(
+            dir.path(),
+            &doc,
+            Some("hash-1"),
+            "serialized_atomic_write",
+            SocketDeliveryFailure::ProjectionUnconverged,
+        )
+        .unwrap();
+        let health = gh131nonipc_health(dir.path(), &doc);
+        assert_eq!(health.consecutive_timeouts, 1);
+        assert_eq!(health.consecutive_rejections, 0);
+        assert!(!agent_doc_capture_io::editor_delivery_endpoint_rejected(
+            &doc
+        ));
+        assert!(
+            record_ipc_socket_ack_failure(
+                dir.path(),
+                &doc,
+                Some("hash-2"),
+                "serialized_atomic_write",
+                SocketDeliveryFailure::ProjectionUnconverged,
+            )
+            .unwrap(),
+            "repeated non-socket retentions must reach degraded and arm the recycle"
+        );
+        assert!(editor_ipc_write_wedge_needs_recycle(dir.path(), &doc));
+
+        record_ipc_socket_ack_failure(
+            dir.path(),
+            &doc,
+            Some("p3"),
+            "socket_ipc",
+            SocketDeliveryFailure::Rejected,
+        )
+        .unwrap();
+        record_ipc_socket_ack_failure(
+            dir.path(),
+            &doc,
+            Some("hash-3"),
+            "serialized_atomic_write",
+            SocketDeliveryFailure::ProjectionUnconverged,
+        )
+        .unwrap();
+        assert_eq!(
+            gh131nonipc_health(dir.path(), &doc).consecutive_rejections,
+            1,
+            "a retention must neither extend nor end an open refusal run"
+        );
+    }
+
+    /// `#gh131nonipc`: the endpoint becomes unregistered exactly at
+    /// `EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD` consecutive refusals —
+    /// any mix of receipt rejections and refused visible-write receipts — and a
+    /// proven delivery resets it. A timeout breaks the run.
+    #[test]
+    fn an_endpoint_is_unregistered_after_n_consecutive_refusals_and_reset_on_success() {
+        use agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD as N;
+        let (dir, doc) = gh131nonipc_doc("unregister-run");
+        let refusals = [
+            SocketDeliveryFailure::Rejected,
+            SocketDeliveryFailure::VisibleWriteDiverged,
+        ];
+        for i in 0..N - 1 {
+            record_ipc_socket_ack_failure(
+                dir.path(),
+                &doc,
+                Some(&format!("p{i}")),
+                "socket_ipc",
+                refusals[(i % 2) as usize],
+            )
+            .unwrap();
+            assert!(
+                !editor_delivery_endpoint_unregistered(dir.path(), &doc),
+                "{} refusals is below the threshold {N}",
+                i + 1
+            );
+        }
+        // A non-socket retention in the middle does not break the run.
+        record_ipc_socket_ack_failure(
+            dir.path(),
+            &doc,
+            Some("hash"),
+            "serialized_atomic_write",
+            SocketDeliveryFailure::ProjectionUnconverged,
+        )
+        .unwrap();
+        assert!(!editor_delivery_endpoint_unregistered(dir.path(), &doc));
+        assert!(
+            record_ipc_socket_ack_failure(
+                dir.path(),
+                &doc,
+                Some("pN"),
+                "socket_visible_write",
+                SocketDeliveryFailure::VisibleWriteDiverged,
+            )
+            .unwrap()
+        );
+        assert!(
+            editor_delivery_endpoint_unregistered(dir.path(), &doc),
+            "the Nth consecutive refusal unregisters the endpoint"
+        );
+        assert_eq!(
+            gh131nonipc_health(dir.path(), &doc).consecutive_rejections,
+            N
+        );
+
+        // A socket ACK is liveness, not delivery proof: it keeps the open run.
+        note_ipc_socket_ack(dir.path(), &doc, "socket_ack").unwrap();
+        assert!(editor_delivery_endpoint_unregistered(dir.path(), &doc));
+
+        // A proven delivery is the success that resets it.
+        clear_ipc_socket_ack_timeouts(dir.path(), &doc, "socket_visible_write_proven").unwrap();
+        assert!(!editor_delivery_endpoint_unregistered(dir.path(), &doc));
+        assert!(!editor_ipc_write_wedged(dir.path(), &doc));
+
+        // A timeout breaks the run: N-1 refusals, a timeout, one refusal is not N.
+        for i in 0..N - 1 {
+            record_ipc_socket_ack_failure(
+                dir.path(),
+                &doc,
+                Some(&format!("q{i}")),
+                "socket_ipc",
+                SocketDeliveryFailure::Rejected,
+            )
+            .unwrap();
+        }
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("qt"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_failure(
+            dir.path(),
+            &doc,
+            Some("qr"),
+            "socket_ipc",
+            SocketDeliveryFailure::Rejected,
+        )
+        .unwrap();
+        assert!(!editor_delivery_endpoint_unregistered(dir.path(), &doc));
+    }
+
+    /// `#gh131nonipc`: the unregister verdict is bounded in time — it expires
+    /// into a probe once the window since the last recorded failure elapses,
+    /// and a carried-over retention does not restart that window.
+    #[test]
+    fn an_unregistered_endpoint_expires_into_a_probe() {
+        use agent_doc_ipc_protocol::{
+            EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS,
+            EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD,
+        };
+        let (dir, doc) = gh131nonipc_doc("probe-window");
+        for i in 0..EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD {
+            record_ipc_socket_ack_failure(
+                dir.path(),
+                &doc,
+                Some(&format!("p{i}")),
+                "socket_ipc",
+                SocketDeliveryFailure::Rejected,
+            )
+            .unwrap();
+        }
+        assert!(editor_delivery_endpoint_unregistered(dir.path(), &doc));
+        let mut health = gh131nonipc_health(dir.path(), &doc);
+        let stale_at = health
+            .updated_at_secs
+            .saturating_sub(EDITOR_ENDPOINT_UNREGISTER_PROBE_AFTER_SECS + 1);
+        health.updated_at_secs = stale_at;
+        agent_doc_controller_io::project_controller::upsert_editor_transport_health(
+            dir.path(),
+            &health,
+        )
+        .unwrap();
+        record_ipc_socket_ack_failure(
+            dir.path(),
+            &doc,
+            Some("hash"),
+            "serialized_atomic_write",
+            SocketDeliveryFailure::ProjectionUnconverged,
+        )
+        .unwrap();
+        assert_eq!(
+            gh131nonipc_health(dir.path(), &doc).updated_at_secs,
+            stale_at
+        );
+        assert!(
+            !editor_delivery_endpoint_unregistered(dir.path(), &doc),
+            "the skip must expire into a probe"
+        );
+        assert!(
+            editor_ipc_write_wedged(dir.path(), &doc),
+            "expiry re-admits a probe; it does not erase the degradation"
+        );
+    }
+
+    /// `#gh131nonipc`: with no refusal run open, a socket ACK keeps its old
+    /// meaning — liveness clears accrued timeouts.
+    #[test]
+    fn a_socket_ack_without_a_refusal_run_clears_timeouts() {
+        let (dir, doc) = gh131nonipc_doc("ack-clear");
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
+        record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+        assert!(editor_ipc_write_wedged(dir.path(), &doc));
+        note_ipc_socket_ack(dir.path(), &doc, "socket_ack").unwrap();
+        assert!(!editor_ipc_write_wedged(dir.path(), &doc));
     }
 
     #[test]

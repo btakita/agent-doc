@@ -18,6 +18,7 @@ pub mod orphan_drain;
 pub mod pane_layout;
 pub mod paths;
 pub mod recycle;
+pub mod sequence;
 pub mod status;
 pub mod supervisor_replacement;
 pub mod timeout;

@@ -5406,6 +5406,13 @@ struct RouteModel {
     /// `#netadv5` R8: durable (state.db `dispatch_request_keys`) record of every
     /// dispatch request key the controller applied.
     applied_dispatch_keys: BTreeSet<u64>,
+    /// `#netadv3` SIM-F1/SIM-F2: newest applied send stamp per level-state
+    /// family (the controller's `LEVEL_UPDATE_MARKS`), decided through the
+    /// production `agent_doc_controller::sequence::admit_sequenced`.
+    level_marks: std::collections::BTreeMap<
+        agent_doc_controller::sequence::SequencedFamily,
+        agent_doc_controller::sequence::SequenceMark,
+    >,
     supervisor_lease_generation: Option<u64>,
     /// `#jbdisprecycle`: the project supervisor is mid-`execve` recycle right now
     /// (lib-install auto-recycle / operator restart). Models the project-scoped
@@ -5429,6 +5436,7 @@ impl RouteModel {
             queue_control: QueueControlState::Resumed,
             recovery_marker_keys: BTreeSet::new(),
             applied_dispatch_keys: BTreeSet::new(),
+            level_marks: std::collections::BTreeMap::new(),
             supervisor_lease_generation: Some(1),
             recycle_inflight: false,
             socket: SupervisorSocket::Live,
@@ -5583,6 +5591,9 @@ struct Coverage {
     /// `#netadv5` R8: retransmitted dispatch copies answered from the durable
     /// request-key record without a second injection.
     route_dispatch_duplicates_answered: usize,
+    /// `#netadv3` SIM-F1/SIM-F2: level-state updates discarded because they
+    /// were sent before one already applied in the same generation.
+    stale_level_updates_discarded: usize,
     protected_prompt_route_blocks: usize,
     /// `#rdypoll` (§D / img_52): count of REAL trigger injections into the harness
     /// composer. Mirrors the production `dispatch_inject attempt=N` ops.log marker
@@ -5879,6 +5890,7 @@ impl Coverage {
         self.route_dispatch_proofs += other.route_dispatch_proofs;
         self.route_dispatch_coalesced += other.route_dispatch_coalesced;
         self.route_dispatch_duplicates_answered += other.route_dispatch_duplicates_answered;
+        self.stale_level_updates_discarded += other.stale_level_updates_discarded;
         self.dispatch_injects += other.dispatch_injects;
         self.session_clears += other.session_clears;
         self.deferred_clear_duplicate_suppressed += other.deferred_clear_duplicate_suppressed;

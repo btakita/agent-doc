@@ -8310,6 +8310,14 @@ pub(crate) struct ControllerRequest {
     supervisor_socket: Option<String>,
     command_kind: Option<String>,
     diagnostic_payload: Option<String>,
+    /// `#netadv3` SIM-F1/SIM-F2: send stamp for level-state updates that are
+    /// fenced only by generation (lifecycle, supervisor heartbeat, queue
+    /// control). A per-host monotonic clock read once when the request is
+    /// built, so retries of one request share it; the controller discards an
+    /// update OLDER than the newest it applied for the same document and
+    /// generation. `None` (older clients, every other command) is unfenced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sequence: Option<u64>,
 }
 
 impl ControllerRequest {
@@ -8334,6 +8342,7 @@ impl ControllerRequest {
             supervisor_pid: None,
             supervisor_socket: None,
             command_kind: None,
+            sequence: None,
         }
     }
 }
@@ -12670,6 +12679,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&start).unwrap() + "\n"),
@@ -12709,6 +12719,7 @@ mod tests {
             supervisor_socket: Some("/tmp/agent-doc-test.sock".to_string()),
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&register).unwrap() + "\n"),
@@ -12734,6 +12745,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -12789,6 +12801,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&closed_lifecycle).unwrap() + "\n"),
@@ -12865,6 +12878,7 @@ mod tests {
             supervisor_socket: Some("/tmp/new.sock".to_string()),
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let lease = handle_supervisor_heartbeat(&bootstrap, None, heartbeat).unwrap();
         assert_eq!(lease.runtime_state.as_deref(), Some("ready"));
@@ -12961,6 +12975,7 @@ mod tests {
             supervisor_socket: Some("/tmp/same-supervisor.sock".to_string()),
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let lease = handle_supervisor_heartbeat(&bootstrap, None, heartbeat).unwrap();
         assert_eq!(lease.generation, 2);
@@ -13050,6 +13065,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let record = handle_start_session(&bootstrap, None, start).unwrap();
         assert_eq!(record.generation, 2);
@@ -13068,6 +13084,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("replacement dispatch".to_string()),
+            sequence: None,
         };
         let auth = handle_dispatch(&bootstrap, None, dispatch).unwrap();
         assert_eq!(auth.record.session_id, "session-new");
@@ -13189,6 +13206,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("post-reboot auto dispatch".to_string()),
+            sequence: None,
         };
         let auth = handle_dispatch(&bootstrap, None, dispatch).unwrap();
         assert_eq!(auth.record.session_id, "session-reboot");
@@ -13461,6 +13479,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -13517,6 +13536,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -13582,6 +13602,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&binding).unwrap() + "\n"),
@@ -13609,6 +13630,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("test dispatch".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -13711,6 +13733,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&binding).unwrap() + "\n"),
@@ -13756,6 +13779,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("preflight".to_string()),
             diagnostic_payload: Some("admin receipt test".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&admin).unwrap() + "\n"),
@@ -13839,6 +13863,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&stale_pause).unwrap() + "\n"),
@@ -13897,6 +13922,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("paused dispatch test harness=codex".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -13984,6 +14010,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&inspect).unwrap() + "\n"),
@@ -14085,6 +14112,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14111,6 +14139,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("auto dispatch harness=codex".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&auto).unwrap() + "\n"),
@@ -14230,6 +14259,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14255,6 +14285,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("spent preset absent repair".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -14349,6 +14380,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14374,6 +14406,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("spent preset present repair".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -14477,6 +14510,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14502,6 +14536,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("dispatch_only_reopen".to_string()),
             diagnostic_payload: Some("preset-token unserviceable repair".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -14592,6 +14627,7 @@ mod tests {
                 supervisor_socket: None,
                 command_kind: Some("pause".to_string()),
                 diagnostic_payload: None,
+                sequence: None,
             };
             let response = handle_request(
                 &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14621,6 +14657,7 @@ mod tests {
                 // `dispatch_operator_reopen_bypasses_paused_queue`).
                 command_kind: Some("idle_queue_continuation".to_string()),
                 diagnostic_payload: Some("jbrestale paused dispatch".to_string()),
+                sequence: None,
             };
             let response = handle_request(
                 &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -14733,6 +14770,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("handoff".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&stale_handoff).unwrap() + "\n"),
@@ -14787,6 +14825,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("reap".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&reap).unwrap() + "\n"),
@@ -15252,6 +15291,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("session_clear".to_string()),
             diagnostic_payload: Some("test clear closed actor".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&clear).unwrap() + "\n"),
@@ -15343,6 +15383,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("session_clear".to_string()),
             diagnostic_payload: Some("test clear blocked actor".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&clear).unwrap() + "\n"),
@@ -15467,6 +15508,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&attach).unwrap() + "\n"),
@@ -15523,6 +15565,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&start).unwrap() + "\n"),
@@ -15549,6 +15592,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -16340,6 +16384,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("m2 gate test".to_string()),
+            sequence: None,
         };
 
         // A controller wedged in Preparing (client died before promote_handoff) is
@@ -16434,6 +16479,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("autonomous queue drain".to_string()),
+            sequence: None,
         };
 
         let preparing = ControllerBootstrap {
@@ -16506,6 +16552,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("stale binary test".to_string()),
+            sequence: None,
         };
 
         // Stable handoff state, but the recorded binary is an old/different build.

@@ -3227,9 +3227,52 @@ pub fn converge_queue_via_lifecycle(
     snapshot_entries: &[QueueEntry],
     deleted_directive_ids: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
+    converge_queue_via_lifecycle_with_operator_rearmed(
+        entries,
+        snapshot_entries,
+        deleted_directive_ids,
+        &std::collections::HashSet::new(),
+    )
+}
+
+/// Identities the operator's OWN captured editor ops re-armed (`#unstrikelost`).
+///
+/// `operator_entries` is the queue the durable operator-op epoch replays to from
+/// the snapshot base (`replay_editor_ops(snapshot, ops)`), so it contains only
+/// operator keystrokes — never a stale editor buffer or agent projection. An
+/// identity the snapshot holds struck (`Completed`) that is live (`Prompt`) in
+/// that operator replay was un-struck or re-typed by the operator. That is a
+/// deliberate re-arm, not the stale live re-emit `#qeditdupguard` retires.
+pub fn operator_rearmed_queue_identities(
+    snapshot_entries: &[QueueEntry],
+    operator_entries: &[QueueEntry],
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    let snapshot_struck = snapshot_struck_representatives(snapshot_entries);
+    operator_entries
+        .iter()
+        .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
+        .filter_map(queue_item_identity)
+        .filter(|identity| snapshot_struck.contains_key(identity))
+        .collect()
+}
+
+/// [`converge_queue_via_lifecycle`] with operator re-arm evidence
+/// (`#unstrikelost`). Snapshot-struck dominance (`#qeditdupguard`) still
+/// rewrites a stale live re-emit back to its struck representative, EXCEPT for
+/// an identity in `operator_rearmed` (see
+/// [`operator_rearmed_queue_identities`]): the operator's own ops un-struck it,
+/// so the live head is the operator's current intent and must survive every
+/// maintenance pass and closeout that did not answer it.
+pub fn converge_queue_via_lifecycle_with_operator_rearmed(
+    entries: &[QueueEntry],
+    snapshot_entries: &[QueueEntry],
+    deleted_directive_ids: &std::collections::HashSet<String>,
+    operator_rearmed: &std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity>,
+) -> Option<Vec<QueueEntry>> {
     use agent_doc_element_queue::{QueueItemEvent, QueueItemMachine, QueueItemState};
 
-    let snapshot_struck = snapshot_struck_representatives(snapshot_entries);
+    let mut snapshot_struck = snapshot_struck_representatives(snapshot_entries);
+    snapshot_struck.retain(|identity, _| !operator_rearmed.contains(identity));
     let current_struck = current_struck_identities(entries);
     let mut injected_snapshot_struck =
         std::collections::HashSet::<agent_doc_element_queue::QueueItemIdentity>::new();
@@ -7081,6 +7124,71 @@ mod tests {
             vec![c("do [#qeditdup] [#qftloss#qftloss]")],
             "current struck evidence should absorb the stale live duplicate"
         );
+    }
+
+    /// `#unstrikelost`: an identity the operator's own captured ops un-struck is
+    /// a re-arm, not a stale re-emit. Snapshot-struck dominance must leave it
+    /// live while still retiring an unrelated stale live re-emit.
+    #[test]
+    fn converge_keeps_operator_rearmed_free_text_head_live() {
+        let snapshot = vec![
+            p("do [#jbpluginvanish]"),
+            c("release + publish"),
+            c("do [#qeditdup]"),
+        ];
+        // The operator replay (base = snapshot, ops = operator keystrokes) only
+        // un-struck `release + publish`.
+        let operator = vec![
+            p("do [#jbpluginvanish]"),
+            p("release + publish"),
+            c("do [#qeditdup]"),
+        ];
+        // The observed current queue also carries a stale unstrike of `#qeditdup`
+        // that no operator op produced.
+        let entries = vec![
+            p("do [#jbpluginvanish]"),
+            p("release + publish"),
+            p("do [#qeditdup]"),
+        ];
+
+        let rearmed = operator_rearmed_queue_identities(&snapshot, &operator);
+        assert_eq!(rearmed.len(), 1, "only the operator unstrike re-arms");
+
+        let out = converge_queue_via_lifecycle_with_operator_rearmed(
+            &entries,
+            &snapshot,
+            &Default::default(),
+            &rearmed,
+        )
+        .expect("the stale #qeditdup re-emit still converges");
+        assert_eq!(
+            out,
+            vec![
+                p("do [#jbpluginvanish]"),
+                p("release + publish"),
+                c("do [#qeditdup]"),
+            ],
+            "operator re-arm stays live; the stale re-emit is re-struck"
+        );
+        assert!(
+            converge_queue_via_lifecycle_with_operator_rearmed(
+                &out,
+                &snapshot,
+                &Default::default(),
+                &rearmed,
+            )
+            .is_none(),
+            "operator re-arm convergence is idempotent"
+        );
+    }
+
+    /// Without operator op evidence the same live copy is indistinguishable from
+    /// a stale re-emit, so `#qeditdupguard` keeps re-striking it.
+    #[test]
+    fn operator_rearmed_identities_ignore_heads_the_operator_left_struck() {
+        let snapshot = vec![c("release + publish"), p("do [#open]")];
+        let operator = vec![c("release + publish"), p("do [#open]")];
+        assert!(operator_rearmed_queue_identities(&snapshot, &operator).is_empty());
     }
 
     /// `#queue-operator-pin-position-lock` / `#qauthorder`: convergence never

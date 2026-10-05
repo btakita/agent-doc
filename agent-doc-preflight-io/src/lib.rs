@@ -3420,6 +3420,65 @@ fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
     observed
 }
 
+/// Parse the `agent:queue` entries of `content` (empty when absent/unparseable).
+fn queue_entries_in_content(content: &str) -> Vec<agent_doc_queue::document_queue::QueueEntry> {
+    agent_doc_element::element::parse(content)
+        .ok()
+        .and_then(|comps| {
+            comps
+                .iter()
+                .find(|c| c.name == "queue")
+                .map(|q| content[q.open_end..q.close_start].to_string())
+        })
+        .and_then(|body| agent_doc_queue::document_queue::parse(&body).ok())
+        .unwrap_or_default()
+}
+
+/// `#unstrikelost`: snapshot-struck queue identities the operator re-armed.
+///
+/// The durable editor-op epoch records only operator keystrokes, captured
+/// against the base the editor last saw. When that base is the committed
+/// snapshot, replaying the ops onto it reconstructs the operator's own queue cut
+/// independently of any stale editor buffer or agent projection. A head that is
+/// struck in the snapshot but live in that operator cut was un-struck (or
+/// re-typed) by the operator, so queue maintenance must not re-strike it. The
+/// active epoch is preferred; the newest retained checkpoint covers an epoch a
+/// non-operator projection already closed before this maintenance pass ran.
+/// With no matching op evidence the set is empty and `#qeditdupguard` applies.
+fn operator_rearmed_queue_identities(
+    file: &Path,
+    snapshot_text: &str,
+    snapshot_queue_entries: &[agent_doc_queue::document_queue::QueueEntry],
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    let operator_cut = agent_doc_op_capture_io::editor_ops_for_base(file, snapshot_text)
+        .ok()
+        .flatten()
+        .and_then(|ops| agent_doc_merge::crdt::replay_editor_ops(snapshot_text, &ops))
+        .or_else(|| {
+            agent_doc_op_capture_io::last_editor_text_for_base(file, snapshot_text)
+                .ok()
+                .flatten()
+        });
+    let Some(operator_cut) = operator_cut else {
+        return std::collections::HashSet::new();
+    };
+    let rearmed = agent_doc_queue::document_queue::operator_rearmed_queue_identities(
+        snapshot_queue_entries,
+        &queue_entries_in_content(&operator_cut),
+    );
+    if !rearmed.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_operator_rearm_preserved file={} heads={} (#unstrikelost)",
+                file.display(),
+                rearmed.len()
+            ),
+        );
+    }
+    rearmed
+}
+
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     run_queue_maintenance_with_coin_gate(file, diff, &FreeTextCoinGate::structural_only())
 }
@@ -4304,25 +4363,28 @@ pub fn run_queue_maintenance_with_coin_gate(
     // their regression coverage do not break). Position-lock
     // (#queue-operator-pin-position-lock) is preserved: convergence is purely
     // subtractive at each identity's earliest slot.
-    let snapshot_queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> =
-        match agent_doc_snapshot_io::load_document_baseline(file) {
-            Ok(Some(snap)) => agent_doc_element::element::parse(&snap)
-                .ok()
-                .and_then(|comps| {
-                    comps
-                        .iter()
-                        .find(|c| c.name == "queue")
-                        .map(|q| snap[q.open_end..q.close_start].to_string())
-                })
-                .and_then(|body| agent_doc_queue::document_queue::parse(&body).ok())
-                .unwrap_or_default(),
-            _ => Vec::new(),
-        };
-    if let Some(converged_entries) = agent_doc_queue::document_queue::converge_queue_via_lifecycle(
-        &activation.entries_after,
-        &snapshot_queue_entries,
-        &agent_doc_queue_io::queue_tombstone::current_tombstones(file),
-    ) {
+    let snapshot_text = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
+    let snapshot_queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = snapshot_text
+        .as_deref()
+        .map(queue_entries_in_content)
+        .unwrap_or_default();
+    // `#unstrikelost`: the operator's own captured ops decide whether a live copy
+    // of a snapshot-struck head is a re-arm (operator unstrike) or a stale
+    // re-emit. Only the former may survive snapshot-struck dominance.
+    let operator_rearmed = snapshot_text
+        .as_deref()
+        .map(|snap| operator_rearmed_queue_identities(file, snap, &snapshot_queue_entries))
+        .unwrap_or_default();
+    if let Some(converged_entries) =
+        agent_doc_queue::document_queue::converge_queue_via_lifecycle_with_operator_rearmed(
+            &activation.entries_after,
+            &snapshot_queue_entries,
+            &agent_doc_queue_io::queue_tombstone::current_tombstones(file),
+            &operator_rearmed,
+        )
+    {
         let dropped = activation
             .entries_after
             .len()
@@ -8828,6 +8890,104 @@ mod tests {
         assert!(
             active.iter().any(|text| text.contains("#stillopen")),
             "unrelated live head must stay runnable: active={active:?}"
+        );
+    }
+
+    /// `#unstrikelost` (2026-10-04, agent-doc-bugs.md 08fdaf4438): the operator
+    /// un-struck `~~release + publish~~` in the editor. The next preflight's
+    /// queue maintenance treated the live copy as a stale re-emit of the
+    /// snapshot-struck head (`#qeditdupguard`) and re-struck it, and the
+    /// following closeout — which never quoted or answered that head — committed
+    /// the re-strike, silently removing it from the drain.
+    ///
+    /// The operator's own captured editor ops replay onto the snapshot to the
+    /// live head, so this is a re-arm: it must stay live through maintenance and
+    /// through a closeout whose response does not quote it.
+    #[test]
+    fn unstrike_then_a_closeout_with_no_quote_keeps_the_head_live() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — claude\n\n",
+            "> **Queue prompt:** release + publish\n\n",
+            "Released.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#stillopen]\n",
+            "- ~~release + publish~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        // The operator deletes the closing then the opening `~~` in the editor;
+        // the editor records those keystrokes against the snapshot base.
+        let struck_at = snapshot_content.find("~~release + publish~~").unwrap();
+        let close_at = struck_at + "~~release + publish".len();
+        agent_doc_op_capture_io::record_editor_ops(
+            &doc,
+            &agent_doc_hash::content_hash(snapshot_content),
+            vec![
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: close_at,
+                    len: 2,
+                },
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: struck_at,
+                    len: 2,
+                },
+            ],
+        )
+        .unwrap();
+        let unstruck = snapshot_content.replace("~~release + publish~~", "release + publish");
+        std::fs::write(&doc, &unstruck).unwrap();
+
+        let live_release = |doc: &Path| {
+            read_queue_entries(doc).iter().any(|entry| {
+                matches!(
+                    entry,
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                        if prompt.text.contains("release + publish")
+                )
+            })
+        };
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            live_release(&doc),
+            "queue maintenance re-struck the operator's unstrike:\n{}",
+            std::fs::read_to_string(&doc).unwrap()
+        );
+
+        // A closeout whose response dispatched other work and never quoted the
+        // re-armed head must not strike it (`#ftstrike` strikes answers only).
+        let struck = agent_doc_queue_io::queue_consume::strike_answered_free_text_queue_heads(
+            &doc,
+            "> **Queue prompt:** do [#stillopen]\n\nDispatched to a subagent.\n",
+            true,
+            &TEST_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
+        .unwrap();
+        assert_eq!(struck, 0, "an unquoted re-armed head is not an answer");
+
+        // And the next preflight's maintenance still leaves it in the drain.
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            live_release(&doc),
+            "the second maintenance pass re-struck the operator's unstrike:\n{}",
+            std::fs::read_to_string(&doc).unwrap()
         );
     }
 

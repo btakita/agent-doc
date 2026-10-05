@@ -613,6 +613,37 @@ Fixed and installed. Commit `ab3e68a3a` (GH #116, plugin 0.2.485) moved the Agen
 **Verification:** `make check` on the merged branch exited 0, with nextest 11,027 passed / 265 skipped and every TLA+ model and broken variant behaving as required. `make install` from the tested worktree exited 0. I deliberately built from the worktree so the other session's uncommitted `agent-doc-start-runtime-io` edit in the main checkout stays out of the binary. The JetBrains plugin is 0.2.496. The library reload reached 0 of 1 editor endpoints because that endpoint was unavailable. The superproject submodule bump is `8ee08fd571`.
 
 **Still running:** `netadv3` (models over NetChannel plus one-shot fixes F1–F23 plus SIM-F1/F2), `netadv5` (timeout-as-verdict fixes plus round-trip budgets plus SIM-F3), `netadv6` (simulation fuzzing) and `netadv7` (cargo-fuzz). `netadv4` is done but not merged yet; it goes in with the next batch. The release waits for that batch.
+
+### Re: batch2 installed — sim-net + fuzzing; gh136follow dispatched — opus-5-5 · 2026-10-05T01:45-04:00
+
+**`#netadv4`, done.** New crate `agent-doc-sim-net` with seeded profiles:
+- `local`: no faults, byte-identical to before across 128 seeds;
+- `coder_zscaler`: 20–180ms latency, jitter, 1% drop, 1.5–8s stalls;
+- `hostile`: heavy reorder/drop/duplicate.
+
+`make sim-net` (inside `make check`) runs 2048 schedules per profile. It found three ordering and duplication defects; all are being fixed:
+- SIM-F1: supervisor lifecycle and heartbeat use last-arrival-wins, so a stale Ready can land after Busy and the next prompt is typed into a busy supervisor. Being fixed in `netadv3`.
+- SIM-F2: queue pause/resume/drain have the same defect. Being fixed in `netadv3`.
+- SIM-F3: dispatch requests have no idempotency key, so a resend injects a duplicate trigger. Being fixed in `netadv5`.
+
+**`#netadv7`, done.** Five `cargo-fuzz` targets (IPC wire, markdown/patch, frontmatter, CRDT update, CRDT edits). Fuzzing found 7 real bugs, each fixed with a regression test and a minimized input:
+- a template exchange-repair panic mid-write;
+- 4 frontmatter round-trip bugs: body duplicated into the frontmatter, a duplicate key from a bare `\\r`, a preset losing its trailing newline, and `queue_active` dropped;
+- a CRDT decode that requested about 100 GB of memory from a 9-byte input;
+- a CRDT columnar counter overflow.
+
+It also adds TLA-tied proptest model tests (SupervisorGenerationTransition, IpcBuildIdentity), corpus replay in `make check`, and an opt-in `make fuzz`.
+
+**Integration:** `batch2` → agent-doc `main` @ `e8990627c` (pushed). `make check` exit 0, nextest 11,064 passed / 267 skipped. `make install` from the tested worktree exit 0. Superproject bump `d07c28d431`.
+
+**Dispatched:** `#gh136follow` → `subagent:gh136follow`:
+- (a) columns <= observed panes for every publisher;
+- (b) the 60s focus settle and the `superseded` race;
+- (c) a one-time recycle for supervisors already stale on old code, at a proven idle boundary only;
+- (d) republish the layout when a recycle completes;
+- (e) bound stale panes in non-stash windows.
+
+**Still running:** `netadv3`, `netadv5`, `netadv6`, `gh136follow`. GH #136 and the release are held for the final batch. Handoff doc: `2e5ec57764`.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 
@@ -628,23 +659,24 @@ Fixed and installed. Commit `ab3e68a3a` (GH #116, plugin 0.2.485) moved the Agen
 - ~~do [#netadv1]~~
 - ~~do [#netadv2]~~
 - do [#netadv3]
-- do [#netadv4]
+- ~~do [#netadv4]~~
 - do [#netadv5]
 - do [#netadv6]
-- do [#netadv7]
+- ~~do [#netadv7]~~
+- do [#claimstrike]
+- do [#gh136follow]
 - release + publish
 - do [#codexhandoff]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#claimstrike] [agent-doc] A free-text queue head still held by a queue claim is not struck when the response quotes it as a Queue prompt; post-commit session-check then INTERRUPTS with completed free-text queue residue and needs preflight+commit repair. Repro 2026-10-05: alt+shift head claimed by subagent:altshiftmenu, answered, not struck; releasing the claim and then preflight+commit struck it. Fix: a Queue-prompt echo of a claimed head releases the claim and strikes in the same finalize (or finalize refuses up front), with a regression test.
 - [ ] [#gh136follow] [agent-doc] GH 136 follow-ups the fix left open: (a) enforce columns <= observed_panes for ALL layout publishers, including editor_surface; (b) investigate the 60s focus settle and the superseded gen-reset race on 1061.md; (c) a one-time recycle path for supervisors already stale on old code; (d) republish the layout when a recycle completes; (e) bound stale panes in non-stash windows. Context: tasks/agent-doc/handoff-2026-10-05-codex.md
 - [ ] [#codexhandoff] [agent-doc] Codex pickup of the 2026-10-05 Claude subagent batch: read tasks/agent-doc/handoff-2026-10-05-codex.md. Step 0: confirm no Claude subagent is still writing (pgrep -x claude; git log -1 in each worktree), then agent-doc queue release the claims you take over. Resume gh136/netadv1/netadv2/netadv4/netadv7 from each worktree's HANDOFF.md under ~/work/btakita/agent-doc-wt/, then the held netadv3/5/6, integrate serially into batch-0505, make check, one make install, then release + publish.
 - [ ] [#netadv3] [agent-doc][formal] Re-check hot-path models (VisibleDeliveryReceipt, EditorReplicaStrand, PassiveTmuxSync, RecycleSettleDispatch, AgentDocCloseout, GH 136 layout/recycle) over NetChannel; fix every counterexample with SimWorld replay coverage. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
-- [ ] [#netadv4] [agent-doc][simworld] Seeded network-conditions layer for SimWorld (latency, jitter, reorder, drop, duplicate, reconnect) with a Coder+Zscaler profile, run under make check. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv5] [agent-doc] Latency budget enforcement: per hot path (focus/layout projection, response delivery, closeout ACK) assert serial round-trip count; replace fixed sleeps/settle windows on correctness paths with ack-driven transitions. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 - [ ] [#netadv6] [agent-doc][simworld] Deterministic simulation fuzzing: seeded explorer over SimWorld (interleavings, network faults, edits, recycles, crashes, reconnects) checking TLA-derived invariant oracles each step; shrink failing seeds into committed regression seeds; short budget in make check, long nightly CI run. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
-- [ ] [#netadv7] [agent-doc] Coverage-guided fuzzing: cargo-fuzz targets for IPC wire decode, markdown component/patch parsers, frontmatter, CRDT op decode (no-panic + lossless round-trip oracles; corpus seeded from redacted real logs); extend proptest to model-based tests of the pure transition functions the TLA models describe. Plan: tasks/agent-doc/plan-network-adversarial-correctness.md
 6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged). Blocked on operator: which text was lost + when (JetBrains Local History on api.md). Then trace the dropping path and fix with regression coverage.
 <!-- /agent:backlog -->
 

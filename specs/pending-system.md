@@ -271,6 +271,7 @@ history is reaped. Invalid archive targets fail closed instead of being ignored.
   is owned separately (`#donequeuestrike`).
 - No-partial-reap invariant: if a completed tracked item is followed by malformed flush-left spill such as pasted command/diff transcript lines, reap/archive the whole logical block with that parent item. Do not delete only the tracked parent line and leave orphan prose behind in the live backlog.
 - No-partial-remove invariant: direct tracked-item removal follows the same logical-block boundary as reaping. It removes malformed flush-left spill through the next tracked item or structural heading/component boundary, while preserving that later structural postlude.
+- No-partial-move invariant: moving a tracked item between components (including legacy gated backlog migration into `agent:review`) follows the same logical-block boundary as removal and reaping. Malformed flush-left spill moves with its parent item so a later done/reap cannot leave orphan prose in the source component; blank separators, nested indented continuations, and structural headings/comments remain intact.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.
 
 **Migration of existing items:** `agent-doc migrate` is deterministic only: it
@@ -302,7 +303,7 @@ forbidden for tracked-work lists. All mutations go through explicit flags on
 | `--icebox-add-before <id> "text"` | none | Insert a parked item immediately before an existing icebox item. |
 | `--icebox-add-back "text"` | `--icebox-append` | Insert a parked item at the end of `agent:icebox`. |
 | `--icebox-edit "id=new text"` | none | Rewrite parked item text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. The `agent-doc icebox <file> edit <id> <text>` subcommand is the equivalent CLI form. |
-| `--icebox-clear` | none | Remove all icebox items. |
+| `--icebox-clear` | none | Remove all icebox items and non-structural orphan spill, preserving blank separators and structural headings/comments. |
 | `--icebox-reorder <id1,id2,...>` | none | Reorder parked icebox items by ID. Missing IDs keep their relative order after the listed prefix. |
 
 The backlog is a **priority-ordered pool with id-based consumption** (`--done` / `--backlog-gate` reference `#id`, never position) — not a stack or queue (FIFO execution discipline lives in `agent:queue`). So `--backlog-add` stays the cheap front-insert default for single captures, and the explicit-position flags above make ordered insertion unambiguous when position matters, instead of relying on argv direction.
@@ -311,7 +312,7 @@ The backlog is a **priority-ordered pool with id-based consumption** (`--done` /
 | `--backlog-set-gate-type <id>=<type>` | `--pending-set-gate-type` | Set a typed gate on a gated item in `agent:review` or a legacy in-place gated backlog. A closeout may combine this with `--backlog-gate <id>`; the type assignment follows the same transaction's move into review. |
 | `--backlog-ungate <id>` | `--pending-ungate` | Move an `agent:review` item back to backlog as `[ ]` — review failed or its blocker cleared while executable work remains, so the same id is active again. Legacy gated backlog items still ungate in place until migrated. Error if source is `[ ]` or `[x]`. |
 | `--backlog-edit <id> "new text"` | `--pending-edit` | Rewrite text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. |
-| `--backlog-clear` | `--pending-clear` | Remove all backlog items. |
+| `--backlog-clear` | `--pending-clear` | Remove all backlog items and non-structural orphan spill (including stale prose and fenced transcript residue), while preserving blank separators and structural headings/comments. |
 | `--backlog-reorder <id1,id2,...>` | `--pending-reorder` | Reorder backlog items by ID. Missing IDs keep their relative order after the listed prefix. |
 | `--review-add "text"` | none | Add a new `[/]` item directly to `agent:review`. Rare; normal code-complete flow should use `--backlog-gate`. |
 | `--review-edit <id> "new text"` | none | Rewrite text in `agent:review`, preserving hash and state. |

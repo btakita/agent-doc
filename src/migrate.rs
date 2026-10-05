@@ -443,6 +443,64 @@ mod tests {
     }
 
     #[test]
+    fn gated_backlog_migration_moves_split_item_spill_through_done_reap() {
+        let split_spill = concat!(
+            "6local-splice-batch 3 splices 34346->34137 chars, then 00:40:03 exact inverse ",
+            "back to 25509a1e (undo/redo or plugin-internal flip; no VFS reload/projection logged)."
+        );
+        let input = format!(
+            concat!(
+                "## Backlog\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [/] [#apimdrevert] Only editor-side anomaly: idea.1.log 00:40:02\n",
+                "  - [ ] Preserve this nested continuation.\n",
+                "{}\n",
+                "\n",
+                "### Operator notes\n",
+                "Keep this structural postlude.\n",
+                "<!-- /agent:backlog -->\n\n",
+                "## Completed / Reaped\n\n",
+                "<!-- agent:done -->\n",
+                "<!-- /agent:done -->\n",
+            ),
+            split_spill
+        );
+
+        let migrated = migrate_content(&input);
+        let backlog = migrated
+            .split("<!-- agent:backlog -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n<!-- /agent:backlog -->").next())
+            .unwrap();
+        let review = migrated
+            .split("<!-- agent:review -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n<!-- /agent:review -->").next())
+            .unwrap();
+
+        assert!(!backlog.contains("[#apimdrevert]"));
+        assert!(!backlog.contains(split_spill));
+        assert!(backlog.contains("### Operator notes\nKeep this structural postlude."));
+        assert!(review.contains("- [/] [#apimdrevert]"));
+        assert!(review.contains("  - [ ] Preserve this nested continuation."));
+        assert!(review.contains(split_spill));
+
+        let completed = agent_doc_element_backlog::backlog::op_done(review, "apimdrevert")
+            .expect("migrated item remains addressable");
+        let (reaped, removed) =
+            agent_doc_element_backlog::backlog::reap_with_items(&completed).unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].id, "apimdrevert");
+        assert!(
+            removed[0]
+                .continuation
+                .contains("  - [ ] Preserve this nested continuation.")
+        );
+        assert!(removed[0].continuation.contains(split_spill));
+        assert!(!reaped.contains(split_spill));
+    }
+
+    #[test]
     fn code_block_immune() {
         let input = "```\n<!-- agent:pending -->\n```\n<!-- agent:pending -->\nContent\n<!-- /agent:pending -->\n";
         let result = migrate_content(input);

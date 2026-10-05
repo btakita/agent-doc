@@ -29,7 +29,7 @@ coordinator assigned here.
 
 ## Verification
 
-- `make check` EXIT=0 at 7ad… (pre-RTT commit; nextest 11063 passed, sim-medium, sim-net, editor-parity, tla, lean). Final run on HEAD: see last commit message / rerun.
+- `make check` EXIT=0 on a8c15748e (nextest 11064 passed / 267 skipped; clippy, sim-medium, sim-net, editor-parity, audit-docs, tla, lean all green).
 - JetBrains: `./gradlew --no-daemon --console=plain test` exit 0 (0.2.497), `PatchWatcherDeferredReceiptTest` 2/2.
 
 ## Remaining (concrete)

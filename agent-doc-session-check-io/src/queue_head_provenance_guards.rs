@@ -65,6 +65,7 @@ pub fn check_expect_done_or_gate_guard(file: &Path, rc: &CycleContext) -> Result
             &file_display,
             &unresolved,
             mode,
+            agent_doc_document_realtime_io::observed_retained_write_ownership(file),
         ),
     )
 }

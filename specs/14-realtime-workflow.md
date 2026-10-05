@@ -282,6 +282,79 @@ retention is evidence of neither refusal nor acceptance, so it carries the run.
   the endpoint pid, so the window is what keeps a restarted editor from being
   shut out by its predecessor's record.
 
+### Retained-write guidance must terminate (GH #131 reopened)
+
+Every instruction an agent can receive about a retained write is a step in a
+procedure; following the steps in order must end. On 0.35.453 three printed
+instructions formed loops, each with no exit, while the response body was
+already committed:
+
+1. `session-check`'s tracked-work guard named
+   `agent-doc write <FILE> --done <id> --pending-only --commit`; that write's
+   envelope reached the editor authority, the post-write barrier refused with
+   the converging-projection deferral (`retained=delivery_projection_pending`),
+   and the deferral's remedy said "run `session-check`".
+2. `session-check`'s attached-editor integrity gate prescribed
+   `agent-doc admin reload-lib` for an editor that holds the document but is not
+   serving its replica, while the deferral forbade `admin reload-lib` for the
+   same document. `reload-lib` was the command that worked.
+3. Preflight refused every new turn because "a retained document-write effect
+   still owns the prior captured response", when the only retained intent was
+   the later `--pending-only` repair.
+
+The rules, each derived from `agent_doc_turn::write_ownership` rather than
+re-decided at a site:
+
+- **An unserved replica has one owned recovery (`#replicaunservedremedy`).**
+  `RetainedWriteOwnership` carries `replica_unserved`, set only by a site that
+  observed the attached editor with no registered replica
+  (`CurrentText::EditorAttachedMissingReplica`). The verdict
+  `ReplicaUnserved` names `editor_replica_recovery()` — run
+  `agent-doc admin reload-lib`, retry, restart only if refused again — which is
+  the exact sentence the integrity gate renders for the same observation. The
+  `Deferred` remedy keeps forbidding re-send, force disk and `admin recycle`,
+  and states (`EDITOR_REPLICA_RELOAD_SANCTION`) that `admin reload-lib` is
+  sanctioned exactly when `session-check` reports the editor is not serving its
+  replica. No verdict forbids `admin reload-lib` outright, and an observed
+  unserved replica never reads as `Deferred` (exhaustive predicate test).
+  `retained_write_ownership_guard.rs` owns both phrases.
+- **A tracked-work repair is named only when it can complete
+  (`#trackedrepairterminates`).** `tracked_work_repair_admission` asks the
+  ownership exactly as the write path's own delivery refusal will
+  (`with_retained_projection(true)`): `ReplicaUnserved` and `DeliveryRejected`
+  return `RecoverEditorFirst`, and the guard text
+  (`tracked_work_repair_instruction`) puts that verdict's recovery before the
+  command; every other verdict renders the bare command. `session-check`'s
+  pending-done, expect-done-or-gate and blocked-follow-up guards, and finalize's
+  post-write pending-done advisory, read the observed ownership through
+  `agent_doc_document_realtime_io::observed_retained_write_ownership`.
+- **A converging retention beside a committed response is absorbed, not
+  refused.** When a `--pending-only` envelope fails with the narrow
+  `retained=delivery_projection_pending` refusal, a retained intent appeared
+  during this invocation (its own envelope reached the authority), the
+  response cycle is not open, and the exact target is recorded as the
+  pending-only commit continuation, the write prints the retention notice and
+  exits successfully (`pending_only_retention` → `Absorbed`, ops-log
+  `pending_only_mutation_absorbed_by_retained_continuation`). `session-check`
+  commits that continuation once delivery converges
+  (`resume_retained_pending_only_commit`). The continuation is now recorded for
+  this refusal too; before, only retry-without-disk refusals recorded it, so a
+  retained `--done` had nothing that would ever commit it. A rejecting endpoint
+  or an unserved replica withholds the narrow marker, so those stay refused
+  with the recovery above.
+- **Ownership of a captured response belongs to the transition that introduces
+  it.** `DocumentStateProjection::retained_captured_response_write` no longer
+  attributes the capture to an intent whose own base (`expected_content`)
+  already materializes the response, for a capture whose cycle is committed
+  (`intent_builds_on_committed_response`). Such an intent delivers only its
+  tracked-work delta, so it cannot block `PreflightStarted` /
+  `TurnIntentCheckpointed` admission. A response-bearing intent earlier in the
+  journal (base lacks the body) still owns the capture, so a cycle that crossed
+  `committed` before its response was delivered keeps blocking as before; an
+  intent with no recorded base, or a cycle that is not committed, keeps the old
+  reading. This is consistent with `#admissionsteeringagree`: admission is
+  refused only by a holder that can still change what the next turn reads.
+
 ## Editor Frontend Hot Path
 
 The editor text-change callback is a capture boundary, not a convergence worker. JetBrains `DocumentListener` callbacks, VS Code

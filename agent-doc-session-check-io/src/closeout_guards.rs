@@ -72,6 +72,7 @@ pub fn check_blocked_closeout_followup_guard(
             &file_display,
             &unresolved,
             mode,
+            agent_doc_document_realtime_io::observed_retained_write_ownership(file),
         ),
     )
 }

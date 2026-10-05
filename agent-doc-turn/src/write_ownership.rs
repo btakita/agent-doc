@@ -120,6 +120,21 @@ pub struct RetainedWriteOwnership {
     /// site that has read the durable rejection record may set it; the default
     /// `false` keeps the conservative reading.
     pub delivery_rejected: bool,
+    /// The editor that holds this document is not serving its replica
+    /// (GH #131, `#replicaunservedremedy`).
+    ///
+    /// Observed directly: the live authority reports the editor attached while
+    /// its replica is not registered. Every holder above completes through
+    /// that replica, and nothing the agent can wait for re-registers it —
+    /// `agent-doc admin reload-lib` does. Before this bit existed the retained
+    /// refusal answered `Deferred` and forbade `admin reload-lib`, while
+    /// `session-check`'s integrity gate prescribed `admin reload-lib` for the
+    /// same document in the same session, and that command was the one that
+    /// worked. Both texts now read this one fact.
+    ///
+    /// Only a site that has actually observed the replica may set it; the
+    /// default `false` keeps the conservative reading.
+    pub replica_unserved: bool,
 }
 
 impl RetainedWriteOwnership {
@@ -134,6 +149,7 @@ impl RetainedWriteOwnership {
         unanswered_edit: false,
         capture_resume_unowned: false,
         delivery_rejected: false,
+        replica_unserved: false,
     };
 
     pub const fn new(cycle_open: bool, retained_capture: bool) -> Self {
@@ -145,6 +161,7 @@ impl RetainedWriteOwnership {
             unanswered_edit: false,
             capture_resume_unowned: false,
             delivery_rejected: false,
+            replica_unserved: false,
         }
     }
 
@@ -162,6 +179,7 @@ impl RetainedWriteOwnership {
             unanswered_edit: false,
             capture_resume_unowned: false,
             delivery_rejected: false,
+            replica_unserved: false,
         }
     }
 
@@ -196,6 +214,13 @@ impl RetainedWriteOwnership {
         self
     }
 
+    /// Record that the editor holding this document is observed not serving its
+    /// replica (GH #131). Only a site that has observed the replica may set it.
+    pub const fn with_replica_unserved(mut self, replica_unserved: bool) -> Self {
+        self.replica_unserved |= replica_unserved;
+        self
+    }
+
     /// Refine ownership with a response capture proven by the current caller.
     ///
     /// Some guards already hold the loaded capture. Keeping that evidence is
@@ -226,6 +251,13 @@ impl RetainedWriteOwnership {
             // is durable and must not be re-sent. The recovery is removing the
             // rejecting endpoint.
             RetainedWriteVerdict::DeliveryRejected
+        } else if self.replica_unserved {
+            // GH #131 (`#replicaunservedremedy`): whatever holds the write —
+            // or nothing — it can only complete through the replica the editor
+            // is not serving. Waiting cannot end it and committing is refused
+            // by the same integrity gate, so the one terminating move is the
+            // replica recovery the integrity gate names.
+            RetainedWriteVerdict::ReplicaUnserved
         } else if self.retained_capture || self.retained_projection {
             RetainedWriteVerdict::Deferred
         } else if self.write_applied {
@@ -292,6 +324,14 @@ pub enum RetainedWriteVerdict {
     /// rejecting editor is the recovery; once it is gone or re-registered the
     /// retained intent converges through document authority on its own.
     DeliveryRejected,
+    /// The editor that holds the document is not serving its replica, so no
+    /// delivery to it can converge (GH #131, `#replicaunservedremedy`).
+    ///
+    /// The terminating recovery is the one `session-check`'s integrity gate
+    /// names for the same observation — [`editor_replica_recovery`] — which is
+    /// why this verdict and that gate derive the instruction from one owner
+    /// instead of one forbidding what the other prescribes.
+    ReplicaUnserved,
 }
 
 impl RetainedWriteVerdict {
@@ -303,6 +343,7 @@ impl RetainedWriteVerdict {
             Self::AwaitingTerminalCommit => "awaiting_terminal_commit",
             Self::UnansweredEditPending => "unanswered_edit_pending",
             Self::DeliveryRejected => "delivery_rejected",
+            Self::ReplicaUnserved => "replica_unserved",
         }
     }
 
@@ -331,7 +372,8 @@ impl RetainedWriteVerdict {
             Self::Deferred
             | Self::CaptureResumeUnowned
             | Self::UnansweredEditPending
-            | Self::DeliveryRejected => false,
+            | Self::DeliveryRejected
+            | Self::ReplicaUnserved => false,
             Self::Stranded | Self::AwaitingTerminalCommit => true,
         }
     }
@@ -408,6 +450,31 @@ pub fn is_retained_delivery_projection_pending(message: &str) -> bool {
         && message.contains(RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN)
 }
 
+/// The one instruction for an editor that holds a document but is not serving
+/// its replica (GH #131, `#replicaunservedremedy`).
+///
+/// Two texts used to author it independently and disagree: `session-check`'s
+/// attached-editor integrity gate prescribed `agent-doc admin reload-lib`, and
+/// the retained-write deferral forbade it, about the same document in the same
+/// session — and the forbidden command was the one that worked. Both now read
+/// this function: the integrity gate prefixes the holder it observed, and the
+/// [`RetainedWriteVerdict::ReplicaUnserved`] remedy appends it.
+pub fn editor_replica_recovery() -> &'static str {
+    "Run `agent-doc admin reload-lib` so the editor re-registers its replica, then retry the \
+     same command; restart that editor only if the retry is refused again (#84)."
+}
+
+/// When `admin reload-lib` is sanctioned, stated once for every remedy that
+/// otherwise tells the agent to wait (GH #131).
+///
+/// The deferral's do-NOT list exists because sessions invented recoveries that
+/// perturbed a capture a live replica was about to converge. It must not
+/// outlaw the one recovery the integrity gate prescribes for a replica that is
+/// NOT being served, or the two instructions form a loop with no exit.
+pub const EDITOR_REPLICA_RELOAD_SANCTION: &str = "`admin reload-lib` is the sanctioned recovery only when `agent-doc session-check` reports \
+     that the editor holding the document is not serving its replica, and then its remedy \
+     governs";
+
 /// The remedy every retained-projection refusal appends, derived from one owner.
 pub fn retained_projection_remedy(ownership: RetainedProjectionOwnership, file: &str) -> String {
     match ownership {
@@ -437,8 +504,9 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
             "The retained capture or projection is already durable and the same intent commits itself once delivery \
              converges — this is a deferral, not a lost response. Run \
              `agent-doc session-check {file}` once to observe the terminal state; do NOT \
-             re-send the response, force disk, `admin recycle`, or `admin reload-lib`, all of \
-             which disturb the capture being awaited"
+             re-send the response, force disk, or `admin recycle`, which disturb the capture \
+             being awaited. Do not reach for `admin reload-lib` on your own either: {}",
+            EDITOR_REPLICA_RELOAD_SANCTION
         ),
         RetainedWriteVerdict::CaptureResumeUnowned => format!(
             "The response capture is DURABLE but UNOWNED: no supervisor idle watch and no \
@@ -457,6 +525,15 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
              plugin jars after an update is the observed cause). Once that endpoint is gone or re-registered, the retained intent \
              converges through document authority on its own; then run `agent-doc session-check \
              {file}` and follow the recovery it names"
+        ),
+        RetainedWriteVerdict::ReplicaUnserved => format!(
+            "The editor that has {file} open holds the document but is not serving its replica, \
+             so no delivery to it can converge: waiting will not commit anything and a manual \
+             commit is refused by the same integrity gate. Any retained write is durable \
+             and NOT lost — do NOT re-send it, and do NOT force disk (that editor's buffer may \
+             hold unsaved text). {} Then run `agent-doc session-check {file}` and follow the \
+             recovery it names",
+            editor_replica_recovery()
         ),
         RetainedWriteVerdict::Stranded => format!(
             "NO cycle is open and NO response capture is retained, so nothing owns this write \
@@ -487,6 +564,116 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
              which clobbers the live edits"
         ),
     }
+}
+
+/// Whether a tracked-work-only repair (`agent-doc write <FILE> ... --pending-only
+/// --commit`) can complete in the current state (GH #131, `#trackedrepairterminates`).
+///
+/// `session-check` names that command as the repair for an unrecorded `--done`.
+/// On 0.35.453 the command answered with the retained-write deferral, whose
+/// remedy is "run `session-check`" — and `session-check` named the same command
+/// again. A remedy that names a command the write path refuses is the
+/// `#strandedremedydeadlock` defect in a new place, so admission is derived from
+/// the same predicate the write path's refusal is, rather than re-decided.
+///
+/// The write path's delivery refusal always carries proof that its own
+/// projection is retained, so the question is asked of the ownership exactly as
+/// that refusal will see it. [`RetainedWriteVerdict::Deferred`] is admissible:
+/// the write absorbs the retained mutation into its pending-only commit
+/// continuation instead of refusing ([`pending_only_retention`]). Only the
+/// verdicts whose convergence the editor is refusing are not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackedWorkRepairAdmission {
+    /// The repair command completes (or is absorbed) now.
+    Admissible,
+    /// The repair command would be refused until the editor serves its
+    /// replica again; the carried verdict names that recovery.
+    RecoverEditorFirst(RetainedWriteVerdict),
+}
+
+pub const fn tracked_work_repair_admission(
+    ownership: RetainedWriteOwnership,
+) -> TrackedWorkRepairAdmission {
+    match ownership.with_retained_projection(true).verdict() {
+        verdict @ (RetainedWriteVerdict::ReplicaUnserved
+        | RetainedWriteVerdict::DeliveryRejected) => {
+            TrackedWorkRepairAdmission::RecoverEditorFirst(verdict)
+        }
+        _ => TrackedWorkRepairAdmission::Admissible,
+    }
+}
+
+/// The instruction a guard renders for a tracked-work-only repair, derived from
+/// [`tracked_work_repair_admission`]: the command itself when it can complete,
+/// otherwise the editor recovery FIRST and the command after it, so following
+/// the text in order terminates.
+pub fn tracked_work_repair_instruction(
+    ownership: RetainedWriteOwnership,
+    file: &str,
+    repair: &str,
+) -> String {
+    match tracked_work_repair_admission(ownership) {
+        TrackedWorkRepairAdmission::Admissible => format!("`{repair}`"),
+        TrackedWorkRepairAdmission::RecoverEditorFirst(_) => format!(
+            "`{repair}` AFTER recovering the editor — the write path refuses it until then. {}",
+            retained_write_remedy(ownership.with_retained_projection(true), file)
+        ),
+    }
+}
+
+/// What a tracked-work-only write does when its own mutation envelope was
+/// retained by the editor delivery projection (GH #131, `#trackedrepairterminates`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingOnlyRetention {
+    /// The mutation is durable in the editor authority, the response it sits
+    /// beside is already committed, and the exact target is recorded as the
+    /// pending-only commit continuation that `session-check` resumes once
+    /// delivery converges. Nothing would be gained by refusing: re-running the
+    /// write cannot add anything, so the write reports the retention and exits
+    /// successfully.
+    Absorbed,
+    /// Not proven absorbable: keep the refusal and its derived remedy.
+    Refused,
+}
+
+/// Decide [`PendingOnlyRetention`] from facts the write path can prove.
+///
+/// - `message` must carry the narrow `retained=delivery_projection_pending`
+///   marker: a live replica that converges on its own. A rejecting endpoint or
+///   an unserved replica withholds it and stays refused, because waiting there
+///   never ends.
+/// - `response_committed`: no response cycle is open, so this write carries no
+///   response half that a closeout still owns.
+/// - `own_intent_retained`: a NEW retained write intent appeared during this
+///   invocation, i.e. this envelope reached the editor authority.
+/// - `continuation_recorded`: the pending-only commit continuation names that
+///   intent's exact target.
+pub fn pending_only_retention(
+    message: &str,
+    response_committed: bool,
+    own_intent_retained: bool,
+    continuation_recorded: bool,
+) -> PendingOnlyRetention {
+    if is_retained_delivery_projection_pending(message)
+        && response_committed
+        && own_intent_retained
+        && continuation_recorded
+    {
+        PendingOnlyRetention::Absorbed
+    } else {
+        PendingOnlyRetention::Refused
+    }
+}
+
+/// The notice an absorbed pending-only write prints instead of refusing.
+pub fn pending_only_absorbed_notice(file: &str, target_hash: &str) -> String {
+    format!(
+        "tracked-work mutation for {file} reached the editor authority and is retained while its \
+         delivery projection converges; its exact target ({target_hash}) is recorded as the \
+         pending-only commit continuation, which `agent-doc session-check {file}` commits once \
+         delivery converges. The mutation is recorded — do NOT re-run this write. {}",
+        EDITOR_REPLICA_RELOAD_SANCTION
+    )
 }
 
 /// The tracked-work mutations one closeout recorded, for provenance.
@@ -1370,6 +1557,7 @@ mod tests {
             RetainedWriteVerdict::CaptureResumeUnowned,
             RetainedWriteVerdict::UnansweredEditPending,
             RetainedWriteVerdict::DeliveryRejected,
+            RetainedWriteVerdict::ReplicaUnserved,
         ] {
             let ownership = match verdict {
                 RetainedWriteVerdict::Deferred => RetainedWriteOwnership::new(true, false),
@@ -1385,6 +1573,9 @@ mod tests {
                 }
                 RetainedWriteVerdict::DeliveryRejected => {
                     RetainedWriteOwnership::new(true, true).with_delivery_rejected(true)
+                }
+                RetainedWriteVerdict::ReplicaUnserved => {
+                    RetainedWriteOwnership::new(true, false).with_replica_unserved(true)
                 }
             };
             assert_eq!(ownership.verdict(), verdict, "fixture builds {verdict:?}");
@@ -1542,5 +1733,150 @@ mod tests {
                 "rejected remedy must not carry `{forbidden_claim}`: {remedy}"
             );
         }
+    }
+
+    /// Every input combination, so a new verdict branch cannot quietly
+    /// reintroduce the contradiction.
+    fn every_ownership() -> Vec<RetainedWriteOwnership> {
+        (0u16..256)
+            .map(|bits| {
+                let bit = |n: u16| bits & (1 << n) != 0;
+                RetainedWriteOwnership::new_with_phase(bit(0), bit(1), bit(2))
+                    .with_retained_projection(bit(3))
+                    .with_unanswered_edit(bit(4))
+                    .with_capture_resume_unowned(bit(5))
+                    .with_delivery_rejected(bit(6))
+                    .with_replica_unserved(bit(7))
+            })
+            .collect()
+    }
+
+    /// GH #131 shape 2: `session-check`'s integrity gate prescribed `admin
+    /// reload-lib` for an editor not serving its replica, while the retained
+    /// write's deferral forbade it for the same document. An observed unserved
+    /// replica now yields a verdict whose remedy IS the integrity gate's
+    /// recovery, derived from the one function both render.
+    #[test]
+    fn an_unserved_replica_names_the_integrity_gate_recovery() {
+        let owned = RetainedWriteOwnership::new(false, false)
+            .with_retained_projection(true)
+            .with_replica_unserved(true);
+        assert_eq!(owned.verdict(), RetainedWriteVerdict::ReplicaUnserved);
+        let remedy = retained_write_remedy(owned, "plan.md");
+        assert!(remedy.contains(editor_replica_recovery()), "{remedy}");
+        assert!(remedy.contains("agent-doc admin reload-lib"), "{remedy}");
+        assert!(remedy.contains("agent-doc session-check plan.md"), "{remedy}");
+        assert!(remedy.contains("re-send"), "retained work is durable: {remedy}");
+        assert!(
+            !remedy.contains("deferral, not a lost response"),
+            "an unserved replica never converges on its own: {remedy}"
+        );
+        assert!(
+            !owned.verdict().commit_is_the_named_recovery(),
+            "the integrity gate refuses commit for the same observation"
+        );
+    }
+
+    /// GH #131 shape 2, the other half: no remedy may forbid `admin reload-lib`
+    /// categorically, because the integrity gate prescribes it. The deferral
+    /// keeps forbidding invented recoveries and states when reload-lib is
+    /// sanctioned instead.
+    #[test]
+    fn no_remedy_forbids_the_recovery_the_integrity_gate_prescribes() {
+        for ownership in every_ownership() {
+            let verdict = ownership.verdict();
+            let remedy = retained_write_remedy(ownership, "plan.md");
+            if matches!(
+                verdict,
+                RetainedWriteVerdict::Deferred | RetainedWriteVerdict::ReplicaUnserved
+            ) {
+                assert!(
+                    !remedy.contains("`admin recycle`, or `admin reload-lib`"),
+                    "{verdict:?} must not forbid reload-lib outright: {remedy}"
+                );
+            }
+            if verdict == RetainedWriteVerdict::Deferred {
+                assert!(remedy.contains(EDITOR_REPLICA_RELOAD_SANCTION), "{remedy}");
+                for invented in ["re-send", "force disk", "admin recycle"] {
+                    assert!(remedy.contains(invented), "{invented}: {remedy}");
+                }
+            }
+            if ownership.replica_unserved {
+                assert!(
+                    verdict != RetainedWriteVerdict::Deferred,
+                    "an observed unserved replica must never read as a self-completing \
+                     deferral: {ownership:?}"
+                );
+            }
+        }
+    }
+
+    /// GH #131 shape 1: `session-check` named `write --done <id> --pending-only
+    /// --commit`, and that command refused. The repair is admissible exactly
+    /// when the write path would not refuse it, asked of the same predicate.
+    #[test]
+    fn a_tracked_work_repair_is_named_only_when_the_write_path_can_complete_it() {
+        let repair = "agent-doc write plan.md --done x --pending-only --commit";
+        for ownership in every_ownership() {
+            let write_path_verdict = ownership.with_retained_projection(true).verdict();
+            let admission = tracked_work_repair_admission(ownership);
+            let instruction = tracked_work_repair_instruction(ownership, "plan.md", repair);
+            assert!(instruction.contains(repair), "{instruction}");
+            match write_path_verdict {
+                RetainedWriteVerdict::ReplicaUnserved | RetainedWriteVerdict::DeliveryRejected => {
+                    assert_eq!(
+                        admission,
+                        TrackedWorkRepairAdmission::RecoverEditorFirst(write_path_verdict)
+                    );
+                    assert!(instruction.contains("AFTER recovering the editor"), "{instruction}");
+                }
+                _ => {
+                    assert_eq!(admission, TrackedWorkRepairAdmission::Admissible);
+                    assert_eq!(instruction, format!("`{repair}`"));
+                }
+            }
+        }
+        // The reported shape: a live replica still converging is admissible,
+        // because the write absorbs that retention instead of refusing.
+        assert_eq!(
+            tracked_work_repair_admission(RetainedWriteOwnership::UNOWNED),
+            TrackedWorkRepairAdmission::Admissible
+        );
+        let unserved = RetainedWriteOwnership::UNOWNED.with_replica_unserved(true);
+        assert!(
+            tracked_work_repair_instruction(unserved, "plan.md", repair)
+                .contains("agent-doc admin reload-lib")
+        );
+    }
+
+    /// GH #131 shape 1, the write path: a pending-only mutation retained by a
+    /// converging delivery projection beside an already-committed response is
+    /// absorbed, and every unproven fact keeps the refusal.
+    #[test]
+    fn a_pending_only_retention_is_absorbed_only_when_every_fact_is_proven() {
+        let pending = format!(
+            "retained [{AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN}] [{RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN}]"
+        );
+        let unserved = format!("retained [{AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN}]");
+        assert_eq!(
+            pending_only_retention(&pending, true, true, true),
+            PendingOnlyRetention::Absorbed
+        );
+        for (message, committed, own, recorded) in [
+            (unserved.as_str(), true, true, true),
+            (pending.as_str(), false, true, true),
+            (pending.as_str(), true, false, true),
+            (pending.as_str(), true, true, false),
+            ("unrelated failure", true, true, true),
+        ] {
+            assert_eq!(
+                pending_only_retention(message, committed, own, recorded),
+                PendingOnlyRetention::Refused,
+                "{message} committed={committed} own={own} recorded={recorded}"
+            );
+        }
+        let notice = pending_only_absorbed_notice("plan.md", "abc");
+        assert!(notice.contains("agent-doc session-check plan.md"), "{notice}");
+        assert!(!notice.contains("deferral, not a lost response"), "{notice}");
     }
 }

@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 /// Phrases that state a verdict. Each belongs to exactly one branch of
 /// `retained_write_remedy` and must not be authored anywhere else.
-const VERDICT_PHRASES: [&str; 8] = [
+const VERDICT_PHRASES: [&str; 10] = [
     "deferral, not a lost response",
     "STRANDED, not deferred",
     // `#ownershipverdictdiverges`: the third verdict. `write_applied` is neither
@@ -62,6 +62,13 @@ const VERDICT_PHRASES: [&str; 8] = [
     "the same intent resumes",
     "will resume without",
     "Do not recapture or rerun",
+    // GH #131 (`#replicaunservedremedy`): the integrity gate prescribed `admin
+    // reload-lib` in its own words while the deferral forbade it in others, for
+    // the same document in the same session. The recovery for an unserved
+    // replica, and the statement of when reload-lib is sanctioned, are owned
+    // once so the two can never be re-authored into a contradiction.
+    "so the editor re-registers its replica",
+    "is the sanctioned recovery only when",
 ];
 
 /// The file allowed to author them.

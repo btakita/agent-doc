@@ -46,13 +46,13 @@
 //!    layout gate never kills or reaps a process directly, and no wall-clock age
 //!    is an input to the replacement decision.
 
-use crate::sync::{PaneOccupant, pane_occupant_for_document};
+use crate::sync::{pane_occupant_for_document, PaneOccupant};
 use agent_doc_controller::dispatch::is_stash_window_name;
 use agent_doc_controller::supervisor_replacement::{
-    StaleIdleSupervisorFacts, StaleIdleSupervisorRecovery, decide_stale_idle_supervisor_recovery,
+    decide_stale_idle_supervisor_recovery, StaleIdleSupervisorFacts, StaleIdleSupervisorRecovery,
 };
 pub use agent_doc_supervisor::recycle_request::{
-    STALE_RECYCLE_CONSUME_BOUND_SECS, StaleRecycleRequestState,
+    StaleRecycleRequestState, STALE_RECYCLE_CONSUME_BOUND_SECS,
 };
 use agent_doc_turn::turn_status::STALE_SUPERVISOR_PANE_MARKER;
 use std::collections::{HashMap, HashSet};
@@ -398,6 +398,12 @@ fn request_stale_idle_supervisor_replacement(
 pub enum ColumnAdmission {
     /// The pane may realise the column.
     Admit,
+    /// The pane's supervisor runs replaced bytes, but the pane already realises
+    /// this desired column in the target window. Preserve it in place while its
+    /// safe-boundary recycle remains pending; excluding it would make the
+    /// layout effect stash a live visible session merely because an install
+    /// happened during its turn.
+    AdmitStaleVisible,
     /// The pane's supervisor runs replaced bytes: it is ineligible to satisfy
     /// this column until its recycle lands. The column is left unrealised for
     /// this pass (the pane stays wherever it is, typically the stash).
@@ -429,7 +435,10 @@ pub enum ColumnAdmission {
 impl ColumnAdmission {
     /// Whether the column is removed from what tmux-router realises.
     pub fn excludes(self) -> bool {
-        !matches!(self, Self::Admit | Self::AdmitStaleFocused)
+        !matches!(
+            self,
+            Self::Admit | Self::AdmitStaleVisible | Self::AdmitStaleFocused
+        )
     }
 }
 
@@ -562,7 +571,19 @@ pub fn plan_column_admissions(
 ) -> Vec<(ColumnAdmission, Vec<String>)> {
     let base: Vec<ColumnAdmission> = facts
         .iter()
-        .map(|fact| column_admission(&fact.freshness, fact.own_pane, fact.is_focus))
+        .map(|fact| {
+            let admission = column_admission(&fact.freshness, fact.own_pane, fact.is_focus);
+            if admission == ColumnAdmission::ExcludeStale && !fact.outside_target_window {
+                // A desired pane already in the target window needs no stale
+                // promotion exception: preserving it is the zero-movement
+                // fixed point. Removing it from the router input would itself
+                // move the live session to stash and turn a safe-boundary
+                // recycle into an operator-visible layout regression.
+                ColumnAdmission::AdmitStaleVisible
+            } else {
+                admission
+            }
+        })
         .collect();
     if !base.contains(&ColumnAdmission::AdmitStaleFocused) {
         return base
@@ -578,7 +599,9 @@ pub fn plan_column_admissions(
         .filter(|(_, admission)| {
             matches!(
                 admission,
-                ColumnAdmission::Admit | ColumnAdmission::AdmitStaleFocused
+                ColumnAdmission::Admit
+                    | ColumnAdmission::AdmitStaleVisible
+                    | ColumnAdmission::AdmitStaleFocused
             )
         })
         .map(|(fact, _)| fact.pane.clone())
@@ -800,6 +823,10 @@ pub fn gate_stale_column_panes(
         let before = input.before.get(pane);
         let (record, admission_token) = match admission {
             ColumnAdmission::Admit => continue,
+            ColumnAdmission::AdmitStaleVisible => (
+                "layout_column_pane_stale_visible_preserved",
+                "admitted_visible_document".to_string(),
+            ),
             ColumnAdmission::ExcludeStale => {
                 excluded.push(file.clone());
                 ("layout_column_pane_excluded", "excluded".to_string())
@@ -1246,6 +1273,58 @@ mod tests {
         );
     }
 
+    #[test]
+    fn stale_nonfocused_desired_pane_already_in_target_window_is_preserved() {
+        // Live repro, 2026-10-05: an install made the supervisor stale while
+        // its open-turn pane remained visible. A passive two-column editor
+        // observation carried no focus, so excluding the stale column reduced
+        // the router input to one pane and stashed the live session.
+        let stale = classify_pane_supervisor_freshness(Some(2062336), Some(true), true);
+        let fresh = classify_pane_supervisor_freshness(Some(3935160), Some(false), false);
+        let facts = vec![
+            ColumnGateFacts {
+                file: PathBuf::from("tasks/agent-doc/agent-doc-bugs.md"),
+                pane: "%2".to_string(),
+                freshness: stale,
+                own_pane: true,
+                is_focus: false,
+                outside_target_window: false,
+                recycle: StaleRecycleRequestState::Pending {
+                    reason: "install_fanout".to_string(),
+                    age_secs: 4_820,
+                    deferred_by_turn: true,
+                },
+                turn_active: true,
+            },
+            ColumnGateFacts {
+                file: PathBuf::from("tasks/devops.md"),
+                pane: "%125".to_string(),
+                freshness: fresh,
+                own_pane: true,
+                is_focus: false,
+                outside_target_window: false,
+                recycle: StaleRecycleRequestState::NotRequested,
+                turn_active: false,
+            },
+        ];
+
+        let plan = plan_column_admissions(&facts, &|| Some(2), &|| vec!["%2".to_string()]);
+
+        assert_eq!(plan[0].0, ColumnAdmission::AdmitStaleVisible);
+        assert!(!plan[0].0.excludes());
+        assert_eq!(plan[1].0, ColumnAdmission::Admit);
+        assert_eq!(
+            facts
+                .iter()
+                .zip(&plan)
+                .filter(|(_, (admission, _))| !admission.excludes())
+                .map(|(fact, _)| fact.pane.as_str())
+                .collect::<Vec<_>>(),
+            vec!["%2", "%125"],
+            "the existing two-pane visible layout must remain a two-pane router input"
+        );
+    }
+
     /// GH #124 SimWorld: the measured tmux state, the gate plan, and a model of
     /// tmux-router realising the gated columns (column panes join the window,
     /// every other window pane is stashed, the focused column's pane is active).
@@ -1499,7 +1578,8 @@ mod tests {
                     "an admitted column must never carry supervisor=stale: {}",
                     freshness.log_token()
                 ),
-                ColumnAdmission::AdmitStaleFocused
+                ColumnAdmission::AdmitStaleVisible
+                | ColumnAdmission::AdmitStaleFocused
                 | ColumnAdmission::ExcludeStaleFocusedLiveTurn
                 | ColumnAdmission::ExcludeStaleFocusedRecycleOverdue
                 | ColumnAdmission::ExcludeStaleFocusedWouldWiden => unreachable!(),

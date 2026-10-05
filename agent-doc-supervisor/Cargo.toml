@@ -27,3 +27,6 @@ agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", versi
 lazily = { version = "0.57.1", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+proptest = "1"

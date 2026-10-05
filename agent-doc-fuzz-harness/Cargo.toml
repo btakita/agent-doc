@@ -1,0 +1,32 @@
+[package]
+name = "agent-doc-fuzz-harness"
+version = "0.35.456"
+edition = "2024"
+description = "Stable-toolchain fuzz harness functions and corpus replay for agent-doc untrusted-input decoders"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
+
+[lib]
+name = "agent_doc_fuzz_harness"
+
+[dependencies]
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.456" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.456" }
+agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.456" }
+agent-doc-markdown-lossless = { path = "../agent-doc-markdown-lossless", version = "0.35.456" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.456" }
+agent-doc-state-wire = { path = "../agent-doc-state-wire", version = "0.35.456" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.456" }
+serde = "1"
+serde_json = "1"
+serde_yaml = "0.9"
+# The text-op envelopes are base64(zstd(msgpack)). The harness re-wraps raw
+# fuzz bytes in each envelope so mutations reach the msgpack/columnar layer
+# instead of dying in base64 or zstd framing.
+base64 = "0.22"
+rmp-serde = "1"
+zstd = "0.13"
+
+[dev-dependencies]
+proptest = "1"

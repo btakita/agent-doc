@@ -1,0 +1,1 @@
+{"baseline":"","expected_content_hash":"00ff","expected_content_len":8,"file":"tasks/sample.md","normalize_prefix_lines":["<!-- agent:exchange -->"],"patch_id":"patch-1","patches":[],"preserve_head":true,"reposition_boundary":true,"type":"apply_canonical","unmatched":""}

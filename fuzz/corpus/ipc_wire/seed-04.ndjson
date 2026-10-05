@@ -1,0 +1,1 @@
+{"build_id":"fuzz-build-0000","detail":"IPC protocol mismatch: listener=1, client=2","protocol_version":1,"reason":"ipc_protocol_mismatch","status":"rejected","type":"receipt"}

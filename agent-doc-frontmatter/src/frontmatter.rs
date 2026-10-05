@@ -1635,8 +1635,40 @@ pub fn ensure_session_with_ssh_resolver(
 /// `queue_active` on parse), and a doc with no queue state writes neither.
 pub fn write(fm: &Frontmatter, body: &str) -> Result<String> {
     let fm = canonical_for_write(fm);
-    let yaml = serde_yaml::to_string(fm.as_ref())?;
+    let yaml = fence_safe_yaml(serde_yaml::to_string(fm.as_ref())?, fm.as_ref());
     Ok(format!("---\n{}---\n{}", yaml, body))
+}
+
+/// The YAML region `parse` will read back from `---\n{yaml}---\n`: the closing
+/// fence is found at the `\n---` that ends the last line, so the region stops
+/// BEFORE that final line break.
+fn region_as_parsed(yaml: &str) -> &str {
+    yaml.strip_suffix('\n').unwrap_or(yaml)
+}
+
+/// Whether `yaml`, read back the way `parse` reads it, records exactly `fm`.
+fn yaml_reads_back_as(yaml: &str, fm: &Frontmatter) -> bool {
+    let Ok(parsed) = deserialize_frontmatter_yaml(region_as_parsed(yaml)) else {
+        return false;
+    };
+    matches!(
+        (serde_yaml::to_value(&parsed), serde_yaml::to_value(fm)),
+        (Ok(read), Ok(written)) if read == written
+    )
+}
+
+/// `#netadv7` fuzz crasher: a value ending in a line break (a multi-line prompt
+/// preset) serialises as a `|` block scalar whose final line break is the one
+/// `parse` strips with the closing fence, so the value lost its trailing `\n`
+/// on every write → parse cycle that left it as the last key. A blank line
+/// before the fence keeps the block's final line break inside the region. It
+/// is only added when needed, so ordinary documents are byte-identical.
+fn fence_safe_yaml(yaml: String, fm: &Frontmatter) -> String {
+    if yaml_reads_back_as(&yaml, fm) {
+        yaml
+    } else {
+        format!("{yaml}\n")
+    }
 }
 
 /// Fold the deprecated `queue_active` flag onto the canonical `queue` control
@@ -1644,6 +1676,19 @@ pub fn write(fm: &Frontmatter, body: &str) -> Result<String> {
 /// write paths emit the same canonical key set.
 fn canonical_for_write(fm: &Frontmatter) -> std::borrow::Cow<'_, Frontmatter> {
     if fm.queue_active.is_none() {
+        return std::borrow::Cow::Borrowed(fm);
+    }
+    // `#netadv7` fuzz crasher: a `queue:` value that is not a control
+    // (`queue: e`, or one being typed) does not win at parse time —
+    // `normalize_queue_control` leaves the legacy flag in force. Dropping the
+    // flag here therefore changed the queue state on the next read. Keep both
+    // keys until `queue:` holds a real control; never rewrite the operator's
+    // `queue:` text.
+    if fm
+        .queue
+        .as_deref()
+        .is_some_and(|raw| QueueControl::parse(raw).is_none())
+    {
         return std::borrow::Cow::Borrowed(fm);
     }
     let mut canonical = fm.clone();
@@ -1699,7 +1744,17 @@ struct FrontmatterBlock {
 /// original cannot be preserved byte-precisely and the caller should fall back
 /// to full re-serialisation.
 fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String> {
-    let old_yaml = raw_frontmatter_yaml(original)?;
+    // `#netadv7` fuzz crasher: this used `raw_frontmatter_yaml`, whose splitter
+    // disagrees with `parse` on an EMPTY block (`---\n---\n`, which clearing the
+    // last key legitimately leaves). `raw_frontmatter_yaml` skipped the empty
+    // block and ran to the next `\n---` in the BODY (any markdown rule line), so
+    // the body up to that rule was re-emitted as frontmatter AND kept as body.
+    // Split with the same function `parse` uses, so the region this rewrites is
+    // exactly the region `parse` read `fm` from.
+    let (old_yaml, _) = split_frontmatter(original).ok()??;
+    if has_non_lf_yaml_line_break(old_yaml) {
+        return None;
+    }
     let canonical = canonical_for_write(fm);
     let mut new_map = match serde_yaml::to_value(canonical.as_ref()).ok()? {
         serde_yaml::Value::Mapping(m) => m,
@@ -1761,10 +1816,31 @@ fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String
         }
         out.push(render_frontmatter_key(key_str, value)?);
     }
-    if out.is_empty() {
-        return Some(String::new());
-    }
-    Some(format!("{}\n", out.join("\n")))
+    let preserved = if out.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", out.join("\n"))
+    };
+    // `#netadv7`: the byte-preserving splice is only trusted when it re-parses
+    // to exactly what `write` would have recorded. Anything else (a key block
+    // boundary the line splitter misread) falls back to full re-serialisation,
+    // which is always self-consistent.
+    yaml_reads_back_as(&preserved, canonical.as_ref()).then_some(preserved)
+}
+
+/// `#netadv7` fuzz crasher: YAML (libyaml, YAML 1.1) breaks lines on a bare
+/// `\r`, NEL, LS and PS as well as `\n`, but the key-block splitter here works
+/// on `\n` lines. A value holding a bare `\r` (`agent: e\rs:`) hid the `agent`
+/// key from the splitter, which then appended a second `agent:` block and made
+/// the document unparsable (`duplicate field agent`). Such a region cannot be
+/// preserved byte-for-byte by a `\n` splitter, so it is re-serialised instead.
+fn has_non_lf_yaml_line_break(yaml: &str) -> bool {
+    let bytes = yaml.as_bytes();
+    bytes
+        .iter()
+        .enumerate()
+        .any(|(index, byte)| *byte == b'\r' && bytes.get(index + 1) != Some(&b'\n'))
+        || yaml.contains(['\u{85}', '\u{2028}', '\u{2029}'])
 }
 
 /// `#presetsalias`: keep the operator's spelling of the prompt-presets key.
@@ -2787,6 +2863,93 @@ fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#netadv7` fuzz crasher (minimized): an empty frontmatter block followed
+    /// by a body whose first lines read as YAML (`key: value`) and then a
+    /// markdown rule. `write_preserving` split the document with a different
+    /// function than `parse` and copied the body up to the rule into the
+    /// frontmatter, duplicating it.
+    #[test]
+    fn write_preserving_empty_block_with_body_rule_keeps_body_once() {
+        let content = "---\n---\nintro: notes\n---\nmore\n";
+        let (fm, body) = parse(content).unwrap();
+        assert_eq!(body, "intro: notes\n---\nmore\n");
+        let written = write_preserving(content, &fm, body).unwrap();
+        let (_, rebody) = parse(&written).unwrap();
+        assert_eq!(rebody, body, "body must survive exactly once:\n{written}");
+        assert_eq!(written.matches("intro").count(), 1, "{written}");
+
+        let claimed = set_session_id(content, "sample-session").unwrap();
+        let (claimed_fm, claimed_body) = parse(&claimed).unwrap();
+        assert_eq!(claimed_fm.session.as_deref(), Some("sample-session"));
+        assert_eq!(claimed_body, body, "claim must not duplicate the body:\n{claimed}");
+    }
+
+    /// `#netadv7` fuzz crasher (minimized): a bare `\r` inside a value is a YAML
+    /// line break, so `agent: e\rs:` is two keys to libyaml but one line to the
+    /// key-block splitter. `write_preserving` then appended a second `agent:`
+    /// and the written document no longer parsed (`duplicate field agent`).
+    #[test]
+    fn write_preserving_bare_cr_line_break_stays_parseable() {
+        let content = "---\nagent_doc_session: 0\nagent: e\rs:\n  '#p':\n  '#p':\n---\n";
+        let (fm, body) = parse(content).unwrap();
+        let written = write_preserving(content, &fm, body).unwrap();
+        let (reparsed, rebody) = parse(&written)
+            .unwrap_or_else(|err| panic!("written document must parse: {err}\n{written:?}"));
+        assert_eq!(rebody, body);
+        assert_eq!(reparsed.agent, fm.agent);
+        assert_eq!(reparsed.session, fm.session);
+
+        let claimed = set_session_id(content, "sample-session").unwrap();
+        let (claimed_fm, _) = parse(&claimed).unwrap();
+        assert_eq!(claimed_fm.session.as_deref(), Some("sample-session"));
+        assert_eq!(claimed_fm.agent, fm.agent);
+    }
+
+    /// `#netadv7` fuzz crasher (minimized): a multi-line preset that was NOT the
+    /// last key keeps its trailing line break, but `write` emits it last as a
+    /// `|` block whose final line break the closing fence swallowed, so every
+    /// write → parse cycle changed the preset text.
+    #[test]
+    fn write_keeps_trailing_line_break_of_a_last_block_scalar() {
+        let content = "---\nprompt_presets:\n  '#a': |\n    line\nagent: claude\n---\nbody\n";
+        let (fm, body) = parse(content).unwrap();
+        let preset = |fm: &Frontmatter| {
+            serde_yaml::to_value(fm).unwrap()["prompt_presets"]["#a"]
+                .as_str()
+                .map(str::to_string)
+        };
+        assert_eq!(preset(&fm).as_deref(), Some("line\n"));
+        let written = write(&fm, body).unwrap();
+        let (reparsed, rebody) = parse(&written).unwrap();
+        assert_eq!(rebody, body);
+        assert_eq!(preset(&reparsed), preset(&fm), "{written:?}");
+        assert_eq!(write(&reparsed, rebody).unwrap(), written, "write is a fixed point");
+
+        let preserved = write_preserving(content, &fm, body).unwrap();
+        let (reparsed, _) = parse(&preserved).unwrap();
+        assert_eq!(preset(&reparsed), preset(&fm), "{preserved:?}");
+    }
+
+    /// `#netadv7` fuzz crasher (minimized): an unparseable `queue:` value beside
+    /// the legacy `queue_active:` flag. `parse` keeps the flag in force, but
+    /// `write` dropped it, so one write changed the queue state.
+    #[test]
+    fn write_keeps_legacy_queue_flag_beside_unparseable_queue_value() {
+        for flag in ["true", "false"] {
+            let content = format!("---\nqueue: e\nqueue_active: {flag}\n---\n");
+            let (fm, body) = parse(&content).unwrap();
+            assert_eq!(fm.queue_active, Some(flag == "true"));
+            for written in [
+                write(&fm, body).unwrap(),
+                write_preserving(&content, &fm, body).unwrap(),
+            ] {
+                let (reparsed, _) = parse(&written).unwrap();
+                assert_eq!(reparsed.queue_active, fm.queue_active, "{written:?}");
+                assert_eq!(reparsed.queue.as_deref(), Some("e"), "{written:?}");
+            }
+        }
+    }
 
     #[test]
     fn harness_resume_map_reads_only_requested_harness() {

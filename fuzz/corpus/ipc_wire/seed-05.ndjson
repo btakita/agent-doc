@@ -1,0 +1,1 @@
+{"build_id":"fuzz-build-0000","detail":"malformed IPC handshake; expected ipc_hello","protocol_version":1,"reason":"ipc_handshake_required","status":"rejected","type":"receipt"}

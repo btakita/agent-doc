@@ -505,6 +505,21 @@ pub fn repair_duplicate_exchange_opener(doc: &str) -> Result<Option<String>> {
     }
     let first = exchanges[0];
     let second = exchanges[1];
+    // `#netadv7` fuzz crasher: a response whose unmatched text carries a whole
+    // `<!-- agent:exchange -->…<!-- /agent:exchange -->` pair is appended INSIDE
+    // the live exchange, so the second component is nested in the first rather
+    // than a sibling after it. The sibling merge below slices
+    // `first.close_start..second.open_start`, which is a reversed range for a
+    // nested pair and panicked mid-write. A nested exchange is not a duplicate
+    // opener this repair understands; fail closed instead of guessing.
+    if second.open_start < first.close_end {
+        anyhow::bail!(
+            "nested exchange components (inner exchange at byte {} inside outer exchange {}..{}); refusing to merge",
+            second.open_start,
+            first.open_start,
+            first.close_end
+        );
+    }
 
     let first_content = first.content(doc).trim_end().to_string();
     let second_content = second.content(doc).trim().to_string();
@@ -4324,6 +4339,56 @@ Existing answer.
 
         let result = repair_duplicate_exchange_opener(doc).unwrap();
         assert!(result.is_none(), "single exchange block should return None");
+    }
+    #[test]
+    fn repair_duplicate_exchange_opener_refuses_nested_exchange_without_panicking() {
+        // `#netadv7` fuzz crasher (minimized): an exchange nested inside another
+        // made the sibling merge slice a reversed byte range and panic.
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "outer\n",
+            "<!-- agent:exchange -->\n",
+            "inner\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let err = repair_duplicate_exchange_opener(doc).unwrap_err();
+        assert!(err.to_string().contains("nested exchange"), "{err}");
+    }
+    #[test]
+    fn apply_patches_refuses_unmatched_response_carrying_a_whole_exchange() {
+        // `#netadv7` fuzz crasher (found by replaying a redacted real session
+        // document as its own response): unmatched response text holding a
+        // complete exchange component lands inside the live exchange. The write
+        // path used to panic; it must now refuse the write with an error.
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let response = "<!-- agent:exchange -->\nquoted\n<!-- /agent:exchange -->\n";
+        let (patches, unmatched) = parse_patches(response).unwrap();
+        let outcome = std::panic::catch_unwind(|| {
+            apply_patches_pure(
+                doc,
+                &patches,
+                &unmatched,
+                None,
+                &std::collections::HashMap::new(),
+                &std::collections::HashMap::new(),
+            )
+        });
+        let result = outcome.expect("apply_patches_pure must not panic");
+        if let Ok(written) = result {
+            let components = element::parse(&written).unwrap();
+            let exchanges: Vec<_> = components.iter().filter(|c| c.name == "exchange").collect();
+            for pair in exchanges.windows(2) {
+                assert!(
+                    pair[1].open_start >= pair[0].close_end,
+                    "a written document must never carry a nested exchange:\n{written}"
+                );
+            }
+        }
     }
     #[test]
     fn strip_conversation_tail_outside_exchange_removes_escaped_heading_tail_only() {

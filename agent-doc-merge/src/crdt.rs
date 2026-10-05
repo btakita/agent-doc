@@ -1966,7 +1966,13 @@ impl MultiNodeState {
             anyhow::bail!("unsupported multinode state version {version}");
         }
         let count = read_u32(&mut cursor)? as usize;
-        let mut nodes = Vec::with_capacity(count);
+        // `#netadv7` fuzz crasher: `count` is untrusted durable input. Trusting
+        // it as a capacity hint made a 9-byte file request a ~100 GB
+        // allocation (an abort, not an unwind, on allocation failure). Every
+        // node occupies at least two u32 length words, so the remaining bytes
+        // bound the real count.
+        let max_nodes = (bytes.len() - cursor) / 8;
+        let mut nodes = Vec::with_capacity(count.min(max_nodes));
         for _ in 0..count {
             let name_len = read_u32(&mut cursor)?;
             let name = if name_len == u32::MAX {
@@ -2516,6 +2522,21 @@ fn apply_ops_lazily(t: &mut TextCrdt, ops: &[EditOp]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#netadv7` fuzz crasher (minimized): a 9-byte `ADN1` container whose
+    /// node count is `u32::MAX` used that count as a `Vec` capacity, asking the
+    /// allocator for ~100 GB. It must be refused as truncated without
+    /// allocating for nodes that cannot be present.
+    #[test]
+    fn multinode_decode_does_not_trust_the_node_count_for_allocation() {
+        let mut bytes = MULTINODE_MAGIC.to_vec();
+        bytes.push(1);
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        let err = MultiNodeState::decode(&bytes).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "{err}");
+        let migrated = MultiNodeState::decode_or_migrate(&bytes, "fallback\n");
+        assert_eq!(migrated.to_text().unwrap(), "fallback\n");
+    }
 
     /// `common_prefix_len` walks raw BYTES, so two sides that diverge *inside* a
     /// multi-byte character yield a prefix length that is not a char boundary.

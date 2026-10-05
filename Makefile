@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net cross-editor-simworld editor-parity tmux-ci clippy check python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net cross-editor-simworld editor-parity tmux-ci clippy check python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -270,6 +270,26 @@ audit-docs:
 # Translate the PlusCal concurrency model and check its TLA+ safety/liveness properties.
 tla:
 	@./scripts/run_tla.sh
+
+# Coverage-guided fuzzing of untrusted input (`#netadv7`). Opt-in: needs a
+# nightly toolchain and `cargo install cargo-fuzz`, so it is NOT part of
+# `check`. `check` still exercises every target on stable: the
+# `agent-doc-fuzz-harness` tests replay fuzz/corpus and fuzz/regressions
+# through the same harness functions. New inputs go to a scratch corpus so the
+# committed seed corpus stays small; promote a crasher by minimizing it
+# (`cargo +nightly fuzz tmin`) into fuzz/regressions/<target>/ and adding a
+# unit regression test beside the fix.
+FUZZ_SECONDS ?= 60
+FUZZ_TARGETS ?= ipc_wire markdown_patch frontmatter crdt_update crdt_edits
+FUZZ_WORK ?= $(or $(TMPDIR),/tmp)/agent-doc-fuzz
+fuzz:
+	@set -e; \
+	for target in $(FUZZ_TARGETS); do \
+		mkdir -p "$(FUZZ_WORK)/$$target"; \
+		echo "fuzz: $$target for $(FUZZ_SECONDS)s"; \
+		cargo +nightly fuzz run -O $$target "$(FUZZ_WORK)/$$target" fuzz/corpus/$$target fuzz/regressions/$$target -- \
+			-max_total_time=$(FUZZ_SECONDS) -timeout=10 -rss_limit_mb=2048 -max_len=16384; \
+	done
 
 # Pre-commit: clippy + test + audit-docs + plugin version check
 precommit: check

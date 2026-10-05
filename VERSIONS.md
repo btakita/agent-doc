@@ -2,8 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
-## 0.35.456
+## 0.35.457
 
+- **Tmux pane auto-sync recovers after effect failures.** Editor navigation no longer leaves the pane-layout worker's
+  active lease latched when a Lazily layout effect panics. A newer navigation transfers to exactly one replacement
+  worker, while the failed revision is not hot-looped, so moving from the agent-doc backlog to `tsift.md` or
+  `lazily.md` resumes focus and layout reconciliation without restarting the controller.
 - **Response-heading coverage follows the production write path (GH #137).** Removed the test-only
   `agent_doc_turn::response_text::response_heading` constructor that had no shipped callers. The contract now names
   strict closeout canonicalization as the production owner that preserves agent-authored model attribution and local
@@ -15,6 +19,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   clears the episode. `socket_already_applied` without a visible response receipt now records
   `ProjectionUnconverged` instead of remaining invisible to degradation. The transition is covered by a focused TLA+
   model with must-fail refusal-drop and unregister-reach configurations.
+- **Adversarial network transitions retain their intended effects.** Failed focus and editor-surface effects are
+  reapplied only to the next matching observation, stale lifecycle and focus traffic is fenced by receiver-local
+  ordering, and rejected deliveries no longer count as applied. Deterministic model checks, shrinker regressions, and
+  seeded simulator fuzzing cover the repaired transitions.
+
+## 0.35.456
+
 - **Retained-write guidance terminates (GH #131 reopened).** Three recovery loops are closed, all derived from the shared
   `write_ownership` predicate:
   - A pending-only tracked-work write (`--done/--pending-gate ... --pending-only`) whose response is already committed

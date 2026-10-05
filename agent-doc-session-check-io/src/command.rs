@@ -442,6 +442,7 @@ pub trait SessionCheckEffects {
 /// drift. That edit is not admissible as the next prompt until the continuation
 /// settles or is identity-matched as superseded.
 fn terminal_divergence_ownership(
+    observed: agent_doc_turn::write_ownership::RetainedWriteOwnership,
     cycle_phase: Option<CyclePhase>,
     retained_capture: bool,
     retained_projection_blocks: bool,
@@ -454,6 +455,10 @@ fn terminal_divergence_ownership(
     )
     .with_retained_projection(retained_projection_blocks)
     .with_unanswered_edit(unanswered_edit)
+    .with_capture_resume_unowned(observed.capture_resume_unowned)
+    .with_delivery_rejected(observed.delivery_rejected)
+    .with_editor_route_unowned(observed.editor_route_unowned)
+    .with_replica_unserved(observed.replica_unserved)
 }
 
 /// CLI entry: check the end-of-cycle write invariant for `file`.
@@ -1614,6 +1619,7 @@ fn run_with_options_inner(
             )
         });
         let ownership = terminal_divergence_ownership(
+            agent_doc_document_realtime_io::observed_retained_write_ownership(file),
             cycle_phase,
             retained_capture,
             retained_document_write_blocks,
@@ -3865,7 +3871,13 @@ mod terminal_convergence_tests {
 
     #[test]
     fn retained_projection_prevents_partial_compact_from_becoming_unanswered_edit() {
-        let ownership = terminal_divergence_ownership(None, false, true, true);
+        let ownership = terminal_divergence_ownership(
+            agent_doc_turn::write_ownership::RetainedWriteOwnership::UNOWNED,
+            None,
+            false,
+            true,
+            true,
+        );
 
         assert_eq!(
             ownership.verdict(),
@@ -3876,6 +3888,33 @@ mod terminal_convergence_tests {
         assert!(remedy.contains("retained capture or projection"));
         assert!(!remedy.contains("UNANSWERED DOCUMENT EDIT"));
         assert!(!remedy.contains("agent-doc tasks/contracts.md` to open the next cycle"));
+    }
+
+    #[test]
+    fn terminal_divergence_preserves_observed_unregistered_zero_replica_route() {
+        let observed = agent_doc_turn::write_ownership::RetainedWriteOwnership::new(true, true)
+            .with_retained_projection(true)
+            .with_delivery_rejected(true)
+            .with_editor_route_unowned(true);
+        let ownership = terminal_divergence_ownership(
+            observed,
+            Some(CyclePhase::ResponseCaptured),
+            true,
+            true,
+            false,
+        );
+
+        assert_eq!(
+            ownership.verdict(),
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded,
+            "an unregistered route with zero live replicas has no holder"
+        );
+        let remedy =
+            agent_doc_turn::write_ownership::retained_write_remedy(ownership, "tasks/doc.md");
+        assert!(remedy.contains("UNREGISTERED"), "{remedy}");
+        assert!(remedy.contains("ZERO live editor replicas"), "{remedy}");
+        assert!(remedy.contains("agent-doc commit tasks/doc.md"), "{remedy}");
+        assert!(!remedy.contains("controller owns the next closeout attempt"));
     }
 
     #[test]

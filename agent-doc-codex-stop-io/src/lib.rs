@@ -4197,6 +4197,7 @@ Done.\n\
             unanswered_edit: false,
             capture_resume_unowned: false,
             delivery_rejected: false,
+            editor_route_unowned: false,
             replica_unserved: false,
         };
         let note = closeout_repair_retained_note(&err, owned, Path::new("/p/fpe.md"));

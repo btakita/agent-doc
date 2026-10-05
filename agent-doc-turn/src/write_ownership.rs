@@ -120,6 +120,19 @@ pub struct RetainedWriteOwnership {
     /// site that has read the durable rejection record may set it; the default
     /// `false` keeps the conservative reading.
     pub delivery_rejected: bool,
+    /// The refusing endpoint has crossed the unregister threshold AND the
+    /// document authority currently reports zero live editor replicas (GH
+    /// #144).
+    ///
+    /// Neither observation is sufficient alone: a rejection below the
+    /// threshold still names an endpoint to recover, while a transient
+    /// `live_editors=0` observation can retain editor authority through the
+    /// reliable open-file projection. Together they prove that the delivery
+    /// route has been removed and no replica can emit the state edge the
+    /// retained write is waiting for. Any cycle/capture/projection bits then
+    /// describe durable work, not a live holder, so the write is stranded and
+    /// `agent-doc commit` is the recovery.
+    pub editor_route_unowned: bool,
     /// The editor that holds this document is not serving its replica
     /// (GH #131, `#replicaunservedremedy`).
     ///
@@ -149,6 +162,7 @@ impl RetainedWriteOwnership {
         unanswered_edit: false,
         capture_resume_unowned: false,
         delivery_rejected: false,
+        editor_route_unowned: false,
         replica_unserved: false,
     };
 
@@ -161,6 +175,7 @@ impl RetainedWriteOwnership {
             unanswered_edit: false,
             capture_resume_unowned: false,
             delivery_rejected: false,
+            editor_route_unowned: false,
             replica_unserved: false,
         }
     }
@@ -179,6 +194,7 @@ impl RetainedWriteOwnership {
             unanswered_edit: false,
             capture_resume_unowned: false,
             delivery_rejected: false,
+            editor_route_unowned: false,
             replica_unserved: false,
         }
     }
@@ -214,6 +230,13 @@ impl RetainedWriteOwnership {
         self
     }
 
+    /// Record that the rejecting editor route is currently unregistered and
+    /// document authority has no live editor replica (GH #144).
+    pub const fn with_editor_route_unowned(mut self, editor_route_unowned: bool) -> Self {
+        self.editor_route_unowned |= editor_route_unowned;
+        self
+    }
+
     /// Record that the editor holding this document is observed not serving its
     /// replica (GH #131). Only a site that has observed the replica may set it.
     pub const fn with_replica_unserved(mut self, replica_unserved: bool) -> Self {
@@ -236,7 +259,13 @@ impl RetainedWriteOwnership {
         // captured-finalize worker is waiting on the same editor state edge and
         // a manual `commit` would race it. Only an *uncaptured* write-applied
         // cycle needs the manual terminal-commit recovery.
-        if self.retained_capture && self.capture_resume_unowned && !self.retained_projection {
+        if self.editor_route_unowned {
+            // GH #144: the retained bits say work is durable, but the endpoint
+            // that could advance it has been removed and authority has no live
+            // replica. Waiting cannot fire a state edge. This is the stranded
+            // shape and commit is deliberately the named recovery.
+            RetainedWriteVerdict::Stranded
+        } else if self.retained_capture && self.capture_resume_unowned && !self.retained_projection {
             // `#capturedresumeunowned`: the capture is durable, but the worker
             // that would re-drive it is not running. Waiting is the one thing
             // that cannot work, so this must not read as Deferred.
@@ -535,14 +564,22 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
              recovery it names",
             editor_replica_recovery()
         ),
-        RetainedWriteVerdict::Stranded => format!(
-            "NO cycle is open and NO response capture is retained, so nothing owns this write \
-             and no state edge will fire — the visible edits are STRANDED, not deferred, and \
-             waiting will not commit them. Run `agent-doc commit {file}`; when a live document \
-             actor exists the controller routes that commit under the actor's explicit pane \
-             identity, so do not claim or move the live session. Use `agent-doc write --commit \
-             {file}` from the owning pane only if an unwritten response body remains"
-        ),
+        RetainedWriteVerdict::Stranded => {
+            let evidence = if ownership.editor_route_unowned {
+                "The refusing editor endpoint is UNREGISTERED and document authority reports \
+                 ZERO live editor replicas, so no durable holder can emit another state edge"
+            } else {
+                "NO cycle is open and NO response capture is retained, so nothing owns this write \
+                 and no state edge will fire"
+            };
+            format!(
+                "{evidence} — the visible edits are STRANDED, not deferred, and waiting will not \
+                 commit them. Run `agent-doc commit {file}`; when a live document actor exists \
+                 the controller routes that commit under the actor's explicit pane identity, so \
+                 do not claim or move the live session. Use `agent-doc write --commit {file}` \
+                 from the owning pane only if an unwritten response body remains"
+            )
+        }
         RetainedWriteVerdict::AwaitingTerminalCommit => format!(
             "The response write ALREADY LANDED and only the terminal commit is outstanding — \
              this is neither a lost response nor a self-completing deferral, and \
@@ -1735,10 +1772,31 @@ mod tests {
         }
     }
 
+    /// GH #144: once the refusing endpoint is actually unregistered and the
+    /// authority reports no live replica, the durable cycle/capture/projection
+    /// facts no longer prove a holder. Waiting is impossible; commit is the
+    /// recovery the same predicate must both print and admit.
+    #[test]
+    fn an_unregistered_editor_route_with_zero_live_replicas_is_stranded() {
+        let ownership = RetainedWriteOwnership::new(true, true)
+            .with_retained_projection(true)
+            .with_delivery_rejected(true)
+            .with_editor_route_unowned(true);
+
+        assert_eq!(ownership.verdict(), RetainedWriteVerdict::Stranded);
+        assert!(ownership.verdict().commit_is_the_named_recovery());
+        let remedy = retained_write_remedy(ownership, "plan.md");
+        assert!(remedy.contains("UNREGISTERED"), "{remedy}");
+        assert!(remedy.contains("ZERO live editor replicas"), "{remedy}");
+        assert!(remedy.contains("`agent-doc commit plan.md`"), "{remedy}");
+        assert!(!remedy.contains("restart or reload the editor"), "{remedy}");
+        assert!(!remedy.contains("commits itself"), "{remedy}");
+    }
+
     /// Every input combination, so a new verdict branch cannot quietly
     /// reintroduce the contradiction.
     fn every_ownership() -> Vec<RetainedWriteOwnership> {
-        (0u16..256)
+        (0u16..512)
             .map(|bits| {
                 let bit = |n: u16| bits & (1 << n) != 0;
                 RetainedWriteOwnership::new_with_phase(bit(0), bit(1), bit(2))
@@ -1746,7 +1804,8 @@ mod tests {
                     .with_unanswered_edit(bit(4))
                     .with_capture_resume_unowned(bit(5))
                     .with_delivery_rejected(bit(6))
-                    .with_replica_unserved(bit(7))
+                    .with_editor_route_unowned(bit(7))
+                    .with_replica_unserved(bit(8))
             })
             .collect()
     }

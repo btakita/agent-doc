@@ -233,7 +233,7 @@ fn await_editor_replica_no_disk_write(message: String) -> anyhow::Error {
 /// get to decide on its own whether waiting is correct.
 fn retained_write_remedy_for(file: &Path) -> String {
     agent_doc_turn::write_ownership::retained_write_remedy(
-        agent_doc_capture_io::retained_write_ownership(file),
+        observed_retained_write_ownership(file),
         &file.display().to_string(),
     )
 }
@@ -271,7 +271,7 @@ fn retained_refusal(file: &Path, message: String) -> anyhow::Error {
 /// that has not settled yet.
 fn retained_intent_refusal(file: &Path, intent_id: &str, message: String) -> anyhow::Error {
     // An empty id proves nothing, so it adds no ownership.
-    let ownership = agent_doc_capture_io::retained_write_ownership(file)
+    let ownership = observed_retained_write_ownership(file)
         .with_retained_projection(!intent_id.is_empty());
     await_editor_replica_no_disk_write(format!(
         "{message}. {}",
@@ -6473,7 +6473,7 @@ pub fn guard_visible_delivery_convergence(file: &Path, source: &str) -> Result<(
                     "visible document write for {} is retained by the lazy delivery projection; the attached editor replica is not registered, so no snapshot or commit effect is eligible. {}",
                     file.display(),
                     agent_doc_turn::write_ownership::retained_write_remedy(
-                        agent_doc_capture_io::retained_write_ownership(file)
+                        observed_retained_write_ownership(file)
                             .with_replica_unserved(true),
                         &file.display().to_string(),
                     ),
@@ -6512,6 +6512,32 @@ pub fn observed_retained_write_ownership(
 ) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
     agent_doc_capture_io::retained_write_ownership(file)
         .with_replica_unserved(editor_replica_unserved(file))
+        .with_editor_route_unowned(editor_route_unowned(file))
+}
+
+/// Whether the rejected editor route has been removed and document authority
+/// currently has no live replica to emit the retained write's next edge (GH
+/// #144).
+///
+/// This deliberately requires both observations. A raw zero-live count can be
+/// a transient replica-registration gap while reliable liveness still keeps
+/// editor authority, and a rejection below the unregister threshold still has
+/// an endpoint whose restart/reload is the recovery. Only the conjunction
+/// proves there is no holder and makes `agent-doc commit` safe to name.
+pub fn editor_route_unowned(file: &Path) -> bool {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return false;
+    };
+    if !agent_doc_write_converge_io::editor_delivery_endpoint_unregistered(&project_root, file) {
+        return false;
+    }
+    matches!(
+        query_live_editor_authority(file, "retained_write_route_owner_probe"),
+        Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+            live_editors: 0,
+            ..
+        })
+    )
 }
 
 fn defer_visible_delivery_projection(
@@ -6561,7 +6587,7 @@ fn defer_visible_delivery_projection_with_ownership(
                 // endpoint answered its delivery receipt with a rejection. A projection held
                 // only by a rejecting endpoint is not owned, and the
                 // predicate says so — this site must not re-decide it.
-                agent_doc_capture_io::retained_write_ownership(file).with_retained_projection(true),
+                observed_retained_write_ownership(file).with_retained_projection(true),
             )
         }
         ProjectionRefusalOwnership::PrewriteBase => {
@@ -12467,6 +12493,73 @@ mod tests {
             gate.contains(recovery),
             "the integrity gate renders the same owned recovery: {gate}"
         );
+        seed_reliable_sync_close(&file, identity);
+    }
+
+    /// GH #144: after the refusal threshold removes the endpoint, a relay with
+    /// zero live members is not a holder. The durable route-health fact and the
+    /// live authority cut must combine in the shared ownership adapter so every
+    /// caller names `agent-doc commit` instead of waiting forever.
+    #[test]
+    fn unregistered_endpoint_with_zero_live_replicas_is_an_unowned_route() {
+        let (dir, file, _canonical) = temp_doc(
+            "---\nsession: gh144-unowned-route\n---\n\n# Session\n",
+        );
+        drop(agent_doc_sqlite::state_store::open_state_db(dir.path()).expect("state db"));
+        let identity = "test-gh144-unowned-route";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach before route removal");
+        let baseline = std::fs::read_to_string(&file).unwrap();
+        let target = format!("{baseline}\nretained response\n");
+        agent_doc_crdt_relay_io::apply_cp_write_for_file(
+            &file,
+            &baseline,
+            &target,
+            "gh144_retained_write",
+        )
+        .unwrap()
+        .expect("retained target should enter controller canonical");
+        assert!(test_support_deregister_replica_for_file(&file, identity).unwrap());
+        assert!(
+            matches!(
+                agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap(),
+                agent_doc_crdt_relay_io::CurrentText::Current {
+                    live_editors: 0,
+                    ..
+                }
+            ),
+            "the retained relay cut must report zero live replicas"
+        );
+
+        for attempt in 0..agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD {
+            agent_doc_write_converge_io::record_ipc_socket_ack_failure(
+                dir.path(),
+                &file,
+                Some(&format!("gh144-{attempt}")),
+                "native_editor_save_request",
+                agent_doc_ipc_protocol::SocketDeliveryFailure::Rejected,
+            )
+            .unwrap();
+        }
+
+        assert!(editor_route_unowned(&file));
+        let ownership = observed_retained_write_ownership(&file)
+            .with_retained_projection(true);
+        assert!(ownership.delivery_rejected, "{ownership:?}");
+        assert!(ownership.editor_route_unowned, "{ownership:?}");
+        assert_eq!(
+            ownership.verdict(),
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded,
+        );
+        let remedy = agent_doc_turn::write_ownership::retained_write_remedy(
+            ownership,
+            &file.display().to_string(),
+        );
+        assert!(remedy.contains("agent-doc commit"), "{remedy}");
+        assert!(!remedy.contains("restart or reload the editor"), "{remedy}");
+
         seed_reliable_sync_close(&file, identity);
     }
 

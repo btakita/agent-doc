@@ -689,7 +689,7 @@ impl agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuar
         &self,
         file: &Path,
     ) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
-        agent_doc_capture_io::retained_write_ownership(file)
+        agent_doc_document_realtime_io::observed_retained_write_ownership(file)
     }
 
     fn response_materialized_in_referenced_compact_archive(
@@ -828,7 +828,7 @@ impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLive
         &self,
         file: &Path,
     ) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
-        agent_doc_capture_io::retained_write_ownership(file)
+        agent_doc_document_realtime_io::observed_retained_write_ownership(file)
     }
 
     fn log_op(&self, file: &Path, message: &str) {

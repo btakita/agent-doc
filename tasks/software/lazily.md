@@ -641,6 +641,50 @@ Next is the queued `release + publish`. The exchange is past 530 lines; not stop
 - **Other bindings:** lazily-cpp is the only other binding with a positional codec, and it always writes `backend`, so it never had this bug.
 
 Next is the queued `release + publish`.
+
+### Re: release + publish (lazily family) — opus-5-5 · 2026-10-04T23:31-04:00
+
+> **Queue prompt:**
+>
+> release + publish
+
+**Done.** All ten bindings and lazily-spec are released, and I checked every registry directly afterwards. Following the `#subagents` preset, each binding had its own subagent, working in a sandbox worktree outside the IDE tree. Each subagent bumped the version, ran a full `make check` (exit 0 everywhere), pushed to main, tagged, published and verified. I released spec last.
+
+| Binding | Version | Published to | Checked |
+|---|---|---|---|
+| lazily-rs | 0.59.0 | crates.io (manual `cargo publish`) | crates.io max = 0.59.0, Apache-2.0 |
+| lazily-py | 0.43.0 | PyPI via tag → `wheels.yml` | PyPI = 0.43.0, 21 wheels + sdist |
+| lazily-kt | 0.44.0 | GitHub Packages via tag → `release.yml` | packages API lists 0.44.0 |
+| lazily-go | v0.29.0 | GitHub release + Go module proxy | proxy `@latest` = v0.29.0 |
+| lazily-js | 0.35.0 | npm via tag → `release.yml` (OIDC) | npm `latest` = 0.35.0 |
+| lazily-dart | 0.33.0 | pub.dev (`dart pub publish`) | pub.dev latest = 0.33.0 |
+| lazily-zig | v0.37.0 | GitHub release | — |
+| lazily-cpp | v0.31.0 | GitHub release | — |
+| lazily-cs | v0.7.0 | GitHub release (no NuGet) | — |
+| lazily-gd | v0.2.1 | GitHub release (packaging-only patch) | — |
+| lazily-spec | v0.41.0 | tag + GitHub release | — |
+
+**Behaviour changes called out in the release notes:**
+- **Strict decoding (rs, py, go, kt):** unknown keys are refused, and so are missing fields that used to be defaulted.
+- **Receipt `generation` became unsigned in go and kt** (`uint64` / `ULong`). That breaks callers who pass a signed value; it's marked BREAKING in go's CHANGELOG.
+- **Kotlin:** factories became extension functions. Kotlin callers in other packages must import them, and Java callers use the generated `*Kt` static helpers instead.
+- **Rust:** Postcard bytes changed for a default-backend `ShmBlobRef`, which couldn't be decoded before (`#lzshmblobpostcard`).
+
+**One thing changed for the better.** lazily-js no longer needs you to run `npm publish` with an OTP. The tag-triggered OIDC publish worked for 0.35.0, and the run history shows 0.34.0 went out the same way. I updated memory to say so.
+
+**CI:** green everywhere except two lazily-rs runs:
+- **The tag-triggered `Release` run failed, and this is not a regression.** It authenticates to crates.io through OIDC, and crates.io has no Trusted Publisher configured for `lazily-hub/lazily-rs`. Every past tag failed the same way, and 0.59.0 was published by hand. To make the tag path work, a crates.io owner (you) needs to add the Trusted Publisher. After that, stop publishing by hand, or the two paths will collide.
+- **The rs `CI` run on the release commit** was still in progress at closeout.
+
+**Found during the release:**
+- **lazily-macros 0.23.0 on crates.io still says MIT.** It was published before the Apache-2.0 relicense, and its version was never bumped. I filed `#lzmacroslicense` (bump to 0.23.1 and publish), appended to the backlog.
+- **lazily-go's CHANGELOG had stale entries.** Its "Unreleased" section still held entries already shipped in v0.26–v0.28. The release split them out so v0.29.0 lists only what's new.
+
+**Local checkouts.** I fast-forwarded nine of them to the released `main`. I left lazily-zig and lazily-gd alone: they hold other sessions' uncommitted edits to `scripts/check-conformance-coverage.sh` and `AGENTS.md`, files the releases also changed. The sandboxes are removed. Memory has a new record of this release (`reference_lazily_wiremodel_release_2026_10_04`), and the js note is corrected.
+
+**Still yours:** `rm -rf ~/.cache/claude-qops`. It's the Rust build cache, about 74 GB, and the delete hook blocks me from removing it.
+
+The exchange is past 610 lines.
 <!-- agent:boundary:cfd052cf -->
 <!-- /agent:exchange -->
  
@@ -649,12 +693,13 @@ Next is the queued `release + publish`.
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzshmblobpostcard]~~
 - ~~do [#lzwiremodel7]~~
-- release + publish
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzmacroslicense] [lazily-rs] lazily-macros 0.23.0 on crates.io still declares MIT: it was published before the Apache-2.0 relicense (c3026be) and its version was never bumped. Bump lazily-macros to 0.23.1 (Cargo.lock refresh), make check, cargo publish -p lazily-macros --locked (passage token), verify crates.io shows Apache-2.0.
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

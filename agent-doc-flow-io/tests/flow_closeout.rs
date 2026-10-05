@@ -1113,6 +1113,37 @@ mod tests {
     }
 
     #[test]
+    fn classify_recovery_names_repair_for_transcript_shaped_capture() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let transcript = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "### Re: hello — gpt-5\n\nCaptured transcript.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, transcript).unwrap();
+
+        assert_eq!(
+            classify_closeout_recovery_state_for_file(&doc),
+            CloseoutRecoveryState::BlockedCapture
+        );
+        let command = closeout_recovery_command_for_file(
+            &doc,
+            CloseoutRecoveryState::BlockedCapture,
+        )
+        .unwrap();
+        assert!(command.contains("agent-doc repair"), "{command}");
+        assert!(!command.contains("write --commit"), "{command}");
+    }
+
+    #[test]
     fn observed_recovery_evidence_requires_current_visible_hash() {
         let base = concat!(
             "---\nagent_doc_format: template\n---\n\n",

@@ -71,6 +71,34 @@ pub fn save_pending_with_current_content_and_plan(
             response,
             current_content,
         )?;
+    let canonical_response = match agent_doc_template::replay_guard::classify_replay_payload(
+        &canonical_response,
+    ) {
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+            response.into_owned()
+        }
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {
+            anyhow::bail!(
+                "refusing to capture an empty pending response for {}",
+                file.display()
+            )
+        }
+        agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "pending_response_capture_refused file={} response_sha256={} reason_bytes={} captured=false",
+                    file.display(),
+                    agent_doc_hash::content_hash(&canonical_response),
+                    reason.len(),
+                ),
+            );
+            anyhow::bail!(
+                "refusing to capture a pending response for {} because {reason}; nothing was captured or written",
+                file.display()
+            )
+        }
+    };
     let capture = agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
         file,
         &canonical_response,
@@ -238,5 +266,33 @@ mod tests {
             load_pending_response_state(&doc).unwrap(),
             PendingResponseState::Cleared
         );
+    }
+
+    #[test]
+    fn rejects_transcript_shaped_pending_response_before_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("task.md");
+        let content = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Original prompt\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let transcript = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Original prompt\n",
+            "### Re: answer — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let err = save_pending_with_current_content(&doc, transcript, content).unwrap_err();
+
+        assert!(err.to_string().contains("refusing to capture a pending response"));
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        assert_eq!(load_active_pending_response(&doc).unwrap(), None);
     }
 }

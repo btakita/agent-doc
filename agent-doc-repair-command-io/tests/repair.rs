@@ -1962,7 +1962,9 @@ mod tests {
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "content").unwrap();
 
-        agent_doc_repair_io::pending::save_pending(&doc, "").unwrap();
+        // Model an empty artifact written by an older producer. New shared
+        // pending-response capture rejects this shape before persistence.
+        agent_doc_capture_io::capture_response(&doc, "").unwrap();
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::Noop);
 
@@ -4303,7 +4305,7 @@ mod tests {
     }
 
     #[test]
-    fn recover_fails_closed_on_transcript_shaped_template_replay() {
+    fn recover_quarantines_legacy_transcript_shaped_template_capture() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
         let content = concat!(
@@ -4329,18 +4331,19 @@ mod tests {
             "<!-- agent:boundary:def456 -->\n",
             "<!-- /agent:exchange -->\n"
         );
-        agent_doc_repair_io::pending::save_pending(&doc, transcript_dump).unwrap();
+        agent_doc_capture_io::capture_response(&doc, transcript_dump).unwrap();
 
-        let err = run(&doc).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("refused to replay pending response"),
-            "unexpected error: {err}"
-        );
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::BlockedCaptureQuarantined);
         assert_eq!(
             std::fs::read_to_string(&doc).unwrap(),
             content,
-            "blocked replay must not mutate the document"
+            "quarantine must not mutate the document"
+        );
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::Abandoned
         );
 
         let blocked_dir = dir.path().join(".agent-doc/repair-blocked");

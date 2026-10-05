@@ -482,6 +482,15 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     log_slow_repair_phase(&canonical, "current_document", &mut phase_started);
     let current_authority = current_document.authority;
     let mut doc_content = current_document.content;
+    if let Some(response) = pending_response
+        .as_deref()
+        .or_else(|| capture.as_ref().map(|capture| capture.response_body.as_str()))
+        && let agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) =
+            agent_doc_template::replay_guard::classify_replay_payload(response)
+        && !is_legacy_structured_exchange_patch(response)
+    {
+        return quarantine_blocked_pending_capture(&canonical, &doc_content, response, &reason);
+    }
     if force_disk_override != Some(true)
         && let Some(restored) =
             restore_committed_head_after_authority_regression(&canonical, &doc_content)?
@@ -1384,6 +1393,42 @@ pub fn save_blocked_repair_payload(file: &Path, response: &str, reason: &str) ->
     std::fs::write(&path, json)
         .with_context(|| format!("write blocked repair payload {}", path.display()))?;
     Ok(path)
+}
+
+fn quarantine_blocked_pending_capture(
+    file: &Path,
+    current_content: &str,
+    response: &str,
+    reason: &str,
+) -> Result<agent_doc_turn::repair::RepairOutcome> {
+    let path = save_blocked_repair_payload(file, response, reason)?;
+    agent_doc_capture_io::mark_discarded(file)?;
+    agent_doc_cycle_state_io::mark_abandoned(
+        file,
+        "blocked_capture_quarantined",
+        Some(current_content),
+        Some(current_content),
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "repair_blocked_capture_quarantined file={} path={} reason={} recovery=fresh_response_cycle",
+            file.display(),
+            path.display(),
+            reason,
+        ),
+    );
+    eprintln!(
+        "[repair] quarantined invalid pending response for {} at {}; the next admission may start a fresh response cycle",
+        file.display(),
+        path.display(),
+    );
+    Ok(agent_doc_turn::repair::RepairOutcome::BlockedCaptureQuarantined)
+}
+
+fn is_legacy_structured_exchange_patch(response: &str) -> bool {
+    agent_doc_template::parse_patches(response)
+        .is_ok_and(|(patches, _)| patches.iter().any(|patch| patch.name == "exchange"))
 }
 
 pub fn fail_closed_on_blocked_template_replay(

@@ -113,6 +113,7 @@ pub enum RepairOutcome {
     CommitBoundaryRecovered,
     TemplateNormalized,
     CompletedBacklogReaped,
+    BlockedCaptureQuarantined,
 }
 
 impl RepairOutcome {
@@ -128,6 +129,7 @@ impl RepairOutcome {
             Self::CommitBoundaryRecovered => "commit_boundary_recovered",
             Self::TemplateNormalized => "template_normalized",
             Self::CompletedBacklogReaped => "completed_backlog_reaped",
+            Self::BlockedCaptureQuarantined => "blocked_capture_quarantined",
         }
     }
 
@@ -159,6 +161,9 @@ impl RepairOutcome {
             Self::CommitBoundaryRecovered => "recovered a missing commit boundary",
             Self::TemplateNormalized => "normalized template drift before closeout",
             Self::CompletedBacklogReaped => "reaped a stale completed backlog item during recovery",
+            Self::BlockedCaptureQuarantined => {
+                "quarantined an invalid transcript-shaped capture and reopened the document for a fresh response"
+            }
         }
     }
 }

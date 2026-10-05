@@ -247,6 +247,9 @@ pub enum CloseoutRecoveryState {
     Clean,
     /// Cycle still open (preflight_started / response_captured / write_applied).
     OpenCycle,
+    /// The active capture is transcript/full-document shaped and cannot be
+    /// replayed. Repair quarantines it and abandons the poisoned cycle.
+    BlockedCapture,
     /// Committed binary-owned work but the assistant response body is missing
     /// from HEAD (no capture, or a captured body not materialized in HEAD).
     MissingResponseBody,
@@ -322,6 +325,7 @@ impl CloseoutRecoveryCycleInput {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CloseoutRecoveryStateInput {
     pub cycle: Option<CloseoutRecoveryCycleInput>,
+    pub blocked_captured_response: bool,
     pub head_has_escaped_template_patch: bool,
     pub missing_captured_response_body: bool,
     pub direct_response_patchback: bool,
@@ -357,9 +361,10 @@ pub struct CloseoutRecoveryCommandInput {
 }
 
 impl CloseoutRecoveryState {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Clean,
         Self::OpenCycle,
+        Self::BlockedCapture,
         Self::MissingResponseBody,
         Self::DirectResponsePatchback,
         Self::EscapedTemplatePatch,
@@ -375,6 +380,7 @@ impl CloseoutRecoveryState {
         match self {
             Self::Clean => "clean",
             Self::OpenCycle => "open_cycle",
+            Self::BlockedCapture => "blocked_capture",
             Self::MissingResponseBody => "missing_response_body",
             Self::DirectResponsePatchback => "direct_response_patchback",
             Self::EscapedTemplatePatch => "escaped_template_patch",
@@ -395,6 +401,9 @@ pub fn closeout_recovery_command(input: CloseoutRecoveryCommandInput) -> Option<
         CloseoutRecoveryState::OpenCycle => {
             open_cycle_recovery_command(f, input.open_cycle.as_ref())
         }
+        CloseoutRecoveryState::BlockedCapture => format!(
+            "`agent-doc repair {f}` to quarantine the invalid pending response and abandon its poisoned cycle; then re-run `agent-doc {f}` to answer from a fresh cycle"
+        ),
         CloseoutRecoveryState::MissingResponseBody => format!(
             "pipe the final response (with `<!-- patch:exchange -->` blocks) through `agent-doc write --commit {f}`, then re-run `agent-doc session-check {f}`"
         ),
@@ -528,6 +537,10 @@ pub fn classify_closeout_recovery_state_from_input(
     let Some(cycle) = input.cycle else {
         return CloseoutRecoveryState::Clean;
     };
+
+    if input.blocked_captured_response {
+        return CloseoutRecoveryState::BlockedCapture;
+    }
 
     match cycle.phase {
         CyclePhase::PreflightStarted if cycle.is_empty_preflight() => {
@@ -862,7 +875,8 @@ pub fn closeout_recovery_decision_from_state(
     };
     match state {
         CloseoutRecoveryState::Clean => CloseoutRecoveryDecision::AlreadyCommitted,
-        CloseoutRecoveryState::DirectResponsePatchback
+        CloseoutRecoveryState::BlockedCapture
+        | CloseoutRecoveryState::DirectResponsePatchback
         | CloseoutRecoveryState::BoundaryOnlyDrift
         | CloseoutRecoveryState::NestedParentPointerStale
         | CloseoutRecoveryState::OpenEmptyPreflight
@@ -1181,6 +1195,7 @@ mod tests {
         let cases = [
             (Clean, "clean"),
             (OpenCycle, "open_cycle"),
+            (BlockedCapture, "blocked_capture"),
             (MissingResponseBody, "missing_response_body"),
             (DirectResponsePatchback, "direct_response_patchback"),
             (EscapedTemplatePatch, "escaped_template_patch"),
@@ -1214,6 +1229,7 @@ mod tests {
         );
         for (state, name, needle) in [
             (OpenCycle, "open_cycle", "wait for its durable checkpoint"),
+            (BlockedCapture, "blocked_capture", "agent-doc repair"),
             (
                 MissingResponseBody,
                 "missing_response_body",
@@ -1459,6 +1475,19 @@ mod tests {
                 ..CloseoutRecoveryStateInput::default()
             }),
             CloseoutRecoveryState::OpenCycle
+        );
+        assert_eq!(
+            classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
+                cycle: Some(CloseoutRecoveryCycleInput {
+                    phase: CyclePhase::ResponseCaptured,
+                    has_capture: true,
+                    has_response_hash: true,
+                    had_pending_mutations: false,
+                }),
+                blocked_captured_response: true,
+                ..CloseoutRecoveryStateInput::default()
+            }),
+            CloseoutRecoveryState::BlockedCapture
         );
     }
 
@@ -1718,6 +1747,7 @@ mod tests {
         let default_cases = [
             (Clean, "already_committed"),
             (OpenCycle, "blocked"),
+            (BlockedCapture, "replay_safe"),
             (MissingResponseBody, "blocked"),
             (DirectResponsePatchback, "replay_safe"),
             (EscapedTemplatePatch, "blocked"),

@@ -119,7 +119,8 @@ fn expected_closeout_recovery_decision(
     }
     match state {
         CloseoutRecoveryState::Clean => "already_committed",
-        CloseoutRecoveryState::DirectResponsePatchback
+        CloseoutRecoveryState::BlockedCapture
+        | CloseoutRecoveryState::DirectResponsePatchback
         | CloseoutRecoveryState::BoundaryOnlyDrift
         | CloseoutRecoveryState::NestedParentPointerStale
         | CloseoutRecoveryState::OpenEmptyPreflight

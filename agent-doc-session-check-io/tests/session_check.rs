@@ -7412,7 +7412,7 @@ Body\n\
         );
     }
     #[test]
-    fn session_check_snapshot_committed_guard_reports_side_effect_recovery_hint() {
+    fn session_check_snapshot_committed_guard_omits_unattributed_worktree_dirt() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
@@ -7467,12 +7467,11 @@ Body\n\
             .output()
             .unwrap();
 
-        // No cycle state, response heading present, snapshot ≠ HEAD, side
-        // effects exist. Phase 3 (#jbccc3) only auto-recovers when the cycle
+        // No cycle state, response heading present, snapshot ≠ HEAD, and
+        // unrelated worktree dirt exists. Phase 3 (#jbccc3) only auto-recovers when the cycle
         // is at WriteApplied or Committed — without any cycle state, the
-        // bypassed_response_write path still fires and must keep emitting the
-        // side-effect recovery hint so the operator can diagnose the broken
-        // closeout.
+        // bypassed_response_write path still fires, but it must not attribute
+        // ambient files to this cycle without baseline evidence.
         let new_content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nold body\n### Re: create today's news — codex\nresponse\n";
         fs::write(&doc, new_content).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
@@ -7487,9 +7486,9 @@ Body\n\
         let status = inspect(&doc).unwrap();
         match status {
             SessionCheckStatus::Interrupted(msg) => {
-                assert!(msg.contains("tracked side-effect edits"));
-                assert!(msg.contains("news/README.md"));
-                assert!(msg.contains("news/2026-05-01/README.md"));
+                assert!(!msg.contains("tracked side-effect edits"));
+                assert!(!msg.contains("news/README.md"));
+                assert!(!msg.contains("news/2026-05-01/README.md"));
                 assert!(msg.contains("agent-doc write --commit"));
             }
             SessionCheckStatus::Ok(msg) | SessionCheckStatus::SteeringPending(msg) => {

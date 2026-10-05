@@ -2255,6 +2255,17 @@ pub fn classify_closeout_recovery_state_for_file(
         cycle: Some(cycle),
         ..CloseoutRecoveryStateInput::default()
     };
+    input.blocked_captured_response = agent_doc_capture_io::load_active(file)
+        .ok()
+        .flatten()
+        .is_some_and(|capture| {
+            matches!(
+                agent_doc_template::replay_guard::classify_replay_payload(
+                    &capture.response_body
+                ),
+                agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(_)
+            )
+        });
     if cycle.phase == agent_doc_turn::CyclePhase::Abandoned {
         input.uncommitted_response_vs_head = uncommitted_response_vs_head(file, effects);
         return classify_closeout_recovery_state_from_input(input);

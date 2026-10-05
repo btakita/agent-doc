@@ -170,18 +170,12 @@ pub fn filter_tracked_side_effect_paths(
         .collect()
 }
 
-pub fn tracked_side_effect_note(file: &Path) -> Result<String> {
-    let mut paths = tracked_side_effect_paths(file)?;
-    if paths.is_empty() {
-        return Ok(String::new());
-    }
-    let overflow = paths.len().saturating_sub(3);
-    paths.truncate(3);
-    let mut note = format!("; tracked side-effect edits: {}", paths.join(", "));
-    if overflow > 0 {
-        note.push_str(&format!(" (+{} more)", overflow));
-    }
-    Ok(note)
+pub fn tracked_side_effect_note(_file: &Path) -> Result<String> {
+    // A point-in-time `git status` cannot attribute ambient worktree dirt to a
+    // particular agent-doc cycle. Until the cycle ledger carries a baseline
+    // path set, omit the note rather than claim unrelated user edits as this
+    // response's side effects (GH #145).
+    Ok(String::new())
 }
 
 /// Paths registered as git submodules under `git_root`, read from `.gitmodules`.
@@ -412,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn tracked_side_effect_note_limits_to_three_paths() {
+    fn tracked_side_effect_note_omits_unattributed_worktree_dirt() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         Command::new("git")
@@ -467,9 +461,6 @@ mod tests {
 
         let note = tracked_side_effect_note(&root.join("docs/session.md")).unwrap();
 
-        assert_eq!(
-            note,
-            "; tracked side-effect edits: a.txt, b.txt, c.txt (+1 more)"
-        );
+        assert_eq!(note, "");
     }
 }

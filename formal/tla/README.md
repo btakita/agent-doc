@@ -209,9 +209,11 @@ durable level-triggered request. One wedge per fix must violate:
 `StaleColumnRecycleLapseWedge` (an install fan-out request that lapses), and
 `StaleColumnRecycleDropWedge` (a fire-and-forget notification under Drop);
 `StaleColumnRecycleReach` and `StaleColumnRecycleConsumeReach` keep the focus
-exception and consumption reachable. The channel is a plain set with explicit
-`Drop` and duplicate-on-deliver so it can be swapped for a shared channel
-module later.
+exception and consumption reachable. The editor link is the shared
+`NetChannel` (`#netadv3` port): publications carry no id, so two equal
+publications are two copies in the bag, and the pre-fix notification rides the
+same channel under `FairLossy({Notify})`. The Drop wedge is therefore the
+channel's own `Drop`, not a model-local action.
 ## Adversarial network: `NetChannel`
 
 Most models above collapse "A sends, B receives" into one atomic transition,

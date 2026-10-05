@@ -656,8 +656,9 @@ impl SimWorld {
                 freshness: fresh.clone(),
                 own_pane: true,
                 is_focus: false,
-                in_stash: false,
+                outside_target_window: false,
                 recycle: StaleRecycleRequestState::NotRequested,
+                turn_active: self.sync.protected_open_cycle.contains(doc),
             })
             .collect();
         facts.push(ColumnGateFacts {
@@ -673,7 +674,7 @@ impl SimWorld {
             },
             own_pane: true,
             is_focus: true,
-            in_stash: true,
+            outside_target_window: true,
             recycle: if request_live {
                 StaleRecycleRequestState::Pending {
                     reason: "sim_live_recycle_request".to_string(),
@@ -683,6 +684,7 @@ impl SimWorld {
             } else {
                 StaleRecycleRequestState::NotRequested
             },
+            turn_active: self.sync.protected_open_cycle.contains(&focus),
         });
         let live_turn: Vec<String> = self
             .sync

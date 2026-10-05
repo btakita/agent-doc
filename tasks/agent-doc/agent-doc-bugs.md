@@ -778,6 +778,18 @@ The betterstack-to-observability rename collision is fixed on main in `5a1e210ad
 The public release is agent-doc `v0.35.460`. These final marker and rename repairs are newer commits on `main` under the same version and have not been published as a second release yet. No tmux-router change, tag, or publication was made as part of this work.
 
 The previously visible backlog cruft is gone. The remaining rows are genuine open work (`#releasecyclefast` and any newly queued operator requests), not orphaned completed residue.
+
+### Re: faster release cycle — gpt-5 · 2026-10-05T17:22-04:00
+
+> **Queue prompt:** do [#releasecyclefast]
+
+Implemented by a dedicated subagent and integrated on main through `8c12896cc`.
+
+`make release` now runs cheap version/editor-parity preflight before expensive gates. Full-check and tmux-CI proofs are independent content/toolchain receipts: staging, committing, or tagging identical bytes does not invalidate them, while repo-byte or covered-toolchain drift does. The tmux receipt fingerprints the real `tmux -V` output. `install-full` now uses `CARGO_TARGET_DIR_ABS` end to end, including invoking `lib-install` through the newly built external-target binary.
+
+Verification: self-test, release preflight, external-target dry run, final authoritative `make check` (9,561 workspace tests plus controller/session tail, 193 VS Code tests, cross-editor tests, and TLA+ checks) and `make tmux-ci` all passed. Final CLI/library/editor integration installed locally. Commits `370645adf`, `66b4f2795`, `4220df2cb`, and `8c12896cc` are pushed to `origin/main`.
+
+No new public version was released in this continuation; the public release remains v0.35.460.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
@@ -789,15 +801,15 @@ The previously visible backlog cruft is gone. The remaining rows are genuine ope
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - ~~do [#claimmarker]~~
 - ~~I renamed betterstack.md to observability.md. Run Agent Doc failed: refusing duplicate session identity 0b281660-be9c-4f2d-9a1d-f5ce38aa88a9 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/observability.md: first durable owner is /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/betterstack.md in pane  (registered state-event:577209)~~
-- do [#releasecyclefast]
+- ~~do [#releasecyclefast]~~
 - Is there a command to see the agent-doc version + plugin version(s)? If not, we need a cli + plugin command to see the versions.
 - #gh-fix https://github.com/btakita/agent-doc/issues/144
+ - #gh-fix https://github.com/btakita/agent-doc/issues/145
 - release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#releasecyclefast] [recommended] [agent-doc] Finish release-cycle acceleration: run cheap version and editor-parity preflight before the full suite; make full-check receipts independent of commit metadata when repository bytes and toolchains match; reuse tmux-ci proof; and make install-full honor external CARGO_TARGET_DIR, with regressions.
 <!-- /agent:backlog -->
 
 ## Review

@@ -492,6 +492,20 @@ These are captured as phased backlog items, appended so they don't jump ahead of
 - `netadv5`: tests that enforce the round-trip budget per path, and ack-driven transitions in place of fixed waits.
 
 GH #136 is the first concrete case. I've told its subagent to model the messages as an adversarial channel: invariants hold under delay, reordering, drop, duplication and reconnect; liveness only under fairness. It should also add a Wedge config showing the pre-fix behaviour breaks the invariant. The plan file is committed (`992e5902c7`).
+
+### Re: message loss over the network — opus-5-5 · 2026-10-05T00:29-04:00
+
+> **Chat prompt (#chatprompt):** Messages may also be lost over the network?
+
+Yes. The plan's adversarial channel includes a Drop action, and loss is the harder case. A delayed or reordered message still arrives eventually, but a lost one never arrives unless something resends it. Loss requires every hot-path protocol to have these properties (now explicit in the plan, commit `9ffa70872b`):
+
+- **Resend until acked, or pull the state.** A change that crosses the network is either resent until acknowledged, or held as durable state the receiver reads and reconciles. A one-shot fire-and-forget notification on a correctness path is a defect.
+- **Idempotent receivers.** The sender can't tell a lost request from a lost ack, so it resends, and the receiver applies each message exactly once by key (idempotency key, sequence number or generation), even when duplicated.
+- **Half-open connections.** Zscaler can silently stall a stream with no reset. A heartbeat/lease turns that into a reconnect, and safety never depends on how fast the heartbeat fires.
+- **Reconnect resync.** After a reconnect, the two sides reconcile from durable state (`state.db`, generation counters), never from messages assumed to be in flight.
+- **Liveness only under fairness:** a message resent infinitely often is eventually delivered. A Wedge config with a fire-and-forget variant must show the stall, so a green run is not vacuous.
+
+GH #136 may itself be a loss bug. Its safe-boundary recycle request was never consumed (`prior_request=unconsumed`, up to 22h old), which is what you'd see if a one-shot notification were dropped. I've told that subagent to check whether this is the cause. If it is, the fix should be a durable request that is re-read at every supervisor idle boundary or reconnect, consumed idempotently by request id, plus a Wedge config showing that the fire-and-forget version stalls under Drop.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 

@@ -5985,9 +5985,13 @@ struct SimWorld {
     ops_log: Vec<String>,
     next_prompt: usize,
     coverage: Coverage,
+    /// `#netadv4`: adversarial channel for cross-process messages. `None` is the
+    /// perfect `local` channel (every pre-existing scenario).
+    net: Option<net::SimWorldNet>,
 }
 
 mod engine;
+mod net;
 mod steering_delivery_model;
 
 #[derive(Debug)]
@@ -6478,6 +6482,27 @@ fn closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget() {
         coverage.sync_protected_expansions > 0 && coverage.sync_detachable_replacements > 0,
         "medium seed corpus must keep sync expansion/replacement coverage"
     );
+}
+
+#[test]
+#[ignore = "netadv4 exploration"]
+fn sim_net_explore_profiles() {
+    use agent_doc_sim_net::NetProfile;
+    for profile in NetProfile::ADVERSARIAL {
+        let run = net::run_net_corpus(profile, 0..512, &[0, 1, 2, 3], FAST_CORPUS_STEPS);
+        eprintln!("{}", run.summary(profile.name()));
+        for (seed, net_seed, failure) in run.failures.iter().take(5) {
+            eprintln!("FAILURE {profile} seed={seed} net_seed={net_seed}: {}", &failure[..failure.len().min(600)]);
+        }
+        let mut kinds = std::collections::BTreeMap::new();
+        for (seed, net_seed, finding) in &run.findings {
+            let entry = kinds.entry(finding.kind).or_insert((0, *seed, *net_seed, finding.detail.clone()));
+            entry.0 += 1;
+        }
+        for (kind, (count, seed, net_seed, detail)) in kinds {
+            eprintln!("FINDING {profile} {kind} count={count} first seed={seed} net_seed={net_seed}: {detail}");
+        }
+    }
 }
 
 #[test]

@@ -13,7 +13,16 @@ coder_zscaler + hostile across seeds, record failures (seed + minimal trace), ad
 make hook so `make check` runs a fixed seed set under coder_zscaler.
 
 ## Done
-1. Surveyed code (no edits yet).
+1. New pure crate `agent-doc-sim-net` (NetConditions, LatencyModel, NetProfile
+   local/coder_zscaler/hostile, SimNet<L,M> with Delivery::{AtLeastOnce,FireAndForget},
+   seeded splitmix RNG, trace). 7 unit tests green.
+2. `src/sim_world/net.rs`: SimLink classification, generation stamped at send,
+   Rpc mode (scripted tests, env `AGENT_DOC_SIM_NET_PROFILE`/`AGENT_DOC_SIM_NET_SEED`)
+   and Async mode (corpus, `run_seed_with_net`, `net::run_net_corpus`). Oracles:
+   stale level-update reorder, dispatch accepted on reordered stale lifecycle,
+   duplicate dispatch injected twice. Panic dumps net trace tail.
+3. `engine.rs`: `apply` -> net wrapper; `apply_local` = old body; generation reads
+   in networked arms go through `observed_generation()`; `new_local`.
 
 ## Remaining
 1. Add pure crate `agent-doc-sim-net` (publish=false, version = workspace version,
@@ -37,7 +46,24 @@ make hook so `make check` runs a fixed seed set under coder_zscaler.
 7. Commit; final report.
 
 ## Findings so far
-None yet.
+Corpus (FAST seeds 0..512 x net seeds 0..4, 24 steps): 0 structural failures in both
+profiles; closeout commits identical (272). Oracle findings:
+- F1 lifecycle reorder: `LifecycleRequest` (agent-doc-controller-io/src/project_controller.rs:8115)
+  and heartbeat carry `generation` only, no per-generation sequence -> older Ready/Busy/
+  WaitingInput applied after newer. coder_zscaler 144, hostile 670. Impact: dispatch
+  accepted while supervisor last reported busy (coder seed 204/net 0; hostile 7x).
+  Scripted: route_sim_repairs_stale_busy_projection_with_ready_prompt_then_dispatches
+  (hostile net seed 0) dispatches into Busy; accepted_stale_supervisor_replacement_timeout_preserves_mid_turn_session
+  (hostile 1) Busy straggler after Ready -> reexec never happens (liveness);
+  restart_supervisor_sim_refuses_alive_busy_without_force_then_force_kills (hostile 1)
+  pre-restart Busy straggler overwrites Starting (model restart keeps generation).
+- F2 queue-control reorder (pause/resume/drain), coder 32 / hostile 153.
+- F3 duplicate dispatch request injected twice after proof (no request id in
+  ControllerRequest): hostile seed 8 net_seed 1 (3x).
+- Counter-only (safe, idempotent outcome, exact-counter asserts trip): admin handoff/reap
+  dup -> extra stale block (coder 2, hostile 2/3/5); qflood coalesce counters; sync
+  tmuxbudget dup sync (coder 7); queue_controls dup resume; starting/busy dup dispatch blocks.
+
 
 ## Commands / status
 - `make check` not yet run.

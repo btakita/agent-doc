@@ -9509,6 +9509,21 @@ fn handle_editor_route_rpc(
             )
         })
         .unwrap_or_default();
+    // GH #136 follow-up (b): a controller that just took over (handoff or
+    // restart) has no retained layout, and a replayed `ensure` route used to
+    // "seed" from its own single column — an exact one-column publication
+    // that collapsed a live 2-pane layout to 1 (`merge=seeded
+    // retained_columns=0`, generation reset). With nothing retained, an
+    // `ensure` route merges over a POSITIVE live tmux observation of this
+    // project's documents instead; remembered columns still never seed
+    // desired intent.
+    let (retained_columns, retained_focus, live_basis_columns) = ensure_route_merge_basis(
+        layout_mode,
+        retained_columns,
+        retained_focus,
+        || observe_live_layout_documents(bootstrap, runtime, &layout_invocation),
+        &canonical,
+    );
     let (merged_columns, layout_merge, dropped_columns) = merge_editor_route_columns_within(
         layout_mode,
         &retained_columns,
@@ -9558,8 +9573,13 @@ fn handle_editor_route_rpc(
         bootstrap,
         runtime,
         layout_invocation,
-        PaneLayoutClaim::route(layout_mode.claim(), plane_basis)
-            .asserting(layout_merge.route_columns),
+        // A live tmux observation is a positive count of panes that exist: the
+        // route may keep them all (GH #136 follow-up b), never more.
+        PaneLayoutClaim::route(layout_mode.claim(), plane_basis).asserting(
+            layout_merge
+                .route_columns
+                .max(live_basis_columns.unwrap_or_default()),
+        ),
         route_deadline.saturating_duration_since(Instant::now()),
     )?;
     let (layout_receipt, layout_observations) = await_editor_route_layout_gates(
@@ -11250,6 +11270,136 @@ impl EnsureRouteWidening {
             Self::Allowed
         }
     }
+}
+
+/// GH #136 follow-up (b): the retained layout an `ensure` route merges over.
+///
+/// Pure but for the `observe_live` probe, which runs only when there is no
+/// retained layout (a fresh controller) and the route is `ensure`. The live
+/// documents become the merge BASIS only — never stored as desired intent
+/// before the route itself publishes, and never read from remembered
+/// columns. An `exact` route, a non-empty retained layout, or an empty or
+/// failed observation leaves the inputs unchanged.
+fn ensure_route_merge_basis(
+    mode: EditorRouteLayoutMode,
+    retained_columns: Vec<String>,
+    retained_focus: Option<String>,
+    observe_live: impl FnOnce() -> Option<Vec<String>>,
+    log_target: &Path,
+) -> (Vec<String>, Option<String>, Option<usize>) {
+    if mode != EditorRouteLayoutMode::Ensure || !retained_columns.is_empty() {
+        return (retained_columns, retained_focus, None);
+    }
+    let Some(live) = observe_live().filter(|live| !live.is_empty()) else {
+        return (retained_columns, retained_focus, None);
+    };
+    agent_doc_ops_log_io::log_op(
+        log_target,
+        &format!(
+            "controller_editor_route_merge_basis source=live_tmux_observation columns={} (GH #136)",
+            live.len()
+        ),
+    );
+    let width = live.len();
+    (live, None, Some(width))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test hook: the live tmux documents `observe_live_layout_documents`
+    /// reports (`None` = no observation).
+    static TEST_LIVE_LAYOUT_DOCUMENTS: std::cell::RefCell<Option<Vec<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// GH #136 follow-up (b): this project's documents visible in the layout's
+/// target window right now, left to right, one column each. `None` when tmux
+/// gives no positive observation. Another project's panes in a shared window
+/// are not ours to preserve and are left out.
+fn observe_live_layout_documents(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    route: &ControllerTmuxLayoutSyncInvocation,
+) -> Option<Vec<String>> {
+    #[cfg(test)]
+    {
+        let _ = (bootstrap, runtime, route);
+        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| documents.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        let report = tmux_layout_sync_state_for_invocation(
+            bootstrap,
+            runtime,
+            &ControllerTmuxLayoutSyncStateInvocation {
+                columns: route.columns.clone(),
+                window: route.window.clone(),
+                focus: None,
+            },
+        )
+        .ok()?;
+        if report.panes.is_empty() {
+            return None;
+        }
+        let project_root = bootstrap
+            .project_root
+            .canonicalize()
+            .unwrap_or_else(|_| bootstrap.project_root.clone());
+        let mut documents: Vec<String> = Vec::new();
+        for document in report.actual_documents {
+            let document = document.trim().to_string();
+            if document.is_empty()
+                || !Path::new(&document).starts_with(&project_root)
+                || documents.contains(&document)
+            {
+                continue;
+            }
+            documents.push(document);
+        }
+        Some(respell_live_documents_like_route(
+            &bootstrap.project_root,
+            &route.columns,
+            documents,
+        ))
+    }
+}
+
+/// GH #136 follow-up (b): the route merge compares documents by text, so
+/// express each canonical live document the way the route spells it — the
+/// route's own spelling when it names the same document, else root-relative
+/// when the route uses root-relative spellings.
+#[cfg_attr(test, allow(dead_code))]
+fn respell_live_documents_like_route(
+    project_root: &Path,
+    route_columns: &[String],
+    live: Vec<String>,
+) -> Vec<String> {
+    let route_documents: Vec<&str> = route_columns
+        .iter()
+        .flat_map(|column| column.split(','))
+        .map(str::trim)
+        .filter(|document| !document.is_empty())
+        .collect();
+    let route_is_relative = route_documents
+        .iter()
+        .any(|document| !Path::new(document).is_absolute());
+    let root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    live.into_iter()
+        .map(|document| {
+            if let Some(spelled) = route_documents
+                .iter()
+                .find(|candidate| canonical_layout_document_id(project_root, candidate) == document)
+            {
+                return spelled.to_string();
+            }
+            if route_is_relative && let Ok(relative) = Path::new(&document).strip_prefix(&root) {
+                return relative.to_string_lossy().to_string();
+            }
+            document
+        })
+        .collect()
 }
 
 /// [`merge_editor_route_columns`] with the arbitration inputs: `route_focus` is
@@ -30648,6 +30798,18 @@ mod tests {
             columns: &[&str],
             layout_mode: Option<&str>,
         ) -> Result<ControllerEditorRouteResult> {
+            self.route_on(self.runtime.as_ref(), focus, columns, layout_mode)
+        }
+
+        /// [`Self::route`] against another runtime on the same project — a
+        /// successor controller after a handoff or restart (GH #136 b).
+        fn route_on(
+            &self,
+            runtime: &ControllerRuntime,
+            focus: &str,
+            columns: &[&str],
+            layout_mode: Option<&str>,
+        ) -> Result<ControllerEditorRouteResult> {
             let mut layout_args = Vec::new();
             for column in columns {
                 layout_args.push("--col".to_string());
@@ -30679,7 +30841,7 @@ mod tests {
                 command_kind: None,
                 diagnostic_payload: Some(payload.to_string()),
             };
-            handle_editor_route_rpc(&self.bootstrap, self.runtime.as_ref(), request)
+            handle_editor_route_rpc(&self.bootstrap, runtime, request)
         }
 
         fn desired_columns(&self) -> Vec<String> {
@@ -30965,6 +31127,150 @@ mod tests {
                 "pane_layout_publication_widened publisher=plugin_publication authority=editor_split_observation columns=3 observed_panes=2 observed_bound=2"
             ),
             "{ops}"
+        );
+    }
+
+    /// GH #136 follow-up (b): the `1061.md` collapse. A Run Agent Doc route
+    /// (`attempt_id=1791171607716-3`) was logged twice: the controller handed
+    /// off mid-route and the same command was replayed onto the successor,
+    /// whose layout graph starts empty (generation 6 -> 1). The `ensure` route
+    /// "seeded" from its own single column (`merge=seeded retained_columns=0`)
+    /// and published an exact one-column layout over a live two-pane window.
+    ///
+    /// Driven over the `coder_zscaler` network profile with at-least-once
+    /// delivery, so the replay arrives late, duplicated, and reordered against
+    /// the handoff. Whatever the schedule, every copy that reaches the
+    /// successor keeps both live columns: it merges over the positive live tmux
+    /// observation, never over nothing.
+    #[test]
+    fn gh136b_a_route_replayed_onto_a_successor_never_collapses_the_live_layout() {
+        use agent_doc_sim_net::{Delivery, NetEvent, NetProfile, SimNet};
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        enum Link {
+            EditorToController,
+        }
+
+        struct LiveLayoutGuard;
+        impl Drop for LiveLayoutGuard {
+            fn drop(&mut self) {
+                TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| *documents.borrow_mut() = None);
+            }
+        }
+        let _guard = LiveLayoutGuard;
+
+        let mut copies_seen = 0usize;
+        let mut duplicated_schedules = 0usize;
+        for seed in 0..48u64 {
+            let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+            fixture
+                .route("alpha", &["alpha", "beta"], Some("exact"))
+                .unwrap();
+            let both = vec![fixture.id("alpha"), fixture.id("beta")];
+            assert_eq!(fixture.desired_columns(), both);
+
+            // Handoff: a successor with an empty layout graph; tmux still
+            // shows both panes.
+            let successor = test_controller_runtime(&fixture.bootstrap);
+            assert!(successor.pane_layout_desired().is_none());
+            TEST_LIVE_LAYOUT_DOCUMENTS
+                .with(|documents| *documents.borrow_mut() = Some(both.clone()));
+
+            let mut net: SimNet<Link, &'static str> =
+                SimNet::for_profile(NetProfile::CoderZscaler, seed, Delivery::AtLeastOnce);
+            net.send(Link::EditorToController, "beta");
+            net.send(Link::EditorToController, "alpha");
+            net.send(Link::EditorToController, "beta");
+            let mut delivered = 0usize;
+            for event in net.drain() {
+                let NetEvent::Deliver { msg, copy, .. } = event else {
+                    continue;
+                };
+                delivered += 1;
+                if copy > 0 {
+                    duplicated_schedules += 1;
+                }
+                let routed = fixture
+                    .route_on(successor.as_ref(), msg, &[msg], Some("ensure"))
+                    .unwrap();
+                assert_eq!(routed.exit_code, 0, "seed={seed}");
+                let desired = successor.pane_layout_desired().unwrap();
+                assert_eq!(
+                    desired.invocation.columns, both,
+                    "seed={seed}: a replayed ensure route must not collapse the live layout"
+                );
+                assert_eq!(
+                    desired.invocation.focus,
+                    Some(fixture.id(msg)),
+                    "seed={seed}"
+                );
+            }
+            assert!(
+                delivered >= 3,
+                "seed={seed}: at-least-once delivers every route"
+            );
+            copies_seen += delivered;
+            let ops = fixture.ops_log();
+            assert!(!ops.contains("merge=seeded"), "seed={seed}: {ops}");
+            assert!(
+                !ops.contains("pane_layout_projection_narrowed"),
+                "seed={seed}: {ops}"
+            );
+            assert!(
+                ops.contains(
+                    "controller_editor_route_merge_basis source=live_tmux_observation columns=2"
+                ),
+                "seed={seed}: {ops}"
+            );
+        }
+        assert!(copies_seen >= 48 * 3);
+        assert!(
+            duplicated_schedules > 0,
+            "the coder_zscaler schedules must exercise duplicate delivery"
+        );
+
+        // Without a positive tmux observation the route still seeds from its
+        // own column: nothing remembered is promoted to live intent.
+        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| *documents.borrow_mut() = None);
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+        let successor = test_controller_runtime(&fixture.bootstrap);
+        fixture
+            .route_on(successor.as_ref(), "beta", &["beta"], Some("ensure"))
+            .unwrap();
+        assert_eq!(
+            successor.pane_layout_desired().unwrap().invocation.columns,
+            vec![fixture.id("beta")]
+        );
+        assert!(fixture.ops_log().contains("merge=seeded"));
+    }
+
+    #[test]
+    fn gh136b_live_documents_take_the_route_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        for name in ["a.md", "b.md", "c.md"] {
+            std::fs::write(dir.path().join("tasks").join(name), "# x\n").unwrap();
+        }
+        let root = dir.path().canonicalize().unwrap();
+        let live = |name: &str| root.join("tasks").join(name).display().to_string();
+        // A root-relative route: its own document keeps its spelling, the
+        // other live documents become root-relative too.
+        assert_eq!(
+            respell_live_documents_like_route(
+                dir.path(),
+                &["tasks/b.md".to_string()],
+                vec![live("a.md"), live("b.md")],
+            ),
+            vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()]
+        );
+        // An absolute route keeps canonical absolute spellings.
+        assert_eq!(
+            respell_live_documents_like_route(
+                dir.path(),
+                &[live("c.md")],
+                vec![live("a.md"), live("c.md")],
+            ),
+            vec![live("a.md"), live("c.md")]
         );
     }
 

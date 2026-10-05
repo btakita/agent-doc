@@ -482,6 +482,28 @@ pub fn last_editor_text_for_base(doc: &Path, base_text: &str) -> Result<Option<S
     ))
 }
 
+/// `#unstrikelost`: queue items struck in `base_text` that the operator's OWN
+/// captured editor ops un-struck, keyed for
+/// [`agent_doc_merge::crdt::with_operator_rearmed_queue_items`].
+///
+/// The active epoch is preferred; the newest retained checkpoint covers an epoch
+/// a non-operator projection already closed. Ops captured against any other base
+/// are not evidence, so the set is empty and the merge keeps the
+/// anti-resurrection `Live < Struck` join.
+pub fn operator_rearmed_queue_item_keys(
+    doc: &Path,
+    base_text: &str,
+) -> std::collections::HashSet<String> {
+    let operator_cut = editor_ops_for_base(doc, base_text)
+        .ok()
+        .flatten()
+        .and_then(|ops| agent_doc_merge::crdt::replay_editor_ops(base_text, &ops))
+        .or_else(|| last_editor_text_for_base(doc, base_text).ok().flatten());
+    operator_cut
+        .map(|cut| agent_doc_merge::crdt::operator_rearmed_queue_item_keys(base_text, &cut))
+        .unwrap_or_default()
+}
+
 /// Clear the active Lazily op-capture epoch. Idempotent at the public boundary:
 /// clearing an absent epoch succeeds while retaining a monotonic clear marker.
 pub fn clear_op_capture(doc: &Path) -> Result<()> {

@@ -1601,6 +1601,143 @@ pub(crate) fn queue_instruction_text(text: &str) -> String {
         .join("\n")
 }
 
+thread_local! {
+    /// `#unstrikelost`: queue items the operator's own captured editor ops
+    /// re-armed for the merge running on this thread (see
+    /// [`with_operator_rearmed_queue_items`]). Empty outside such a scope.
+    static OPERATOR_REARMED_QUEUE_ITEMS: RefCell<std::collections::HashSet<String>> =
+        RefCell::new(std::collections::HashSet::new());
+}
+
+/// Run `f` with `keys` as the operator re-arm evidence consulted by the per-item
+/// queue lifecycle join (`#unstrikelost`). The previous evidence is restored on
+/// return (and on unwind), so scopes nest and never leak into unrelated merges.
+pub fn with_operator_rearmed_queue_items<R>(
+    keys: std::collections::HashSet<String>,
+    f: impl FnOnce() -> R,
+) -> R {
+    struct Restore(Option<std::collections::HashSet<String>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            if let Some(previous) = self.0.take() {
+                OPERATOR_REARMED_QUEUE_ITEMS.with(|cell| *cell.borrow_mut() = previous);
+            }
+        }
+    }
+    let previous = OPERATOR_REARMED_QUEUE_ITEMS.with(|cell| cell.replace(keys));
+    let _restore = Restore(Some(previous));
+    f()
+}
+
+/// [`merge_by_component`] with operator re-arm evidence (`#unstrikelost`); see
+/// [`operator_rearmed_queue_item_keys`].
+pub fn merge_by_component_with_operator_rearmed(
+    base_state: Option<&[u8]>,
+    ours_text: &str,
+    theirs_text: &str,
+    operator_rearmed: std::collections::HashSet<String>,
+) -> Result<String> {
+    with_operator_rearmed_queue_items(operator_rearmed, || {
+        merge_by_component(base_state, ours_text, theirs_text)
+    })
+}
+
+/// Queue bodies (`<!-- agent:queue ... -->` .. `<!-- /agent:queue -->`) in order.
+fn queue_component_bodies(text: &str) -> Vec<&str> {
+    let mut bodies = Vec::new();
+    let mut rest = text;
+    let mut offset = 0usize;
+    while let Some(open) = rest.find("<!-- agent:queue") {
+        let after_open = &rest[open..];
+        let Some(open_end) = after_open.find("-->") else {
+            break;
+        };
+        let body_start = offset + open + open_end + "-->".len();
+        let Some(close) = text[body_start..].find("<!-- /agent:queue -->") else {
+            break;
+        };
+        bodies.push(&text[body_start..body_start + close]);
+        offset = body_start + close + "<!-- /agent:queue -->".len();
+        rest = &text[offset..];
+    }
+    bodies
+}
+
+/// `#unstrikelost`: queue items struck in `base_text` that are live in
+/// `operator_cut`, keyed by [`queue_instruction_text`].
+///
+/// `operator_cut` must be the replay of the operator's OWN captured editor ops
+/// onto `base_text` (`replay_editor_ops`), never an observed editor buffer: a
+/// stale buffer flush is not an operator op, so it can never appear here and
+/// still loses to the struck side (`#qeditdupguard`).
+pub fn operator_rearmed_queue_item_keys(
+    base_text: &str,
+    operator_cut: &str,
+) -> std::collections::HashSet<String> {
+    use agent_doc_element_queue::QueueItemLifecycle;
+    let base_struck: std::collections::HashMap<String, String> = queue_component_bodies(base_text)
+        .into_iter()
+        .filter_map(split_list_children)
+        .flatten()
+        .filter(|child| {
+            child.key != PREAMBLE_KEY
+                && QueueItemLifecycle::classify(&child.text) == QueueItemLifecycle::Struck
+        })
+        .map(|child| (child.key.clone(), queue_instruction_text(&child.text)))
+        .collect();
+    queue_component_bodies(operator_cut)
+        .into_iter()
+        .filter_map(split_list_children)
+        .flatten()
+        .filter(|child| {
+            child.key != PREAMBLE_KEY
+                && QueueItemLifecycle::classify(&child.text) == QueueItemLifecycle::Live
+        })
+        .filter_map(|child| {
+            let instruction = queue_instruction_text(&child.text);
+            base_struck
+                .get(&child.key)
+                .filter(|base_instruction| **base_instruction == instruction)
+                .map(|_| instruction)
+        })
+        .collect()
+}
+
+/// `#unstrikelost`: the operator re-arm override of the `Live < Struck` join.
+///
+/// Returns the live side's text when the base holds the item struck, the struck
+/// side is still that same instruction (it did not re-answer a revised head),
+/// and the live side is an item the operator's own ops un-struck in this merge's
+/// evidence scope. `None` keeps the anti-resurrection join.
+pub(crate) fn operator_rearm_override(
+    ours: &str,
+    theirs: &str,
+    base: Option<&str>,
+) -> Option<String> {
+    use agent_doc_element_queue::QueueItemLifecycle;
+    let base = base?;
+    if QueueItemLifecycle::classify(base) != QueueItemLifecycle::Struck {
+        return None;
+    }
+    let (live, struck) = match (
+        QueueItemLifecycle::classify(ours),
+        QueueItemLifecycle::classify(theirs),
+    ) {
+        (QueueItemLifecycle::Live, QueueItemLifecycle::Struck) => (ours, theirs),
+        (QueueItemLifecycle::Struck, QueueItemLifecycle::Live) => (theirs, ours),
+        _ => return None,
+    };
+    let instruction = queue_instruction_text(live);
+    if queue_instruction_text(struck) != queue_instruction_text(base)
+        || instruction != queue_instruction_text(base)
+    {
+        return None;
+    }
+    OPERATOR_REARMED_QUEUE_ITEMS
+        .with(|cell| cell.borrow().contains(&instruction))
+        .then(|| live.to_string())
+}
+
 /// Reconcile a matched-but-different list item through the per-item lifecycle
 /// lattice (`#queuestatemachine2`/`#qheadresidue`).
 ///
@@ -1629,6 +1766,13 @@ fn reconcile_list_item_lifecycle(
             .unwrap_or_else(|_| ours.text.clone());
     }
 
+    // `#unstrikelost`: an operator un-strike proven by the operator's own ops
+    // is a re-arm, not a stale re-emit, and outranks the unchanged struck side.
+    if let Some(rearmed) =
+        operator_rearm_override(&ours.text, &theirs.text, base.map(|b| b.text.as_str()))
+    {
+        return rearmed;
+    }
     let ours_state = QueueItemLifecycle::classify(&ours.text);
     let theirs_state = QueueItemLifecycle::classify(&theirs.text);
     let joined = ours_state.join(theirs_state);
@@ -4893,6 +5037,75 @@ Second answer line three.
     /// Free-text variant of the resurrection: same residue shape, but the head is
     /// an operator free-text line (no `#id`), so the fix must also reconcile
     /// free-text identities (`#qdedupsync` was free-text-blind).
+    /// `#unstrikelost`: with operator op evidence (the operator's own ops replay
+    /// from base to a live copy) the un-strike is a re-arm and survives the
+    /// response-writing side's unchanged struck copy. The evidence is scoped:
+    /// the same merge outside the scope keeps the stale-unstrike guard.
+    #[test]
+    fn merge_by_component_operator_rearmed_unstrike_survives_struck_agent_side() {
+        let base = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#open]\n- ~~release + publish~~\n<!-- /agent:queue -->\n";
+        let ours = "<!-- agent:exchange -->\n### Re: x\nbody\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- ~~do [#open]~~\n- ~~release + publish~~\n<!-- /agent:queue -->\n";
+        let theirs = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#open]\n- release + publish\n<!-- /agent:queue -->\n";
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let keys = operator_rearmed_queue_item_keys(base, theirs);
+        assert_eq!(keys.len(), 1, "{keys:?}");
+
+        let merged =
+            merge_by_component_with_operator_rearmed(Some(&base_state), ours, theirs, keys)
+                .unwrap();
+        assert!(merged.contains("- release + publish\n"), "{merged}");
+        assert!(!merged.contains("~~release + publish~~"), "{merged}");
+        assert!(merged.contains("~~do [#open]~~"), "{merged}");
+        assert!(merged.contains("body"), "{merged}");
+
+        let unscoped = merge_by_component(Some(&base_state), ours, theirs).unwrap();
+        assert!(
+            unscoped.contains("~~release + publish~~"),
+            "evidence must not leak past its scope:\n{unscoped}"
+        );
+    }
+
+    /// Operator evidence never covers an item the operator left struck, nor a
+    /// head whose struck side carries a revised instruction.
+    #[test]
+    fn operator_rearm_override_requires_matching_unstrike_evidence() {
+        let base = "<!-- agent:queue -->\n- ~~release + publish~~\n<!-- /agent:queue -->\n";
+        assert!(operator_rearmed_queue_item_keys(base, base).is_empty());
+        let keys = operator_rearmed_queue_item_keys(
+            base,
+            "<!-- agent:queue -->\n- release + publish\n<!-- /agent:queue -->\n",
+        );
+        with_operator_rearmed_queue_items(keys, || {
+            assert_eq!(
+                operator_rearm_override(
+                    "- ~~release + publish~~\n",
+                    "- release + publish\n",
+                    Some("- ~~release + publish~~\n"),
+                )
+                .as_deref(),
+                Some("- release + publish\n")
+            );
+            assert_eq!(
+                operator_rearm_override(
+                    "- ~~release + publish v2~~\n",
+                    "- release + publish\n",
+                    Some("- ~~release + publish~~\n"),
+                ),
+                None,
+                "a revised struck instruction is not the re-armed head"
+            );
+            assert_eq!(
+                operator_rearm_override(
+                    "- ~~release + publish~~\n",
+                    "- release + publish\n",
+                    Some("- release + publish\n"),
+                ),
+                None,
+                "a base-live head is a fresh strike, not an operator re-arm"
+            );
+        });
+    }
+
     #[test]
     fn merge_by_component_struck_free_text_head_not_resurrected_by_stale_unstrike() {
         let base = "<!-- agent:queue -->\n- ~~Still getting JB File Cache Conflict dialogs.~~\n<!-- /agent:queue -->\n";

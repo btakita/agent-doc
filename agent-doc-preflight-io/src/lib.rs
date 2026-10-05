@@ -6009,10 +6009,15 @@ fn rebase_queue_maintenance_target(
         return Ok(content.to_string());
     }
     let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(expected_current).encode_state();
-    let rebased = agent_doc_merge::crdt::merge_by_component(Some(&base_state), content, current)
-        .with_context(|| {
-            format!("{source}: failed to rebase queue maintenance over the live Lazily head")
-        })?;
+    let rebased = agent_doc_merge::crdt::merge_by_component_with_operator_rearmed(
+        Some(&base_state),
+        content,
+        current,
+        agent_doc_op_capture_io::operator_rearmed_queue_item_keys(file, expected_current),
+    )
+    .with_context(|| {
+        format!("{source}: failed to rebase queue maintenance over the live Lazily head")
+    })?;
     let rebased =
         reproject_marker_only_queue_over_live_head(expected_current, content, current, &rebased)?;
     agent_doc_ops_log_io::log_op(

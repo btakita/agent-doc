@@ -2369,6 +2369,7 @@ pub fn settle_retained_non_capture_projection_through_authority(
     }
     if let Some(semantic_base) = semantic_response_base {
         let rebased = rebase_agent_candidate_over_editor_cut(
+            path,
             semantic_base,
             &pending.target_content,
             &canonical,
@@ -3544,6 +3545,7 @@ pub fn apply_canonical_replace_if_attached(
                                 true,
                             );
                             let settled_target = rebase_agent_candidate_over_editor_cut(
+                                file,
                                 expected_current,
                                 content,
                                 &editor_cut,
@@ -3618,6 +3620,7 @@ pub fn apply_canonical_replace_if_attached(
                                 agent_projection_may_be_visible,
                             );
                             let merged = rebase_agent_candidate_over_editor_cut(
+file,
                         expected_current,
                         content,
                         &editor_cut,
@@ -3991,12 +3994,26 @@ fn agent_projection_integrity_valid(content: &str) -> bool {
 /// once that response is already present, the live cut wins byte-for-byte; if
 /// it is still missing, append only that response cell. Other candidates keep
 /// the existing component-aware three-way merge.
+///
+/// `#unstrikelost`: the merge runs inside the operator re-arm evidence scope
+/// recovered from `file`'s captured editor ops against `merge_base`, so an
+/// operator un-strike of a struck head survives a concurrent response write.
 fn rebase_agent_candidate_over_editor_cut(
+    file: &Path,
     merge_base: &str,
     agent_target: &str,
     editor_cut: &str,
 ) -> Result<String> {
-    write_policy::rebase_agent_candidate_over_editor_cut(merge_base, agent_target, editor_cut)
+    agent_doc_merge::crdt::with_operator_rearmed_queue_items(
+        agent_doc_op_capture_io::operator_rearmed_queue_item_keys(file, merge_base),
+        || {
+            write_policy::rebase_agent_candidate_over_editor_cut(
+                merge_base,
+                agent_target,
+                editor_cut,
+            )
+        },
+    )
 }
 
 /// Remove the earlier of exactly two standalone boundary markers inside the
@@ -4156,7 +4173,7 @@ fn recover_concatenated_document_generations(
     }
     let editor_cut =
         editor_operator_cut_for_agent_rebase(file, expected, editor_generation, source, false);
-    let merged = rebase_agent_candidate_over_editor_cut(expected, target, &editor_cut)?;
+    let merged = rebase_agent_candidate_over_editor_cut(file, expected, target, &editor_cut)?;
     let canonical = canonicalize_and_validate_agent_rebase(&merged, target, file, source)?;
     Ok((canonical != content).then_some(canonical))
 }
@@ -4993,6 +5010,7 @@ fn ensure_deferred_document_write_intent_with_mode(
                 // newest complete editor cut. Raw component CRDT composition can
                 // splice the old partial queue line into the new full line.
                 target_content = rebase_agent_candidate_over_editor_cut(
+                    file,
                     &merge_base,
                     &pending.target_content,
                     content,
@@ -5046,10 +5064,11 @@ fn ensure_deferred_document_write_intent_with_mode(
                 };
                 let base_state =
                     agent_doc_merge::crdt::CrdtDoc::from_text(&merge_base).encode_state();
-                target_content = agent_doc_merge::crdt::merge_by_component(
+                target_content = agent_doc_merge::crdt::merge_by_component_with_operator_rearmed(
                     Some(&base_state),
                     &pending.target_content,
                     content,
+                    agent_doc_op_capture_io::operator_rearmed_queue_item_keys(file, &merge_base),
                 )
                 .with_context(|| {
                     format!(
@@ -5321,15 +5340,19 @@ pub fn deferred_document_write_reconnect_content(
         // cut. In particular, a retained response may append only its response
         // cell; replaying its stale whole-document target can resurrect queue
         // or backlog lines the operator deleted while the ACK was pending.
-        merged =
-            rebase_agent_candidate_over_editor_cut(&merge_base, &intent.target_content, &merged)
-                .with_context(|| {
-                    format!(
-                        "failed to replay deferred agent change {} over editor content for {}",
-                        intent.intent_id,
-                        file.display()
-                    )
-                })?;
+        merged = rebase_agent_candidate_over_editor_cut(
+            file,
+            &merge_base,
+            &intent.target_content,
+            &merged,
+        )
+        .with_context(|| {
+            format!(
+                "failed to replay deferred agent change {} over editor content for {}",
+                intent.intent_id,
+                file.display()
+            )
+        })?;
         merged = agent_doc_merge::response_cell::deduplicate_response_cells(&merged)
             .ok()
             .flatten()
@@ -6763,8 +6786,14 @@ mod retained_refusal_token_tests {
             !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&rejected),
             "an endpoint that answered NO is not a converging replica: {rejected}"
         );
-        assert!(rejected.contains("REJECTED the delivery receipt"), "{rejected}");
-        assert!(rejected.contains("restart or reload the editor"), "{rejected}");
+        assert!(
+            rejected.contains("REJECTED the delivery receipt"),
+            "{rejected}"
+        );
+        assert!(
+            rejected.contains("restart or reload the editor"),
+            "{rejected}"
+        );
         assert!(
             !rejected.contains("deferral, not a lost response")
                 && !rejected.contains("`admin recycle`, or `admin reload-lib`"),
@@ -10115,6 +10144,72 @@ mod tests {
         (dir, file, canonical)
     }
 
+    /// `#unstrikelost`: the operator un-strikes a struck free-text queue head
+    /// while a cycle is closing out. The cycle's response cell has already
+    /// landed; its closeout write then consumes only the head the response
+    /// quoted (`do [#stillopen]`). That tracked-work write is rebased over the
+    /// operator's editor cut, and must keep the operator's re-arm of the
+    /// unquoted `release + publish` live. Without operator op evidence the same
+    /// live copy is a stale editor re-emit and the `Live < Struck` join still
+    /// re-strikes it.
+    #[test]
+    fn unstrike_then_response_writing_closeout_without_quote_keeps_head_live() {
+        let base = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#stillopen]\n",
+            "- ~~release + publish~~\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\n> **Queue prompt:** release + publish\n\nReleased.\n",
+            "### Re: dispatch\n\n> **Queue prompt:** do [#stillopen]\n\nDispatched to a subagent.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let agent_target = base.replacen("- do [#stillopen]\n", "- ~~do [#stillopen]~~\n", 1);
+        let editor_cut = base.replacen("~~release + publish~~", "release + publish", 1);
+        let assert_queue = |merged: &str, live: bool| {
+            assert!(merged.contains("- ~~do [#stillopen]~~\n"), "{merged}");
+            assert_eq!(
+                merged.contains("- release + publish\n"),
+                live,
+                "release + publish live={live} expected:\n{merged}"
+            );
+            assert_eq!(merged.contains("~~release + publish~~"), !live, "{merged}");
+        };
+
+        // No operator op evidence: stale-buffer anti-resurrection still wins.
+        let (_stale_dir, stale_file, _) = temp_doc(base);
+        let stale =
+            rebase_agent_candidate_over_editor_cut(&stale_file, base, &agent_target, &editor_cut)
+                .unwrap();
+        assert_queue(&stale, false);
+
+        // The operator's own keystrokes delete both `~~` pairs.
+        let (_dir, file, _) = temp_doc(base);
+        let struck_at = base.find("~~release + publish~~").unwrap();
+        let close_at = struck_at + "~~release + publish".len();
+        agent_doc_op_capture_io::record_editor_ops(
+            &file,
+            &agent_doc_hash::content_hash(base),
+            vec![
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: close_at,
+                    len: 2,
+                },
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset: struck_at,
+                    len: 2,
+                },
+            ],
+        )
+        .unwrap();
+        let merged =
+            rebase_agent_candidate_over_editor_cut(&file, base, &agent_target, &editor_cut)
+                .unwrap();
+        assert_queue(&merged, true);
+    }
+
     #[test]
     fn invalid_agent_projection_reconstructs_operator_cut_from_durable_ops() {
         let base = concat!(
@@ -10238,8 +10333,9 @@ mod tests {
                 .any(|line| line == "- Does the API return")
         );
 
-        let merged = rebase_agent_candidate_over_editor_cut(base, &agent_target, &recovered)
-            .expect("agent response should rebase over the replayed operator cut");
+        let merged =
+            write_policy::rebase_agent_candidate_over_editor_cut(base, &agent_target, &recovered)
+                .expect("agent response should rebase over the replayed operator cut");
         assert_eq!(merged.matches(full_prompt.trim_end()).count(), 1);
         assert!(!merged.lines().any(|line| line == "- Does the API return"));
         assert!(
@@ -10283,8 +10379,9 @@ mod tests {
                 .any(|line| line == partial_prompt.trim_end())
         );
 
-        let merged = rebase_agent_candidate_over_editor_cut(base, &agent_target, &collapsed)
-            .expect("the agent response should rebase over the completed queue edit");
+        let merged =
+            write_policy::rebase_agent_candidate_over_editor_cut(base, &agent_target, &collapsed)
+                .expect("the agent response should rebase over the completed queue edit");
         assert_eq!(merged.matches(complete_prompt.trim_end()).count(), 1);
         assert!(!merged.lines().any(|line| line == partial_prompt.trim_end()));
         assert!(merged.contains("### Re: current"));
@@ -11695,8 +11792,12 @@ mod tests {
             .replace("- [ ] [#haivenapply] apply\n", "")
             .replace("- [ ] [#haivenprofiles] profiles\n", "");
 
-        let rebased =
-            rebase_agent_candidate_over_editor_cut(baseline, &agent_target, &editor_cut).unwrap();
+        let rebased = write_policy::rebase_agent_candidate_over_editor_cut(
+            baseline,
+            &agent_target,
+            &editor_cut,
+        )
+        .unwrap();
 
         assert!(rebased.contains("### Re: Compare the profiles."));
         assert!(rebased.contains("❯ Implement gRPC batching."));
@@ -11744,8 +11845,12 @@ mod tests {
             .replace("- [ ] [#haivenapply] apply\n", "")
             .replace("- [ ] [#haivenprofiles] profiles\n", "");
 
-        let rebased =
-            rebase_agent_candidate_over_editor_cut(baseline, &agent_target, &editor_cut).unwrap();
+        let rebased = write_policy::rebase_agent_candidate_over_editor_cut(
+            baseline,
+            &agent_target,
+            &editor_cut,
+        )
+        .unwrap();
 
         assert_eq!(
             rebased.matches(live_prompt).count(),
@@ -11779,7 +11884,8 @@ mod tests {
             .replace("❯ Question.\n", "❯ Question.\n❯ New prompt.\n")
             .replace("- do [#deleted]\n", "");
 
-        let rebased = rebase_agent_candidate_over_editor_cut(baseline, &target, &live).unwrap();
+        let rebased =
+            write_policy::rebase_agent_candidate_over_editor_cut(baseline, &target, &live).unwrap();
 
         assert_eq!(rebased, live);
     }
@@ -11920,9 +12026,12 @@ mod tests {
                         );
                     }
 
-                    let rebased =
-                        rebase_agent_candidate_over_editor_cut(baseline, &target, &editor_cut)
-                            .unwrap();
+                    let rebased = write_policy::rebase_agent_candidate_over_editor_cut(
+                        baseline,
+                        &target,
+                        &editor_cut,
+                    )
+                    .unwrap();
                     assert_eq!(rebased.matches("### Re: Original prompt.").count(), 1);
                     assert_eq!(rebased.matches("agent:boundary:").count(), 1);
                     assert_eq!(
@@ -12149,7 +12258,12 @@ mod tests {
     fn repair_rolled_forward_over_concurrent_operator_edit_settles_to_the_rebased_cut() {
         let (pre_repair, repair_target, rebased) = repair_rebase_fixture();
         assert_eq!(
-            rebase_agent_candidate_over_editor_cut(&pre_repair, &repair_target, &rebased).unwrap(),
+            write_policy::rebase_agent_candidate_over_editor_cut(
+                &pre_repair,
+                &repair_target,
+                &rebased
+            )
+            .unwrap(),
             rebased,
             "fixture precondition: the controller's rebase yields exactly this cut",
         );

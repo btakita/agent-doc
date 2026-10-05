@@ -4297,3 +4297,87 @@ fn init_then_first_write_commit_commits_with_a_lintable_boundary() {
         "the first write --commit must add a closeout commit"
     );
 }
+
+/// `#unstrikelost`: the operator un-strikes a struck free-text queue head while a
+/// cycle is writing its response. The response neither quotes nor answers the
+/// head, so the closeout must keep the operator's re-arm live in both the
+/// materialized document and the commit.
+fn unstrike_then_response_closeout_case(disk_holds_operator_cut: bool) {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let base = concat!(
+        "---\n",
+        "agent_doc_session: test-session\n",
+        "agent_doc_format: template\n",
+        "agent_doc_write: crdt\n",
+        "agent: codex\n",
+        "model: gpt-5\n",
+        "---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Dispatch the open heads\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#stillopen]\n",
+        "- ~~release + publish~~\n",
+        "<!-- /agent:queue -->\n",
+    );
+    fs::write(&doc, base).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), base);
+    let struck_at = base.find("~~release + publish~~").unwrap();
+    let close_at = struck_at + "~~release + publish".len();
+    agent_doc_op_capture_io::record_editor_ops(
+        &doc,
+        &content_hash(base),
+        vec![
+            agent_doc_merge::crdt::EditorOp::Delete {
+                offset: close_at,
+                len: 2,
+            },
+            agent_doc_merge::crdt::EditorOp::Delete {
+                offset: struck_at,
+                len: 2,
+            },
+        ],
+    )
+    .unwrap();
+    if disk_holds_operator_cut {
+        fs::write(
+            &doc,
+            base.replace("~~release + publish~~", "release + publish"),
+        )
+        .unwrap();
+    }
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap(), "--stream"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: dispatch — gpt-5\n\n> **Queue prompt:** do [#stillopen]\n\nDispatched to a subagent.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let head = head_blob(tmp.path());
+    for (label, materialized) in [("document", &content), ("HEAD", &head)] {
+        assert!(materialized.contains("Dispatched to a subagent."), "{label}:\n{materialized}");
+        assert!(
+            materialized.contains("- release + publish\n")
+                && !materialized.contains("~~release + publish~~"),
+            "{label} re-struck the operator's unstrike:\n{materialized}"
+        );
+    }
+}
+
+#[test]
+fn unstrike_then_response_closeout_without_quote_keeps_head_live_editor_absent() {
+    unstrike_then_response_closeout_case(false);
+}
+
+#[test]
+fn unstrike_then_response_closeout_without_quote_keeps_head_live_operator_saved() {
+    unstrike_then_response_closeout_case(true);
+}

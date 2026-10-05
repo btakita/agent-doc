@@ -6323,6 +6323,31 @@ fn retained_transition_matches_intent(
             .eq_ignore_ascii_case(&transition.projected_target_hash)
 }
 
+/// `#unstrikelost`: operator re-arm evidence from the document projection's
+/// captured editor-op epochs (active first, then the newest retained one). Only
+/// an epoch captured against exactly `base_content` is evidence; its ops replay
+/// to the operator's own cut, never to a stale editor buffer.
+fn operator_rearmed_queue_item_keys_from_projection(
+    projection: &agent_doc_state_backbone::DocumentStateProjection,
+    base_content: &str,
+) -> std::collections::HashSet<String> {
+    let base_hash = agent_doc_hash::content_hash(base_content);
+    [
+        projection.document.editor_op_capture.as_ref(),
+        projection.document.last_editor_op_capture.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|capture| capture.base_hash == base_hash)
+    .filter_map(|capture| {
+        serde_json::from_str::<Vec<agent_doc_merge::crdt::EditorOp>>(&capture.ops_json).ok()
+    })
+    .filter(|ops| !ops.is_empty())
+    .find_map(|ops| agent_doc_merge::crdt::replay_editor_ops(base_content, &ops))
+    .map(|cut| agent_doc_merge::crdt::operator_rearmed_queue_item_keys(base_content, &cut))
+    .unwrap_or_default()
+}
+
 fn retained_transition_state(
     projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
     delivery: Option<&RetainedDeliveryObservation>,
@@ -6501,10 +6526,15 @@ fn retained_transition_state(
     let mut rebased = match compact_rebased.flatten() {
         Some(rebased) => rebased,
         None => {
-            match agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
-                base_content,
-                &intent.target_content,
-                delivery.content.as_ref(),
+            match agent_doc_merge::crdt::with_operator_rearmed_queue_items(
+                operator_rearmed_queue_item_keys_from_projection(projection, base_content),
+                || {
+                    agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+                        base_content,
+                        &intent.target_content,
+                        delivery.content.as_ref(),
+                    )
+                },
             ) {
                 Ok(rebased) => rebased,
                 Err(_) => {

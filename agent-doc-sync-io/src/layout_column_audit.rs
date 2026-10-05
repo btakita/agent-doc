@@ -1630,7 +1630,7 @@ mod tests {
             dotted.display().to_string(),
         ];
         assert_eq!(
-            col_args_without(&col_args, &[a.clone()]),
+            col_args_without(&col_args, std::slice::from_ref(&a)),
             vec![b.display().to_string()]
         );
         assert_eq!(col_args_without(&col_args, &[]), col_args);

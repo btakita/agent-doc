@@ -91,8 +91,7 @@ pub fn queue_head_annotation(head: &str) -> Option<QueueHeadAnnotation> {
         ids.push(id.to_ascii_lowercase());
         // A following id token must be whitespace-separated (`do [#a] [#b]`).
         let trimmed = after.trim_start();
-        if trimmed.len() != after.len() && (trimmed.starts_with("[#") || trimmed.starts_with('#'))
-        {
+        if trimmed.len() != after.len() && (trimmed.starts_with("[#") || trimmed.starts_with('#')) {
             rest = trimmed;
             continue;
         }
@@ -155,7 +154,10 @@ pub fn live_queue_head_annotations(content: &str) -> anyhow::Result<Vec<QueueHea
 }
 
 /// True when `annotation` names one of `completion_ids`.
-pub fn annotation_completed_by(annotation: &QueueHeadAnnotation, completion_ids: &[String]) -> bool {
+pub fn annotation_completed_by(
+    annotation: &QueueHeadAnnotation,
+    completion_ids: &[String],
+) -> bool {
     let completed = completion_ids
         .iter()
         .map(|id| normalize_done_id(id))
@@ -325,7 +327,10 @@ pub fn requeue_unaddressed_annotations(
     }
     Ok(Some((
         updated,
-        targets.into_iter().map(|(_, annotation)| annotation).collect(),
+        targets
+            .into_iter()
+            .map(|(_, annotation)| annotation)
+            .collect(),
     )))
 }
 
@@ -360,12 +365,18 @@ mod tests {
             annotation("do [#a] then ship it").as_deref(),
             Some("then ship it")
         );
-        assert_eq!(annotation("do #a — but skip tests").as_deref(), Some("but skip tests"));
+        assert_eq!(
+            annotation("do #a — but skip tests").as_deref(),
+            Some("but skip tests")
+        );
         assert_eq!(
             annotation("do [#a] [#b]: both, carefully").as_deref(),
             Some("both, carefully")
         );
-        assert_eq!(queue_head_annotation("do [#a] [#b]: x").unwrap().ids, vec!["a", "b"]);
+        assert_eq!(
+            queue_head_annotation("do [#a] [#b]: x").unwrap().ids,
+            vec!["a", "b"]
+        );
     }
 
     #[test]
@@ -455,27 +466,29 @@ mod tests {
         let content = doc("- do [#a]: why is the sky blue?\n- do [#b]\n");
         // The consume plan reports the completed head without its 🚧 marker.
         let a_head = "🚧 do [#a]: why is the sky blue?".to_string();
-        let (updated, requeued) =
-            requeue_unaddressed_annotations(&content, &[a_head.clone()], &["no evidence"])
-                .unwrap()
-                .unwrap();
+        let (updated, requeued) = requeue_unaddressed_annotations(
+            &content,
+            std::slice::from_ref(&a_head),
+            &["no evidence"],
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(requeued.len(), 1);
         assert!(
-            updated.contains(
-                "- do [#a]: why is the sky blue?\n- why is the sky blue?\n- do [#b]\n"
-            ),
+            updated
+                .contains("- do [#a]: why is the sky blue?\n- why is the sky blue?\n- do [#b]\n"),
             "{updated}"
         );
         // A retried consume over the already-requeued document adds nothing.
         assert!(
-            requeue_unaddressed_annotations(&updated, &[a_head.clone()], &[])
+            requeue_unaddressed_annotations(&updated, std::slice::from_ref(&a_head), &[])
                 .unwrap()
                 .is_none()
         );
         // Addressed evidence: nothing to requeue.
         let addressed = "> **Operator note:** why is the sky blue?\n\nRayleigh scattering.\n";
         assert!(
-            requeue_unaddressed_annotations(&content, &[a_head.clone()], &[addressed])
+            requeue_unaddressed_annotations(&content, std::slice::from_ref(&a_head), &[addressed],)
                 .unwrap()
                 .is_none()
         );

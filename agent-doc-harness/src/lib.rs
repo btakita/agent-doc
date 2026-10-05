@@ -3168,7 +3168,6 @@ mod tests {
         ));
     }
 
-    #[test]
     /// `#freshclaudectxless`: a FRESH Claude session renders its built-in status
     /// line WITHOUT the `ctx:N%` segment (0% context is omitted), e.g.
     /// `Opus 5 ~/…/src/sample-app main alex@workstation`. Keying the chrome

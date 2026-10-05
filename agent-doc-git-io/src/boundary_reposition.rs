@@ -154,6 +154,7 @@ pub fn reposition_boundary_in_snapshot(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
         BoundaryRepositionDelivery, reposition_snapshot_boundary, reposition_working_boundary,

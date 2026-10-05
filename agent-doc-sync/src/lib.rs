@@ -1553,7 +1553,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
 
     #[test]
     fn session_layout_not_converged_when_normalization_would_act() {
-        let drifted: Vec<(&str, Vec<(String, String, String)>)> = vec![
+        type DriftedLayout<'a> = Vec<(&'a str, Vec<(String, String, String)>)>;
+        let drifted: DriftedLayout<'_> = vec![
             (
                 "target window off index 0",
                 vec![win("1", "@10", "agent-doc"), win("2", "@11", "stash")],

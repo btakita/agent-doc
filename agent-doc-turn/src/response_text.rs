@@ -416,12 +416,12 @@ mod tests {
 
         // 1. This module's own parser (first dash).
         assert_eq!(
-            super::response_prompt_target_from_re_heading(&heading).as_deref(),
+            super::response_prompt_target_from_re_heading(heading).as_deref(),
             Some("do [#fix1]")
         );
         // 2. The queue-closeout parser (first dash).
         assert_eq!(
-            agent_doc_queue::queue_response::response_heading_topic(&heading),
+            agent_doc_queue::queue_response::response_heading_topic(heading),
             Some("do [#fix1]")
         );
         // 3. The compact digest's topic summarizer.
@@ -446,7 +446,7 @@ mod tests {
         let heading = "### Re: do [#fix1] \u{2014} gpt-5";
         assert_eq!(heading, "### Re: do [#fix1] \u{2014} gpt-5");
         assert_eq!(
-            super::response_heading_model_and_timestamp(&heading),
+            super::response_heading_model_and_timestamp(heading),
             Some(("gpt-5", None))
         );
         assert_eq!(
@@ -461,7 +461,7 @@ mod tests {
     fn heading_attribution_splits_into_model_and_timestamp() {
         let heading = "### Re: topic \u{2014} opus-5 \u{00B7} 2026-09-11T23:45-04:00";
         assert_eq!(
-            super::response_heading_model_and_timestamp(&heading),
+            super::response_heading_model_and_timestamp(heading),
             Some(("opus-5", Some("2026-09-11T23:45-04:00")))
         );
         // No attribution at all.

@@ -5066,12 +5066,15 @@ mod tests {
     /// The retry budget must be bounded — a compact that hangs waiting for an
     /// editor that never settles is no better than one that silently skips.
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn compact_commit_observe_retry_is_bounded() {
-        assert!(COMPACT_COMMIT_OBSERVE_ATTEMPTS >= 1);
-        assert!(
-            COMPACT_COMMIT_OBSERVE_ATTEMPTS <= 10,
-            "the observe retry must stay bounded"
-        );
+        const {
+            assert!(COMPACT_COMMIT_OBSERVE_ATTEMPTS >= 1);
+            assert!(
+                COMPACT_COMMIT_OBSERVE_ATTEMPTS <= 10,
+                "the observe retry must stay bounded"
+            );
+        }
         assert!(
             COMPACT_COMMIT_OBSERVE_BACKOFF <= std::time::Duration::from_millis(500),
             "per-attempt backoff must stay small enough to bound the whole gate"

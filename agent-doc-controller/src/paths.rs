@@ -81,9 +81,8 @@ mod tests {
     #[test]
     fn a_root_whose_socket_path_overflows_sun_path_is_rejected() {
         let root = PathBuf::from(format!("/{}", "r".repeat(SUN_PATH_MAX)));
-        assert_eq!(
-            socket_path_rejection(&root).is_none(),
-            false,
+        assert!(
+            socket_path_rejection(&root).is_some(),
             "a root at the limit still overflows once the socket suffix is appended"
         );
 

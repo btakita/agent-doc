@@ -880,7 +880,7 @@ mod tests {
             .set_modified(SystemTime::now() + std::time::Duration::from_secs(1))
             .unwrap();
         assert!(!jetbrains_plugin_staged_in(
-            &[plugins.clone()],
+            std::slice::from_ref(&plugins),
             &[],
             "0.2.480"
         ));
@@ -986,7 +986,7 @@ mod tests {
 
         assert!(!retire_satisfied_restart_marker(&plugins));
         assert!(!jetbrains_plugin_staged_in(
-            &[plugins.clone()],
+            std::slice::from_ref(&plugins),
             &roots,
             "0.2.481"
         ));
@@ -1043,7 +1043,7 @@ mod tests {
         assert!(pending[0].zip_present);
         assert_eq!(pending[0].version, "0.2.481");
         assert!(jetbrains_plugin_staged_in(
-            &[plugins.clone()],
+            std::slice::from_ref(&plugins),
             &roots,
             "0.2.481"
         ));
@@ -1074,7 +1074,7 @@ mod tests {
         let roots = vec![system.clone()];
         assert_eq!(staged_install_failure(&plugins, &roots), None);
         assert!(!jetbrains_plugin_staged_in(
-            &[plugins.clone()],
+            std::slice::from_ref(&plugins),
             &roots,
             "0.2.481"
         ));
@@ -1253,8 +1253,11 @@ mod tests {
             Some(StagedInstallFailure::Doomed { .. })
         ));
 
-        let repairs =
-            repair_jetbrains_stagings(&[plugins.clone()], &roots, std::time::SystemTime::now());
+        let repairs = repair_jetbrains_stagings(
+            std::slice::from_ref(&plugins),
+            &roots,
+            std::time::SystemTime::now(),
+        );
 
         assert!(
             repairs
@@ -1282,8 +1285,11 @@ mod tests {
         let body = guarded_block(&plugins, &viable);
         std::fs::write(&script, &body).unwrap();
 
-        let repairs =
-            repair_jetbrains_stagings(&[plugins.clone()], &roots, std::time::SystemTime::now());
+        let repairs = repair_jetbrains_stagings(
+            std::slice::from_ref(&plugins),
+            &roots,
+            std::time::SystemTime::now(),
+        );
 
         assert_eq!(repairs, Vec::new());
         assert_eq!(std::fs::read_to_string(&script).unwrap(), body);
@@ -1308,8 +1314,11 @@ mod tests {
         age(&stale, 3600);
         age(&foreign, 3600);
 
-        let repairs =
-            repair_jetbrains_stagings(&[plugins.clone()], &roots, std::time::SystemTime::now());
+        let repairs = repair_jetbrains_stagings(
+            std::slice::from_ref(&plugins),
+            &roots,
+            std::time::SystemTime::now(),
+        );
 
         assert_eq!(
             repairs,
@@ -1333,8 +1342,11 @@ mod tests {
         std::fs::write(&script, &body).unwrap();
         let held = lock_jetbrains_install(&plugins).unwrap();
 
-        let repairs =
-            repair_jetbrains_stagings(&[plugins.clone()], &roots, std::time::SystemTime::now());
+        let repairs = repair_jetbrains_stagings(
+            std::slice::from_ref(&plugins),
+            &roots,
+            std::time::SystemTime::now(),
+        );
 
         assert_eq!(repairs, Vec::new());
         assert_eq!(std::fs::read_to_string(&script).unwrap(), body);

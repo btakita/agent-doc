@@ -1314,6 +1314,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use agent_doc_session_check_io::{CapturedFinalizeResumeOutcome, SessionCheckEffects};

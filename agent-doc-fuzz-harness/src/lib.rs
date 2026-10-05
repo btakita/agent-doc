@@ -35,7 +35,9 @@ pub const MAX_INPUT_LEN: usize = 64 * 1024;
 
 /// The fuzz targets, by corpus directory name. `fuzz/fuzz_targets/<name>.rs`
 /// and `fuzz/corpus/<name>/` use the same names.
-pub const TARGETS: &[(&str, fn(&[u8]))] = &[
+pub type FuzzTarget = fn(&[u8]);
+
+pub const TARGETS: &[(&str, FuzzTarget)] = &[
     ("ipc_wire", ipc_wire),
     ("markdown_patch", markdown_patch),
     ("frontmatter", frontmatter),
@@ -44,7 +46,7 @@ pub const TARGETS: &[(&str, fn(&[u8]))] = &[
 ];
 
 /// Look up a harness function by target name.
-pub fn target(name: &str) -> Option<fn(&[u8])> {
+pub fn target(name: &str) -> Option<FuzzTarget> {
     TARGETS
         .iter()
         .find(|(target, _)| *target == name)

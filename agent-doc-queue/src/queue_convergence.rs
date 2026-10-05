@@ -409,11 +409,15 @@ mod tests {
 
         // The predicate the drain path used to rely on cannot see it: the entry
         // is neither a prompt nor residue, so "no prompts" reads as "drained".
-        assert!(document_queue::prompts(&[operator.clone()]).is_empty());
-        assert!(!queue_entries_are_drained_residue(&[operator.clone()]));
+        assert!(document_queue::prompts(std::slice::from_ref(&operator)).is_empty());
+        assert!(!queue_entries_are_drained_residue(std::slice::from_ref(
+            &operator
+        )));
 
         assert!(entry_carries_operator_text(&operator));
-        assert!(!queue_body_clear_is_lossless(&[operator.clone()]));
+        assert!(!queue_body_clear_is_lossless(std::slice::from_ref(
+            &operator
+        )));
         assert!(
             !queue_body_clear_is_lossless(&[completed.clone(), operator]),
             "residue alongside operator text still must not blank the body"

@@ -724,7 +724,8 @@ mod tests {
         .join("\n");
 
         assert!(
-            requested_prompt_presets(&[pasted_report.clone()], &[], &presets).is_empty(),
+            requested_prompt_presets(std::slice::from_ref(&pasted_report), &[], &presets)
+                .is_empty(),
             "a preset hashtag inside pasted report content is description, not a request"
         );
     }

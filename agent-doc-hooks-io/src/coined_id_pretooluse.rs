@@ -528,7 +528,6 @@ mod tests {
     }
 
     /// The durable case this exists for: writing a coined tag into source.
-    #[test]
     /// The false positive that blocked its own remedy. The commit message here
     /// carries no id; a heredoc in the same call does, and it exists precisely to
     /// strip the id from the message. Scanning the whole command made that

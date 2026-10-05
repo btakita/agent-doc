@@ -1783,7 +1783,7 @@ mod th {
 #[cfg(test)]
 pub(crate) use th::{
     ScopedCurrentDir, drive_pane_to_retained_dead, launch_mock_agent_doc, test_cwd, test_entry,
-    wait_for_pane_contains, wait_for_pane_current_command, wait_for_pane_dead,
+    wait_for_pane_contains, wait_for_pane_current_command,
     wait_for_pane_in_stash_window, wait_for_pane_removed, wait_for_process_pid, wait_for_shell,
     wait_for_window_relation, write_mock_agent_doc,
 };
@@ -1870,7 +1870,7 @@ mod tests {
         assert!(
             matches!(&issues[0], Issue::NoLiveOwner { .. }),
             "pane with no provable owner should now fail as NoLiveOwner before WrongSession; got: {}",
-            &issues[0]
+            issues[0]
         );
     }
     #[test]
@@ -1911,7 +1911,7 @@ mod tests {
         assert!(
             matches!(&issues[0], Issue::WrongProcess { process, .. } if process == "sleep"),
             "issue should be WrongProcess(sleep), got: {}",
-            &issues[0]
+            issues[0]
         );
     }
     #[test]
@@ -1938,7 +1938,7 @@ mod tests {
         assert!(
             matches!(&issues[0], Issue::NoLiveOwner { .. }),
             "issue should be NoLiveOwner, got: {}",
-            &issues[0]
+            issues[0]
         );
     }
     #[test]

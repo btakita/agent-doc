@@ -488,7 +488,6 @@ mod tests {
         );
     }
 
-    #[test]
     /// `#supervisoridlewatchmissing`: two crates answer "which document does
     /// this supervisor serve?" and they drifted. `agent-doc-controller` depends
     /// on `agent-doc-supervisor`, so the predicate cannot be shared downward

@@ -284,7 +284,8 @@ mod tests {
     /// request a drain (there is no delivery to push).
     #[test]
     fn route_startup_still_fails_closed_without_authoritative_text() {
-        let cases: [(&str, fn() -> Result<Option<CurrentText>>); 3] = [
+        type Observation = fn() -> Result<Option<CurrentText>>;
+        let cases: [(&str, Observation); 3] = [
             ("missing_replica", || {
                 Ok(Some(CurrentText::EditorAttachedMissingReplica))
             }),

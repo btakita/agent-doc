@@ -2917,10 +2917,12 @@ mod tests {
         // the editor stayed stranded on the stale cdylib. The reload_library
         // receipt now uses a dedicated budget larger than the generic timeout,
         // and `send_legacy_reload_to_pid` honors it against a slow-acking peer.
-        assert!(
-            IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS > IPC_RECEIPT_TIMEOUT_SECS,
-            "reload_library receipt budget must outlive the generic receipt timeout"
-        );
+        const {
+            assert!(
+                IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS > IPC_RECEIPT_TIMEOUT_SECS,
+                "reload_library receipt budget must outlive the generic receipt timeout"
+            );
+        }
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();

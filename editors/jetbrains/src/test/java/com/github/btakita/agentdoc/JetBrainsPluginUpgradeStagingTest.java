@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -60,11 +61,7 @@ public class JetBrainsPluginUpgradeStagingTest {
             script,
             pluginsDir.resolve("agent-doc-jetbrains"),
             pluginsDir,
-            staged,
-            () -> {
-                fail("the platform's command classes are constructible on this build");
-                return null;
-            }
+            staged
         );
         return staged;
     }
@@ -317,6 +314,61 @@ public class JetBrainsPluginUpgradeStagingTest {
             "the probe extraction is cleaned up",
             Files.exists(JetBrainsPluginUpgradeAction.probeDirFor(pluginsDir, staged))
         );
+    }
+
+    /**
+     * `#jbstagefallback`: a script manager with the platform's load/save but no constructible
+     * {@code DeleteCommand}/{@code UnzipCommand}, i.e. a build where the guarded block cannot
+     * be written. Its load/save record that the refusal never touched the script.
+     */
+    public static final class CommandlessScriptManager {
+        static int loads;
+        static int saves;
+
+        public static synchronized List<Object> loadActionScript(Path script) throws Exception {
+            loads++;
+            return new ArrayList<Object>(StartupActionScriptManager.loadActionScript(script));
+        }
+
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        public static synchronized void saveActionScript(List commands, Path script) throws Exception {
+            saves++;
+            StartupActionScriptManager.saveActionScript(commands, script);
+        }
+    }
+
+    @Test
+    public void aBuildWithoutConstructibleCommandsRefusesTheUnguardedFallback() throws Exception {
+        Path pluginsDir = pluginsDir();
+        Path tempDir = tempDir();
+        Path script = tempDir.resolve("action.script");
+        Path priorStaged = stage(script, pluginsDir, tempDir);
+        byte[] before = Files.readAllBytes(script);
+        Path staged = JetBrainsPluginUpgradeAction.copyVerifiedStagedArchive(
+            packageZip("launcher-fallback.zip"), tempDir, "0.2.482"
+        );
+        CommandlessScriptManager.loads = 0;
+        CommandlessScriptManager.saves = 0;
+        try {
+            JetBrainsPluginUpgradeAction.replaceStagingInActionScript(
+                CommandlessScriptManager.class,
+                script,
+                pluginsDir.resolve("agent-doc-jetbrains"),
+                pluginsDir,
+                staged
+            );
+            fail("staging without a probe-guarded block must be refused");
+        } catch (IllegalStateException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().startsWith("restart required:"));
+            assertTrue(refused.getMessage(), refused.getMessage().contains("installAfterRestart"));
+        }
+        assertEquals("the refusal never reads the script", 0, CommandlessScriptManager.loads);
+        assertEquals("the refusal never writes the script", 0, CommandlessScriptManager.saves);
+        assertArrayEquals("the pending guarded staging is untouched", before, Files.readAllBytes(script));
+        assertTrue(Files.isRegularFile(priorStaged));
+        for (String[] command : described(script)) {
+            assertFalse("no command names the refused package: " + command[1], command[1].equals(staged.toString()));
+        }
     }
 
     @Test

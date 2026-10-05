@@ -200,14 +200,15 @@ public final class JetBrainsPluginUpgradeAction {
      * directory, so a missing, unreadable or unextractable package aborts the script before
      * anything deletes the installed plugin. See {@link #stagingBlock}.
      *
+     * `#jbstagefallback`: there is no unguarded fallback. A build whose command classes cannot
+     * be constructed refuses to stage (the platform's {@code PluginInstaller.installAfterRestart}
+     * writes the delete-then-unzip block this guard exists to prevent) and the failure reaches
+     * the launcher, which replaces the package on disk and reports restart-required.
+     *
      * @return receipt notes (prior stagings replaced, cleanup failures), empty when none
      */
     private static String stageForRestart(String archiveValue, String pluginsDirValue, String expectedVersion)
         throws Exception {
-        IdeaPluginDescriptor descriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
-        if (descriptor == null) {
-            throw new IllegalStateException("no " + PLUGIN_ID + " descriptor to stage against");
-        }
         Path pluginsDir = Path.of(pluginsDirValue).toAbsolutePath().normalize();
         Path existing = pluginsDir.resolve(PLUGIN_DIR_NAME);
         Class<?> pathManager = Class.forName("com.intellij.openapi.application.PathManager");
@@ -224,24 +225,7 @@ public final class JetBrainsPluginUpgradeAction {
                 script,
                 existing,
                 idePluginsPath,
-                staged,
-                () -> {
-                    Method install = findInstallAfterRestart(PluginInstaller.class, descriptor);
-                    if (install == null) {
-                        throw new IllegalStateException(
-                            "StartupActionScriptManager commands are not constructible and PluginInstaller has no "
-                                + "installAfterRestart accepting a descriptor and two paths on build " + platformBuild()
-                                + "; found: " + signaturesNamed(PluginInstaller.class, "installAfterRestart")
-                        );
-                    }
-                    Object accepted = install.invoke(
-                        null, installAfterRestartArguments(install, descriptor, staged, existing)
-                    );
-                    if (Boolean.FALSE.equals(accepted)) {
-                        throw new IllegalStateException("PluginInstaller.installAfterRestart declined " + staged);
-                    }
-                    return null;
-                }
+                staged
             );
         } catch (Exception stagingFailure) {
             // Nothing references the copy unless the script verified it; do not leak it.
@@ -438,8 +422,9 @@ public final class JetBrainsPluginUpgradeAction {
      * save the whole script to a temp file and rename it over the original, then reload and
      * verify the result. Superseded staged packages are deleted afterwards.
      *
-     * {@code fallback} installs the block through {@code PluginInstaller.installAfterRestart}
-     * when this build's command classes are not constructible; the dedupe still precedes it.
+     * `#jbstagefallback`: when this build's command classes are not constructible the staging
+     * is refused before the script is read or written -- no prior staging is dropped and no
+     * unguarded {@code PluginInstaller.installAfterRestart} block is written.
      *
      * @return receipt notes
      */
@@ -448,11 +433,14 @@ public final class JetBrainsPluginUpgradeAction {
         Path script,
         Path pluginDir,
         Path idePluginsPath,
-        Path staged,
-        java.util.concurrent.Callable<Object> fallback
+        Path staged
     ) throws Exception {
         List<String> notes = new ArrayList<>();
         List<String> superseded = new ArrayList<>();
+        List<Object> block = stagingBlock(scriptManager, pluginDir, idePluginsPath, staged);
+        if (block == null) {
+            throw new IllegalStateException(unguardedStagingRefusal(scriptManager));
+        }
         synchronized (scriptManager) {
             Method load = scriptManager.getMethod("loadActionScript", Path.class);
             Method save = scriptManager.getMethod("saveActionScript", List.class, Path.class);
@@ -469,22 +457,10 @@ public final class JetBrainsPluginUpgradeAction {
                     kept.add(command);
                 }
             }
-            List<Object> block = stagingBlock(scriptManager, pluginDir, idePluginsPath, staged);
-            if (block != null) {
-                kept.addAll(block);
-                saveActionScriptAtomically(save, kept, script);
-            } else {
-                if (kept.isEmpty()) {
-                    Files.deleteIfExists(script);
-                } else {
-                    saveActionScriptAtomically(save, kept, script);
-                }
-                // No nested types here (see JetBrainsPluginUpgradeActionShapeTest): a JDK
-                // Callable carries the installAfterRestart fallback.
-                fallback.call();
-            }
+            kept.addAll(block);
+            saveActionScriptAtomically(save, kept, script);
             verifyActionScriptStaging(
-                (List<?>) load.invoke(null, script), pluginDir, idePluginsPath, staged, block != null
+                (List<?>) load.invoke(null, script), pluginDir, idePluginsPath, staged
             );
             if (removed > 0) {
                 notes.add("replaced a prior agent-doc staging (" + removed + " pending-install commands)");
@@ -501,6 +477,20 @@ public final class JetBrainsPluginUpgradeAction {
     }
 
     /**
+     * `#jbstagefallback`: why a build without constructible command classes does not stage.
+     * Restart-required is the honest outcome: IntelliJ's {@code installAfterRestart} would write
+     * {@code delete:<plugin dir>} ahead of {@code unzip:<package>} with nothing to abort it.
+     */
+    static String unguardedStagingRefusal(Class<?> scriptManager) {
+        return "restart required: refusing to stage the upgrade for the next IDE start because "
+            + scriptManager.getName() + "'s DeleteCommand/UnzipCommand are not constructible on build "
+            + platformBuild() + ", so no probe-guarded pending-install block can be written and "
+            + "PluginInstaller.installAfterRestart's delete-then-unzip block could remove the plugin "
+            + "without installing its replacement; restart the IDE, then rerun the agent-doc plugin "
+            + "install or install the package from disk (Settings > Plugins > Install Plugin from Disk)";
+    }
+
+    /**
      * `#jbstagebackup`: the guarded install block
      *
      * <ol>
@@ -513,13 +503,15 @@ public final class JetBrainsPluginUpgradeAction {
      *       same directory.</li>
      * </ol>
      *
-     * {@code null} when this build's command classes are not constructible.
+     * {@code null} when this build's command classes are not constructible. They are resolved
+     * as nested classes of {@code scriptManager} itself (in production, the platform's
+     * {@code StartupActionScriptManager}).
      */
     private static List<Object> stagingBlock(Class<?> scriptManager, Path pluginDir, Path idePluginsPath, Path staged) {
         try {
             ClassLoader loader = scriptManager.getClassLoader();
-            Class<?> delete = Class.forName(SCRIPT_MANAGER_CLASS + "$DeleteCommand", true, loader);
-            Class<?> unzip = Class.forName(SCRIPT_MANAGER_CLASS + "$UnzipCommand", true, loader);
+            Class<?> delete = Class.forName(scriptManager.getName() + "$DeleteCommand", true, loader);
+            Class<?> unzip = Class.forName(scriptManager.getName() + "$UnzipCommand", true, loader);
             Path probe = probeDirFor(idePluginsPath, staged);
             List<Object> block = new ArrayList<>();
             block.add(unzip.getConstructor(Path.class, Path.class).newInstance(staged, probe));
@@ -556,17 +548,15 @@ public final class JetBrainsPluginUpgradeAction {
      * GH #115: the saved script must install exactly one agent-doc package, {@code staged}, whose
      * package exists, with no delete of {@code staged} ahead of its install unzip.
      *
-     * `#jbstagebackup`: when {@code guarded} (this module wrote the block), the script must also
-     * probe-unzip {@code staged} exactly once before its single delete of the plugin directory,
-     * so a package that cannot be extracted at restart aborts the script before that delete.
-     * The {@code installAfterRestart} fallback writes the platform's own unguarded block.
+     * `#jbstagebackup`: the script must also probe-unzip {@code staged} exactly once before its
+     * single delete of the plugin directory, so a package that cannot be extracted at restart
+     * aborts the script before that delete. `#jbstagefallback`: there is no unguarded variant.
      */
     static void verifyActionScriptStaging(
         List<?> commands,
         Path pluginDir,
         Path idePluginsPath,
-        Path staged,
-        boolean guarded
+        Path staged
     ) {
         int installUnzips = 0;
         int probeUnzips = 0;
@@ -595,7 +585,7 @@ public final class JetBrainsPluginUpgradeAction {
                 }
                 if (samePath(described[1], pluginDir)) {
                     pluginDeletesBeforeInstall++;
-                    if (guarded && probeUnzips == 0) {
+                    if (probeUnzips == 0) {
                         throw new IllegalStateException(
                             "pending-install script deletes " + pluginDir + " before probing " + staged
                         );
@@ -608,12 +598,12 @@ public final class JetBrainsPluginUpgradeAction {
                 "pending-install script holds " + installUnzips + " agent-doc install unzips after staging; expected 1"
             );
         }
-        if (guarded && probeUnzips != 1) {
+        if (probeUnzips != 1) {
             throw new IllegalStateException(
                 "pending-install script holds " + probeUnzips + " agent-doc probe unzips after staging; expected 1"
             );
         }
-        if (pluginDeletesBeforeInstall > (guarded ? 1 : 2)) {
+        if (pluginDeletesBeforeInstall > 1) {
             throw new IllegalStateException(
                 "pending-install script deletes " + pluginDir + " " + pluginDeletesBeforeInstall + " times before its unzip"
             );
@@ -621,57 +611,6 @@ public final class JetBrainsPluginUpgradeAction {
         if (!Files.isRegularFile(staged) || !Files.isReadable(staged)) {
             throw new IllegalStateException("staged package " + staged + " vanished before the script was verified");
         }
-    }
-
-    /**
-     * The static {@code installAfterRestart} overload whose parameters are a descriptor, two
-     * {@link Path}s (source, then existing plugin) and optionally one {@code boolean}, in any
-     * order -- the platform has moved the descriptor between first and last across builds.
-     */
-    static Method findInstallAfterRestart(Class<?> owner, Object descriptor) {
-        for (Method candidate : owner.getMethods()) {
-            if (!candidate.getName().equals("installAfterRestart")
-                || !Modifier.isStatic(candidate.getModifiers())) {
-                continue;
-            }
-            int descriptors = 0;
-            int paths = 0;
-            int booleans = 0;
-            boolean other = false;
-            for (Class<?> type : candidate.getParameterTypes()) {
-                if (type == Path.class) {
-                    paths++;
-                } else if (type == boolean.class) {
-                    booleans++;
-                } else if (type.isInstance(descriptor)) {
-                    descriptors++;
-                } else {
-                    other = true;
-                }
-            }
-            if (!other && descriptors == 1 && paths == 2 && booleans <= 1) {
-                return candidate;
-            }
-        }
-        return null;
-    }
-
-    /** Arguments for {@link #findInstallAfterRestart}'s method: delete the staged copy after use. */
-    static Object[] installAfterRestartArguments(Method install, Object descriptor, Path source, Path existing) {
-        Class<?>[] types = install.getParameterTypes();
-        Object[] args = new Object[types.length];
-        boolean sourceAssigned = false;
-        for (int index = 0; index < types.length; index++) {
-            if (types[index] == Path.class) {
-                args[index] = sourceAssigned ? existing : source;
-                sourceAssigned = true;
-            } else if (types[index] == boolean.class) {
-                args[index] = true;
-            } else {
-                args[index] = descriptor;
-            }
-        }
-        return args;
     }
 
     /**

@@ -449,9 +449,17 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
      fits wherever the probe did;
   3. `delete:<plugin dir>`, `unzip:<package>:<plugins>`, `delete:<package>`.
   The staging verifies the saved script holds exactly one probe unzip, before
-  exactly one plugin-dir delete, before exactly one install unzip. Only the
-  `PluginInstaller.installAfterRestart` fallback (a build whose command classes
-  are not constructible) still writes the platform's unguarded block.
+  exactly one plugin-dir delete, before exactly one install unzip. There is no
+  unguarded fallback (`#jbstagefallback`): on a build whose
+  `StartupActionScriptManager` `DeleteCommand`/`UnzipCommand` classes are not
+  constructible, the staging is refused before `action.script` is read or
+  written (prior stagings stay as they were) instead of calling
+  `PluginInstaller.installAfterRestart`, which would write the platform's
+  unguarded delete-then-unzip block. The refusal (`restart required: refusing
+  to stage ...`) is the upgrader's failure, so the launcher takes the
+  failed-dynamic-upgrade path above: the package is replaced on disk and the
+  command reports restart-required, with manual guidance to restart the IDE and
+  rerun the install or install the package from disk.
   Rationale: a durable backup copy of the package would only cover the
   "package vanished" cause and only if something restored it before the
   restart; ordering the probe first closes the vanish AND full-disk causes at

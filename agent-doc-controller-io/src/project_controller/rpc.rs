@@ -1929,10 +1929,32 @@ fn durable_actor_binding(
     load_actor_record(project_root, &document_id)
 }
 
+/// `#netadv5` R8: mint one idempotency key per logical dispatch request.
+fn mint_dispatch_request_key() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!(
+        "dr-{}-{}-{}",
+        std::process::id(),
+        nanos,
+        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
+}
+
 pub fn authorize_dispatch(
     project_root: &Path,
-    request: DispatchRequest,
+    mut request: DispatchRequest,
 ) -> Result<DispatchAuthorization> {
+    // `#netadv5` R8: key the request once; every retry below (transport drop,
+    // stale binary, stale-generation redirect) re-sends the same key, so a copy
+    // the controller already applied is answered, never re-injected.
+    request.diagnostic_payload = agent_doc_controller::dispatch::with_dispatch_request_key(
+        &request.diagnostic_payload,
+        &mint_dispatch_request_key(),
+    );
     // `#qflood`: every dispatch caller (route auto-start on file change, idle
     // queue continuation, `/loop`) funnels through here. Log the invocation —
     // command_kind / diagnostic_payload identify the caller — so an operator
@@ -20460,6 +20482,31 @@ pub(crate) fn handle_dispatch(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
+    // `#netadv5` R8 / `#netadv4` SIM-F3: a retransmitted copy of a dispatch
+    // request this controller already applied (its ACK was lost, so the caller
+    // re-sent) is answered with the original outcome and injects nothing. The
+    // key lives in state.db, so the answer survives a controller restart.
+    let request_key = agent_doc_controller::dispatch::dispatch_request_key(&diagnostic_payload)
+        .map(str::to_string);
+    if let Some(key) = request_key.as_deref() {
+        let conn = open_state_db(&bootstrap.project_root)?;
+        let recorded = state_store::load_dispatch_request_outcome(&conn, &document_id, key)?;
+        if agent_doc_controller::dispatch::dispatch_request_admission(recorded.is_some())
+            == agent_doc_controller::dispatch::DispatchRequestAdmission::DuplicateOfApplied
+            && let Some(outcome) = recorded
+        {
+            let original: DispatchAuthorization = serde_json::from_str(&outcome)
+                .context("failed to parse recorded dispatch request outcome")?;
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "dispatch_request_duplicate_answered key={} generation={} receipt_id={} action=no_inject",
+                    key, original.record.generation, original.receipt.receipt_id
+                ),
+            );
+            return Ok(original);
+        }
+    }
     // `#ctlstalebin` (#stuckhandoff2 follow-up): a controller whose own binary no
     // longer matches the installed agent-doc keeps running OLD code. `connect_or_launch`
     // hands cross-process callers to a fresh controller, but any dispatch that still
@@ -20910,11 +20957,21 @@ pub(crate) fn handle_dispatch(
             surface_observations,
         ),
     );
-    Ok(DispatchAuthorization {
+    let authorization = DispatchAuthorization {
         record,
         accepted_stage: accepted_stage.to_string(),
         receipt,
-    })
+    };
+    if let Some(key) = request_key.as_deref() {
+        let conn = open_state_db(&bootstrap.project_root)?;
+        state_store::record_dispatch_request_outcome(
+            &conn,
+            &document_id,
+            key,
+            &serde_json::to_string(&authorization)?,
+        )?;
+    }
+    Ok(authorization)
 }
 
 pub(crate) fn handle_session_status(
@@ -28139,6 +28196,90 @@ mod tests {
         .unwrap();
         assert!(reconnected.get());
         assert_eq!(reaped.get(), 0);
+    }
+
+    /// `#netadv5` R8 / `#netadv4` SIM-F3: a dispatch request whose ACK was lost
+    /// is re-sent with the same key. The controller already applied it, so the
+    /// copy is answered with the original outcome and no second receipt (no
+    /// second trigger) is created. A fresh key still dispatches normally.
+    #[test]
+    fn retransmitted_dispatch_request_is_answered_not_reinjected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/netadv5r8.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-r8\nagent: codex\n---\nBody\n")
+            .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(&doc, "session-r8", "%48", "@1", 1)
+            .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
+            &doc,
+            "session-r8",
+            "%48",
+            Some(1),
+            agent_doc_controller::actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: root.to_path_buf(),
+            socket_path: socket_path(root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity().unwrap()),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let request = |payload: &str| ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-r8".to_string()),
+            pane_id: Some("%48".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some(payload.to_string()),
+        };
+        let attempts = || -> i64 {
+            open_state_db(root)
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM dispatch_attempts", [], |row| row.get(0))
+                .unwrap()
+        };
+        let keyed =
+            agent_doc_controller::dispatch::with_dispatch_request_key("netadv5", "dr-test-1");
+        let first = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
+        let after_first = attempts();
+
+        // The ACK was lost; the caller retransmits the same request.
+        let copy = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
+        assert_eq!(copy, first, "a duplicate is answered with the original outcome");
+        assert_eq!(attempts(), after_first, "a duplicate never creates a second dispatch");
+
+        // Durable: a restarted controller (fresh schema memo) still answers it.
+        state_store::reset_state_db_schema_convergence_memo();
+        let after_restart = handle_dispatch(&bootstrap, None, request(&keyed)).unwrap();
+        assert_eq!(after_restart, first);
+        assert_eq!(attempts(), after_first);
+        let ops_log = std::fs::read_to_string(doc.parent().unwrap().parent().unwrap().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(ops_log.contains("dispatch_request_duplicate_answered"), "{ops_log}");
+
+        // Eventual progress: a new logical request (new key) is evaluated fresh.
+        let fresh =
+            agent_doc_controller::dispatch::with_dispatch_request_key("netadv5", "dr-test-2");
+        let _ = handle_dispatch(&bootstrap, None, request(&fresh));
+        assert!(attempts() > after_first, "a new key is a new request");
     }
 
     /// `#netadv5` R5: a controller that refuses connects mid-handoff is not

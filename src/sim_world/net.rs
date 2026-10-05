@@ -78,6 +78,9 @@ pub(crate) struct SimWorldNet {
     pub(crate) net: SimNet<SimLink, NetMsg>,
     /// Generation override in force while a delivered message is applied.
     pub(crate) delivering_generation: Option<u64>,
+    /// `#netadv5` R8: the request key (the net send id, shared by every
+    /// retransmit/duplicate copy) of the message being applied.
+    pub(crate) delivering_request_key: Option<u64>,
     /// Latest applied send id per level-state family and generation.
     pub(crate) latest_applied: BTreeMap<LevelFamily, (u64, u64)>,
     pub(crate) findings: Vec<NetFinding>,
@@ -96,6 +99,7 @@ impl SimWorldNet {
             mode,
             net: SimNet::for_profile(profile, seed, Delivery::AtLeastOnce),
             delivering_generation: None,
+            delivering_request_key: None,
             latest_applied: BTreeMap::new(),
             findings: Vec::new(),
             reconnect_resyncs: 0,
@@ -302,6 +306,7 @@ impl SimWorld {
         }
         if let Some(net) = self.net.as_mut() {
             net.delivering_generation = Some(msg.generation_at_send);
+            net.delivering_request_key = Some(id);
         }
         let result = self.apply_local(msg.command);
         let after = self.actor_fact();
@@ -310,6 +315,7 @@ impl SimWorld {
         let seed = self.seed;
         if let Some(net) = self.net.as_mut() {
             net.delivering_generation = None;
+            net.delivering_request_key = None;
             let stale_lifecycle = level_family(msg.command) == Some(LevelFamily::ActorLifecycle)
                 && net.findings.len() > findings_before;
             if after != before {
@@ -446,7 +452,7 @@ impl Drop for SimWorldNet {
 /// Oracle finding classes already diagnosed as open protocol defects (see the
 /// `netadv4_known_*` tests below). A corpus run may report these; any OTHER class
 /// is a new finding and fails the run.
-pub(crate) const KNOWN_OPEN_NET_FINDINGS: [&str; 4] = [
+pub(crate) const KNOWN_OPEN_NET_FINDINGS: [&str; 3] = [
     // F1: `LifecycleRequest`/`SupervisorHeartbeatRequest` are fenced by generation
     // only; within one generation the controller applies them in arrival order.
     "stale_actor_lifecycle_applied_out_of_order",
@@ -454,9 +460,9 @@ pub(crate) const KNOWN_OPEN_NET_FINDINGS: [&str; 4] = [
     "dispatch_accepted_on_reordered_stale_lifecycle",
     // F2: queue pause/resume/drain requests carry no sequence either.
     "stale_queue_control_applied_out_of_order",
-    // F3: a retransmitted dispatch request has no idempotency key; after the first
-    // copy is proven, a straggler copy injects a second trigger.
-    "duplicate_dispatch_request_injected_twice",
+    // F3 (`duplicate_dispatch_request_injected_twice`) is FIXED by `#netadv5` R8:
+    // dispatch requests carry a durable idempotency key, so it is no longer an
+    // accepted finding and any recurrence fails the corpus.
 ];
 
 /// Net seeds `make sim-net` runs each corpus schedule under.
@@ -649,25 +655,30 @@ mod tests {
         );
     }
 
-    /// `#netadv4` F3, minimal trace. One dispatch request, retransmitted because
-    /// its ACK was lost. The first copy is accepted and proven; the straggler copy
-    /// then passes the in-flight coalesce (nothing is in flight any more) and
-    /// injects a second trigger. Production `ControllerRequest` has no request id.
-    /// KNOWN OPEN DEFECT: flip when dispatch requests become idempotent by key.
+    /// `#netadv4` F3, minimal trace — FIXED by `#netadv5` R8. One dispatch
+    /// request, retransmitted because its ACK was lost. The first copy is
+    /// accepted and proven; the straggler copy carries the same request key, so
+    /// the controller answers it from the durable record and injects nothing.
     #[test]
-    fn netadv4_known_f3_retransmitted_dispatch_after_proof_injects_twice() {
+    fn netadv4_f3_retransmitted_dispatch_after_proof_injects_once() {
         let mut world = SimWorld::new_local(4_003);
         world.apply(SimCommand::BindRouteOwner).unwrap();
         world.apply(SimCommand::SupervisorReady).unwrap();
-        world.apply(SimCommand::DispatchRoutePrompt).unwrap(); // copy 0
+        world.dispatch_route_prompt_keyed(false, Some(77)).unwrap(); // copy 0
         world.apply(SimCommand::ProveDispatchAccepted).unwrap();
-        world.apply(SimCommand::DispatchRoutePrompt).unwrap(); // copy 1 (retransmit)
+        world.dispatch_route_prompt_keyed(false, Some(77)).unwrap(); // copy 1 (retransmit)
         assert_eq!(
-            world.coverage.route_dispatch_acceptances, 2,
-            "known defect: one operator request, two injected triggers"
+            world.coverage.route_dispatch_acceptances, 1,
+            "one operator request, one injected trigger"
         );
+        assert_eq!(world.coverage.route_dispatch_duplicates_answered, 1);
+        // Eventual progress: the next logical request (new key) dispatches.
+        world.apply(SimCommand::SupervisorReady).unwrap();
+        world.dispatch_route_prompt_keyed(false, Some(78)).unwrap();
+        assert_eq!(world.coverage.route_dispatch_acceptances, 2);
+        // The hostile seed that found F3 no longer reports it.
         assert!(
-            findings_of(8, NetProfile::Hostile, 1)
+            !findings_of(8, NetProfile::Hostile, 1)
                 .iter()
                 .any(|f| f.kind == "duplicate_dispatch_request_injected_twice")
         );

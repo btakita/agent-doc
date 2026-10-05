@@ -135,6 +135,48 @@ pub fn dispatch_should_coalesce_in_flight(
     in_flight_same_cycle && !operator_driven
 }
 
+/// `#netadv5` R8 / `#netadv4` SIM-F3: the diagnostic-payload field carrying a
+/// dispatch request's idempotency key.
+///
+/// The caller mints one key per logical dispatch request and re-sends it on
+/// every retry (transport drop, stale-binary reconnect, stale-generation
+/// redirect). A lost ACK makes the caller re-send a request the controller
+/// already applied; without a key, once the first copy is proven nothing is in
+/// flight any more and the straggler injects a second trigger.
+pub const DISPATCH_REQUEST_KEY_FIELD: &str = "dispatch_request_key";
+
+/// The dispatch request key carried in `payload`, if any.
+pub fn dispatch_request_key(payload: &str) -> Option<&str> {
+    dispatch_diagnostic_field(payload, DISPATCH_REQUEST_KEY_FIELD)
+}
+
+/// `payload` with `key` attached (idempotent: an existing key is kept, so a
+/// retry can never re-key its own request).
+pub fn with_dispatch_request_key(payload: &str, key: &str) -> String {
+    if dispatch_request_key(payload).is_some() {
+        return payload.to_string();
+    }
+    append_dispatch_proof_payload(payload, &format!("{DISPATCH_REQUEST_KEY_FIELD}={key}"))
+}
+
+/// How the controller admits a keyed dispatch request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchRequestAdmission {
+    /// No applied outcome is recorded for this key: evaluate normally.
+    Fresh,
+    /// The key was already applied: answer with the recorded original outcome
+    /// and inject nothing.
+    DuplicateOfApplied,
+}
+
+pub fn dispatch_request_admission(applied_outcome_recorded: bool) -> DispatchRequestAdmission {
+    if applied_outcome_recorded {
+        DispatchRequestAdmission::DuplicateOfApplied
+    } else {
+        DispatchRequestAdmission::Fresh
+    }
+}
+
 pub const fn queue_pause_predates_boot(updated_at: u64, boot_timestamp: Option<u64>) -> bool {
     match boot_timestamp {
         Some(boot_timestamp) => updated_at < boot_timestamp,
@@ -4155,6 +4197,21 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(!dispatch_should_coalesce_in_flight(true, true));
         assert!(!dispatch_should_coalesce_in_flight(false, false));
         assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+
+    #[test]
+    fn dispatch_request_key_round_trips_and_never_rekeys() {
+        let payload = with_dispatch_request_key("harness=codex", "dr-1");
+        assert_eq!(payload, "harness=codex dispatch_request_key=dr-1");
+        assert_eq!(dispatch_request_key(&payload), Some("dr-1"));
+        assert_eq!(with_dispatch_request_key(&payload, "dr-2"), payload);
+        assert_eq!(with_dispatch_request_key("", "dr-3"), "dispatch_request_key=dr-3");
+        assert_eq!(dispatch_request_key("harness=codex"), None);
+        assert_eq!(
+            dispatch_request_admission(true),
+            DispatchRequestAdmission::DuplicateOfApplied
+        );
+        assert_eq!(dispatch_request_admission(false), DispatchRequestAdmission::Fresh);
     }
 
     #[test]

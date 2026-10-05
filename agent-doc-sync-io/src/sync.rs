@@ -2733,11 +2733,11 @@ pub(crate) fn acquire_sync_lock_for_mode(
     auto_start_mode: AutoStartMode,
     wait_budget: Duration,
     mut log: impl FnMut(String),
-) -> Result<Option<SyncLockAcquire>> {
+) -> Result<Option<crate::SyncLockAcquire>> {
     let start = Instant::now();
     let guard = acquire_sync_lock(lock_path, wait_budget, &mut log);
     let elapsed = start.elapsed();
-    let contended = matches!(guard, SyncLockAcquire::Contended);
+    let contended = matches!(guard, crate::SyncLockAcquire::Contended);
     match agent_doc_sync::sync_lock_disposition(auto_start_mode, guard.is_acquired(), contended) {
         agent_doc_sync::SyncLockDisposition::Proceed => Ok(Some(guard)),
         agent_doc_sync::SyncLockDisposition::SkipPassive => {

@@ -2210,6 +2210,27 @@ impl SimWorld {
     /// operator dispatch (JB `Run Agent Doc`); it is never coalesced, so the
     /// operator can dispatch while auto-drain backpressure holds.
     pub(crate) fn dispatch_route_prompt_with(&mut self, operator_driven: bool) -> Result<()> {
+        let request_key = self.net.as_ref().and_then(|net| net.delivering_request_key);
+        self.dispatch_route_prompt_keyed(operator_driven, request_key)
+    }
+
+    /// `#netadv5` R8 / `#netadv4` SIM-F3: a dispatch request carries the
+    /// sender-minted idempotency key (a retransmit/duplicate reuses it). A key
+    /// the controller already applied is answered with the original outcome and
+    /// injects nothing, through the production `dispatch_request_admission`.
+    pub(crate) fn dispatch_route_prompt_keyed(
+        &mut self,
+        operator_driven: bool,
+        request_key: Option<u64>,
+    ) -> Result<()> {
+        if let Some(key) = request_key
+            && agent_doc_controller::dispatch::dispatch_request_admission(
+                self.route.applied_dispatch_keys.contains(&key),
+            ) == agent_doc_controller::dispatch::DispatchRequestAdmission::DuplicateOfApplied
+        {
+            self.coverage.route_dispatch_duplicates_answered += 1;
+            return Ok(());
+        }
         let pane_id = self.current_dispatch_pane()?;
         if let Some(stage) = self
             .route
@@ -2267,6 +2288,9 @@ impl SimWorld {
             proved: false,
         });
         self.coverage.route_dispatch_acceptances += 1;
+        if let Some(key) = request_key {
+            self.route.applied_dispatch_keys.insert(key);
+        }
         // `#rdypoll` (§D / img_52): a real trigger injection happened — emit the
         // same `dispatch_inject attempt=N` marker the production route logs so a
         // multi-inject regression (N stacked un-submitted triggers after a restart)

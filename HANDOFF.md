@@ -77,4 +77,7 @@ empty; a recurrence is a test failure rather than an allow-listed result.
   structural checks, no finding kinds.
 - Fresh long budget: base seed 9,000,000, 2,395 schedules × 160 steps in 30
   seconds, no finding kinds.
-- Full `make check` with explicit exit status and native failure tally: pending.
+- Full `make check`: exit 0. Native nextest summary: 11,087 passed, 270
+  skipped, 0 failed across 182 binaries. TLA+ completed 36 safe model checks
+  with no errors and confirmed 79 expected non-vacuity witnesses. Captured native
+  failure tally: 0.

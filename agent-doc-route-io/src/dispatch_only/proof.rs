@@ -43,6 +43,9 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
     let mut recycle_epoch = status.recycle_epoch;
     let mut attempt: u32 = 0;
     let mut epoch_changes: u32 = 0;
+    // `#netadv3` RSD-1: consecutive round trips where both the settle wait and
+    // the status re-read failed.
+    let mut unreachable: u32 = 0;
 
     // `#recycleinflightwedge` / `#recyclesettlewaitshort`: a recycle older than
     // the settle TTL lost its settle transition — the supervisor died between
@@ -115,6 +118,7 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
             );
         match waited {
             Ok(projection) => {
+                unreachable = 0;
                 if !matches!(
                     projection.phase,
                     agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
@@ -179,6 +183,7 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
                     Path::new(file_path),
                 ) {
                     Ok(refreshed) => {
+                        unreachable = 0;
                         if !matches!(
                             refreshed.phase,
                             agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
@@ -220,20 +225,33 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
                         }
                     }
                     Err(status_err) => {
-                        // The controller itself is unreachable. That is not a
-                        // pending recycle, and re-arming a wait against an
-                        // endpoint that cannot answer never terminates.
-                        return Err(recycle_inflight_refusal(
+                        // `#netadv3` RSD-1: both round trips were lost. That
+                        // is not a verdict about the recycle (a stamped,
+                        // pending recycle must never refuse), so back off and
+                        // re-arm. The loop head's verdict on the last mark it
+                        // read still bounds the wait.
+                        unreachable = unreachable.saturating_add(1);
+                        let backoff =
+                            agent_doc_controller::dispatch::recycle_settle_unreachable_backoff(
+                                unreachable,
+                            );
+                        agent_doc_ops_log_io::log_op(
                             file,
-                            pane,
-                            harness_binary,
-                            &reason,
-                            marked_secs,
-                            recycle_epoch,
-                            started.elapsed().as_millis(),
-                            attempt,
-                            &format!("recycle_status_unreadable: {status_err}"),
-                        ));
+                            &format!(
+                                "route_dispatch_only_recycle_inflight_status_unreachable file={} pane={} harness={} reason={} recycle_epoch={} attempt={} consecutive={} backoff_ms={} error={:?}",
+                                file.display(),
+                                pane,
+                                harness_binary,
+                                reason,
+                                recycle_epoch,
+                                attempt,
+                                unreachable,
+                                backoff.as_millis(),
+                                status_err.to_string()
+                            ),
+                        );
+                        std::thread::sleep(backoff);
+                        continue;
                     }
                 }
             }

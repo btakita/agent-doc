@@ -2284,6 +2284,24 @@ pub enum RecycleInflightUnsettledVerdict {
 /// operator who recycles twice while one dispatch waits is already unusual.
 pub const RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES: u32 = 3;
 
+/// Back-off before re-arming the settle wait after BOTH the settle-wait RPC and
+/// the status re-read failed (`#netadv3` RSD-1).
+///
+/// Two lost round trips used to be read as "controller unreachable" and refused
+/// a stamped recycle that was still pending, the refusal
+/// `StampedRecycleNeverRefuses` forbids
+/// (`formal/tla/RecycleSettleDispatchNet.tla`, `Unreachable` wedge). A lost
+/// request and a lost reply look the same to the caller, and neither says
+/// anything about the recycle, so the gate backs off and re-arms; the loop
+/// head's verdict still bounds the wait. 250ms doubling, capped at 5s, so an
+/// endpoint that refuses connections immediately cannot spin the loop.
+pub fn recycle_settle_unreachable_backoff(consecutive_failures: u32) -> std::time::Duration {
+    const INITIAL_MS: u64 = 250;
+    const MAX_MS: u64 = 5_000;
+    let shift = consecutive_failures.saturating_sub(1).min(16);
+    std::time::Duration::from_millis(INITIAL_MS.saturating_mul(1u64 << shift).min(MAX_MS))
+}
+
 /// Classify one unsettled settle-wait return.
 ///
 /// Total over the three shapes, so a caller cannot fall through to a refusal it
@@ -5427,6 +5445,17 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     /// `FailClosed` merely because it outran the settle-wait RPC. Stated over the
     /// whole window rather than sampled, so a future constant change cannot
     /// silently reopen the gap.
+    #[test]
+    fn recycle_settle_unreachable_backoff_doubles_and_caps() {
+        use std::time::Duration;
+        assert_eq!(recycle_settle_unreachable_backoff(0), Duration::from_millis(250));
+        assert_eq!(recycle_settle_unreachable_backoff(1), Duration::from_millis(250));
+        assert_eq!(recycle_settle_unreachable_backoff(2), Duration::from_millis(500));
+        assert_eq!(recycle_settle_unreachable_backoff(3), Duration::from_millis(1_000));
+        assert_eq!(recycle_settle_unreachable_backoff(6), Duration::from_millis(5_000));
+        assert_eq!(recycle_settle_unreachable_backoff(u32::MAX), Duration::from_millis(5_000));
+    }
+
     #[test]
     fn recycle_inflight_unsettled_verdict_has_no_refusal_window_below_the_ttl() {
         let marked = 1_000_000u64;

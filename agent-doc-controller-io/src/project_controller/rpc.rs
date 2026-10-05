@@ -509,6 +509,7 @@ fn record_controller_model_pressure(project_root: &Path, doc: &Path, source: &st
     .flatten()
     .and_then(|raw| raw.parse::<u64>().ok())
     .unwrap_or(0);
+    let episode_started = existing_deadline <= now;
     // Do not rewrite/log the same project-wide marker on every foreground
     // retry. Refresh only after half its cooldown has elapsed.
     let refresh_after = now.saturating_add(CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs() / 2);
@@ -528,17 +529,22 @@ fn record_controller_model_pressure(project_root: &Path, doc: &Path, source: &st
                 return;
             }
         };
-    agent_doc_ops_log_io::log_op(
-        doc,
-        &format!(
-            "controller_model_pressure_recorded file={} source={} cooldown_secs={} deadline={} error={}",
-            doc.display(),
-            source,
-            CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs(),
-            retained_deadline,
-            error.replace('\n', "\\n")
-        ),
-    );
+    // The retained deadline may refresh during one continuous pressure episode,
+    // but the episode itself is the operator-relevant event. Logging every
+    // refresh made this self-limiting backpressure recorder dominate ops.log.
+    if episode_started {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_model_pressure_recorded file={} source={} cooldown_secs={} deadline={} error={}",
+                doc.display(),
+                source,
+                CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs(),
+                retained_deadline,
+                error.replace('\n', "\\n")
+            ),
+        );
+    }
 }
 
 fn clear_expired_controller_model_pressure(project_root: &Path) {
@@ -699,6 +705,37 @@ fn controller_request_deadline_exceeded(error: &anyhow::Error) -> bool {
             .downcast_ref::<std::io::Error>()
             .is_some_and(is_timeout_error)
     })
+}
+
+/// Retry one idempotent state-event publication after the controller receive
+/// deadline expires.
+///
+/// State events carry stable event ids and the controller deduplicates them at
+/// ingress, so a response lost after apply is safe to re-submit. This is a
+/// single boundary retry, not polling: a second expiry is returned to the
+/// caller with both attempts recorded in the error chain.
+fn retry_state_event_deadline<T>(
+    retry_log_path: &Path,
+    mut attempt: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    match attempt() {
+        Err(first) if controller_request_deadline_exceeded(&first) => {
+            agent_doc_ops_log_io::log_op(
+                retry_log_path,
+                &format!(
+                    "controller_state_event_deadline_retry attempt=2 first_error={}",
+                    compact_controller_error(&first)
+                ),
+            );
+            attempt().with_context(|| {
+                format!(
+                    "idempotent state-event retry failed after controller deadline: {}",
+                    compact_controller_error(&first)
+                )
+            })
+        }
+        result => result,
+    }
 }
 
 /// Whether `err` is a controller transport drop — the connection went away
@@ -3059,26 +3096,25 @@ pub fn publish_state_event(
         let bootstrap = runtime.bootstrap_snapshot()?;
         return ingest_state_event(&bootstrap, &runtime, event.clone());
     }
-    request_controller_with_timeout(
-        project_root,
-        ControllerRequest {
-            command: "state_event_append".to_string(),
-            file: None,
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: Some("automatic_state_source".to_string()),
-            reason: Some("reactive_state_publication".to_string()),
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(serde_json::to_string(event)?),
-            sequence: None,
-        },
-        CONTROLLER_RPC_TIMEOUT,
-    )
+    let request = ControllerRequest {
+        command: "state_event_append".to_string(),
+        file: None,
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("automatic_state_source".to_string()),
+        reason: Some("reactive_state_publication".to_string()),
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(event)?),
+        sequence: None,
+    };
+    retry_state_event_deadline(project_root, || {
+        request_controller_with_timeout(project_root, request.clone(), CONTROLLER_RPC_TIMEOUT)
+    })
 }
 
 /// Publish a typed fact only when this project already has a live controller.
@@ -3089,26 +3125,29 @@ pub fn publish_state_event_existing(
     project_root: &Path,
     event: &agent_doc_state_backbone::StateEvent,
 ) -> Result<bool> {
-    request_existing_controller_with_timeout(
-        project_root,
-        ControllerRequest {
-            command: "state_event_append".to_string(),
-            file: None,
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: Some("passive_state_source".to_string()),
-            reason: Some("reactive_state_publication".to_string()),
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(serde_json::to_string(event)?),
-            sequence: None,
-        },
-        CONTROLLER_RPC_TIMEOUT,
-    )
+    let request = ControllerRequest {
+        command: "state_event_append".to_string(),
+        file: None,
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("passive_state_source".to_string()),
+        reason: Some("reactive_state_publication".to_string()),
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(event)?),
+        sequence: None,
+    };
+    retry_state_event_deadline(project_root, || {
+        request_existing_controller_with_timeout(
+            project_root,
+            request.clone(),
+            CONTROLLER_RPC_TIMEOUT,
+        )
+    })
 }
 
 /// Publish one editor-produced state fact to an already-running controller.
@@ -33112,6 +33151,40 @@ mod tests {
     }
 
     #[test]
+    fn controller_model_pressure_logs_once_per_continuous_episode() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+
+        record_controller_model_pressure(dir.path(), &doc, "first", "controller busy");
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            CONTROLLER_MODEL_PRESSURE_STATE_KEY,
+            &(controller_model_pressure_now_secs() + 1).to_string(),
+            controller_model_pressure_now_secs() * 1000,
+        )
+        .unwrap();
+
+        // An active-but-near-expiry marker refreshes the cooldown, but remains
+        // part of the same pressure episode and must not add another log line.
+        record_controller_model_pressure(dir.path(), &doc, "refresh", "still busy");
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert_eq!(ops.matches("controller_model_pressure_recorded").count(), 1);
+
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            CONTROLLER_MODEL_PRESSURE_STATE_KEY,
+            "0",
+            controller_model_pressure_now_secs() * 1000,
+        )
+        .unwrap();
+        record_controller_model_pressure(dir.path(), &doc, "next", "busy again");
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert_eq!(ops.matches("controller_model_pressure_recorded").count(), 2);
+    }
+
+    #[test]
     fn controller_model_pressure_lock_contention_is_bounded_and_nonfatal() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("doc.md");
@@ -36425,6 +36498,68 @@ mod tests {
             "transport retry must be visible in ops.log:\n{ops_log}"
         );
         assert!(ops_log.contains("failed to read project controller response"));
+    }
+
+    #[test]
+    fn idempotent_state_event_deadline_retries_once_and_logs() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut attempts = 0;
+
+        let result = retry_state_event_deadline(dir.path(), || {
+            attempts += 1;
+            if attempts == 1 {
+                Err(std::io::Error::new(
+                    ErrorKind::TimedOut,
+                    "timed out after 5.0s waiting for project controller response",
+                )
+                .into())
+            } else {
+                Ok("applied")
+            }
+        })
+        .unwrap();
+
+        assert_eq!(result, "applied");
+        assert_eq!(attempts, 2);
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("controller_state_event_deadline_retry attempt=2"));
+    }
+
+    #[test]
+    fn state_event_non_deadline_error_is_not_retried() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut attempts = 0;
+        let error = retry_state_event_deadline::<()>(dir.path(), || {
+            attempts += 1;
+            anyhow::bail!("controller refused event")
+        })
+        .unwrap_err();
+
+        assert_eq!(attempts, 1);
+        assert!(error.to_string().contains("controller refused event"));
+    }
+
+    #[test]
+    fn repeated_state_event_deadline_is_returned_to_the_caller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut attempts = 0;
+        let error = retry_state_event_deadline::<()>(dir.path(), || {
+            attempts += 1;
+            Err(std::io::Error::new(
+                ErrorKind::TimedOut,
+                "timed out after 5.0s waiting for project controller response",
+            )
+            .into())
+        })
+        .unwrap_err();
+
+        assert_eq!(attempts, 2);
+        assert!(
+            format!("{error:#}").contains("idempotent state-event retry failed"),
+            "{error:#}"
+        );
     }
 
     #[test]

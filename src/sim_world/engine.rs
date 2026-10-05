@@ -2192,6 +2192,35 @@ impl SimWorld {
         Ok(())
     }
 
+    /// `#netadv3` SIM-F1/SIM-F2: admit one level-state update by its send stamp
+    /// (the IO clock value while a delivered message is applied; unstamped for
+    /// a local step), through the production `admit_sequenced`. `false` = it was
+    /// sent before an update already applied in this generation: discard it.
+    pub(crate) fn admit_level_update(
+        &mut self,
+        family: agent_doc_controller::sequence::SequencedFamily,
+        generation: u64,
+    ) -> bool {
+        use agent_doc_controller::sequence::{SequenceAdmission, admit_sequenced};
+        let stamp = self.net.as_ref().and_then(|net| net.delivering_level_stamp);
+        match admit_sequenced(
+            self.route.level_marks.get(&family).copied(),
+            generation,
+            stamp,
+        ) {
+            SequenceAdmission::Stale { .. } => {
+                self.coverage.stale_level_updates_discarded += 1;
+                false
+            }
+            SequenceAdmission::Apply { next } => {
+                if let Some(next) = next {
+                    self.route.level_marks.insert(family, next);
+                }
+                true
+            }
+        }
+    }
+
     pub(crate) fn transition_supervisor(
         &mut self,
         generation: u64,
@@ -2205,6 +2234,12 @@ impl SimWorld {
                 self.seed,
                 self.trace
             );
+        }
+        if !self.admit_level_update(
+            agent_doc_controller::sequence::SequencedFamily::Lifecycle,
+            generation,
+        ) {
+            return Ok(());
         }
         let projection_was_current = self.projection_identity_matches_durable();
         self.route.durable.lifecycle = lifecycle;
@@ -2229,6 +2264,27 @@ impl SimWorld {
     /// operator dispatch (JB `Run Agent Doc`); it is never coalesced, so the
     /// operator can dispatch while auto-drain backpressure holds.
     pub(crate) fn dispatch_route_prompt_with(&mut self, operator_driven: bool) -> Result<()> {
+        let request_key = self.net.as_ref().and_then(|net| net.delivering_request_key);
+        self.dispatch_route_prompt_keyed(operator_driven, request_key)
+    }
+
+    /// `#netadv5` R8 / `#netadv4` SIM-F3: a dispatch request carries the
+    /// sender-minted idempotency key (a retransmit/duplicate reuses it). A key
+    /// the controller already applied is answered with the original outcome and
+    /// injects nothing, through the production `dispatch_request_admission`.
+    pub(crate) fn dispatch_route_prompt_keyed(
+        &mut self,
+        operator_driven: bool,
+        request_key: Option<u64>,
+    ) -> Result<()> {
+        if let Some(key) = request_key
+            && agent_doc_controller::dispatch::dispatch_request_admission(
+                self.route.applied_dispatch_keys.contains(&key),
+            ) == agent_doc_controller::dispatch::DispatchRequestAdmission::DuplicateOfApplied
+        {
+            self.coverage.route_dispatch_duplicates_answered += 1;
+            return Ok(());
+        }
         let pane_id = self.current_dispatch_pane()?;
         // `#netadv6`: every production route dispatch path waits for the project
         // supervisor's recycle to settle before typing
@@ -2300,6 +2356,9 @@ impl SimWorld {
             proved: false,
         });
         self.coverage.route_dispatch_acceptances += 1;
+        if let Some(key) = request_key {
+            self.route.applied_dispatch_keys.insert(key);
+        }
         // `#rdypoll` (§D / img_52): a real trigger injection happened — emit the
         // same `dispatch_inject attempt=N` marker the production route logs so a
         // multi-inject regression (N stacked un-submitted triggers after a restart)
@@ -2357,6 +2416,12 @@ impl SimWorld {
         observed_generation: u64,
     ) -> Result<()> {
         self.require_current_admin_generation(observed_generation, "queue_control")?;
+        if !self.admit_level_update(
+            agent_doc_controller::sequence::SequencedFamily::QueueControl,
+            observed_generation,
+        ) {
+            return Ok(());
+        }
         self.route.queue_control = state;
         match state {
             QueueControlState::Paused => self.coverage.queue_pauses += 1,
@@ -2409,6 +2474,13 @@ impl SimWorld {
                 self.seed,
                 self.trace
             );
+        }
+        // The sim's heartbeat writes the lifecycle, so it shares that family.
+        if !self.admit_level_update(
+            agent_doc_controller::sequence::SequencedFamily::Lifecycle,
+            generation,
+        ) {
+            return Ok(());
         }
         self.route.durable.pane_id = Some(pane_id.into());
         self.route.durable.lifecycle = SupervisorLifecycle::Ready;

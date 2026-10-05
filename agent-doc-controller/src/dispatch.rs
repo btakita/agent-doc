@@ -135,6 +135,48 @@ pub fn dispatch_should_coalesce_in_flight(
     in_flight_same_cycle && !operator_driven
 }
 
+/// `#netadv5` R8 / `#netadv4` SIM-F3: the diagnostic-payload field carrying a
+/// dispatch request's idempotency key.
+///
+/// The caller mints one key per logical dispatch request and re-sends it on
+/// every retry (transport drop, stale-binary reconnect, stale-generation
+/// redirect). A lost ACK makes the caller re-send a request the controller
+/// already applied; without a key, once the first copy is proven nothing is in
+/// flight any more and the straggler injects a second trigger.
+pub const DISPATCH_REQUEST_KEY_FIELD: &str = "dispatch_request_key";
+
+/// The dispatch request key carried in `payload`, if any.
+pub fn dispatch_request_key(payload: &str) -> Option<&str> {
+    dispatch_diagnostic_field(payload, DISPATCH_REQUEST_KEY_FIELD)
+}
+
+/// `payload` with `key` attached (idempotent: an existing key is kept, so a
+/// retry can never re-key its own request).
+pub fn with_dispatch_request_key(payload: &str, key: &str) -> String {
+    if dispatch_request_key(payload).is_some() {
+        return payload.to_string();
+    }
+    append_dispatch_proof_payload(payload, &format!("{DISPATCH_REQUEST_KEY_FIELD}={key}"))
+}
+
+/// How the controller admits a keyed dispatch request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchRequestAdmission {
+    /// No applied outcome is recorded for this key: evaluate normally.
+    Fresh,
+    /// The key was already applied: answer with the recorded original outcome
+    /// and inject nothing.
+    DuplicateOfApplied,
+}
+
+pub fn dispatch_request_admission(applied_outcome_recorded: bool) -> DispatchRequestAdmission {
+    if applied_outcome_recorded {
+        DispatchRequestAdmission::DuplicateOfApplied
+    } else {
+        DispatchRequestAdmission::Fresh
+    }
+}
+
 pub const fn queue_pause_predates_boot(updated_at: u64, boot_timestamp: Option<u64>) -> bool {
     match boot_timestamp {
         Some(boot_timestamp) => updated_at < boot_timestamp,
@@ -2267,6 +2309,11 @@ pub enum RecycleInflightUnsettledVerdict {
     /// Unstamped projection. Unknown is not stale, and an unbounded wait on an
     /// unknown mark cannot terminate, so this stays fail-closed.
     FailClosed,
+    /// `#netadv5` R9: past the TTL, but the document's supervisor process is
+    /// still alive. An elapsed TTL is not proof the settle was lost — on a slow
+    /// host the `auto_install_reexec` phase spans a whole `make install`. Do not
+    /// inject into a pane that may be mid-`execve`; refuse retryably.
+    RefuseOwnerStillRecycling,
 }
 
 /// How many times the gated recycle may be replaced by a NEW epoch before the
@@ -2283,6 +2330,24 @@ pub enum RecycleInflightUnsettledVerdict {
 /// Three is generous: a single install fan-out settles in one epoch, and an
 /// operator who recycles twice while one dispatch waits is already unusual.
 pub const RECYCLE_INFLIGHT_MAX_EPOCH_CHANGES: u32 = 3;
+
+/// Back-off before re-arming the settle wait after BOTH the settle-wait RPC and
+/// the status re-read failed (`#netadv3` RSD-1).
+///
+/// Two lost round trips used to be read as "controller unreachable" and refused
+/// a stamped recycle that was still pending, the refusal
+/// `StampedRecycleNeverRefuses` forbids
+/// (`formal/tla/RecycleSettleDispatchNet.tla`, `Unreachable` wedge). A lost
+/// request and a lost reply look the same to the caller, and neither says
+/// anything about the recycle, so the gate backs off and re-arms; the loop
+/// head's verdict still bounds the wait. 250ms doubling, capped at 5s, so an
+/// endpoint that refuses connections immediately cannot spin the loop.
+pub fn recycle_settle_unreachable_backoff(consecutive_failures: u32) -> std::time::Duration {
+    const INITIAL_MS: u64 = 250;
+    const MAX_MS: u64 = 5_000;
+    let shift = consecutive_failures.saturating_sub(1).min(16);
+    std::time::Duration::from_millis(INITIAL_MS.saturating_mul(1u64 << shift).min(MAX_MS))
+}
 
 /// Classify one unsettled settle-wait return.
 ///
@@ -2301,6 +2366,24 @@ pub fn recycle_inflight_unsettled_verdict(
         return RecycleInflightUnsettledVerdict::ProceedAbandoned;
     }
     RecycleInflightUnsettledVerdict::KeepWaiting
+}
+
+/// `#netadv5` R9: [`recycle_inflight_unsettled_verdict`] with positive
+/// evidence. Abandonment ("the settle was lost") additionally requires that no
+/// supervisor process for the document is alive; a live one past the TTL is
+/// [`RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling`].
+pub fn recycle_inflight_unsettled_verdict_with_owner(
+    marked_secs: u64,
+    now_secs: u64,
+    ttl_secs: u64,
+    supervisor_alive: bool,
+) -> RecycleInflightUnsettledVerdict {
+    match recycle_inflight_unsettled_verdict(marked_secs, now_secs, ttl_secs) {
+        RecycleInflightUnsettledVerdict::ProceedAbandoned if supervisor_alive => {
+            RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling
+        }
+        verdict => verdict,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2935,6 +3018,24 @@ pub fn direct_pane_max_enter_resubmits() -> usize {
 /// composer may be read as `Cleared` and before a visible draft may be read as
 /// stranded.
 pub const PASS_THROUGH_STRANDED_DRAFT_SETTLE: Duration = Duration::from_millis(150);
+/// `#netadv5` R8: override for [`PASS_THROUGH_STRANDED_DRAFT_SETTLE`]
+/// (milliseconds). The window is localhost-tuned; a remote workspace whose TUI
+/// renders slower raises it so an empty-looking composer is not read early.
+pub const PASS_THROUGH_STRANDED_DRAFT_SETTLE_ENV: &str = "AGENT_DOC_PASS_THROUGH_SETTLE_MS";
+
+pub fn pass_through_stranded_draft_settle_from_env_value(value: Option<&str>) -> Duration {
+    value
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(PASS_THROUGH_STRANDED_DRAFT_SETTLE)
+}
+
+pub fn pass_through_stranded_draft_settle() -> Duration {
+    pass_through_stranded_draft_settle_from_env_value(
+        std::env::var(PASS_THROUGH_STRANDED_DRAFT_SETTLE_ENV).ok().as_deref(),
+    )
+}
 pub const PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS_DEFAULT: usize = 3;
 
 pub fn pass_through_stranded_draft_max_enter_resubmits_from_env_value(
@@ -3120,6 +3221,34 @@ pub fn pass_through_stranded_draft_log_line(facts: PassThroughStrandedDraftLogFa
         facts.elapsed_ms,
         facts.capture_failed,
     )
+}
+
+/// `#netadv5` R8: what a route does when it pressed `Enter` on a stranded
+/// draft and the controller did not project admission within the bounded wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrandedDraftUnobservedAdmission {
+    /// The composer no longer holds this trigger: the `Enter` was consumed and
+    /// the turn is (or will be) admitted. Report submitted-unproven; never
+    /// inject a second trigger.
+    SubmittedUnproven,
+    /// The composer still holds this exact trigger: the `Enter` was not
+    /// consumed yet. Retry later (the next route re-presses `Enter` on the same
+    /// draft); appending a fresh trigger would duplicate the prompt.
+    RetryLater,
+}
+
+/// A slow admission projection is not proof of non-admission. Only the pane
+/// re-observed still holding the identical draft is evidence the submit did
+/// not land, and even then the remedy is a retry, never a second trigger.
+pub fn stranded_draft_unobserved_admission_followup(
+    after: PreDispatchStrandedDraftAction,
+) -> StrandedDraftUnobservedAdmission {
+    match after {
+        PreDispatchStrandedDraftAction::ResubmitStrandedDraft => {
+            StrandedDraftUnobservedAdmission::RetryLater
+        }
+        _ => StrandedDraftUnobservedAdmission::SubmittedUnproven,
+    }
 }
 
 /// What a routed dispatch should do about the composer state it observes
@@ -4155,6 +4284,78 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(!dispatch_should_coalesce_in_flight(true, true));
         assert!(!dispatch_should_coalesce_in_flight(false, false));
         assert!(!dispatch_should_coalesce_in_flight(false, true));
+    }
+
+    /// `#netadv5` R9: a slow `make install` that outlives the 120s TTL while
+    /// its supervisor is alive is not a lost settle; only a dead supervisor is.
+    #[test]
+    fn recycle_ttl_elapsed_with_live_supervisor_is_not_abandonment() {
+        let ttl = RECYCLE_INFLIGHT_SETTLE_TTL_SECS;
+        let marked = 1_000;
+        let late = marked + ttl + 30;
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_owner(marked, late, ttl, true),
+            RecycleInflightUnsettledVerdict::RefuseOwnerStillRecycling
+        );
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_owner(marked, late, ttl, false),
+            RecycleInflightUnsettledVerdict::ProceedAbandoned
+        );
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_owner(marked, marked + 5, ttl, true),
+            RecycleInflightUnsettledVerdict::KeepWaiting
+        );
+        assert_eq!(
+            recycle_inflight_unsettled_verdict_with_owner(0, late, ttl, false),
+            RecycleInflightUnsettledVerdict::FailClosed
+        );
+    }
+
+    #[test]
+    fn pass_through_settle_is_configurable_for_slow_hosts() {
+        assert_eq!(
+            pass_through_stranded_draft_settle_from_env_value(None),
+            PASS_THROUGH_STRANDED_DRAFT_SETTLE
+        );
+        assert_eq!(
+            pass_through_stranded_draft_settle_from_env_value(Some("600")),
+            Duration::from_millis(600)
+        );
+        assert_eq!(
+            pass_through_stranded_draft_settle_from_env_value(Some("0")),
+            PASS_THROUGH_STRANDED_DRAFT_SETTLE
+        );
+    }
+
+    #[test]
+    fn stranded_draft_admission_timeout_never_authorizes_a_second_trigger() {
+        use PreDispatchStrandedDraftAction as A;
+        assert_eq!(
+            stranded_draft_unobserved_admission_followup(A::ResubmitStrandedDraft),
+            StrandedDraftUnobservedAdmission::RetryLater
+        );
+        for consumed in [A::DispatchFresh, A::DeferPaneBusy, A::ObserveUnavailable] {
+            assert_eq!(
+                stranded_draft_unobserved_admission_followup(consumed),
+                StrandedDraftUnobservedAdmission::SubmittedUnproven,
+                "{consumed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dispatch_request_key_round_trips_and_never_rekeys() {
+        let payload = with_dispatch_request_key("harness=codex", "dr-1");
+        assert_eq!(payload, "harness=codex dispatch_request_key=dr-1");
+        assert_eq!(dispatch_request_key(&payload), Some("dr-1"));
+        assert_eq!(with_dispatch_request_key(&payload, "dr-2"), payload);
+        assert_eq!(with_dispatch_request_key("", "dr-3"), "dispatch_request_key=dr-3");
+        assert_eq!(dispatch_request_key("harness=codex"), None);
+        assert_eq!(
+            dispatch_request_admission(true),
+            DispatchRequestAdmission::DuplicateOfApplied
+        );
+        assert_eq!(dispatch_request_admission(false), DispatchRequestAdmission::Fresh);
     }
 
     #[test]
@@ -5427,6 +5628,17 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     /// `FailClosed` merely because it outran the settle-wait RPC. Stated over the
     /// whole window rather than sampled, so a future constant change cannot
     /// silently reopen the gap.
+    #[test]
+    fn recycle_settle_unreachable_backoff_doubles_and_caps() {
+        use std::time::Duration;
+        assert_eq!(recycle_settle_unreachable_backoff(0), Duration::from_millis(250));
+        assert_eq!(recycle_settle_unreachable_backoff(1), Duration::from_millis(250));
+        assert_eq!(recycle_settle_unreachable_backoff(2), Duration::from_millis(500));
+        assert_eq!(recycle_settle_unreachable_backoff(3), Duration::from_millis(1_000));
+        assert_eq!(recycle_settle_unreachable_backoff(6), Duration::from_millis(5_000));
+        assert_eq!(recycle_settle_unreachable_backoff(u32::MAX), Duration::from_millis(5_000));
+    }
+
     #[test]
     fn recycle_inflight_unsettled_verdict_has_no_refusal_window_below_the_ttl() {
         let marked = 1_000_000u64;

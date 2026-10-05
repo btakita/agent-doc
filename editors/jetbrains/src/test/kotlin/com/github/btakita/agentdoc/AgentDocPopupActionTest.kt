@@ -70,10 +70,12 @@ class AgentDocPopupActionTest {
         return (0 until nodes.length).map { nodes.item(it) as Element }
     }
 
-    private fun Element.defaultKeystrokes(): List<String> =
+    private fun Element.keystrokes(keymap: String): List<String> =
         children("keyboard-shortcut")
-            .filter { it.getAttribute("keymap") == "\$default" }
+            .filter { it.getAttribute("keymap") == keymap }
             .map { it.getAttribute("first-keystroke").trim().lowercase().split(Regex("\\s+")).joinToString(" ") }
+
+    private fun Element.defaultKeystrokes(): List<String> = keystrokes("\$default")
 
     @Test
     fun `every declared agent-doc action is reachable from the popup`() {
@@ -109,5 +111,39 @@ class AgentDocPopupActionTest {
             .filter { it.getAttribute("id") != "AgentDoc.Popup" }
             .flatMap { it.defaultKeystrokes() }
         assertFalse("popup default collides with another agent-doc default", "ctrl shift alt d" in otherDefaults)
+    }
+
+    @Test
+    fun `x window manager keymap keeps alt space for the popup`() {
+        // `altshiftmenu`: #gh116 removed alt SPACE from every keymap. On Linux
+        // under a bare X window manager (the operator runs i3 with a keymap
+        // derived from "Default for XWin") Alt+Space reaches the IDE and was the
+        // popup's working key, so the Windows fix silently took the menu away.
+        val popup = actionElements().single { it.getAttribute("id") == "AgentDoc.Popup" }
+        assertEquals(listOf("alt space"), popup.keystrokes("Default for XWin"))
+
+        // The XWin shortcut is added on top of the parent's list only if the
+        // `$default` binding was registered first (KeymapImpl copies the parent
+        // shortcuts when an action gets its first own shortcut), so XWin keeps
+        // Ctrl+Shift+Alt+D too.
+        val keymapOrder = popup.children("keyboard-shortcut").map { it.getAttribute("keymap") }
+        assertEquals(listOf("\$default", "Default for XWin"), keymapOrder)
+
+        // Keymaps whose platforms consume Alt+Space never carry it:
+        // Windows/macOS use $default or Mac keymaps, GNOME opens the window
+        // menu, KDE opens KRunner.
+        val consuming = listOf("\$default", "Default for GNOME", "Default for KDE", "Mac OS X 10.5+", "Mac OS X")
+        val offenders = actionElements().flatMap { action ->
+            consuming.flatMap { keymap ->
+                action.keystrokes(keymap).filter { it == "alt space" }.map { "${action.getAttribute("id")} [$keymap]" }
+            }
+        }
+        assertEquals(emptyList<String>(), offenders)
+
+        // No other agent-doc action claims Alt+Space in any keymap.
+        val others = actionElements()
+            .filter { it.getAttribute("id") != "AgentDoc.Popup" }
+            .flatMap { action -> action.children("keyboard-shortcut").map { it.getAttribute("first-keystroke").trim().lowercase() } }
+        assertFalse("alt space collides with another agent-doc shortcut", others.any { it.split(Regex("\\s+")).joinToString(" ") == "alt space" })
     }
 }

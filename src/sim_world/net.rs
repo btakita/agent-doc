@@ -55,6 +55,8 @@ pub(crate) struct NetMsg {
     pub(crate) command: SimCommand,
     /// The sender's view of the actor generation when it sent the message.
     pub(crate) generation_at_send: u64,
+    /// Per-host order assigned at the level-update call/send edge.
+    pub(crate) level_stamp: Option<u64>,
 }
 
 /// Families of level-state updates whose receivers apply "last arrival wins".
@@ -78,6 +80,14 @@ pub(crate) struct SimWorldNet {
     pub(crate) net: SimNet<SimLink, NetMsg>,
     /// Generation override in force while a delivered message is applied.
     pub(crate) delivering_generation: Option<u64>,
+    /// `#netadv5` R8: the request key (the net send id, shared by every
+    /// retransmit/duplicate copy) of the message being applied.
+    pub(crate) delivering_request_key: Option<u64>,
+    /// Send-time order of the level-state update being applied, independent of
+    /// the request key used for dispatch idempotency.
+    pub(crate) delivering_level_stamp: Option<u64>,
+    /// Model of the production IO layer's per-host monotonic level-update clock.
+    pub(crate) level_update_clock: u64,
     /// Latest applied send id per level-state family and generation.
     pub(crate) latest_applied: BTreeMap<LevelFamily, (u64, u64)>,
     pub(crate) findings: Vec<NetFinding>,
@@ -100,6 +110,9 @@ impl SimWorldNet {
             mode,
             net: SimNet::for_profile(profile, seed, Delivery::AtLeastOnce),
             delivering_generation: None,
+            delivering_request_key: None,
+            delivering_level_stamp: None,
+            level_update_clock: 0,
             latest_applied: BTreeMap::new(),
             findings: Vec::new(),
             reconnect_resyncs: 0,
@@ -180,7 +193,8 @@ fn level_family(command: SimCommand) -> Option<LevelFamily> {
         | SupervisorWaitingInput
         | SupervisorBlocked
         | SupervisorClosed
-        | SupervisorHeartbeatReattach => Some(LevelFamily::ActorLifecycle),
+        | SupervisorHeartbeatReattach
+        | PromoteStartingPromptReady => Some(LevelFamily::ActorLifecycle),
         AdminPauseQueue | AdminResumeQueue | AdminDrainQueue => Some(LevelFamily::QueueControl),
         _ => None,
     }
@@ -224,9 +238,17 @@ impl SimWorld {
     pub(crate) fn send_over_net(&mut self, link: SimLink, command: SimCommand) -> Result<()> {
         let generation_at_send = self.route.durable.generation;
         let net = self.net.as_mut().expect("send_over_net requires a net");
+        let level_stamp = level_family(command).map(|_| {
+            net.level_update_clock = net
+                .level_update_clock
+                .checked_add(1)
+                .expect("level-update clock overflow");
+            net.level_update_clock
+        });
         let msg = NetMsg {
             command,
             generation_at_send,
+            level_stamp,
         };
         let (id, plan) = match net.next_plan.take() {
             Some(plan) => (net.net.send_planned(link, msg, &plan), plan),
@@ -269,10 +291,22 @@ impl SimWorld {
 
     /// A local step changed the actor lifecycle: any stale effect is overwritten.
     pub(crate) fn net_note_local_step(&mut self, before: (u64, SupervisorLifecycle)) {
-        if self.actor_fact() != before
+        let after = self.actor_fact();
+        if after != before
             && let Some(net) = self.net.as_mut()
         {
             net.stale_lifecycle_in_effect = None;
+            net.level_update_clock = net
+                .level_update_clock
+                .checked_add(1)
+                .expect("level-update clock overflow");
+            self.route.level_marks.insert(
+                agent_doc_controller::sequence::SequencedFamily::Lifecycle,
+                agent_doc_controller::sequence::SequenceMark {
+                    generation: after.0,
+                    stamp: net.level_update_clock,
+                },
+            );
         }
     }
 
@@ -280,9 +314,31 @@ impl SimWorld {
         let before = self.actor_fact();
         let acceptances_before = self.coverage.route_dispatch_acceptances;
         let findings_before = self.net.as_ref().map_or(0, |net| net.findings.len());
+        let discarded_before = self.coverage.stale_level_updates_discarded;
         let accepted_generation = msg.generation_at_send == self.route.durable.generation;
+        if let Some(net) = self.net.as_mut() {
+            net.delivering_generation = Some(msg.generation_at_send);
+            net.delivering_request_key = Some(id);
+            net.delivering_level_stamp = msg.level_stamp;
+        }
+        let fuzz_pre = self.fuzz_pre();
+        let result = self.apply_local(msg.command);
+        // A delivered controller command can itself cause a controller-local
+        // lifecycle transition (for example AdminReap -> Closed). Production
+        // stamps that inner mark_lifecycle call on the receiver host, so model
+        // it as a newer call edge than messages already sent to the controller.
+        if level_family(msg.command) != Some(LevelFamily::ActorLifecycle) {
+            self.net_note_local_step(before);
+        }
+        let after = self.actor_fact();
+        // `#netadv3` SIM-F1/SIM-F2: the oracle flags an out-of-order level update
+        // only when the controller APPLIED it; one discarded by its send stamp is
+        // the fix working.
+        let discarded = self.coverage.stale_level_updates_discarded > discarded_before;
         if let Some(family) = level_family(msg.command)
             && accepted_generation
+            && !discarded
+            && (family != LevelFamily::ActorLifecycle || after != before)
         {
             let generation = msg.generation_at_send;
             let net = self.net.as_mut().expect("delivery requires a net");
@@ -310,17 +366,13 @@ impl SimWorld {
                 }
             }
         }
-        if let Some(net) = self.net.as_mut() {
-            net.delivering_generation = Some(msg.generation_at_send);
-        }
-        let fuzz_pre = self.fuzz_pre();
-        let result = self.apply_local(msg.command);
-        let after = self.actor_fact();
         let dispatch_accepted = self.coverage.route_dispatch_acceptances > acceptances_before;
         let trace = self.trace.clone();
         let seed = self.seed;
         if let Some(net) = self.net.as_mut() {
             net.delivering_generation = None;
+            net.delivering_request_key = None;
+            net.delivering_level_stamp = None;
             let stale_lifecycle = level_family(msg.command) == Some(LevelFamily::ActorLifecycle)
                 && net.findings.len() > findings_before;
             if after != before {
@@ -465,17 +517,15 @@ impl Drop for SimWorldNet {
 /// Oracle finding classes already diagnosed as open protocol defects (see the
 /// `netadv4_known_*` tests below). A corpus run may report these; any OTHER class
 /// is a new finding and fails the run.
-pub(crate) const KNOWN_OPEN_NET_FINDINGS: [&str; 4] = [
-    // F1: `LifecycleRequest`/`SupervisorHeartbeatRequest` are fenced by generation
-    // only; within one generation the controller applies them in arrival order.
-    "stale_actor_lifecycle_applied_out_of_order",
-    // F1 impact: a reordered Ready re-opens dispatch into a busy supervisor.
-    "dispatch_accepted_on_reordered_stale_lifecycle",
-    // F2: queue pause/resume/drain requests carry no sequence either.
-    "stale_queue_control_applied_out_of_order",
-    // F3: a retransmitted dispatch request has no idempotency key; after the first
-    // copy is proven, a straggler copy injects a second trigger.
-    "duplicate_dispatch_request_injected_twice",
+pub(crate) const KNOWN_OPEN_NET_FINDINGS: [&str; 0] = [
+    // F1 (`stale_actor_lifecycle_applied_out_of_order`,
+    // `dispatch_accepted_on_reordered_stale_lifecycle`) and F2
+    // (`stale_queue_control_applied_out_of_order`) are FIXED by `#netadv3`
+    // SIM-F1/SIM-F2: level-state updates carry a send stamp and the controller
+    // discards one older than the newest it applied in the same generation.
+    // F3 (`duplicate_dispatch_request_injected_twice`) is FIXED by `#netadv5`
+    // R8: dispatch requests carry a durable idempotency key. Any recurrence of
+    // these, or any new class, fails the corpus.
 ];
 
 /// Net seeds `make sim-net` runs each corpus schedule under.
@@ -633,73 +683,143 @@ mod tests {
         std::mem::take(&mut world.net.as_mut().unwrap().findings)
     }
 
-    /// `#netadv4` F1, minimal trace. The supervisor reports Ready, then Busy, in
-    /// one generation. The channel delivers Busy first; the late Ready is still
-    /// current-generation, so the controller accepts it and a route dispatch
-    /// types into a busy supervisor. Production `LifecycleRequest` carries the
-    /// same generation-only fence. KNOWN OPEN DEFECT: when lifecycle updates gain
-    /// a per-generation sequence, flip these assertions.
+    /// `#netadv4` F1, minimal trace — FIXED by `#netadv3` SIM-F1. The supervisor
+    /// sends Ready (send #1), then Busy (send #2), in one generation; the channel
+    /// delivers Busy first. The late Ready carries the OLDER send stamp, so the
+    /// controller discards it and the route dispatch is refused instead of typed
+    /// into a busy supervisor (`formal/tla/LifecycleSequence.tla`).
     #[test]
-    fn netadv4_known_f1_reordered_ready_reopens_dispatch_into_busy_supervisor() {
-        let mut world = SimWorld::new_local(4_001);
-        world.apply(SimCommand::BindRouteOwner).unwrap();
-        world.apply(SimCommand::SupervisorReady).unwrap();
-        // Sent: Ready (t0, delayed), Busy (t1). Delivered: Busy, then Ready.
-        world.apply(SimCommand::SupervisorBusy).unwrap();
-        world.apply(SimCommand::SupervisorReady).unwrap();
-        world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    fn netadv4_f1_reordered_ready_never_reopens_dispatch_into_busy_supervisor() {
+        let mut world = SimWorld::new_local(4_001).with_net(NetProfile::Hostile, 0, NetMode::Async);
+        world.apply_local(SimCommand::BindRouteOwner).unwrap();
+        let generation = world.route.durable.generation;
+        let msg = |command| NetMsg {
+            command,
+            generation_at_send: generation,
+            level_stamp: Some(match command {
+                SimCommand::SupervisorBusy => 2,
+                _ => 1,
+            }),
+        };
+        world
+            .apply_delivered(2, 0, msg(SimCommand::SupervisorBusy))
+            .unwrap();
+        world
+            .apply_delivered(1, 0, msg(SimCommand::SupervisorReady))
+            .unwrap();
+        assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Busy);
+        assert_eq!(world.coverage.stale_level_updates_discarded, 1);
+        world.apply_local(SimCommand::DispatchRoutePrompt).unwrap();
         assert_eq!(
-            world.coverage.route_dispatch_acceptances, 1,
-            "known defect: the reordered Ready re-opens dispatch while the supervisor is busy"
+            world.coverage.route_dispatch_acceptances, 0,
+            "the reordered Ready must not re-open dispatch while the supervisor is busy"
         );
+        // Eventual progress: the supervisor's NEXT report (newer stamp) applies.
+        world
+            .apply_delivered(
+                3,
+                0,
+                NetMsg {
+                    command: SimCommand::SupervisorReady,
+                    generation_at_send: generation,
+                    level_stamp: Some(3),
+                },
+            )
+            .unwrap();
+        world.apply_local(SimCommand::DispatchRoutePrompt).unwrap();
+        assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+        assert!(world.net.as_mut().unwrap().findings.is_empty());
 
-        // The corpus oracle finds the same class at pinned seeds.
-        let found = findings_of(204, NetProfile::CoderZscaler, 0);
-        assert!(
-            found
-                .iter()
-                .any(|f| f.kind == "dispatch_accepted_on_reordered_stale_lifecycle"),
-            "{found:#?}"
-        );
-        assert!(
-            findings_of(22, NetProfile::CoderZscaler, 0)
-                .iter()
-                .any(|f| f.kind == "stale_actor_lifecycle_applied_out_of_order")
-        );
+        // The pinned corpus seeds that found the class no longer report it.
+        for (seed, kind) in [
+            (204, "dispatch_accepted_on_reordered_stale_lifecycle"),
+            (22, "stale_actor_lifecycle_applied_out_of_order"),
+        ] {
+            let found = findings_of(seed, NetProfile::CoderZscaler, 0);
+            assert!(!found.iter().any(|f| f.kind == kind), "{seed}: {found:#?}");
+        }
     }
 
-    /// `#netadv4` F3, minimal trace. One dispatch request, retransmitted because
-    /// its ACK was lost. The first copy is accepted and proven; the straggler copy
-    /// then passes the in-flight coalesce (nothing is in flight any more) and
-    /// injects a second trigger. Production `ControllerRequest` has no request id.
-    /// KNOWN OPEN DEFECT: flip when dispatch requests become idempotent by key.
+    /// A controller-local lifecycle transition is also a level-update call edge.
+    /// It must advance the same per-host order as network sends, otherwise a
+    /// Ready sent before the local Dead transition can arrive afterward and
+    /// resurrect the dead supervisor (`#netadv6` seed 23).
     #[test]
-    fn netadv4_known_f3_retransmitted_dispatch_after_proof_injects_twice() {
+    fn delayed_ready_cannot_overwrite_newer_local_dead_transition() {
+        let mut world = SimWorld::new_local(6_023).with_net(NetProfile::Hostile, 0, NetMode::Async);
+        world.apply(SimCommand::BindRouteOwner).unwrap();
+        world.net.as_mut().unwrap().next_plan = Some(SendPlan {
+            copies_ms: vec![1_000],
+            stall_ms: None,
+        });
+        world.apply(SimCommand::SupervisorReady).unwrap();
+        world
+            .apply(SimCommand::AbandonSupervisorToDeadSocket)
+            .unwrap();
+        assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Dead);
+
+        world.net_drain().unwrap();
+
+        assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Dead);
+        assert_eq!(world.coverage.stale_level_updates_discarded, 1);
+        assert!(world.net.as_ref().unwrap().findings.is_empty());
+    }
+
+    /// `#netadv4` F3, minimal trace — FIXED by `#netadv5` R8. One dispatch
+    /// request, retransmitted because its ACK was lost. The first copy is
+    /// accepted and proven; the straggler copy carries the same request key, so
+    /// the controller answers it from the durable record and injects nothing.
+    #[test]
+    fn netadv4_f3_retransmitted_dispatch_after_proof_injects_once() {
         let mut world = SimWorld::new_local(4_003);
         world.apply(SimCommand::BindRouteOwner).unwrap();
         world.apply(SimCommand::SupervisorReady).unwrap();
-        world.apply(SimCommand::DispatchRoutePrompt).unwrap(); // copy 0
+        world.dispatch_route_prompt_keyed(false, Some(77)).unwrap(); // copy 0
         world.apply(SimCommand::ProveDispatchAccepted).unwrap();
-        world.apply(SimCommand::DispatchRoutePrompt).unwrap(); // copy 1 (retransmit)
+        world.dispatch_route_prompt_keyed(false, Some(77)).unwrap(); // copy 1 (retransmit)
         assert_eq!(
-            world.coverage.route_dispatch_acceptances, 2,
-            "known defect: one operator request, two injected triggers"
+            world.coverage.route_dispatch_acceptances, 1,
+            "one operator request, one injected trigger"
         );
-        // `#netadv6` fenced the dispatch proof by the receipt's generation, which
-        // moved the corpus schedules this class first showed up in; search the
-        // fast corpus instead of pinning one seed.
-        assert!(FAST_CORPUS_SEEDS.clone().any(|seed| {
-            findings_of(seed, NetProfile::Hostile, 1)
+        assert_eq!(world.coverage.route_dispatch_duplicates_answered, 1);
+        // Eventual progress: the next logical request (new key) dispatches.
+        world.apply(SimCommand::SupervisorReady).unwrap();
+        world.dispatch_route_prompt_keyed(false, Some(78)).unwrap();
+        assert_eq!(world.coverage.route_dispatch_acceptances, 2);
+        // The old allow-listed corpus class is clean now that every retransmit
+        // reuses the sender-minted request key.
+        assert!(FAST_CORPUS_SEEDS.clone().all(|seed| {
+            !findings_of(seed, NetProfile::Hostile, 1)
                 .iter()
                 .any(|f| f.kind == "duplicate_dispatch_request_injected_twice")
         }));
     }
 
-    /// `#netadv4` F2: queue control has the same last-arrival-wins shape.
+    /// `#netadv4` F2 — FIXED by `#netadv3` SIM-F2: queue control had the same
+    /// last-arrival-wins shape. A reordered older pause is discarded.
     #[test]
-    fn netadv4_known_f2_reordered_queue_control_is_detected() {
+    fn netadv4_f2_reordered_queue_control_never_flips_back() {
+        let mut world = SimWorld::new_local(4_002).with_net(NetProfile::Hostile, 0, NetMode::Async);
+        world.apply_local(SimCommand::BindRouteOwner).unwrap();
+        let generation = world.route.durable.generation;
+        let msg = |command| NetMsg {
+            command,
+            generation_at_send: generation,
+            level_stamp: Some(match command {
+                SimCommand::AdminResumeQueue => 2,
+                _ => 1,
+            }),
+        };
+        world
+            .apply_delivered(2, 0, msg(SimCommand::AdminResumeQueue))
+            .unwrap();
+        world
+            .apply_delivered(1, 0, msg(SimCommand::AdminPauseQueue))
+            .unwrap();
+        assert_eq!(world.route.queue_control, QueueControlState::Resumed);
+        assert_eq!(world.coverage.stale_level_updates_discarded, 1);
         assert!(
-            findings_of(28, NetProfile::CoderZscaler, 0)
+            !findings_of(28, NetProfile::CoderZscaler, 0)
                 .iter()
                 .any(|f| f.kind == "stale_queue_control_applied_out_of_order")
         );
@@ -722,6 +842,7 @@ mod tests {
                 NetMsg {
                     command: SimCommand::SupervisorBusy,
                     generation_at_send: stale,
+                    level_stamp: Some(1),
                 },
             )
             .unwrap();

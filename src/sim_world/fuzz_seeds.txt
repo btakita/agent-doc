@@ -99,16 +99,16 @@ step Commit
 step DuplicateVisibleResponse
 step Recover
 
-# ---- Known open defects: must keep reproducing until fixed -----------------
+# ---- Fixed by reconciled netadv3/netadv5/GH #136: must stay clean ----------
 
 === known-stale_actor_lifecycle_applied_out_of_order-seed2
-expect known stale_actor_lifecycle_applied_out_of_order
+expect clean
 profile hostile
 step SupervisorBusy @1101
 step SupervisorReady @0
 
 === known-dispatch_accepted_on_reordered_stale_lifecycle-seed26
-expect known dispatch_accepted_on_reordered_stale_lifecycle
+expect clean
 profile hostile
 step SupervisorReady @651
 step SyncDetachableReplaceManual @0
@@ -117,26 +117,26 @@ step SupervisorReady @522
 step DispatchRoutePrompt @333
 
 === known-stale_queue_control_applied_out_of_order-seed161
-expect known stale_queue_control_applied_out_of_order
+expect clean
 profile hostile
 step AdminDrainQueue @2413
 step AdminPauseQueue @0
 
 === known-duplicate_dispatch_request_injected_twice-seed44
-expect known duplicate_dispatch_request_injected_twice
+expect clean
 profile hostile
 step SupervisorReady @0
 step DispatchRoutePrompt @254,434
 step ProveDispatchAccepted @246
 
 === known-stale_actor_lifecycle_overwrote_local_transition-seed23
-expect known stale_actor_lifecycle_overwrote_local_transition
+expect clean
 profile hostile
 step SupervisorReady @904
 step AbandonSupervisorToDeadSocket
 
 === known-stale_stash_pane_widened_layout-seed7
-expect known stale_stash_pane_widened_layout
+expect clean
 profile local
 step InstallFanout
 step SyncFocusStaleStashPane
@@ -146,7 +146,7 @@ step SyncFocusStaleStashPane
 # install fan-out request ages past its TTL while the cycle stays open, and the
 # still-stale supervisor never consumes it.
 === known-stale_recycle_request_lapsed_unconsumed
-expect known stale_recycle_request_lapsed_unconsumed
+expect clean
 profile local
 step DisableSupervisorAutoRecycle
 step SetAgentDocCycleOpen(true)

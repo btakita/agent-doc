@@ -473,6 +473,67 @@ mod tests {
         );
     }
 
+    /// `#netadv5` R8: the inject's 10s effect receipt timed out after the bytes
+    /// were delivered, the supervisor re-exec'd (process memory gone), and the
+    /// caller re-sent. The durable admission key must suppress the duplicate;
+    /// after Ready the next inject is delivered (eventual progress).
+    #[test]
+    fn inject_dedupe_survives_supervisor_reexec() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("reexec.md");
+        std::fs::write(&doc, "# reexec\n").unwrap();
+        let make_shared = |instance: &str, written: Arc<Mutex<Vec<u8>>>| {
+            let runtime = SessionActorRuntime {
+                project_root: dir.path().to_path_buf(),
+                file: doc.clone(),
+                session_id: "reexec-session".to_string(),
+                pane_id: "%1".to_string(),
+                generation: 4,
+            };
+            let shared = Arc::new(SupervisorShared::with_actor_runtime(
+                "test",
+                instance.to_string(),
+                None,
+                "claude",
+                Some(runtime),
+                Some(agent_doc_controller::actor::ActorState::Ready),
+                None,
+            ));
+            *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+                Box::new(RecordingWriter(written)),
+            ))));
+            shared
+        };
+        let bytes = "agent-doc tasks/reexec.md\n";
+        let written_before = Arc::new(Mutex::new(Vec::new()));
+        let before = make_shared("before-reexec", written_before.clone());
+        assert_eq!(
+            agent_doc_supervisor_io::ipc::deliver_supervisor_inject(before.as_ref(), bytes, "ipc_inject")
+                .unwrap(),
+            agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::Delivered
+        );
+        drop(before);
+
+        // Re-exec: a fresh process image with empty memory.
+        let written_after = Arc::new(Mutex::new(Vec::new()));
+        let after = make_shared("after-reexec", written_after.clone());
+        assert_eq!(
+            agent_doc_supervisor_io::ipc::deliver_supervisor_inject(after.as_ref(), bytes, "ipc_inject")
+                .unwrap(),
+            agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::DuplicateSuppressed
+        );
+        assert!(written_after.lock().is_empty(), "the retransmit wrote nothing");
+
+        // The turn completes: Ready retires the admission; a new inject lands.
+        *after.prompt_dispatch_projection.lock() = None;
+        after.clear_durable_prompt_dispatch_key(None);
+        assert_eq!(
+            agent_doc_supervisor_io::ipc::deliver_supervisor_inject(after.as_ref(), bytes, "ipc_inject")
+                .unwrap(),
+            agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::Delivered
+        );
+    }
+
     #[test]
     fn handle_ipc_inject_suppresses_duplicate_before_ready_projection_clears() {
         let dir = tempfile::tempdir().unwrap();
@@ -526,6 +587,7 @@ mod tests {
         );
 
         *shared.prompt_dispatch_projection.lock() = None;
+        shared.clear_durable_prompt_dispatch_key(None);
         let after_ready = agent_doc_supervisor_io::ipc::deliver_supervisor_inject(
             shared.as_ref(),
             bytes,

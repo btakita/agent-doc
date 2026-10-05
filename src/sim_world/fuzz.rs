@@ -34,7 +34,8 @@ use agent_doc_supervisor::recycle_request::{
     recycle_request, recycle_request_is_live,
 };
 use agent_doc_sync_io::layout_column_audit::{
-    ColumnAdmission, ColumnGateFacts, PaneSupervisorFreshness, plan_column_admissions,
+    ColumnAdmission, ColumnGateFacts, PaneSupervisorFreshness, StaleRecycleRequestState,
+    plan_column_admissions,
 };
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -46,43 +47,10 @@ pub(crate) const FUZZ_STEPS: usize = 80;
 /// Wall-clock seconds one `AdvanceWallClock` step represents.
 pub(crate) const WALL_CLOCK_STEP_SECS: u64 = 300;
 
-/// Finding kinds already diagnosed as open defects (or fixed upstream but not in
-/// this branch's base). A run may report these; any OTHER kind is a new finding.
-/// Keyed by kind, like netadv4's `KNOWN_OPEN_NET_FINDINGS`, which it includes.
-pub(crate) const KNOWN_FUZZ_FINDINGS: [(&str, &str); 7] = [
-    (
-        "stale_actor_lifecycle_applied_out_of_order",
-        "netadv4 SIM-F1: lifecycle/heartbeat fenced by generation only (sibling fix)",
-    ),
-    (
-        "dispatch_accepted_on_reordered_stale_lifecycle",
-        "netadv4 SIM-F1 impact: a reordered Ready re-opens dispatch into a busy supervisor",
-    ),
-    (
-        "stale_queue_control_applied_out_of_order",
-        "netadv4 SIM-F2: queue pause/resume/drain carry no sequence (sibling fix)",
-    ),
-    (
-        "duplicate_dispatch_request_injected_twice",
-        "netadv4 SIM-F3: dispatch request has no idempotency key (sibling fix)",
-    ),
-    (
-        "stale_actor_lifecycle_overwrote_local_transition",
-        "NEW netadv6, SIM-F1 variant: a lifecycle/heartbeat straggler sent BEFORE a controller-side \
-         transition that keeps the generation (session restart -> Starting, socket death -> Dead, \
-         admin reap -> Closed) lands after it and resurrects Ready; the F1 fix must order these \
-         too (see HANDOFF)",
-    ),
-    (
-        "stale_stash_pane_widened_layout",
-        "GH #136: fixed on main (9bb7edb2b), not in this branch's netadv4 base; drop on rebase",
-    ),
-    (
-        "stale_recycle_request_lapsed_unconsumed",
-        "GH #136: install_fanout request lapses while the supervisor is still stale; fixed on \
-         main (9bb7edb2b), not in this branch's netadv4 base; drop on rebase",
-    ),
-];
+/// Diagnosed findings that are still intentionally open on this branch.
+/// Reconciliation with netadv3/netadv5 and GH #136 leaves none: every retained
+/// regression seed must now run clean, and any finding is a test failure.
+pub(crate) const KNOWN_FUZZ_FINDINGS: [(&str, &str); 0] = [];
 
 pub(crate) fn is_known_kind(kind: &str) -> bool {
     KNOWN_FUZZ_FINDINGS.iter().any(|(known, _)| *known == kind)
@@ -677,6 +645,7 @@ impl SimWorld {
             supervisor_pid: 1,
             title_marker: false,
         };
+        let request_live = self.fuzz_recycle_request_live();
         let mut facts: Vec<ColumnGateFacts> = self
             .sync
             .visible
@@ -687,6 +656,8 @@ impl SimWorld {
                 freshness: fresh.clone(),
                 own_pane: true,
                 is_focus: false,
+                in_stash: false,
+                recycle: StaleRecycleRequestState::NotRequested,
             })
             .collect();
         facts.push(ColumnGateFacts {
@@ -702,6 +673,16 @@ impl SimWorld {
             },
             own_pane: true,
             is_focus: true,
+            in_stash: true,
+            recycle: if request_live {
+                StaleRecycleRequestState::Pending {
+                    reason: "sim_live_recycle_request".to_string(),
+                    age_secs: 0,
+                    deferred_by_turn: self.recycle_clear.cycle_open,
+                }
+            } else {
+                StaleRecycleRequestState::NotRequested
+            },
         });
         let live_turn: Vec<String> = self
             .sync
@@ -710,7 +691,9 @@ impl SimWorld {
             .filter(|doc| self.sync.protected_open_cycle.contains(*doc))
             .cloned()
             .collect();
-        let plan = plan_column_admissions(&facts, &|| live_turn.clone());
+        let window_pane_count = self.sync.visible.len();
+        let plan =
+            plan_column_admissions(&facts, &|| Some(window_pane_count), &|| live_turn.clone());
         let admission = plan.last().map(|(admission, _)| *admission);
         let mut promotion = (false, false);
         if matches!(
@@ -726,7 +709,6 @@ impl SimWorld {
                 self.sync.visible.len() > before,
             );
         }
-        let request_live = self.fuzz_recycle_request_live();
         if let Some(fuzz) = self.fuzz.as_mut() {
             fuzz.stale_column.last_promotion = Some(promotion);
             if stale && !request_live {

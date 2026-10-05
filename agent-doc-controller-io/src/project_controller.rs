@@ -274,6 +274,14 @@ pub struct ControllerTmuxLayoutSyncReceipt {
     /// partial actor store.
     #[serde(default)]
     pub file_panes: Vec<(String, String)>,
+    /// GH #136: column documents the effect deliberately did NOT realise —
+    /// the stale-supervisor column gate excluded them. This is the effect's
+    /// acknowledgement of what it promised, so the projection measures
+    /// convergence against `columns - gated_documents` instead of retrying a
+    /// layout it was told not to build (a 250ms..5s retry loop that never
+    /// converges while the supervisor stays stale).
+    #[serde(default)]
+    pub gated_documents: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2541,6 +2549,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
     ) -> Result<ControllerTmuxLayoutSyncReceipt> {
         let routes_created_panes = invocation.routes_created_panes();
         Ok(ControllerTmuxLayoutSyncReceipt {
+            gated_documents: Vec::new(),
             applied: true,
             reason: "test_runtime".to_string(),
             columns: invocation.columns,
@@ -3781,8 +3790,17 @@ enum RetainedTransitionCompletion {
     Applied(bool),
 }
 
-/// `#retainedsaveretry`: most refused attempts re-claimed for one epoch. A new
-/// epoch (any further edit or delivery) restarts the count.
+/// `#retainedsaveretry`: refused attempts re-claimed on a growing backoff for
+/// one epoch before the delay settles at its cap. A new epoch (any further
+/// edit or delivery) restarts the count.
+///
+/// `#netadv3` F13: this used to be a hard budget. After it, the retained save
+/// waited for a delivery or generation edge that an idle document never
+/// produces, so one lost save request or receipt past the budget left the
+/// retained write (and every preflight it blocks) waiting forever. The retry
+/// is now level-triggered: it continues at the capped delay for as long as
+/// the refused epoch is still the desired one
+/// (`formal/tla/VisibleDeliveryReceiptNet.tla`, `SaveOneShot` wedge).
 const RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES: u32 = 8;
 
 /// Backoff before re-claim attempt `attempt` (1-based): 1s doubling, capped at 30s.
@@ -3809,11 +3827,10 @@ fn retained_persistence_retry_step(
     if entry.0 != epoch {
         *entry = (epoch, 0);
     }
-    if entry.1 >= RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES {
-        return None;
-    }
-    entry.1 += 1;
-    Some(retained_persistence_retry_delay(entry.1))
+    entry.1 = entry.1.saturating_add(1);
+    Some(retained_persistence_retry_delay(
+        entry.1.min(RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES),
+    ))
 }
 
 /// Wait out the backoff off every lock, then re-claim the refused epoch.
@@ -8293,6 +8310,14 @@ pub(crate) struct ControllerRequest {
     supervisor_socket: Option<String>,
     command_kind: Option<String>,
     diagnostic_payload: Option<String>,
+    /// `#netadv3` SIM-F1/SIM-F2: send stamp for level-state updates that are
+    /// fenced only by generation (lifecycle, supervisor heartbeat, queue
+    /// control). A per-host monotonic clock read once when the request is
+    /// built, so retries of one request share it; the controller discards an
+    /// update OLDER than the newest it applied for the same document and
+    /// generation. `None` (older clients, every other command) is unfenced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sequence: Option<u64>,
 }
 
 impl ControllerRequest {
@@ -8317,6 +8342,7 @@ impl ControllerRequest {
             supervisor_pid: None,
             supervisor_socket: None,
             command_kind: None,
+            sequence: None,
         }
     }
 }
@@ -8992,12 +9018,27 @@ pub fn fresh_foreign_supervisor_lease_holds_document(
     if !status::supervisor_lease_pid_is_foreign(lease.supervisor_pid, self_pid) {
         return false;
     }
-    status::supervisor_lease_is_fresh_and_alive(
+    // `#netadv5` R6: heartbeat age is a timer, not evidence; an idle live
+    // supervisor that still names this document keeps holding it.
+    let supervisor_owns_document = lease.supervisor_pid.is_some_and(|pid| {
+        crate::process::open_supervisor_document(pid).is_some_and(|document| {
+            same_document_path(&document, Path::new(document_id))
+        })
+    });
+    status::supervisor_lease_holds_against_takeover(
         lease.last_heartbeat,
         lease.supervisor_pid.is_some_and(process_is_alive),
+        supervisor_owns_document,
         now,
         stale_after,
     )
+}
+
+fn same_document_path(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
 }
 
 pub fn close_stale_starting_actors_for_caller(
@@ -12638,6 +12679,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&start).unwrap() + "\n"),
@@ -12677,6 +12719,7 @@ mod tests {
             supervisor_socket: Some("/tmp/agent-doc-test.sock".to_string()),
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&register).unwrap() + "\n"),
@@ -12702,6 +12745,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -12757,6 +12801,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&closed_lifecycle).unwrap() + "\n"),
@@ -12833,6 +12878,7 @@ mod tests {
             supervisor_socket: Some("/tmp/new.sock".to_string()),
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let lease = handle_supervisor_heartbeat(&bootstrap, None, heartbeat).unwrap();
         assert_eq!(lease.runtime_state.as_deref(), Some("ready"));
@@ -12929,6 +12975,7 @@ mod tests {
             supervisor_socket: Some("/tmp/same-supervisor.sock".to_string()),
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let lease = handle_supervisor_heartbeat(&bootstrap, None, heartbeat).unwrap();
         assert_eq!(lease.generation, 2);
@@ -13018,6 +13065,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let record = handle_start_session(&bootstrap, None, start).unwrap();
         assert_eq!(record.generation, 2);
@@ -13036,6 +13084,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("replacement dispatch".to_string()),
+            sequence: None,
         };
         let auth = handle_dispatch(&bootstrap, None, dispatch).unwrap();
         assert_eq!(auth.record.session_id, "session-new");
@@ -13157,6 +13206,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("post-reboot auto dispatch".to_string()),
+            sequence: None,
         };
         let auth = handle_dispatch(&bootstrap, None, dispatch).unwrap();
         assert_eq!(auth.record.session_id, "session-reboot");
@@ -13429,6 +13479,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -13485,6 +13536,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -13550,6 +13602,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&binding).unwrap() + "\n"),
@@ -13577,6 +13630,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("test dispatch".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -13679,6 +13733,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&binding).unwrap() + "\n"),
@@ -13724,6 +13779,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("preflight".to_string()),
             diagnostic_payload: Some("admin receipt test".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&admin).unwrap() + "\n"),
@@ -13807,6 +13863,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&stale_pause).unwrap() + "\n"),
@@ -13865,6 +13922,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("paused dispatch test harness=codex".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -13952,6 +14010,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&inspect).unwrap() + "\n"),
@@ -14053,6 +14112,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14079,6 +14139,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("auto dispatch harness=codex".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&auto).unwrap() + "\n"),
@@ -14198,6 +14259,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14223,6 +14285,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("spent preset absent repair".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -14317,6 +14380,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14342,6 +14406,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("spent preset present repair".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -14445,6 +14510,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("pause".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14470,6 +14536,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("dispatch_only_reopen".to_string()),
             diagnostic_payload: Some("preset-token unserviceable repair".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -14560,6 +14627,7 @@ mod tests {
                 supervisor_socket: None,
                 command_kind: Some("pause".to_string()),
                 diagnostic_payload: None,
+                sequence: None,
             };
             let response = handle_request(
                 &(serde_json::to_string(&pause).unwrap() + "\n"),
@@ -14589,6 +14657,7 @@ mod tests {
                 // `dispatch_operator_reopen_bypasses_paused_queue`).
                 command_kind: Some("idle_queue_continuation".to_string()),
                 diagnostic_payload: Some("jbrestale paused dispatch".to_string()),
+                sequence: None,
             };
             let response = handle_request(
                 &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -14701,6 +14770,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("handoff".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&stale_handoff).unwrap() + "\n"),
@@ -14755,6 +14825,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("reap".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&reap).unwrap() + "\n"),
@@ -15220,6 +15291,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("session_clear".to_string()),
             diagnostic_payload: Some("test clear closed actor".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&clear).unwrap() + "\n"),
@@ -15311,6 +15383,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("session_clear".to_string()),
             diagnostic_payload: Some("test clear blocked actor".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&clear).unwrap() + "\n"),
@@ -15435,6 +15508,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&attach).unwrap() + "\n"),
@@ -15491,6 +15565,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&start).unwrap() + "\n"),
@@ -15517,6 +15592,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -16308,6 +16384,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("m2 gate test".to_string()),
+            sequence: None,
         };
 
         // A controller wedged in Preparing (client died before promote_handoff) is
@@ -16402,6 +16479,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("autonomous queue drain".to_string()),
+            sequence: None,
         };
 
         let preparing = ControllerBootstrap {
@@ -16474,6 +16552,7 @@ agent:queue\n\
             supervisor_socket: None,
             command_kind: Some("idle_queue_continuation".to_string()),
             diagnostic_payload: Some("stale binary test".to_string()),
+            sequence: None,
         };
 
         // Stable handoff state, but the recorded binary is an old/different build.
@@ -19875,7 +19954,7 @@ mod retained_persistence_retry_tests {
     use super::*;
 
     #[test]
-    fn a_refused_current_epoch_retries_on_a_bounded_backoff() {
+    fn a_refused_current_epoch_retries_on_a_capped_backoff_until_superseded() {
         // `#retainedsaveretry`: 2026-10-01 the editor refused the save during a
         // plugin reload and nothing re-armed it, so preflight refused every cycle.
         let mut retries = std::collections::HashMap::new();
@@ -19890,11 +19969,16 @@ mod retained_persistence_retry_tests {
             Some(Duration::from_secs(30)),
             "the backoff is capped"
         );
-        assert_eq!(
-            retained_persistence_retry_step(&mut retries, "doc", 7, false, false),
-            None,
-            "the retry budget is bounded per epoch"
-        );
+        // `#netadv3` F13: past the growing phase the retry stays at the cap
+        // for as long as the epoch is still refused; it never gives up and
+        // waits for an edge an idle document will not produce.
+        for _ in 0..32 {
+            assert_eq!(
+                retained_persistence_retry_step(&mut retries, "doc", 7, false, false),
+                Some(Duration::from_secs(30)),
+                "a refused current epoch keeps retrying at the capped delay"
+            );
+        }
         assert_eq!(
             retained_persistence_retry_step(&mut retries, "doc", 8, false, false),
             Some(Duration::from_secs(1)),

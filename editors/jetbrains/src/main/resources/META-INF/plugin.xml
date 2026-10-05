@@ -54,6 +54,15 @@
                  is unbound in every bundled keymap and joins the plugin's
                  existing `ctrl shift alt` family. Rebind under Settings > Keymap. -->
             <keyboard-shortcut first-keystroke="ctrl shift alt D" keymap="$default"/>
+            <!-- `altshiftmenu`: #gh116 dropped `alt SPACE` from EVERY keymap, which
+                 regressed Linux operators whose window manager (i3 and other
+                 bare X WMs) delivers Alt+Space to the IDE — their menu key
+                 stopped opening the popup. Restore it ONLY in the X window
+                 manager keymap. GNOME (window menu) and KDE (KRunner) claim
+                 Alt+Space, and Windows/macOS never use this keymap. The
+                 `$default` line above must stay first: a keymap-scoped shortcut
+                 is ADDED to the parent's list, so XWin keeps Ctrl+Shift+Alt+D. -->
+            <keyboard-shortcut first-keystroke="alt SPACE" keymap="Default for XWin"/>
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>

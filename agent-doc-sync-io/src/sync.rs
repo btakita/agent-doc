@@ -206,7 +206,7 @@ use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_supervisor::startup_miss::unresolved_startup_miss_blocks_autostart;
 use agent_doc_sync::{
     AutoStartMode, RENAME_DEBOUNCE_TTL_SECS, SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
-    SYNC_DOCTOR_REPAIR_BUDGET, SYNC_LOCK_WAIT_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET,
+    SYNC_DOCTOR_REPAIR_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET,
     SYNC_OWNERSHIP_PROOF_BUDGET, SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET,
     SYNC_PRUNE_SUBPHASE_BUDGET, SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
     SYNC_WINDOW_RESOLUTION_BUDGET, WindowIndexNormalizationPlan, auto_started_panes_summary,
@@ -240,6 +240,9 @@ pub struct SyncRunReport {
     pub applied: bool,
     pub reason: String,
     pub file_panes: Vec<(PathBuf, String)>,
+    /// GH #136: column documents the stale-supervisor gate deliberately left
+    /// unrealised this pass (see `layout_column_audit::gate_stale_column_panes`).
+    pub gated_documents: Vec<PathBuf>,
 }
 
 impl Default for SyncRunReport {
@@ -248,6 +251,7 @@ impl Default for SyncRunReport {
             applied: true,
             reason: "applied".to_string(),
             file_panes: Vec::new(),
+            gated_documents: Vec::new(),
         }
     }
 }
@@ -265,11 +269,19 @@ fn reset_sync_run_report() {
 
 fn mark_sync_layout_preserved(reason: &str) {
     LAST_SYNC_RUN_REPORT.with(|report| {
+        let gated_documents = std::mem::take(&mut report.borrow_mut().gated_documents);
         *report.borrow_mut() = SyncRunReport {
             applied: false,
             reason: reason.to_string(),
             file_panes: Vec::new(),
+            gated_documents,
         };
+    });
+}
+
+fn record_sync_gated_documents(gated: &[PathBuf]) {
+    LAST_SYNC_RUN_REPORT.with(|report| {
+        report.borrow_mut().gated_documents = gated.to_vec();
     });
 }
 
@@ -2710,6 +2722,44 @@ fn sanitize_cross_root_layout(
     (sanitized, dropped)
 }
 
+/// `#netadv5` R7: acquire the sync lock and apply
+/// [`agent_doc_sync::sync_lock_disposition`]. `Ok(Some(guard))` proceeds,
+/// `Ok(None)` is the quiet safe-passive skip, and `Err` is a retryable abort:
+/// a full sync never reconciles stash/join-pane state without exclusion just
+/// because its wait budget elapsed.
+pub(crate) fn acquire_sync_lock_for_mode(
+    lock_path: &Path,
+    auto_start_mode: AutoStartMode,
+    wait_budget: Duration,
+    mut log: impl FnMut(String),
+) -> Result<Option<crate::SyncLockAcquire>> {
+    let start = Instant::now();
+    let guard = acquire_sync_lock(lock_path, wait_budget, &mut log);
+    let elapsed = start.elapsed();
+    let contended = matches!(guard, crate::SyncLockAcquire::Contended);
+    match agent_doc_sync::sync_lock_disposition(auto_start_mode, guard.is_acquired(), contended) {
+        agent_doc_sync::SyncLockDisposition::Proceed => Ok(Some(guard)),
+        agent_doc_sync::SyncLockDisposition::SkipPassive => {
+            let message =
+                agent_doc_sync::safe_passive_lock_contention_message(elapsed, wait_budget);
+            eprintln!("{}", message);
+            log(message);
+            Ok(None)
+        }
+        agent_doc_sync::SyncLockDisposition::AbortRetryable => {
+            let message = format!(
+                "{} lock={} elapsed_ms={} budget_ms={} action=retry (a full sync never runs without its lock)",
+                agent_doc_sync::SYNC_LOCK_CONTENDED_RETRY_MARKER,
+                lock_path.display(),
+                elapsed.as_millis(),
+                wait_budget.as_millis(),
+            );
+            log(message.clone());
+            anyhow::bail!(message)
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_with_options_internal_at_root(
     project_root: &Path,
@@ -2748,12 +2798,22 @@ fn run_with_options_internal_at_root(
     let sync_lock_wait_budget = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
         SYNC_LOCK_WAIT_LATENCY_BUDGET
     } else {
-        SYNC_LOCK_WAIT_BUDGET
+        agent_doc_sync::sync_lock_wait_budget_from_env_value(
+            std::env::var(agent_doc_sync::SYNC_LOCK_WAIT_BUDGET_ENV)
+                .ok()
+                .as_deref(),
+        )
     };
     let sync_lock_start = Instant::now();
-    let lock_guard = acquire_sync_lock(lock_path, sync_lock_wait_budget, |message| {
-        sync_log(&message);
-    });
+    let Some(lock_guard) = acquire_sync_lock_for_mode(
+        lock_path,
+        auto_start_mode,
+        sync_lock_wait_budget,
+        |message| sync_log(&message),
+    )?
+    else {
+        return Ok(());
+    };
     let sync_lock_elapsed = sync_lock_start.elapsed();
     log_sync_latency(
         focus,
@@ -2762,15 +2822,6 @@ fn run_with_options_internal_at_root(
         SYNC_LOCK_WAIT_LATENCY_BUDGET,
         auto_start_mode,
     );
-    if matches!(auto_start_mode, AutoStartMode::SafePassive) && !lock_guard.is_acquired() {
-        let message = agent_doc_sync::safe_passive_lock_contention_message(
-            sync_lock_elapsed,
-            sync_lock_wait_budget,
-        );
-        eprintln!("{}", message);
-        sync_log(&message);
-        return Ok(());
-    }
 
     // `#syncobscache`: with the sync lock held we own the layout, so tmux's
     // structural answers are coherent for the rest of this pass. Reconciliation
@@ -4809,7 +4860,15 @@ fn run_with_options_internal_at_root(
                 .filter(|pane| agent_doc_turn_status_io::turn_active_for_pane(project_root, pane))
                 .collect()
         };
-        crate::layout_column_audit::gate_stale_column_panes(
+        // GH #136: a stale stash pane may replace a column, never add one, so
+        // the bounded focus exception needs the target window's pane count.
+        let gate_window_pane_count = || -> Option<usize> {
+            let window = window?;
+            tmux.list_window_panes(window).ok().map(|panes| panes.len())
+        };
+        let gate_pane_turn_active =
+            |pane: &str| agent_doc_turn_status_io::turn_active_for_pane(project_root, pane);
+        let gate = crate::layout_column_audit::gate_stale_column_panes(
             tmux,
             &crate::layout_column_audit::StaleColumnGateInput {
                 col_args,
@@ -4818,8 +4877,14 @@ fn run_with_options_internal_at_root(
                 registry_pane: &gate_registry_pane,
                 before: &pane_windows_before_router,
                 live_turn_window_panes: &gate_live_turn_window_panes,
+                window_pane_count: &gate_window_pane_count,
+                pane_turn_active: &gate_pane_turn_active,
             },
-        )
+        );
+        // GH #136: acknowledge what this pass deliberately does not build, so
+        // the controller converges on it instead of retrying it.
+        record_sync_gated_documents(&gate.excluded);
+        gate.col_args
     };
     if router_col_args.is_empty() && !col_args.is_empty() {
         // GH #124: every column was gated out (stale, or a stale focused pane
@@ -9396,6 +9461,54 @@ mod tests {
             agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
     }
+    /// `#netadv5` R7: a slow prior sync holds the lock past the wait budget.
+    /// The full sync must abort retryably (no unlocked reconcile), and once
+    /// the holder releases, a retry acquires and proceeds.
+    #[test]
+    fn contended_full_sync_aborts_then_progresses_after_release() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lock_path = tmp.path().join(".agent-doc/sync.lock");
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        let holder = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&holder).unwrap();
+
+        let err = acquire_sync_lock_for_mode(
+            &lock_path,
+            AutoStartMode::Full,
+            Duration::from_millis(80),
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains(agent_doc_sync::SYNC_LOCK_CONTENDED_RETRY_MARKER),
+            "{err:#}"
+        );
+        let passive = acquire_sync_lock_for_mode(
+            &lock_path,
+            AutoStartMode::SafePassive,
+            Duration::from_millis(20),
+            |_| {},
+        )
+        .unwrap();
+        assert!(passive.is_none(), "safe-passive contention skips quietly");
+
+        fs2::FileExt::unlock(&holder).unwrap();
+        let retried = acquire_sync_lock_for_mode(
+            &lock_path,
+            AutoStartMode::Full,
+            Duration::from_millis(80),
+            |_| {},
+        )
+        .unwrap()
+        .expect("the retry after release proceeds");
+        assert!(retried.is_acquired());
+    }
+
     #[test]
     fn acquire_sync_lock_times_out_when_lock_is_held() {
         let tmp = tempfile::TempDir::new().unwrap();

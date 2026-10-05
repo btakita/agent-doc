@@ -211,7 +211,44 @@ admitted (`layout_column_pane_stale_focus_admitted`) only when realising it
 stashes no pane in the target window that holds a fresh turn-active lease — a
 live agent pane is never stashed in favour of a stale-supervisor pane (GH #124,
 `admission=excluded_focused_live_turn_protected:<panes>`). When every column is
-gated out the current layout is preserved. agent-doc's own `⚠ STALE SUPERVISOR`
+gated out the current layout is preserved.
+- The focus exception is bounded (GH #136). It is granted on the strength of
+the safe-boundary recycle that will make the pane fresh, so it is decided by a
+total transition function (`layout_column_audit::stale_focus_admission`) over
+facts local to the controller at effect time — never over the order, timing,
+or arrival of editor publications, which cross JetBrains Remote Dev and
+Zscaler and may be delayed, reordered, duplicated, dropped, or replayed after a
+reconnect. A stale focused pane already visible is never moved by it. A stale
+focused pane still in a `stash` window is promoted only while (1) its recycle
+request is not *overdue* and (2) promoting it does not realise more columns
+than the target window holds (`max(window_panes, 1)`) — a stale stash pane may
+take the place of a column, never add one (`admission=excluded_focused_stash_would_widen`).
+The request is *overdue* when the FIRST unconsumed request (the oldest
+`SupervisorRecycleRequested` epoch above the highest `Started`/`Settled` epoch)
+is older than `AGENT_DOC_STALE_RECYCLE_CONSUME_BOUND_SECS` (default 120s) while
+the pane holds no fresh turn-active lease (`admission=excluded_focused_recycle_overdue`,
+`prior_request=overdue:reason=...:age_secs=...`; a mid-turn pane reads
+`pending:...:deferred_by_turn`). Re-requests and install fan-outs refresh the
+request's reason but never its clock, so an overdue refusal cannot flap back
+into an admission until the request is consumed. The bound is a liveness
+budget for a local process, never a safety argument: every invariant holds for
+any value (`formal/tla/StaleColumnRecycle.tla`, where it is an arbitrary
+`Expire` event).
+- The recycle request is durable, level-triggered `state.db` state, re-read by
+the owning supervisor at every idle boundary and settled per epoch, never a
+one-shot notification. A request whose cause is a replaced binary
+(`stale_supervisor_turn_stage`, `install_fanout`, `install_fanout_force`) stays
+live past the request TTL for as long as the supervisor is stale (GH #136: an
+install fan-out used to overwrite a non-lapsing stale request with one that
+lapsed after 900s, leaving `prior_request=unconsumed` for up to 22 hours).
+- The layout effect acknowledges the columns it gated out:
+`ControllerTmuxLayoutSyncReceipt.gated_documents` (serde-defaulted). The
+pane-layout projection measures convergence against the desired columns minus
+those documents and does not demand focus of a gated document, so a gated
+column converges in one attempt instead of cycling `retry_pending` for as long
+as the supervisor stays stale. An all-gated pass converges as
+`all_columns_gated_layout_preserved`. Re-admission happens on the next layout
+publication after the pane reads fresh. agent-doc's own `⚠ STALE SUPERVISOR`
 title is diagnostic only, never evidence. A pane title carries one status
 marker: a busy stale pane reads `⚠ STALE SUPERVISOR: turn in progress`, never the
 busy `⟳` marker welded behind the warning.

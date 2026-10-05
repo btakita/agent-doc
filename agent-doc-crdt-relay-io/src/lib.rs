@@ -3560,18 +3560,21 @@ pub fn apply_cp_write_for_file_scoped(
         }
     };
     let result = result?;
-    if result.targets > 0
-        && result.update_bytes > 0
-        && let Err(err) =
+    if result.targets > 0 && result.update_bytes > 0 {
+        if let Err(err) =
             signal_crdt_replica_event(file, CrdtReplicaEventReason::CpWrite, result.targets)
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "crdt_replica_event_signal_failed file={} reason=cp_write error={err}",
-                file.display(),
-            ),
-        );
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_replica_event_signal_failed file={} reason=cp_write error={err}",
+                    file.display(),
+                ),
+            );
+        }
+        // `#netadv3` F9: the wake above is one shot. Keep re-sending it until
+        // the projection ACK makes the visible-delivery receipt true.
+        schedule_pending_delivery_rewake(file);
     }
     agent_doc_ops_log_io::log_op(
         file,
@@ -3589,6 +3592,137 @@ pub fn apply_cp_write_for_file_scoped(
         ),
     );
     Ok(Some(result))
+}
+
+/// `#netadv3` F9: what the pending-delivery re-wake loop does next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingDeliveryRewake {
+    /// Every live replica visibly projected the canonical cut (or this process
+    /// hosts no hub for it any more): the wake was answered, stop.
+    Stop,
+    /// A live replica still owes its projection ACK: wake it again after the
+    /// given delay.
+    Rewake(std::time::Duration),
+}
+
+/// First re-wake delay; doubles per attempt up to [`PENDING_DELIVERY_REWAKE_MAX`].
+pub const PENDING_DELIVERY_REWAKE_INITIAL: std::time::Duration =
+    std::time::Duration::from_millis(250);
+/// Cap on the re-wake delay.
+pub const PENDING_DELIVERY_REWAKE_MAX: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Pure policy for the re-wake loop (`formal/tla/VisibleDeliveryReceiptNet.tla`,
+/// `ResendWake`; its `WakeOneShot` wedge is the shipped one-shot wake).
+///
+/// `projected` is the hub's strict receipt (`None` = no hub here); `found` is
+/// how many live editor registrations the previous wake found. With no live
+/// registration there is nothing to wake: re-registration owns that case, and
+/// waking nobody forever would only spin.
+pub fn pending_delivery_rewake_step(
+    attempt: u32,
+    projected: Option<bool>,
+    found: usize,
+) -> PendingDeliveryRewake {
+    if projected != Some(false) || found == 0 {
+        return PendingDeliveryRewake::Stop;
+    }
+    let delay = PENDING_DELIVERY_REWAKE_INITIAL
+        .saturating_mul(1u32 << attempt.min(16))
+        .min(PENDING_DELIVERY_REWAKE_MAX);
+    PendingDeliveryRewake::Rewake(delay)
+}
+
+/// Documents with a re-wake loop running in this process (single flight).
+static PENDING_DELIVERY_REWAKE_ACTIVE: std::sync::LazyLock<Mutex<HashSet<String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// Re-send the `deliver_crdt_remote` wake until the visible-delivery receipt
+/// holds (`#netadv3` F9).
+///
+/// The wake is a hint ("pull now"), and the pull reads the CURRENT canonical,
+/// so re-sending it is idempotent. Before this, one lost wake left the update
+/// queued with no pull, no ACK and no streak charge unless a foreground waiter
+/// happened to be parked on the barrier; an idle document stayed invisible
+/// until the operator touched the editor. Only the process that serves the hub
+/// runs the loop; the loop stops on the receipt, on the hub leaving this
+/// process, or when no live registration remains to be woken.
+fn schedule_pending_delivery_rewake(file: &Path) {
+    if cfg!(test) || !process_serves_relay_hub() {
+        return;
+    }
+    let Ok(key) = agent_doc_fs::document_state_hash(file) else {
+        return;
+    };
+    if !PENDING_DELIVERY_REWAKE_ACTIVE.lock().insert(key.clone()) {
+        return;
+    }
+    let file = file.to_path_buf();
+    let spawned = std::thread::Builder::new()
+        .name("agent-doc-crdt-rewake".to_string())
+        .spawn({
+            let key = key.clone();
+            move || {
+                let mut found = 1usize;
+                let mut attempt = 0u32;
+                loop {
+                    let projected = with_existing_hub(&file, |hub| {
+                        hub.visible_delivery_projected()
+                    })
+                    .ok()
+                    .flatten();
+                    match pending_delivery_rewake_step(attempt, projected, found) {
+                        PendingDeliveryRewake::Stop => break,
+                        PendingDeliveryRewake::Rewake(delay) => std::thread::sleep(delay),
+                    }
+                    // Re-check after the delay: the ACK usually lands first.
+                    let projected = with_existing_hub(&file, |hub| {
+                        hub.visible_delivery_projected()
+                    })
+                    .ok()
+                    .flatten();
+                    if projected != Some(false) {
+                        break;
+                    }
+                    attempt = attempt.saturating_add(1);
+                    found = match signal_crdt_replica_event_with_counts(
+                        &file,
+                        CrdtReplicaEventReason::CpWrite,
+                        1,
+                    ) {
+                        Ok(outcome) => {
+                            agent_doc_ops_log_io::log_op(
+                                &file,
+                                &format!(
+                                    "crdt_replica_rewake file={} attempt={} found={} notified={} reason=visible_delivery_pending",
+                                    file.display(),
+                                    attempt,
+                                    outcome.found,
+                                    outcome.notified,
+                                ),
+                            );
+                            outcome.found
+                        }
+                        // A failed send is exactly the loss this loop exists
+                        // for; keep the previous count and try again.
+                        Err(error) => {
+                            agent_doc_ops_log_io::log_op(
+                                &file,
+                                &format!(
+                                    "crdt_replica_rewake_failed file={} attempt={} error={error:#}",
+                                    file.display(),
+                                    attempt,
+                                ),
+                            );
+                            found
+                        }
+                    };
+                }
+                PENDING_DELIVERY_REWAKE_ACTIVE.lock().remove(&key);
+            }
+        });
+    if spawned.is_err() {
+        PENDING_DELIVERY_REWAKE_ACTIVE.lock().remove(&key);
+    }
 }
 
 /// Pull supervisor-to-editor updates queued for this replica. The returned
@@ -3758,22 +3892,51 @@ fn signal_nonconverging_replica_recovery(
                     outcome.nonconverging_disposition(),
                 ),
             );
-            if outcome.nonconverging_disposition()
-                == NonconvergingReplicaDisposition::DropFromDeliveryCut
-            {
-                drop_definitively_refused_replica(file, client_id, source);
+            match outcome.nonconverging_disposition() {
+                NonconvergingReplicaDisposition::DropFromDeliveryCut => {
+                    drop_definitively_refused_replica(file, client_id, source);
+                }
+                // `#netadv3` F10: nothing reached the endpoint, so nothing was
+                // learned. Re-arm the claim (with backoff) so a later pull or
+                // expired wait asks again instead of latching forever.
+                NonconvergingReplicaDisposition::Retry => {
+                    rearm_nonconverging_replica_recovery(file, client_id, source, "retryable");
+                }
+                NonconvergingReplicaDisposition::AwaitRebuild => {}
             }
         }
-        Err(error) => agent_doc_ops_log_io::log_op(
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_nonconverging_replica_recovery_deferred file={} client_id={} redeliveries={} source={} error={error:#}",
+                    file.display(),
+                    client_id,
+                    redeliveries_without_ack,
+                    source,
+                ),
+            );
+            rearm_nonconverging_replica_recovery(file, client_id, source, "send_error");
+        }
+    }
+}
+
+/// Re-arm a recovery claim whose signal did not reach the endpoint
+/// (`#netadv3` F10, `formal/tla/VisibleDeliveryReceiptNet.tla`).
+fn rearm_nonconverging_replica_recovery(file: &Path, client_id: u64, source: &str, cause: &str) {
+    if let Ok(Some(true)) =
+        with_existing_hub(file, |hub| hub.rearm_nonconverging_recovery(client_id))
+    {
+        agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_nonconverging_replica_recovery_deferred file={} client_id={} redeliveries={} source={} error={error:#}",
+                "crdt_nonconverging_replica_recovery_rearmed file={} client_id={} source={} cause={}",
                 file.display(),
                 client_id,
-                redeliveries_without_ack,
                 source,
+                cause,
             ),
-        ),
+        );
     }
 }
 
@@ -5878,6 +6041,14 @@ mod tests {
                 !hub.claim_nonconverging_recovery(44).unwrap(),
                 "the first later pull must not duplicate the rebuild request"
             );
+            // `#netadv3` F10: nothing was registered to receive that request
+            // (`Retry`), so it was re-armed behind a backoff rather than
+            // latched forever: once the backoff is spent a pull re-sends it.
+            let mut resent = false;
+            for _ in 0..agent_doc_document_realtime::crdt_relay::INITIAL_RECOVERY_RETRY_SKIP {
+                resent |= hub.claim_nonconverging_recovery(44).unwrap();
+            }
+            assert!(resent, "a lost recovery request is eventually re-sent");
         })
         .unwrap();
     }
@@ -5956,6 +6127,24 @@ mod tests {
         );
     }
 
+    /// `#netadv5` R2: an editor whose replica attach (750ms) or document-lane
+    /// save (5s) outlived its bounded wait answers `deferred`. That is a slow
+    /// endpoint, not a refusal, so it must never count toward
+    /// `DefinitivelyRefusedByAll` / `DropFromDeliveryCut`.
+    #[test]
+    fn a_deferred_receipt_from_a_slow_editor_is_never_a_definitive_answer() {
+        let deferred = anyhow::anyhow!(
+            "IPC receipt deferred: {}",
+            agent_doc_ipc_protocol::DEFERRED_RECEIPT_LINE
+        );
+        assert!(agent_doc_ipc_io::is_ipc_receipt_deferred_error(&deferred));
+        assert!(!agent_doc_ipc_io::is_ipc_receipt_rejected_error(&deferred));
+        assert!(!recovering_send_error_is_definitive(
+            agent_doc_ipc_io::is_ipc_receipt_rejected_error(&deferred),
+            agent_doc_ipc_io::is_ipc_build_mismatch_error(&deferred),
+        ));
+    }
+
     /// `#refusedreceiptveto`: the disposition must follow the classification.
     ///
     /// `definitively_refused_by_all` already documented that the caller must
@@ -6016,6 +6205,47 @@ mod tests {
         assert_eq!(
             outcome(1, 1, 0, 0).nonconverging_disposition(),
             NonconvergingReplicaDisposition::AwaitRebuild,
+        );
+    }
+
+    #[test]
+    fn pending_delivery_rewake_keeps_waking_until_the_receipt() {
+        // `#netadv3` F9, replaying `VisibleDeliveryReceiptNetWakeOneShotWedge`:
+        // the first wake was dropped, no ACK arrived and nobody waits on the
+        // barrier. The loop must keep re-sending, with a capped backoff.
+        let delays: Vec<_> = (0..10)
+            .map(|attempt| pending_delivery_rewake_step(attempt, Some(false), 1))
+            .collect();
+        assert_eq!(
+            delays[0],
+            PendingDeliveryRewake::Rewake(PENDING_DELIVERY_REWAKE_INITIAL)
+        );
+        assert_eq!(
+            delays[1],
+            PendingDeliveryRewake::Rewake(PENDING_DELIVERY_REWAKE_INITIAL * 2)
+        );
+        assert_eq!(
+            delays[9],
+            PendingDeliveryRewake::Rewake(PENDING_DELIVERY_REWAKE_MAX),
+            "the backoff is capped, never abandoned"
+        );
+        assert_eq!(
+            pending_delivery_rewake_step(u32::MAX, Some(false), 1),
+            PendingDeliveryRewake::Rewake(PENDING_DELIVERY_REWAKE_MAX)
+        );
+        // The receipt, a hub that left this process, or nobody left to wake
+        // ends the loop.
+        assert_eq!(
+            pending_delivery_rewake_step(3, Some(true), 1),
+            PendingDeliveryRewake::Stop
+        );
+        assert_eq!(
+            pending_delivery_rewake_step(3, None, 1),
+            PendingDeliveryRewake::Stop
+        );
+        assert_eq!(
+            pending_delivery_rewake_step(3, Some(false), 0),
+            PendingDeliveryRewake::Stop
         );
     }
 

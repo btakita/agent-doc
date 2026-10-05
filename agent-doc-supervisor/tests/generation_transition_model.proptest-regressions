@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 950b6b8f510fe72bdf510799bf3155107ebc43aee0a4f8b8e2297509b2b5474d # shrinks to init = State { cycle_open: true, replay_checkpoint: false, ipc_drained: true, cause: Install, phase: Requested, replacements: 0, unsafe_replacements: 0, uncheckpointed_open_replacements: 0 }, prefix = [Replace]
+cc d46197dbb31e14d31cb4af77e80bce34f463f31ec8da00273a19e891a90003a2 # shrinks to init = State { cycle_open: true, replay_checkpoint: false, ipc_drained: false, cause: Install, phase: Requested, replacements: 0, unsafe_replacements: 0, uncheckpointed_open_replacements: 0 }, schedule = [DrainIpc, Replace]
+cc ba20e60c3ef496aef843099862ae068ba73822fabd2a07f218bd293ce9552f11 # shrinks to init = State { cycle_open: false, replay_checkpoint: false, ipc_drained: false, cause: Install, phase: Requested, replacements: 0, unsafe_replacements: 0, uncheckpointed_open_replacements: 0 }, schedule = [Replace]
+cc bd7732af4127e46360a0033a60bb772eb1aa2a3b297a75a7aad9c48f366620ac # shrinks to init = State { cycle_open: false, replay_checkpoint: false, ipc_drained: false, cause: Install, phase: Requested, replacements: 0, unsafe_replacements: 0, uncheckpointed_open_replacements: 0 }, prefix = [Replace]

@@ -1224,6 +1224,7 @@ version = "0.35.456"
 dependencies = [
  "agent-doc-hash",
  "agent-doc-markdown-ast",
+ "proptest",
  "serde",
  "serde_json",
 ]
@@ -2479,6 +2480,7 @@ dependencies = [
  "agent-doc-tmux-commands",
  "agent-doc-turn-executor-tmux",
  "lazily 0.57.1",
+ "proptest",
  "serde",
  "serde_json",
 ]

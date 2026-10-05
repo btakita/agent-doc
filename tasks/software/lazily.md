@@ -16,7 +16,6 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
-queue: go
 ---
 
 ## Status
@@ -690,10 +689,7 @@ The exchange is past 610 lines.
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzshmblobpostcard]~~
-- ~~do [#lzwiremodel7]~~
-- 🚧 release + publish
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

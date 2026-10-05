@@ -23571,8 +23571,11 @@ fn pane_layout_effect_worker(
             .as_ref()
             .map(|receipt| receipt.gated_documents.clone())
             .unwrap_or_default();
-        let projected_focus =
-            focus_outside_gated_documents(&bootstrap.project_root, projected_focus, &gated_documents);
+        let projected_focus = focus_outside_gated_documents(
+            &bootstrap.project_root,
+            projected_focus,
+            &gated_documents,
+        );
         if effect_result.is_ok() {
             runtime.record_pane_layout_structural_assignment(
                 &desired,
@@ -32018,6 +32021,64 @@ mod tests {
             pane_layout_await_outcome(&PaneLayoutProjection::Absent, 7),
             (false, "desired_layout_state_absent")
         );
+    }
+
+    /// GH #136: a column the layout effect acknowledged as gated (stale
+    /// supervisor) is removed from what convergence is measured against, under
+    /// any spelling, and focus is never demanded of it. Without this the
+    /// projection compared tmux against a column it was told not to build and
+    /// retried forever (`retry_pending`, 250ms..5s backoff, no attempt cap).
+    #[test]
+    fn gh136_gated_documents_are_excluded_from_convergence_and_focus() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("tasks/pmt2/mr")).unwrap();
+        for doc in ["tasks/pmt2/mr/1099.md", "tasks/ad.md", "tasks/two.md"] {
+            std::fs::write(root.join(doc), "").unwrap();
+        }
+        let abs = |doc: &str| root.join(doc).to_string_lossy().to_string();
+        let columns = vec![
+            "tasks/pmt2/mr/1099.md".to_string(),
+            format!("{},tasks/two.md", abs("tasks/ad.md")),
+        ];
+        // Gated under its absolute spelling, published root-relative.
+        let gated = vec![abs("tasks/pmt2/mr/1099.md")];
+        assert_eq!(
+            layout_columns_without_gated_documents(root, &columns, &gated),
+            vec![format!("{},tasks/two.md", abs("tasks/ad.md"))]
+        );
+        assert_eq!(
+            layout_columns_without_gated_documents(root, &columns, &[]),
+            columns,
+            "nothing gated: convergence is measured against the full layout"
+        );
+        assert_eq!(
+            layout_columns_without_gated_documents(
+                root,
+                &["tasks/pmt2/mr/1099.md".to_string()],
+                &gated
+            ),
+            Vec::<String>::new(),
+            "every column gated: nothing left to observe"
+        );
+        assert_eq!(
+            focus_outside_gated_documents(root, Some("tasks/pmt2/mr/1099.md".to_string()), &gated),
+            None
+        );
+        assert_eq!(
+            focus_outside_gated_documents(root, Some("tasks/ad.md".to_string()), &gated),
+            Some("tasks/ad.md".to_string())
+        );
+        assert_eq!(focus_outside_gated_documents(root, None, &gated), None);
+    }
+
+    #[test]
+    fn gh136_gated_receipt_field_defaults_for_older_peers() {
+        // A receipt from a peer that predates the field still deserialises.
+        let json = r#"{"applied":true,"reason":"applied","columns":[],"no_autostart":true,
+            "exact_visible":true,"routes_created_panes":false}"#;
+        let receipt: ControllerTmuxLayoutSyncReceipt = serde_json::from_str(json).unwrap();
+        assert!(receipt.gated_documents.is_empty());
     }
 
     #[test]

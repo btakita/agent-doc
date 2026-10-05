@@ -22830,14 +22830,16 @@ fn handle_document_path_transition_observe(
         );
 
         let conn = open_state_db(&bootstrap.project_root)?;
+        let old_document_id = old_path.to_string_lossy().to_string();
+        let new_document_id = new_path.to_string_lossy().to_string();
         let state_report =
             agent_doc_sqlite::state_store::merge_document_state_for_path_transition_in_db(
                 &conn,
                 &old_document_hash,
                 &new_document_hash,
+                &old_document_id,
+                &new_document_id,
             )?;
-        let old_document_id = old_path.to_string_lossy().to_string();
-        let new_document_id = new_path.to_string_lossy().to_string();
         let actor_rekeyed = agent_doc_sqlite::state_store::rekey_actor_document_path_in_db(
             &conn,
             &old_document_id,

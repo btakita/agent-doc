@@ -109,6 +109,11 @@ therefore cannot change the owner. Session lookup uses that same owner rule, so
 an old duplicate cannot select an arbitrary sibling supervisor while it is
 being repaired.
 
+A converged document-path transition rewrites both the indexed document hash
+and the embedded canonical path of every durable session-identity observation.
+The renamed document therefore remains the first durable owner of its UUID;
+admission must not misclassify a rename as a copied-document collision.
+
 **Canonical same-document claim reuse:** `claim` must judge "is this pane already mine?" by canonical document identity, not by an incidental caller path. The registry key is a canonical file path, not a session UUID. Re-claiming the same live pane for the same document, including submodule-relative `entry.file` shapes, must remain idempotent and must not provision a duplicate pane.
 
 **Cross-session claim guard:** `claim` may bind to a pane in the operator's current tmux session even when the configured project `tmux_session` points at another still-live session. This is a live-session override, not a config rewrite: the configured value remains unchanged, and it is still the fallback when the current session is not the active `agent-doc` session. Other cross-session claims are invalid unless the configured project session is stale or the user explicitly passes `--force`.

@@ -3944,7 +3944,7 @@ pub fn rekey_document_state_in_db(
     old_document_hash: &str,
     new_document_hash: &str,
 ) -> Result<DocumentStateRekeyReport> {
-    rekey_document_state_in_db_with_policy(conn, old_document_hash, new_document_hash, false)
+    rekey_document_state_in_db_with_policy(conn, old_document_hash, new_document_hash, false, None)
 }
 
 /// Merge one path lineage into another after an observed filesystem rename.
@@ -3963,8 +3963,16 @@ pub fn merge_document_state_for_path_transition_in_db(
     conn: &Connection,
     old_document_hash: &str,
     new_document_hash: &str,
+    old_canonical_path: &str,
+    new_canonical_path: &str,
 ) -> Result<DocumentStateRekeyReport> {
-    rekey_document_state_in_db_with_policy(conn, old_document_hash, new_document_hash, true)
+    rekey_document_state_in_db_with_policy(
+        conn,
+        old_document_hash,
+        new_document_hash,
+        true,
+        Some((old_canonical_path, new_canonical_path)),
+    )
 }
 
 fn rekey_document_state_in_db_with_policy(
@@ -3972,6 +3980,7 @@ fn rekey_document_state_in_db_with_policy(
     old_document_hash: &str,
     new_document_hash: &str,
     allow_destination_history: bool,
+    canonical_path_transition: Option<(&str, &str)>,
 ) -> Result<DocumentStateRekeyReport> {
     if old_document_hash == new_document_hash {
         return Ok(DocumentStateRekeyReport::default());
@@ -4029,6 +4038,21 @@ fn rekey_document_state_in_db_with_policy(
             "state event {event_id} indexed under {old_document_hash} embeds a different document hash"
         );
         *embedded_hash = serde_json::Value::String(new_document_hash.to_string());
+        if let Some((old_path, new_path)) = canonical_path_transition
+            && payload
+                .pointer("/fact/type")
+                .and_then(serde_json::Value::as_str)
+                == Some("document_session_identity_observed")
+            && payload
+                .pointer("/fact/canonical_path")
+                .and_then(serde_json::Value::as_str)
+                == Some(old_path)
+        {
+            let embedded_path = payload
+                .pointer_mut("/fact/canonical_path")
+                .expect("identity observation path was just matched");
+            *embedded_path = serde_json::Value::String(new_path.to_string());
+        }
         let rewritten = serde_json::to_string(&payload)
             .with_context(|| format!("serialize rekeyed state event {event_id}"))?;
         let changed = tx
@@ -6097,14 +6121,26 @@ mod tests {
             ("old-event", "old-hash", 1_u64),
             ("new-event", "new-hash", 2_u64),
         ] {
-            let payload = serde_json::json!({
-                "event_id": event_id,
-                "fact": {
-                    "type": "document_baseline_cleared",
-                    "document_hash": document_hash,
-                    "generation": generation
-                }
-            })
+            let payload = if event_id == "old-event" {
+                serde_json::json!({
+                    "event_id": event_id,
+                    "fact": {
+                        "type": "document_session_identity_observed",
+                        "document_hash": document_hash,
+                        "canonical_path": "/project/tasks/old.md",
+                        "session_id": "rename-session"
+                    }
+                })
+            } else {
+                serde_json::json!({
+                    "event_id": event_id,
+                    "fact": {
+                        "type": "document_baseline_cleared",
+                        "document_hash": document_hash,
+                        "generation": generation
+                    }
+                })
+            }
             .to_string();
             insert_state_event_in_db(
                 &conn,
@@ -6125,7 +6161,13 @@ mod tests {
             )?;
         }
 
-        let report = merge_document_state_for_path_transition_in_db(&conn, "old-hash", "new-hash")?;
+        let report = merge_document_state_for_path_transition_in_db(
+            &conn,
+            "old-hash",
+            "new-hash",
+            "/project/tasks/old.md",
+            "/project/tasks/new.md",
+        )?;
 
         assert_eq!(report.state_events_rekeyed, 1);
         assert_eq!(report.peer_acknowledgements_retired, 2);
@@ -6145,6 +6187,13 @@ mod tests {
                 .pointer("/fact/document_hash")
                 .and_then(serde_json::Value::as_str),
             Some("new-hash"),
+        );
+        assert_eq!(
+            rewritten
+                .pointer("/fact/canonical_path")
+                .and_then(serde_json::Value::as_str),
+            Some("/project/tasks/new.md"),
+            "durable session identity ownership must follow the rename",
         );
         assert!(load_state_event_peer_acks_from_db(&conn, "old-hash")?.is_empty());
         assert!(load_state_event_peer_acks_from_db(&conn, "new-hash")?.is_empty());

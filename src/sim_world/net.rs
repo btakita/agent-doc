@@ -20,7 +20,7 @@
 //!   arrive after later local steps.
 
 use super::*;
-use agent_doc_sim_net::{Delivery, NetEvent, NetProfile, NetStats, SimNet};
+use agent_doc_sim_net::{Delivery, NetEvent, NetProfile, NetStats, SendPlan, SimNet};
 use std::collections::BTreeMap;
 
 /// Virtual time one scheduler step represents.
@@ -87,6 +87,10 @@ pub(crate) struct SimWorldNet {
     pub(crate) stale_lifecycle_in_effect: Option<u64>,
     /// Dispatch request ids the controller accepted (injected a trigger for).
     pub(crate) accepted_dispatch_ids: std::collections::BTreeSet<u64>,
+    /// `#netadv6`: explicit delivery schedule for the next send (fuzz replay).
+    pub(crate) next_plan: Option<SendPlan>,
+    /// `#netadv6`: the delivery schedule the last send used (fuzz recording).
+    pub(crate) last_plan: Option<SendPlan>,
 }
 
 impl SimWorldNet {
@@ -101,6 +105,8 @@ impl SimWorldNet {
             reconnect_resyncs: 0,
             stale_lifecycle_in_effect: None,
             accepted_dispatch_ids: std::collections::BTreeSet::new(),
+            next_plan: None,
+            last_plan: None,
         }
     }
 
@@ -218,13 +224,17 @@ impl SimWorld {
     pub(crate) fn send_over_net(&mut self, link: SimLink, command: SimCommand) -> Result<()> {
         let generation_at_send = self.route.durable.generation;
         let net = self.net.as_mut().expect("send_over_net requires a net");
-        let id = net.net.send(
-            link,
-            NetMsg {
-                command,
-                generation_at_send,
-            },
-        );
+        let msg = NetMsg {
+            command,
+            generation_at_send,
+        };
+        let (id, plan) = match net.next_plan.take() {
+            Some(plan) => (net.net.send_planned(link, msg, &plan), plan),
+            None => net.net.send_recorded(link, msg),
+        };
+        net.last_plan = Some(plan);
+        self.fuzz_on_send(id);
+        let net = self.net.as_mut().expect("send_over_net requires a net");
         if net.mode == NetMode::Rpc {
             let events = net.net.advance_until_delivered(id);
             self.apply_net_events(events)?;
@@ -303,6 +313,7 @@ impl SimWorld {
         if let Some(net) = self.net.as_mut() {
             net.delivering_generation = Some(msg.generation_at_send);
         }
+        let fuzz_pre = self.fuzz_pre();
         let result = self.apply_local(msg.command);
         let after = self.actor_fact();
         let dispatch_accepted = self.coverage.route_dispatch_acceptances > acceptances_before;
@@ -337,6 +348,14 @@ impl SimWorld {
                 });
             }
         }
+        self.fuzz_post(
+            fuzz_pre,
+            super::fuzz::FuzzEvent::Delivered {
+                command: msg.command,
+                id,
+                generation_at_send: msg.generation_at_send,
+            },
+        );
         result
     }
 }
@@ -666,11 +685,14 @@ mod tests {
             world.coverage.route_dispatch_acceptances, 2,
             "known defect: one operator request, two injected triggers"
         );
-        assert!(
-            findings_of(8, NetProfile::Hostile, 1)
+        // `#netadv6` fenced the dispatch proof by the receipt's generation, which
+        // moved the corpus schedules this class first showed up in; search the
+        // fast corpus instead of pinning one seed.
+        assert!(FAST_CORPUS_SEEDS.clone().any(|seed| {
+            findings_of(seed, NetProfile::Hostile, 1)
                 .iter()
                 .any(|f| f.kind == "duplicate_dispatch_request_injected_twice")
-        );
+        }));
     }
 
     /// `#netadv4` F2: queue control has the same last-arrival-wins shape.

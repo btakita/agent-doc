@@ -316,6 +316,70 @@ struct LinkState {
     connection: u64,
 }
 
+/// The delivery schedule one send drew: every copy's delivery offset from the
+/// send time (empty = lost, 2+ = duplicated/retransmitted), plus a half-open
+/// stall of the link the send started (ends in a reconnect).
+///
+/// Recorded by [`SimNet::send_recorded`] and replayed by [`SimNet::send_planned`],
+/// so a fuzz trace carries its network faults explicitly and a shrinker can drop
+/// or simplify them one message at a time.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct SendPlan {
+    pub copies_ms: Vec<u64>,
+    pub stall_ms: Option<u64>,
+}
+
+impl SendPlan {
+    /// One copy, delivered on the next scheduler tick: no fault.
+    pub fn clean() -> Self {
+        Self {
+            copies_ms: vec![0],
+            stall_ms: None,
+        }
+    }
+
+    /// True when the plan injects no fault beyond plain latency.
+    pub fn is_clean(&self) -> bool {
+        self.copies_ms.len() == 1 && self.stall_ms.is_none()
+    }
+
+    /// Compact replayable form: `@120,1300` / `@40!stall=2000` / `@lost`.
+    pub fn to_token(&self) -> String {
+        let mut out = String::from("@");
+        if self.copies_ms.is_empty() {
+            out.push_str("lost");
+        } else {
+            let copies: Vec<String> = self.copies_ms.iter().map(u64::to_string).collect();
+            out.push_str(&copies.join(","));
+        }
+        if let Some(stall) = self.stall_ms {
+            out.push_str(&format!("!stall={stall}"));
+        }
+        out
+    }
+
+    /// Parse [`to_token`](Self::to_token) output.
+    pub fn parse_token(token: &str) -> Option<Self> {
+        let body = token.strip_prefix('@')?;
+        let (copies, stall) = match body.split_once("!stall=") {
+            Some((copies, stall)) => (copies, Some(stall.parse().ok()?)),
+            None => (body, None),
+        };
+        let copies_ms = if copies == "lost" {
+            Vec::new()
+        } else {
+            copies
+                .split(',')
+                .map(|part| part.parse().ok())
+                .collect::<Option<Vec<u64>>>()?
+        };
+        Some(Self {
+            copies_ms,
+            stall_ms: stall,
+        })
+    }
+}
+
 /// The adversarial channel. `L` names a link (a directed process hop); `M` is the
 /// message payload.
 #[derive(Clone, Debug)]
@@ -423,19 +487,28 @@ where
     /// Send `msg` over `link`. Returns the message id. The draw order below is
     /// fixed, so a seed reproduces exactly.
     pub fn send(&mut self, link: L, msg: M) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.stats.sent += 1;
-        self.record(link, id, NetTraceKind::Send);
-        let now = self.now_ms;
-        let conditions = self.conditions;
+        self.send_recorded(link, msg).0
+    }
 
-        let mut state = self.links.get(&link).copied().unwrap_or_default();
-        if now >= state.stalled_until_ms && self.rng.chance(conditions.stall_permille) {
-            let duration = self
-                .rng
-                .range_inclusive(conditions.stall_min_ms, conditions.stall_max_ms);
-            state.stalled_until_ms = now + duration;
+    /// [`send`](Self::send), also returning the [`SendPlan`] the channel drew, so
+    /// a caller can record it and later replay the same delivery schedule with
+    /// [`send_planned`](Self::send_planned) without the channel RNG.
+    pub fn send_recorded(&mut self, link: L, msg: M) -> (u64, SendPlan) {
+        let id = self.begin_send(link);
+        let plan = self.sample_plan(link, id);
+        self.schedule_plan(link, id, msg, &plan);
+        (id, plan)
+    }
+
+    /// Send `msg` over `link` on an explicit delivery schedule. Draws nothing from
+    /// the channel RNG: a recorded trace replays (and shrinks) independently of
+    /// how many other messages were sent before it.
+    pub fn send_planned(&mut self, link: L, msg: M, plan: &SendPlan) -> u64 {
+        let id = self.begin_send(link);
+        if let Some(stall) = plan.stall_ms {
+            let mut state = self.links.get(&link).copied().unwrap_or_default();
+            state.stalled_until_ms = self.now_ms + stall;
+            self.links.insert(link, state);
             self.stats.stalls += 1;
             self.record(
                 link,
@@ -444,7 +517,47 @@ where
                     until_ms: state.stalled_until_ms,
                 },
             );
-            self.schedule(state.stalled_until_ms, Pending::Reconnect { link });
+        }
+        if plan.copies_ms.len() > 1 {
+            self.stats.duplicates += (plan.copies_ms.len() - 1) as u64;
+            self.record(link, id, NetTraceKind::Duplicate);
+        }
+        if plan.copies_ms.is_empty() {
+            self.stats.lost += 1;
+            self.record(link, id, NetTraceKind::Lost);
+        }
+        self.schedule_plan(link, id, msg, plan);
+        id
+    }
+
+    fn begin_send(&mut self, link: L) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.stats.sent += 1;
+        self.record(link, id, NetTraceKind::Send);
+        id
+    }
+
+    fn sample_plan(&mut self, link: L, id: u64) -> SendPlan {
+        let now = self.now_ms;
+        let conditions = self.conditions;
+        let mut plan = SendPlan::default();
+
+        let mut state = self.links.get(&link).copied().unwrap_or_default();
+        if now >= state.stalled_until_ms && self.rng.chance(conditions.stall_permille) {
+            let duration = self
+                .rng
+                .range_inclusive(conditions.stall_min_ms, conditions.stall_max_ms);
+            state.stalled_until_ms = now + duration;
+            plan.stall_ms = Some(duration);
+            self.stats.stalls += 1;
+            self.record(
+                link,
+                id,
+                NetTraceKind::StallStart {
+                    until_ms: state.stalled_until_ms,
+                },
+            );
         }
         self.links.insert(link, state);
 
@@ -505,9 +618,18 @@ where
             self.stats.lost += 1;
             self.record(link, id, NetTraceKind::Lost);
         }
-        for due in dues {
+        plan.copies_ms = dues.into_iter().map(|due| due - now).collect();
+        plan
+    }
+
+    fn schedule_plan(&mut self, link: L, id: u64, msg: M, plan: &SendPlan) {
+        let now = self.now_ms;
+        if let Some(stall) = plan.stall_ms {
+            self.schedule(now + stall, Pending::Reconnect { link });
+        }
+        for &offset in &plan.copies_ms {
             self.schedule(
-                due,
+                now + offset,
                 Pending::Copy {
                     link,
                     id,
@@ -516,7 +638,6 @@ where
                 },
             );
         }
-        id
     }
 
     fn pop_due(&mut self, until_ms: u64) -> Option<NetEvent<L, M>> {
@@ -770,6 +891,34 @@ mod tests {
             }
         }
         assert!(overtakes > 0);
+    }
+
+    /// `#netadv6`: a recorded plan replays the identical delivery schedule with no
+    /// channel RNG, and the token form round-trips.
+    #[test]
+    fn recorded_plans_replay_the_same_deliveries() {
+        for profile in NetProfile::ADVERSARIAL {
+            for seed in 0..8 {
+                let mut live = SimNet::<Link, u32>::for_profile(profile, seed, Delivery::AtLeastOnce);
+                let mut replay =
+                    SimNet::<Link, u32>::for_profile(NetProfile::Local, 0, Delivery::AtLeastOnce);
+                let (mut a, mut b) = (Vec::new(), Vec::new());
+                for step in 0..200u32 {
+                    let link = if step % 3 == 0 { Link::B } else { Link::A };
+                    let (_, plan) = live.send_recorded(link, step);
+                    let token = plan.to_token();
+                    assert_eq!(SendPlan::parse_token(&token), Some(plan.clone()), "{token}");
+                    replay.send_planned(link, step, &plan);
+                    a.extend(live.advance(50).into_iter().map(|e| format!("{e:?}")));
+                    b.extend(replay.advance(50).into_iter().map(|e| format!("{e:?}")));
+                }
+                a.extend(live.drain().into_iter().map(|e| format!("{e:?}")));
+                b.extend(replay.drain().into_iter().map(|e| format!("{e:?}")));
+                assert_eq!(a, b, "{profile} seed {seed}");
+            }
+        }
+        assert!(SendPlan::clean().is_clean());
+        assert_eq!(SendPlan::parse_token("@lost"), Some(SendPlan::default()));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net cross-editor-simworld editor-parity tmux-ci clippy check python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -126,6 +126,25 @@ sim-net:
 		exit 1; \
 	fi; \
 	rm -f "$$log"
+
+# `#netadv6`: deterministic simulation fuzzing on FRESH seeds for FUZZ_SECS
+# seconds (src/sim_world/fuzz.rs). `make check` already runs the short fixed
+# budget and replays every regression seed in src/sim_world/fuzz_seeds.txt
+# through `make test`. Each NEW finding kind's shrunk, replayable trace is printed
+# and written to FUZZ_OUT/<kind>.trace; paste it into fuzz_seeds.txt to make it a
+# permanent regression seed. FUZZ_SEED pins the base seed (default: clock).
+FUZZ_SECS ?= 600
+FUZZ_STEPS ?= 160
+FUZZ_OUT ?= $(CARGO_TARGET_DIR_ABS)/sim-fuzz
+sim-fuzz:
+	@mkdir -p "$(FUZZ_OUT)"; log="$(FUZZ_OUT)/sim-fuzz.log"; \
+	if AGENT_DOC_SIM_FUZZ_SECS="$(FUZZ_SECS)" AGENT_DOC_SIM_FUZZ_STEPS="$(FUZZ_STEPS)" \
+		AGENT_DOC_SIM_FUZZ_OUT="$(FUZZ_OUT)" $(if $(FUZZ_SEED),AGENT_DOC_SIM_FUZZ_SEED="$(FUZZ_SEED)") \
+		$(CARGO_CLEAN_ENV) cargo test --bin agent-doc sim_world::fuzz::tests::sim_fuzz_long_budget \
+		-- --ignored --nocapture --test-threads=1 >"$$log" 2>&1; then status=0; else status=1; fi; \
+	grep -v '^\[template\]' "$$log" | grep -v '^\[perf\]'; \
+	echo "sim-fuzz: exit=$$status log=$$log out=$(FUZZ_OUT)"; \
+	exit $$status
 
 # Compile and run the shipped JetBrains and VS Code CRDT forwarders, controller
 # transports, and native FFI nodes as peers through a real agent-doc controller.

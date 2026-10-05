@@ -1,0 +1,144 @@
+# `#netadv6` sim-fuzz regression seeds, replayed by `make check`
+# (sim_world::fuzz::tests::sim_fuzz_regression_seeds_replay).
+#
+# Each entry is a shrunk, replayable SimWorld schedule:
+#   === <name>
+#   expect clean               -- must run with NO finding (a fixed defect's guard)
+#   expect known <kind>        -- a still-open defect on KNOWN_FUZZ_FINDINGS that
+#                                 must keep reproducing; flip to `expect clean`
+#                                 once it is fixed
+#   profile <local|coder_zscaler|hostile>
+#   step <SimCommand> [@<copy offsets ms>[!stall=<ms>] | @lost]
+#   tick <n>
+#
+# New entries come from `make sim-fuzz` (FUZZ_OUT/<kind>.trace) or the short
+# budget's failure output, pasted verbatim.
+
+# ---- Fixed by netadv6 (model fidelity): must stay clean ---------------------
+
+# A Starting->Ready readiness report delayed across a rebind promoted the NEW
+# generation without proof (`promote_starting_prompt_ready` read the durable
+# generation, not the sender's). Production `LifecycleRequest` is generation-fenced.
+=== netadv6-stale-promote-across-rebind
+expect clean
+profile hostile
+step PromoteStartingPromptReady @824
+step BindRouteOwner
+
+# A route dispatch landed while the project supervisor was mid-recycle and was
+# injected. Every production route path waits for the recycle to settle.
+=== netadv6-route-dispatch-during-recycle
+expect clean
+profile hostile
+step MarkSupervisorRecycleInflight
+step DispatchRoutePrompt @515,790
+step SupervisorReady @0
+
+# The supervisor's own idle-watch drain cannot run while it is mid-execve.
+=== netadv6-idle-drain-during-own-recycle
+expect clean
+profile local
+step ActivateGoModeQueueHead
+step MarkSupervisorRecycleInflight
+step SupervisorReady
+step SupervisorIdleQueueTick
+
+# A dispatch proof observed for generation 1 proved the generation-2 receipt
+# created after a delayed handoff landed. Proofs are bound to their receipt.
+=== netadv6-stale-proof-across-handoff
+expect clean
+profile hostile
+step AdminHandoff @828
+step Commit
+step EditPrompt
+step Commit
+step SupervisorReady @0
+step DispatchRoutePrompt @394
+step ProveDispatchAccepted @331
+
+# DuplicateVisibleResponse duplicates the LAST visible response; with none (or
+# with an operator prompt after it) the step is disabled: it once "committed a
+# response no capture produced" that was really an answer-shaped block.
+=== netadv6-duplicate-response-needs-a-visible-response
+expect clean
+profile local
+step EditPrompt
+step DuplicateVisibleResponse
+step Commit
+
+=== netadv6-duplicate-response-after-a-later-prompt-is-not-a-duplicate
+expect clean
+profile local
+step CaptureResponse
+step ApplyCapturedResponse
+step Commit
+step EditPrompt
+step DuplicateVisibleResponse
+step Commit
+
+# The closeout refuses to commit a duplicate of the last response.
+=== netadv6-adjacent-duplicate-response-is-never-committed
+expect clean
+profile local
+step CaptureResponse
+step ApplyCapturedResponse
+step Commit
+step DuplicateVisibleResponse
+step Commit
+
+# ---- Known open defects: must keep reproducing until fixed -----------------
+
+=== known-stale_actor_lifecycle_applied_out_of_order-seed2
+expect known stale_actor_lifecycle_applied_out_of_order
+profile hostile
+step SupervisorBusy @1101
+step SupervisorReady @0
+
+=== known-dispatch_accepted_on_reordered_stale_lifecycle-seed26
+expect known dispatch_accepted_on_reordered_stale_lifecycle
+profile hostile
+step SupervisorReady @651
+step SyncDetachableReplaceManual @0
+step SupervisorClosed @0
+step SupervisorReady @522
+step DispatchRoutePrompt @333
+
+=== known-stale_queue_control_applied_out_of_order-seed161
+expect known stale_queue_control_applied_out_of_order
+profile hostile
+step AdminDrainQueue @2413
+step AdminPauseQueue @0
+
+=== known-duplicate_dispatch_request_injected_twice-seed44
+expect known duplicate_dispatch_request_injected_twice
+profile hostile
+step SupervisorReady @0
+step DispatchRoutePrompt @254,434
+step ProveDispatchAccepted @246
+
+=== known-stale_actor_lifecycle_overwrote_local_transition-seed23
+expect known stale_actor_lifecycle_overwrote_local_transition
+profile hostile
+step SupervisorReady @904
+step AbandonSupervisorToDeadSocket
+
+=== known-stale_stash_pane_widened_layout-seed7
+expect known stale_stash_pane_widened_layout
+profile local
+step InstallFanout
+step SyncFocusStaleStashPane
+
+
+# GH #136 lapse (hand-built; fixed on main 9bb7edb2b): auto-recycle opted out, an
+# install fan-out request ages past its TTL while the cycle stays open, and the
+# still-stale supervisor never consumes it.
+=== known-stale_recycle_request_lapsed_unconsumed
+expect known stale_recycle_request_lapsed_unconsumed
+profile local
+step DisableSupervisorAutoRecycle
+step SetAgentDocCycleOpen(true)
+step InstallFanout
+step AdvanceWallClock
+step AdvanceWallClock
+step AdvanceWallClock
+step AdvanceWallClock

@@ -42,6 +42,7 @@ impl SimWorld {
             next_prompt: 1,
             coverage: Coverage::default(),
             net: None,
+            fuzz: None,
         }
     }
 
@@ -174,7 +175,10 @@ impl SimWorld {
 
     pub(crate) fn apply(&mut self, command: SimCommand) -> Result<()> {
         if self.net.is_none() {
-            return self.apply_local(command);
+            let pre = self.fuzz_pre();
+            let result = self.apply_local(command);
+            self.fuzz_post(pre, fuzz::FuzzEvent::Local(command));
+            return result;
         }
         // Stragglers due by now land first, then this step.
         self.net_tick()?;
@@ -182,8 +186,10 @@ impl SimWorld {
             Some(link) => self.send_over_net(link, command),
             None => {
                 let before = (self.route.durable.generation, self.route.durable.lifecycle);
+                let pre = self.fuzz_pre();
                 let result = self.apply_local(command);
                 self.net_note_local_step(before);
+                self.fuzz_post(pre, fuzz::FuzzEvent::Local(command));
                 result
             }
         }
@@ -647,6 +653,15 @@ impl SimWorld {
             }
             SimCommand::AbandonSupervisorToDeadSocket => {
                 self.abandon_supervisor_to_dead_socket();
+            }
+            SimCommand::InstallFanout => {
+                self.fuzz_install_fanout();
+            }
+            SimCommand::SyncFocusStaleStashPane => {
+                self.fuzz_sync_focus_stale_stash_pane();
+            }
+            SimCommand::AdvanceWallClock => {
+                self.fuzz_advance_wall_clock();
             }
         }
         Ok(())
@@ -1465,7 +1480,9 @@ impl SimWorld {
             self.recycle_clear.auto_recycle,
             recycle_checkpoint,
             head_pending,
-            self.recycle_clear.operator_recycle_marked,
+            // `#netadv6`: a live durable recycle request (install fan-out / GH #136
+            // stale-column request) is honoured like an explicit admin recycle.
+            self.recycle_clear.operator_recycle_marked || self.fuzz_recycle_request_live(),
             write_wedged,
             false, // editor-delivery stale requests are exercised by the runtime/policy seam
             self.recycle_clear.reexec_failed,
@@ -1734,6 +1751,7 @@ impl SimWorld {
     }
 
     fn recycle_supervisor_in_place(&mut self) {
+        self.fuzz_settle_recycle_request();
         let preserved_pane = self.route.durable.pane_id.clone();
         let preserved_session = self.route.durable.session_id.clone();
         let generation = self.route.durable.generation + 1;
@@ -2211,6 +2229,20 @@ impl SimWorld {
     /// operator can dispatch while auto-drain backpressure holds.
     pub(crate) fn dispatch_route_prompt_with(&mut self, operator_driven: bool) -> Result<()> {
         let pane_id = self.current_dispatch_pane()?;
+        // `#netadv6`: every production route dispatch path waits for the project
+        // supervisor's recycle to settle before typing
+        // (`wait_for_dispatch_only_recycle_inflight_settle`,
+        // `direct_pane_dispatch`'s `wait_for_supervisor_recycle_settle_for_file`),
+        // and the idle-watch drain cannot run while its own supervisor is mid
+        // `execve`. Model the deferral: no inject while the marker is set.
+        if self.route.recycle_inflight {
+            bail!(
+                "dispatch deferred: project supervisor mid-recycle for pane {}; seed={} trace={:?}",
+                pane_id,
+                self.seed,
+                self.trace
+            );
+        }
         if let Some(stage) = self
             .route
             .queue_control
@@ -2414,7 +2446,10 @@ impl SimWorld {
                 self.trace
             );
         }
-        self.transition_supervisor(self.route.durable.generation, SupervisorLifecycle::Ready)?;
+        // `#netadv6`: the readiness report is the supervisor's generation-fenced
+        // `LifecycleRequest { generation, state: Ready }`; a report from a prior
+        // generation (delayed across a rebind) must not promote the new one.
+        self.transition_supervisor(self.observed_generation(), SupervisorLifecycle::Ready)?;
         self.coverage.starting_prompt_promotions += 1;
         Ok(())
     }
@@ -2579,10 +2614,15 @@ impl SimWorld {
     }
 
     pub(crate) fn prove_dispatch_accepted(&mut self) -> Result<()> {
+        let observed_generation = self.observed_generation();
         let Some(receipt) = self.route.pending_dispatch.as_mut() else {
             return Ok(());
         };
+        // `#netadv6`: a proof is bound to the receipt it proves (production stamps
+        // `dispatch_start_proof pane= generation=` from the receipt it polled), so a
+        // proof observed for an earlier generation never proves a newer receipt.
         if receipt.generation != self.route.durable.generation
+            || receipt.generation != observed_generation
             || receipt.session_id != self.route.durable.session_id
             || Some(&receipt.pane_id) != self.route.durable.pane_id.as_ref()
         {

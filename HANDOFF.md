@@ -38,10 +38,8 @@ function; every crasher -> regression test + fix.
 6. Fuzz runs: several rounds of 90-120s per target. All 5 targets were clean on the final round.
 
 ## Remaining
-1. Run `make check` with explicit exit capture; fix any fallout.
-2. Final commit; update this file.
+None for #netadv7. Not pushed/installed/released/merged (per instructions).
 
 ## Commands / status
-- cargo-fuzz: PATH=/tmp/claude-1000/-home-brian-work-btakita-agent-loop/c6814369-5609-4ecd-bdf6-1f2a5cca6d15/scratchpad/cf/bin:$PATH
-- `cargo test -p agent-doc-fuzz-harness` green.
-- `make check`: pending.
+- cargo-fuzz (scratch install): PATH=<scratchpad>/cf/bin:$PATH; `make fuzz FUZZ_SECONDS=120`.
+- `make check` (via `rtk proxy`, exit captured explicitly): MAKE_CHECK_EXIT=0; nextest 11042 passed, 265 skipped.

@@ -85,7 +85,12 @@ may republish the retained intent, but remains subject to the same rule.
   is retained but cannot supersede the route; the newest retained generation is
   projected after the routed dispatch attempt settles. A newer explicit route,
   operator ownership, or a terminal non-converged state still fails closed
-  before dispatch (`#routelayoutlease`).
+  before dispatch (`#routelayoutlease`). When a newer foreground route or
+  command supersedes an in-flight route, the refusal is terminal for that
+  generation: it fails immediately rather than retrying until the shared budget
+  expires, and names the winning publisher, generation, and observed columns so
+  the operator can distinguish intentional supersession from a stuck projection
+  (`#gh143`).
 - Fresh auto-starts and live reroutes both require the Project Controller's reactive per-document admission projection after dispatch; accepted input alone is not sufficient.
 - Automatic editor-layout `Sync` generations are structural edges and must cross the tmux effect boundary even when the desired columns match a retained structural receipt. A first observation or controller-observed drift cannot be declared converged from an older pane assignment; focus-only changes use their separate effect.
 - When a project has no explicit tmux-session configuration, the layout observer must resolve the observed session from that generation's effect-owned pane assignment. A configured session remains authoritative; the observer must not reject an already-applied shared-session effect merely because the target project omitted redundant session configuration.

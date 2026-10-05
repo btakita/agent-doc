@@ -10959,13 +10959,39 @@ fn editor_route_layout_refusal(
 ) -> Option<EditorRouteLayoutRefusal> {
     let columns = editor_route_columns_display(&receipt.columns);
     if !tmux_layout_command_applied(receipt) {
+        let superseding_foreground = receipt.reason == PANE_LAYOUT_SUPERSEDED_REASON
+            && matches!(
+                receipt.layout_publisher.as_deref(),
+                Some("route" | "command")
+            );
+        let superseding_layout = match (
+            receipt.layout_publisher.as_deref(),
+            receipt.layout_generation,
+        ) {
+            (Some(publisher), Some(generation)) => format!(
+                "; observed layout publisher={publisher} generation={generation} columns={columns}"
+            ),
+            (Some(publisher), None) => {
+                format!("; observed layout publisher={publisher} columns={columns}")
+            }
+            _ => String::new(),
+        };
+        let retry_guidance = superseding_foreground.then_some(
+            "; a newer foreground layout owns the pane state; retry this document after that command settles if routing it is still desired",
+        );
         return Some(EditorRouteLayoutRefusal {
             // An operator-owned layout is a terminal refusal: waiting longer
-            // would only fight the operator for the panes.
-            retryable: receipt.reason != "operator_owned_layout",
+            // would only fight the operator for the panes. A foreground route
+            // or command that superseded this route is terminal for this
+            // generation; re-observing cannot restore its ownership.
+            retryable: receipt.reason != "operator_owned_layout" && !superseding_foreground,
             message: format!(
-                "editor route layout did not converge before dispatch: reason={} for routed document `{}` (published columns: {})",
-                receipt.reason, routed_document, columns,
+                "editor route layout did not converge before dispatch: reason={} for routed document `{}` (published columns: {}){}{}",
+                receipt.reason,
+                routed_document,
+                columns,
+                superseding_layout,
+                retry_guidance.unwrap_or_default(),
             ),
         });
     }
@@ -26389,6 +26415,8 @@ fn await_sync_tmux_layout_projection(
                 applied: false,
                 reason: "projection_published".to_string(),
                 columns: invocation.columns,
+                layout_generation: Some(desired.generation),
+                layout_publisher: Some(desired.provenance.publisher.label().to_string()),
                 window: invocation.window,
                 focus: invocation.focus,
                 no_autostart: invocation.no_autostart,
@@ -26423,6 +26451,10 @@ fn await_sync_tmux_layout_projection(
             applied,
             reason: reason.to_string(),
             columns: invocation.columns,
+            layout_generation: pane_layout_projection_desired(&projection)
+                .map(|current| current.generation),
+            layout_publisher: pane_layout_projection_desired(&projection)
+                .map(|current| current.provenance.publisher.label().to_string()),
             window: invocation.window,
             focus: invocation.focus,
             no_autostart: invocation.no_autostart,
@@ -26446,16 +26478,12 @@ fn editor_route_layout_receipt(
 ) -> ControllerTmuxLayoutSyncReceipt {
     let projection = runtime.await_pane_layout_route_document(document, await_timeout);
     let (applied, reason) = pane_layout_route_await_outcome(&projection, document);
-    let receipt_invocation = pane_layout_projection_desired(&projection)
-        .filter(|current| {
-            current
-                .invocation
-                .columns
-                .iter()
-                .flat_map(|column| column.split(','))
-                .map(str::trim)
-                .any(|candidate| candidate == document)
-        })
+    // Preserve the projection that won arbitration, even when it omits the
+    // routed document. Falling back to the route's original columns hid the
+    // superseding publisher and made a terminal foreground supersession look
+    // like a retryable convergence race (GH #143).
+    let projected = pane_layout_projection_desired(&projection);
+    let receipt_invocation = projected
         .map(|current| current.invocation.clone())
         .unwrap_or(invocation);
     let routes_created_panes = receipt_invocation.routes_created_panes();
@@ -26467,6 +26495,8 @@ fn editor_route_layout_receipt(
         applied,
         reason: reason.to_string(),
         columns: receipt_invocation.columns,
+        layout_generation: projected.map(|current| current.generation),
+        layout_publisher: projected.map(|current| current.provenance.publisher.label().to_string()),
         window: receipt_invocation.window,
         focus: receipt_invocation.focus,
         no_autostart: receipt_invocation.no_autostart,
@@ -32767,6 +32797,8 @@ mod tests {
             applied,
             reason: reason.to_string(),
             columns: columns.iter().map(|column| column.to_string()).collect(),
+            layout_generation: None,
+            layout_publisher: None,
             window: None,
             focus: None,
             no_autostart: false,
@@ -32879,6 +32911,65 @@ mod tests {
         // `projection_published` is a successful command-plane terminal.
         let published = gh110_receipt(false, "projection_published", &["/repo/a.md"]);
         assert_eq!(editor_route_layout_refusal(&published, "/repo/a.md"), None);
+    }
+
+    #[test]
+    fn gh143_foreground_supersession_is_terminal_and_names_the_winner() {
+        let mut superseded = gh110_receipt(
+            false,
+            PANE_LAYOUT_SUPERSEDED_REASON,
+            &["/repo/competing.md"],
+        );
+        superseded.layout_generation = Some(41);
+        superseded.layout_publisher = Some("route".to_string());
+
+        let refusal = editor_route_layout_refusal(&superseded, "/repo/a.md").unwrap();
+        assert!(
+            !refusal.retryable,
+            "a newer foreground owner cannot converge back"
+        );
+        assert!(
+            refusal.message.contains("publisher=route"),
+            "{}",
+            refusal.message
+        );
+        assert!(
+            refusal.message.contains("generation=41"),
+            "{}",
+            refusal.message
+        );
+        assert!(
+            refusal.message.contains("columns=`/repo/competing.md`"),
+            "{}",
+            refusal.message
+        );
+        assert!(
+            refusal
+                .message
+                .contains("retry this document after that command settles"),
+            "{}",
+            refusal.message
+        );
+
+        let error = await_editor_route_layout_gates(
+            "/repo/a.md",
+            Instant::now() + Duration::from_secs(5),
+            superseded,
+            |_, _| panic!("terminal foreground supersession must not re-observe"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("after 1 layout observation(s)"), "{error}");
+        assert!(error.contains("this refusal is terminal"), "{error}");
+        assert!(!error.contains("was exhausted"), "{error}");
+    }
+
+    #[test]
+    fn gh143_unknown_supersession_remains_retryable_for_older_peers() {
+        let superseded = gh110_receipt(false, PANE_LAYOUT_SUPERSEDED_REASON, &["/repo/other.md"]);
+        let refusal = editor_route_layout_refusal(&superseded, "/repo/a.md").unwrap();
+        assert!(refusal.retryable);
+        assert!(!refusal.message.contains("observed layout publisher="));
     }
 
     #[test]
@@ -33678,6 +33769,8 @@ mod tests {
             "exact_visible":true,"routes_created_panes":false}"#;
         let receipt: ControllerTmuxLayoutSyncReceipt = serde_json::from_str(json).unwrap();
         assert!(receipt.gated_documents.is_empty());
+        assert_eq!(receipt.layout_generation, None);
+        assert_eq!(receipt.layout_publisher, None);
     }
 
     #[test]
@@ -33687,6 +33780,8 @@ mod tests {
             applied,
             reason: reason.to_string(),
             columns: vec!["tasks/one.md".to_string()],
+            layout_generation: None,
+            layout_publisher: None,
             window: Some("agent-doc".to_string()),
             focus: Some("tasks/one.md".to_string()),
             no_autostart: true,

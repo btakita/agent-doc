@@ -5058,6 +5058,15 @@ enum SimCommand {
     /// targeted tests, not the random generator, so the seed corpus traces are
     /// unchanged.
     AbandonSupervisorToDeadSocket,
+    /// `#netadv6` (fuzz-only): `make install` replaced the binary and the install
+    /// fan-out wrote an `install_fanout` recycle request for this supervisor.
+    InstallFanout,
+    /// `#netadv6` (fuzz-only, GH #136): an editor focus publication asks for the
+    /// first stashed document's pane as an extra column; admission runs through
+    /// the production `plan_column_admissions`.
+    SyncFocusStaleStashPane,
+    /// `#netadv6` (fuzz-only): advance the wall clock recycle requests age on.
+    AdvanceWallClock,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5991,6 +6000,10 @@ struct SimWorld {
     trace: Vec<SimCommand>,
     doc: String,
     snapshot: String,
+    /// `#netadv6`: the content a commit wrote to HEAD when the snapshot save after
+    /// it was interrupted; recovery restores the snapshot from it, not from the
+    /// (possibly since-edited) working document.
+    interrupted_commit_head: Option<String>,
     phase: CyclePhase,
     captured_response: Option<String>,
     pending_fault: Option<FaultPoint>,
@@ -6008,9 +6021,12 @@ struct SimWorld {
     /// `#netadv4`: adversarial channel for cross-process messages. `None` is the
     /// perfect `local` channel (every pre-existing scenario).
     net: Option<net::SimWorldNet>,
+    /// `#netadv6`: fuzz oracle state. `None` outside the fuzzer.
+    fuzz: Option<Box<fuzz::FuzzState>>,
 }
 
 mod engine;
+mod fuzz;
 mod net;
 mod steering_delivery_model;
 

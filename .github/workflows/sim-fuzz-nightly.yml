@@ -1,0 +1,72 @@
+name: Sim fuzz (nightly)
+
+# `#netadv6`: deterministic simulation fuzzing on FRESH seeds for a long budget.
+# `make check` (CI) already runs the short fixed budget and replays every
+# regression seed in src/sim_world/fuzz_seeds.txt; this job explores new
+# schedules. A failure means a NEW finding kind (one not on KNOWN_FUZZ_FINDINGS):
+# its shrunk, replayable trace is in the `sim-fuzz-traces` artifact. Paste the
+# trace into fuzz_seeds.txt to make it a permanent regression seed.
+
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+    inputs:
+      fuzz_secs:
+        description: Wall-clock fuzz budget in seconds
+        required: false
+        default: '2400'
+      fuzz_seed:
+        description: Base seed (empty = derived from the run id)
+        required: false
+        default: ''
+
+jobs:
+  sim-fuzz:
+    runs-on: ubuntu-latest
+    env:
+      # Same disk constraints as CI: the test graph exceeds the hosted runner
+      # disk when Cargo retains incremental state and full debug info.
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    # Build (~25 min cold) + the default 40 min budget, with slack.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out agent-kit path dependency
+        run: git clone --depth 1 https://github.com/btakita/agent-kit ../agent-kit
+
+      - name: Check out tmux-router patch dependency
+        run: git clone --depth 1 https://github.com/btakita/tmux-router ../tmux-router
+
+      - name: Check out lazily-rs path dependency
+        run: git clone --depth 1 https://github.com/btakita/lazily-rs ../lazily-rs
+
+      - name: Check out lazily-spec schema dependency
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec ../lazily-spec
+
+      - name: Check out lazily-kt composite dependency
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-kt ../lazily-kt
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run make sim-fuzz
+        env:
+          FUZZ_SECS: ${{ github.event.inputs.fuzz_secs || '2400' }}
+          FUZZ_SEED: ${{ github.event.inputs.fuzz_seed || github.run_id }}
+        run: |
+          echo "sim-fuzz: secs=$FUZZ_SECS base_seed=$FUZZ_SEED"
+          make sim-fuzz FUZZ_SECS="$FUZZ_SECS" FUZZ_SEED="$FUZZ_SEED" FUZZ_OUT="$GITHUB_WORKSPACE/sim-fuzz-out"
+
+      - name: Upload shrunk traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-fuzz-traces
+          path: |
+            sim-fuzz-out/*.trace
+            sim-fuzz-out/sim-fuzz.log
+          if-no-files-found: warn
+          retention-days: 30

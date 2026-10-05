@@ -20,7 +20,7 @@
 //!   arrive after later local steps.
 
 use super::*;
-use agent_doc_sim_net::{Delivery, NetEvent, NetProfile, NetStats, SimNet};
+use agent_doc_sim_net::{Delivery, NetEvent, NetProfile, NetStats, SendPlan, SimNet};
 use std::collections::BTreeMap;
 
 /// Virtual time one scheduler step represents.
@@ -55,6 +55,8 @@ pub(crate) struct NetMsg {
     pub(crate) command: SimCommand,
     /// The sender's view of the actor generation when it sent the message.
     pub(crate) generation_at_send: u64,
+    /// Per-host order assigned at the level-update call/send edge.
+    pub(crate) level_stamp: Option<u64>,
 }
 
 /// Families of level-state updates whose receivers apply "last arrival wins".
@@ -81,6 +83,11 @@ pub(crate) struct SimWorldNet {
     /// `#netadv5` R8: the request key (the net send id, shared by every
     /// retransmit/duplicate copy) of the message being applied.
     pub(crate) delivering_request_key: Option<u64>,
+    /// Send-time order of the level-state update being applied, independent of
+    /// the request key used for dispatch idempotency.
+    pub(crate) delivering_level_stamp: Option<u64>,
+    /// Model of the production IO layer's per-host monotonic level-update clock.
+    pub(crate) level_update_clock: u64,
     /// Latest applied send id per level-state family and generation.
     pub(crate) latest_applied: BTreeMap<LevelFamily, (u64, u64)>,
     pub(crate) findings: Vec<NetFinding>,
@@ -90,6 +97,10 @@ pub(crate) struct SimWorldNet {
     pub(crate) stale_lifecycle_in_effect: Option<u64>,
     /// Dispatch request ids the controller accepted (injected a trigger for).
     pub(crate) accepted_dispatch_ids: std::collections::BTreeSet<u64>,
+    /// `#netadv6`: explicit delivery schedule for the next send (fuzz replay).
+    pub(crate) next_plan: Option<SendPlan>,
+    /// `#netadv6`: the delivery schedule the last send used (fuzz recording).
+    pub(crate) last_plan: Option<SendPlan>,
 }
 
 impl SimWorldNet {
@@ -100,11 +111,15 @@ impl SimWorldNet {
             net: SimNet::for_profile(profile, seed, Delivery::AtLeastOnce),
             delivering_generation: None,
             delivering_request_key: None,
+            delivering_level_stamp: None,
+            level_update_clock: 0,
             latest_applied: BTreeMap::new(),
             findings: Vec::new(),
             reconnect_resyncs: 0,
             stale_lifecycle_in_effect: None,
             accepted_dispatch_ids: std::collections::BTreeSet::new(),
+            next_plan: None,
+            last_plan: None,
         }
     }
 
@@ -178,7 +193,8 @@ fn level_family(command: SimCommand) -> Option<LevelFamily> {
         | SupervisorWaitingInput
         | SupervisorBlocked
         | SupervisorClosed
-        | SupervisorHeartbeatReattach => Some(LevelFamily::ActorLifecycle),
+        | SupervisorHeartbeatReattach
+        | PromoteStartingPromptReady => Some(LevelFamily::ActorLifecycle),
         AdminPauseQueue | AdminResumeQueue | AdminDrainQueue => Some(LevelFamily::QueueControl),
         _ => None,
     }
@@ -222,13 +238,25 @@ impl SimWorld {
     pub(crate) fn send_over_net(&mut self, link: SimLink, command: SimCommand) -> Result<()> {
         let generation_at_send = self.route.durable.generation;
         let net = self.net.as_mut().expect("send_over_net requires a net");
-        let id = net.net.send(
-            link,
-            NetMsg {
-                command,
-                generation_at_send,
-            },
-        );
+        let level_stamp = level_family(command).map(|_| {
+            net.level_update_clock = net
+                .level_update_clock
+                .checked_add(1)
+                .expect("level-update clock overflow");
+            net.level_update_clock
+        });
+        let msg = NetMsg {
+            command,
+            generation_at_send,
+            level_stamp,
+        };
+        let (id, plan) = match net.next_plan.take() {
+            Some(plan) => (net.net.send_planned(link, msg, &plan), plan),
+            None => net.net.send_recorded(link, msg),
+        };
+        net.last_plan = Some(plan);
+        self.fuzz_on_send(id);
+        let net = self.net.as_mut().expect("send_over_net requires a net");
         if net.mode == NetMode::Rpc {
             let events = net.net.advance_until_delivered(id);
             self.apply_net_events(events)?;
@@ -263,10 +291,22 @@ impl SimWorld {
 
     /// A local step changed the actor lifecycle: any stale effect is overwritten.
     pub(crate) fn net_note_local_step(&mut self, before: (u64, SupervisorLifecycle)) {
-        if self.actor_fact() != before
+        let after = self.actor_fact();
+        if after != before
             && let Some(net) = self.net.as_mut()
         {
             net.stale_lifecycle_in_effect = None;
+            net.level_update_clock = net
+                .level_update_clock
+                .checked_add(1)
+                .expect("level-update clock overflow");
+            self.route.level_marks.insert(
+                agent_doc_controller::sequence::SequencedFamily::Lifecycle,
+                agent_doc_controller::sequence::SequenceMark {
+                    generation: after.0,
+                    stamp: net.level_update_clock,
+                },
+            );
         }
     }
 
@@ -279,8 +319,18 @@ impl SimWorld {
         if let Some(net) = self.net.as_mut() {
             net.delivering_generation = Some(msg.generation_at_send);
             net.delivering_request_key = Some(id);
+            net.delivering_level_stamp = msg.level_stamp;
         }
+        let fuzz_pre = self.fuzz_pre();
         let result = self.apply_local(msg.command);
+        // A delivered controller command can itself cause a controller-local
+        // lifecycle transition (for example AdminReap -> Closed). Production
+        // stamps that inner mark_lifecycle call on the receiver host, so model
+        // it as a newer call edge than messages already sent to the controller.
+        if level_family(msg.command) != Some(LevelFamily::ActorLifecycle) {
+            self.net_note_local_step(before);
+        }
+        let after = self.actor_fact();
         // `#netadv3` SIM-F1/SIM-F2: the oracle flags an out-of-order level update
         // only when the controller APPLIED it; one discarded by its send stamp is
         // the fix working.
@@ -288,6 +338,7 @@ impl SimWorld {
         if let Some(family) = level_family(msg.command)
             && accepted_generation
             && !discarded
+            && (family != LevelFamily::ActorLifecycle || after != before)
         {
             let generation = msg.generation_at_send;
             let net = self.net.as_mut().expect("delivery requires a net");
@@ -315,13 +366,13 @@ impl SimWorld {
                 }
             }
         }
-        let after = self.actor_fact();
         let dispatch_accepted = self.coverage.route_dispatch_acceptances > acceptances_before;
         let trace = self.trace.clone();
         let seed = self.seed;
         if let Some(net) = self.net.as_mut() {
             net.delivering_generation = None;
             net.delivering_request_key = None;
+            net.delivering_level_stamp = None;
             let stale_lifecycle = level_family(msg.command) == Some(LevelFamily::ActorLifecycle)
                 && net.findings.len() > findings_before;
             if after != before {
@@ -349,6 +400,14 @@ impl SimWorld {
                 });
             }
         }
+        self.fuzz_post(
+            fuzz_pre,
+            super::fuzz::FuzzEvent::Delivered {
+                command: msg.command,
+                id,
+                generation_at_send: msg.generation_at_send,
+            },
+        );
         result
     }
 }
@@ -637,9 +696,17 @@ mod tests {
         let msg = |command| NetMsg {
             command,
             generation_at_send: generation,
+            level_stamp: Some(match command {
+                SimCommand::SupervisorBusy => 2,
+                _ => 1,
+            }),
         };
-        world.apply_delivered(2, 0, msg(SimCommand::SupervisorBusy)).unwrap();
-        world.apply_delivered(1, 0, msg(SimCommand::SupervisorReady)).unwrap();
+        world
+            .apply_delivered(2, 0, msg(SimCommand::SupervisorBusy))
+            .unwrap();
+        world
+            .apply_delivered(1, 0, msg(SimCommand::SupervisorReady))
+            .unwrap();
         assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Busy);
         assert_eq!(world.coverage.stale_level_updates_discarded, 1);
         world.apply_local(SimCommand::DispatchRoutePrompt).unwrap();
@@ -648,7 +715,17 @@ mod tests {
             "the reordered Ready must not re-open dispatch while the supervisor is busy"
         );
         // Eventual progress: the supervisor's NEXT report (newer stamp) applies.
-        world.apply_delivered(3, 0, msg(SimCommand::SupervisorReady)).unwrap();
+        world
+            .apply_delivered(
+                3,
+                0,
+                NetMsg {
+                    command: SimCommand::SupervisorReady,
+                    generation_at_send: generation,
+                    level_stamp: Some(3),
+                },
+            )
+            .unwrap();
         world.apply_local(SimCommand::DispatchRoutePrompt).unwrap();
         assert_eq!(world.coverage.route_dispatch_acceptances, 1);
         assert!(world.net.as_mut().unwrap().findings.is_empty());
@@ -661,6 +738,31 @@ mod tests {
             let found = findings_of(seed, NetProfile::CoderZscaler, 0);
             assert!(!found.iter().any(|f| f.kind == kind), "{seed}: {found:#?}");
         }
+    }
+
+    /// A controller-local lifecycle transition is also a level-update call edge.
+    /// It must advance the same per-host order as network sends, otherwise a
+    /// Ready sent before the local Dead transition can arrive afterward and
+    /// resurrect the dead supervisor (`#netadv6` seed 23).
+    #[test]
+    fn delayed_ready_cannot_overwrite_newer_local_dead_transition() {
+        let mut world = SimWorld::new_local(6_023).with_net(NetProfile::Hostile, 0, NetMode::Async);
+        world.apply(SimCommand::BindRouteOwner).unwrap();
+        world.net.as_mut().unwrap().next_plan = Some(SendPlan {
+            copies_ms: vec![1_000],
+            stall_ms: None,
+        });
+        world.apply(SimCommand::SupervisorReady).unwrap();
+        world
+            .apply(SimCommand::AbandonSupervisorToDeadSocket)
+            .unwrap();
+        assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Dead);
+
+        world.net_drain().unwrap();
+
+        assert_eq!(world.route.durable.lifecycle, SupervisorLifecycle::Dead);
+        assert_eq!(world.coverage.stale_level_updates_discarded, 1);
+        assert!(world.net.as_ref().unwrap().findings.is_empty());
     }
 
     /// `#netadv4` F3, minimal trace — FIXED by `#netadv5` R8. One dispatch
@@ -684,12 +786,13 @@ mod tests {
         world.apply(SimCommand::SupervisorReady).unwrap();
         world.dispatch_route_prompt_keyed(false, Some(78)).unwrap();
         assert_eq!(world.coverage.route_dispatch_acceptances, 2);
-        // The hostile seed that found F3 no longer reports it.
-        assert!(
-            !findings_of(8, NetProfile::Hostile, 1)
+        // The old allow-listed corpus class is clean now that every retransmit
+        // reuses the sender-minted request key.
+        assert!(FAST_CORPUS_SEEDS.clone().all(|seed| {
+            !findings_of(seed, NetProfile::Hostile, 1)
                 .iter()
                 .any(|f| f.kind == "duplicate_dispatch_request_injected_twice")
-        );
+        }));
     }
 
     /// `#netadv4` F2 — FIXED by `#netadv3` SIM-F2: queue control had the same
@@ -702,9 +805,17 @@ mod tests {
         let msg = |command| NetMsg {
             command,
             generation_at_send: generation,
+            level_stamp: Some(match command {
+                SimCommand::AdminResumeQueue => 2,
+                _ => 1,
+            }),
         };
-        world.apply_delivered(2, 0, msg(SimCommand::AdminResumeQueue)).unwrap();
-        world.apply_delivered(1, 0, msg(SimCommand::AdminPauseQueue)).unwrap();
+        world
+            .apply_delivered(2, 0, msg(SimCommand::AdminResumeQueue))
+            .unwrap();
+        world
+            .apply_delivered(1, 0, msg(SimCommand::AdminPauseQueue))
+            .unwrap();
         assert_eq!(world.route.queue_control, QueueControlState::Resumed);
         assert_eq!(world.coverage.stale_level_updates_discarded, 1);
         assert!(
@@ -731,6 +842,7 @@ mod tests {
                 NetMsg {
                     command: SimCommand::SupervisorBusy,
                     generation_at_send: stale,
+                    level_stamp: Some(1),
                 },
             )
             .unwrap();

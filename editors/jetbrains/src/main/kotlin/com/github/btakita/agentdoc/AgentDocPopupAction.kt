@@ -13,7 +13,8 @@ internal class DumbAwareGroup(name: String? = null, popup: Boolean = false) :
     DefaultActionGroup(name, popup), DumbAware
 
 /**
- * Shows a popup menu with Agent Doc commands when Ctrl+Shift+Alt+D (rebindable) is pressed in a .md file.
+ * Shows a popup menu with Agent Doc commands when Ctrl+Shift+Alt+D (rebindable) is pressed in a .md file;
+ * the "Default for XWin" keymap also keeps Alt+Space (`altshiftmenu`).
  */
 class AgentDocPopupAction : AnAction(), DumbAware {
     companion object {

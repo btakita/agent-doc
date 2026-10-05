@@ -380,7 +380,7 @@ GH #19 (plugin UX phases 5-7); shared contract in `editors/SPEC.md` § 12.
 
 ### Agent Doc Actions popup
 
-- `AgentDocPopupAction` (`AgentDoc.Popup`) defaults to `Ctrl+Shift+Alt+D`. It never uses `Alt+Space` (`#gh116`: Windows consumes it for the window system menu, so the IDE never receives it) and installs no `ActionPromoter`, so native `Alt+Enter` intentions stay intact. The popup is also in the Tools menu and editor context menu, and like every `AgentDoc.*` action it can be rebound under Settings > Keymap.
+- `AgentDocPopupAction` (`AgentDoc.Popup`) defaults to `Ctrl+Shift+Alt+D`. It never uses `Alt+Space` (`#gh116`: Windows consumes it for the window system menu, so the IDE never receives it) in `$default`. The `Default for XWin` keymap adds `Alt+Space` on top of `Ctrl+Shift+Alt+D` (`altshiftmenu`: i3 and other bare X window managers deliver it, and it was the Linux operator's working menu key until #gh116 removed it everywhere); GNOME and KDE keymaps do not get it because those desktops claim Alt+Space. The `$default` shortcut is declared first so the XWin shortcut is added to, not substituted for, the inherited one. In IntelliJ IDEA Ultimate, `Ctrl+Shift+Alt+D` is also the bundled Database grid's `Console.TableResult.CloneColumn`, which is disabled outside a data grid, so it does not compete in a markdown editor. It installs no `ActionPromoter`, so native `Alt+Enter` intentions stay intact. The popup is also in the Tools menu and editor context menu, and like every `AgentDoc.*` action it can be rebound under Settings > Keymap.
 - Every declared `AgentDoc.*` action is listed in the popup's primary or More Actions group; `AgentDocPopupActionTest` enforces this and rejects OS-reserved default keystrokes.
 
 ### Logging
@@ -415,7 +415,7 @@ Binary auto-start forensics also land in `/tmp/agent-doc-sync.log` and the per-d
 | Fix Document | none |
 | Claim | `Ctrl+Shift+Alt+C` |
 | Sync Layout | `Ctrl+Shift+Alt+L` |
-| Agent Doc Actions popup | `Ctrl+Shift+Alt+D` |
+| Agent Doc Actions popup | `Ctrl+Shift+Alt+D` (also `Alt+Space` in the `Default for XWin` keymap) |
 | Run with Junie | `Ctrl+Shift+Alt+J` |
 | Load Tmux Window | `Ctrl+Shift+Alt+W` |
 | Refresh Environment | `Ctrl+Shift+Alt+R` |

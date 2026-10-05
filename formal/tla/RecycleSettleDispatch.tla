@@ -36,6 +36,17 @@
 (* decides, which makes the two budgets coherent by construction rather than *)
 (* by a pair of constants that can drift apart again — and that is the       *)
 (* property checked here.                                                    *)
+(*                                                                          *)
+(* `#netadv5` R9 / `#netadv3`: the TTL is NOT a fact. An elapsed TTL used to *)
+(* be read as "the settle transition was lost" and dispatch proceeded, even  *)
+(* while the recycling supervisor was alive and about to settle, injecting   *)
+(* across the very boundary this gate protects. Abandonment now needs        *)
+(* positive evidence that the supervisor is gone; past the TTL with the      *)
+(* supervisor alive the gate stops waiting with a RETRYABLE refusal          *)
+(* (`RefuseOwnerStillRecycling`). The TTL therefore only ever ends a wait in *)
+(* a refusal (safe), never in an injection. `TtlIsProof = TRUE` restores the *)
+(* old reading and MUST violate `NeverProceedsPastALiveRecycle`              *)
+(* (`RecycleSettleDispatchTtlWedge`).                                        *)
 (***************************************************************************)
 EXTENDS Naturals
 
@@ -44,7 +55,8 @@ CONSTANTS
     Ttl,                \* abandonment threshold (RECYCLE_INFLIGHT_SETTLE_TTL_SECS)
     WaitBudget,         \* one settle-wait RPC (SUPERVISOR_RECYCLE_SETTLE_WAIT)
     SingleShotVerdict,  \* TRUE models the shipped gate: one timeout is a verdict
-    Stamped             \* FALSE models an unstamped projection (marked_secs = 0)
+    Stamped,            \* FALSE models an unstamped projection (marked_secs = 0)
+    TtlIsProof          \* TRUE models pre-R9: an elapsed TTL proves the settle was lost
 
 (* The incoherence this module is about only exists when the wait is shorter  *)
 (* than the TTL, so the model insists on that ordering: a configuration that   *)
@@ -68,6 +80,10 @@ vars == <<age, recycle, settleAge, gate, waitStart, delivered>>
 (* A recycle that never settles: the supervisor died between publishing      *)
 (* InFlight and its replacement reaching the watch loop (`#recycleinflightwedge`). *)
 Never == Horizon + 1
+
+(* Positive evidence the gate can read: is a supervisor process still running  *)
+(* for this document? It is gone exactly when the settle will never come.      *)
+SupervisorAlive == settleAge # Never
 
 Terminal == gate \in {"delivered", "proceeded", "refused"}
 
@@ -115,7 +131,19 @@ Abandoned ==
     /\ recycle = "inflight"
     /\ Stamped
     /\ age > Ttl
+    /\ TtlIsProof \/ ~SupervisorAlive   \* R9: the supervisor must be GONE
     /\ gate' = "proceeded"
+    /\ UNCHANGED <<waitStart, delivered>>
+
+(* Past the TTL with the supervisor still ALIVE: it is still recycling. Stop  *)
+(* waiting with a retryable refusal; never inject across a live boundary.     *)
+RefuseOwnerStillRecycling ==
+    /\ recycle = "inflight"
+    /\ Stamped
+    /\ age > Ttl
+    /\ ~TtlIsProof
+    /\ SupervisorAlive
+    /\ gate' = "refused"
     /\ UNCHANGED <<waitStart, delivered>>
 
 (* THE DEFECT. One RPC timeout read as a verdict, inside the TTL. *)
@@ -143,6 +171,7 @@ Observe ==
     /\ \/ Settled
        \/ Unstamped
        \/ Abandoned
+       \/ RefuseOwnerStillRecycling
        \/ SingleShotRefusal
        \/ ReArm
     /\ UNCHANGED <<age, recycle, settleAge>>
@@ -166,15 +195,21 @@ TypeOK ==
     /\ delivered \in 0..1
 
 (***************************************************************************)
-(* The fix, as one sentence: a STAMPED recycle is never refused. It either   *)
-(* settles and the trigger is delivered, or it outlives the TTL and dispatch *)
-(* proceeds. The refusal that survives belongs to the unstamped case alone.  *)
+(* The fix, as one sentence: a STAMPED recycle is never refused while it is  *)
+(* still pending. It settles and the trigger is delivered, or its supervisor *)
+(* is gone and dispatch proceeds, or (R9) the TTL ends the wait with a       *)
+(* retryable refusal while the supervisor is still recycling.               *)
 (*                                                                          *)
 (* Stated over the whole run rather than over the observed window, so a      *)
 (* future change to either budget cannot silently reopen the gap: there is   *)
 (* no age at which a stamped recycle may refuse.                             *)
 (***************************************************************************)
-StampedRecycleNeverRefuses == (gate = "refused") => ~Stamped
+StampedRecycleNeverRefuses ==
+    (gate = "refused") => (~Stamped \/ (age > Ttl /\ SupervisorAlive))
+
+(* R9: dispatch never proceeds past a recycle whose supervisor is alive: the  *)
+(* TTL is a bound on waiting, never evidence that the settle was lost.        *)
+NeverProceedsPastALiveRecycle == (gate = "proceeded") => ~SupervisorAlive
 
 (***************************************************************************)
 (* The boundary is a hot-reload: a trigger delivered twice is as wrong as a  *)

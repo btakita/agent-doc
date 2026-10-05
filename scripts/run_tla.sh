@@ -35,11 +35,23 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet LifecycleSequence)
 
 # Library modules: INSTANCE'd by the models above, never checked on their own
 # (no Spec, no .cfg). They only need to sit next to the importing model.
 libraries=(NetChannel)
+
+# Extra POSITIVE configs: `Module:Config` that must pass like `Module.cfg`.
+# `#netadv3` splits a model's liveness run (small bounds, so strong fairness per
+# message stays tractable) from its safety run under the full adversary.
+must_pass=(
+    VisibleDeliveryReceiptNet:VisibleDeliveryReceiptNetSafety
+    PassiveTmuxSyncNet:PassiveTmuxSyncNetSafety
+    LifecycleSequence:LifecycleSequenceSafety
+    # Target design for ADC-fence (NOT in code yet): a fenced commit is what
+    # makes one-commit-per-cycle hold; the Fence wedge below shows the gap.
+    AgentDocCloseoutNet:AgentDocCloseoutNetFencedTarget
+)
 
 # Non-vacuity obligations. Each entry is `Module:Config` that MUST be reported as
 # a violation. A safety or liveness property that cannot fail is not evidence,
@@ -158,6 +170,9 @@ must_violate=(
     RecycleSettleDispatch:RecycleSettleDispatchWedge
     RecycleSettleDispatch:RecycleSettleDispatchReach
     RecycleSettleDispatch:RecycleSettleDispatchUnstampedReach
+    # `#netadv5` R9: an elapsed TTL is not proof the settle was lost; with the
+    # supervisor alive, proceeding would inject across a live hot-reload.
+    RecycleSettleDispatch:RecycleSettleDispatchTtlWedge
     # GH #136 — a stale stash supervisor pane admitted as a layout column on the
     # strength of a recycle request that was never consumed. One wedge PER FIX
     # (overdue bound, no-widen, first-unconsumed clock, non-lapsing fan-out,
@@ -182,6 +197,35 @@ must_violate=(
     NetChannelRetransmit:NetChannelRetransmitStaleGenWedge
     NetChannelRetransmit:NetChannelRetransmitUnfairWedge
     NetChannelRetransmit:NetChannelRetransmitReach
+    # `#netadv3`: the hot-path models re-checked over NetChannel. One wedge per
+    # fix (each is the shipped pre-fix behaviour and MUST violate), plus the
+    # timeout-as-verdict wedges whose code fixes are owned by `#netadv5`
+    # (TimeoutRefusal, GiveUpRefusal, Ttl) and the unfixed ADC-fence gap.
+    VisibleDeliveryReceiptNet:VisibleDeliveryReceiptNetWakeOneShotWedge
+    VisibleDeliveryReceiptNet:VisibleDeliveryReceiptNetRecoveryLatchWedge
+    VisibleDeliveryReceiptNet:VisibleDeliveryReceiptNetSaveOneShotWedge
+    VisibleDeliveryReceiptNet:VisibleDeliveryReceiptNetStaleAckWedge
+    VisibleDeliveryReceiptNet:VisibleDeliveryReceiptNetTimeoutRefusalWedge
+    VisibleDeliveryReceiptNet:VisibleDeliveryReceiptNetReach
+    VisibleDeliveryReceiptNet:VisibleDeliveryReceiptNetDropReach
+    EditorReplicaStrandNet:EditorReplicaStrandNetLatchWedge
+    EditorReplicaStrandNet:EditorReplicaStrandNetGiveUpRefusalWedge
+    EditorReplicaStrandNet:EditorReplicaStrandNetReach
+    RecycleSettleDispatchNet:RecycleSettleDispatchNetUnreachableWedge
+    RecycleSettleDispatchNet:RecycleSettleDispatchNetTtlWedge
+    RecycleSettleDispatchNet:RecycleSettleDispatchNetReach
+    RecycleSettleDispatchNet:RecycleSettleDispatchNetAbandonReach
+    RecycleSettleDispatchNet:RecycleSettleDispatchNetUnstampedReach
+    AgentDocCloseoutNet:AgentDocCloseoutNetOneShotClaimWedge
+    AgentDocCloseoutNet:AgentDocCloseoutNetHeartbeatBreakWedge
+    AgentDocCloseoutNet:AgentDocCloseoutNetIgnoreLossWedge
+    AgentDocCloseoutNet:AgentDocCloseoutNetFenceWedge
+    AgentDocCloseoutNet:AgentDocCloseoutNetReach
+    PassiveTmuxSyncNet:PassiveTmuxSyncNetAdvanceFirstWedge
+    PassiveTmuxSyncNet:PassiveTmuxSyncNetReorderWedge
+    PassiveTmuxSyncNet:PassiveTmuxSyncNetReach
+    LifecycleSequence:LifecycleSequenceReorderWedge
+    LifecycleSequence:LifecycleSequenceReach
 )
 
 for module in "${modules[@]}"; do
@@ -191,7 +235,7 @@ done
 for library in "${libraries[@]}"; do
     cp "${repo_root}/formal/tla/${library}.tla" "${work_dir}/"
 done
-for entry in "${must_violate[@]}"; do
+for entry in "${must_violate[@]}" "${must_pass[@]}"; do
     cp "${repo_root}/formal/tla/${entry#*:}.cfg" "${work_dir}/"
 done
 
@@ -207,6 +251,14 @@ for module in "${modules[@]}"; do
 # configs that is not a rare race, it is the common case.
 java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto \
     -metadir "${work_dir}/states-${module}" "${module}.tla"
+done
+
+for entry in "${must_pass[@]}"; do
+    module="${entry%%:*}"
+    config="${entry#*:}"
+    java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto \
+        -metadir "${work_dir}/states-${module}-${config}" \
+        -config "${config}.cfg" "${module}.tla"
 done
 
 for entry in "${must_violate[@]}"; do

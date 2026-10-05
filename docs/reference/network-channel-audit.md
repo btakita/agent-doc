@@ -243,8 +243,9 @@ fixes below.
 
 ## 5. Candidate fixes: one-shot notifications on correctness paths
 
-This section reports only; nothing here was fixed. Each item names the missing
-property. Fixes belong to netadv3, netadv4 and netadv5.
+This table is the original `#netadv1` finding set. Each item names the missing
+property at audit time; the `#netadv3` closure below records the fixes proved by
+the subsequent NetChannel models and deterministic regressions.
 
 | # | Site | Defect | Missing property |
 |---|---|---|---|
@@ -272,11 +273,31 @@ property. Fixes belong to netadv3, netadv4 and netadv5.
 | F22 | `JB/PatchWatcher.kt:122` | The patch dedupe TTL is 60s; a later redelivery relies on content heuristics | Durable or generation-scoped dedupe |
 | F23 | `agent-doc-controller/src/paths.rs:15-17` | The controller socket path is not relocatable (Coder volumes) | Honour `AGENT_DOC_SOCKET_DIR` |
 
+### `#netadv3` closure
+
+- F4/F5: closeout claims reuse a caller-stable owner id and retry a lost claim;
+  heartbeat transport loss retries, while an answered lease loss aborts before
+  commit (`AgentDocCloseoutNet` plus deterministic write-runtime regressions).
+- F9/F10/F13: delivery wake, recovery and retained-save paths are level-triggered
+  and re-arm after lost/refused receipts (`VisibleDeliveryReceiptNet`).
+- F14/F15: a failed editor-surface focus or structural publication retains the
+  exact `SurfaceIntent`; the next matching observation reapplies it, and only a
+  successful effect, an answered refusal, a document move or client retirement
+  clears it (`PassiveTmuxSyncNetAdvanceFirstWedge`).
+- SIM-F1/SIM-F2: lifecycle, heartbeat and queue-control level updates carry a
+  monotonic send stamp. Reordered older updates in the same generation are
+  rejected by the real handlers and by deterministic SimWorld traces
+  (`LifecycleSequenceReorderWedge`).
+
 ## 6. Formal-model gap summary
 
-The full table is in `formal/tla/README.md`. These are the points that bear on the ranking:
+The full table is in `formal/tla/README.md`. The original `#netadv1` gap was
+closed for the selected hot paths by `#netadv3`: requests and receipts are split
+over `NetChannel`, safety runs under the full adversary, and liveness runs under
+fair loss with protocol resend fairness. Remaining gaps stay explicit in each
+model rather than being hidden behind an atomic receipt.
 
-- **Lossy channels:** no model has a lossy, delayed or stalling channel. Receipts are atomic steps or shared-variable reads.
+- **Lossy channels:** the `*Net` hot-path models now cover loss, delay, duplication, reordering, stalls and reconnect cuts.
 - **Believed refusals:** VisibleDeliveryReceipt, EditorReplicaStrand and TransientRefusalLatch believe every refusal. Neither R2 (timeout read as refusal) nor R3 (connect failure read as stale socket) can be expressed.
 - **Timer-derived facts:** RecycleSettleDispatch and WaitMachine encode a timer firing as a fact (`Ttl`, `globalHangCeiling`). That conflicts with the target property.
 - **First remodel targets for netadv3:**

@@ -209,9 +209,11 @@ durable level-triggered request. One wedge per fix must violate:
 `StaleColumnRecycleLapseWedge` (an install fan-out request that lapses), and
 `StaleColumnRecycleDropWedge` (a fire-and-forget notification under Drop);
 `StaleColumnRecycleReach` and `StaleColumnRecycleConsumeReach` keep the focus
-exception and consumption reachable. The channel is a plain set with explicit
-`Drop` and duplicate-on-deliver so it can be swapped for a shared channel
-module later.
+exception and consumption reachable. The editor link is the shared
+`NetChannel` (`#netadv3` port): publications carry no id, so two equal
+publications are two copies in the bag, and the pre-fix notification rides the
+same channel under `FairLossy({Notify})`. The Drop wedge is therefore the
+channel's own `Drop`, not a model-local action.
 ## Adversarial network: `NetChannel`
 
 Most models above collapse "A sends, B receives" into one atomic transition,
@@ -285,6 +287,36 @@ plus a weakly fair resend it proves `Completes`. Each wedge is must-violate:
 
 `scripts/run_tla.sh` copies library modules (`libraries=(NetChannel)`) next to
 the models that instance them.
+## Hot-path models over `NetChannel` (`#netadv3`)
+
+Each module below re-checks a hot-path protocol with every cross-process step
+split into a send and a receive over `NetChannel`. Safety is checked under
+`[][Next]_vars` alone (full adversary, no fairness). Liveness is checked under
+`FairLossy` plus weak fairness on the protocol's own (re)send actions. Where
+strong fairness per message is too slow over two versions or a reconnect, the
+liveness run uses smaller bounds and a separate `*Safety` config (listed in
+`must_pass` in `scripts/run_tla.sh`) checks the invariants with the larger ones.
+The atomic modules stay: they prove each protocol's decision table, and the Net
+modules prove the transport around it.
+
+| Module | Hops | Wedges (each MUST violate) |
+|---|---|---|
+| `VisibleDeliveryReceiptNet` | wake, projection ACK, recovery request with refused/`deferred` answers, native save/receipt | `WakeOneShot` (F9), `RecoveryLatch` (F10), `SaveOneShot` (F13/F12), `StaleAck` (receipts keyed by content), `TimeoutRefusal` (R2: a timeout or `deferred` read as a refusal; fixed by `#netadv5`) |
+| `EditorReplicaStrandNet` | re-registration request with refused/accepted/`deferred` answers | `Latch` (ERS-1: a budget whose receipts were all lost latches self-heal forever), `GiveUpRefusal` (R2/R3 class, fixed by `#netadv5`) |
+| `RecycleSettleDispatchNet` | settle-wait RPC, one request per connection | `Unreachable` (RSD-1: two lost round trips refused a pending recycle), `Ttl` (R9: TTL read as proof; fixed by `#netadv5`, abandonment needs the supervisor gone) |
+| `AgentDocCloseoutNet` | closeout owner claim and heartbeat | `OneShotClaim` (F4), `HeartbeatBreak` (F5a), `IgnoreLoss` (F5b), `Fence` (ADC-fence, not fixed: needs a commit fenced by owner id; `FencedTarget` is the passing target) |
+| `PassiveTmuxSyncNet` | editor focus/layout observation and its effect | `AdvanceFirst` (F14/F15: tracking advances before the effect; fixed by retaining the exact failed `SurfaceIntent` until a later observation applies it), `Reorder` (sequence fence) |
+| `LifecycleSequence` | lifecycle, heartbeat and queue-control level updates | `Reorder` (SIM-F1/SIM-F2: fixed by a monotonic send-stamp fence within each generation) |
+
+Each module also has a reach config that must be violated, so the happy path
+stays reachable over the lossy channel.
+
+The atomic `RecycleSettleDispatch` no longer treats an elapsed TTL as a fact
+(`#netadv5` R9): abandonment needs the supervisor to be gone, and past the TTL
+with it alive the gate refuses with a retryable verdict
+(`RefuseOwnerStillRecycling`). `RecycleSettleDispatchTtlWedge` restores the old
+reading and must violate `NeverProceedsPastALiveRecycle`.
+
 ## Network channel assumptions
 
 Audit `#netadv1`, 2026-10-05. The deployment design point is a Coder remote
@@ -326,7 +358,7 @@ For the D/Du/R/Rc column (Drop, Duplicate, Reorder, Reconnect): `y` = yes,
 | PlanClosureContract | shared sets; `Closeout` reads `planned` (129-131) | - / - / - / - | none | n/a |
 | ReactiveTopology | in-process; effect + receipt in one action (73-88) | - / p / p (generation fence 78, 90-96) / - | none (MaxGeneration bounds the environment) | n/a (in-process) |
 | RealtimeSteeringStop | `StopHook` reads `steering` SV (70-77) | - / - / - / - | none | n/a |
-| RecycleSettleDispatch | settle-wait RPC = SV read of supervisor `recycle` that always returns by `WaitBudget` (91-99) | - / - / - / p | **`Ttl`, `WaitBudget`, `ASSUME Ttl > WaitBudget` (44-56)**; `Abandoned` treats `age > Ttl` as proof of loss (114-119) | **yes**, and it treats elapsed time as fact |
+| RecycleSettleDispatch | settle-wait RPC = SV read of supervisor `recycle` that always returns by `WaitBudget` (91-99) | - / - / - / p | **`Ttl`, `WaitBudget`, `ASSUME Ttl > WaitBudget` (44-56)**; `Abandoned` treated `age > Ttl` as proof of loss (114-119). **Updated `#netadv3`:** abandonment now needs the supervisor gone; the TTL only ends a wait in a retryable refusal. Network re-model: `RecycleSettleDispatchNet` | yes for the transport (see the Net module) |
 | RefusedSaveOperatorAction | `RecoveryPass` request + instant nondeterministic answer (129-135) | p (`delivery_failed_to_all`, 94) / - / - / - | `MaxPasses` (88), for finiteness | yes. Every refusal is assumed authentic |
 | ResponseCheckpoint | `visibleSeq := producedSeq` instantly visible (42-44); `Seal` SV (53-54) | - / p (46-48) / - / - | none | **yes** |
 | RetainedProjectionHold | `ControllerIngest` SV (139-144); `Register` decides over buffer+shadow+canon atomically (120-125, 166-179) | p (lag, forced by WF 191) / p (157-162) / - / p | none | **yes** |

@@ -27,8 +27,8 @@ use agent_doc_controller::supervisor_replacement::{
 use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_document_realtime::watch_authority::{DiskChangeSignal, WatchAction, WatchDelivery};
 use agent_doc_editor_surface::{
-    EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState, SurfaceColumn,
-    SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
+    EditorSurface, EditorSurfaceObservation, EditorSurfaceProjection, EditorSurfaceState,
+    SurfaceColumn, SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use std::collections::{BTreeMap, BTreeSet};
@@ -978,6 +978,7 @@ fn document_turn_authority_stream_request(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(&invocation)?),
+        sequence: None,
     };
     let mut request_value = serde_json::to_value(&request)?;
     if let Some(object) = request_value.as_object_mut() {
@@ -1166,6 +1167,7 @@ pub fn subscribe_document_delivery_wakes_for_file(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(&invocation)?),
+        sequence: None,
     };
     let subscription: ControllerStatePlaneSubscription = request_controller_with_timeout(
         &project_root,
@@ -1229,6 +1231,7 @@ pub fn subscribe_captured_finalize_wakes_for_file(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(&invocation)?),
+        sequence: None,
     };
     let subscription: ControllerStatePlaneSubscription = request_controller_with_timeout(
         &project_root,
@@ -1289,6 +1292,7 @@ pub fn request_crdt_replica(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(diagnostic_payload.to_string()),
+            sequence: None,
         },
         CONTROLLER_RPC_TIMEOUT,
     )
@@ -1347,6 +1351,7 @@ pub fn request_crdt_replica_for_test(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(diagnostic_payload.to_string()),
+            sequence: None,
         },
         CONTROLLER_RPC_TIMEOUT,
     )
@@ -1386,6 +1391,7 @@ pub fn request_crdt_current_text_for_test(
                 })
                 .to_string(),
             ),
+            sequence: None,
         },
         CONTROLLER_RPC_TIMEOUT,
     )
@@ -1583,6 +1589,7 @@ pub fn try_claim_coordination(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
         project_root,
     )?;
@@ -1611,6 +1618,7 @@ pub fn release_coordination(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
         project_root,
     )?;
@@ -1640,6 +1648,7 @@ pub fn start_session(
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: request.harness,
+                sequence: None,
             },
         );
     }
@@ -1659,6 +1668,7 @@ pub fn start_session(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: request.harness,
+            sequence: None,
         },
     )
 }
@@ -1683,14 +1693,83 @@ pub fn register_supervisor(
             supervisor_socket: Some(registration.supervisor_socket),
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
+}
+
+/// `#netadv3` SIM-F1/SIM-F2: the send stamp for a generation-fenced level-state
+/// update. A per-host monotonic clock (`CLOCK_MONOTONIC`, shared by every
+/// process on the host and never stepped), read ONCE when the request is built
+/// so every retry of that request carries the same stamp. It orders updates;
+/// it is never compared against a duration. `None` where no such clock exists,
+/// which leaves the update unfenced (the pre-fix behaviour), never refused.
+pub(crate) fn level_update_send_stamp() -> Option<u64> {
+    #[cfg(unix)]
+    {
+        let mut now = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: `now` is a valid, writable timespec for the duration of the call.
+        let rc = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+        if rc != 0 {
+            return None;
+        }
+        let secs = u64::try_from(now.tv_sec).ok()?;
+        let nanos = u64::try_from(now.tv_nsec).ok()?;
+        secs.checked_mul(1_000_000_000)?.checked_add(nanos)
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
+/// Newest applied stamp per (family, scope) in THIS controller process
+/// (`#netadv3` SIM-F1/SIM-F2). In memory: requests are one per connection, so a
+/// request in flight to a controller that exits dies with its connection; a
+/// client retry re-sends the SAME stamp, which a successor applies (it has no
+/// mark yet) exactly as the pre-fix controller would have.
+static LEVEL_UPDATE_MARKS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<
+            (agent_doc_controller::sequence::SequencedFamily, String),
+            agent_doc_controller::sequence::SequenceMark,
+        >,
+    >,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Check-and-record one stamped level-state update. `Err(newest)` when it was
+/// sent before an update already applied for the same family, scope and
+/// generation: the caller discards it instead of regressing its view.
+pub(crate) fn admit_level_update(
+    family: agent_doc_controller::sequence::SequencedFamily,
+    scope: &str,
+    generation: u64,
+    stamp: Option<u64>,
+) -> std::result::Result<(), u64> {
+    use agent_doc_controller::sequence::{SequenceAdmission, admit_sequenced};
+    let mut marks = LEVEL_UPDATE_MARKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let key = (family, scope.to_string());
+    match admit_sequenced(marks.get(&key).copied(), generation, stamp) {
+        SequenceAdmission::Stale { newest } => Err(newest),
+        SequenceAdmission::Apply { next } => {
+            if let Some(next) = next {
+                marks.insert(key, next);
+            }
+            Ok(())
+        }
+    }
 }
 
 pub fn mark_lifecycle(
     project_root: &Path,
     request: LifecycleRequest,
 ) -> Result<agent_doc_controller::actor::ActorRecord> {
+    let stamp = level_update_send_stamp();
     #[cfg(any(test, feature = "test-support"))]
     {
         let bootstrap = ControllerBootstrap {
@@ -1722,6 +1801,7 @@ pub fn mark_lifecycle(
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: stamp,
             },
         )
     }
@@ -1743,6 +1823,7 @@ pub fn mark_lifecycle(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: stamp,
         },
     )
 }
@@ -1767,6 +1848,7 @@ pub fn set_actor_harness(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(request.harness),
+        sequence: None,
     };
 
     #[cfg(any(test, feature = "test-support"))]
@@ -1794,6 +1876,7 @@ pub fn refresh_supervisor_lease(
     project_root: &Path,
     request: SupervisorHeartbeatRequest,
 ) -> Result<SupervisorLeaseStatus> {
+    let stamp = level_update_send_stamp();
     #[cfg(any(test, feature = "test-support"))]
     {
         let bootstrap = ControllerBootstrap {
@@ -1825,6 +1908,7 @@ pub fn refresh_supervisor_lease(
                 supervisor_socket: request.supervisor_socket,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: stamp,
             },
         )
     }
@@ -1846,6 +1930,7 @@ pub fn refresh_supervisor_lease(
             supervisor_socket: request.supervisor_socket,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: stamp,
         },
     )
 }
@@ -1865,6 +1950,7 @@ fn actor_binding_request(file: &Path) -> ControllerRequest {
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: None,
+        sequence: None,
     }
 }
 
@@ -2021,6 +2107,7 @@ pub fn authorize_dispatch(
             supervisor_socket: None,
             command_kind: Some(request.command_kind.clone()),
             diagnostic_payload: Some(request.diagnostic_payload.clone()),
+            sequence: None,
         };
         match handle_dispatch(&bootstrap, None, dispatch_request(request.generation)) {
             Err(err) => {
@@ -2064,6 +2151,7 @@ pub fn authorize_dispatch(
             supervisor_socket: None,
             command_kind: Some(request.command_kind),
             diagnostic_payload: Some(request.diagnostic_payload),
+            sequence: None,
         };
         // `#ctlstalebin`: if the dispatch reached a stale controller and was refused,
         // retry exactly once. The retry's `request_controller` → `connect_or_launch`
@@ -2143,6 +2231,7 @@ pub fn session_operator_status(project_root: &Path, file: &Path) -> Result<Sessi
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: None,
             },
         )
     }
@@ -2184,6 +2273,7 @@ pub fn inspect_actor(
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: None,
             },
         )
     }
@@ -2205,6 +2295,7 @@ pub fn inspect_actor(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -2244,6 +2335,7 @@ pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState>
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -2356,6 +2448,7 @@ pub fn retained_write_settlement(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(observations)?),
+            sequence: None,
         },
     )
 }
@@ -2399,6 +2492,7 @@ pub fn preflight_read_projection(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(facts)?),
+            sequence: None,
         },
     )
 }
@@ -2499,6 +2593,7 @@ pub fn observe_queue_authority(project_root: &Path, file: &Path, content: &str) 
             diagnostic_payload: Some(serde_json::to_string(&QueueAuthorityObservationRequest {
                 content: content.to_string(),
             })?),
+            sequence: None,
         },
     )
 }
@@ -2559,6 +2654,7 @@ fn request_document_pane(
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: None,
             },
             payload.effective_policy(),
             None,
@@ -2598,6 +2694,7 @@ fn request_document_pane(
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: Some(serde_json::to_string(&policy)?),
+                sequence: None,
             },
         )
     }
@@ -2678,6 +2775,7 @@ pub fn sync_tmux_layout(
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: Some(diagnostic_payload),
+                sequence: None,
             },
         )
     }
@@ -2724,6 +2822,7 @@ pub fn sync_tmux_layout(
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: Some(diagnostic_payload),
+                sequence: None,
             },
             CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
         )
@@ -2804,6 +2903,7 @@ pub fn tmux_layout_sync_state(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(diagnostic_payload),
+            sequence: None,
         },
         CONTROLLER_RPC_TIMEOUT,
     )
@@ -2834,6 +2934,7 @@ pub fn observe_editor_surface_existing(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(observation)?),
+            sequence: None,
         },
         CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
     )
@@ -2860,6 +2961,7 @@ pub fn forget_editor_surface_existing(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
         CONTROLLER_RPC_TIMEOUT,
     )?;
@@ -2937,6 +3039,7 @@ fn document_path_transition_request(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(observation)?),
+        sequence: None,
     })
 }
 
@@ -2972,6 +3075,7 @@ pub fn publish_state_event(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(event)?),
+            sequence: None,
         },
         CONTROLLER_RPC_TIMEOUT,
     )
@@ -3001,6 +3105,7 @@ pub fn publish_state_event_existing(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(event)?),
+            sequence: None,
         },
         CONTROLLER_RPC_TIMEOUT,
     )
@@ -3031,6 +3136,7 @@ pub fn publish_editor_state_event_existing(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(event)?),
+            sequence: None,
         },
         CONTROLLER_RPC_TIMEOUT,
     )
@@ -3056,6 +3162,7 @@ pub fn document_state_projection_existing(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
         CONTROLLER_RPC_TIMEOUT,
     )
@@ -3294,6 +3401,7 @@ where
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(&message)?),
+        sequence: None,
     };
     // `#layoutobservehandoff`: a command admitted by a controller that is mid-handoff
     // comes back as a terminal rejection carrying `controller not authoritative`,
@@ -3339,6 +3447,7 @@ pub fn control_queue(
     reason: Option<&str>,
     item_id: Option<&str>,
 ) -> Result<ControllerAdminReceipt> {
+    let stamp = level_update_send_stamp();
     #[cfg(any(test, feature = "test-support"))]
     {
         let bootstrap = ControllerBootstrap {
@@ -3369,6 +3478,7 @@ pub fn control_queue(
                 supervisor_socket: None,
                 command_kind: Some(action.to_string()),
                 diagnostic_payload: item_id.map(ToOwned::to_owned),
+                sequence: stamp,
             },
         )
     }
@@ -3390,6 +3500,7 @@ pub fn control_queue(
             supervisor_socket: None,
             command_kind: Some(action.to_string()),
             diagnostic_payload: item_id.map(ToOwned::to_owned),
+            sequence: stamp,
         },
     )
 }
@@ -3433,6 +3544,7 @@ pub fn admin_reap(
                 supervisor_socket: None,
                 command_kind: Some("reap".to_string()),
                 diagnostic_payload: None,
+                sequence: None,
             },
         )
     }
@@ -3454,6 +3566,7 @@ pub fn admin_reap(
             supervisor_socket: None,
             command_kind: Some("reap".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -3496,6 +3609,7 @@ pub fn admin_handoff(
                 supervisor_socket: None,
                 command_kind: Some("handoff".to_string()),
                 diagnostic_payload: None,
+                sequence: None,
             },
         )
     }
@@ -3517,6 +3631,7 @@ pub fn admin_handoff(
             supervisor_socket: None,
             command_kind: Some("handoff".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -3558,6 +3673,7 @@ pub fn repair_projection(
                 supervisor_socket: None,
                 command_kind: Some("projection_repair".to_string()),
                 diagnostic_payload: None,
+                sequence: None,
             },
         )
     }
@@ -3579,6 +3695,7 @@ pub fn repair_projection(
             supervisor_socket: None,
             command_kind: Some("projection_repair".to_string()),
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -3603,6 +3720,7 @@ pub fn attach_pane(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -3643,6 +3761,7 @@ pub fn authorize_operator_command(
                 supervisor_socket: None,
                 command_kind: Some(command_kind.to_string()),
                 diagnostic_payload: Some("session operator command".to_string()),
+                sequence: None,
             },
         )
     }
@@ -3664,6 +3783,7 @@ pub fn authorize_operator_command(
             supervisor_socket: None,
             command_kind: Some(command_kind.to_string()),
             diagnostic_payload: Some("session operator command".to_string()),
+            sequence: None,
         },
     )
 }
@@ -3698,6 +3818,7 @@ pub fn request_supervisor_replacement(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(diagnostic_payload),
+            sequence: None,
         },
     )
 }
@@ -4874,6 +4995,7 @@ pub fn supervisor_recycle_requested(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -4917,6 +5039,7 @@ fn request_supervisor_recycle_for_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
         timeout,
         stream,
@@ -4951,6 +5074,7 @@ pub fn supervisor_recycle_started(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -4983,6 +5107,7 @@ pub fn supervisor_recycle_settled(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -5016,6 +5141,7 @@ pub fn supervisor_recycle_status(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -5167,6 +5293,7 @@ pub fn route_submit_started_for_file(
             supervisor_socket: None,
             command_kind: Some(harness.to_string()),
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -5199,6 +5326,7 @@ pub fn route_submit_settled_for_file(
             supervisor_socket: None,
             command_kind: Some(harness.to_string()),
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -5228,6 +5356,7 @@ pub fn mark_route_submit_blocked(
             supervisor_socket: None,
             command_kind: Some(harness.to_string()),
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -5257,6 +5386,7 @@ pub fn route_submit_status_for_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -5287,6 +5417,7 @@ pub fn wait_for_supervisor_recycle_settle(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
         SUPERVISOR_RECYCLE_SETTLE_WAIT.saturating_add(CONTROLLER_RPC_TIMEOUT),
         stream,
@@ -5474,6 +5605,7 @@ pub fn await_closeout_cycle_progress_for_file(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(payload.to_string()),
+        sequence: None,
     };
     request_existing_controller_with_timeout(
         &project_root,
@@ -5521,6 +5653,7 @@ pub fn await_turn_admission_projection_for_file(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(&operation)?),
+        sequence: None,
     };
     request_existing_controller_with_timeout(
         &project_root,
@@ -5556,6 +5689,7 @@ pub fn current_turn_admission_projection_for_file(
         diagnostic_payload: Some(serde_json::to_string(
             &TurnAdmissionProjectionOperation::Current,
         )?),
+        sequence: None,
     };
     request_existing_controller_with_timeout(&project_root, request, CONTROLLER_RPC_TIMEOUT)
 }
@@ -5599,6 +5733,7 @@ pub fn queue_context_clear_started_for_file(
             supervisor_socket: None,
             command_kind: Some(harness.to_string()),
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
         },
     )
 }
@@ -5651,6 +5786,7 @@ pub fn queue_context_clear_deferred_for_file(
             supervisor_socket: None,
             command_kind: Some(harness.to_string()),
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
         },
     )
 }
@@ -5689,6 +5825,7 @@ pub fn queue_context_clear_settled_for_file(
             supervisor_socket: None,
             command_kind: Some(harness.to_string()),
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
         },
     )
 }
@@ -5718,6 +5855,7 @@ pub fn queue_context_clear_status_for_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -5840,6 +5978,7 @@ pub fn record_queue_drain_stall_continuation_pending_for_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
         },
     )
 }
@@ -5869,6 +6008,7 @@ pub fn queue_drain_stall_status_for_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -5915,6 +6055,7 @@ pub fn clear_queue_drain_stall_continuation_pending_for_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
         },
     )?;
     Ok(true)
@@ -6061,6 +6202,7 @@ pub fn record_visible_write_commit_candidate_for_project_file(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        sequence: None,
     };
     request_controller::<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection>(
         project_root,
@@ -6139,6 +6281,7 @@ pub fn visible_write_commit_candidate_applied_for_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(payload.to_string()),
+            sequence: None,
         };
         if let Ok(status) =
             request_controller::<VisibleWriteCommitCandidateStatus>(&project_root, request)
@@ -6178,6 +6321,7 @@ pub fn visible_write_commit_candidate_for_patch_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(payload.to_string()),
+            sequence: None,
         };
         if let Ok(status) =
             request_controller::<VisibleWriteCommitCandidatePatchStatus>(&project_root, request)
@@ -6233,6 +6377,7 @@ pub fn await_visible_write_commit_candidate_for_patch_file(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(payload.to_string()),
+        sequence: None,
     };
     // The response cannot arrive before the server-side await elapses, so the recv
     // budget must outlast it; the margin covers request/response serialization.
@@ -6357,6 +6502,7 @@ fn request_delivery_convergence_for_file(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(payload.to_string()),
+        sequence: None,
     };
     let recv_timeout = wait.saturating_add(CONTROLLER_RPC_TIMEOUT);
     let status: DeliveryConvergenceStatus =
@@ -6392,6 +6538,7 @@ pub fn peer_replicas_missing(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(payload.to_string()),
+        sequence: None,
     };
     request_existing_controller_with_timeout(project_root, request, CONTROLLER_RPC_TIMEOUT)
 }
@@ -6434,6 +6581,7 @@ pub fn record_visible_write_materialized_carry_forward_for_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
         },
     )
 }
@@ -6466,6 +6614,7 @@ pub fn visible_write_materialized_carry_forward_for_file(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(payload.to_string()),
+            sequence: None,
         };
         if let Ok(status) =
             request_controller::<VisibleWriteMaterializedCarryForwardStatus>(&project_root, request)
@@ -7199,6 +7348,7 @@ fn request_controller_crdt_current_text_with_options(
                 })
                 .to_string(),
             ),
+            sequence: None,
         },
         timeout,
     )?;
@@ -7235,6 +7385,7 @@ fn request_existing_controller_crdt_current_text_read(
                 })
                 .to_string(),
             ),
+            sequence: None,
         },
         CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
     )?;
@@ -7264,6 +7415,7 @@ fn request_existing_controller_crdt_revision_read(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::json!({ "source": source }).to_string()),
+            sequence: None,
         },
         CONTROLLER_CRDT_REVISION_READ_TIMEOUT,
     )?;
@@ -7346,6 +7498,7 @@ pub fn apply_cp_write_via_controller_model_for_doc(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
         },
         CONTROLLER_CRDT_CP_WRITE_TIMEOUT,
     )?;
@@ -7490,6 +7643,7 @@ fn response_cell_via_controller_model_for_doc(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
         },
     )?;
     Ok(result.write)
@@ -7564,6 +7718,7 @@ pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -7637,6 +7792,7 @@ pub fn commit_document_via_controller(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(payload),
+            sequence: None,
         },
         CONTROLLER_COMMIT_DOCUMENT_TIMEOUT,
         stream,
@@ -7674,6 +7830,7 @@ pub fn compact_document_via_controller(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(payload),
+        sequence: None,
     };
     let submit = |request| {
         request_controller_with_timeout::<serde_json::Value>(
@@ -7810,6 +7967,7 @@ pub fn record_committed_baseline_via_controller_model_for_doc(doc: &Path) -> Res
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         },
     )
 }
@@ -7860,6 +8018,7 @@ pub fn reconcile_disk_projection_via_controller_model_for_doc(
                 })
                 .context("failed to encode disk projection reconcile payload")?,
             ),
+            sequence: None,
         },
     )?;
     Ok(result.changed)
@@ -7904,6 +8063,7 @@ pub fn route_disk_change_signal_via_controller_model_for_doc(
                 serde_json::to_string(&DiskChangeSignal::from_delivery(delivery))
                     .context("failed to encode disk-change route signal payload")?,
             ),
+            sequence: None,
         },
     )?;
     watch_action_from_payload(&result.action)
@@ -8754,6 +8914,7 @@ pub fn resume_id_claimant(
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
+            sequence: None,
         },
     )?;
     Ok(result.owner)
@@ -10701,6 +10862,7 @@ fn empty_controller_request(command: &str) -> ControllerRequest {
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: None,
+        sequence: None,
     }
 }
 
@@ -15052,6 +15214,7 @@ fn controller_supervisor_watchdog_tick(
                     supervisor_socket: None,
                     command_kind: None,
                     diagnostic_payload: Some(diagnostic_payload),
+                    sequence: None,
                 };
                 if let Err(err) =
                     handle_supervisor_replacement(&bootstrap, Some(runtime.as_ref()), request)
@@ -16559,6 +16722,7 @@ fn request_reliable_sync_outbox(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        sequence: None,
     };
     request_controller::<ControllerReliableSyncResponse>(project_root, request)
 }
@@ -16588,6 +16752,7 @@ pub fn push_reliable_sync_liveness(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(envelope.to_string()),
+        sequence: None,
     };
     request_controller::<ControllerReliableSyncResponse>(project_root, request)
 }
@@ -16616,6 +16781,7 @@ pub fn push_reliable_sync_frame_for_file(
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: Some(envelope.to_string()),
+        sequence: None,
     };
     request_controller::<ControllerReliableSyncResponse>(project_root, request)
 }
@@ -17199,6 +17365,7 @@ fn reliable_sync_status_request(caller: &str) -> ControllerRequest {
         supervisor_socket: None,
         command_kind: None,
         diagnostic_payload: None,
+        sequence: None,
     }
 }
 
@@ -17614,6 +17781,7 @@ impl agent_doc_reliable_sync_io::push::LivenessPushTransport
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: Some(envelope.to_string()),
+                sequence: None,
             },
         )?;
         Ok(response.ack_through)
@@ -20196,6 +20364,29 @@ pub(crate) fn handle_mark_lifecycle(
             current.pane_id
         );
     }
+    // `#netadv3` SIM-F1: within one generation the newest SENT update wins,
+    // not the last to arrive.
+    if let Err(newest) = admit_level_update(
+        agent_doc_controller::sequence::SequencedFamily::Lifecycle,
+        &document_id,
+        current.generation,
+        request.sequence,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "controller_lifecycle_stale_sequence_discarded document_id={} generation={} state={} caller={} reason={} stamp={:?} newest={}",
+                document_id,
+                current.generation,
+                state.as_str(),
+                caller,
+                reason,
+                request.sequence,
+                newest,
+            ),
+        );
+        return Ok(current);
+    }
     let mut record = current.clone();
     record.state = state;
     record.last_transition = agent_doc_controller::actor::ActorLastTransition {
@@ -20434,20 +20625,38 @@ pub(crate) fn handle_supervisor_heartbeat(
             );
         }
     }
-    upsert_supervisor_lease(
-        &bootstrap.project_root,
-        &record,
-        request.supervisor_pid,
-        request.supervisor_socket.as_deref(),
-        runtime_state,
-    )?;
-    agent_doc_ops_log_io::log_op(
-        &file,
-        &format!(
-            "controller_supervisor_heartbeat session={} pane={} generation={} state={}",
-            session_id, pane_id, generation, runtime_state
+    // `#netadv3` SIM-F1: a reordered older heartbeat must not overwrite the
+    // runtime state a newer one already reported.
+    match admit_level_update(
+        agent_doc_controller::sequence::SequencedFamily::Heartbeat,
+        &document_id,
+        record.generation,
+        request.sequence,
+    ) {
+        Ok(()) => {
+            upsert_supervisor_lease(
+                &bootstrap.project_root,
+                &record,
+                request.supervisor_pid,
+                request.supervisor_socket.as_deref(),
+                runtime_state,
+            )?;
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "controller_supervisor_heartbeat session={} pane={} generation={} state={}",
+                    session_id, pane_id, generation, runtime_state
+                ),
+            );
+        }
+        Err(newest) => agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "controller_supervisor_heartbeat_stale_sequence_discarded session={} pane={} generation={} state={} stamp={:?} newest={}",
+                session_id, pane_id, generation, runtime_state, request.sequence, newest
+            ),
         ),
-    );
+    }
     if let Ok(conn) = open_state_db(&bootstrap.project_root)
         && let Ok(Some(control)) =
             state_store::load_queue_control_from_db(&conn, "document", &document_id)
@@ -21626,7 +21835,7 @@ fn escalate_focus_to_structural_layout(
     document: &str,
     columns: &[SurfaceColumn],
     reason: &str,
-) {
+) -> bool {
     let FocusEscalationColumns {
         columns,
         source,
@@ -21640,7 +21849,7 @@ fn escalate_focus_to_structural_layout(
                     "controller_editor_surface_focus_escalation_skipped document={document} reason={reason} cause={cause}"
                 ),
             );
-            return;
+            return false;
         }
     };
     agent_doc_ops_log_io::log_op(
@@ -21679,7 +21888,9 @@ fn escalate_focus_to_structural_layout(
                 "controller_editor_surface_focus_escalation_failed document={document} reason={reason} error={error:#}"
             ),
         );
+        return false;
     }
+    true
 }
 
 fn record_editor_surface_focus_outcome(
@@ -21859,6 +22070,79 @@ fn surface_intent_label(intent: &SurfaceIntent) -> &'static str {
     }
 }
 
+/// `#netadv3` F14/F15: editor-surface intent that the graph already folded but
+/// its layout/focus effect never accepted, per (project root, editor client).
+///
+/// `SurfaceTracking::advance` moves `focused_document` when it DERIVES the
+/// `Focus` intent, before the `select-pane` effect runs. When that effect fails
+/// (a tmux error, a wedged server), every later observation of the same focus
+/// folded to `Idle`, so the wrong pane stayed visible until the operator
+/// switched tabs (`formal/tla/PassiveTmuxSyncNet.tla`, `AdvanceFirst` wedge).
+/// The controller now remembers the failed focus and marks the next
+/// observation of that same focus `force_reconcile`, which re-derives `Focus`
+/// and retries the effect: a level-triggered retry driven by the editor's own
+/// observation stream. Answered refusals (desktop inactive, a stashed pane
+/// handed to the layout owner) are verdicts, not losses, and are not retried.
+#[derive(Clone)]
+struct EditorSurfaceRetry {
+    surface: EditorSurface,
+    intent: SurfaceIntent,
+}
+
+static EDITOR_SURFACE_RETRY: std::sync::LazyLock<
+    parking_lot::Mutex<std::collections::HashMap<(PathBuf, String), EditorSurfaceRetry>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+
+/// Return the intent whose effect failed, and forget it once the editor has
+/// moved to another document. The intent remains pending until an effect is
+/// accepted, so another transport failure cannot consume the only retry.
+fn pending_editor_surface_retry(
+    project_root: &Path,
+    client_id: &str,
+    surface: &EditorSurface,
+) -> Option<SurfaceIntent> {
+    let key = (project_root.to_path_buf(), client_id.to_string());
+    let mut pending = EDITOR_SURFACE_RETRY.lock();
+    match pending.get(&key) {
+        Some(retry)
+            if retry.surface.focused == surface.focused
+                && retry.surface.columns == surface.columns
+                && retry.surface.focus_only == surface.focus_only
+                && retry.surface.preserve_focus == surface.preserve_focus =>
+        {
+            Some(retry.intent.clone())
+        }
+        Some(_) => {
+            pending.remove(&key);
+            None
+        }
+        None => None,
+    }
+}
+
+/// Record the outcome of one editor-driven focus effect for the retry above.
+fn record_editor_surface_effect(
+    project_root: &Path,
+    client_id: &str,
+    surface: &EditorSurface,
+    intent: &SurfaceIntent,
+    effect_failed: bool,
+) {
+    let key = (project_root.to_path_buf(), client_id.to_string());
+    let mut pending = EDITOR_SURFACE_RETRY.lock();
+    if effect_failed {
+        pending.insert(
+            key,
+            EditorSurfaceRetry {
+                surface: surface.clone(),
+                intent: intent.clone(),
+            },
+        );
+    } else {
+        pending.remove(&key);
+    }
+}
+
 fn handle_editor_surface_observe(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -21867,6 +22151,26 @@ fn handle_editor_surface_observe(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let observation: EditorSurfaceObservation =
         serde_json::from_str(&payload_json).context("parse editor surface observation")?;
+    let retry_intent = if !observation.surface.force_reconcile {
+        pending_editor_surface_retry(
+            &bootstrap.project_root,
+            &observation.client_id,
+            &observation.surface,
+        )
+    } else {
+        None
+    };
+    if retry_intent.is_some() {
+        agent_doc_ops_log_io::log_op(
+            &bootstrap.project_root,
+            &format!(
+                "controller_editor_surface_retry client={} sequence={} document={} reason=previous_surface_effect_failed",
+                observation.client_id, observation.sequence, observation.surface.focused,
+            ),
+        );
+    }
+    let focus_client_id = observation.client_id.clone();
+    let observed_surface = observation.surface.clone();
     let projection_identity = (
         observation.client_id.clone(),
         observation.generation,
@@ -21897,6 +22201,9 @@ fn handle_editor_surface_observe(
         observation,
         None,
     );
+    if accepted && let Some(intent) = retry_intent {
+        receipt.intent = intent;
+    }
     // `#surfaceobservesilent`: an observation the graph REJECTS produced no ops.log
     // line at all, and neither did a plain accepted `Idle`. A selection that
     // published and was rejected was therefore indistinguishable from a selection
@@ -21964,7 +22271,8 @@ fn handle_editor_surface_observe(
         // so the editor socket request never round-trips through the controller
         // command socket. The eager intent effect is a no-op for both in
         // production (see the runtime constructor closure).
-        match receipt.intent.clone() {
+        let effect_intent = receipt.intent.clone();
+        match effect_intent.clone() {
             SurfaceIntent::Sync {
                 columns,
                 document,
@@ -21972,14 +22280,22 @@ fn handle_editor_surface_observe(
             } => {
                 let invocation =
                     automatic_editor_surface_sync_invocation(&columns, &document, preserve_focus);
-                if let Err(error) = publish_pane_layout_desired_invocation(
+                let publish_result = publish_pane_layout_desired_invocation(
                     bootstrap,
                     runtime,
                     invocation,
                     None,
                     PaneLayoutPublication::CoalesceIdentical,
                     PaneLayoutPublisher::EditorSurface,
-                ) {
+                );
+                record_editor_surface_effect(
+                    &bootstrap.project_root,
+                    &focus_client_id,
+                    &observed_surface,
+                    &effect_intent,
+                    publish_result.is_err(),
+                );
+                if let Err(error) = publish_result {
                     agent_doc_ops_log_io::log_op(
                         &bootstrap.project_root,
                         &format!(
@@ -21992,6 +22308,13 @@ fn handle_editor_surface_observe(
             // target pane directly — a single tmux command, no socket round-trip.
             SurfaceIntent::Focus { document } => {
                 if !automatic_editor_focus_allowed(desktop_editor_focus_state()) {
+                    record_editor_surface_effect(
+                        &bootstrap.project_root,
+                        &focus_client_id,
+                        &observed_surface,
+                        &effect_intent,
+                        false,
+                    );
                     agent_doc_ops_log_io::log_op(
                         &bootstrap.project_root,
                         &format!(
@@ -22027,6 +22350,7 @@ fn handle_editor_surface_observe(
                         supervisor_socket: None,
                         command_kind: None,
                         diagnostic_payload: None,
+                        sequence: None,
                     };
                     let focus_result = handle_focus_document_pane_with_policy(
                         bootstrap,
@@ -22054,13 +22378,16 @@ fn handle_editor_surface_observe(
                                 && focus_refusal_requires_structural_layout(&outcome.reason)
                         })
                         .map(|outcome| outcome.reason.clone());
+                    // `#netadv3` F14/F15: an effect that ERRORED was lost, not
+                    // refused; keep the intent for the next observation.
+                    let mut effect_failed = focus_result.is_err();
                     record_editor_surface_focus_outcome(
                         &bootstrap.project_root,
                         &mut receipt,
                         focus_result,
                     )?;
                     if let Some(reason) = structural_refusal {
-                        escalate_focus_to_structural_layout(
+                        effect_failed = !escalate_focus_to_structural_layout(
                             bootstrap,
                             runtime,
                             &document,
@@ -22068,6 +22395,13 @@ fn handle_editor_surface_observe(
                             &reason,
                         );
                     }
+                    record_editor_surface_effect(
+                        &bootstrap.project_root,
+                        &focus_client_id,
+                        &observed_surface,
+                        &effect_intent,
+                        effect_failed,
+                    );
                 }
             }
             SurfaceIntent::Idle => {}
@@ -22103,6 +22437,13 @@ fn handle_editor_surface_forget(
     let retire_client_family =
         request.reason.as_deref() == Some("editor_surface_client_family_retired");
     let client_id = request_string(&request.caller, "caller")?;
+    record_editor_surface_effect(
+        &bootstrap.project_root,
+        &client_id,
+        &EditorSurface::default(),
+        &SurfaceIntent::Idle,
+        false,
+    );
     let generation = request
         .generation
         .context("editor_surface_forget requires generation")?;
@@ -26727,6 +27068,32 @@ pub(crate) fn handle_queue_control(
     )? {
         return Ok(rejected);
     }
+    // `#netadv3` SIM-F2: a reordered older pause/resume/drain must not flip
+    // queue control back over a newer one.
+    let sequence_scope = document_id
+        .clone()
+        .unwrap_or_else(|| bootstrap.project_root.to_string_lossy().into_owned());
+    let sequence_generation = record
+        .as_ref()
+        .map(|record| record.generation)
+        .or(request.generation)
+        .unwrap_or_default();
+    if let Err(newest) = admit_level_update(
+        agent_doc_controller::sequence::SequencedFamily::QueueControl,
+        &sequence_scope,
+        sequence_generation,
+        request.sequence,
+    ) {
+        return rejected_admin_receipt(
+            bootstrap,
+            &operation_kind,
+            document_id.as_deref(),
+            "stale_sequence",
+            &format!("{diagnostic_payload} stamp={:?} newest={newest}", request.sequence),
+            request.generation,
+            record.as_ref().map(|record| record.generation),
+        );
+    }
     let receipt = insert_admin_operation_record(
         &bootstrap.project_root,
         &operation_kind,
@@ -27258,6 +27625,7 @@ pub(crate) fn handle_supervisor_replacement(
             diagnostic_payload: Some(format!(
                 "session supervisor replacement background mode={mode} force={force}"
             )),
+            sequence: None,
         },
     )?;
     let record = authorization.record.clone();
@@ -28344,6 +28712,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some(payload.to_string()),
+            sequence: None,
         };
         let attempts = || -> i64 {
             open_state_db(root)
@@ -29719,6 +30088,7 @@ mod tests {
                     supervisor_socket: None,
                     command_kind: None,
                     diagnostic_payload: Some(payload),
+                    sequence: None,
                 },
             )
             .unwrap()
@@ -30228,6 +30598,7 @@ mod tests {
                     supervisor_socket: None,
                     command_kind: None,
                     diagnostic_payload: Some(payload),
+                    sequence: None,
                 },
             )
         };
@@ -30252,6 +30623,7 @@ mod tests {
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: None,
             },
         )
         .unwrap();
@@ -30897,6 +31269,7 @@ mod tests {
                 })
                 .to_string(),
             ),
+            sequence: None,
         };
 
         let result =
@@ -30999,6 +31372,7 @@ mod tests {
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: Some(payload.to_string()),
+                sequence: None,
             };
             handle_editor_route_rpc(&self.bootstrap, self.runtime.as_ref(), request)
         }
@@ -32463,6 +32837,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&message).unwrap()),
+            sequence: None,
         }
     }
 
@@ -32793,6 +33168,7 @@ mod tests {
                 diagnostic_payload: Some(
                     serde_json::json!({ "command_id": "cmd-sync-async" }).to_string(),
                 ),
+                sequence: None,
             },
         )
         .unwrap();
@@ -32824,6 +33200,7 @@ mod tests {
                     })
                     .to_string(),
                 ),
+                sequence: None,
             },
         )
         .unwrap();
@@ -33410,6 +33787,7 @@ mod tests {
             diagnostic_payload: Some(
                 serde_json::json!({ "command_id": "cmd-does-not-exist" }).to_string(),
             ),
+            sequence: None,
         };
         let err = handle_editor_command_status_rpc(runtime.as_ref(), request).unwrap_err();
         assert!(format!("{err:#}").contains("unknown or expired async editor command"));
@@ -33685,6 +34063,7 @@ mod tests {
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: None,
             },
             MissingFocusPanePolicy::ObserveOnly,
             None,
@@ -33732,6 +34111,7 @@ mod tests {
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: None,
             },
             MissingFocusPanePolicy::ObserveOnly,
             None,
@@ -34562,6 +34942,7 @@ mod tests {
                 })
                 .unwrap(),
             ),
+            sequence: None,
         };
 
         let err = handle_sync_tmux_layout(&bootstrap, runtime.as_ref(), request).unwrap_err();
@@ -34771,6 +35152,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&event).unwrap()),
+            sequence: None,
         };
 
         assert!(handle_state_event_append(&bootstrap, &runtime, request).unwrap());
@@ -34908,6 +35290,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&event).unwrap()),
+            sequence: None,
         };
 
         assert!(handle_state_event_append(&bootstrap, &runtime, request()).unwrap());
@@ -35597,6 +35980,7 @@ mod tests {
                 })
                 .unwrap(),
             ),
+            sequence: None,
         };
 
         let before_claim = timestamp_secs();
@@ -35652,6 +36036,7 @@ mod tests {
                     })
                     .unwrap(),
                 ),
+                sequence: None,
             },
         )
         .unwrap();
@@ -37057,6 +37442,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("session_clear".to_string()),
             diagnostic_payload: Some("test operator command".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&operator_command).unwrap() + "\n"),
@@ -37093,6 +37479,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&status).unwrap() + "\n"),
@@ -37168,6 +37555,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("session_clear".to_string()),
             diagnostic_payload: Some("clear during controller recycle".to_string()),
+            sequence: None,
         };
         let mut attempts = 0usize;
         let authorization = retry_controller_handoff_refusal(
@@ -37249,6 +37637,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(serde_json::json!({"force": false}).to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&request).unwrap() + "\n"),
@@ -37576,6 +37965,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&start).unwrap() + "\n"),
@@ -37601,6 +37991,7 @@ mod tests {
             supervisor_socket: Some("supervisor.sock".to_string()),
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&register).unwrap() + "\n"),
@@ -37626,6 +38017,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("control-plane status test".to_string()),
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&dispatch).unwrap() + "\n"),
@@ -37718,6 +38110,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&status).unwrap() + "\n"),
@@ -37843,6 +38236,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request_locked(
             &(serde_json::to_string(&start).unwrap() + "\n"),
@@ -37877,6 +38271,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some("claude".to_string()),
+            sequence: None,
         };
         let response = handle_request_locked(
             &(serde_json::to_string(&set_harness).unwrap() + "\n"),
@@ -37914,6 +38309,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request_locked(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -37940,6 +38336,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
         let response = handle_request_locked(
             &(serde_json::to_string(&status).unwrap() + "\n"),
@@ -38002,6 +38399,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
 
         let err = decode_controller_response::<SessionOperatorStatus>(
@@ -38117,6 +38515,205 @@ mod tests {
             )
         );
     }
+    /// `#netadv3` F14/F15, replaying `PassiveTmuxSyncNetAdvanceFirstWedge`: the
+    /// graph folded the focus/layout before its effect ran, the effect errored,
+    /// and the next identical observation folded to `Idle`. The controller
+    /// retains the exact failed intent and reapplies it on that next observation;
+    /// a success or a move to another document clears it.
+    #[test]
+    fn a_failed_editor_surface_effect_is_retried_by_the_next_observation() {
+        use agent_doc_editor_surface::{EditorSurface, SurfaceColumn, SurfaceTracking};
+        let root = std::path::Path::new("/tmp/netadv3-focus-retry");
+        let surface = |focused: &str| EditorSurface {
+            focused: focused.to_string(),
+            open: vec!["/a.md".to_string(), "/b.md".to_string()],
+            visible: vec!["/a.md".to_string(), "/b.md".to_string()],
+            columns: vec![
+                SurfaceColumn::new(["/a.md"]),
+                SurfaceColumn::new(["/b.md"]),
+            ],
+            force_reconcile: false,
+            focus_only: false,
+            preserve_focus: false,
+        };
+        let (tracking, _) = SurfaceTracking::default().advance(&surface("/a.md"), Some(true));
+        let (tracking, intent) = tracking.advance(&surface("/b.md"), Some(true));
+        assert!(matches!(intent, SurfaceIntent::Focus { .. }));
+        // The select-pane effect errored. Pre-fix, the same focus is now Idle.
+        let (_, idle) = tracking.advance(&surface("/b.md"), Some(true));
+        assert!(idle.is_idle(), "the wedge: graph advanced before the effect");
+        let focus_intent = SurfaceIntent::Focus {
+            document: "/b.md".to_string(),
+        };
+        record_editor_surface_effect(root, "client-1", &surface("/b.md"), &focus_intent, true);
+
+        // The next observation carries the retained Focus even though the graph
+        // has already folded it to Idle.
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-1", &surface("/b.md")),
+            Some(focus_intent.clone())
+        );
+        // Success clears the retry.
+        record_editor_surface_effect(root, "client-1", &surface("/b.md"), &focus_intent, false);
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-1", &surface("/b.md")),
+            None
+        );
+        // So does the editor moving on; other clients are independent.
+        record_editor_surface_effect(root, "client-1", &surface("/b.md"), &focus_intent, true);
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-2", &surface("/b.md")),
+            None
+        );
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-1", &surface("/a.md")),
+            None
+        );
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-1", &surface("/b.md")),
+            None
+        );
+
+        // F14 is the same wedge on the structural lane: the graph advances its
+        // layout signature before the desired-layout publication can fail.
+        let (tracking, first_sync) =
+            SurfaceTracking::default().advance(&surface("/a.md"), Some(true));
+        assert!(matches!(first_sync, SurfaceIntent::Sync { .. }));
+        let (_, idle) = tracking.advance(&surface("/a.md"), Some(true));
+        assert!(idle.is_idle(), "the structural wedge: graph advanced first");
+        record_editor_surface_effect(root, "client-2", &surface("/a.md"), &first_sync, true);
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-2", &surface("/a.md")),
+            Some(first_sync.clone())
+        );
+        // A newer layout observation supersedes rather than replays the stale
+        // structural intent, even when focus stayed on the same document.
+        let mut changed_layout = surface("/a.md");
+        changed_layout.columns = vec![SurfaceColumn::new(["/a.md", "/b.md"])];
+        assert_eq!(
+            pending_editor_surface_retry(root, "client-2", &changed_layout),
+            None
+        );
+        record_editor_surface_effect(root, "client-2", &surface("/a.md"), &first_sync, true);
+        record_editor_surface_effect(root, "client-2", &surface("/a.md"), &first_sync, false);
+    }
+
+    /// `#netadv3` SIM-F1, replaying the netadv4 SimWorld trace through the real
+    /// handler (`formal/tla/LifecycleSequence.tla`, `Reorder` wedge): the
+    /// supervisor sends Ready, then Busy, in one generation; the channel delivers
+    /// Busy first. The late Ready carries the OLDER send stamp and must not
+    /// overwrite Busy, or the next dispatch is typed into a busy supervisor. A
+    /// newer update and an unstamped (older-client) update still apply.
+    #[test]
+    fn reordered_older_lifecycle_update_is_discarded_by_send_stamp() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/simf1.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-sf\nagent: codex\n---\nBody\n")
+            .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(&doc, "session-sf", "%51", "@1", 1)
+            .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let lifecycle = |state: &str, sequence: Option<u64>| ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-sf".to_string()),
+            pane_id: Some("%51".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some(state.to_string()),
+            caller: Some("supervisor".to_string()),
+            reason: Some("simf1".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+            sequence,
+        };
+        let ready_sent = level_update_send_stamp().expect("monotonic clock");
+        let busy_sent = level_update_send_stamp().expect("monotonic clock");
+        assert!(busy_sent >= ready_sent);
+        let busy_sent = busy_sent.max(ready_sent + 1);
+
+        // Delivered out of order: Busy, then the delayed Ready.
+        let applied = handle_mark_lifecycle(&bootstrap, None, lifecycle("busy", Some(busy_sent)))
+            .expect("busy applies");
+        assert_eq!(applied.state, agent_doc_controller::actor::ActorState::Busy);
+        let after_late_ready =
+            handle_mark_lifecycle(&bootstrap, None, lifecycle("ready", Some(ready_sent)))
+                .expect("a stale update is discarded, not an error");
+        assert_eq!(
+            after_late_ready.state,
+            agent_doc_controller::actor::ActorState::Busy,
+            "the reordered older Ready must not re-open dispatch into a busy supervisor"
+        );
+
+        // A newer Ready applies; a duplicate of it is idempotent.
+        let newer = busy_sent + 1;
+        assert_eq!(
+            handle_mark_lifecycle(&bootstrap, None, lifecycle("ready", Some(newer)))
+                .unwrap()
+                .state,
+            agent_doc_controller::actor::ActorState::Ready
+        );
+        assert_eq!(
+            handle_mark_lifecycle(&bootstrap, None, lifecycle("ready", Some(newer)))
+                .unwrap()
+                .state,
+            agent_doc_controller::actor::ActorState::Ready
+        );
+        // An unstamped request (older client) is never fenced.
+        assert_eq!(
+            handle_mark_lifecycle(&bootstrap, None, lifecycle("busy", None))
+                .unwrap()
+                .state,
+            agent_doc_controller::actor::ActorState::Busy
+        );
+    }
+
+    /// `#netadv3` SIM-F2: a reordered older queue pause must not flip queue
+    /// control back over a newer resume; it is rejected with `stale_sequence`.
+    #[test]
+    fn reordered_older_queue_control_is_rejected_by_send_stamp() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let control = |action: &str, sequence: Option<u64>| ControllerRequest {
+            command: "queue_control".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: Some(action.to_string()),
+            caller: Some("admin".to_string()),
+            reason: Some("simf2".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(action.to_string()),
+            diagnostic_payload: None,
+            sequence,
+        };
+        let pause_sent = level_update_send_stamp().expect("monotonic clock");
+        let resume_sent = pause_sent + 1;
+        let resumed = handle_queue_control(&bootstrap, control("resume", Some(resume_sent)))
+            .expect("resume applies");
+        assert!(resumed.failed_stage.is_none(), "{resumed:?}");
+        let late_pause = handle_queue_control(&bootstrap, control("pause", Some(pause_sent)))
+            .expect("a stale control is a rejected receipt, not an error");
+        assert_eq!(late_pause.failed_stage.as_deref(), Some("stale_sequence"));
+        let conn = open_state_db(dir.path()).unwrap();
+        let effective = state_store::load_queue_control_from_db(
+            &conn,
+            "project",
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap()
+        .expect("queue control row");
+        assert_eq!(effective.state, "resumed", "the newer resume stays in force");
+    }
+
     #[test]
     fn qflood_coalesces_in_flight_despite_ready_projection_drift_and_releases_on_ready() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -38160,6 +38757,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("projection_repair".to_string()),
             diagnostic_payload: Some("qflood test".to_string()),
+            sequence: None,
         };
 
         // First dispatch while Busy: nothing in flight yet ⇒ admitted (queued),
@@ -38207,6 +38805,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("dispatch_only_reopen".to_string()),
             diagnostic_payload: Some("operator Run Agent Doc".to_string()),
+            sequence: None,
         };
         handle_dispatch(&bootstrap, None, operator_dispatch())
             .expect("operator reopen must bypass stale in-flight coalescing");
@@ -38264,6 +38863,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
 
         // The premature Ready, now through the controller's own boundary. Still no
@@ -38430,6 +39030,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: Some("managed_reopen".to_string()),
             diagnostic_payload: Some("anw0 redirect test".to_string()),
+            sequence: None,
         };
 
         // Current generation (1) is Ready ⇒ a retry would be authorized ⇒ structured
@@ -39300,6 +39901,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         };
 
         // Contract guard: the OLD no-bump value (the un-incremented current
@@ -39370,6 +39972,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
+            sequence: None,
         }
     }
 
@@ -39651,6 +40254,7 @@ mod tests {
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: None,
             },
         )
         .unwrap_err();
@@ -39727,6 +40331,7 @@ mod tests {
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: None,
             },
         )
         .expect("start_session must accept an equivalent same-document pane alias");
@@ -39925,6 +40530,7 @@ mod tests {
                 supervisor_socket: None,
                 command_kind: None,
                 diagnostic_payload: None,
+                sequence: None,
             },
         )
         .expect("start_session must reopen a closed same-document generation");
@@ -39971,6 +40577,7 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(envelope.to_string()),
+            sequence: None,
         }
     }
 
@@ -40712,6 +41319,7 @@ body
                 })
                 .unwrap(),
             ),
+            sequence: None,
         };
 
         let enqueued = handle_reliable_sync_outbox(dir.path(), request(Some(frame), false))

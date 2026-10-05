@@ -7749,8 +7749,66 @@ pub fn wait_for_editor_replica_liveness_change(
 /// Files whose replica self-heal was exhausted without recovering, remembered
 /// against the liveness witness that was current when it failed.
 static EDITOR_REPLICA_SELF_HEAL_EXHAUSTED: std::sync::LazyLock<
-    Mutex<std::collections::HashMap<std::path::PathBuf, EditorReplicaLivenessWitness>>,
+    Mutex<std::collections::HashMap<std::path::PathBuf, SelfHealExhaustion>>,
 > = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// One exhausted re-registration budget, keyed by its liveness witness.
+#[derive(Clone, PartialEq, Eq)]
+struct SelfHealExhaustion {
+    witness: EditorReplicaLivenessWitness,
+    /// `None`: the endpoint ANSWERED inside the budget (accepted or refused),
+    /// so the exhaustion is a fact about the endpoint and pauses until the
+    /// witness changes. `Some`: NOTHING answered, see [`UnansweredSelfHeal`].
+    unanswered: Option<UnansweredSelfHeal>,
+}
+
+/// `#netadv3` ERS-1: a budget in which no attempt was answered.
+///
+/// Every attempt ended `not_delivered` or `failed`: the request or its receipt
+/// was lost, which says nothing about the endpoint. Latching that exhaustion
+/// at an unchanged witness paused self-heal forever, so an endpoint that DOES
+/// answer (a refusal that would demote the stale latch, or an acceptance that
+/// would be corroborated) was never asked again
+/// (`formal/tla/EditorReplicaStrandNet.tla`, `EditorReplicaStrandNetLatchWedge`).
+/// Instead the budget is re-spent after a number of paused resolves that
+/// doubles each time, so silence stays cheap and is never promoted to proof.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct UnansweredSelfHeal {
+    /// Resolves still to skip before the next budget.
+    skip: u32,
+    /// Consecutive unanswered budgets at this witness.
+    budgets: u32,
+}
+
+/// Cap on the resolves skipped between unanswered budgets.
+const UNANSWERED_SELF_HEAL_MAX_SKIP: u32 = 32;
+
+impl UnansweredSelfHeal {
+    fn after_budgets(budgets: u32) -> Self {
+        Self {
+            skip: (1u32 << budgets.saturating_sub(1).min(16)).min(UNANSWERED_SELF_HEAL_MAX_SKIP),
+            budgets,
+        }
+    }
+}
+
+impl SelfHealExhaustion {
+    /// Whether a resolve at `witness` should skip the re-registration loop,
+    /// spending one paused resolve of an unanswered backoff.
+    fn pause(&mut self, witness: &EditorReplicaLivenessWitness) -> bool {
+        if &self.witness != witness {
+            return false;
+        }
+        match self.unanswered.as_mut() {
+            None => true,
+            Some(retry) if retry.skip > 0 => {
+                retry.skip -= 1;
+                true
+            }
+            Some(_) => false,
+        }
+    }
+}
 
 /// `true` when the retry loop should be paused for this file: the self-heal
 /// already failed against exactly this liveness witness, so another attempt is
@@ -7779,17 +7837,44 @@ fn should_pause_editor_replica_self_heal(
 ) -> bool {
     EDITOR_REPLICA_SELF_HEAL_EXHAUSTED
         .lock()
-        .get(file)
-        .is_some_and(|recorded| recorded == witness)
+        .get_mut(file)
+        .is_some_and(|recorded| recorded.pause(witness))
 }
 
+/// Record a budget in which the endpoint ANSWERED: pause until the witness
+/// changes.
 fn record_editor_replica_self_heal_exhausted(
     file: &std::path::Path,
     witness: EditorReplicaLivenessWitness,
 ) {
-    EDITOR_REPLICA_SELF_HEAL_EXHAUSTED
-        .lock()
-        .insert(file.to_path_buf(), witness);
+    EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock().insert(
+        file.to_path_buf(),
+        SelfHealExhaustion {
+            witness,
+            unanswered: None,
+        },
+    );
+}
+
+/// Record a budget in which NOTHING answered (`#netadv3` ERS-1): pause for a
+/// doubling number of resolves, then spend another budget.
+fn record_editor_replica_self_heal_unanswered(
+    file: &std::path::Path,
+    witness: EditorReplicaLivenessWitness,
+) {
+    let mut memo = EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock();
+    let budgets = memo
+        .get(file)
+        .filter(|recorded| recorded.witness == witness)
+        .and_then(|recorded| recorded.unanswered)
+        .map_or(1, |retry| retry.budgets.saturating_add(1));
+    memo.insert(
+        file.to_path_buf(),
+        SelfHealExhaustion {
+            witness,
+            unanswered: Some(UnansweredSelfHeal::after_budgets(budgets)),
+        },
+    );
 }
 
 /// One observation of "the endpoint accepted every request and the replica never
@@ -7975,6 +8060,8 @@ fn reobserve_missing_editor_replica_with_reregistration(
     // shape with no exit. Counting acceptances is what lets the loop tell it
     // apart from "nothing answered", which must stay retryable.
     let mut accepted_requests = 0usize;
+    // `#netadv3` ERS-1: whether ANY attempt was answered (accepted or refused).
+    let mut answered = false;
     for attempt in 1..=attempts {
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event_reporting(
             file,
@@ -7990,10 +8077,12 @@ fn reobserve_missing_editor_replica_with_reregistration(
                     file,
                     editor_replica_liveness_witness(file),
                 );
+                answered = true;
                 format!("definitively_refused:{}", outcome.definitive_refusals)
             }
             Ok(outcome) if outcome.notified == 0 => "not_delivered".to_string(),
             Ok(outcome) => {
+                answered = true;
                 accepted_requests += outcome.notified;
                 format!("delivered:{}", outcome.notified)
             }
@@ -8072,7 +8161,23 @@ fn reobserve_missing_editor_replica_with_reregistration(
             ),
         );
     }
-    record_editor_replica_self_heal_exhausted(file, witness);
+    if answered {
+        record_editor_replica_self_heal_exhausted(file, witness);
+    } else {
+        // Nothing answered: the requests or their receipts were lost, which
+        // proves nothing about the endpoint. Re-spend the budget later
+        // instead of pausing forever at a witness a stuck endpoint never moves.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_replica_self_heal_unanswered file={} source={} attempts={} recovery=rearm_with_backoff (#netadv3)",
+                file.display(),
+                source,
+                attempts,
+            ),
+        );
+        record_editor_replica_self_heal_unanswered(file, witness);
+    }
     current
 }
 
@@ -10090,6 +10195,44 @@ mod tests {
         );
 
         clear_editor_replica_recovery_latches(file);
+    }
+
+    /// `#netadv3` ERS-1, replaying `EditorReplicaStrandNetLatchWedge`: every
+    /// receipt of one budget was lost, so nothing answered. The memo must not
+    /// pause forever at the unchanged witness: it skips a doubling number of
+    /// resolves and then lets the loop re-ask, while an ANSWERED budget still
+    /// pauses until the witness changes.
+    #[test]
+    fn unanswered_self_heal_budget_rearms_with_backoff_at_an_unchanged_witness() {
+        let file = std::path::Path::new("/tmp/agent-doc-self-heal-unanswered.md");
+        clear_editor_replica_self_heal_exhausted(file);
+        let observed = witness(true, &[(4242, "jetbrains-a", 1_000)]);
+
+        let mut pauses = Vec::new();
+        for _ in 0..4 {
+            record_editor_replica_self_heal_unanswered(file, observed.clone());
+            let mut skipped = 0;
+            while should_pause_editor_replica_self_heal(file, &observed) {
+                skipped += 1;
+                assert!(skipped <= UNANSWERED_SELF_HEAL_MAX_SKIP, "never pauses forever");
+            }
+            pauses.push(skipped);
+        }
+        assert_eq!(pauses, vec![1, 2, 4, 8], "the backoff doubles per unanswered budget");
+
+        // An answered budget at the same witness is a fact about the endpoint.
+        record_editor_replica_self_heal_exhausted(file, observed.clone());
+        for _ in 0..(UNANSWERED_SELF_HEAL_MAX_SKIP * 2) {
+            assert!(should_pause_editor_replica_self_heal(file, &observed));
+        }
+        // A changed witness lifts either memo.
+        let moved = witness(true, &[(4242, "jetbrains-a", 2_000)]);
+        assert!(!should_pause_editor_replica_self_heal(file, &moved));
+        // And a fresh unanswered budget at a new witness restarts the backoff.
+        record_editor_replica_self_heal_unanswered(file, moved.clone());
+        assert!(should_pause_editor_replica_self_heal(file, &moved));
+        assert!(!should_pause_editor_replica_self_heal(file, &moved));
+        clear_editor_replica_self_heal_exhausted(file);
     }
 
     /// The self-heal memo suppresses the retry loop only while the realtime

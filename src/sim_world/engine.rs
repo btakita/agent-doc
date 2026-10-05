@@ -2173,6 +2173,35 @@ impl SimWorld {
         Ok(())
     }
 
+    /// `#netadv3` SIM-F1/SIM-F2: admit one level-state update by its send stamp
+    /// (the net send id while a delivered message is applied; unstamped for a
+    /// local step), through the production `admit_sequenced`. `false` = it was
+    /// sent before an update already applied in this generation: discard it.
+    pub(crate) fn admit_level_update(
+        &mut self,
+        family: agent_doc_controller::sequence::SequencedFamily,
+        generation: u64,
+    ) -> bool {
+        use agent_doc_controller::sequence::{SequenceAdmission, admit_sequenced};
+        let stamp = self.net.as_ref().and_then(|net| net.delivering_request_key);
+        match admit_sequenced(
+            self.route.level_marks.get(&family).copied(),
+            generation,
+            stamp,
+        ) {
+            SequenceAdmission::Stale { .. } => {
+                self.coverage.stale_level_updates_discarded += 1;
+                false
+            }
+            SequenceAdmission::Apply { next } => {
+                if let Some(next) = next {
+                    self.route.level_marks.insert(family, next);
+                }
+                true
+            }
+        }
+    }
+
     pub(crate) fn transition_supervisor(
         &mut self,
         generation: u64,
@@ -2186,6 +2215,12 @@ impl SimWorld {
                 self.seed,
                 self.trace
             );
+        }
+        if !self.admit_level_update(
+            agent_doc_controller::sequence::SequencedFamily::Lifecycle,
+            generation,
+        ) {
+            return Ok(());
         }
         let projection_was_current = self.projection_identity_matches_durable();
         self.route.durable.lifecycle = lifecycle;
@@ -2348,6 +2383,12 @@ impl SimWorld {
         observed_generation: u64,
     ) -> Result<()> {
         self.require_current_admin_generation(observed_generation, "queue_control")?;
+        if !self.admit_level_update(
+            agent_doc_controller::sequence::SequencedFamily::QueueControl,
+            observed_generation,
+        ) {
+            return Ok(());
+        }
         self.route.queue_control = state;
         match state {
             QueueControlState::Paused => self.coverage.queue_pauses += 1,
@@ -2400,6 +2441,13 @@ impl SimWorld {
                 self.seed,
                 self.trace
             );
+        }
+        // The sim's heartbeat writes the lifecycle, so it shares that family.
+        if !self.admit_level_update(
+            agent_doc_controller::sequence::SequencedFamily::Lifecycle,
+            generation,
+        ) {
+            return Ok(());
         }
         self.route.durable.pane_id = Some(pane_id.into());
         self.route.durable.lifecycle = SupervisorLifecycle::Ready;

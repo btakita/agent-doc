@@ -137,6 +137,50 @@ struct Member {
     /// the queued revision. This latch makes that recovery signal one-shot even
     /// when the replica keeps polling the same pending head.
     nonconvergence_recovery_signaled: bool,
+    /// `#netadv3` F10: a recovery signal that did not reach the endpoint (a
+    /// retryable disposition, or a send error) re-arms the latch with this
+    /// backoff instead of leaving it latched forever. Counted in observations
+    /// (pulls and expired barrier waits that re-ask), not in time.
+    nonconvergence_recovery_retry: RecoveryRetryBackoff,
+}
+
+/// Backoff for re-sending a non-convergence recovery that was lost (`#netadv3`
+/// F10). A lost request and a lost answer are indistinguishable to the sender,
+/// so the only safe responses are "send it again" or "re-derive it"; the
+/// latch used to do neither and the refusing replica vetoed the receipt
+/// forever (`formal/tla/VisibleDeliveryReceiptNet.tla`,
+/// `VisibleDeliveryReceiptNetRecoveryLatchWedge`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct RecoveryRetryBackoff {
+    /// Re-arms since the last forward progress.
+    rearms: u32,
+    /// Observations still to skip before the next claim may re-send.
+    skip: u32,
+}
+
+/// First observation backoff after a lost recovery signal. Pulls run at a few
+/// per second, so a duplicate-looking burst of pulls never re-sends at once.
+pub const INITIAL_RECOVERY_RETRY_SKIP: u32 = 4;
+/// Cap on the observation backoff between recovery re-sends (about a minute
+/// of pulls).
+pub const MAX_RECOVERY_RETRY_SKIP: u32 = 256;
+
+impl RecoveryRetryBackoff {
+    fn rearm(&mut self) {
+        self.rearms = self.rearms.saturating_add(1);
+        self.skip = INITIAL_RECOVERY_RETRY_SKIP
+            .saturating_mul(1u32 << self.rearms.saturating_sub(1).min(16))
+            .min(MAX_RECOVERY_RETRY_SKIP);
+    }
+
+    /// Spend one observation of the backoff; `true` once it is exhausted.
+    fn ready(&mut self) -> bool {
+        if self.skip == 0 {
+            return true;
+        }
+        self.skip -= 1;
+        false
+    }
 }
 
 impl Member {
@@ -150,6 +194,7 @@ impl Member {
         self.redeliveries_without_ack = 0;
         self.barrier_waits_without_progress = 0;
         self.nonconvergence_recovery_signaled = false;
+        self.nonconvergence_recovery_retry = RecoveryRetryBackoff::default();
     }
 }
 
@@ -1646,6 +1691,7 @@ impl RelayHub {
                 redeliveries_without_ack: 0,
                 barrier_waits_without_progress: 0,
                 nonconvergence_recovery_signaled: false,
+                nonconvergence_recovery_retry: RecoveryRetryBackoff::default(),
             },
         );
         // Materialize this member's liveness cell (live-on-register) and bump the
@@ -2479,8 +2525,40 @@ impl RelayHub {
         if !recovery_required || member.nonconvergence_recovery_signaled {
             return Ok(false);
         }
+        if !member.nonconvergence_recovery_retry.ready() {
+            return Ok(false);
+        }
         member.nonconvergence_recovery_signaled = true;
         Ok(true)
+    }
+
+    /// Re-arm a claimed recovery whose signal never reached the endpoint
+    /// (`#netadv3` F10).
+    ///
+    /// [`Self::claim_nonconverging_recovery`] latches on the CLAIM, before the
+    /// send. When the send then yields a retryable disposition (no live
+    /// registration, a generation mismatch, a delivery failure) or an error,
+    /// nothing was learned about the endpoint, and the latch used to stay set
+    /// until an ACK that a refusing replica never sends: the refusal the drop
+    /// edge needs was never asked for again, and the replica vetoed the
+    /// visible-delivery receipt forever. This clears the latch behind an
+    /// observation backoff, so a later pull or expired wait re-sends it.
+    ///
+    /// Returns `false` when the member is gone, no longer needs recovery, or
+    /// was never claimed: an ACK or a fresh obligation already reset it.
+    pub fn rearm_nonconverging_recovery(&mut self, client_id: u64) -> bool {
+        let live = self.is_live(client_id);
+        let Some(member) = self.members.get_mut(&client_id) else {
+            return false;
+        };
+        let recovery_required =
+            live && !member.pending.is_empty() && !Self::member_holds_delivery_barrier(member);
+        if !recovery_required || !member.nonconvergence_recovery_signaled {
+            return false;
+        }
+        member.nonconvergence_recovery_signaled = false;
+        member.nonconvergence_recovery_retry.rearm();
+        true
     }
 
     /// Drop a live replica from the delivery cut after its endpoint ANSWERED
@@ -4910,6 +4988,59 @@ mod tests {
             !hub.claim_nonconverging_recovery(3).unwrap(),
             "repeated polls must not spam editor rebuild recovery"
         );
+    }
+
+    /// `#netadv3` F10, replaying `VisibleDeliveryReceiptNetRecoveryLatchWedge`:
+    /// the recovery is claimed, its signal is lost (a retryable disposition),
+    /// and the latch must not hold forever. Re-arming skips a growing number of
+    /// observations and then lets the next claim re-send; an ACK resets it all.
+    #[test]
+    fn a_lost_recovery_signal_rearms_with_backoff_instead_of_latching() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        assert!(hub.ensure_canonical_projection_receipt(3).unwrap());
+        for _ in 0..MAX_BARRIER_WAITS_WITHOUT_PROGRESS {
+            assert!(hub.charge_barrier_wait_without_progress().is_empty());
+        }
+        assert_eq!(hub.charge_barrier_wait_without_progress(), vec![3]);
+
+        assert!(hub.claim_nonconverging_recovery(3).unwrap(), "first claim");
+        assert!(!hub.claim_nonconverging_recovery(3).unwrap(), "latched");
+        // The Recover message was dropped: the adapter saw `Retry`.
+        assert!(hub.rearm_nonconverging_recovery(3));
+        // The first observations are skipped, then the claim re-sends.
+        for _ in 0..INITIAL_RECOVERY_RETRY_SKIP {
+            assert!(!hub.claim_nonconverging_recovery(3).unwrap());
+        }
+        assert!(hub.claim_nonconverging_recovery(3).unwrap(), "re-sent after backoff");
+        // Lost again: the backoff doubles.
+        assert!(hub.rearm_nonconverging_recovery(3));
+        for _ in 0..INITIAL_RECOVERY_RETRY_SKIP * 2 {
+            assert!(!hub.claim_nonconverging_recovery(3).unwrap());
+        }
+        assert!(hub.claim_nonconverging_recovery(3).unwrap());
+        // A rearm without a claim outstanding is refused (nothing was sent).
+        assert!(hub.rearm_nonconverging_recovery(3));
+        assert!(!hub.rearm_nonconverging_recovery(3));
+
+        // Forward progress clears the latch and the backoff together.
+        let canonical_hash = content_hash(&hub.canonical_text());
+        assert!(hub.observe_delivery_projection(3, &canonical_hash).unwrap());
+        assert!(!hub.rearm_nonconverging_recovery(3), "nothing pending any more");
+    }
+
+    #[test]
+    fn recovery_retry_backoff_doubles_and_caps() {
+        let mut backoff = RecoveryRetryBackoff::default();
+        assert!(backoff.ready(), "a fresh member claims immediately");
+        let mut skips = Vec::new();
+        for _ in 0..10 {
+            backoff.rearm();
+            skips.push(backoff.skip);
+            while !backoff.ready() {}
+        }
+        assert_eq!(skips, vec![4, 8, 16, 32, 64, 128, 256, 256, 256, 256]);
     }
 
     /// `#silentreplicabarrier`: a projection ACK clears the silent streak, so a

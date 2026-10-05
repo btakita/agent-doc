@@ -467,6 +467,116 @@ struct CloseoutOwnerGuard {
     owner_id: String,
     stop: Option<std::sync::mpsc::Sender<()>>,
     heartbeat: Option<std::thread::JoinHandle<()>>,
+    /// `#netadv3` F5: set by the heartbeat when the controller ANSWERED that this
+    /// owner no longer holds the lease (another closeout took it, or the cycle
+    /// was superseded). The foreground checks it before committing.
+    lease_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl CloseoutOwnerGuard {
+    fn lease_lost(&self) -> bool {
+        self.lease_lost.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// `#netadv3` F5 (b): refuse to commit once the heartbeat learned, from an
+/// answered refresh, that this closeout no longer owns its lease. Committing
+/// anyway is two closeouts finishing one cycle
+/// (`formal/tla/AgentDocCloseoutNet.tla`, `IgnoreLoss` wedge).
+fn ensure_closeout_lease_still_held(owner: Option<&CloseoutOwnerGuard>) -> Result<()> {
+    let Some(owner) = owner else {
+        return Ok(());
+    };
+    if owner.lease_lost() {
+        agent_doc_ops_log_io::log_op(
+            &owner.file,
+            &format!(
+                "closeout_owner_lease_lost_before_commit file={} cycle_id={} owner_id={}",
+                owner.file.display(),
+                owner.cycle_id,
+                owner.owner_id,
+            ),
+        );
+        anyhow::bail!(
+            "closeout owner lease for cycle {} was taken over before commit (owner {}); the response stays retained for the current owner",
+            owner.cycle_id,
+            owner.owner_id,
+        );
+    }
+    Ok(())
+}
+
+/// `#netadv3` F4: one owner id per (process, thread, role).
+///
+/// The id used to be minted per claim, so a claim whose reply was lost (or a
+/// retried claim the controller applied after answering a later copy) left a
+/// lease held by an id nobody would ever present again; the next closeout in
+/// the same live process was refused `HeldByOther` by its own orphan until the
+/// lease expired. A stable id makes the controller's CAS idempotent for this
+/// owner, so re-claiming re-acquires. Different threads keep different ids, so
+/// the CAS still excludes two concurrent closeouts in one process.
+fn stable_closeout_owner_id(prefix: &str) -> String {
+    static PROCESS_NONCE: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    static NEXT_THREAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    thread_local! {
+        static THREAD_ORDINAL: u64 = NEXT_THREAD.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    let nonce = *PROCESS_NONCE.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    });
+    let thread = THREAD_ORDINAL.with(|ordinal| *ordinal);
+    format!("{prefix}-{}-{nonce}-t{thread}", std::process::id())
+}
+
+/// Attempts for one closeout-owner claim whose transport fails (`#netadv3` F4).
+const CLOSEOUT_OWNER_CLAIM_ATTEMPTS: u32 = 3;
+
+/// Re-send a closeout-owner claim with the SAME request until the controller
+/// answers (`#netadv3` F4). Any outcome is an answer; only a transport error is
+/// retried, after `backoff(attempt)`. The claim is idempotent for one owner id,
+/// so a retry after a lost reply re-acquires rather than conflicting.
+fn claim_closeout_owner_until_answered<T>(
+    attempts: u32,
+    mut claim: impl FnMut() -> Result<T>,
+    mut backoff: impl FnMut(u32),
+) -> Result<T> {
+    let mut attempt = 1;
+    loop {
+        match claim() {
+            Ok(answer) => return Ok(answer),
+            Err(error) if attempt >= attempts.max(1) => return Err(error),
+            Err(_) => {
+                backoff(attempt);
+                attempt += 1;
+            }
+        }
+    }
+}
+
+/// What the heartbeat does with one refresh result (`#netadv3` F5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloseoutHeartbeatStep {
+    /// Refreshed: wait the full interval.
+    Refreshed,
+    /// The refresh's reply was lost (transport error): NOT a verdict about the
+    /// lease, so retry sooner instead of stopping.
+    RetrySoon,
+    /// The controller ANSWERED that this owner no longer holds the lease.
+    LeaseLost,
+}
+
+fn closeout_heartbeat_step<T>(
+    refreshed: &Result<agent_doc_controller_io::project_controller::CloseoutOwnerClaimOutcome, T>,
+) -> CloseoutHeartbeatStep {
+    use agent_doc_controller_io::project_controller::CloseoutOwnerClaimOutcome as Outcome;
+    match refreshed {
+        Ok(Outcome::Acquired(_)) => CloseoutHeartbeatStep::Refreshed,
+        Ok(Outcome::HeldByOther(_) | Outcome::CycleSuperseded) => CloseoutHeartbeatStep::LeaseLost,
+        Err(_) => CloseoutHeartbeatStep::RetrySoon,
+    }
 }
 
 impl Drop for CloseoutOwnerGuard {
@@ -605,21 +715,39 @@ fn claim_foreground_closeout_owner(
         return Ok(None);
     }
 
-    let owner_id = controller::new_closeout_owner_id(role.owner_id_prefix());
+    let owner_id = stable_closeout_owner_id(role.owner_id_prefix());
     let owner_pid = std::process::id();
     let role_name = role.as_str();
-    let cycle_id = match controller::claim_closeout_owner_for_file(
-        file,
-        controller::CloseoutOwnerClaimRequest {
-            expected_cycle_id: None,
-            owner_id: owner_id.clone(),
-            owner_pid,
-            role: role_name.to_string(),
-            now_secs: current_epoch_secs(),
-            lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
-            allow_dead_owner_takeover: true,
+    let claimed = claim_closeout_owner_until_answered(
+        CLOSEOUT_OWNER_CLAIM_ATTEMPTS,
+        || {
+            controller::claim_closeout_owner_for_file(
+                file,
+                controller::CloseoutOwnerClaimRequest {
+                    expected_cycle_id: None,
+                    owner_id: owner_id.clone(),
+                    owner_pid,
+                    role: role_name.to_string(),
+                    now_secs: current_epoch_secs(),
+                    lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
+                    allow_dead_owner_takeover: true,
+                },
+            )
         },
-    )? {
+        |attempt| {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "closeout_owner_claim_retry file={} owner_id={} attempt={} reason=no_answer",
+                    file.display(),
+                    owner_id,
+                    attempt,
+                ),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(250u64 << attempt.min(3)));
+        },
+    )?;
+    let cycle_id = match claimed {
         controller::CloseoutOwnerClaimOutcome::Acquired(owner) => owner.cycle_id,
         controller::CloseoutOwnerClaimOutcome::HeldByOther(owner) => {
             anyhow::bail!(
@@ -640,11 +768,15 @@ fn claim_foreground_closeout_owner(
     let heartbeat_file = file.to_path_buf();
     let heartbeat_cycle = cycle_id.clone();
     let heartbeat_owner = owner_id.clone();
+    let lease_lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let heartbeat_lease_lost = lease_lost.clone();
     let heartbeat = std::thread::spawn(move || {
         let interval =
             std::time::Duration::from_secs((controller::CLOSEOUT_OWNER_LEASE_SECS / 3).max(1));
+        let mut wait = interval;
+        let mut lost_refreshes: u32 = 0;
         loop {
-            match stopped.recv_timeout(interval) {
+            match stopped.recv_timeout(wait) {
                 Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             }
@@ -660,20 +792,44 @@ fn claim_foreground_closeout_owner(
                     allow_dead_owner_takeover: false,
                 },
             );
-            if !matches!(
-                refreshed,
-                Ok(controller::CloseoutOwnerClaimOutcome::Acquired(_))
-            ) {
-                agent_doc_ops_log_io::log_op(
-                    &heartbeat_file,
-                    &format!(
-                        "closeout_owner_heartbeat_stopped file={} cycle_id={} owner_id={} outcome={refreshed:?}",
-                        heartbeat_file.display(),
-                        heartbeat_cycle,
-                        heartbeat_owner,
-                    ),
-                );
-                break;
+            // `#netadv3` F5: one failed refresh used to `break` this loop while
+            // the foreground kept working, so the lease expired under a live
+            // owner. A lost reply is not a verdict: retry sooner. Only an
+            // ANSWERED loss stops the heartbeat, and it tells the foreground.
+            match closeout_heartbeat_step(&refreshed) {
+                CloseoutHeartbeatStep::Refreshed => {
+                    lost_refreshes = 0;
+                    wait = interval;
+                }
+                CloseoutHeartbeatStep::RetrySoon => {
+                    lost_refreshes = lost_refreshes.saturating_add(1);
+                    wait = std::time::Duration::from_secs(1u64 << lost_refreshes.min(5))
+                        .min(interval);
+                    agent_doc_ops_log_io::log_op(
+                        &heartbeat_file,
+                        &format!(
+                            "closeout_owner_heartbeat_refresh_retry file={} cycle_id={} owner_id={} consecutive={} retry_in_ms={} outcome={refreshed:?}",
+                            heartbeat_file.display(),
+                            heartbeat_cycle,
+                            heartbeat_owner,
+                            lost_refreshes,
+                            wait.as_millis(),
+                        ),
+                    );
+                }
+                CloseoutHeartbeatStep::LeaseLost => {
+                    heartbeat_lease_lost.store(true, std::sync::atomic::Ordering::SeqCst);
+                    agent_doc_ops_log_io::log_op(
+                        &heartbeat_file,
+                        &format!(
+                            "closeout_owner_heartbeat_stopped file={} cycle_id={} owner_id={} reason=lease_lost outcome={refreshed:?}",
+                            heartbeat_file.display(),
+                            heartbeat_cycle,
+                            heartbeat_owner,
+                        ),
+                    );
+                    break;
+                }
             }
         }
     });
@@ -685,6 +841,7 @@ fn claim_foreground_closeout_owner(
         owner_id,
         stop: Some(stop),
         heartbeat: Some(heartbeat),
+        lease_lost,
     }))
 }
 
@@ -2622,6 +2779,7 @@ fn run_command_inner_within_pass(
                 );
             }
         }
+        ensure_closeout_lease_still_held(_closeout_owner.as_ref())?;
         return finalize_commit(file, commit_mode, options.force_disk);
     }
 
@@ -3268,7 +3426,8 @@ fn run_command_inner_within_pass(
     }
 
     let commit_result = if write_result.is_ok() {
-        let primary = finalize_commit(file, commit_mode, options.force_disk);
+        let primary = ensure_closeout_lease_still_held(_closeout_owner.as_ref())
+            .and_then(|()| finalize_commit(file, commit_mode, options.force_disk));
         if primary.is_ok() && !options.commit_sibling.is_empty() {
             let pairs: Vec<(std::path::PathBuf, String)> = options
                 .commit_sibling
@@ -4073,6 +4232,169 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 // must register a real editor replica.
 #[cfg(test)]
 mod gh131_pending_only_tests;
+
+#[cfg(test)]
+mod closeout_owner_network_tests {
+    //! `#netadv3` F4/F5, replaying `formal/tla/AgentDocCloseoutNet.tla` traces
+    //! against the controller's real claim decision
+    //! (`CloseoutProjection::decide_owner_claim`).
+    use super::*;
+    use agent_doc_controller_io::project_controller::{
+        CloseoutOwnerClaimOutcome, CloseoutOwnerClaimRequest,
+    };
+    use agent_doc_state_backbone::CloseoutProjection;
+    use agent_doc_turn::CyclePhase;
+
+    fn open_cycle() -> CloseoutProjection {
+        CloseoutProjection {
+            cycle_id: Some("cycle-1".to_string()),
+            phase: Some(CyclePhase::ResponseCaptured),
+            ..CloseoutProjection::default()
+        }
+    }
+
+    fn request(owner_id: &str) -> CloseoutOwnerClaimRequest {
+        CloseoutOwnerClaimRequest {
+            expected_cycle_id: None,
+            owner_id: owner_id.to_string(),
+            owner_pid: std::process::id(),
+            role: "foreground_finalize".to_string(),
+            now_secs: 1_000,
+            lease_secs: 300,
+            allow_dead_owner_takeover: true,
+        }
+    }
+
+    /// The controller applies the claim (the CAS holds the lease) and the reply
+    /// is lost. With the per-call id the re-run in this live process was refused
+    /// by its own orphan (`OneShotClaim` wedge). With the stable id the CAS is
+    /// idempotent and the re-claim re-acquires.
+    #[test]
+    fn a_lost_claim_reply_never_leaves_an_orphan_that_refuses_its_own_owner() {
+        let mut projection = open_cycle();
+        let first = stable_closeout_owner_id("foreground-finalize");
+        let CloseoutOwnerClaimOutcome::Acquired(owner) =
+            projection.decide_owner_claim(&request(&first), Some(true))
+        else {
+            panic!("a free lease is acquired");
+        };
+        projection.owner = Some(owner); // applied; the reply never arrived
+
+        let second = stable_closeout_owner_id("foreground-finalize");
+        assert_eq!(first, second, "the same thread and role present the same id");
+        assert!(
+            matches!(
+                projection.decide_owner_claim(&request(&second), Some(true)),
+                CloseoutOwnerClaimOutcome::Acquired(_)
+            ),
+            "re-claiming with the stable id re-acquires the orphaned lease"
+        );
+
+        // The pre-fix id (minted per call) is refused by that orphan.
+        let minted = agent_doc_controller_io::project_controller::new_closeout_owner_id(
+            "foreground-finalize",
+        );
+        assert!(matches!(
+            projection.decide_owner_claim(&request(&minted), Some(true)),
+            CloseoutOwnerClaimOutcome::HeldByOther(_)
+        ));
+    }
+
+    #[test]
+    fn stable_owner_ids_differ_across_threads_so_the_cas_still_excludes() {
+        let here = stable_closeout_owner_id("foreground-finalize");
+        let there = std::thread::spawn(|| stable_closeout_owner_id("foreground-finalize"))
+            .join()
+            .unwrap();
+        assert_ne!(here, there);
+        assert_ne!(
+            here,
+            stable_closeout_owner_id("captured-finalize-resume"),
+            "roles keep distinct owners"
+        );
+    }
+
+    #[test]
+    fn a_claim_whose_reply_was_lost_is_resent_until_answered() {
+        let mut calls = 0;
+        let mut slept = Vec::new();
+        let answered = claim_closeout_owner_until_answered(
+            3,
+            || {
+                calls += 1;
+                if calls < 3 {
+                    anyhow::bail!("controller RPC timed out")
+                }
+                Ok("acquired")
+            },
+            |attempt| slept.push(attempt),
+        )
+        .unwrap();
+        assert_eq!(answered, "acquired");
+        assert_eq!(calls, 3);
+        assert_eq!(slept, vec![1, 2]);
+
+        // An answer, even a refusal, ends the loop at once.
+        let mut calls = 0;
+        let answered: Result<&str> = claim_closeout_owner_until_answered(
+            3,
+            || {
+                calls += 1;
+                Ok("held_by_other")
+            },
+            |_| panic!("an answer is never retried"),
+        );
+        assert_eq!(answered.unwrap(), "held_by_other");
+        assert_eq!(calls, 1);
+
+        // Transport failure on every attempt surfaces the error.
+        let mut calls = 0;
+        let failed: Result<()> = claim_closeout_owner_until_answered(
+            3,
+            || {
+                calls += 1;
+                anyhow::bail!("down")
+            },
+            |_| {},
+        );
+        assert!(failed.is_err());
+        assert_eq!(calls, 3);
+    }
+
+    /// `HeartbeatBreak` / `IgnoreLoss` wedges: a lost refresh is not a verdict;
+    /// an answered "not the owner" is, and it must reach the foreground.
+    #[test]
+    fn heartbeat_retries_a_lost_refresh_and_reports_an_answered_loss() {
+        let lost: Result<CloseoutOwnerClaimOutcome, anyhow::Error> =
+            Err(anyhow::anyhow!("controller RPC timed out"));
+        assert_eq!(closeout_heartbeat_step(&lost), CloseoutHeartbeatStep::RetrySoon);
+        let superseded: Result<CloseoutOwnerClaimOutcome, anyhow::Error> =
+            Ok(CloseoutOwnerClaimOutcome::CycleSuperseded);
+        assert_eq!(
+            closeout_heartbeat_step(&superseded),
+            CloseoutHeartbeatStep::LeaseLost
+        );
+        let mut projection = open_cycle();
+        let CloseoutOwnerClaimOutcome::Acquired(owner) =
+            projection.decide_owner_claim(&request("other-closeout"), Some(true))
+        else {
+            panic!("a free lease is acquired");
+        };
+        projection.owner = Some(owner);
+        let refreshed: Result<CloseoutOwnerClaimOutcome, anyhow::Error> =
+            Ok(projection.decide_owner_claim(&request("this-closeout"), Some(true)));
+        assert_eq!(
+            closeout_heartbeat_step(&refreshed),
+            CloseoutHeartbeatStep::LeaseLost
+        );
+        let acquired: Result<CloseoutOwnerClaimOutcome, anyhow::Error> =
+            Ok(projection.decide_owner_claim(&request("other-closeout"), Some(true)));
+        assert_eq!(
+            closeout_heartbeat_step(&acquired),
+            CloseoutHeartbeatStep::Refreshed
+        );
+    }
+}
 
 #[cfg(test)]
 mod tests {

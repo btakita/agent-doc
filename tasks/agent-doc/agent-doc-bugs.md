@@ -818,6 +818,18 @@ Verification passed: targeted repair/flow/session-check suites, the 7,920-test a
 ### Re: GitHub issue #146 — gpt-5
 
 Yes. GitHub issue [#146](https://github.com/btakita/agent-doc/issues/146) is currently running in the dedicated `/root/gh146_compact` subagent, using an isolated worktree based on the latest `origin/main`. It owns the compact/remedy fix only; I will review and integrate its commit, rerun the relevant checks, and include it in the next release rather than letting the subagent publish independently.
+
+### Re: GitHub issue #144 — gpt-5
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/144
+
+Fixed, verified, pushed, and closed in commit `28951db18` on `origin/main`.
+
+The ownership invariant is now: a retained write is self-completing only while a durable state-edge holder remains. A receipt rejection below the unregister threshold still identifies an editor endpoint to recover; `live_editors=0` alone can still be a transient registration gap. Only the conjunction “endpoint currently unregistered after the refusal threshold” plus “document authority reports zero live editor replicas” proves that the route is unowned. That state is now classified as stranded and names `agent-doc commit <FILE>` instead of the held-write do-NOT diagnostic.
+
+`RetainedWriteOwnership` remains the policy owner. The observed realtime adapter joins durable transport health with the current replica count, `session-check` preserves those observed facts instead of rebuilding ownership from four cycle booleans, and commit-side guards consume the same observed predicate so the command named by the remedy is admitted by the write path. The reactive topology is transport-health and live-authority sources -> observed ownership -> shared verdict -> session-check/commit effects; no poller or second policy owner was added.
+
+Regression coverage exercises the pure verdict, the real unregister-threshold plus zero-live-replica adapter, the terminal authority/disk divergence diagnostic, the commit-side guard, and every statically enumerated retained-write refusal. All affected crate suites passed: 995 tests across `agent-doc-turn`, `agent-doc-document-realtime-io`, `agent-doc-session-check-io`, `agent-doc-commit-io`, and `agent-doc-codex-stop-io`, plus strict clippy with warnings denied.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
@@ -827,7 +839,7 @@ Yes. GitHub issue [#146](https://github.com/btakita/agent-doc/issues/146) is cur
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/144
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/144~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/145~~ — auto-struck: answered this cycle (#ftstrike)
 - #gh-fix https://github.com/btakita/agent-doc/issues/146
 - release + publish

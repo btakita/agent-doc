@@ -337,7 +337,7 @@ Notes:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#unstrikelost]
+- ⏭️ do [#unstrikelost]
 - do [#gh131nonipc]
 - do [#gh133sigterm]
 - do [#jbstagebackup]

@@ -2,6 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.458
+
+- **Opt-in simulator triage is safe under the CI ignored-test sweep.** The trace replay and finding-kind helpers now
+  skip cleanly when their environment inputs are absent, while retaining their explicit opt-in behavior. This keeps
+  `make tmux-ci` compatible with the network-adversarial fuzz tooling introduced in 0.35.457.
+
 ## 0.35.457
 
 - **Tmux pane auto-sync recovers after effect failures.** Editor navigation no longer leaves the pane-layout worker's

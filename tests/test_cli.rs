@@ -16310,8 +16310,7 @@ fn test_response_header_timestamp_contract_is_documented_and_singly_owned() {
 
     let write_runtime =
         fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
-    let production_owner =
-        "agent_doc_template::response_materialization::canonicalize_strict_closeout_response_heading(";
+    let production_owner = "agent_doc_template::response_materialization::canonicalize_strict_closeout_response_heading(";
     assert!(
         write_runtime.matches(production_owner).count() >= 2,
         "strict closeout and tracked-work prevalidation must share the production heading canonicalizer"
@@ -33048,6 +33047,11 @@ fn test_opencode_skill_install_preserves_operator_authority_instructions() {
     assert_operator_authority_instructions(&content, "OpenCode SKILL.md");
     assert!(content.contains("Interactive markdown session for OpenCode"));
     assert!(content.contains("agent-doc skill install --harness opencode"));
+    assert!(content.contains("`#chatprompt`, GH #140"));
+    assert!(content.contains(
+        "OpenCode has no `UserPromptSubmit` hook, so its agent MUST self-apply the shared rule"
+    ));
+    assert!(content.contains("> **Chat prompt (#chatprompt):** <verbatim prompt>"));
 }
 
 #[test]

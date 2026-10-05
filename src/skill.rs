@@ -3668,12 +3668,17 @@ mod tests {
         );
     }
 
-    /// GH #125 (`#chatprompt`): the hot path must tell the agent to record a
-    /// chat-originated prompt in the document, and that `no_changes: true` is
-    /// not a stop when the turn carries such a prompt.
+    /// GH #125 / #140 (`#chatprompt`): the hot path must tell every agent to
+    /// record a chat-originated prompt in the document, including OpenCode
+    /// where no `UserPromptSubmit` hook can deliver the instruction, and that
+    /// `no_changes: true` is not a stop when the turn carries such a prompt.
     #[test]
     fn bundled_skill_records_chat_originated_prompts() {
         assert!(SKILL_TEMPLATE.contains("`#chatprompt`, GH #125"));
+        assert!(SKILL_TEMPLATE.contains("`#chatprompt`, GH #140"));
+        assert!(SKILL_TEMPLATE.contains(
+            "OpenCode has no `UserPromptSubmit` hook, so its agent MUST self-apply the shared rule"
+        ));
         assert!(SKILL_TEMPLATE.contains(
             "begin the `patch:exchange` response with `> **Chat prompt (#chatprompt):** <verbatim prompt>` and persist it through `respond` / `write --commit`"
         ));

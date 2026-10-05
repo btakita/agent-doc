@@ -458,6 +458,18 @@ Three heads went to background subagents. Each one is claimed and has its own wo
 > **Queue prompt:** release + publish
 
 **Deferred:** this release has to ship the three subagent fixes (`#jbstagefallback`, GH #136, alt+shift menu), and all three are still running. I've claimed the head as `coordinator:after-subagent-integration` with a 3h TTL so the loop stops re-entering for it. Re-entering would only produce no-op cycles, and there have already been 2 in the last 30 minutes. Once the subagents report back, I'll merge their branches one at a time, run `make check` and one `make install`, then release this claim and cut the release.
+
+### Re: Coder + Zscaler latency as the design point for GH #136 — opus-5-5 · 2026-10-05T00:27-04:00
+
+> **Chat prompt (#chatprompt):** Note that coder has latency. The environment also has zscaler which adds more latency.
+
+I've forwarded this to the GH #136 subagent along with the earlier formal-proof request. The design point is now the remote path (Coder workspace, JetBrains Remote Dev backend, Zscaler), not localhost:
+
+- **No timing dependence:** state transitions are driven by events and acknowledgements. The invariants must hold under any message delay or reordering between the plugin, the controller and tmux.
+- **Lower latency means fewer round trips, not shorter timeouts:** remove the serial round trips and fixed waits in the focus/layout effect path (the 60s focus settle, the `retry_pending` → `converged` second attempt). Timeouts that absorb network delay stay as they are.
+- **Configurable timeouts:** any timeout or budget that gets added is configurable or based on measured round-trip time, and the spec names the remote/Zscaler path as the design point.
+
+Batch status: `#jbstagefallback` and the alt+shift menu fix are merged on `batch-0505` (plugin 0.2.496). The JetBrains suite passes there (exit 0, 714 tests, 0 failures). GH #136 is still running, and the release stays held until it lands.
 <!-- agent:boundary:da65c2e1 -->
 <!-- /agent:exchange -->
 

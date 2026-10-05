@@ -2,8 +2,8 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0fa46-ac02-7680-9541-ac8de07305db
-agent: claude
+  codex: 01a10ac7-0854-7370-9995-144908122424
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -16,6 +16,7 @@ prompt_presets:
   '#fix-ci': Fix CI
   '#followup': Add follow-up work into the backlog + queue
   '#rebase-conflicts': rebase + fix merge conflicts
+queue: go
 ---
 
 ## Status
@@ -689,13 +690,14 @@ The exchange is past 610 lines.
  
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 do [#lzmacroslicense]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzmacroslicense] [lazily-rs] lazily-macros 0.23.0 on crates.io still declares MIT: it was published before the Apache-2.0 relicense (c3026be) and its version was never bumped. Bump lazily-macros to 0.23.1 (Cargo.lock refresh), make check, cargo publish -p lazily-macros --locked (passage token), verify crates.io shows Apache-2.0.
+- [ ] 🚧 [#lzmacroslicense] [lazily-rs] lazily-macros 0.23.0 on crates.io still declares MIT: it was published before the Apache-2.0 relicense (c3026be) and its version was never bumped. Bump lazily-macros to 0.23.1 (Cargo.lock refresh), make check, cargo publish -p lazily-macros --locked (passage token), verify crates.io shows Apache-2.0.
 - [ ] [#lzmacosrunner] [operator-decision, agent-doc/lazily-py] Refresh newly stale macOS coverage evidence: add v0.35.430 to MACOS_INCOMPLETE_PAIR_BASELINE and update the recorded review list from 17 to the currently measured 18 incomplete-pair releases; advance the widening self-test fixture beyond the baseline, run make review-gate-self-test, make review-gate-status, and the full root make check, commit and push the evidence refresh, then return this item to review blocked solely on Mac release access.
 <!-- /agent:backlog -->
 

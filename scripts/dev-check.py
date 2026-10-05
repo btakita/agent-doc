@@ -24,6 +24,10 @@ BATCHED_TEST_PACKAGES = {
     "agent-doc-start-runtime-io",
 }
 DOC_SURFACES = ("SKILL.md", "AGENTS.md", "README.md", "SPEC.md", "runbooks/", "specs/")
+PROOFS = {
+    "full-check": ("AGENT_DOC_FULL_CHECK_SUCCEEDED", ".agent-doc-full-check.json"),
+    "tmux-ci": ("AGENT_DOC_TMUX_CI_SUCCEEDED", ".agent-doc-tmux-ci.json"),
+}
 
 
 def output(*args: str) -> str:
@@ -200,7 +204,6 @@ def run_affected(base: str) -> None:
 
 def repository_fingerprint() -> str:
     digest = hashlib.sha256()
-    digest.update(subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=ROOT))
     tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).split(b"\0")
     untracked = subprocess.check_output(
         ["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=ROOT
@@ -222,7 +225,10 @@ def repository_fingerprint() -> str:
         else:
             digest.update(b"missing\0")
         digest.update(b"\0")
-    for tool in ("rustc", "cargo", sys.executable, "node", "npm", "java", "lake"):
+    # Keep the receipt tied to every external runtime exercised by `check` or
+    # `tmux-ci`.  The proof is shared only when both repository bytes and these
+    # toolchain identities still match.
+    for tool in ("rustc", "cargo", sys.executable, "node", "npm", "java", "lake", "tmux"):
         executable = shutil.which(tool) if tool != sys.executable else sys.executable
         digest.update(tool.encode() + b"\0")
         if executable:
@@ -239,42 +245,64 @@ def repository_fingerprint() -> str:
     return digest.hexdigest()
 
 
-def receipt_path() -> Path:
-    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+def receipt_path(proof: str = "full-check") -> Path:
+    target = Path(os.environ.get("CARGO_TARGET_DIR") or ROOT / "target")
     if not target.is_absolute():
         target = ROOT / target
-    return target / ".agent-doc-full-check.json"
+    return target / PROOFS[proof][1]
 
 
-def record_full_check() -> None:
-    if os.environ.get("AGENT_DOC_FULL_CHECK_SUCCEEDED") != "1":
+def record_proof(proof: str) -> None:
+    guard, _ = PROOFS[proof]
+    if os.environ.get(guard) != "1":
+        target = "check" if proof == "full-check" else proof
         raise SystemExit(
-            "record-full-check is private to the successful `make check` recipe"
+            f"record-{proof} is private to the successful `make {target}` recipe"
         )
-    receipt = receipt_path()
+    receipt = receipt_path(proof)
     receipt.parent.mkdir(parents=True, exist_ok=True)
-    data = {"schema": 1, "fingerprint": repository_fingerprint()}
+    data = {"schema": 2, "proof": proof, "fingerprint": repository_fingerprint()}
     temporary = receipt.with_suffix(".tmp")
     temporary.write_text(json.dumps(data, sort_keys=True) + "\n")
     temporary.replace(receipt)
-    print(f"full-check receipt: {receipt}")
+    print(f"{proof} receipt: {receipt}")
 
 
-def verify_full_check() -> bool:
-    receipt = receipt_path()
+def verify_proof(proof: str) -> bool:
+    receipt = receipt_path(proof)
     try:
         data = json.loads(receipt.read_text())
     except (OSError, json.JSONDecodeError):
-        print("release-check: no reusable full-check receipt", file=sys.stderr)
+        print(f"release-check: no reusable {proof} receipt", file=sys.stderr)
         return False
-    valid = data == {"schema": 1, "fingerprint": repository_fingerprint()}
+    valid = data == {
+        "schema": 2,
+        "proof": proof,
+        "fingerprint": repository_fingerprint(),
+    }
     print(
-        "release-check: reusing content-identical full-suite proof"
+        f"release-check: reusing content-identical {proof} proof"
         if valid
-        else "release-check: repository/toolchain changed since the full suite",
+        else f"release-check: repository/toolchain changed since {proof}",
         file=sys.stderr,
     )
     return valid
+
+
+def record_full_check() -> None:
+    record_proof("full-check")
+
+
+def verify_full_check() -> bool:
+    return verify_proof("full-check")
+
+
+def record_tmux_ci() -> None:
+    record_proof("tmux-ci")
+
+
+def verify_tmux_ci() -> bool:
+    return verify_proof("tmux-ci")
 
 
 def self_test() -> None:
@@ -333,31 +361,93 @@ def self_test() -> None:
         subprocess.run(["git", "add", "tracked.txt"], cwd=tmp, check=True)
         real_root = ROOT
         real_target = os.environ.get("CARGO_TARGET_DIR")
-        real_proof = os.environ.get("AGENT_DOC_FULL_CHECK_SUCCEEDED")
+        real_full_proof = os.environ.get("AGENT_DOC_FULL_CHECK_SUCCEEDED")
+        real_tmux_proof = os.environ.get("AGENT_DOC_TMUX_CI_SUCCEEDED")
         ROOT = tmp
         os.environ["CARGO_TARGET_DIR"] = str(tmp / "target")
         os.environ["AGENT_DOC_FULL_CHECK_SUCCEEDED"] = "1"
+        os.environ["AGENT_DOC_TMUX_CI_SUCCEEDED"] = "1"
         try:
-            record_full_check()
-            assert verify_full_check(), "an unchanged tree must reuse its proof"
             tracked.write_text("second\n")
+            record_full_check()
+            record_tmux_ci()
+            assert verify_full_check(), "an unchanged tree must reuse its proof"
+            assert verify_tmux_ci(), "an unchanged tree must reuse its tmux proof"
+            fingerprint = repository_fingerprint()
+            subprocess.run(["git", "add", "tracked.txt"], cwd=tmp, check=True)
+            assert repository_fingerprint() == fingerprint, "index metadata is not repository content"
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=agent-doc self-test",
+                    "-c",
+                    "user.email=agent-doc@example.invalid",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "metadata-only proof",
+                ],
+                cwd=tmp,
+                check=True,
+            )
+            assert repository_fingerprint() == fingerprint, "commit metadata is not repository content"
+            assert verify_full_check(), "staging and committing identical bytes must preserve proof"
+            assert verify_tmux_ci(), "tmux proof must survive metadata-only commits"
+            tracked.write_text("third\n")
             assert not verify_full_check(), "repository drift must invalidate proof"
+            assert not verify_tmux_ci(), "repository drift must invalidate tmux proof"
         finally:
             ROOT = real_root
             if real_target is None:
                 os.environ.pop("CARGO_TARGET_DIR", None)
             else:
                 os.environ["CARGO_TARGET_DIR"] = real_target
-            if real_proof is None:
+            if real_full_proof is None:
                 os.environ.pop("AGENT_DOC_FULL_CHECK_SUCCEEDED", None)
             else:
-                os.environ["AGENT_DOC_FULL_CHECK_SUCCEEDED"] = real_proof
+                os.environ["AGENT_DOC_FULL_CHECK_SUCCEEDED"] = real_full_proof
+            if real_tmux_proof is None:
+                os.environ.pop("AGENT_DOC_TMUX_CI_SUCCEEDED", None)
+            else:
+                os.environ["AGENT_DOC_TMUX_CI_SUCCEEDED"] = real_tmux_proof
+
+    makefile = (ROOT / "Makefile").read_text()
+    preflight_start = makefile.index("release-preflight: version-sync")
+    release_start = makefile.index("release-check: release-preflight", preflight_start)
+    preflight = makefile[preflight_start:release_start]
+    release_check = makefile[release_start:makefile.index("\nrelease-macos-cadence-check:", release_start)]
+    assert "scripts/check_editor_parity.py" in preflight
+    assert release_check.index("verify-full-check") < release_check.index("$(MAKE) check")
+    assert release_check.index("$(MAKE) check") < release_check.index("verify-tmux-ci")
+    assert release_check.index("verify-tmux-ci") < release_check.index("$(MAKE) tmux-ci")
+    tmux_start = makefile.index("tmux-ci:")
+    tmux_recipe = makefile[tmux_start:makefile.index("\n# Lint", tmux_start)]
+    assert "AGENT_DOC_TMUX_CI_SUCCEEDED=1" in tmux_recipe
+    assert "record-tmux-ci" in tmux_recipe
+    install_start = makefile.index("install-full: editor-generation-bump")
+    install_recipe = makefile[install_start:makefile.index("\n# Keep every existing", install_start)]
+    assert '--target-dir "$(CARGO_TARGET_DIR_ABS)"' in install_recipe
+    assert install_recipe.count('"$(CARGO_TARGET_DIR_ABS)/release/agent-doc"') >= 4
+    assert 'CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" agent-doc lib-install --profile release' in install_recipe
+    assert "target/release/agent-doc" not in install_recipe
     print("dev-check self-test: ok")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("plan", "run", "self-test", "record-full-check", "verify-full-check"))
+    parser.add_argument(
+        "command",
+        choices=(
+            "plan",
+            "run",
+            "self-test",
+            "record-full-check",
+            "verify-full-check",
+            "record-tmux-ci",
+            "verify-tmux-ci",
+        ),
+    )
     parser.add_argument("--base", default=os.environ.get("AGENT_DOC_CHECK_BASE", "origin/main"))
     args = parser.parse_args()
     if args.command == "plan":
@@ -370,6 +460,10 @@ def main() -> int:
         record_full_check()
     elif args.command == "verify-full-check":
         return 0 if verify_full_check() else 1
+    elif args.command == "record-tmux-ci":
+        record_tmux_ci()
+    elif args.command == "verify-tmux-ci":
+        return 0 if verify_tmux_ci() else 1
     return 0
 
 

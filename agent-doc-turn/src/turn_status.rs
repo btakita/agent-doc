@@ -28,6 +28,14 @@ pub fn turn_active_marker_is_fresh(marker: &TurnActiveMarker, now: u64) -> bool 
     now.saturating_sub(marker.written_at) < TURN_ACTIVE_TTL_SECS
 }
 
+/// Newest heartbeat that reads as expired at `now`: a turn-active lease whose
+/// heartbeat is at or before this cutoff fails [`turn_active_marker_is_fresh`]
+/// and may be deleted by an age-based sweep (GH #135). `None` while `now` is
+/// still inside the first TTL window, where no heartbeat can be expired.
+pub fn turn_active_expiry_cutoff(now: u64) -> Option<u64> {
+    now.checked_sub(TURN_ACTIVE_TTL_SECS)
+}
+
 /// True when a turn-active fact belongs to `pane`.
 pub fn turn_active_marker_matches_pane(marker: &TurnActiveMarker, pane: &str) -> bool {
     marker.pane == pane
@@ -129,6 +137,23 @@ mod tests {
     }
 
     #[test]
+    fn turn_active_expiry_cutoff_agrees_with_freshness() {
+        assert_eq!(turn_active_expiry_cutoff(TURN_ACTIVE_TTL_SECS - 1), None);
+        let now = 1000 + TURN_ACTIVE_TTL_SECS;
+        let cutoff = turn_active_expiry_cutoff(now).unwrap();
+        let at_cutoff = TurnActiveMarker {
+            pane: "%7".to_string(),
+            written_at: cutoff,
+        };
+        let after_cutoff = TurnActiveMarker {
+            pane: "%7".to_string(),
+            written_at: cutoff + 1,
+        };
+        assert!(!turn_active_marker_is_fresh(&at_cutoff, now));
+        assert!(turn_active_marker_is_fresh(&after_cutoff, now));
+    }
+
+    #[test]
     fn turn_active_marker_matches_only_marker_pane() {
         let marker = TurnActiveMarker {
             pane: "%7".to_string(),
@@ -160,8 +185,15 @@ mod tests {
         // A pane already carrying the stale marker that goes busy must not weld
         // the busy marker on (`⚠ STALE SUPERVISOR ⟳ agent-doc: turn in progress`).
         let busy_on_stale = pane_title_for_status(true, true);
-        assert_eq!(pane_title_status_marker_count(&busy_on_stale), 1, "{busy_on_stale}");
-        assert!(!busy_on_stale.contains(TURN_ACTIVE_PANE_TITLE), "{busy_on_stale}");
+        assert_eq!(
+            pane_title_status_marker_count(&busy_on_stale),
+            1,
+            "{busy_on_stale}"
+        );
+        assert!(
+            !busy_on_stale.contains(TURN_ACTIVE_PANE_TITLE),
+            "{busy_on_stale}"
+        );
         let refreshed = pane_title_with_freshness(STALE_SUPERVISOR_PANE_MARKER, true);
         assert_eq!(pane_title_status_marker_count(&refreshed), 1, "{refreshed}");
         for active in [true, false] {
@@ -179,7 +211,10 @@ mod tests {
         let stale = pane_title_with_freshness(&welded, true);
         assert_eq!(stale, STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE);
         assert_eq!(pane_title_status_marker_count(&stale), 1);
-        assert_eq!(pane_title_with_freshness(&welded, false), TURN_ACTIVE_PANE_TITLE);
+        assert_eq!(
+            pane_title_with_freshness(&welded, false),
+            TURN_ACTIVE_PANE_TITLE
+        );
         assert_eq!(
             pane_title_with_freshness(STALE_SUPERVISOR_TURN_ACTIVE_PANE_TITLE, false),
             TURN_ACTIVE_PANE_TITLE

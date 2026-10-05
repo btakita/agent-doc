@@ -16,14 +16,14 @@
 //! the turn: outside tmux, or on any tmux error, it succeeds quietly.
 
 use agent_doc_sqlite::state_store::{
-    CoordinationLeaseRecord, clear_coordination_lease_if_holder_in_db,
-    clear_coordination_lease_in_db, load_coordination_lease_from_db,
-    load_coordination_leases_for_scope_kind_from_db, open_state_db,
-    upsert_coordination_lease_in_db,
+    Connection, CoordinationLeaseRecord, clear_coordination_lease_if_holder_in_db,
+    clear_coordination_lease_in_db, clear_coordination_leases_heartbeat_at_or_before_in_db,
+    load_coordination_lease_from_db, load_coordination_leases_for_scope_kind_from_db,
+    open_state_db, upsert_coordination_lease_in_db,
 };
 use agent_doc_turn::turn_status::{
-    TurnActiveMarker, pane_title_for_status, turn_active_marker_is_fresh,
-    turn_active_marker_matches_pane,
+    TurnActiveMarker, pane_title_for_status, turn_active_expiry_cutoff,
+    turn_active_marker_is_fresh, turn_active_marker_matches_pane,
 };
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -79,16 +79,62 @@ fn marker_from_lease(lease: CoordinationLeaseRecord, now: u64) -> Option<TurnAct
     turn_active_marker_is_fresh(&marker, now).then_some(marker)
 }
 
+fn sweep_expired_turn_active_leases_in_db(conn: &Connection, now: u64) -> Result<usize> {
+    let Some(cutoff) = turn_active_expiry_cutoff(now) else {
+        return Ok(0);
+    };
+    clear_coordination_leases_heartbeat_at_or_before_in_db(conn, TURN_ACTIVE_SCOPE, cutoff)
+}
+
+/// Delete every turn-active lease past `TURN_ACTIVE_TTL_SECS` (GH #135).
+///
+/// The sweep is keyed to heartbeat age only, never to the pane that wrote the
+/// row: a pane that died before its idle hook can never clear its own lease, so
+/// a per-pane clear cannot reclaim it. One bounded `DELETE`; the `WHERE` clause
+/// re-checks the heartbeat, so a lease refreshed by a live turn between a read
+/// and the sweep is never deleted. Returns the number of rows removed.
+pub fn sweep_expired_turn_active_markers(base: &Path) -> Result<usize> {
+    sweep_expired_turn_active_markers_at(base, now_secs())
+}
+
+pub fn sweep_expired_turn_active_markers_at(base: &Path, now: u64) -> Result<usize> {
+    let conn = open_state_db(base)?;
+    sweep_expired_turn_active_leases_in_db(&conn, now)
+}
+
+/// Count the turn-active leases a sweep at `now` would delete (`gc --dry-run`).
+pub fn count_expired_turn_active_markers_at(base: &Path, now: u64) -> Result<usize> {
+    let conn = open_state_db(base)?;
+    Ok(
+        load_coordination_leases_for_scope_kind_from_db(&conn, TURN_ACTIVE_SCOPE)?
+            .into_iter()
+            .filter(|lease| marker_from_lease(lease.clone(), now).is_none())
+            .count(),
+    )
+}
+
+/// A read that observed an expired lease reclaims it instead of only skipping
+/// it, so expiry deletes the row rather than guaranteeing it survives
+/// (GH #135). Best-effort: a failed reclaim never changes the read result.
+fn reclaim_expired_turn_active_leases_on_read(conn: &Connection, now: u64) {
+    let _ = sweep_expired_turn_active_leases_in_db(conn, now);
+}
+
 /// Read the turn-active marker if it exists and is not expired. An expired
 /// marker is treated as absent so a missed `idle` hook self-heals instead of
-/// wedging the session busy.
+/// wedging the session busy, and its row is reclaimed.
 pub fn read_turn_active_marker_at(base: &Path, now: u64) -> Option<TurnActiveMarker> {
     let conn = open_state_db(base).ok()?;
-    load_coordination_leases_for_scope_kind_from_db(&conn, TURN_ACTIVE_SCOPE)
-        .ok()?
+    let leases = load_coordination_leases_for_scope_kind_from_db(&conn, TURN_ACTIVE_SCOPE).ok()?;
+    let lease_count = leases.len();
+    let fresh: Vec<TurnActiveMarker> = leases
         .into_iter()
         .filter_map(|lease| marker_from_lease(lease, now))
-        .max_by_key(|marker| marker.written_at)
+        .collect();
+    if fresh.len() < lease_count {
+        reclaim_expired_turn_active_leases_on_read(&conn, now);
+    }
+    fresh.into_iter().max_by_key(|marker| marker.written_at)
 }
 
 fn read_turn_active_marker_for_pane_at(
@@ -109,7 +155,11 @@ fn read_turn_active_marker_for_pane_at(
             (legacy.holder == pane).then_some(legacy)?
         }
     };
-    marker_from_lease(lease, now)
+    let marker = marker_from_lease(lease, now);
+    if marker.is_none() {
+        reclaim_expired_turn_active_leases_on_read(&conn, now);
+    }
+    marker
 }
 
 /// Read the non-expired turn-active marker under `base`, if present.
@@ -278,6 +328,7 @@ fn resolve_marker_base() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_turn::turn_status::TURN_ACTIVE_TTL_SECS;
 
     #[test]
     fn turn_active_marker_write_read_clear_roundtrip() {
@@ -384,5 +435,99 @@ mod tests {
         );
         clear_turn_active_marker(base, "%7").unwrap();
         assert!(!turn_active_for_pane(base, "%7"));
+    }
+
+    fn turn_active_rows(base: &Path) -> Vec<String> {
+        let conn = open_state_db(base).unwrap();
+        let mut ids: Vec<String> =
+            load_coordination_leases_for_scope_kind_from_db(&conn, TURN_ACTIVE_SCOPE)
+                .unwrap()
+                .into_iter()
+                .map(|lease| lease.scope_id)
+                .collect();
+        ids.sort();
+        ids
+    }
+
+    fn agent_doc_base() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        dir
+    }
+
+    /// GH #135: a pane that died before its idle hook leaves a row no per-pane
+    /// clear can ever reach. The age sweep removes it without knowing the pane.
+    #[test]
+    fn sweep_deletes_expired_orphan_row_for_nonexistent_pane() {
+        let dir = agent_doc_base();
+        let base = dir.path();
+        let now = 1_000_000;
+        write_turn_active_marker_at(base, "%53", now - 292_943).unwrap();
+        write_turn_active_marker_at(base, "%436", now - 76_837).unwrap();
+        write_turn_active_marker_at(base, "%434", now - 144).unwrap();
+
+        let deleted = sweep_expired_turn_active_markers_at(base, now).unwrap();
+
+        assert_eq!(deleted, 2, "both expired rows are reclaimed");
+        assert_eq!(turn_active_rows(base), vec!["%434".to_string()]);
+    }
+
+    /// The live turn's lease is never swept, including one exactly one second
+    /// inside the TTL, and the sweep is a no-op when nothing is expired.
+    #[test]
+    fn sweep_keeps_fresh_rows() {
+        let dir = agent_doc_base();
+        let base = dir.path();
+        let now = 1_000_000;
+        write_turn_active_marker_at(base, "%7", now).unwrap();
+        write_turn_active_marker_at(base, "%8", now - (TURN_ACTIVE_TTL_SECS - 1)).unwrap();
+        write_turn_active_marker_at(base, "%9", now - TURN_ACTIVE_TTL_SECS).unwrap();
+
+        assert_eq!(count_expired_turn_active_markers_at(base, now).unwrap(), 1);
+        assert_eq!(sweep_expired_turn_active_markers_at(base, now).unwrap(), 1);
+        assert_eq!(
+            turn_active_rows(base),
+            vec!["%7".to_string(), "%8".to_string()]
+        );
+        assert_eq!(sweep_expired_turn_active_markers_at(base, now).unwrap(), 0);
+
+        // Inside the first TTL window nothing can be expired.
+        let early = agent_doc_base();
+        write_turn_active_marker_at(early.path(), "%1", 0).unwrap();
+        assert_eq!(
+            sweep_expired_turn_active_markers_at(early.path(), TURN_ACTIVE_TTL_SECS - 1).unwrap(),
+            0
+        );
+        assert_eq!(turn_active_rows(early.path()), vec!["%1".to_string()]);
+    }
+
+    /// `clear_matching_turn_status_projection` gates its clear on
+    /// `turn_active_for_pane_for_file`, which reads an expired lease as absent
+    /// and so never reached the clear. That read now reclaims the row itself.
+    #[test]
+    fn expired_row_is_reclaimed_by_the_read_that_reports_it_absent() {
+        let dir = agent_doc_base();
+        let base = dir.path();
+        let file = base.join("session.md");
+        std::fs::write(&file, "# session\n").unwrap();
+        let stale = now_secs() - TURN_ACTIVE_TTL_SECS - 10;
+        write_turn_active_marker_at(base, "%65", stale).unwrap();
+        write_turn_active_marker_at(base, "%66", now_secs()).unwrap();
+
+        assert!(
+            !turn_active_for_pane_for_file(&file, "%65"),
+            "an expired lease still reads as absent"
+        );
+        assert_eq!(
+            turn_active_rows(base),
+            vec!["%66".to_string()],
+            "the read reclaimed the expired row and kept the fresh one"
+        );
+
+        // The project-wide read reclaims too.
+        write_turn_active_marker_at(base, "%55", stale).unwrap();
+        let marker = read_turn_active_marker(base).expect("fresh marker survives");
+        assert_eq!(marker.pane, "%66");
+        assert_eq!(turn_active_rows(base), vec!["%66".to_string()]);
     }
 }

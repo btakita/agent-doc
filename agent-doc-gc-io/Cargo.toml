@@ -17,6 +17,7 @@ agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.454" }
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.454" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.454" }
+agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.454" }
 anyhow = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 

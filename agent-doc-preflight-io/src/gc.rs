@@ -144,6 +144,16 @@ pub fn run_preflight_auto_gc(file: &Path) {
         Ok(_) => {}
         Err(e) => eprintln!("[preflight] actor gc warning: {}", e),
     }
+    // Expired turn-active leases are swept every preflight, not only on the
+    // daily GC pass (GH #135): one bounded age-keyed DELETE that reclaims rows
+    // whose pane died before its idle hook. Fresh leases are never touched.
+    match agent_doc_turn_status_io::sweep_expired_turn_active_markers(&root) {
+        Ok(deleted) if deleted > 0 => {
+            eprintln!("[preflight] turn_active: {deleted} expired lease(s) swept");
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("[preflight] turn_active sweep warning: {error:#}"),
+    }
     let now = current_epoch_secs();
     let needs_gc = match latest_auto_gc_at(&root) {
         Ok(Some(timestamp)) => now.saturating_sub(timestamp) > 86_400,

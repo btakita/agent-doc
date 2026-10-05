@@ -322,3 +322,39 @@ realtime parse state machine in
 [Real-Time Workflow Authority](14-realtime-workflow.md); editor plugins surface
 diagnostics while the lifecycle waits, blocks, or retries after the operator or
 an explicitly accepted realtime quick-fix produces a new source epoch.
+
+## Turn-Active Lease Retirement (GH #135)
+
+`agent-doc turn-status active|idle` projects the in-flight turn as a
+pane-scoped coordination lease in `state.db` (`coordination_leases`,
+`scope_kind = 'turn_active'`, `scope_id = <pane>`, `heartbeat_secs` = the time
+the turn went active). `TURN_ACTIVE_TTL_SECS` (3600s, owned by
+`agent_doc_turn::turn_status`) governs both how a lease is read and when it is
+deleted:
+
+- **Read.** A lease is fresh while `now - heartbeat_secs < TURN_ACTIVE_TTL_SECS`
+  (`turn_active_marker_is_fresh`). An expired lease reads as absent, so a missed
+  idle hook never wedges the session busy.
+- **Reclaim on read.** A read that observes an expired lease
+  (`read_turn_active_marker_at`, and the pane-scoped read behind
+  `turn_active_for_pane` / `turn_active_for_pane_for_file`) also deletes the
+  expired rows. Without this, any clear gated on a present, pane-matched marker
+  (`clear_matching_turn_status_projection`) returns early on an expired row, so
+  expiry would guarantee the row survives instead of retiring it.
+- **Age sweep.** Expired rows are swept by age at two GC boundaries: every
+  preflight (`run_preflight_auto_gc`, before the daily-gated full GC) and
+  `agent-doc gc` (`--dry-run` only counts). The sweep
+  (`sweep_expired_turn_active_markers`) is keyed to heartbeat age only, never to
+  the pane that wrote the row, because a pane that died before its idle hook can
+  never clear its own lease.
+
+Every deletion is one bounded statement,
+`DELETE FROM coordination_leases WHERE scope_kind = 'turn_active' AND
+heartbeat_secs <= now - TURN_ACTIVE_TTL_SECS` (`turn_active_expiry_cutoff`), with
+no enclosing transaction. Because the `WHERE` clause re-checks the heartbeat, a
+fresh lease, including a live turn's lease refreshed between a read and the
+delete, is never removed. Inside the first TTL window (`now <
+TURN_ACTIVE_TTL_SECS`) nothing is expired and nothing is deleted. The per-pane
+idle clear (`clear_turn_active_marker`) remains the normal retirement path; the
+sweep and the read reclaim exist only for rows whose owner can no longer clear
+them.

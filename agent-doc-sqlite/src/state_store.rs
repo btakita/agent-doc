@@ -1926,6 +1926,23 @@ pub fn clear_coordination_lease_in_db(
     )? > 0)
 }
 
+/// Delete every lease of `scope_kind` whose heartbeat is at or before
+/// `cutoff_secs`, in one bounded statement (no enclosing transaction). Keyed to
+/// age only, never to the holder, so a lease whose holder vanished before it
+/// could clear its own row is still reclaimed (GH #135).
+pub fn clear_coordination_leases_heartbeat_at_or_before_in_db(
+    conn: &Connection,
+    scope_kind: &str,
+    cutoff_secs: u64,
+) -> Result<usize> {
+    let cutoff = i64::try_from(cutoff_secs).unwrap_or(i64::MAX);
+    conn.execute(
+        "DELETE FROM coordination_leases WHERE scope_kind = ?1 AND heartbeat_secs <= ?2",
+        params![scope_kind, cutoff],
+    )
+    .context("delete expired coordination leases")
+}
+
 pub fn clear_coordination_lease_if_holder_in_db(
     conn: &Connection,
     scope_kind: &str,

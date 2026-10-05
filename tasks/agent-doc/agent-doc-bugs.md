@@ -19,6 +19,7 @@ prompt_presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -758,6 +759,8 @@ All eight answered queue heads were consumed and the queue is drained. The excha
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- do [#claimmarker]
+- do [#releasecyclefast]
 <!-- /agent:queue -->
 
 

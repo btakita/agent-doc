@@ -1490,6 +1490,7 @@ dependencies = [
  "agent-doc-memory-io",
  "agent-doc-merge",
  "agent-doc-model-tier",
+ "agent-doc-op-capture-io",
  "agent-doc-ops-log-io",
  "agent-doc-project-config-io",
  "agent-doc-project-root-io",

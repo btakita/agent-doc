@@ -24,10 +24,11 @@ iteration aid, not release proof.
 After integration and any release-version projection, run exactly one
 authoritative `make check` before `finalize` / `write --commit`. A successful
 run records a worktree-local fingerprint of repository bytes and toolchain
-identities. `make release` may reuse that proof only while the fingerprint still
-matches; otherwise it runs `make check` itself. It always keeps `make tmux-ci`
-as a separate release gate. Do not pre-run another full suite merely because
-release is next. Do not rely on a pre-commit hook or waive red suites as
+identities. `make release` first runs cheap version/editor-parity checks, then
+may reuse the full-suite and tmux-CI proofs independently while their
+repository-bytes/toolchain fingerprints still match. Index, commit, and tag
+metadata do not invalidate identical checked bytes. Do not pre-run either
+expensive suite merely because release is next. Do not rely on a pre-commit hook or waive red suites as
 "unrelated" or "flaky".
 
 Capture two independent proofs when the runner exposes a failure tally:

@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check check-fast dev-check-self-test python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check check-fast dev-check-self-test python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -39,8 +39,8 @@ build-release:
 # GitHub Actions publishes Linux and Windows assets. Darwin archives are built
 # on operator-owned Mac hardware and may be attached to the release later.
 # The release owns the one authoritative full-suite gate. A content-identical
-# successful `make check` performed after integration/version projection is
-# reused; any source or toolchain change invalidates the local receipt.
+# successful `make check` and `make tmux-ci` performed after integration/version
+# projection are reused independently; source/toolchain changes invalidate both.
 release: release-check
 	@version=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	echo "Releasing v$$version..."; \
@@ -48,11 +48,18 @@ release: release-check
 	echo "Tag v$$version pushed. CI handles GitHub Release + PyPI."; \
 	$(MAKE) install-full
 
-release-check: tmux-ci
+release-preflight: version-sync
+	@python3 scripts/check_editor_parity.py
+
+release-check: release-preflight
 	@if ! python3 scripts/dev-check.py verify-full-check; then \
 		$(MAKE) check; \
 	fi
 	@python3 scripts/dev-check.py verify-full-check
+	@if ! python3 scripts/dev-check.py verify-tmux-ci; then \
+		$(MAKE) tmux-ci; \
+	fi
+	@python3 scripts/dev-check.py verify-tmux-ci
 
 release-macos-cadence-check:
 	@python3 scripts/agent-doc-dev verify-macos-release-cadence
@@ -190,6 +197,7 @@ tmux-ci:
 	for test_filter in provision_pane_ manual_layout_provisions_paused_queue_without_dispatch_or_resume layout_owned_provisioning_does_not_focus_intermediate_pane; do \
 		AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --test route "$$test_filter" -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	done
+	@AGENT_DOC_TMUX_CI_SUCCEEDED=1 python3 scripts/dev-check.py record-tmux-ci
 
 # Lint
 clippy:
@@ -379,11 +387,11 @@ install: editor-generation-bump
 # loop. Reserve `install-full` for verifying pre-release parity, which is what
 # the `release` target uses it for.
 install-full: editor-generation-bump
-	$(CARGO_CMD) build --release --bin agent-doc --lib
-	@target/release/agent-doc binary-install --source target/release/agent-doc
-	@target/release/agent-doc skill install --all
-	@target/release/agent-doc skill install --root . --all
-	@agent-doc lib-install
+	$(CARGO_CMD) build --release --target-dir "$(CARGO_TARGET_DIR_ABS)" --bin agent-doc --lib
+	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" binary-install --source "$(CARGO_TARGET_DIR_ABS)/release/agent-doc"
+	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --all
+	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --root . --all
+	@CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" agent-doc lib-install --profile release
 	@$(MAKE) install-editor-plugins
 	@$(MAKE) cleanup-build-artifacts
 

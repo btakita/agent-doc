@@ -31,11 +31,37 @@ Siblings (avoid their functions; note overlap here):
 
 ## Status
 
-- [ ] (e) gate generalisation + tests
-- [ ] (a) width bound + tests
-- [ ] (d) republish on recycle + tests
+- [x] (e) `5eb641072` — `pane_outside_target_window` (snapshot carries `#{window_id}`); gate field renamed
+  `in_stash` -> `outside_target_window`. Tests: `gh136e_*` in agent-doc-sync-io layout_column_audit.
+- [x] (a) `6c499bcea` — pure `agent_doc_controller::pane_layout::bound_layout_width` applied in
+  `publish_pane_layout_desired_invocation` (rpc.rs) via `bound_pane_layout_publication_width`.
+  Derived bound = `max(min(retained, observed + gated), asserted, 1)` using only the observation/gated set of
+  the RETAINED generation's own pass (`PaneLayoutWidthMemory` in project_controller.rs). Logs
+  `pane_layout_publication_width_bounded` / `pane_layout_publication_widened`. Tests: `gh136a_*` (pure,
+  exhaustive) + controller `gh136a_*`.
+- [x] (d) `6c499bcea` — `handle_supervisor_recycle_settled` -> `republish_pane_layout_after_recycle`
+  (publisher `recycle_settled`, FreshIntent, once per gated pass; pure decision
+  `recycle_settle_republishes_layout`). Tests: `gh136d_*`.
+- [x] (b) generation-reset collapse `8501c3a07` — ensure route on an empty (successor) graph merges over a
+  positive live tmux observation (`ensure_route_merge_basis`, `observe_live_layout_documents`). Regression
+  `gh136b_a_route_replayed_onto_a_successor_never_collapses_the_live_layout` (SimNet coder_zscaler,
+  at-least-once, 48 seeds; mutation-checked).
+  60s ceiling: NO 60s timer exists on the controller layout path. The only 60s ceiling is the JetBrains
+  plugin's per-request socket timeout (`CpRouteClient.kt:152 SOCKET_REQUEST_TIMEOUT_MS = 60_000L`) on the
+  SINGLE-THREAD surface delivery lane (`EditorTabSyncListener.kt` `surfaceDeliveryExecutor`): one request
+  the controller never answers (a controller mid-handoff/wedged) blocks every later observation until the
+  60s timeout + retry reaches the live controller. Also: generation numbers restart at 1 per controller,
+  so log pairing across a handoff fabricates long pairs. NOT fixed here (Kotlin lane; overlaps netadv5's
+  timeout work): proposed fix = latest-wins supersede of a stalled in-flight surface request (the controller
+  already rejects stale `(client_id, generation, sequence)`), not a shorter timeout.
 - [ ] (c) idle-boundary replacement + tests
-- [ ] (b) cause + fix + SimWorld coder_zscaler regression
 - [ ] TLA model `LayoutWidthBound` (NetChannel) + wedges, wired into scripts/run_tla.sh
 - [ ] spec text (specs/07-session-tmux-commands.md, specs/08-session-routing.md)
 - [ ] `make check` (capture exit status explicitly; RTK may mask it)
+
+## Overlap notes
+- rpc.rs `publish_pane_layout_desired_invocation`, effect worker (records gated docs), `handle_editor_route_rpc`
+  (merge basis), `escalate_focus_to_structural_layout` (claim), `handle_supervisor_recycle_settled` (hook).
+  netadv5 R7 (layout sync lock-skip) lives in `src/ffi.rs` / sync lock — not touched here.
+- Flake seen once under the parallel lib run: `reliable_sync_status_projects_plane_open_set_without_sidecar_oracle`
+  (passes alone 3/3; unrelated to these changes).

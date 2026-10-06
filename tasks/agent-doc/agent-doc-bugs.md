@@ -19,7 +19,6 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -853,6 +852,24 @@ Fixed and closed [#147](https://github.com/btakita/agent-doc/issues/147) on `mai
 The harness now represents Claude's empty `Message @subagent…` composer as a typed `AgentAddressed` state. Dispatch-only, supervisor-owned, and ordinary direct-pane submission paths all refuse before transport and report the exact unblocker `clear_pane_agent_addressing`, preventing session triggers from being silently delivered to a subagent.
 
 Verification passed: the full repository gate completed with 9,571 Rust tests plus editor, bootstrap, Lean, and TLA checks; the affected harness/controller/route suites also passed after the final direct-pane guard and again after integration.
+
+### Re: release + publish — gpt-5 · 2026-10-05T21:19-04:00
+
+> **Queue prompt:** release + publish
+
+Released and verified `agent-doc v0.35.462`.
+
+- Release commit/tag: `9df2a73bd0b2ce0749450355f93bdb720bf1cebc`
+- GitHub: https://github.com/btakita/agent-doc/releases/tag/v0.35.462
+- PyPI: https://pypi.org/project/agent-doc/0.35.462/
+- The authoritative `make check` passed all 9,573 primary tests plus the serialized, editor, simulator, Python, Lean, and TLA gates. `make tmux-ci` also passed.
+- All four native archives and both editor packages passed their published checksums. Linux archives contain `agent-doc` plus `libagent_doc.so`; Windows contains `agent-doc.exe` plus `agent_doc.dll`.
+- A clean no-cache PyPI install reports `agent-doc 0.35.462` and resolves the matching native library.
+- One plain `make install-full` proved the follow-up fix: both the global binary and `libagent_doc-0.35.462.so` were installed directly, without a corrective command.
+- Installed editor packages remain JetBrains `0.2.498` and VS Code `0.2.80`. No IDEA restart is required; a busy live endpoint may adopt the new native generation at its next idle boundary.
+- No separate `tmux-router` release was needed.
+
+This release includes the completed fixes for [#144](https://github.com/btakita/agent-doc/issues/144), [#145](https://github.com/btakita/agent-doc/issues/145), [#146](https://github.com/btakita/agent-doc/issues/146), and [#147](https://github.com/btakita/agent-doc/issues/147), plus the retained `sdk.md` delivery-rejection recovery fix. The original retained response recovered same-capture and committed; its separate older `pending_done` state still requires the editor endpoint to restart/reload/re-register before a pending-only session repair.
 <!-- agent:boundary:3d7316c5 -->
 <!-- /agent:exchange -->
 
@@ -862,11 +879,6 @@ Verification passed: the full repository gate completed with 9,571 Rust tests pl
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/144~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/145~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/146~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/147~~
-- release + publish
 <!-- /agent:queue -->
 
 

@@ -19,6 +19,7 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -124,6 +125,7 @@ The generated Claude Code, Codex, OpenCode, Cursor, and Grok skill surfaces, doc
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- #advance-reviews
 <!-- /agent:queue -->
 
 

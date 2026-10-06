@@ -132,8 +132,7 @@ class PluginLifecycleListener : ProjectManagerListener {
                     }
                 },
             )
-        FileEditorManager.getInstance(project)
-            .openFiles
+        EditorOpenFileSurface.snapshot(project)
             .asSequence()
             .filter { it.name.endsWith(".md") }
             .forEach { patchWatcher.registerRootForFile(it.path) }

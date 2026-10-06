@@ -54,7 +54,7 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
         // seed that existing open set because no new fileOpened event is guaranteed.
         ApplicationManager.getApplication().invokeLater {
             if (!project.isDisposed) {
-                FileEditorManager.getInstance(project).openFiles.forEach(::reportOpen)
+                EditorOpenFileSurface.snapshot(project).forEach(::reportOpen)
             }
         }
     }
@@ -141,11 +141,11 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
         }
     }
 
-    private fun republishOpenDocumentsAfterNativeReload(): Int {
+    private fun republishOpenDocumentsAfterNativeReload(files: Collection<VirtualFile>): Int {
         if (project.isDisposed) return 0
         val fallbackRoot = project.basePath ?: return 0
         val lib = AgentDocLib.get() ?: return 0
-        return FileEditorManager.getInstance(project).openFiles.count { file ->
+        return files.count { file ->
             reportOpenNow(lib, fallbackRoot, file, republish = true)
         }
     }
@@ -289,10 +289,23 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
             instances[project]?.reportOpenWithRetry(filePath, attempt = 1)
         }
 
-        fun republishOpenDocumentsAfterNativeReload(projects: Iterable<Project>): Int =
-            projects.sumOf { project ->
-                instances[project]?.republishOpenDocumentsAfterNativeReload() ?: 0
+        fun republishOpenDocumentsAfterNativeReload(projects: Iterable<Project>): Int {
+            val liveProjects = projects.filterNot { it.isDisposed }.toList()
+            val openFiles = linkedMapOf<Project, List<VirtualFile>>()
+            val capture = {
+                liveProjects.forEach { project ->
+                    openFiles[project] = EditorOpenFileSurface.snapshot(project)
+                }
             }
+            if (javax.swing.SwingUtilities.isEventDispatchThread()) {
+                capture()
+            } else {
+                ApplicationManager.getApplication().invokeAndWait(capture)
+            }
+            return liveProjects.sumOf { project ->
+                instances[project]?.republishOpenDocumentsAfterNativeReload(openFiles[project].orEmpty()) ?: 0
+            }
+        }
 
         fun disposeProject(project: Project) {
             instances.remove(project)

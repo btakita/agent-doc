@@ -626,6 +626,17 @@ class PatchWatcher(private val project: Project) : Disposable {
                 } else {
                     true
                 }
+                if (shouldReregisterForRemoteEventUtil(reasonToken)) {
+                    val outcome = when {
+                        reregistered -> "attached"
+                        reregisterPending.get() -> "deferred"
+                        else -> "not_attached"
+                    }
+                    LOG.info(
+                        "[crdt-replica] editor replica rebuild outcome=$outcome " +
+                            "file=$file reason=${reasonToken ?: "-"}",
+                    )
+                }
                 // #crdtpushdrain: every controller-published frontier drains urgently.
                 // The urgent path falls back to the gated drain when it finds no work,
                 // so the no-op backoff still governs speculative polling. Legacy

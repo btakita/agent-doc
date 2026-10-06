@@ -157,12 +157,14 @@ The five review gates were audited in a subagent. Two were stale gates and are n
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/151
-- #gh-fix https://github.com/btakita/agent-doc/issues/152
-- #gh-fix https://github.com/btakita/agent-doc/issues/153
-- #gh-fix https://github.com/btakita/agent-doc/issues/154
+- do [#qsubattr5]
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/151
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/152
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/153
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/154
 - #gh-fix https://github.com/btakita/agent-doc/issues/155
 - #gh-fix https://github.com/btakita/agent-doc/issues/156
+- #gh-fix https://github.com/btakita/agent-doc/issues/157
 - release + publish 
 <!-- /agent:queue -->
 

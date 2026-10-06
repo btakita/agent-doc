@@ -4,6 +4,8 @@ CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null 
 TEST_THREADS ?= 2
 TMUX_TEST_THREADS ?= 1
 CARGO_TARGET_DIR_ABS := $(abspath $(if $(strip $(CARGO_TARGET_DIR)),$(CARGO_TARGET_DIR),target))
+# Build artifacts may live outside the repository, but install destinations follow Cargo's bin root.
+CARGO_INSTALL_BIN_DIR_ABS := $(abspath $(if $(strip $(CARGO_INSTALL_ROOT)),$(CARGO_INSTALL_ROOT)/bin,$(if $(strip $(CARGO_HOME)),$(CARGO_HOME)/bin,$(if $(strip $(HOME)),$(HOME)/.cargo/bin,$(USERPROFILE)/.cargo/bin))))
 AGENT_DOC_TEST_TMPDIR ?= $(if $(strip $(TMPDIR)),$(TMPDIR),$(shell if test -d /var/tmp && test -w /var/tmp; then printf '%s' /var/tmp; else printf '%s' /tmp; fi))
 VSCODE_NODE_LOCK := editors/vscode/node_modules/.package-lock.json
 CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
@@ -391,7 +393,7 @@ install-full: editor-generation-bump
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" binary-install --source "$(CARGO_TARGET_DIR_ABS)/release/agent-doc"
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --all
 	@"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" skill install --root . --all
-	@CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" "$(CARGO_TARGET_DIR_ABS)/release/agent-doc" lib-install --profile release
+	@CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" "$(CARGO_TARGET_DIR_ABS)/release/agent-doc" lib-install --profile release --target-dir "$(CARGO_INSTALL_BIN_DIR_ABS)"
 	@$(MAKE) install-editor-plugins
 	@$(MAKE) cleanup-build-artifacts
 

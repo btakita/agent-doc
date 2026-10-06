@@ -14540,11 +14540,12 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
         "release must run cheap parity preflight before independently reusing matching full-check and tmux-ci proofs"
     );
     assert!(
-        makefile.contains("--target-dir \"$(CARGO_TARGET_DIR_ABS)\" --bin agent-doc --lib")
+        makefile.contains("CARGO_INSTALL_BIN_DIR_ABS :=")
+            && makefile.contains("--target-dir \"$(CARGO_TARGET_DIR_ABS)\" --bin agent-doc --lib")
             && makefile.contains(
-                "CARGO_TARGET_DIR=\"$(CARGO_TARGET_DIR_ABS)\" \"$(CARGO_TARGET_DIR_ABS)/release/agent-doc\" lib-install --profile release"
+                "CARGO_TARGET_DIR=\"$(CARGO_TARGET_DIR_ABS)\" \"$(CARGO_TARGET_DIR_ABS)/release/agent-doc\" lib-install --profile release --target-dir \"$(CARGO_INSTALL_BIN_DIR_ABS)\""
             ),
-        "install-full must build and install the binary and library from the resolved external target directory"
+        "install-full must read the library from the resolved build target and install it beside the globally installed binary"
     );
     assert!(
         makefile.contains("NEXTEST_NON_BATCHED_FILTER")

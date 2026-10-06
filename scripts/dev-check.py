@@ -438,11 +438,13 @@ def self_test() -> None:
     assert "record-tmux-ci" in tmux_recipe
     install_start = makefile.index("install-full: editor-generation-bump")
     install_recipe = makefile[install_start:makefile.index("\n# Keep every existing", install_start)]
+    assert "CARGO_INSTALL_BIN_DIR_ABS :=" in makefile
     assert '--target-dir "$(CARGO_TARGET_DIR_ABS)"' in install_recipe
     assert install_recipe.count('"$(CARGO_TARGET_DIR_ABS)/release/agent-doc"') >= 4
     assert (
         'CARGO_TARGET_DIR="$(CARGO_TARGET_DIR_ABS)" '
-        '"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" lib-install --profile release'
+        '"$(CARGO_TARGET_DIR_ABS)/release/agent-doc" lib-install --profile release '
+        '--target-dir "$(CARGO_INSTALL_BIN_DIR_ABS)"'
         in install_recipe
     )
     assert "target/release/agent-doc" not in install_recipe

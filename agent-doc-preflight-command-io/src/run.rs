@@ -4243,10 +4243,10 @@ mod tests {
     }
 
     #[test]
-    fn preflight_auto_dag_queue_edit_that_changes_selected_head_affects_turn() {
-        // The exception to non-active isolation: if a future queue edit changes
-        // the auto-DAG's selected head, the current turn must follow the new
-        // selected head.
+    fn preflight_auto_dag_queue_edit_cannot_preempt_in_progress_head() {
+        // GH #162: dependency maintenance may reorder pending work, but a
+        // future queue edit cannot preempt the head whose turn is already in
+        // progress.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let snapshot_content = concat!(
@@ -4284,13 +4284,11 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#blocker]\n- do [#active] after=#blocker"),
-            // `#pinoperatoronly`: auto-DAG expresses order by POSITION; it no
-            // longer injects an agent pin marker onto the promoted head.
-            "auto-DAG must reselect the blocker as the active head:\n{updated}"
+            updated.contains("- 🚧 do [#active] after=#blocker\n- do [#blocker]"),
+            "auto-DAG must preserve the in-progress head and order the new dependency behind it:\n{updated}"
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert_eq!(state.queue_task_id.as_deref(), Some("#blocker"));
+        assert_eq!(state.queue_task_id.as_deref(), Some("#active"));
     }
 
     #[test]

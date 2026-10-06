@@ -315,7 +315,12 @@ All reported defects are fixed locally, and the earlier SDK response is committe
 > **Queue prompt:** release + publish
 
 **Deferred:** public v0.35.469 publication is blocked because crates.io rejects both the GitHub Actions and local credentials for the required `tmux-router` 0.3.22 publish. Refresh the `CARGO_REGISTRY_TOKEN` secret for `btakita/tmux-router` (and the local token only if local publishing is desired); then this queue head can publish tmux-router first and complete the agent-doc release. No issue or release is being claimed complete before that succeeds.
-<!-- agent:boundary:4146e13a -->
+> **Chat prompt (#chatprompt):** Is the release published?
+
+### Re: Release status
+
+No. The public release is still **agent-doc v0.35.468**: GitHub has no `v0.35.469` release and PyPI reports `0.35.468`. The locally installed v0.35.469 candidate was pushed and tested, but not published. Its dependency release is also still blocked: crates.io reports `tmux-router` v0.3.20, not v0.3.22. Publishing still requires a working crates.io token.
+<!-- agent:boundary:575e8566 -->
 <!-- /agent:exchange -->
 
 <!--

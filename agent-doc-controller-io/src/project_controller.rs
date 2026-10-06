@@ -102,9 +102,6 @@ const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROLLER_IDLE_CLIENT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
 const SUPERVISOR_RECYCLE_SETTLE_WAIT: Duration = Duration::from_secs(10);
-#[cfg(test)]
-const COMPACT_RETAINED_PROJECTION_DEADLINE: Duration = Duration::from_millis(50);
-#[cfg(not(test))]
 const COMPACT_RETAINED_PROJECTION_DEADLINE: Duration = Duration::from_secs(30);
 
 const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS";
@@ -19112,7 +19109,11 @@ revised operator request
             agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
                 document_hash: document_hash.clone(),
                 continuation_id: continuation_id.to_string(),
-                retained_at_ms: compact_projection_now_ms(),
+                // Legacy retained facts deserialize without a timestamp and
+                // expire immediately after one failed completion attempt.
+                // Use that deterministic path instead of globally shortening
+                // the production deadline for every compact test.
+                retained_at_ms: 0,
                 file: file.to_string_lossy().into_owned(),
                 live_content: "retained compact target".to_string(),
                 committed_content: "retained compact target".to_string(),

@@ -342,6 +342,13 @@ open. During rolling upgrades, an older supervisor may omit `binary_stale`; the
 CLI then compares the returned process inode with the installed binary inode,
 without reading controller SQLite state.
 
+The supervisor resolves that installed command independently of its
+`current_exe`. If it started from another launchable path, such as the native
+payload behind a PyPI bootstrap, it snapshots the installed command at launch
+and compares later identity/inode observations to that snapshot. It does not
+compare the unrelated payload and wrapper inodes, which would report permanent
+staleness even before an upgrade.
+
 ### External control use cases
 
 1. **`/agent-doc` routing from a different tmux pane:** instead of `tmux send-keys`, the route subcommand opens the supervisor socket and calls `inject` with `/agent-doc <file>\r`. Removes the 5s sleep hack + race conditions in `start.rs:229`.

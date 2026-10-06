@@ -33864,7 +33864,9 @@ mod tests {
         agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
             &conn,
             CONTROLLER_MODEL_PRESSURE_STATE_KEY,
-            &(controller_model_pressure_now_secs() + 1).to_string(),
+            &(controller_model_pressure_now_secs()
+                + CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs() / 2)
+                .to_string(),
             controller_model_pressure_now_secs() * 1000,
         )
         .unwrap();

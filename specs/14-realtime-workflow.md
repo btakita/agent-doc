@@ -1182,7 +1182,8 @@ violated and each of which silently produced a recipe that could not pass:
 - **The focus guard matches the scratch document's absolute path**, not its
   basename; a stale tab of an older scratch document with the same filename
   otherwise passes the guard and receives the keystrokes.
-- **Scratch documents live in `tmp/live-repro/`**, not `.agent-doc/live-repro/`.
+- **Scratch documents live in `tmp/live-repro/`** (the captured-splice proof uses
+  its isolated `tmp/captured-splice-live/` sibling), not `.agent-doc/live-repro/`.
   Under `.agent-doc/`, once `.agent-doc/.agent-doc/` exists, the scratch document
   resolves its project root to `.agent-doc/` and becomes a nested project with
   its own controller, lease and `ops.log`. The harness reads receipts from the
@@ -1192,6 +1193,18 @@ violated and each of which silently produced a recipe that could not pass:
   canonical advance carries a real response patch (empty stdin is refused) and
   runs in the scratch document's owning pane when another idle shell pane owns
   it; the harness refuses before typing when the owner is not an idle shell.
+  The advance is launched asynchronously and edit two is admitted only after a
+  fresh `crdt_response_cell_add ... delivery_converged=false` receipt proves
+  that the independent response advanced canonical while editor delivery is
+  still retained. The harness then types edit two against that stale replica
+  before awaiting the advance,
+  so a healthy-path delivery cannot satisfy the stale-replica proof.
+  `tmp/live-repro/` remains ignored by the product repository; captured-splice
+  baselines its one scratch document through an isolated bare `GIT_DIR` plus the
+  product tree as `GIT_WORK_TREE`. Only the advance inherits those variables,
+  so the real strict response cycle has a commit boundary without creating a
+  nested `.agent-doc`, terminating in `commit_refused_ignored_path`, or modifying
+  the product repository's `HEAD`.
   `--dry-run` types nothing, so no fresh receipt can arrive: it names each wait
   instead of performing it and prints the whole recipe offline.
 

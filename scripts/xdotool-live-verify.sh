@@ -190,16 +190,16 @@ mark_ops_log() {
   MARK_OFFSET="$( [[ -f "$olog" ]] && stat -c %s "$olog" || echo 0 )"
 }
 
-# wait_for_marker <marker> [doc-stem]: with a stem, only lines carrying
-# `doc=<stem>` count, so another document's receipt cannot satisfy the wait.
+# wait_for_marker <marker> [doc-stem] [required-field]: with a stem, only lines
+# carrying `doc=<stem>` count; required-field must occur on that same line.
 wait_for_marker() {
-  local marker="$1" stem="${2:-}" olog deadline now
+  local marker="$1" stem="${2:-}" required="${3:-}" olog deadline now
   olog="$(ops_log)"
   if [[ -n "$stem" && "$DRY_RUN" != 1 ]]; then
     deadline=$(( $(date +%s) + TIMEOUT ))
     while :; do
       if [[ -f "$olog" ]] && tail -c +"$(( MARK_OFFSET + 1 ))" "$olog" 2>/dev/null \
-          | grep -F -- "$marker" | grep -qF -- "doc=$stem "; then
+          | grep -F -- "$marker" | grep -F -- "doc=$stem " | grep -qF -- "$required"; then
         return 0
       fi
       now=$(date +%s)
@@ -275,7 +275,7 @@ assert_no_marker() {
 # --- scratch lifecycle ------------------------------------------------------
 ensure_scratch_doc() {
   local case_name="$1" doc base
-  doc="$(scratch_doc "$case_name")"
+  if [[ $# -ge 2 ]]; then doc="$2"; else doc="$(scratch_doc "$case_name")"; fi
   base="$(basename "$doc")"
   mkdir -p "$(dirname "$doc")"
   if [[ ! -f "$doc" ]]; then
@@ -322,8 +322,8 @@ ide_launcher() {
 open_scratch_in_ide() {
   local doc="$1" base="$2" launcher deadline
   # Safety: refuse to hand anything but a live-repro scratch doc to the IDE.
-  [[ "$doc" == "$REPO/tmp/live-repro/"* && "$doc" != *"/.agent-doc/"* ]] \
-    || die "refusing to IDE-open '$doc' — only tmp/live-repro/ scratch docs may be opened automatically"
+  [[ ( "$doc" == "$REPO/tmp/live-repro/"* || "$doc" == "$REPO/tmp/captured-splice-live/"* ) && "$doc" != *"/.agent-doc/"* ]] \
+    || die "refusing to IDE-open '$doc' — only approved tmp live-proof scratch docs may be opened automatically"
   if ! launcher="$(ide_launcher)"; then
     warn "no IDE launcher found (tried \$AGENT_DOC_IDE_LAUNCHER, idea)"
     return 1
@@ -441,11 +441,13 @@ case_tmux_switch() {
 # Step 2 is the part a bare "type and grep" recipe skips, and skipping it is why
 # earlier evidence sweeps found splice recoveries with nothing to recover across.
 case_captured_splice() {
-  local doc base wid rel
-  doc="$(ensure_scratch_doc captured-splice)"; base="$(basename "$doc")"
+  local doc base wid rel run_id
+  run_id="${AGENT_DOC_LIVE_RUN_ID:-$(date +%s)}"
+  doc="$(ensure_scratch_doc "captured-splice-$run_id" "$REPO/tmp/captured-splice-live/xdotool-captured-splice-$run_id.md")"; base="$(basename "$doc")"
   OPS_LOG_DOC="$doc"
   log "receipts for this doc are read from $(ops_log)"
   rel="${doc#"$REPO"/}"
+  ensure_captured_splice_commit_repo "$doc"
   assert_scratch_authority "$rel"
   wid="$(require_window "$base" "$doc")"
   # Opening the doc can bind it to a pane for the first time; re-read before typing.
@@ -467,14 +469,28 @@ case_captured_splice() {
   fi
 
   if [[ "$DRY_RUN" == 1 ]]; then
-    log "[dry-run] would advance the canonical response via: agent-doc write --commit $rel (in pane ${SCRATCH_OWNER_PANE:-self})"
+    log "[dry-run] would start the canonical response advance via: agent-doc write --commit $rel (in pane ${SCRATCH_OWNER_PANE:-self})"
+    log "[dry-run] would wait for a fresh crdt_response_cell_add delivery_converged=false receipt for ${base%.md} before typing edit two"
   else
-    log "advancing the canonical response independently of the editor"
-    await_scratch_owner_ready "$rel" && advance_in_owner_pane "$rel" \
-      || warn "response advance did not complete; the verifier will report an unadvanced canonical text"
+    log "advancing the canonical response independently while retaining its editor delivery"
+    await_scratch_owner_ready "$rel" || die "scratch owner could not host the independent advance"
+    mark_ops_log
+    start_advance_in_owner_pane "$rel" || die "independent response advance could not be started"
+    wait_for_marker "crdt_response_cell_add" "${base%.md}" "delivery_converged=false" \
+      || die "the independent advance did not retain canonical delivery within ${TIMEOUT}s — refusing a healthy-path proof; edit two must be typed against the stale editor replica"
   fi
 
+  mark_ops_log
   type_into_scratch "$wid" "$base" "operator edit two after the advance" "$doc"
+
+  if [[ "$DRY_RUN" != 1 ]]; then
+    wait_for_marker "editor_op_capture_proof" "${base%.md}" \
+      || die "edit two did not produce a fresh operator capture proof within ${TIMEOUT}s"
+    wait_for_marker "controller_crdt_current_text" "${base%.md}" "source=captured-local-splice-recovery" \
+      || die "edit two did not reach captured-local-splice recovery within ${TIMEOUT}s"
+    await_advance_in_owner_pane \
+      || warn "strict scratch closeout remained retained after the stale-replica proof; verifier receipts remain authoritative"
+  fi
 
   if [[ "$DRY_RUN" == 1 ]]; then
     log "[dry-run] would assert: agent-doc verify-captured-splice-recovery $rel"
@@ -486,6 +502,35 @@ case_captured_splice() {
   fi
   warn "FAIL [activateinstalledjetbrai]: see the verifier's diagnosis above — it names which link is missing"
   return 1
+}
+
+# The live-repro directory is ignored by the product repository, deliberately:
+# no proof scratch may leak into a product commit. Strict response cycles still
+# require a reachable commit boundary, so captured-splice owns an isolated bare
+# Git directory and points only the advance process at it through GIT_DIR and
+# GIT_WORK_TREE. It MUST NOT create a nested `.git` beside the document: that
+# would also create a nested `.agent-doc`, split the controller/ops-log authority,
+# and make the proof meaningless.
+ADVANCE_GIT_DIR=""
+ensure_captured_splice_commit_repo() {
+  local doc="$1" root rel
+  root="$(dirname "$doc")"; rel="${doc#"$REPO"/}"
+  ADVANCE_GIT_DIR="$root/.captured-splice-git-dir"
+  if [[ "$DRY_RUN" == 1 ]]; then
+    log "[dry-run] would baseline $rel through isolated GIT_DIR=$ADVANCE_GIT_DIR"
+    return 0
+  fi
+  [[ ! -e "$root/.git" && ! -e "$root/.agent-doc" ]] \
+    || die "live-repro contains nested .git/.agent-doc authority; move it aside before running the proof"
+  git init -q --bare "$ADVANCE_GIT_DIR"
+  GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" git add -f -- "$rel"
+  if ! GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" git diff --cached --quiet -- "$rel"; then
+    GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" git -c user.name=agent-doc-live-verify \
+      -c user.email=agent-doc-live-verify@invalid \
+      commit -q -m "captured-splice live proof baseline" -- "$rel"
+  fi
+  GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" git ls-files --error-unmatch "$rel" >/dev/null \
+    || die "captured-splice scratch is not tracked in its isolated Git directory"
 }
 
 case_lvbatch_markers() {
@@ -591,35 +636,45 @@ await_scratch_owner_ready() {
   describe_scratch_owner
 }
 
-# Run the advance in the owning pane and wait for its exit status via a sentinel.
-advance_in_owner_pane() {
-  local rel="$1" sentinel rc deadline body
+# Start the advance in the owning pane, but deliberately do not wait for it. The
+# caller first observes the binary's retained-delivery receipt, types edit two
+# against the stale replica, and only then releases this command to finish.
+ADVANCE_SENTINEL=""
+ADVANCE_BODY=""
+start_advance_in_owner_pane() {
+  local rel="$1"
   # The advance must carry a response: `write --commit` with empty stdin is
   # refused ("empty response — nothing to write"), so the canonical text never
   # moved and the verifier could only ever report an unadvanced document.
-  body="$(mktemp "${TMPDIR:-/tmp}/xdotool-advance-body.XXXXXX")"
+  ADVANCE_BODY="$(mktemp "${TMPDIR:-/tmp}/xdotool-advance-body.XXXXXX")"
   printf '<!-- patch:exchange -->\n### Re: captured-splice advance — xdotool\n\nCanonical response advanced independently of the editor at %s.\n<!-- /patch:exchange -->\n' \
-    "$(date -u +%FT%TZ)" > "$body"
+    "$(date -u +%FT%TZ)" > "$ADVANCE_BODY"
+  ADVANCE_SENTINEL="$(mktemp -u "${TMPDIR:-/tmp}/xdotool-advance.XXXXXX")"
   if [[ -z "$SCRATCH_OWNER_PANE" ]]; then
-    (cd "$REPO" && agent-doc write --commit "$rel" < "$body")
-    rc=$?; rm -f "$body"; return $rc
+    (cd "$REPO"; GIT_DIR="$ADVANCE_GIT_DIR" GIT_WORK_TREE="$REPO" agent-doc write --commit "$rel" < "$ADVANCE_BODY"; printf '%s\n' "$?" > "$ADVANCE_SENTINEL") &
+    return 0
   fi
-  sentinel="$(mktemp -u "${TMPDIR:-/tmp}/xdotool-advance.XXXXXX")"
   if [[ "$SCRATCH_OWNER_BANG" == 1 ]]; then
     # `!` alone switches the composer into bash mode; the command text follows.
     tmux send-keys -t "$SCRATCH_OWNER_PANE" -l -- '!'
     sleep 0.5
   fi
   tmux send-keys -t "$SCRATCH_OWNER_PANE" -l -- \
-    "cd $(printf '%q' "$REPO") && agent-doc write --commit $(printf '%q' "$rel") < $(printf '%q' "$body"); echo \$? > $(printf '%q' "$sentinel")"
+    "cd $(printf '%q' "$REPO") && GIT_DIR=$(printf '%q' "$ADVANCE_GIT_DIR") GIT_WORK_TREE=$(printf '%q' "$REPO") agent-doc write --commit $(printf '%q' "$rel") < $(printf '%q' "$ADVANCE_BODY"); echo \$? > $(printf '%q' "$ADVANCE_SENTINEL")"
   tmux send-keys -t "$SCRATCH_OWNER_PANE" Enter
+}
+
+await_advance_in_owner_pane() {
+  local rc deadline
+  [[ -n "$ADVANCE_SENTINEL" ]] || { warn "no independent advance is running"; return 1; }
   deadline=$(( $(date +%s) + TIMEOUT * 4 ))
-  until [[ -s "$sentinel" ]]; do
+  until [[ -s "$ADVANCE_SENTINEL" ]]; do
     (( $(date +%s) >= deadline )) && { warn "advance in $SCRATCH_OWNER_PANE did not finish"; return 1; }
     sleep 0.2
   done
-  rc="$(cat "$sentinel")"; rm -f "$sentinel" "$body"
-  log "advance in $SCRATCH_OWNER_PANE exited $rc"
+  rc="$(cat "$ADVANCE_SENTINEL")"; rm -f "$ADVANCE_SENTINEL" "$ADVANCE_BODY"
+  ADVANCE_SENTINEL=""; ADVANCE_BODY=""
+  log "advance in ${SCRATCH_OWNER_PANE:-self} exited $rc"
   [[ "$rc" == 0 ]]
 }
 

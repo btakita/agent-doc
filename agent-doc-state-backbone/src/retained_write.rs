@@ -293,13 +293,11 @@ pub fn join_controller_settlement(
         settled_hash,
         ..
     } = controller
+        && durable.intent_id() == Some(intent_id.as_str())
+        && authority_hash == Some(settled_hash.as_str())
+        && disk_hash == Some(settled_hash.as_str())
     {
-        if durable.intent_id() == Some(intent_id.as_str())
-            && authority_hash == Some(settled_hash.as_str())
-            && disk_hash == Some(settled_hash.as_str())
-        {
-            return ControllerSettlementJoin::UseController;
-        }
+        return ControllerSettlementJoin::UseController;
     }
 
     if let (

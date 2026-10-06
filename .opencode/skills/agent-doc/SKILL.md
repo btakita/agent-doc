@@ -2,7 +2,7 @@
 description: "Interactive markdown session for OpenCode. TRIGGER: user invokes /agent-doc <file> command. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.463"
+agent-doc-version: "0.35.464"
 ---
 
 # agent-doc

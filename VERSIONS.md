@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.464
+
+- **Restarted editor replicas now fail diagnostically instead of flapping invisibly (GH #149).** JetBrains retained-
+  reseed handling no longer dereferences a missing registration shadow; it records the precise attach failure, removes
+  the provisional replica deterministically, and gives recovery guidance for a missing settled shadow. Compact
+  refusals now enter the operations log, while `admin inspect` joins live editor/replica health, counts, attach causes,
+  and remedies so a write-refusing document cannot appear simply healthy.
+
 ## 0.35.463
 
 - **Retained Compact Exchange projections now terminate with actionable recovery (GH #148).** The controller owns a

@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: agent-doc <file>. Requires binary admission and committed closeout."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.463"
+agent-doc-version: "0.35.464"
 ---
 
 # agent-doc

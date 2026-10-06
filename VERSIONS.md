@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.469
+
+- **Partial registry cleanup no longer closes live tmux actors (GH #160).** tmux-router treats registry saves as
+  metadata mutations instead of lifecycle authority, while preserve-child startup repairs closed or pane-less actor
+  records through the controller and still rejects conflicting live pane ownership.
+- **Reusable preset queue heads survive archived done-ID collisions (GH #161).** Queue maintenance preserves a live
+  registered preset name even when an archived item reused that ID, and dispatch consumes the settled post-maintenance
+  projection so genuinely completed heads are not dispatched from stale content.
+
 ## 0.35.468
 
 - **Retained Compact Exchange delivery is an accepted asynchronous outcome.** When the initiating compact continuation

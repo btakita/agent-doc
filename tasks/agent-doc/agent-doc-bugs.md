@@ -19,6 +19,7 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status

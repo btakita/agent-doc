@@ -33670,3 +33670,46 @@ fn every_wedge_recording_site_classifies_rejections_too() {
         );
     }
 }
+
+/// `#drivecapturedsplice` is intentionally a stale-replica live proof. It must
+/// not silently collapse back to the healthy sequence where the response is
+/// delivered before edit two, and its ignored scratch must not make the strict
+/// response cycle terminally `commit_refused`.
+#[test]
+fn captured_splice_live_recipe_holds_delivery_and_uses_disposable_commit_boundary() {
+    let script = std::fs::read_to_string("scripts/xdotool-live-verify.sh")
+        .expect("read xdotool live verifier");
+    let case_start = script.find("case_captured_splice() {").expect("captured-splice case");
+    let case_end = script[case_start..]
+        .find("\ncase_lvbatch_markers() {")
+        .map(|offset| case_start + offset)
+        .expect("captured-splice case end");
+    let recipe = &script[case_start..case_end];
+
+    let start = recipe
+        .find("start_advance_in_owner_pane \"$rel\"")
+        .expect("asynchronous canonical advance");
+    let retained = recipe
+        .find("wait_for_marker \"crdt_response_cell_add\" \"${base%.md}\" \"delivery_converged=false\"")
+        .expect("retained canonical-delivery receipt");
+    let edit_two = recipe
+        .find("operator edit two after the advance")
+        .expect("second real editor edit");
+    let completion = recipe
+        .find("await_advance_in_owner_pane")
+        .expect("advance completion after edit two");
+    assert!(
+        start < retained && retained < edit_two && edit_two < completion,
+        "the live proof must observe a retained independent advance, type edit two against the stale replica, then await closeout",
+    );
+    assert!(
+        recipe.contains("ensure_captured_splice_commit_repo \"$doc\"")
+            && script.contains("git init -q --bare \"$ADVANCE_GIT_DIR\"")
+            && script.contains("GIT_DIR=\"$ADVANCE_GIT_DIR\" GIT_WORK_TREE=\"$REPO\" git add -f"),
+        "the ignored scratch must get an isolated Git commit boundary",
+    );
+    assert!(
+        recipe.contains("agent-doc verify-captured-splice-recovery \"$rel\""),
+        "the live driver must defer the verdict to the branch-specific verifier contract",
+    );
+}

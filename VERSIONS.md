@@ -2,6 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.462
+
+- **Full installation now places the freshly built native library beside the installed binary.** `make install-full`
+  passes the resolved binary directory to `lib-install`, preventing a release worktree's temporary target directory
+  from receiving—and later deleting—the only updated cdylib.
+
 ## 0.35.461
 
 - **Claude composer routing no longer mistakes agent-addressing chrome for an operator draft (GH #147).** The

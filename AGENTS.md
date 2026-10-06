@@ -341,26 +341,37 @@ An on-demand tag or Linux/Windows build does not reset that clock.
 
 When publishing a release:
 
-1. Run `make release-version VERSION=<version>` to project the version across
+1. Establish one release batch before version projection. Collect every completed
+   claimed queue fix that is ready at that boundary and integrate those branches
+   together; refresh claims for workers still running, and leave fixes that become
+   ready after the boundary for the next release. Do not run separate
+   version/check/install trains for fixes that were already ready together.
+2. Run `make release-version VERSION=<version>` to project the version across
    every workspace package, internal path constraint, `Cargo.lock`,
    `pyproject.toml`, and the bundled `SKILL.md`. Do not bump these surfaces
    manually.
-2. Update `VERSIONS.md` with one entry summarizing all changes accumulated since
+3. Update `VERSIONS.md` with one entry summarizing all changes accumulated since
    the previous release.
-3. Run `make check` (clippy + test).
-4. Run `make install-full` to install a full release-profile local build and
-   verify the changed behavior end-to-end; automated checks are the verification
-   and the agent does not wait on a human.
+4. Run `make check` (clippy + test) exactly once for the integrated, versioned
+   batch. `make release` reuses this content-identical proof.
+5. Do not pre-run `make install-full`: `make release` owns the batch's single
+   full-profile local install after the tag/publish handoff. It reports timed
+   `tag-publish-handoff` and `local-install-full` outcomes independently, so a
+   local install failure after a successful push is reported as local follow-up,
+   not as an unpublished release and not as a reason to cut another tag.
 
    **`#installfulloom`: run this ONCE, at release time — never as the per-fix install.** `[profile.release]` is `lto = "fat"` + `codegen-units = 1` over a 144-crate workspace, which fat-LTO collapses into a single enormous LLVM process; repeated runs can OOM the machine (observed 2026-07-18: a session that invoked it ~10 times while iterating was killed with SIGKILL/137, losing the live session). For the edit → install → recycle loop use **`make install`**, which builds `release-local` (`lto = off`, `codegen-units = 256`, incremental) and installs the same binary + cdylib + editor packages.
-5. **No operator gate on agent-doable steps (`#deploy-just-do-it`):** proceed
-   straight through steps 6-9 without asking. The only operator-gated step is a
+6. **No operator gate on agent-doable steps (`#deploy-just-do-it`):** proceed
+   straight through steps 7-10 without asking. The only operator-gated step is a
    live human eyeball of the changed behavior in a real editor/pane; record it as
    a non-blocking `[operator-verify]` follow-up.
-6. Branch → PR → squash merge to main (or commit + push to main directly in this
+7. Branch → PR → squash merge to main (or commit + push to main directly in this
    dogfooding repo).
-7. Run `make release`; the recipe tags `v<version>` and pushes main plus the tag.
-8. The tag push drives the GitHub Release: `.github/workflows/release.yml`
+8. Run `make release`; the recipe revalidates/reuses the release proofs, tags
+   `v<version>`, pushes main plus the tag, and then performs the one local
+   `install-full`. Treat the tag/publish handoff as complete once its phase says
+   `complete`, regardless of the separately reported local-install outcome.
+9. The tag push drives the GitHub Release: `.github/workflows/release.yml`
    builds four Linux and Windows target binaries and packages each one **with its
    platform cdylib beside it** (`libagent_doc.so` / `agent_doc.dll` — GH #52: without
    it `lib-path` cannot resolve the library and every package install runs the
@@ -384,7 +395,7 @@ When publishing a release:
    `/manage/project/agent-doc/settings/` page, which PyPI gates behind a password
    re-confirmation. Deleting release history is reserved for a ceiling the check
    actually reports; verify any deletion from the authenticated `/manage/` pages.
-9. Verify the release run went green (`gh run list --limit 5`) and that
+10. Verify the release run went green (`gh run list --limit 5`) and that
    `gh release view v<version>` lists four automated platform archives plus
    `SHA256SUMS`. On a Mac, `make release-macos-cadence-check` reports whether the
    weekly Darwin window is open; `make release-macos-assets TAG=v<version>`

@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check check-fast dev-check-self-test python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test python-compat-check artifact-purge-check precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla fuzz
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -45,10 +45,7 @@ build-release:
 # projection are reused independently; source/toolchain changes invalidate both.
 release: release-check
 	@version=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
-	echo "Releasing v$$version..."; \
-	git tag "v$$version" && git push origin main "v$$version" && \
-	echo "Tag v$$version pushed. CI handles GitHub Release + PyPI."; \
-	$(MAKE) install-full
+	python3 scripts/release-driver.py --version "$$version" --make "$(MAKE)"
 
 release-preflight: version-sync
 	@python3 scripts/check_editor_parity.py
@@ -314,12 +311,15 @@ lean:
 dev-check-self-test:
 	@python3 scripts/dev-check.py self-test
 
+release-driver-self-test:
+	@python3 scripts/release-driver.py --self-test
+
 # Fast edit-loop validation: helper checks plus Rust packages affected by the
 # diff and their reverse-dependency closure. This is not a release proof.
-check-fast: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test
+check-fast: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test
 	@python3 scripts/dev-check.py run
 
-check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity python-bootstrap-test lean tla
+check: python-compat-check plugin-version-check artifact-purge-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity python-bootstrap-test lean tla
 	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.

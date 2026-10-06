@@ -231,6 +231,22 @@ The v0.35.466 GitHub Release workflow completed successfully with all platform a
 > **Chat prompt (#chatprompt):** Idea is unresponsive
 
 > **Chat prompt (#chatprompt):** sdk.md session crashed
+
+### Re: recovered response
+
+Completed and committed the [agent-doc session](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md).
+
+- Released [agent-doc v0.35.466](https://github.com/btakita/agent-doc/releases/tag/v0.35.466); GitHub assets and PyPI publication succeeded.
+- Fixed and closed GitHub issues #151–#157.
+- Hot updates now automatically recycle existing supervisors and controllers at safe boundaries.
+- `roseshield.md` retained intent converged and committed without resending or forcing disk.
+- `sdk.md` recovered with no lost work.
+- IDEA’s apparent hang was a hidden File Cache Conflict dialog. The plugin is upgraded and live.
+- Full checks passed, including 9,591 Rust tests, editor suites, tmux integration, and formal models.
+- Queue drained; `#qsubattr5` and `#drivecapturedsplice` remain correctly gated for live proof.
+- Document commits: `539d7f0604`, queue closeout `4002c605ab`.
+
+Yes—you can safely restart IDEA now, although it is no longer required.
 <!-- agent:boundary:38ce3b77 -->
 <!-- /agent:exchange -->
 

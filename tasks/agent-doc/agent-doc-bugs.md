@@ -19,6 +19,7 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -48,7 +49,8 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-
+- #gh-fix https://github.com/btakita/agent-doc/issues/148
+- release + publish
 <!-- /agent:queue -->
 
 

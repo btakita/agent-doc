@@ -40,7 +40,30 @@ Released agent-doc v0.35.460; fixed and closed GH #139–#143; restored this doc
 Compacted content:
 - Archived 42 response topic(s): do #steerbaselineabsorb; preflight refused on its own repair (haiven-dev sdk.md); queue: GH #127, #128, #129 + release; 39 more
 - Prior summary/context: prior compacted content: Archived 15 response topic(s): release + publish; release cleanup; queue dispatch; 12 more
-<!-- agent:boundary:3d7316c5 -->
+> **Chat prompt (#chatprompt):** Can we reduce the time to release?
+
+### Re: GH #148, GH #149, releases, and release speed — gpt-6.1-sol · 2026-10-05T23:22:27-04:00
+
+Yes. The largest avoidable delay in this cycle was running two complete release trains: GH #149 arrived while v0.35.463 was already underway, so it required a second version projection, full check, tmux CI, release, and install. The recommended fast path is to coalesce all ready claimed fixes before the release boundary, then distinguish “tag pushed and publication jobs handed off” from “local install-full finished.” I added that work as the recommended `releasefastpath` backlog item, including timing and regression coverage.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/148
+
+Preset expansion satisfied: fix then closerelease.
+
+GH #148 is fixed, closed, and released in v0.35.463. Retained compact projections now have a bounded 30-second deadline with identity-fenced cleanup, a nonzero pending CLI outcome, rerun guidance, and continuation-aware completion logs. The final tree passed the complete check suite and tmux CI; a timing-race regression was found during verification and fixed before release.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/149
+
+Preset expansion satisfied: fix then closerelease.
+
+GH #149 is fixed, closed, and released in v0.35.464. Restarted editor replicas now handle missing registration shadows safely, diagnose the exact retained-reseed hold with an actionable remedy, clean up provisional registrations deterministically, and expose replica health through `admin inspect`. The JetBrains plugin generation advanced to 0.2.499. The final tree again passed the complete check suite and tmux CI.
+
+> **Queue prompt:** release + publish
+
+The v0.35.464 tag and main branch are pushed, the clean release checkout matches `origin/main`, and the installed CLI reports `agent-doc 0.35.464`. GitHub Release and PyPI workflows were both in progress at the required single observation; the GitHub release artifact was not yet published at that point. Per the repository release policy, I did not wait on or poll those asynchronous workflows.
+
+The preflight semantic-completion matches were advisory only and were not used as evidence to close this batch.
+<!-- agent:boundary:93bdac10 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -49,13 +72,14 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/148
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/149
-- 🚧 release + publish
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/148~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/149
+- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#releasefastpath] [recommended] Shorten the release critical path: coalesce all ready claimed queue fixes into one version/check/install batch, and report tag/publish completion independently from local install-full completion; add timing and regression coverage.
 <!-- /agent:backlog -->
 
 ## Review

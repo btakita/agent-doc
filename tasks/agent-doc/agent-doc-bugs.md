@@ -19,7 +19,6 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -261,7 +260,62 @@ The JetBrains native-library reload repair was verified, released in agent-doc v
 - The release passed the full agent-doc and cross-editor checks and was installed successfully.
 
 No actionable follow-up items remain for #158.
-<!-- agent:boundary:38ce3b77 -->
+> **Chat prompt (#chatprompt):** Also fix in subagent: Compact Exchange in fpe.md: Agent Doc couldn't compact this document (exit 1). Error: [compact] pending: compact continuation compact-projection-9feecb5622f1e4c5968ca4b87853d78bd70fdb95999a27d26bdfa227e2d8ef98-95e5d1f4-c0e2-44c1-91b2-ad5278b56afb is in editor delivery and will commit automatically after delivery settles; do not re-run Compact Exchange (commit_requested=true)
+
+> **Chat prompt (#chatprompt):** Also fix in subagent: inotify errors with Idea. Should we use a separate process for the bindings?
+
+> **Chat prompt (#chatprompt):** In a subagent, fix: • Blocked by hook
+>   └ agent-doc Stop hook intercepted an unfinished document cycle for /home/brian/work/btakita/agent-loop/src/haiven-
+> dev/tasks/sdk.md. [session-check] INTERRUPTED: cycle `cycle-1791317771796` is still `preflight_started`
+> (preflight_started) — cycle started but no write/commit followed. The latest assistant text was captured into the
+> pending/capture ledger before auto-close. The hook could not finish the required commit boundary: closeout operation is
+> already in progress for cycle cycle-1791317771796 by foreground-finalize-3518627-1791317845283876891-t1 pid=3518627
+> role=foreground_finalize until=1791318145 [closeout_owner_retry_at=1791318145]. The retained capture or projection is
+> already durable and the same intent commits itself once delivery converges — this is a deferral, not a lost response.
+> Run `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` once to observe the
+> terminal state; do NOT re-send the response, force disk, or `admin recycle`, which disturb the capture being awaited.
+> Do not reach for `admin reload-lib` on your own either: `admin reload-lib` is the sanctioned recovery only when `agent-
+> doc session-check` reports that the editor holding the document is not serving its replica, and then its remedy
+> governs. Do not send the final answer yet. If the response is missing from the document, run `agent-doc repair /home/
+> brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` first. Then finish the commit boundary for this turn and end
+> with `agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md`.
+
+> **Chat prompt (#chatprompt):** also • The agent-doc closeout was still converging when the chat answer returned. I’m checking the retained write once, as
+>   directed, without resubmitting or forcing the document.
+>
+> • Failed (exit 1) agent-doc session-check tasks/sdk.md
+>   └ [perf] session_check.operations file=tasks/sdk.md total_ms=3666 attributed_ms=3504 nested=true inspect_with_warnin…
+>     [session-check] INTERRUPTED: cycle `cycle-1791317771796` is still `response_captured` (response_captured) — respon…
+>     + 2 lines (ctrl+t to expand)
+>
+> • Failed (exit 1) agent-doc repair tasks/sdk.md
+>   └ [perf] repair.cycle_projection file=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md elapsed_ms=250
+>     [repair] Found orphaned response for tasks/sdk.md (825 bytes). Applying...
+>     Error: closeout operation is already in progress for cycle cycle-1791317771796 by foreground-finalize-3518627-1791…
+>     + 4 lines (ctrl+t to expand)
+
+> **Chat prompt (#chatprompt):** This may be related • Hook stopped
+>   └ agent-doc Stop hook exceeded its 45s internal budget and failed closed before the harness timeout. The route-owned
+> supervisor retains any captured closeout and continues recovery; do not rerun finalize or recapture the response.
+> Phases: load_bound_session=23058ms session_check_inspect=3445ms auto_queue_continuation=1067ms
+> active_session_prompt_writeback=0ms active_session_prompt_or_queue_head=RUNNING_17427ms
+
+### Re: compact, IDEA inotify, and retained closeout recovery — gpt-6.1-sol · 2026-10-06T17:14:41-04:00
+
+All reported defects are fixed locally, and the earlier SDK response is committed without replay or forced recovery.
+
+- Compact Exchange initiating retained editor delivery now returns success while clearly reporting that the retained continuation will commit automatically; repeated or foreign pending operations remain nonzero. This shipped in agent-doc v0.35.468.
+- A separate bindings process would not solve IDEA's inotify failure because the watch quota is per user. Since v0.35.468, `MaxFilesWatch` switches the daemon and steering follow paths to 500 ms content-aware polling. Native events still require reducing watched roots or raising the host per-user inotify limit.
+- For `sdk.md`, the foreground owner exited and the one directed terminal `session-check` returned `commit_success`. The response was present, so no repair, resend, force-disk, recycle, or reload-lib action was taken.
+- The stranded SDK lease was caused by a promoted v0.35.469 controller rejecting the older foreground finalizer's exact `closeout_owner_release` as `controller_binary_stale`. The fix permits only an exact capability-scoped owner release across version skew; every other stale mutation remains refused.
+- The 45-second Stop trace exposed two additional serial budget sinks. Stop binding lookup is now bounded to five seconds, and exchange/queue selection reuse one authoritative document materialization instead of two realtime reads.
+- The fixes are integrated and pushed through `cbeeac4bf` on `integrate/gh160-161-20261006`, installed locally as agent-doc v0.35.469, and verified by `make check-fast` plus a fresh authoritative `make check`: 9,598 Rust tests, 193 VS Code tests, JetBrains/native cross-editor coverage, release audits, and all formal/non-vacuity models passed.
+- GH #160 and #161 are integrated in the same candidate. The queue-preemption persistence regression found during dogfooding is also fixed.
+
+> **Queue prompt:** release + publish
+
+**Deferred:** public v0.35.469 publication is blocked because crates.io rejects both the GitHub Actions and local credentials for the required `tmux-router` 0.3.22 publish. Refresh the `CARGO_REGISTRY_TOKEN` secret for `btakita/tmux-router` (and the local token only if local publishing is desired); then this queue head can publish tmux-router first and complete the agent-doc release. No issue or release is being claimed complete before that succeeds.
+<!-- agent:boundary:4146e13a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -270,12 +324,6 @@ No actionable follow-up items remain for #158.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/158~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/159~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/160~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/161~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#advance-reviews~~
-- release + publish
 <!-- /agent:queue -->
 
 

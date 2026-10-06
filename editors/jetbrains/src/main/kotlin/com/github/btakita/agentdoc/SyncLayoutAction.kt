@@ -594,34 +594,7 @@ object LayoutDetector {
                 // split set comes from the Remote Dev editor tracker, and the shared
                 // native fold retains a known split across single-selection
                 // observations instead of answering `unknown` forever.
-                val remoteClients = remoteClientSessionEditors(project, sessionDocumentPaths)
-                val focusedSessionFiles = FileEditorManager.getInstance(project).selectedFiles
-                    .filter { file ->
-                        sessionDocumentPaths?.contains(file.path)
-                            ?: AgentDocSessionFiles.isSessionDocument(file)
-                    }
-                    .map { TerminalUtil.relativePath(project, it) }
-                val resolution = resolveRemoteLayout(project, remoteClients, focusedSessionFiles)
-                if (resolution == null || resolution.columns.isEmpty()) {
-                    logUnknownRemoteLayout(
-                        focusedSessionFiles,
-                        remoteClients.map { it.selected },
-                        visibleSelections = remoteClients.map { it.visible },
-                        reason = resolution?.reason ?: "no_unique_client_split_set",
-                    )
-                    return null
-                }
-                val snapshots = resolution.columns.flatMap { column ->
-                    column.files.map { LayoutWindowSnapshot(x = 0, y = 0, file = it) }
-                }
-                logObservedLayout(
-                    0,
-                    snapshots,
-                    resolution.columns,
-                    source = resolution.source +
-                        (resolution.reason?.let { " reason=$it" } ?: ""),
-                )
-                return EditorLayout(resolution.columns)
+                return detectEditorLayout(snapshotRemoteLayout(project, sessionDocumentPaths))
             }
             if (windows.size < 2) {
                 val selectedFile = windows.singleOrNull()?.selectedFile
@@ -782,6 +755,35 @@ object LayoutDetector {
         val reason: String?,
     )
 
+    /**
+     * GH #157: all IntelliJ-owned state needed for the Remote Dev fold, captured while the caller
+     * is on the EDT. The native fold consumes only these immutable strings and lists, so it can run
+     * later on the observation worker without touching client editor services off the EDT.
+     */
+    internal data class RemoteLayoutSnapshot(
+        val projectRoot: String,
+        val clients: List<RemoteClientSessionEditors>,
+        val focusedSessionFiles: List<String>,
+    )
+
+    internal fun snapshotRemoteLayout(
+        project: com.intellij.openapi.project.Project,
+        sessionDocumentPaths: Set<String>? = null,
+    ): RemoteLayoutSnapshot {
+        val clients = remoteClientSessionEditors(project, sessionDocumentPaths)
+        val focusedSessionFiles = FileEditorManager.getInstance(project).selectedFiles
+            .filter { file ->
+                sessionDocumentPaths?.contains(file.path)
+                    ?: AgentDocSessionFiles.isSessionDocument(file)
+            }
+            .map { TerminalUtil.relativePath(project, it) }
+        return RemoteLayoutSnapshot(
+            projectRoot = project.basePath ?: project.locationHash,
+            clients = clients,
+            focusedSessionFiles = focusedSessionFiles,
+        )
+    }
+
     private fun remoteClientSessionEditors(
         project: com.intellij.openapi.project.Project,
         sessionDocumentPaths: Set<String>?,
@@ -827,21 +829,57 @@ object LayoutDetector {
     }
 
     /**
-     * GH #134: resolve through the shared native fold (`#ffi-first`), which keeps the
-     * previous split per project. Without the native library, fall back to the
-     * memoryless rule: one client's visible/selected set naming 2+ documents.
+     * Finish zero-window detection from an EDT snapshot. Direct callers may still enter on the
+     * EDT, so only the immutable native fold is marshalled to a worker. The selection projection
+     * calls this overload from its generation-owned delivery worker and pays no extra dispatch.
      */
+    internal fun detectEditorLayout(
+        snapshot: RemoteLayoutSnapshot,
+        nativeFold: (String, String) -> String? = NativeAdminControls::resolveRemoteLayout,
+    ): EditorLayout? {
+        val resolve = {
+            resolveRemoteLayout(snapshot, nativeFold)
+        }
+        val resolution =
+            if (SwingUtilities.isEventDispatchThread()) {
+                java.util.concurrent.CompletableFuture.supplyAsync(resolve).join()
+            } else {
+                resolve()
+            }
+        if (resolution == null || resolution.columns.isEmpty()) {
+            logUnknownRemoteLayout(
+                snapshot.focusedSessionFiles,
+                snapshot.clients.map { it.selected },
+                visibleSelections = snapshot.clients.map { it.visible },
+                reason = resolution?.reason ?: "no_unique_client_split_set",
+            )
+            return null
+        }
+        val windows = resolution.columns.flatMap { column ->
+            column.files.map { LayoutWindowSnapshot(x = 0, y = 0, file = it) }
+        }
+        logObservedLayout(
+            0,
+            windows,
+            resolution.columns,
+            source = resolution.source + (resolution.reason?.let { " reason=$it" } ?: ""),
+        )
+        return EditorLayout(resolution.columns)
+    }
+
     private fun resolveRemoteLayout(
-        project: com.intellij.openapi.project.Project,
-        clients: List<RemoteClientSessionEditors>,
-        focusedSessionFiles: List<String>,
+        snapshot: RemoteLayoutSnapshot,
+        nativeFold: (String, String) -> String?,
     ): RemoteLayoutResolution? {
-        val projectRoot = project.basePath ?: project.locationHash
-        val evidenceJson = remoteLayoutEvidenceJson(clients, focusedSessionFiles)
-        NativeAdminControls.resolveRemoteLayout(projectRoot, evidenceJson)
+        // GH #134: resolve through the shared native fold (`#ffi-first`), which keeps the previous
+        // split per project. Without native support, retain the memoryless compatibility fallback.
+        val evidenceJson = remoteLayoutEvidenceJson(snapshot.clients, snapshot.focusedSessionFiles)
+        nativeFold(snapshot.projectRoot, evidenceJson)
             ?.let(::parseRemoteLayoutResolution)
             ?.let { return it }
-        val fallback = uniqueRemoteSplitSelection(clients.map { (it.visible + it.selected).distinct() })
+        val fallback = uniqueRemoteSplitSelection(
+            snapshot.clients.map { (it.visible + it.selected).distinct() },
+        )
             ?: return null
         return RemoteLayoutResolution(
             columns = buildColumnsFromSnapshots(headlessSelectionSnapshots(fallback)),

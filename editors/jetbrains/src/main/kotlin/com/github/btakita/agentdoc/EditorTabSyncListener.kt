@@ -458,6 +458,10 @@ private data class CapturedSurface(
     val visibleMdFiles: List<String>,
     val openMdFiles: List<String>,
     val editorLayout: EditorLayout?,
+    val remoteLayoutSnapshot: LayoutDetector.RemoteLayoutSnapshot?,
+    val reconcileStaleSelection: Boolean,
+    val preferredFilePath: String?,
+    val previousFilePath: String?,
     val forceReconcile: Boolean,
     val preserveFocus: Boolean,
 )
@@ -925,13 +929,25 @@ private data class CapturedSurface(
                 },
                 sessionDocumentPaths,
             )
+        // GH #157: capture Remote Dev client/editor state on this EDT turn, but defer its native
+        // retained-split fold to the generation-owned surface delivery worker below.
+        val remoteLayoutSnapshot =
+            if (editorWindows.isEmpty()) {
+                LayoutDetector.snapshotRemoteLayout(project, sessionDocumentPaths)
+            } else {
+                null
+            }
         val rawEditorLayout =
-            project.basePath?.let { basePath ->
-                SyncLayoutAction.absolutizeEditorLayout(
-                    basePath,
+            if (remoteLayoutSnapshot != null) {
+                null
+            } else {
+                project.basePath?.let { basePath ->
+                    SyncLayoutAction.absolutizeEditorLayout(
+                        basePath,
                         LayoutDetector.detectEditorLayout(project, sessionDocumentPaths),
                     )
                 } ?: LayoutDetector.detectEditorLayout(project, sessionDocumentPaths)
+            }
         val settledProjection =
             if (reconcileStaleSelection) {
                 SelectionProjectionSettling.reconcileEventEdge(
@@ -1010,6 +1026,10 @@ private data class CapturedSurface(
             visibleMdFiles = visibleMdFiles,
             openMdFiles = openMdFiles,
             editorLayout = settledProjection.editorLayout,
+            remoteLayoutSnapshot = remoteLayoutSnapshot,
+            reconcileStaleSelection = reconcileStaleSelection,
+            preferredFilePath = preferredFile?.path,
+            previousFilePath = previousFile?.path,
             forceReconcile = forceReconcile,
             preserveFocus = preserveFocus,
         )
@@ -1031,13 +1051,27 @@ private data class CapturedSurface(
                 captured.openMdFiles.mapNotNull(TerminalUtil::nearestAgentDocProjectRoot) +
                     surfaceProjectRoot
             ).distinct()
+        val resolvedEditorLayout =
+            captured.editorLayout
+                ?: captured.remoteLayoutSnapshot?.let(LayoutDetector::detectEditorLayout)
+        val settledEditorLayout =
+            if (captured.reconcileStaleSelection) {
+                SelectionProjectionSettling.reconcileEventEdge(
+                    preferredFile = captured.preferredFilePath,
+                    previousFile = captured.previousFilePath,
+                    visibleMdFiles = captured.visibleMdFiles,
+                    editorLayout = resolvedEditorLayout,
+                ).editorLayout
+            } else {
+                resolvedEditorLayout
+            }
         val absoluteEditorLayout =
             SyncLayoutAction.absolutizeEditorLayout(
                 surfaceProjectRoot,
                 SyncLayoutAction.normalizeEditorLayout(
                     captured.projectBasePath,
                     surfaceProjectRoot,
-                    captured.editorLayout,
+                    settledEditorLayout,
                 ),
             )
         return PendingSurface(

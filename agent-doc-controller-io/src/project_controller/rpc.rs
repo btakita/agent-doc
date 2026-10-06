@@ -9697,6 +9697,15 @@ fn handle_editor_route_rpc(
     runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<ControllerEditorRouteResult> {
+    handle_editor_route_rpc_with_tmux(bootstrap, runtime, request, None)
+}
+
+fn handle_editor_route_rpc_with_tmux(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+    live_tmux: Option<&tmux_router::Tmux>,
+) -> Result<ControllerEditorRouteResult> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
@@ -9778,7 +9787,19 @@ fn handle_editor_route_rpc(
         layout_mode,
         retained_columns,
         retained_focus,
-        || observe_live_layout_documents(bootstrap, runtime, &layout_invocation),
+        || {
+            live_tmux.map_or_else(
+                || observe_live_layout_documents(bootstrap, runtime, &layout_invocation),
+                |tmux| {
+                    observe_live_layout_documents_with_tmux(
+                        bootstrap,
+                        runtime,
+                        &layout_invocation,
+                        tmux,
+                    )
+                },
+            )
+        },
         &canonical,
     );
     let (merged_columns, layout_merge, dropped_columns) = merge_editor_route_columns_within(
@@ -11568,24 +11589,59 @@ fn ensure_route_merge_basis(
     mode: EditorRouteLayoutMode,
     retained_columns: Vec<String>,
     retained_focus: Option<String>,
-    observe_live: impl FnOnce() -> Option<Vec<String>>,
+    observe_live: impl FnOnce() -> LiveLayoutDocumentsObservation,
     log_target: &Path,
 ) -> (Vec<String>, Option<String>, Option<usize>) {
     if mode != EditorRouteLayoutMode::Ensure || !retained_columns.is_empty() {
         return (retained_columns, retained_focus, None);
     }
-    let Some(live) = observe_live().filter(|live| !live.is_empty()) else {
+    let observation = observe_live();
+    let Some(live) = observation.documents.filter(|live| !live.is_empty()) else {
+        agent_doc_ops_log_io::log_op(
+            log_target,
+            &format!(
+                "controller_editor_route_merge_basis source=none reason={} session_source={} (GH #153)",
+                observation.reason, observation.session_source,
+            ),
+        );
         return (retained_columns, retained_focus, None);
     };
     agent_doc_ops_log_io::log_op(
         log_target,
         &format!(
-            "controller_editor_route_merge_basis source=live_tmux_observation columns={} (GH #136)",
-            live.len()
+            "controller_editor_route_merge_basis source=live_tmux_observation reason={} session_source={} columns={} (GH #136, GH #153)",
+            observation.reason,
+            observation.session_source,
+            live.len(),
         ),
     );
     let width = live.len();
     (live, None, Some(width))
+}
+
+#[derive(Debug)]
+struct LiveLayoutDocumentsObservation {
+    documents: Option<Vec<String>>,
+    reason: String,
+    session_source: &'static str,
+}
+
+impl LiveLayoutDocumentsObservation {
+    fn unavailable(reason: impl Into<String>, session_source: &'static str) -> Self {
+        Self {
+            documents: None,
+            reason: reason.into(),
+            session_source,
+        }
+    }
+
+    fn positive(documents: Vec<String>, session_source: &'static str) -> Self {
+        Self {
+            documents: Some(documents),
+            reason: "positive_observation".to_string(),
+            session_source,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -11604,48 +11660,89 @@ fn observe_live_layout_documents(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     route: &ControllerTmuxLayoutSyncInvocation,
-) -> Option<Vec<String>> {
+) -> LiveLayoutDocumentsObservation {
     #[cfg(test)]
     {
         let _ = (bootstrap, runtime, route);
-        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| documents.borrow().clone())
+        TEST_LIVE_LAYOUT_DOCUMENTS.with(|documents| {
+            documents.borrow().clone().map_or_else(
+                || LiveLayoutDocumentsObservation::unavailable("test_hook_unavailable", "none"),
+                |documents| LiveLayoutDocumentsObservation::positive(documents, "test_hook"),
+            )
+        })
     }
     #[cfg(not(test))]
     {
-        let report = tmux_layout_sync_state_for_invocation(
-            bootstrap,
-            runtime,
-            &ControllerTmuxLayoutSyncStateInvocation {
-                columns: route.columns.clone(),
-                window: route.window.clone(),
-                focus: None,
-            },
-        )
-        .ok()?;
-        if report.panes.is_empty() {
-            return None;
+        let tmux = agent_doc_tmux_io::configured_tmux();
+        observe_live_layout_documents_with_tmux(bootstrap, runtime, route, &tmux)
+    }
+}
+
+fn observe_live_layout_documents_with_tmux(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    route: &ControllerTmuxLayoutSyncInvocation,
+    tmux: &tmux_router::Tmux,
+) -> LiveLayoutDocumentsObservation {
+    let (report, session_source) = match tmux_layout_sync_state_for_invocation_with_tmux(
+        bootstrap,
+        runtime,
+        &ControllerTmuxLayoutSyncStateInvocation {
+            columns: route.columns.clone(),
+            window: route.window.clone(),
+            focus: None,
+        },
+        tmux,
+    ) {
+        Ok(report) => report,
+        Err(err) => {
+            return LiveLayoutDocumentsObservation::unavailable(
+                format!(
+                    "probe_error:{}",
+                    format!("{err:#}")
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join("_")
+                ),
+                "none",
+            );
         }
-        let project_root = bootstrap
-            .project_root
-            .canonicalize()
-            .unwrap_or_else(|_| bootstrap.project_root.clone());
-        let mut documents: Vec<String> = Vec::new();
-        for document in report.actual_documents {
-            let document = document.trim().to_string();
-            if document.is_empty()
-                || !Path::new(&document).starts_with(&project_root)
-                || documents.contains(&document)
-            {
-                continue;
-            }
-            documents.push(document);
+    };
+    let session_source = session_source
+        .map(PaneLayoutObservationSessionSource::label)
+        .unwrap_or("none");
+    if report.panes.is_empty() {
+        return LiveLayoutDocumentsObservation::unavailable(report.reason, session_source);
+    }
+    let project_root = bootstrap
+        .project_root
+        .canonicalize()
+        .unwrap_or_else(|_| bootstrap.project_root.clone());
+    let mut documents: Vec<String> = Vec::new();
+    for document in report.actual_documents {
+        let document = document.trim().to_string();
+        if document.is_empty()
+            || !Path::new(&document).starts_with(&project_root)
+            || documents.contains(&document)
+        {
+            continue;
         }
-        Some(respell_live_documents_like_route(
+        documents.push(document);
+    }
+    if documents.is_empty() {
+        return LiveLayoutDocumentsObservation::unavailable(
+            "no_project_documents",
+            session_source,
+        );
+    }
+    LiveLayoutDocumentsObservation::positive(
+        respell_live_documents_like_route(
             &bootstrap.project_root,
             &route.columns,
             documents,
-        ))
-    }
+        ),
+        session_source,
+    )
 }
 
 /// GH #136 follow-up (b): the route merge compares documents by text, so
@@ -21734,22 +21831,93 @@ fn project_is_multi_tmux_session(project_root: &Path) -> bool {
 /// The tmux session a pane-layout drift survey observes. Single-session
 /// projects keep the configured pin authoritative; multi-session projects
 /// observe the session the layout's own panes live in, falling back to the pin.
+/// A fresh controller has no layout-effect panes yet, so its registered
+/// supervisor panes are the final unpinned fallback (GH #153).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaneLayoutObservationSessionSource {
+    ConfiguredSession,
+    LayoutEffectPane,
+    RegisteredSupervisorPane,
+}
+
+impl PaneLayoutObservationSessionSource {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ConfiguredSession => "tmux_session_pin",
+            Self::LayoutEffectPane => "layout_effect_pane",
+            Self::RegisteredSupervisorPane => "registered_supervisor_pane",
+        }
+    }
+}
+
 fn pane_layout_observation_session(
     configured_session: Option<String>,
     multi_session: bool,
     effect_file_panes: &[(String, String)],
+    registered_supervisor_file_panes: &[(String, String)],
     mut pane_session: impl FnMut(&str) -> Option<String>,
-) -> Option<String> {
-    let mut from_panes = || {
-        effect_file_panes
-            .iter()
-            .find_map(|(_, pane)| pane_session(pane))
-    };
+) -> Option<(String, PaneLayoutObservationSessionSource)> {
+    let configured_session = configured_session
+        .map(|session| (session, PaneLayoutObservationSessionSource::ConfiguredSession));
     if multi_session {
-        from_panes().or(configured_session)
+        pane_layout_session_from_panes(
+            effect_file_panes,
+            PaneLayoutObservationSessionSource::LayoutEffectPane,
+            &mut pane_session,
+        )
+            .or(configured_session)
+            .or_else(|| {
+                pane_layout_session_from_panes(
+                    registered_supervisor_file_panes,
+                    PaneLayoutObservationSessionSource::RegisteredSupervisorPane,
+                    &mut pane_session,
+                )
+            })
     } else {
-        configured_session.or_else(from_panes)
+        configured_session
+            .or_else(|| {
+                pane_layout_session_from_panes(
+                    effect_file_panes,
+                    PaneLayoutObservationSessionSource::LayoutEffectPane,
+                    &mut pane_session,
+                )
+            })
+            .or_else(|| {
+                pane_layout_session_from_panes(
+                    registered_supervisor_file_panes,
+                    PaneLayoutObservationSessionSource::RegisteredSupervisorPane,
+                    &mut pane_session,
+                )
+            })
     }
+}
+
+fn pane_layout_session_from_panes(
+    file_panes: &[(String, String)],
+    source: PaneLayoutObservationSessionSource,
+    pane_session: &mut impl FnMut(&str) -> Option<String>,
+) -> Option<(String, PaneLayoutObservationSessionSource)> {
+    file_panes
+        .iter()
+        .find_map(|(_, pane)| pane_session(pane).map(|session| (session, source)))
+}
+
+/// Pane candidates from the controller's process-scoped actor projection.
+/// Supervisor registration validates this same document/generation/pane tuple;
+/// tmux liveness is still checked before a candidate may supply a session.
+fn registered_supervisor_file_panes(runtime: &ControllerRuntime) -> Vec<(String, String)> {
+    let mut seen_panes = BTreeSet::new();
+    runtime
+        .actor_store_snapshot()
+        .into_values()
+        .filter(|record| record.state != agent_doc_controller::actor::ActorState::Closed)
+        .filter(|record| !record.pane_id.trim().is_empty())
+        .filter_map(|record| {
+            seen_panes
+                .insert(record.pane_id.clone())
+                .then_some((record.document_id, record.pane_id))
+        })
+        .collect()
 }
 
 fn active_tmux_window_for_session(
@@ -23041,16 +23209,37 @@ fn tmux_layout_sync_state_for_invocation(
     runtime: &ControllerRuntime,
     invocation: &ControllerTmuxLayoutSyncStateInvocation,
 ) -> Result<ControllerTmuxLayoutSyncStateReport> {
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    tmux_layout_sync_state_for_invocation_with_tmux(bootstrap, runtime, invocation, &tmux)
+        .map(|(report, _)| report)
+}
+
+fn tmux_layout_sync_state_for_invocation_with_tmux(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: &ControllerTmuxLayoutSyncStateInvocation,
+    tmux: &tmux_router::Tmux,
+) -> Result<(
+    ControllerTmuxLayoutSyncStateReport,
+    Option<PaneLayoutObservationSessionSource>,
+)> {
     let effect_file_panes = runtime
         .pane_layout_desired()
         .filter(|desired| pane_layout_state_invocation(desired) == *invocation)
         .map(|desired| runtime.pane_layout_effect_file_panes(desired.generation))
         .unwrap_or_default();
-    tmux_layout_sync_state_for_invocation_with_effect_assignment(
+    let registered_supervisor_file_panes = if effect_file_panes.is_empty() {
+        registered_supervisor_file_panes(runtime)
+    } else {
+        Vec::new()
+    };
+    tmux_layout_sync_state_for_invocation_with_effect_assignment_and_tmux(
         bootstrap,
         runtime,
         invocation,
         &effect_file_panes,
+        &registered_supervisor_file_panes,
+        tmux,
     )
 }
 
@@ -23090,6 +23279,29 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
     invocation: &ControllerTmuxLayoutSyncStateInvocation,
     effect_file_panes: &[(String, String)],
 ) -> Result<ControllerTmuxLayoutSyncStateReport> {
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    tmux_layout_sync_state_for_invocation_with_effect_assignment_and_tmux(
+        bootstrap,
+        runtime,
+        invocation,
+        effect_file_panes,
+        &[],
+        &tmux,
+    )
+    .map(|(report, _)| report)
+}
+
+fn tmux_layout_sync_state_for_invocation_with_effect_assignment_and_tmux(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: &ControllerTmuxLayoutSyncStateInvocation,
+    effect_file_panes: &[(String, String)],
+    registered_supervisor_file_panes: &[(String, String)],
+    tmux: &tmux_router::Tmux,
+) -> Result<(
+    ControllerTmuxLayoutSyncStateReport,
+    Option<PaneLayoutObservationSessionSource>,
+)> {
     let _survey_timing = PaneLayoutSurveyTimingGuard {
         project_root: bootstrap.project_root.clone(),
         start: Instant::now(),
@@ -23103,17 +23315,20 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
         layout_sync_state_expected_documents(&bootstrap.project_root, invocation);
     let focus = invocation.focus.clone();
     if expected_documents.is_empty() {
-        return Ok(layout_sync_state_report(
-            false,
-            "empty_layout_model",
-            expected_documents,
-            Vec::new(),
-            Vec::new(),
-            LayoutSyncStateTarget {
-                window_id: invocation.window.clone(),
-                focus,
-                ..LayoutSyncStateTarget::default()
-            },
+        return Ok((
+            layout_sync_state_report(
+                false,
+                "empty_layout_model",
+                expected_documents,
+                Vec::new(),
+                Vec::new(),
+                LayoutSyncStateTarget {
+                    window_id: invocation.window.clone(),
+                    focus,
+                    ..LayoutSyncStateTarget::default()
+                },
+            ),
+            None,
         ));
     }
 
@@ -23124,74 +23339,86 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
     // is a read-only survey, so no pane mutation invalidates the snapshot
     // mid-pass. The scope is thread-local and dropped at the function return.
     let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
-    let tmux = agent_doc_tmux_io::configured_tmux();
-    let Some(configured_session) = pane_layout_observation_session(
+    let Some((configured_session, session_source)) = pane_layout_observation_session(
         configured_tmux_session_for_project(&bootstrap.project_root),
         project_is_multi_tmux_session(&bootstrap.project_root),
         effect_file_panes,
+        registered_supervisor_file_panes,
         |pane| tmux.pane_session(pane).ok(),
     ) else {
-        return Ok(layout_sync_state_report(
-            false,
-            "missing_tmux_session",
-            expected_documents,
-            Vec::new(),
-            Vec::new(),
-            LayoutSyncStateTarget {
-                window_id: invocation.window.clone(),
-                focus,
-                ..LayoutSyncStateTarget::default()
-            },
+        return Ok((
+            layout_sync_state_report(
+                false,
+                "missing_tmux_session",
+                expected_documents,
+                Vec::new(),
+                Vec::new(),
+                LayoutSyncStateTarget {
+                    window_id: invocation.window.clone(),
+                    focus,
+                    ..LayoutSyncStateTarget::default()
+                },
+            ),
+            None,
         ));
     };
     if !tmux.session_alive(&configured_session) {
-        return Ok(layout_sync_state_report(
-            false,
-            "tmux_session_not_alive",
-            expected_documents,
-            Vec::new(),
-            Vec::new(),
-            LayoutSyncStateTarget {
-                session_name: Some(configured_session),
-                window_id: invocation.window.clone(),
-                focus,
-                ..LayoutSyncStateTarget::default()
-            },
+        return Ok((
+            layout_sync_state_report(
+                false,
+                "tmux_session_not_alive",
+                expected_documents,
+                Vec::new(),
+                Vec::new(),
+                LayoutSyncStateTarget {
+                    session_name: Some(configured_session),
+                    window_id: invocation.window.clone(),
+                    focus,
+                    ..LayoutSyncStateTarget::default()
+                },
+            ),
+            Some(session_source),
         ));
     }
 
     let window_id = invocation
         .window
         .clone()
-        .or_else(|| resolve_agent_doc_window_id_for_session(&tmux, &configured_session));
+        .or_else(|| resolve_agent_doc_window_id_for_session(tmux, &configured_session));
     let Some(window_id_value) = window_id.clone() else {
-        return Ok(layout_sync_state_report(
-            false,
-            "missing_agent_doc_window",
-            expected_documents,
-            Vec::new(),
-            Vec::new(),
-            LayoutSyncStateTarget {
-                session_name: Some(configured_session),
-                focus,
-                ..LayoutSyncStateTarget::default()
-            },
+        return Ok((
+            layout_sync_state_report(
+                false,
+                "missing_agent_doc_window",
+                expected_documents,
+                Vec::new(),
+                Vec::new(),
+                LayoutSyncStateTarget {
+                    session_name: Some(configured_session),
+                    focus,
+                    ..LayoutSyncStateTarget::default()
+                },
+            ),
+            Some(session_source),
         ));
     };
-    let window_name = agent_doc_tmux_io::target_window_name(&tmux, &window_id_value);
+    let window_name = agent_doc_tmux_io::target_window_name(tmux, &window_id_value);
     if window_name.as_deref() != Some("agent-doc") {
-        return Ok(layout_sync_state_report(
-            false,
-            "target_window_not_agent_doc",
-            expected_documents,
-            Vec::new(),
-            Vec::new(),
-            LayoutSyncStateTarget {
-                session_name: Some(configured_session),
-                window_id: Some(window_id_value),
-                window_name,
-                focus,
-            },
+        return Ok((
+            layout_sync_state_report(
+                false,
+                "target_window_not_agent_doc",
+                expected_documents,
+                Vec::new(),
+                Vec::new(),
+                LayoutSyncStateTarget {
+                    session_name: Some(configured_session),
+                    window_id: Some(window_id_value),
+                    window_name,
+                    focus,
+                },
+            ),
+            Some(session_source),
         ));
     }
 
@@ -23207,7 +23434,7 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
         .map(|pane_id| {
             layout_sync_state_actual_document_for_pane(
                 &bootstrap.project_root,
-                &tmux,
+                tmux,
                 &actor_store,
                 effect_file_panes,
                 pane_id,
@@ -23234,7 +23461,7 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
         focus.as_deref(),
         &visible_effect_file_panes,
     );
-    let active_pane = agent_doc_tmux_io::target_pane_id(&tmux, &window_id_value);
+    let active_pane = agent_doc_tmux_io::target_pane_id(tmux, &window_id_value);
     let operator_owned_documents = layout_sync_state_operator_owned_documents(
         &bootstrap.project_root,
         &expected_documents,
@@ -23268,7 +23495,7 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
     report.operator_owned_documents = operator_owned_documents;
     report.expected_focus_pane = expected_focus_pane;
     report.active_pane = active_pane;
-    Ok(report)
+    Ok((report, Some(session_source)))
 }
 
 fn state_plane_message_metadata(message: &lazily::IpcMessage) -> Result<(u64, Option<u64>)> {
@@ -31857,6 +32084,35 @@ mod tests {
             columns: &[&str],
             layout_mode: Option<&str>,
         ) -> Result<ControllerEditorRouteResult> {
+            handle_editor_route_rpc(
+                &self.bootstrap,
+                runtime,
+                self.route_request(focus, columns, layout_mode),
+            )
+        }
+
+        fn route_on_with_tmux(
+            &self,
+            runtime: &ControllerRuntime,
+            focus: &str,
+            columns: &[&str],
+            layout_mode: Option<&str>,
+            tmux: &tmux_router::Tmux,
+        ) -> Result<ControllerEditorRouteResult> {
+            handle_editor_route_rpc_with_tmux(
+                &self.bootstrap,
+                runtime,
+                self.route_request(focus, columns, layout_mode),
+                Some(tmux),
+            )
+        }
+
+        fn route_request(
+            &self,
+            focus: &str,
+            columns: &[&str],
+            layout_mode: Option<&str>,
+        ) -> ControllerRequest {
             let mut layout_args = Vec::new();
             for column in columns {
                 layout_args.push("--col".to_string());
@@ -31873,7 +32129,7 @@ mod tests {
             if let Some(mode) = layout_mode {
                 payload["layout_mode"] = serde_json::Value::String(mode.to_string());
             }
-            let request = ControllerRequest {
+            ControllerRequest {
                 command: "editor_route".to_string(),
                 file: Some(self.path(focus)),
                 session_id: None,
@@ -31888,8 +32144,7 @@ mod tests {
                 command_kind: None,
                 diagnostic_payload: Some(payload.to_string()),
                 sequence: None,
-            };
-            handle_editor_route_rpc(&self.bootstrap, runtime, request)
+            }
         }
 
         fn desired_columns(&self) -> Vec<String> {
@@ -32267,7 +32522,7 @@ mod tests {
             );
             assert!(
                 ops.contains(
-                    "controller_editor_route_merge_basis source=live_tmux_observation columns=2"
+                    "controller_editor_route_merge_basis source=live_tmux_observation reason=positive_observation session_source=test_hook columns=2"
                 ),
                 "seed={seed}: {ops}"
             );
@@ -32291,6 +32546,126 @@ mod tests {
             vec![fixture.id("beta")]
         );
         assert!(fixture.ops_log().contains("merge=seeded"));
+        assert!(
+            fixture.ops_log().contains(
+                "controller_editor_route_merge_basis source=none reason=test_hook_unavailable session_source=none"
+            ),
+            "{}",
+            fixture.ops_log()
+        );
+    }
+
+    /// GH #153: the GH #136 live-layout basis must run through the real tmux
+    /// survey after a controller restart. There is no retained layout, no
+    /// `tmux_session` pin, and no `TEST_LIVE_LAYOUT_DOCUMENTS` injection: the
+    /// successor resolves the session from its registered supervisors and sees
+    /// both live panes before the one-column `ensure` route can seed.
+    #[test]
+    fn gh153_fresh_controller_uses_registered_supervisors_for_real_tmux_merge_basis() {
+        let fixture = RouteLayoutFixture::new(&["alpha", "beta"]);
+        let socket = format!(
+            "agent-doc-gh153-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let tmux = tmux_router::IsolatedTmux::new(&socket);
+        let first = tmux.new_session("gh153", fixture.dir.path()).unwrap();
+        tmux.raw_cmd(&["rename-window", "-t", "gh153:0", "agent-doc"])
+            .unwrap();
+        tmux.raw_cmd(&["split-window", "-dh", "-t", &first])
+            .unwrap();
+        let window = tmux.pane_window(&first).unwrap();
+        let panes = tmux.list_window_panes(&window).unwrap();
+        assert_eq!(panes.len(), 2, "the real probe needs two live panes");
+
+        // Persist the predecessor's two actors, then construct a successor with
+        // a fresh layout graph and register both live supervisors into it.
+        for (generation, (name, pane)) in ["alpha", "beta"].iter().zip(&panes).enumerate() {
+            let generation = generation as u64 + 1;
+            let session_id = format!("{name}-session");
+            handle_start_session(
+                &fixture.bootstrap,
+                Some(fixture.runtime.as_ref()),
+                ControllerRequest {
+                    command: "start_session".to_string(),
+                    file: Some(fixture.path(name)),
+                    session_id: Some(session_id),
+                    pane_id: Some(pane.clone()),
+                    window_id: Some(window.clone()),
+                    generation: Some(generation),
+                    state: None,
+                    caller: None,
+                    reason: None,
+                    supervisor_pid: None,
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: None,
+                    sequence: None,
+                },
+            )
+            .unwrap();
+        }
+        let successor = test_controller_runtime(&fixture.bootstrap);
+        assert!(
+            successor.pane_layout_desired().is_none(),
+            "the successor must have no retained layout"
+        );
+        assert_eq!(
+            configured_tmux_session_for_project(&fixture.bootstrap.project_root),
+            None,
+            "the project must have no tmux_session pin"
+        );
+        for (generation, (name, pane)) in ["alpha", "beta"].iter().zip(&panes).enumerate() {
+            handle_register_supervisor(
+                &fixture.bootstrap,
+                Some(successor.as_ref()),
+                ControllerRequest {
+                    command: "register_supervisor".to_string(),
+                    file: Some(fixture.path(name)),
+                    session_id: Some(format!("{name}-session")),
+                    pane_id: Some(pane.clone()),
+                    window_id: None,
+                    generation: Some(generation as u64 + 1),
+                    state: Some("ready".to_string()),
+                    caller: None,
+                    reason: None,
+                    supervisor_pid: Some(std::process::id()),
+                    supervisor_socket: None,
+                    command_kind: None,
+                    diagnostic_payload: None,
+                    sequence: None,
+                },
+            )
+            .unwrap();
+        }
+
+        let alpha = fixture.id("alpha");
+        let beta = fixture.id("beta");
+        let routed = fixture
+            .route_on_with_tmux(
+                successor.as_ref(),
+                "alpha",
+                &["alpha"],
+                Some("ensure"),
+                &tmux,
+            )
+            .unwrap();
+        assert_eq!(routed.exit_code, 0);
+        assert_eq!(
+            successor.pane_layout_desired().unwrap().invocation.columns,
+            vec![alpha, beta],
+            "a fresh one-column ensure route must merge over both live panes"
+        );
+        assert!(
+            fixture.ops_log().contains(
+                "controller_editor_route_merge_basis source=live_tmux_observation reason=positive_observation session_source=registered_supervisor_pane columns=2"
+            ),
+            "{}",
+            fixture.ops_log()
+        );
     }
 
     #[test]
@@ -35477,19 +35852,26 @@ mod tests {
         ];
 
         assert_eq!(
-            pane_layout_observation_session(None, false, &effect_file_panes, |pane| {
+            pane_layout_observation_session(None, false, &effect_file_panes, &[], |pane| {
                 (pane == "%77").then(|| "0".to_string())
             }),
-            Some("0".to_string()),
+            Some((
+                "0".to_string(),
+                PaneLayoutObservationSessionSource::LayoutEffectPane
+            )),
         );
         assert_eq!(
             pane_layout_observation_session(
                 Some("configured".to_string()),
                 false,
                 &effect_file_panes,
+                &[],
                 |_| panic!("an explicit project session must remain authoritative"),
             ),
-            Some("configured".to_string()),
+            Some((
+                "configured".to_string(),
+                PaneLayoutObservationSessionSource::ConfiguredSession
+            )),
         );
     }
 
@@ -35501,9 +35883,13 @@ mod tests {
                 Some("main".to_string()),
                 true,
                 &effect_file_panes,
+                &[],
                 |pane| (pane == "%41").then(|| "research".to_string()),
             ),
-            Some("research".to_string()),
+            Some((
+                "research".to_string(),
+                PaneLayoutObservationSessionSource::LayoutEffectPane
+            )),
             "GH #17: a multi-session layout is observed in the session its panes live in"
         );
         assert_eq!(
@@ -35511,10 +35897,28 @@ mod tests {
                 Some("main".to_string()),
                 true,
                 &effect_file_panes,
+                &[],
                 |_| { None }
             ),
-            Some("main".to_string()),
+            Some((
+                "main".to_string(),
+                PaneLayoutObservationSessionSource::ConfiguredSession
+            )),
             "with no live layout pane the allowed pin remains the fallback"
+        );
+    }
+
+    #[test]
+    fn pane_layout_observation_session_uses_registered_supervisor_after_fresh_restart() {
+        let registered = vec![("/repo/tasks/left.md".to_string(), "%77".to_string())];
+        assert_eq!(
+            pane_layout_observation_session(None, false, &[], &registered, |pane| {
+                (pane == "%77").then(|| "live".to_string())
+            }),
+            Some((
+                "live".to_string(),
+                PaneLayoutObservationSessionSource::RegisteredSupervisorPane
+            )),
         );
     }
 

@@ -593,6 +593,36 @@ mod tests {
     }
 
     #[test]
+    fn consume_treats_bare_hash_id_without_open_work_as_free_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- #unknown-preset\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#different-work] still open\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let effects = FakeEffects;
+        consume(&effects, &doc, 1).expect("an unowned bare #id is a consumable free-text head");
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- ~#unknown-preset~"),
+            "the bare hash head must be struck instead of refused as id-backed:\n{result}"
+        );
+    }
+
+    #[test]
     fn consume_bails_on_leading_id_backed_head() {
         // An id-backed head must be reaped via --done, never struck blind here.
         let dir = tempfile::tempdir().unwrap();

@@ -3060,16 +3060,16 @@ mod core_tests {
                 "a bare/pinned [#id] head {head:?} is id-backed, not free text"
             );
         }
-        // A #-token head that is NOT a registered preset (no `prompt_presets`
-        // frontmatter) carries an #id with no backlog row, so it stays id-backed
-        // (cannot be silently struck without an explicit signal).
+        // GH #150: a #-token head that is NOT a registered preset and has no
+        // open tracked-work owner is free text, so response evidence can strike
+        // it instead of serving it forever.
         let preset = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue auto -->\n",
             "- #spec-test-build-install-commit-push\n",
             "<!-- /agent:queue -->\n",
         );
-        assert!(!queue_head_is_free_text_prompt(preset).unwrap());
+        assert!(queue_head_is_free_text_prompt(preset).unwrap());
         // Inactive queue → no head → not free text.
         let inactive = doc.replace("queue_active: true", "queue_active: false");
         assert!(!queue_head_is_free_text_prompt(&inactive).unwrap());
@@ -3312,15 +3312,15 @@ mod core_tests {
             )
         );
 
-        // An unregistered #-token (preset name not in frontmatter) is NOT treated
-        // as a preset — it stays id-backed so it is never struck blind.
+        // An unregistered #-token is not a preset, but without an open
+        // tracked-work owner it is a free-text head.
         let unregistered = concat!(
             "---\nqueue_active: true\n---\n\n",
             "<!-- agent:queue auto -->\n",
             "- #advance-review\n",
             "<!-- /agent:queue -->\n",
         );
-        assert!(!queue_head_is_free_text_prompt(unregistered).unwrap());
+        assert!(queue_head_is_free_text_prompt(unregistered).unwrap());
         assert!(
             !agent_doc_queue::queue_response::head_id_is_registered_preset(
                 unregistered,
@@ -4412,6 +4412,31 @@ mod core_tests {
     }
 
     #[test]
+    fn unowned_bare_hash_head_is_struck_by_exact_response_echo_gh150() {
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- #advance-review\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#different-work] still open\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let response = concat!(
+            "### Re: advance review — opus\n\n",
+            "> **Queue prompt:** #advance-review\n\n",
+            "Reviewed the available work.\n",
+        );
+
+        let keys = answered_free_text_head_node_keys(content, response, Some(content)).unwrap();
+        assert_eq!(
+            keys.len(),
+            1,
+            "an exact queue-prompt echo must close the unowned bare #id once: {keys:?}"
+        );
+    }
+
+    #[test]
     fn queue_prompt_text_is_free_text_classification() {
         let content =
             "---\nqueue_active: true\n---\n<!-- agent:queue -->\n- x\n<!-- /agent:queue -->\n";
@@ -4419,7 +4444,7 @@ mod core_tests {
             content,
             "do [#fullboundary]"
         ));
-        assert!(!queue_prompt_text_is_free_text(content, "#orphanqhead"));
+        assert!(queue_prompt_text_is_free_text(content, "#orphanqhead"));
         assert!(queue_prompt_text_is_free_text(
             content,
             "My free-text queue items are not immediately struck as if they are addressed."

@@ -2190,6 +2190,58 @@ struct PromptDispatchProjection {
     admitted_at: std::time::Instant,
 }
 
+#[derive(Clone, Debug)]
+struct InstalledBinarySnapshot {
+    identity: agent_doc_controller::status::ControllerBinaryIdentity,
+    inode: Option<u64>,
+}
+
+fn installed_binary_snapshot() -> Option<InstalledBinarySnapshot> {
+    let path = installed_agent_doc_binary().ok()?;
+    let identity =
+        agent_doc_controller_io::project_controller::binary_identity_at_running_version(&path)
+            .ok()?;
+    Some(InstalledBinarySnapshot {
+        inode: agent_doc_fs::inode_of_path(&identity.path),
+        identity,
+    })
+}
+
+/// Build the process-scoped filesystem observation without assuming that the
+/// running image and installed command started at the same path (GH #159).
+///
+/// A PyPI bootstrap runs the native payload from its versioned cache while its
+/// installed command remains the Python entrypoint. Source-build supervisors
+/// can have the same shape. Comparing those two inodes directly would make the
+/// process permanently stale. Instead, when the paths differed at launch, track
+/// replacement of the installed command relative to its launch-time snapshot.
+fn supervisor_binary_freshness_observation(
+    launch_binary_identity: Option<&agent_doc_controller::status::ControllerBinaryIdentity>,
+    installed_binary_at_launch: Option<&InstalledBinarySnapshot>,
+    installed_binary_now: &InstalledBinarySnapshot,
+    running_exe_inode: Option<u64>,
+) -> agent_doc_supervisor::binary_freshness::BinaryFreshnessObservation {
+    let running_started_from_installed_path = launch_binary_identity
+        .zip(installed_binary_at_launch)
+        .is_some_and(|(launch, installed)| launch.path == installed.identity.path);
+    let (recorded_identity, recorded_inode) = if running_started_from_installed_path {
+        (launch_binary_identity, running_exe_inode)
+    } else if let Some(installed) = installed_binary_at_launch {
+        (Some(&installed.identity), installed.inode)
+    } else {
+        (launch_binary_identity, running_exe_inode)
+    };
+    let identity_stale = agent_doc_controller::status::process_binary_is_stale(
+        recorded_identity,
+        Some(&installed_binary_now.identity),
+    );
+    agent_doc_supervisor::binary_freshness::BinaryFreshnessObservation {
+        identity_stale,
+        running_exe_inode: recorded_inode,
+        installed_binary_inode: installed_binary_now.inode,
+    }
+}
+
 /// Shared state between the main supervisor loop and the IPC handler thread.
 pub(crate) struct SupervisorShared {
     /// Current supervisor state for IPC `state` queries.
@@ -2206,6 +2258,11 @@ pub(crate) struct SupervisorShared {
     /// refreshes against this snapshot so a stale supervisor does not wait for the
     /// idle watch before choosing the hot-reexec path.
     launch_binary_identity: Option<agent_doc_controller::status::ControllerBinaryIdentity>,
+    /// Installed-command identity captured beside the launch identity. When the
+    /// supervisor runs from another launchable path (notably the PyPI cache),
+    /// freshness tracks changes to this command instead of comparing unrelated
+    /// process and wrapper inodes forever (GH #159).
+    installed_binary_at_launch: Option<InstalledBinarySnapshot>,
     /// Current restart count.
     restart_count: AtomicU32,
     /// Whether a child is currently running.
@@ -2315,6 +2372,7 @@ impl SupervisorShared {
         actor_state: Option<agent_doc_controller::actor::ActorState>,
         inject_pane: Option<String>,
     ) -> Self {
+        let installed_binary_at_launch = installed_binary_snapshot();
         let process_scope = agent_doc_state_scope::ProcessScope::new();
         let binary_freshness =
             agent_doc_supervisor::binary_freshness::BinaryFreshnessState::new_in(&process_scope);
@@ -2333,6 +2391,7 @@ impl SupervisorShared {
             supervisor_pid: std::process::id(),
             supervisor_instance_id,
             launch_binary_identity,
+            installed_binary_at_launch,
             restart_count: AtomicU32::new(0),
             running: AtomicBool::new(false),
             cwd_source,
@@ -2623,22 +2682,16 @@ impl SupervisorShared {
     }
 
     fn refresh_binary_stale(&self) -> bool {
-        let Some(current) =
-            agent_doc_controller_io::project_controller::current_binary_identity().ok()
-        else {
+        let Some(installed_binary_now) = installed_binary_snapshot() else {
             return self.binary_freshness.stale();
         };
-        let identity_stale = agent_doc_controller::status::process_binary_is_stale(
-            self.launch_binary_identity.as_ref(),
-            Some(&current),
-        );
-        self.binary_freshness.observe(
-            agent_doc_supervisor::binary_freshness::BinaryFreshnessObservation {
-                identity_stale,
-                running_exe_inode: agent_doc_fs::running_exe_inode_for_pid(self.supervisor_pid),
-                installed_binary_inode: agent_doc_fs::inode_of_path(&current.path),
-            },
-        );
+        self.binary_freshness
+            .observe(supervisor_binary_freshness_observation(
+                self.launch_binary_identity.as_ref(),
+                self.installed_binary_at_launch.as_ref(),
+                &installed_binary_now,
+                agent_doc_fs::running_exe_inode_for_pid(self.supervisor_pid),
+            ));
         self.binary_freshness.stale()
     }
 
@@ -3086,6 +3139,56 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
+
+    fn binary_identity(
+        path: &str,
+        version: &str,
+        len: u64,
+        modified_nanos: u32,
+    ) -> agent_doc_controller::status::ControllerBinaryIdentity {
+        agent_doc_controller::status::ControllerBinaryIdentity {
+            path: PathBuf::from(path),
+            version: version.to_string(),
+            len,
+            modified_secs: 10,
+            modified_nanos,
+        }
+    }
+
+    #[test]
+    fn supervisor_running_from_distinct_cache_path_detects_installed_binary_replacement() {
+        let launch = binary_identity("/cache/agent-doc/1.0.0/agent-doc", "1.0.0", 100, 1);
+        let installed_at_launch = InstalledBinarySnapshot {
+            identity: binary_identity("/usr/bin/agent-doc", "1.0.0", 100, 1),
+            inode: Some(20),
+        };
+        let state_scope = agent_doc_state_scope::ProcessScope::new();
+        let freshness =
+            agent_doc_supervisor::binary_freshness::BinaryFreshnessState::new_in(&state_scope);
+
+        freshness.observe(supervisor_binary_freshness_observation(
+            Some(&launch),
+            Some(&installed_at_launch),
+            &installed_at_launch,
+            Some(10),
+        ));
+        assert!(
+            !freshness.stale(),
+            "distinct cache and installed-command inodes are not replacement evidence"
+        );
+
+        let upgraded = InstalledBinarySnapshot {
+            identity: binary_identity("/usr/bin/agent-doc", "1.0.1", 101, 2),
+            inode: Some(21),
+        };
+        freshness.observe(supervisor_binary_freshness_observation(
+            Some(&launch),
+            Some(&installed_at_launch),
+            &upgraded,
+            Some(10),
+        ));
+        assert!(freshness.stale());
+    }
 
     #[test]
     fn ctrl_d_restart_mode_preserves_conversation_lineage() {

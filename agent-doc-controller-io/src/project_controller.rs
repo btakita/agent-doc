@@ -8673,7 +8673,15 @@ pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>
 
 pub fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
     let path = current_agent_doc_binary()?;
-    let metadata = std::fs::metadata(&path)
+    binary_identity_at_running_version(&path)
+}
+
+/// Read filesystem identity for `path` while retaining this process's compiled
+/// version. This is the cheap identity probe used by long-lived processes: it
+/// performs only local metadata reads, unlike [`binary_identity_at`], which
+/// executes the target to discover its version.
+pub fn binary_identity_at_running_version(path: &Path) -> Result<ControllerBinaryIdentity> {
+    let metadata = std::fs::metadata(path)
         .with_context(|| format!("failed to stat current agent-doc binary {}", path.display()))?;
     let modified = metadata
         .modified()
@@ -8681,7 +8689,7 @@ pub fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
         .duration_since(UNIX_EPOCH)
         .with_context(|| format!("modified time before unix epoch for {}", path.display()))?;
     Ok(ControllerBinaryIdentity {
-        path,
+        path: path.to_path_buf(),
         version: identity_version(),
         len: metadata.len(),
         modified_secs: modified.as_secs(),

@@ -8579,6 +8579,43 @@ fn test_cli_read_command_routes_active_document_through_realtime_authority() {
 }
 
 #[test]
+fn test_read_unknown_component_is_plain_usage_error_for_dogfood_documents() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let tasks = root.join("tasks");
+    fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    fs::create_dir_all(&tasks).unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"agent-doc\"\nversion = \"0.0.0\"\n",
+    )
+    .unwrap();
+    let content = concat!(
+        "---\nagent_doc_format: template\nagent_doc_dogfood: true\n---\n\n",
+        "<!-- agent:exchange -->\nbody\n<!-- /agent:exchange -->\n",
+        "<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+    );
+    let attached = tasks.join("attached.md");
+    let other = tasks.join("other.md");
+    fs::write(&attached, content).unwrap();
+    fs::write(&other, content).unwrap();
+
+    for (document, invalid) in [(&attached, "nope1"), (&other, "nope2")] {
+        let output = agent_doc_cmd()
+            .current_dir(root)
+            .args(["read", document.to_str().unwrap(), "--component", invalid])
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(stderr.contains(&format!("component '{invalid}' not found")));
+        assert!(stderr.contains("valid components: exchange, queue"));
+        assert!(!stderr.contains("ACTIONABLE_AGENT_DOC_FIX_PROMPT"));
+        assert!(!stderr.contains("issue_class=terminal_failure"));
+    }
+}
+
+#[test]
 fn test_cli_outline_command_routes_active_document_through_realtime_authority() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let outline_source = fs::read_to_string(manifest_dir.join("src/outline_cmd.rs")).unwrap();

@@ -91,6 +91,15 @@ Two modes:
 
 `agent-doc diff <FILE>` prints the unified diff between the saved snapshot and the current document.
 
+## read
+
+`agent-doc read <FILE> [--component NAME]` prints the current authoritative
+document content, or the body of one named template component. An unknown
+component name is an operator usage error on both attached and detached
+documents: it exits unsuccessfully with the document's valid component names
+and never emits the dogfood `ACTIONABLE_AGENT_DOC_FIX_PROMPT` terminal-failure
+banner.
+
 ## response-toc
 
 `agent-doc response-toc <FILE> [--id BACKLOG_ID] [--query TEXT] [--limit N] [--json]`

@@ -4717,6 +4717,7 @@ fn is_operator_usage_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause.is::<agent_doc_queue::queue_claim::QueueClaimMiss>()
             || cause.is::<agent_doc_queue::queue_claim::QueueClaimRefreshRefused>()
+            || cause.is::<read::UnknownReadComponent>()
     })
 }
 
@@ -7860,5 +7861,18 @@ mod usage_error_report_tests {
         let err = anyhow::Error::new(refused).context("queue claim --refresh");
         assert!(is_operator_usage_error(&err));
         assert!(format!("{err:#}").contains("it is not claimed"));
+    }
+
+    #[test]
+    fn unknown_read_component_is_an_operator_usage_error() {
+        let err = anyhow::Error::new(read::UnknownReadComponent {
+            requested: "nope1".to_string(),
+            file: PathBuf::from("tasks/session.md"),
+            valid_components: vec!["exchange".to_string(), "queue".to_string()],
+        })
+        .context("read component");
+
+        assert!(is_operator_usage_error(&err));
+        assert!(format!("{err:#}").contains("valid components: exchange, queue"));
     }
 }

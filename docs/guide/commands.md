@@ -53,6 +53,17 @@ agent-doc diff <FILE>
 
 Preview the unified diff that would be sent on the next run. Useful for checking what changed before running.
 
+## read
+
+```
+agent-doc read <FILE> [--component NAME]
+```
+
+Print the current document, or one named template component. If `NAME` is not
+present, the error lists the valid components. This is a command-usage error
+whether the document is open in an editor or detached; it does not trigger the
+dogfood terminal-failure banner.
+
 ## reset
 
 ```

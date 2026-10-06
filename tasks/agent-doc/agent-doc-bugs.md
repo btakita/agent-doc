@@ -257,8 +257,9 @@ Yes—you can safely restart IDEA now, although it is no longer required.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/158
-- #gh-fix https://github.com/btakita/agent-doc/issues/159
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/158
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/159
+- 🚧 #advance-reviews
 - 🚧 release + publish
 <!-- /agent:queue -->
 

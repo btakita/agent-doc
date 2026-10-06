@@ -12,7 +12,6 @@ import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileDocumentManagerListener
-import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
@@ -111,6 +110,16 @@ internal fun nativeReloadReplicaRestartReport(
         liveProjects = liveProjects,
     )
 }
+
+/**
+ * A native handoff must retain every replica it deregistered as a restart target.
+ * The live editor observation may add a document opened during the handoff, but an
+ * empty/lossy Remote Dev observation can never erase the known pre-handoff set.
+ */
+internal fun nativeReloadReplicaRestartPaths(
+    handoffPaths: Collection<String>,
+    observedPaths: Collection<String>,
+): List<String> = (handoffPaths + observedPaths).toSortedSet().toList()
 
 /**
  * Merge per-project replica restart reports into one whole-IDE report.
@@ -3722,12 +3731,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         runOnEdtNonBlocking {
                             if (disposed.get() || project.isDisposed) return@runOnEdtNonBlocking
                             val file =
-                                FileEditorManager.getInstance(project).openFiles
-                                    .firstOrNull { it.path == filePath }
-                                    ?: return@runOnEdtNonBlocking
+                                EditorOpenFileSurface.find(project, filePath)
+                                    ?: LocalFileSystem.getInstance().findFileByPath(filePath)
+                            if (file == null) {
+                                recordRegisterFailure(filePath, "editor-file-unavailable")
+                                return@runOnEdtNonBlocking
+                            }
                             val document =
                                 FileDocumentManager.getInstance().getDocument(file)
-                                    ?: return@runOnEdtNonBlocking
+                            if (document == null) {
+                                recordRegisterFailure(filePath, "editor-document-unavailable")
+                                return@runOnEdtNonBlocking
+                            }
                     ensureOpenDocumentReplica(
                         file.path,
                         document,
@@ -4139,7 +4154,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             handoff: NativeReloadReplicaHandoff,
             liveProjects: Collection<Project> = emptyList(),
         ): NativeReloadReplicaRestartReport {
-            val targets = mutableListOf<Triple<CrdtReplicaManager, String, Document>>()
+            val targets = linkedMapOf<String, Pair<CrdtReplicaManager, Document>>()
+            val expectedPaths = linkedSetOf<String>()
             val collectTargets = {
                 (handoff.projectDocuments.keys + liveProjects)
                     .distinct()
@@ -4147,15 +4163,34 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     .forEach { project ->
                         val manager = getInstance(project)
                         val fileDocumentManager = FileDocumentManager.getInstance()
-                        FileEditorManager.getInstance(project).openFiles
+                        val observedDocuments = EditorOpenFileSurface.snapshot(project)
                             .asSequence()
                             .filter { it.name.endsWith(".md") }
-                            .forEach { file ->
-                                val document = fileDocumentManager.getDocument(file) ?: return@forEach
-                                if (isAgentDocDocumentTextUtil(document.text)) {
-                                    targets.add(Triple(manager, file.path, document))
-                                }
+                            .mapNotNull { file ->
+                                val document = fileDocumentManager.getDocument(file) ?: return@mapNotNull null
+                                if (isAgentDocDocumentTextUtil(document.text)) file.path to document else null
                             }
+                            .toMap(linkedMapOf())
+                        val handoffPaths = handoff.projectDocuments[project].orEmpty()
+                        val projectExpected = nativeReloadReplicaRestartPaths(
+                            handoffPaths = handoffPaths,
+                            observedPaths = observedDocuments.keys,
+                        )
+                        expectedPaths.addAll(projectExpected)
+                        projectExpected.forEach { filePath ->
+                            val document = observedDocuments[filePath]
+                                ?: LocalFileSystem.getInstance().findFileByPath(filePath)
+                                    ?.let(fileDocumentManager::getDocument)
+                            if (document == null) {
+                                manager.log.warn(
+                                    "[crdt-replica] native-generation re-register outcome=editor_document_unavailable " +
+                                        "file=$filePath retry=scheduled",
+                                )
+                                manager.recordRegisterFailure(filePath, "native-reload-document-unavailable")
+                            } else {
+                                targets.putIfAbsent(filePath, manager to document)
+                            }
+                        }
                     }
             }
             if (SwingUtilities.isEventDispatchThread()) {
@@ -4164,9 +4199,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 ApplicationManager.getApplication().invokeAndWait(collectTargets)
             }
 
-            val expectedPaths = targets.map { it.second }.toSortedSet()
             val attachedPaths = linkedSetOf<String>()
-            targets.forEach { (manager, filePath, document) ->
+            targets.forEach { (filePath, target) ->
+                val (manager, document) = target
                 manager.log.info(
                     "[crdt-replica] awaiting native-generation re-register for ${File(filePath).name}",
                 )
@@ -4179,6 +4214,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                 ) {
                     attachedPaths.add(filePath)
+                    manager.log.info(
+                        "[crdt-replica] native-generation re-register outcome=attached file=$filePath",
+                    )
+                } else {
+                    manager.log.warn(
+                        "[crdt-replica] native-generation re-register outcome=not_attached " +
+                            "file=$filePath retry=scheduled",
+                    )
                 }
             }
             return nativeReloadReplicaRestartReport(
@@ -4362,7 +4405,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (project.isDisposed) return@runOnEdtNonBlocking
                 val manager = instances[project] ?: return@runOnEdtNonBlocking
                 val fileDocumentManager = FileDocumentManager.getInstance()
-                FileEditorManager.getInstance(project).openFiles
+                EditorOpenFileSurface.snapshot(project)
                     .asSequence()
                     .filter { it.name.endsWith(".md") }
                     .forEach { file ->
@@ -4409,7 +4452,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             ApplicationManager.getApplication().invokeAndWait {
                 if (project.isDisposed) return@invokeAndWait
                 val fileDocumentManager = FileDocumentManager.getInstance()
-                FileEditorManager.getInstance(project).openFiles
+                EditorOpenFileSurface.snapshot(project)
                     .asSequence()
                     .filter { it.name.endsWith(".md") }
                     .forEach { file ->
@@ -4468,8 +4511,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (project.isDisposed) return@runOnEdtNonBlocking
                 val manager = instances[project] ?: return@runOnEdtNonBlocking
                 val file =
-                    FileEditorManager.getInstance(project).openFiles
-                        .firstOrNull { it.path == filePath }
+                    EditorOpenFileSurface.find(project, filePath)
                         ?: return@runOnEdtNonBlocking
                 val document =
                     FileDocumentManager.getInstance().getDocument(file)
@@ -4497,8 +4539,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val textRef = AtomicReference<String?>()
             val capture = {
                 val file =
-                    FileEditorManager.getInstance(project).openFiles
-                        .firstOrNull { it.path == newPath }
+                    EditorOpenFileSurface.find(project, newPath)
                         ?: LocalFileSystem.getInstance().findFileByPath(newPath)
                 val document = file?.let { FileDocumentManager.getInstance().getDocument(it) }
                 documentRef.set(document)
@@ -4520,7 +4561,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val manager = instances[project] ?: return@runOnEdtNonBlocking
                 val fileDocumentManager = FileDocumentManager.getInstance()
                 val openDocuments =
-                    FileEditorManager.getInstance(project).openFiles
+                    EditorOpenFileSurface.snapshot(project)
                         .asSequence()
                         .filter { it.name.endsWith(".md") }
                         .mapNotNull { file ->

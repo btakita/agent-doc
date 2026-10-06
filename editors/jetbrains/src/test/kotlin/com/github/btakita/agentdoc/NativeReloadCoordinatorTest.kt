@@ -62,6 +62,24 @@ class NativeReloadCoordinatorTest {
     }
 
     @Test
+    fun `replica restart retains every path torn down by the handoff`() {
+        assertEquals(
+            listOf("/project/a.md", "/project/b.md"),
+            nativeReloadReplicaRestartPaths(
+                handoffPaths = listOf("/project/b.md", "/project/a.md"),
+                observedPaths = emptyList(),
+            ),
+        )
+        assertEquals(
+            listOf("/project/a.md", "/project/b.md", "/project/c.md"),
+            nativeReloadReplicaRestartPaths(
+                handoffPaths = listOf("/project/a.md", "/project/b.md"),
+                observedPaths = listOf("/project/c.md", "/project/a.md"),
+            ),
+        )
+    }
+
+    @Test
     fun `native handoff checkpoints before disposal and awaits replacement registration`() {
         val manager = Files.readString(
             listOf(
@@ -90,7 +108,13 @@ class NativeReloadCoordinatorTest {
         assertTrue(
             "native restart must rediscover every live project's open agent-doc documents",
             restart.contains("handoff.projectDocuments.keys + liveProjects") &&
-                restart.contains("isAgentDocDocumentTextUtil(document.text)"),
+                restart.contains("EditorOpenFileSurface.snapshot(project)") &&
+                restart.contains("nativeReloadReplicaRestartPaths("),
+        )
+        assertTrue(
+            "native restart must retain the exact handoff set and retry unresolved targets",
+            restart.contains("handoff.projectDocuments[project].orEmpty()") &&
+                restart.contains("native-reload-document-unavailable"),
         )
         assertTrue(
             "the coordinator must inspect convergence before releasing the reload gate",

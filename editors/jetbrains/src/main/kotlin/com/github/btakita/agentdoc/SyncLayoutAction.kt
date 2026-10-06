@@ -832,14 +832,7 @@ object LayoutDetector {
         // On a Remote Dev backend the editor tracker is the split-aware
         // RdServerEditorTracker: its active editors are the frontend text editors
         // whose visibility the client reported, one per visible split.
-        val activeEditors: Set<com.intellij.openapi.editor.Editor> = try {
-            com.intellij.codeInsight.daemon.impl.EditorTracker.getInstance(project)
-                .activeEditors
-                .toSet()
-        } catch (e: Throwable) {
-            LOG.debug("[layout-detect] editor tracker unavailable: ${e.message}")
-            emptySet()
-        }
+        val activeEditors = EditorOpenFileSurface.activeEditors(project)
         return remoteManagers
             .mapIndexed { index, manager ->
                 try {

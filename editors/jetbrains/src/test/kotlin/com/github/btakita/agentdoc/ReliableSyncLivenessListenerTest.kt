@@ -33,9 +33,24 @@ class ReliableSyncLivenessListenerTest {
         val coordinator = root.resolve("NativeReloadCoordinator.kt").toFile().readText()
 
         assertTrue(listener.contains("fun republishOpenDocumentsAfterNativeReload("))
+        assertTrue(
+            "native reload must republish the same local and Remote Dev editor surface used by layout",
+            listener.contains("EditorOpenFileSurface.snapshot(project)"),
+        )
         val liveness = coordinator.indexOf("republishOpenDocumentsAfterNativeReload(")
         val replicas = coordinator.indexOf("CrdtReplicaManager.restartAfterNativeReload(")
         assertTrue("liveness endpoint authority must advance before replica admission", liveness >= 0)
         assertTrue("replica restart must follow liveness republish", replicas > liveness)
+    }
+
+    @Test
+    fun `shared open editor surface includes remote client and visible editor state`() {
+        val source = Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorOpenFileSurface.kt")
+            .toFile().readText()
+
+        assertTrue(source.contains("FileEditorManager.getInstance(project).openFiles"))
+        assertTrue(source.contains("ClientFileEditorManager::class.java, ClientKind.REMOTE"))
+        assertTrue(source.contains("manager.getAllFiles()"))
+        assertTrue(source.contains("EditorTracker.getInstance(project).activeEditors"))
     }
 }

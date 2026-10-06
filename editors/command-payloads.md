@@ -37,7 +37,7 @@ target path is the lazily command envelope.
 
 | Command | `name` | `payload_type` | Interim path |
 |---|---|---|---|
-| Run Agent Doc | `editor_route` | `agent-doc.editor_route.v1` | JB `CpRouteClient` submits `editor_command_submit_async` and polls `editor_command_status`; VS Code raw `controller.sock` `editor_route` |
+| Run Agent Doc | `editor_route` | `agent-doc.editor_route.v1` | JB `CpRouteClient` submits `editor_command_submit_async` and polls `editor_command_status`; VS Code submits synchronous `editor_command_submit`; both execute the same binary-owned route |
 | Sync Tmux Layout / Load Window | `sync_tmux_layout` | `agent-doc.sync_tmux_layout.v1` | JB `CpRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
 | Focus handoff | `focus_document_pane` | `agent-doc.focus_document_pane.v1` | JB `CpRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
 | Session status/clear/restart/doctor | `session_command` | `agent-doc.session_command.v1` | editor-spawned CLI |

@@ -140,6 +140,17 @@ No legacy layout file is imported or emitted.
   recorder remains excluded from that critical family. Model-pressure cooldown
   persistence may refresh during a continuous episode, but emits
   `controller_model_pressure_recorded` only when a new episode begins.
+- The generic 5.0s response deadline is an external-client hang guard, not a
+  budget that controller-owned work is expected to consume. A first
+  `controller_state_event_deadline_retry` is expected recovery for the one
+  idempotent state-event replay; `controller_crdt_current_text_read_unavailable`
+  and `retained_write_settlement_local_fallback` identify conservative read or
+  settlement fallbacks. `document_model_controller_lookup_error` uses an
+  embedded relay when one exists and otherwise remains a real unavailable-read
+  error. In contrast, a controller request thread or spawned controller worker
+  must carry controller-local identity and its reactive document reader, so it
+  never calls its own socket and never turns this deadline into an operator
+  `Run Agent Doc` failure.
 - Controller lazy launch must not trust a stale `current_exe()` path after a
   local binary replacement. If that path no longer exists, launch and bootstrap
   identity resolution fall back to the invoked command or `agent-doc` on `PATH`;

@@ -19,7 +19,6 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -241,16 +240,6 @@ The v0.35.466 GitHub Release workflow completed successfully with all platform a
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~do [#qsubattr5]~~
-- ~~do [#drivecapturedsplice]~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/151
-- #gh-fix https://github.com/btakita/agent-doc/issues/152
-- #gh-fix https://github.com/btakita/agent-doc/issues/153
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/154
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/155
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/156
-- #gh-fix https://github.com/btakita/agent-doc/issues/157
-- release + publish 
 <!-- /agent:queue -->
 
 

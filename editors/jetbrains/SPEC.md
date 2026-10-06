@@ -161,7 +161,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   backend enumerates no windows and its client-selected files name only the focused document,
   so it reports per-client `visible` (the Remote Dev editor tracker's active client editors,
   one per visible split), `selected`, and `open` session documents to the shared native fold
-  `agent_doc_editor_surface_resolve_remote_layout_json` (GH #134). One client naming two or
+  `agent_doc_editor_surface_resolve_remote_layout_json` (GH #134). The plugin snapshots those
+  client/editor collections and the backend-focused files on the EDT, then runs the fold from the
+  generation-fenced surface delivery worker; direct synchronous detection also marshals only the
+  immutable fold off the EDT. The native bridge's EDT guard therefore remains intact and a
+  selection observation can use retained split memory instead of silently taking the memoryless
+  fallback (GH #157). One client naming two or
   more documents is a detected split; a later single-selection observation retains that known
   split (width held; a tab switch to an uncovered document replaces the previously focused
   column, never appends), and documents whose tabs closed drop out. Only with no split
@@ -404,7 +409,7 @@ Binary auto-start forensics also land in `/tmp/agent-doc-sync.log` and the per-d
 
 - `PluginLifecycleListener` handles `projectOpened`/`projectClosing`.
 - Startup root discovery and native listener registration run on the pooled application executor, not the IDEA event-dispatch thread. This keeps fallback scans away from UI startup when Linux inotify watches are exhausted.
-- Editor layout/window snapshots and document mutations are captured on the event-dispatch thread, while project-root discovery, filesystem walks, patch-watch registration, command-plane/native work, and tmux consequences run in background executors. Socket patch apply first captures an immutable document text/stamp proof on the EDT, performs every native replay/component/normalization calculation on the listener worker, then returns only the computed target to the EDT for a proof-fenced minimal edit. The immutable post-write content receipt is published from the socket worker before acknowledgement. The native generation bridge rejects event-dispatch-thread calls so a busy controller cannot freeze IDEA, and an adapter path must not catch that rejection as an ordinary patch failure caused by scheduling native computation inside an EDT closure.
+- Editor layout/window snapshots and document mutations are captured on the event-dispatch thread, while project-root discovery, filesystem walks, patch-watch registration, command-plane/native work, and tmux consequences run in background executors. Remote Dev's zero-window layout path snapshots client-visible, selected, open, and focused session documents on the EDT, but resolves the native retained-split fold on the surface delivery worker. Socket patch apply first captures an immutable document text/stamp proof on the EDT, performs every native replay/component/normalization calculation on the listener worker, then returns only the computed target to the EDT for a proof-fenced minimal edit. The immutable post-write content receipt is published from the socket worker before acknowledgement. The native generation bridge rejects event-dispatch-thread calls so a busy controller cannot freeze IDEA, and an adapter path must not catch that rejection as an ordinary patch failure caused by scheduling native computation inside an EDT closure.
 - Project close and plugin unload dispose CRDT replica, patch watcher, layout detector, and visual highlighter resources. Queued visual-refresh callbacks check their manager generation's disposed state before scheduling or applying, and a scheduler-shutdown race is inert rather than an IDE exception.
 
 ## Keybindings

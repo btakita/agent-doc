@@ -4,8 +4,54 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import javax.swing.SwingUtilities
 
 class LayoutDetectorTest {
+
+    @Test
+    fun `GH 157 zero-window detection entered on EDT runs native fold on worker`() {
+        val nativeFoldRan = AtomicBoolean(false)
+        val detected = AtomicReference<EditorLayout?>()
+
+        SwingUtilities.invokeAndWait {
+            assertTrue(SwingUtilities.isEventDispatchThread())
+            detected.set(
+                LayoutDetector.detectEditorLayout(
+                    LayoutDetector.RemoteLayoutSnapshot(
+                        projectRoot = "/repo",
+                        clients = listOf(
+                            LayoutDetector.RemoteClientSessionEditors(
+                                visible = listOf("tasks/a.md"),
+                                selected = listOf("tasks/a.md"),
+                                open = listOf("tasks/a.md", "tasks/b.md"),
+                            ),
+                        ),
+                        focusedSessionFiles = listOf("tasks/a.md"),
+                    ),
+                    nativeFold = { projectRoot, evidenceJson ->
+                        nativeFoldRan.set(true)
+                        assertFalse(SwingUtilities.isEventDispatchThread())
+                        assertEquals("/repo", projectRoot)
+                        assertTrue(evidenceJson.contains("tasks/b.md"))
+                        """{"columns":[{"files":["tasks/a.md"]},{"files":["tasks/b.md"]}],"source":"retained_remote_columns","reason":"single_selection_within_retained_layout"}"""
+                    },
+                ),
+            )
+        }
+
+        assertTrue("the GH #134 retained-split fold must run", nativeFoldRan.get())
+        assertEquals(
+            EditorLayout(
+                listOf(
+                    LayoutColumn(listOf("tasks/a.md")),
+                    LayoutColumn(listOf("tasks/b.md")),
+                ),
+            ),
+            detected.get(),
+        )
+    }
 
     @Test
     fun `buildColumnsFromSnapshots keeps screen order when focused window is listed first`() {

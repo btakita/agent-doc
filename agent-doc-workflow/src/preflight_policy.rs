@@ -228,13 +228,27 @@ pub fn dogfood_terminal_issue_class(diagnostic: &str) -> &'static str {
 /// Render the actionable notification emitted when an opted-in dogfood
 /// document's Agent Doc command does not reach a successful terminal boundary.
 ///
-/// The key is stable for a document + failure class even when cycle ids,
-/// generations, and timestamps change, so notification surfaces may coalesce
-/// repeats without losing the newest diagnostic.
+/// Known failure classes intentionally coalesce changing cycle ids, generations,
+/// and timestamps. Generic failures include a normalized diagnostic fingerprint
+/// so unrelated causes do not collapse onto one `terminal_failure` issue key.
 pub fn format_dogfood_terminal_issue_prompt(document_id: &str, diagnostic: &str) -> String {
     let issue_class = dogfood_terminal_issue_class(diagnostic);
-    let issue_key =
-        agent_doc_hash::content_hash(&format!("dogfood-terminal:{document_id}:{issue_class}"));
+    let discriminator = if issue_class == "terminal_failure" {
+        let normalized = diagnostic
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        format!(
+            "{issue_class}:{}",
+            agent_doc_hash::content_hash(&normalized)
+        )
+    } else {
+        issue_class.to_string()
+    };
+    let issue_key = agent_doc_hash::content_hash(&format!(
+        "dogfood-terminal:{document_id}:{discriminator}"
+    ));
     format!(
         "[dogfood] ACTIONABLE_AGENT_DOC_FIX_PROMPT issue_class={issue_class} issue_key={issue_key}\n\
          Agent Doc did not complete this turn successfully. Diagnose and fix the underlying Agent Doc defect before treating a retry as the remedy. Preserve any retained capture and obey no-resubmit/no-recycle guidance in the original diagnostic."
@@ -531,6 +545,35 @@ mod tests {
         let first_key = first.split("issue_key=").nth(1).unwrap().lines().next();
         let second_key = second.split("issue_key=").nth(1).unwrap().lines().next();
         assert_eq!(first_key, second_key);
+    }
+
+    #[test]
+    fn generic_terminal_issue_keys_discriminate_failure_causes() {
+        let first = format_dogfood_terminal_issue_prompt(
+            "/repo/tasks/bugs.md",
+            "component 'nope1' not found",
+        );
+        let same_cause = format_dogfood_terminal_issue_prompt(
+            "/repo/tasks/bugs.md",
+            "COMPONENT   'nope1'   NOT FOUND",
+        );
+        let second = format_dogfood_terminal_issue_prompt(
+            "/repo/tasks/bugs.md",
+            "respond pre-commit gate failed",
+        );
+        let key = |prompt: &str| {
+            prompt
+                .split("issue_key=")
+                .nth(1)
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap()
+                .to_string()
+        };
+
+        assert_eq!(key(&first), key(&same_cause));
+        assert_ne!(key(&first), key(&second));
     }
 
     #[test]

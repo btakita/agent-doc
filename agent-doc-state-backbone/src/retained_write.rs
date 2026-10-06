@@ -263,6 +263,64 @@ pub enum SettlementVerdict {
     },
 }
 
+/// How a short-lived durable observation joins the controller's refreshed
+/// retained-write projection.
+///
+/// A controller can retire an intent between the caller's local observation
+/// and the RPC response. Treating that exact race as permanent controller lag
+/// strands an already-converged closeout. Absence is authoritative only for
+/// the narrow cut where the controller refreshed from durable state, both
+/// content planes agree, and the caller saw the old intent as payload-absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControllerSettlementJoin {
+    UseController,
+    RetireOrphanedDurableIntent { intent_id: String },
+    UseDurable,
+}
+
+pub fn join_controller_settlement(
+    durable: &SettlementVerdict,
+    controller: &SettlementVerdict,
+    authority_hash: Option<&str>,
+    disk_hash: Option<&str>,
+) -> ControllerSettlementJoin {
+    if durable == controller {
+        return ControllerSettlementJoin::UseController;
+    }
+
+    if let SettlementVerdict::Satisfied {
+        intent_id,
+        settled_hash,
+        ..
+    } = controller
+    {
+        if durable.intent_id() == Some(intent_id.as_str())
+            && authority_hash == Some(settled_hash.as_str())
+            && disk_hash == Some(settled_hash.as_str())
+        {
+            return ControllerSettlementJoin::UseController;
+        }
+    }
+
+    if let (
+        SettlementVerdict::Unsettled {
+            intent_id,
+            cause: UnsettledCause::PayloadAbsentFromConvergedContent,
+        },
+        SettlementVerdict::NoRetainedIntent,
+        Some(authority_hash),
+        Some(disk_hash),
+    ) = (durable, controller, authority_hash, disk_hash)
+        && authority_hash == disk_hash
+    {
+        return ControllerSettlementJoin::RetireOrphanedDurableIntent {
+            intent_id: intent_id.clone(),
+        };
+    }
+
+    ControllerSettlementJoin::UseDurable
+}
+
 /// What preflight should do with the shared settlement verdict before opening
 /// a new cycle (`#0dsr`).
 ///
@@ -748,6 +806,48 @@ mod tests {
             payload_materialized,
             intent_delta_materialized: false,
         }
+    }
+
+    #[test]
+    fn controller_absence_retires_only_payload_absent_intent_on_an_exact_content_cut() {
+        let durable = SettlementVerdict::Unsettled {
+            intent_id: "intent-1".to_string(),
+            cause: UnsettledCause::PayloadAbsentFromConvergedContent,
+        };
+        assert_eq!(
+            join_controller_settlement(
+                &durable,
+                &SettlementVerdict::NoRetainedIntent,
+                Some("current"),
+                Some("current")
+            ),
+            ControllerSettlementJoin::RetireOrphanedDurableIntent {
+                intent_id: "intent-1".to_string()
+            }
+        );
+
+        assert_eq!(
+            join_controller_settlement(
+                &durable,
+                &SettlementVerdict::NoRetainedIntent,
+                Some("authority"),
+                Some("disk")
+            ),
+            ControllerSettlementJoin::UseDurable
+        );
+        let in_flight = SettlementVerdict::Unsettled {
+            intent_id: "intent-1".to_string(),
+            cause: UnsettledCause::AuthorityDiskDiverged,
+        };
+        assert_eq!(
+            join_controller_settlement(
+                &in_flight,
+                &SettlementVerdict::NoRetainedIntent,
+                Some("current"),
+                Some("current")
+            ),
+            ControllerSettlementJoin::UseDurable
+        );
     }
 
     fn satisfied_receipt(

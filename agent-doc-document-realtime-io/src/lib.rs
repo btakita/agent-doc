@@ -9339,31 +9339,28 @@ pub fn recover_retained_document_write_before_new_cycle(
 /// subscribe in (`observe_retained_write_settlement` mints a fresh
 /// `DocumentScope` per call, so an `Effect` there would be this same projection
 /// wearing a costume), so it applies the clear directly and says so.
-/// Join the controller's reactive settlement receipt with this caller's
-/// durable observation.
-///
-/// The controller may settle an intent as a side effect of reading its
-/// `Computed<SettlementVerdict>`. In that case the RPC response is the receipt
-/// for the exact intent and converged content cut even when this short-lived
-/// caller cannot reconstruct semantic payload evidence from the already
-/// rebased document. Accept only that causally closed shape: same intent, and
-/// the receipt's settled hash must equal both observed planes.
-fn controller_settlement_receipt_matches(
-    local: &SettlementVerdict,
-    controller: &SettlementVerdict,
-    observations: &agent_doc_controller_io::project_controller::RetainedWriteObservations,
-) -> bool {
-    let SettlementVerdict::Satisfied {
-        intent_id,
-        settled_hash,
-        ..
-    } = controller
-    else {
-        return false;
+/// Apply the controller's refreshed absence to the exact durable intent the
+/// caller observed. A different current intent means another writer won the
+/// race and must never be cleared here.
+fn retire_orphaned_durable_intent(
+    file: &Path,
+    expected_intent_id: &str,
+    source: &str,
+) -> Result<bool> {
+    let Some(pending) = pending_document_write(file) else {
+        // The controller's refreshed absence already reached the caller's
+        // projection between the verdict and this guarded effect.
+        return Ok(true);
     };
-    local.intent_id() == Some(intent_id.as_str())
-        && observations.authority_hash.as_deref() == Some(settled_hash.as_str())
-        && observations.disk_hash.as_deref() == Some(settled_hash.as_str())
+    if pending.intent_id != expected_intent_id {
+        return Ok(false);
+    }
+    clear_deferred_document_write_intent(
+        file,
+        &pending.target_hash,
+        &format!("{source}:controller-absence-reconcile"),
+    )?;
+    Ok(true)
 }
 
 pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict {
@@ -9398,34 +9395,87 @@ pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict
         &observations,
     ) {
         Ok(verdict) if verdict != local_verdict => {
-            if controller_settlement_receipt_matches(&local_verdict, &verdict, &observations) {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "retained_write_settlement_controller_receipt file={} source={} intent_id={} settled_hash={} action=use_reactive_settlement",
-                        file.display(),
-                        source,
-                        verdict.intent_id().unwrap_or("none"),
-                        observations.authority_hash.as_deref().unwrap_or("none"),
-                    ),
-                );
-                verdict
-            } else {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "retained_write_settlement_controller_projection_lag file={} source={} controller_intent_id={} durable_intent_id={} authority_hash={} disk_hash={} controller_verdict={:?} durable_verdict={:?} action=use_durable_observation",
-                        file.display(),
-                        source,
-                        verdict.intent_id().unwrap_or("none"),
-                        local_verdict.intent_id().unwrap_or("none"),
-                        observations.authority_hash.as_deref().unwrap_or("none"),
-                        observations.disk_hash.as_deref().unwrap_or("none"),
-                        verdict,
-                        local_verdict,
-                    ),
-                );
-                local_verdict
+            use agent_doc_state_backbone::retained_write::{
+                ControllerSettlementJoin, join_controller_settlement,
+            };
+            match join_controller_settlement(
+                &local_verdict,
+                &verdict,
+                observations.authority_hash.as_deref(),
+                observations.disk_hash.as_deref(),
+            ) {
+                ControllerSettlementJoin::UseController => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "retained_write_settlement_controller_receipt file={} source={} intent_id={} settled_hash={} action=use_reactive_settlement",
+                            file.display(),
+                            source,
+                            verdict.intent_id().unwrap_or("none"),
+                            observations.authority_hash.as_deref().unwrap_or("none"),
+                        ),
+                    );
+                    verdict
+                }
+                ControllerSettlementJoin::RetireOrphanedDurableIntent { intent_id } => {
+                    match retire_orphaned_durable_intent(file, &intent_id, source) {
+                        Ok(true) => {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "retained_write_settlement_controller_absence file={} source={} intent_id={} settled_hash={} action=retire_orphaned_durable_intent",
+                                    file.display(),
+                                    source,
+                                    intent_id,
+                                    observations.authority_hash.as_deref().unwrap_or("none"),
+                                ),
+                            );
+                            verdict
+                        }
+                        Ok(false) => {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "retained_write_settlement_controller_absence_raced file={} source={} expected_intent_id={} action=use_durable_observation",
+                                    file.display(),
+                                    source,
+                                    intent_id,
+                                ),
+                            );
+                            local_verdict
+                        }
+                        Err(error) => {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "retained_write_settlement_controller_absence_failed file={} source={} intent_id={} reason={} action=use_durable_observation",
+                                    file.display(),
+                                    source,
+                                    intent_id,
+                                    error,
+                                ),
+                            );
+                            local_verdict
+                        }
+                    }
+                }
+                ControllerSettlementJoin::UseDurable => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "retained_write_settlement_controller_projection_lag file={} source={} controller_intent_id={} durable_intent_id={} authority_hash={} disk_hash={} controller_verdict={:?} durable_verdict={:?} action=use_durable_observation",
+                            file.display(),
+                            source,
+                            verdict.intent_id().unwrap_or("none"),
+                            local_verdict.intent_id().unwrap_or("none"),
+                            observations.authority_hash.as_deref().unwrap_or("none"),
+                            observations.disk_hash.as_deref().unwrap_or("none"),
+                            verdict,
+                            local_verdict,
+                        ),
+                    );
+                    local_verdict
+                }
             }
         }
         Ok(verdict) => verdict,
@@ -9973,11 +10023,15 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(controller_settlement_receipt_matches(
-            &local,
-            &controller,
-            &observations,
-        ));
+        assert_eq!(
+            agent_doc_state_backbone::retained_write::join_controller_settlement(
+                &local,
+                &controller,
+                observations.authority_hash.as_deref(),
+                observations.disk_hash.as_deref(),
+            ),
+            agent_doc_state_backbone::retained_write::ControllerSettlementJoin::UseController,
+        );
     }
 
     #[test]
@@ -9992,16 +10046,20 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!controller_settlement_receipt_matches(
-            &local,
-            &satisfied_settlement("intent-2", "settled-cut"),
-            &observations,
-        ));
-        assert!(!controller_settlement_receipt_matches(
-            &local,
-            &satisfied_settlement("intent-1", "other-cut"),
-            &observations,
-        ));
+        for controller in [
+            satisfied_settlement("intent-2", "settled-cut"),
+            satisfied_settlement("intent-1", "other-cut"),
+        ] {
+            assert_eq!(
+                agent_doc_state_backbone::retained_write::join_controller_settlement(
+                    &local,
+                    &controller,
+                    observations.authority_hash.as_deref(),
+                    observations.disk_hash.as_deref(),
+                ),
+                agent_doc_state_backbone::retained_write::ControllerSettlementJoin::UseDurable,
+            );
+        }
     }
 
     #[test]

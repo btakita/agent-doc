@@ -270,10 +270,10 @@ No actionable follow-up items remain for #158.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/158
-- #gh-fix https://github.com/btakita/agent-doc/issues/159
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/160
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/161
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/158~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/159~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/160~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/161~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#advance-reviews~~
 - release + publish
 <!-- /agent:queue -->

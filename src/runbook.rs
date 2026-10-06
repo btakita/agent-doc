@@ -129,6 +129,7 @@ pub fn create(
         }
         return Err(error).with_context(|| format!("write {}", target.display()));
     }
+    drop(created);
 
     if let Some(preset) = preset {
         let association = (|| -> Result<()> {

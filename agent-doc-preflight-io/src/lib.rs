@@ -6249,6 +6249,59 @@ fn load_projected_in_progress_queue_heads(file: &Path) -> std::collections::Hash
         .unwrap_or_default()
 }
 
+/// A queue-maintenance CAS refusal means the editor advanced after our last
+/// observation. Re-observe the authoritative model, rebase the original
+/// maintenance delta over that fresh cut, and retry within a small budget.
+///
+/// This is deliberately actorless and has no timer: every additional attempt is
+/// earned by an explicit `retry_crdt_merge` refusal from the owning actor and is
+/// preceded by a fresh authoritative observation.
+const QUEUE_MAINTENANCE_CAS_ATTEMPTS: usize = 3;
+
+fn queue_maintenance_cas_is_retryable(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("recovery=retry_crdt_merge")
+}
+
+fn persist_attached_queue_maintenance_with_retry(
+    file: &Path,
+    content: &str,
+    expected_current: &str,
+    source: &str,
+    initial_current: String,
+    mut apply: impl FnMut(&str, &str) -> Result<bool>,
+    mut observe: impl FnMut() -> Result<String>,
+) -> Result<String> {
+    let mut current = initial_current;
+    for attempt in 1..=QUEUE_MAINTENANCE_CAS_ATTEMPTS {
+        let rebased =
+            rebase_queue_maintenance_target(file, source, expected_current, content, &current)?;
+        match apply(&current, &rebased) {
+            Ok(true) => return Ok(rebased),
+            Ok(false) => anyhow::bail!("{source}: attached Lazily write was not applied"),
+            Err(err)
+                if attempt < QUEUE_MAINTENANCE_CAS_ATTEMPTS
+                    && queue_maintenance_cas_is_retryable(&err) =>
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_cas_retry file={} source={} attempt={}/{} expected_hash={} attempted_hash={} recovery=retry_crdt_merge",
+                        file.display(),
+                        source,
+                        attempt,
+                        QUEUE_MAINTENANCE_CAS_ATTEMPTS,
+                        agent_doc_hash::content_hash(&current),
+                        agent_doc_hash::content_hash(&rebased),
+                    ),
+                );
+                current = observe()?;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    unreachable!("the bounded queue-maintenance CAS loop always returns")
+}
+
 pub(crate) fn persist_queue_maintenance_doc(
     file: &Path,
     content: &str,
@@ -6324,8 +6377,6 @@ pub(crate) fn persist_queue_maintenance_doc(
             // a whole-document replacement. The editor may publish even a few
             // bytes after preflight captured `expected_current`; rebase the
             // candidate over that exact live cut, then CAS the rebased cut.
-            let rebased =
-                rebase_queue_maintenance_target(file, source, expected_current, content, &text)?;
             // `#ensurereplicagen`: the write is the symmetric half of the read
             // fix above and must land in the hub-owning process too.
             // `apply_cp_write_for_file` is process-local: with no hub in this
@@ -6336,20 +6387,39 @@ pub(crate) fn persist_queue_maintenance_doc(
             // expected/current hashes on every retry, `recovery=retry_crdt_merge`
             // that no retry can ever satisfy. Route through the controller, whose
             // model is the real current.
-            let write = if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
-                agent_doc_crdt_relay_io::apply_cp_write_for_file(file, &text, &rebased, source)?
-            } else {
-                agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(
-                    file,
-                    &text,
-                    &rebased,
-                    source,
-                )?
-            };
-            anyhow::ensure!(
-                write.is_some(),
-                "{source}: attached Lazily write was not applied"
-            );
+            let embedded = agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file);
+            let rebased = persist_attached_queue_maintenance_with_retry(
+                file,
+                content,
+                expected_current,
+                source,
+                text,
+                |expected, target| {
+                    let write = if embedded {
+                        agent_doc_crdt_relay_io::apply_cp_write_for_file(
+                            file, expected, target, source,
+                        )?
+                    } else {
+                        agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(
+                            file, expected, target, source,
+                        )?
+                    };
+                    Ok(write.is_some())
+                },
+                || {
+                    let observed = current_text_via_preflight_authority_retrying(file, source)?
+                        .unwrap_or(
+                            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+                        );
+                    match observed {
+                        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => Ok(text),
+                        other => anyhow::bail!(
+                            "{source}: Lazily head became {} during queue-maintenance CAS retry",
+                            queue_maintenance_head_label(&other)
+                        ),
+                    }
+                },
+            )?;
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -6555,6 +6625,66 @@ mod tests {
                 QueueMaintenanceHeadAction::DiskWrite,
             );
         }
+    }
+
+    /// GH-162: a live editor can advance between queue maintenance's rebase and
+    /// CAS. A retryable refusal must trigger a fresh observation and a fresh
+    /// rebase so neither the maintenance marker nor the operator's new item is
+    /// lost.
+    #[test]
+    fn queue_maintenance_cas_refusal_reobserves_rebases_and_retries() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let base = concat!(
+            "<!-- agent:queue go -->\n",
+            "- active head\n",
+            "- existing tail\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let maintenance = concat!(
+            "<!-- agent:queue go -->\n",
+            "- 🚧 active head\n",
+            "- existing tail\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let advanced = concat!(
+            "<!-- agent:queue go -->\n",
+            "- active head\n",
+            "- existing tail\n",
+            "- operator-added item\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&file, base).unwrap();
+
+        let mut attempts = Vec::new();
+        let mut observations = 0;
+        let written = persist_attached_queue_maintenance_with_retry(
+            &file,
+            maintenance,
+            base,
+            "test",
+            base.to_string(),
+            |expected, target| {
+                attempts.push((expected.to_string(), target.to_string()));
+                if attempts.len() == 1 {
+                    anyhow::bail!("CAS refused recovery=retry_crdt_merge")
+                }
+                Ok(true)
+            },
+            || {
+                observations += 1;
+                Ok(advanced.to_string())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(observations, 1);
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].0, base);
+        assert_eq!(attempts[1].0, advanced);
+        assert!(written.contains("🚧 active head"), "{written}");
+        assert!(written.contains("operator-added item"), "{written}");
+        assert_eq!(attempts[1].1, written);
     }
 
     struct TestPreflightMaintenanceWriteEffects;

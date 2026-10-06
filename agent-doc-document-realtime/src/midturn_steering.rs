@@ -18,7 +18,9 @@
 //!   `subagent`
 //! - any other new or edited queue item → `drain_after_current`: it runs in
 //!   operator-authored queue order after the current item closes; the current
-//!   item is never interrupted or interleaved.
+//!   item is never interrupted or interleaved. An explicit `Run Agent Doc`
+//!   send upgrades this last case to `address_now`: pressing send is an
+//!   authoritative request for the owning turn to handle the item now.
 //!
 //! The watermark is the exactly-once fence. Queue steering is tracked as an
 //! *acknowledged queue* (the queue as of the last surfacing), so a later edit
@@ -502,6 +504,13 @@ pub fn observe_with_mode(
                 .insert(identity.clone(), candidate.item.verbatim.clone());
         }
         let mut item = candidate.item.clone();
+        // `#explicitqueueaddress`: passive queue additions stay ordered behind
+        // the active head, but Run Agent Doc is an explicit send to the owning
+        // turn. Preserve stronger subagent/claim routing; only upgrade the
+        // otherwise-deferred queue case.
+        if ctx.explicit_send && item.dispatch == SteeringDispatch::DrainAfterCurrent {
+            item.dispatch = SteeringDispatch::AddressNow;
+        }
         item.possibly_partial = partial_keys.contains(&candidate.key);
         item.explicit = ctx.explicit_send;
         ready.push(item);
@@ -771,6 +780,20 @@ fn executable_queue_items(content: &str) -> Vec<QueueItem> {
 /// [`agent_doc_element_queue::queue_head_identity`].
 fn queue_identity(norm: &str) -> String {
     format!("{:?}", agent_doc_element_queue::queue_head_identity(norm))
+}
+
+/// Whether the queue item selected for this cycle is still present in the
+/// live document. Its continued presence is the queue lifecycle's typed proof
+/// that the active head has not closed, even if stale-lock repair prematurely
+/// marked the cycle record terminal.
+pub fn current_item_is_present(watermark: &SteeringWatermark, current: &str) -> bool {
+    let Some(selected) = watermark.current_item.as_deref() else {
+        return false;
+    };
+    let selected_identity = queue_identity(selected);
+    queue_items(current)
+        .iter()
+        .any(|item| item.norm == selected || queue_identity(&item.norm) == selected_identity)
 }
 
 fn queue_alignment(
@@ -1330,6 +1353,14 @@ pub fn carry_unsurfaced_claimed_edits(
 
 /// Instruction text derived from the typed dispatch intent.
 pub fn instruction_for(item: &SteeringItem) -> &'static str {
+    if item.explicit
+        && item.dispatch == SteeringDispatch::AddressNow
+        && item.source == SteeringSource::Queue
+        && !item.current_item
+    {
+        return "the operator explicitly sent this queue item with Run Agent Doc. Address it in \
+                THIS turn together with the current work; do not defer it to a later queue cycle.";
+    }
     match (item.dispatch, item.source, item.change, item.current_item) {
         (SteeringDispatch::AddressNow, SteeringSource::Queue, SteeringChange::Deleted, _) => {
             "the operator REMOVED the queue item this turn is executing. Stop or wrap up the \
@@ -2502,10 +2533,22 @@ mod tests {
         );
         assert_eq!(sent.ready.len(), 1, "{:?}", sent.ready);
         assert!(sent.ready[0].explicit);
+        assert_eq!(sent.ready[0].dispatch, SteeringDispatch::AddressNow);
         assert!(!sent.ready[0].possibly_partial);
         assert_eq!(sent.pending, 0);
         let text = render_steering_context("plan.md", &sent.ready, 0).unwrap();
         assert!(text.contains("sent=explicit"), "{text}");
+        assert!(text.contains("Address it in THIS turn"), "{text}");
+    }
+
+    #[test]
+    fn selected_queue_head_presence_survives_cosmetic_marker_changes() {
+        let baseline = doc("- current task\n", EX);
+        let watermark = seeded(&baseline, Some("current task"));
+        let still_open = doc("- 🚧 current task\n- newly sent work\n", EX);
+        assert!(current_item_is_present(&watermark, &still_open));
+        let closed = doc("- newly sent work\n", EX);
+        assert!(!current_item_is_present(&watermark, &closed));
     }
 
     /// `#steerworks` item 3 / `#claimedsteerwake`: an edit of a claimed head is

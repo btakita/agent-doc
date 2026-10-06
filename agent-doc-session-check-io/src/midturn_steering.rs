@@ -526,6 +526,17 @@ fn prepare_with_gate(
     }
     let content =
         std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
+    let selected_head_open = core::current_item_is_present(&watermark, &content);
+    // `#openheadsteering`: stale-lock repair can terminalize the cycle record
+    // while the selected queue head and its owning harness turn are still live.
+    // Queue lifecycle evidence wins over that stale terminal projection. A
+    // terminal report must stay silent; ordinary consumers keep in-turn wording.
+    if selected_head_open && boundary {
+        if policy == ClosedCyclePolicy::ForceBoundary {
+            return Ok(None);
+        }
+        boundary = false;
+    }
     if unchanged_gate
         && watermark.pending.is_empty()
         && watermark.last_observed_content_hash.as_deref()
@@ -606,7 +617,7 @@ fn prepare_with_gate(
                     );
                 }
             }
-            closed => {
+            closed if !core::current_item_is_present(&watermark, &content) => {
                 // The cycle closed while this harness turn kept running:
                 // report the same edits in boundary terms (queue work for the
                 // next cycle), excluding the closed cycle's own bookkeeping.
@@ -619,6 +630,22 @@ fn prepare_with_gate(
                         binary_owned_queue_ids: &owned,
                         ..ctx
                     },
+                    core::ObserveMode::Boundary,
+                );
+            }
+            Some(_) => {
+                // A stale terminal cycle record does not close a queue head
+                // that is visibly still selected in the authoritative text.
+            }
+            None => {
+                // A seed without any surviving cycle record has no live turn
+                // whose head can outrank the boundary. Preserve the legacy
+                // committed-baseline fallback for polling-only consumers.
+                boundary = true;
+                observation = core::observe_with_mode(
+                    &watermark,
+                    &content,
+                    &ctx,
                     core::ObserveMode::Boundary,
                 );
             }
@@ -1268,6 +1295,61 @@ mod tests {
         );
     }
 
+    /// GH #162: stale-lock repair marked the cycle committed while the selected
+    /// head and owning harness turn were still open. Explicit steering must use
+    /// in-turn wording, and the closeout renderer must remain silent.
+    #[test]
+    fn explicit_send_to_terminalized_cycle_with_live_head_addresses_now() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 600000\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let sent = baseline.replace(
+            "- current task\n",
+            "- 🚧 current task\n- publish the release\n",
+        );
+        std::fs::write(&file, &sent).unwrap();
+        record_explicit_send(&file).unwrap();
+        // Models repair_preflight_stale_lock committing marker bookkeeping
+        // without consuming/responding to the selected head.
+        close_cycle(&file, &sent);
+
+        let mut closeout = Vec::new();
+        emit_closeout_steering(&file, &mut closeout);
+        assert!(
+            closeout.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&closeout)
+        );
+
+        let report = observe(&file, CONSUMER_HOOK, false)
+            .unwrap()
+            .expect("in-turn steering report");
+        assert!(!report.after_close, "{report:?}");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        assert!(report.items[0].explicit);
+        assert_eq!(report.items[0].dispatch, core::SteeringDispatch::AddressNow);
+        let rendered = report.render().unwrap();
+        assert!(rendered.starts_with(core::STEERING_MARKER), "{rendered}");
+        assert!(
+            !rendered.contains("Your response is already committed"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("Address it in THIS turn"), "{rendered}");
+    }
+
     #[test]
     fn closeout_report_skips_what_the_hook_already_surfaced() {
         let dir = tempfile::tempdir().unwrap();
@@ -1296,7 +1378,9 @@ mod tests {
                 .len(),
             1
         );
-        let late = mid.replace("- first addition\n", "- first addition\n- late addition\n");
+        let late = mid
+            .replace("- current task\n", "")
+            .replace("- first addition\n", "- first addition\n- late addition\n");
         std::fs::write(&file, &late).unwrap();
         close_cycle(&file, &late);
         let mut out = Vec::new();

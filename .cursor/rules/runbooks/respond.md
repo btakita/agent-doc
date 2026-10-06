@@ -74,12 +74,13 @@ rule. This runbook carries the rest.
   only on its unambiguous part and re-read it before relying on its ending.
   Each item is surfaced exactly once; a re-edit before delivery replaces the
   held version.
-  - `address_now`: a new exchange prompt, or an edit/removal of the queue item
-    this turn is executing (shown as `previous` → `verbatim`). Address it in the
-    current turn: adjust the in-progress work, or stop/wrap up for a removal.
-  - `drain_after_current`: a new or edited queue item. It runs in operator queue
-    order AFTER the current item closes. Acknowledge it; do not interrupt,
-    interleave, or start it now.
+  - `address_now`: a new exchange prompt, an edit/removal of the queue item
+    this turn is executing (shown as `previous` → `verbatim`), or an ordinary
+    queue item marked `sent=explicit`. Address it in the current turn: adjust the
+    in-progress work, or stop/wrap up for a removal.
+  - `drain_after_current`: a passively observed new or edited queue item. It runs
+    in operator queue order AFTER the current item closes. Acknowledge it; do
+    not interrupt, interleave, or start it now.
   - `forward_to_owner` (`#claimedsteerwake`): a queue item a worker already
     claimed; `owner=subagent:<label>` names it. For an edit, FORWARD
     `previous` -> `verbatim` to that running subagent (for example with
@@ -88,7 +89,9 @@ rule. This runbook carries the rest.
     claimed head also wakes an idle coordinator.
   - `sent=explicit` (`#claimedsteerwake`): the operator pressed Run Agent Doc
     (`agent-doc route`), which flushes all pending steering at once past the
-    typing gate. Treat those items as final.
+    typing gate. Treat those items as final. Explicitly sent ordinary queue
+    work is upgraded from `drain_after_current` to `address_now`; claimed-owner
+    forwarding and subagent dispatch retain their stronger routing.
   - `subagent`: a queue item with subagent intent (`#subagents` on the line, a
     preset expanding to "run … in subagents", or such a preset at queue or cycle
     scope). Spawn a background subagent for it immediately, one per item; when it

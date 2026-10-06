@@ -2245,6 +2245,7 @@ fn run_with_options_to_writer_in_pass(
         };
         if let Err(err) = seed_midturn_steering(
             file,
+            &diff_result_with_current.current,
             current_item.as_deref(),
             midturn_session_presets.clone(),
         ) {
@@ -2621,6 +2622,7 @@ const REVIEW_LEGIBILITY_TARGET: usize = 10;
 /// Seed the `#midturn-steering` watermark for the cycle preflight just opened.
 fn seed_midturn_steering(
     file: &Path,
+    admitted_document: &str,
     current_item: Option<&str>,
     session_presets: Vec<String>,
 ) -> Result<()> {
@@ -2630,11 +2632,10 @@ fn seed_midturn_steering(
     if !matches!(cycle.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
         return Ok(());
     }
-    let baseline = resolve_current_preflight_document(file, "midturn_steering_seed")?;
     agent_doc_session_check_io::midturn_steering::seed_for_cycle(
         file,
         &cycle.cycle_id,
-        &baseline,
+        admitted_document,
         current_item,
         session_presets,
     )
@@ -3933,6 +3934,41 @@ mod tests {
                 .is_empty()
         );
     }
+
+    /// GH-162: seeding from a second document read can absorb an operator edit
+    /// that arrived after the contract's admitted cut. The seed must use the
+    /// exact text passed through contract construction, even when disk already
+    /// contains a later queue item.
+    #[test]
+    fn midturn_seed_uses_the_admitted_contract_cut() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let admitted = concat!(
+            "---\n",
+            "agent_doc_steering_debounce_ms: 0\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- current task\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, admitted).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(admitted), Some(admitted)).unwrap();
+
+        let late = admitted.replace("- current task\n", "- current task\n- late sent item\n");
+        std::fs::write(&doc, &late).unwrap();
+        seed_midturn_steering(&doc, admitted, Some("current task"), Vec::new()).unwrap();
+
+        let report = agent_doc_session_check_io::midturn_steering::observe(
+            &doc,
+            agent_doc_session_check_io::midturn_steering::CONSUMER_HOOK,
+            true,
+        )
+        .unwrap()
+        .expect("late edit remains observable");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        assert_eq!(report.items[0].verbatim, "late sent item");
+    }
+
     /// `#steerbacklogsource` (agent-doc-bugs.md, 2026-10-04): the operator
     /// rewrote the backlog stub `- [ ] [#gvqv] Add a ``` into the full
     /// Dashboard request and the closeout commit absorbed it. Steering reported

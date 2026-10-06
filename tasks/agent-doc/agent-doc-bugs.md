@@ -63,6 +63,16 @@ GH #149 is fixed, closed, and released in v0.35.464. Restarted editor replicas n
 The v0.35.464 tag and main branch are pushed, the clean release checkout matches `origin/main`, and the installed CLI reports `agent-doc 0.35.464`. GitHub Release and PyPI workflows were both in progress at the required single observation; the GitHub release artifact was not yet published at that point. Per the repository release policy, I did not wait on or poll those asynchronous workflows.
 
 The preflight semantic-completion matches were advisory only and were not used as evidence to close this batch.
+
+### Re: release fast path — gpt-5 · 2026-10-06T00:23:20-04:00
+
+Implemented and pushed `#releasefastpath` to `agent-doc` main as `bbb2489da` (`perf: batch and time release phases`).
+
+The release workflow now seals all completed claimed fixes that are ready before version projection into one version/check/install batch. `make release` delegates its irreversible tail to a new release driver that separately times and reports `tag-publish-handoff` and `local-install-full`, runs `install-full` exactly once after the push, skips installation when the push fails, and preserves the successful publication outcome when only the later local install fails. The batch boundary and outcome semantics are documented across AGENTS, the functional/core-command specs, the shared skill, and every harness runbook mirror.
+
+Regression coverage includes behavioral self-tests for success, push failure, and post-publish install failure, plus Rust structural coverage that pins the Makefile wiring and independent timing/status output.
+
+Verification passed on the exact integrated tree: the release-driver self-test, targeted Rust regression, `make check-fast`, `make build`, one authoritative `make check`, diff/whitespace validation, and `make install`. The checked worker tree and the integrated commit had the same Git tree hash, so only commit metadata changed during integration. The install updated the binary, native library, skills, and JetBrains plugin; VS Code package sync used its supported skip path because `vsce` is not installed. Main was fast-forwarded to `bbb2489da`. CI run `37413416775` is in progress; the immediately preceding main CI run `37407933239` completed successfully.
 <!-- agent:boundary:93bdac10 -->
 <!-- /agent:exchange -->
 
@@ -71,10 +81,8 @@ The preflight semantic-completion matches were advisory only and were not used a
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/148~~
-- #gh-fix https://github.com/btakita/agent-doc/issues/149
-- release + publish
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+- do [#releasefastpath]
 <!-- /agent:queue -->
 
 

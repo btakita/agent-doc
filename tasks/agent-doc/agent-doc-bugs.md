@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
-  codex: 01a1116f-44d5-79d2-b6f2-0ae06ed0dccd
+  codex: 01a11229-37c1-78e2-9044-2a7ef441955c
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -248,6 +248,19 @@ Completed and committed the [agent-doc session](/home/brian/work/btakita/agent-l
 - Document commits: `539d7f0604`, queue closeout `4002c605ab`.
 
 Yes—you can safely restart IDEA now, although it is no longer required.
+
+### Re: GH #158 resolved
+
+The selected #gh-fix expansion is complete: fix then closerelease.
+
+The JetBrains native-library reload repair was verified, released in agent-doc v0.35.467, and https://github.com/btakita/agent-doc/issues/158 is closed.
+
+- Reload handoff preserves every deregistered document path.
+- Backend, Remote Dev, and active-editor discovery are unified.
+- Incomplete replica rebuilds retry and report per-document outcomes.
+- The release passed the full agent-doc and cross-editor checks and was installed successfully.
+
+No actionable follow-up items remain for #158.
 <!-- agent:boundary:38ce3b77 -->
 <!-- /agent:exchange -->
 
@@ -258,9 +271,11 @@ Yes—you can safely restart IDEA now, although it is no longer required.
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/158
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/159
-- 🚧 #advance-reviews
-- 🚧 release + publish
+- #gh-fix https://github.com/btakita/agent-doc/issues/159
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/160
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/161
+- ~~#advance-reviews~~
+- release + publish
 <!-- /agent:queue -->
 
 

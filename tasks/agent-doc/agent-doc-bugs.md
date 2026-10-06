@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
-  codex: 01a10fdd-92a3-76a1-bc97-59fc28fdae37
+  codex: 01a1116f-44d5-79d2-b6f2-0ae06ed0dccd
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -19,7 +19,6 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
 ---
 
 ## Status
@@ -116,7 +115,39 @@ Runbook authoring and navigation are available directly in the harness through:
 - `agent-doc runbook create <name-or-path>`
 
 The generated Claude Code, Codex, OpenCode, Cursor, and Grok skill surfaces, documentation, specifications, and regression tests were updated together. `[operator-verify]` A live visual pass through any preferred editor remains optional and non-blocking; no plugin-specific behavior changed in this release.
-<!-- agent:boundary:22570c54 -->
+> **Chat prompt (#chatprompt):** also fix in subagent: • Blocked by hook
+>   └ agent-doc Stop hook found a retained closeout that requires operator action for /home/brian/work/btakita/agent-
+> loop/src/haiven-dev/tasks/roseshield.md. [session-check] INTERRUPTED: binary-owned document projection
+> `1791293469309545516-1-e35c1c8d956053e614dcb51dc1aedf77f7788176ea50ed9c42274a2f7dba5fc7` is retained for `/home/brian/
+> work/btakita/agent-loop/src/haiven-dev/tasks/roseshield.md` (reason=editor_projection_pending,
+> source=post_commit_reposition, target_hash=e35c1c8d956053e614dcb51dc1aedf77f7788176ea50ed9c42274a2f7dba5fc7);
+> retained_pending_needs_operator=true. The exact intent remains durable and must not be recaptured or forced to disk.
+> The registered editor endpoint REJECTED the delivery receipt (`IPC receipt rejected`) — it answered NO, so the delivery
+> projection this write is waiting on will never converge and waiting will not commit it. The response is durable and NOT
+> lost: do NOT re-send it or force disk. Recover by removing the rejecting endpoint: restart or reload the editor that
+> has /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/roseshield.md open (a backend still running deleted plugin
+> jars after an update is the observed cause). Once that endpoint is gone or re-registered, the retained intent converges
+> through document authority on its own; then run `agent-doc session-check /home/brian/work/btakita/agent-loop/src/
+> haiven-dev/tasks/roseshield.md` and follow the recovery it names Report this exact blocker and its recovery to the
+> operator; do not resend or recapture the response, force disk, or keep retrying session-check. After reporting it, the
+> recursive Stop may finish this turn while the durable capture remains retained.
+>
+> **Chat prompt (#chatprompt):** hot-updates should not cause the error. every update should automatically recycle existing supervisors + controllers
+>
+> **Chat prompt (#chatprompt):** Can I restart Idea now?
+
+### Re: hot-update recovery and automatic runtime recycling — gpt-5 · 2026-10-06T10:30-04:00
+
+Yes—the IDEA restart was the correct recovery. It removed the rejecting JetBrains process, which had deleted plugin JARs mapped, and registered a clean plugin 0.2.500 endpoint. The retained RoseShield projection then converged without resending the response or forcing disk. The remaining RoseShield interruption is a separate normal turn containing two new operator prompts, so it was left for that document's owning session.
+
+The recurrence is fixed and pushed to `agent-doc` main at `36451380f`. Every successful binary, native-library, and editor-plugin update now schedules an ordered safe handoff across all existing runtimes: supervisors first, then project controllers, without the former idle-root or same-binary exclusions. Multi-target plugin updates also recycle after partial success when any target changed. Fresh controllers can retire the specific post-restart orphan seen here only under the narrow guarded condition: local `PayloadAbsentFromConvergedContent`, authoritative controller absence, equal non-null authority/disk hashes, and an exact intent-id race check. Divergent or in-flight states remain blocked.
+
+Verification passed: focused regressions, package-wide Clippy, `make check-fast`, and one authoritative `make check`. The latest observed main CI run was green. The one local `make install` succeeded and exercised the new behavior live: 17 supervisors and 15 controllers were marked in order with zero skipped at the binary/library handoff, followed by safe package-update recycle waves for JetBrains and VS Code. JetBrains dynamically upgraded without requiring another IDE restart; two unrelated open documents were still completing their bounded replica re-registration retries.
+
+> **Queue prompt:** #advance-reviews
+
+The five review gates were audited in a subagent. Two were stale gates and are now actionable backlog work: `#qsubattr5` still needs the real `subagents=3` dogfood proof, and `#drivecapturedsplice` still needs the stronger stale-replica race proof rather than weakening the verifier to accept a healthy path. Three remain genuinely gated: `#steergatemodelrerun` has 66 of the required 200 labelled rows, PyPI still has ample headroom while its support request awaits a human response, and Grok remains signed out. No review item was incorrectly marked complete. The semantic completion match for `#steergatemodelrerun` is a known false positive: it is the intentionally renamed successor to the accidentally reaped prior id.
+<!-- agent:boundary:38ce3b77 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -125,20 +156,19 @@ The generated Claude Code, Codex, OpenCode, Cursor, and Grok skill surfaces, doc
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- 🚧 #advance-reviews
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md): keep the existing branch-specific verifier contract; update the xdotool captured-splice recipe to hold canonical delivery after the independent advance until edit two is typed, avoid the gitignored-scratch commit_refused path for the advance, rerun the live proof, and require verify-captured-splice-recovery to pass.
+- [ ] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): add subagents=3 to tasks/software/tsift.md before its next real multi-head batch; then verify from queue claims and ops.log that every eligible head is dispatched exactly once and none drain inline.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): dogfood in tasks/software/tsift.md (replace per-line #subagent: prefixes with subagents=3); verify via queue claims + ops.log that each head is dispatched exactly once and none drain inline.
-- [/] [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (0 as of 2026-10-03). Then run src/agent-doc/scripts/steergate-model-eval --dataset from the project root, which exits insufficient_data until the floor is met. Integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md
-- [/] [#drivecapturedsplice] [operator-verify] Captured-splice live proof (#activateinstalledjetbrai). LIVE RUN 2026-09-30 20:33Z (operator go-ahead): after harness fixes 01b1e30b7, the recipe drove IDEA end to end — edit one captured (editor_op_capture_proof operator_ops=37 shadow_replay=agreed, 20:33:01Z), canonical advanced independently via write --commit in owner pane %93 (20:33:02Z, editor acknowledged the target), edit two captured (operator_ops=36 agreed, 20:33:12Z); the final text holds every operator edit plus the advance. No text lost. The verifier still FAILS: its proving triple needs two source=captured-local-splice-recovery reads, and the plugin only takes that path (CrdtReplicaManager rebootstrapCanonicalAndForwardCapturedLocalEdit) when its replica is STALE against the canonical text. Healthy delivery reached the editor before edit two, so the recovery never had to run. DECISION NEEDED: (a) accept the healthy-path trail as the proof, extending verify-captured-splice-recovery with a capture/advance/capture triple, or (b) require the stale-replica race, making the recipe type edit two while the advance is still in flight. Aside: the scratch doc is under gitignored tmp/, so every advance ends commit_refused_ignored_path (write lands on disk, commit refused). Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
-- [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or 'make pypi-quota-check' reporting a ceiling in reach. Rechecked 2026-09-30 16:25 EDT: 8.362 GiB of 10.0 GiB, 1.638 GiB headroom, 158 releases (0.35.113..0.35.424), post-cutover mean 34.7 KiB, ~49,485 further releases fit; VERDICT headroom fine. Nothing to act on or delete. pypi/support#12214 still open, 1 comment (github-actions bot), untouched since 2026-09-10T22:46:21Z. If the grant lands, record it and drop this item. Deletion stays reserved for a ceiling the check reports (next tranche 0.35.113..0.35.161, 2.491 GiB); verify any deletion from the authenticated /manage/project/agent-doc/ pages, never from pypi.org/pypi/agent-doc/json.
+- [/] [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (66 as of 2026-10-06); src/agent-doc/scripts/steergate-model-eval --dataset currently exits insufficient_data. Then integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md
+- [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-06: 8.363 GiB of 10.0 GiB, 1.637 GiB headroom, 198 releases through 0.35.465, post-cutover mean 35.3 KiB, approximately 48,621 further releases fit; VERDICT headroom fine. The support issue remains open with only the github-actions bot comment and has not changed since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation. NEW BLOCKER 2026-09-30: grok 1.0.41 is now SIGNED OUT ('grok -p' -> 'Error: Not signed in'); operator runs 'grok login --device-code' (or sets XAI_API_KEY), and the free usage quota or the planned subscription must be active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed earlier; the last live MCP probe stopped at the usage limit before committed closeout. Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 <!-- /agent:review -->
 

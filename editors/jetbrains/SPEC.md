@@ -297,6 +297,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `ide`, Sync may reuse or create one live `agent-doc` tab, execute the
   binary-provided attach command, and then resume. The Terminal plugin remains
   optional; failures expose the exact attach command with a Copy action.
+- The accepted async command executes as controller-owned work with the local
+  reactive document projection installed. Nested authority reads must not
+  self-RPC through the controller socket; the generic 5-second external-client
+  deadline is therefore not a terminal `Run Agent Doc` outcome. The binary must
+  not retry the whole route after an ambiguous deadline because dispatch may
+  already have occurred.
 - If route fails only because the authoritative actor is still in its startup window, `Run Agent Doc` performs one short retry before surfacing the final route failure. This includes dispatch-only `latest run is still booting ... (timed_out)` results; active-turn blockers get a still-running notification, and protected-input blockers such as shell history search are not retried. Repeated clicks while that bounded retry is active coalesce with it.
 - A stale startup record must not keep a settled actor in the boot wait. If the requested pane's authoritative actor is `Ready`, dispatch-eligible, and the pane has a recognized busy or interactive blocker, routing exits startup probing and applies the normal busy/queue policy.
 - If route succeeds by queueing a prompt behind an already-busy authoritative actor instead of injecting a duplicate trigger, `Run Agent Doc` must surface a visible queued/still-running warning rather than treating the route request as silent success. Repeating `Run Agent Doc` after editing that same prompt must replace the sole live route-owned `agent:queue` prompt instead of leaving stale wording queued behind the active turn. The plugin accepts the new `active agent:queue` route diagnostic and the older `agent:queue auto` wording for compatibility.

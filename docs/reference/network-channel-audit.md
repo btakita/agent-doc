@@ -79,6 +79,29 @@ of trusting a lossy network.
 | **P14 Editor layout → tmux reconcile** | Plugin → controller retries 100ms→2s until exit 0 (`JB/EditorTabSyncListener.kt:398-405`, `:690-721`). The worker retries with read-back, 250ms→5s (`rpc.rs:83-84`, `:23577-23624`, `:23791-23815`). | Signature `Idle`; generation and work-revision supersede (`rpc.rs:23219-23245`) | 60s watchdog (`JB/CpRouteClient.kt:152`) | Desired columns are stored in `state.db` (`rpc.rs:25085`) but **not reloaded into the graph on controller start**. The generation is per process (GH #136). | `SYNC_LOCK_WAIT_BUDGET` 3s, after which the sync **proceeds unlocked** (R7); many 100-1000ms sync budgets (`agent-doc-sync/src/lib.rs:14-34`, logged only) |
 | **P15 Prompt injection by tmux `send-keys`** | Text, 80ms, then `Enter` (`agent-doc-tmux-commands/src/lib.rs:258-262`). Acceptance poll every 150ms for 1s. Retries send `Enter` only (`agent-doc-route-io/src/direct_pane_dispatch.rs:208-240`, `:395-445`). Dispatch-start proof within 10-15s (`dispatch_start.rs:251-262`). | none at the receiver. Duplicate protection rests on screen observation. | bare-shell check (`direct_pane_dispatch.rs:452-497`) | cycle-state admission projection (`admission_projection.rs:31-43`) | `PASS_THROUGH_STRANDED_DRAFT_SETTLE` 150ms (`agent-doc-controller/src/dispatch.rs:2937`); stranded-draft admission 3s (`:3227-3233`), see R8 |
 
+### P7 deadline interpretation
+
+The generic 5.0s receive deadline is expected only at a process boundary: an
+external caller can observe it while a live controller is scheduled late or is
+not servicing its socket. The associated records describe different outcomes:
+
+- `controller_state_event_deadline_retry` is a first-expiry recovery record. A
+  stable event id permits exactly one replay; only the second expiry is returned.
+- `controller_crdt_current_text_read_unavailable` is a bounded observation miss
+  with `idle_disk_fallback`; `retained_write_settlement_local_fallback` derives a
+  conservative local settlement rather than losing retained intent.
+- `document_model_controller_lookup_error` falls back to the embedded relay when
+  present. With no embedded replica it is an unavailable-read error, not proof
+  that a write or route failed.
+
+Controller-owned request and effect workers are not expected to reach P7 at
+all. They carry controller-local identity and read the reactive projection in
+process. In particular, synchronous VS Code Run and the JetBrains async-command
+worker share that invariant. A five-second self-RPC appearing in an
+`editor_command_async_completed` failure is a context-propagation defect, not an
+operator route verdict; the repair is local context propagation, never blind
+whole-route replay after potentially ambiguous pane dispatch.
+
 ## 3. Serial round trips on hot paths
 
 These are counts for one operation on the happy path. Every one of them multiplies

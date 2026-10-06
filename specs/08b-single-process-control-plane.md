@@ -21,6 +21,14 @@ projections, and tmux transcript inference.
 - In-process consolidation does not make every operation synchronous. The hot
   path validates commands and records durable intent quickly; slow work runs in
   document actors, supervisor adapters, or background workers.
+- Every controller-owned request/effect worker, including the async editor
+  command worker that executes JetBrains `Run Agent Doc`, inherits the
+  controller-local identity and reactive document projection reader. Such a
+  worker resolves authority in process; it must not re-enter
+  `.agent-doc/controller.sock` and wait on the controller that owns it. VS Code's
+  synchronous command-plane Run route has the same invariant through its
+  controller request thread. Replaying an entire route after an ambiguous
+  timeout is forbidden because pane dispatch may already have occurred.
 
 ### Bootstrap publication is adoptable before status hydration (GH #146)
 

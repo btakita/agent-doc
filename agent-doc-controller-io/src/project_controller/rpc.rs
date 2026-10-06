@@ -10647,7 +10647,7 @@ fn handle_editor_command_submit_async_rpc_with_settle(
     let worker_name = submit.name.clone();
     let worker_focus_fence = focus_fence.clone();
     let in_flight = ControllerAsyncEditorCommandGraph::begin_worker(runtime);
-    if let Err(err) = spawn_editor_command_async_worker(move || {
+    if let Err(err) = spawn_editor_command_async_worker(Arc::clone(runtime), move || {
         // `#handoffrouteforward`: held until the terminal projection is
         // published, so a predecessor that handed off does not exit under it.
         let _in_flight = in_flight;
@@ -10817,24 +10817,39 @@ fn compact_command_output(output: &str) -> String {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-fn spawn_editor_command_async_worker<F>(work: F) -> Result<()>
+fn spawn_editor_command_async_worker<F>(runtime: Arc<ControllerRuntime>, work: F) -> Result<()>
 where
     F: FnOnce() + Send + 'static,
 {
-    work();
+    run_editor_command_async_worker(runtime, work);
     Ok(())
 }
 
 #[cfg(not(any(test, feature = "test-support")))]
-fn spawn_editor_command_async_worker<F>(work: F) -> Result<()>
+fn spawn_editor_command_async_worker<F>(runtime: Arc<ControllerRuntime>, work: F) -> Result<()>
 where
     F: FnOnce() + Send + 'static,
 {
     std::thread::Builder::new()
         .name("agent-doc-editor-command-async".to_string())
-        .spawn(work)
+        .spawn(move || run_editor_command_async_worker(runtime, work))
         .context("failed to spawn editor command async worker")?;
     Ok(())
+}
+
+fn run_editor_command_async_worker<F>(runtime: Arc<ControllerRuntime>, work: F)
+where
+    F: FnOnce(),
+{
+    // GH #155 / `#ctrlselfrpc`: this worker is controller-owned even though it
+    // outlives the short admission request. Carry the same local identity and
+    // reactive projection reader as an ordinary controller request thread.
+    // Otherwise nested route authority reads mistake this worker for an
+    // external client, self-RPC through the controller socket, and can turn the
+    // generic five-second transport deadline into a terminal Run Agent Doc
+    // failure. The route itself is not safe to replay after ambiguous dispatch.
+    install_controller_request_thread_context(&runtime);
+    work();
 }
 
 const EDITOR_ROUTE_TERMINAL_REASON_MAX_CHARS: usize = 400;
@@ -42297,25 +42312,29 @@ mod tests {
     }
 
     #[test]
-    fn spawned_controller_request_worker_uses_the_local_reactive_projection() {
+    fn async_editor_command_worker_uses_the_local_reactive_projection() {
         let dir = tempfile::TempDir::new().unwrap();
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
         let expected = Arc::clone(&runtime);
 
         std::thread::spawn(move || {
-            install_controller_request_thread_context(&runtime);
+            assert!(!agent_doc_state_wire::in_controller_request());
+            assert!(local_controller_runtime().is_none());
 
-            assert!(
-                agent_doc_state_wire::in_controller_request(),
-                "a spawned request worker must retain controller-local identity"
-            );
-            let installed =
-                local_controller_runtime().expect("request worker must see its controller runtime");
-            assert!(Arc::ptr_eq(&installed, &expected));
-            assert!(
-                agent_doc_state_wire::local_document_projection("missing-document").is_some(),
-                "controller-local reads must use the reactive projection instead of self-RPC"
-            );
+            spawn_editor_command_async_worker(runtime, move || {
+                assert!(
+                    agent_doc_state_wire::in_controller_request(),
+                    "an async editor-command worker must retain controller-local identity"
+                );
+                let installed = local_controller_runtime()
+                    .expect("async editor-command worker must see its controller runtime");
+                assert!(Arc::ptr_eq(&installed, &expected));
+                assert!(
+                    agent_doc_state_wire::local_document_projection("missing-document").is_some(),
+                    "controller-local route reads must use the reactive projection instead of self-RPC"
+                );
+            })
+            .expect("spawn async editor-command worker");
         })
         .join()
         .expect("request worker");

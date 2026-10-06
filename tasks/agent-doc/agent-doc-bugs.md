@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: c47dae65-e36f-40cb-8ebb-b7c9573e3c41
-  codex: 01a10f50-c22d-7e43-bd55-d0cff1412b90
+  codex: 01a10fdd-92a3-76a1-bc97-59fc28fdae37
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -76,7 +76,45 @@ Verification passed on the exact integrated tree: the release-driver self-test, 
 
 ### Re: continuation — gpt-5 · 2026-10-06T00:32:14-04:00
 
+> **Queue prompt:**
+>
+> Watch the agent-doc gh issues. Some issues may be coming in over the next 2-3 hours. After you get the runbooks over the next 3 hours, release + publish. This will be unattended, so please do not stall.
+>
+> I'd like to associate `presets` with runbooks. Can we have a good way for agent-doc to author runbooks? An agent can easily author runbooks, but it would be nice to be able to navigate available runbooks in the harness.
+
+
 Continued and verified the interrupted console handoff. The preceding `#releasefastpath` response is committed, its backlog item is complete, the worker claim is released, and the queue has no drainable work. No response recapture or duplicate repository mutation was needed.
+
+### Re: runbook presets and the 0.35.465 release — gpt-5 · 2026-10-06T06:34:05-04:00
+
+> **Queue prompt:** Watch the agent-doc gh issues. Some issues may be coming in over the next 2-3 hours. After you get the runbooks over the next 3 hours, release + publish. This will be unattended, so please do not stall.
+
+Completed the full unattended watch and release cycle. The three-hour issue watch found GH #150; the fix now treats unknown, unowned bare `#id` queue heads as free text while preserving explicit and owned directives. I also fixed PyPI propagation verification so it retries a clean exact-version install from the simple index instead of trusting the earlier JSON signal.
+
+Released `v0.35.465` from main commit `15dfe8366`. The [GitHub release](https://github.com/btakita/agent-doc/releases/tag/v0.35.465) is published with all four required Windows/Linux archives, `SHA256SUMS`, and both editor packages. The Release workflow and the PyPI build, publish, and clean-install verification jobs all completed successfully. The one-time local full install also completed and installed `agent-doc 0.35.465` plus its matching native library.
+
+Verification included the authoritative workspace suite (9,582 tests passed, 141 skipped), 193 VS Code tests, the cross-editor native harness, formal model checks, the release parity audit, `tmux-ci`, private-name hygiene, and PyPI quota headroom. The separate main-branch CI run was still in progress at closeout; the release-specific workflows were green.
+
+> **Queue prompt:** I'd like to associate `presets` with runbooks. Can we have a good way for agent-doc to author runbooks? An agent can easily author runbooks, but it would be nice to be able to navigate available runbooks in the harness.
+
+Implemented structured prompt presets with optional runbook metadata while preserving scalar preset compatibility. A preset can now declare both its prompt and a project-relative runbook:
+
+```yaml
+presets:
+  "#release":
+    prompt: release + publish
+    runbook: runbooks/release.md
+```
+
+Preflight exposes a required runbook-load instruction for the selected preset, so the harness receives an explicit path to read rather than relying on convention. Paths are restricted to safe project-relative files; traversal, symlink escape, absolute paths, and create collisions fail closed.
+
+Runbook authoring and navigation are available directly in the harness through:
+
+- `agent-doc runbook list`
+- `agent-doc runbook show <name-or-path>`
+- `agent-doc runbook create <name-or-path>`
+
+The generated Claude Code, Codex, OpenCode, Cursor, and Grok skill surfaces, documentation, specifications, and regression tests were updated together. `[operator-verify]` A live visual pass through any preferred editor remains optional and non-blocking; no plugin-specific behavior changed in this release.
 <!-- agent:boundary:22570c54 -->
 <!-- /agent:exchange -->
 
@@ -85,8 +123,7 @@ Continued and verified the interrupted console handoff. The preceding `#releasef
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
-- #advance-review
+<!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 
 

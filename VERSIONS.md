@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.467
+
+- **JetBrains native reload now reattaches every open editor replica (GH #158).** Reload handoff preserves the exact
+  paths it deregistered, combines backend, Remote Dev, and active-editor discovery, retries incomplete rebuilds, and
+  logs a per-document outcome instead of accepting an incorrect zero-of-N result.
+- **Cached supervisors now detect installed binary replacement (GH #159).** Freshness tracking snapshots the installed
+  command independently from the running cache/source executable, so upgrades trigger the existing reactive recycle
+  path without treating a stable bootstrap-wrapper/payload inode difference as permanent staleness.
+- **Repository navigation instructions track tsift 0.1.103.** The generated skill and code-navigation surfaces now
+  match the installed navigator used for release review.
+
 ## 0.35.466
 
 - **Installed updates now recycle every live runtime automatically.** Binary, skill, and editor-plugin updates hand

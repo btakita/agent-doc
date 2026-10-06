@@ -7901,12 +7901,12 @@ pub fn compact_document_via_controller(
     if compact_outcome_claims_head(&outcome) {
         eprintln!("{COMPACT_COMMIT_SCOPE_NOTE}");
     }
-    fail_if_compact_pending(&outcome)?;
+    report_or_reject_compact_pending(&outcome)?;
     match &outcome {
         ControllerCompactDocumentOutcome::Committed => {}
-        ControllerCompactDocumentOutcome::RetainedPending { .. }
-        | ControllerCompactDocumentOutcome::AlreadyPending { .. } => {
-            unreachable!("pending compact outcomes fail before success handling")
+        ControllerCompactDocumentOutcome::RetainedPending { .. } => {}
+        ControllerCompactDocumentOutcome::AlreadyPending { .. } => {
+            unreachable!("an existing compact continuation is rejected before success handling")
         }
         ControllerCompactDocumentOutcome::DeferredActiveTyping { .. } => {
             unreachable!("active typing is retried before compact outcome handling")
@@ -7954,19 +7954,24 @@ fn compact_already_pending_note(continuation_id: &str, commit_requested: bool) -
     )
 }
 
-fn fail_if_compact_pending(outcome: &ControllerCompactDocumentOutcome) -> Result<()> {
-    let note = match outcome {
+fn report_or_reject_compact_pending(outcome: &ControllerCompactDocumentOutcome) -> Result<()> {
+    match outcome {
         ControllerCompactDocumentOutcome::RetainedPending {
             continuation_id,
             commit,
-        } => compact_retained_pending_note(continuation_id, *commit),
+        } => {
+            eprintln!(
+                "{}",
+                compact_retained_pending_note(continuation_id, *commit)
+            );
+            Ok(())
+        }
         ControllerCompactDocumentOutcome::AlreadyPending {
             continuation_id,
             commit,
-        } => compact_already_pending_note(continuation_id, *commit),
-        _ => return Ok(()),
-    };
-    anyhow::bail!("{note}")
+        } => anyhow::bail!("{}", compact_already_pending_note(continuation_id, *commit)),
+        _ => Ok(()),
+    }
 }
 
 pub fn record_committed_baseline_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
@@ -29829,13 +29834,14 @@ mod tests {
     }
 
     #[test]
-    fn retained_compact_reports_own_delivery_without_rerun_guidance() {
+    fn retained_compact_is_an_accepted_async_outcome() {
         let outcome = ControllerCompactDocumentOutcome::RetainedPending {
             continuation_id: "compact-projection-own".to_string(),
             commit: true,
         };
-        let note = fail_if_compact_pending(&outcome).unwrap_err().to_string();
+        let note = compact_retained_pending_note("compact-projection-own", true);
 
+        assert!(report_or_reject_compact_pending(&outcome).is_ok());
         assert_eq!(note.matches("[compact] pending:").count(), 1);
         assert_eq!(note.lines().count(), 1);
         assert!(note.contains("compact continuation compact-projection-own"));
@@ -29863,7 +29869,9 @@ mod tests {
             continuation_id: "compact-projection-123".to_string(),
             commit: true,
         };
-        let note = fail_if_compact_pending(&outcome).unwrap_err().to_string();
+        let note = report_or_reject_compact_pending(&outcome)
+            .unwrap_err()
+            .to_string();
 
         assert_eq!(note.matches("[compact] pending:").count(), 1);
         assert_eq!(note.lines().count(), 1);

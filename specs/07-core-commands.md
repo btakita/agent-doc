@@ -54,6 +54,10 @@ commands do not wait for the recycle and never interrupt an active turn.
   admission and deduplication boundary as external events and enter the existing
   document graph before publication returns. Compact replies must not wait for
   whole-project ledger rehydration to make a retained continuation visible.
+- The initiating command treats its typed `retained_pending` outcome as accepted
+  asynchronous work and exits successfully after printing the continuation note;
+  only a repeated/foreign `already_pending` request exits nonzero. Neither outcome
+  claims that the compact is already in HEAD.
 - Editor-visible compact text still requires an exact native-save receipt. Both
   pending delivery and an already-visible retained target keep the latest-durable
   save effect active until the write settles; visibility alone must not strand

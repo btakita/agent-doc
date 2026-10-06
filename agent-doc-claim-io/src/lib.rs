@@ -252,7 +252,7 @@ pub fn run(
         return run_isolate(file);
     }
     // Check for stale claims on this specific file and log if found
-    validate_file_claim(file);
+    validate_file_claim(file)?;
 
     // Canonicalize to handle CWD drift (e.g., when CWD is in a submodule)
     let file = &file
@@ -668,15 +668,13 @@ pub fn run(
 /// This is intentionally file-scoped: explicit claim must not run the global
 /// resync/prune path or wait on unrelated panes before it fences and mutates the
 /// requested document.
-fn validate_file_claim(file: &Path) {
+fn validate_file_claim(file: &Path) -> Result<()> {
     let file_str = file.to_string_lossy();
     let registry_path = agent_doc_session_registry_io::registry_path();
-    let Ok(_lock) = tmux_router::RegistryLock::acquire(&registry_path) else {
-        return;
-    };
-    let Ok(registry) = agent_doc_session_registry_io::load() else {
-        return;
-    };
+    let _lock = tmux_router::RegistryLock::acquire(&registry_path)
+        .with_context(|| format!("failed to lock registry before claiming {}", file.display()))?;
+    let registry = agent_doc_session_registry_io::load()
+        .with_context(|| format!("failed to load registry before claiming {}", file.display()))?;
 
     let tmux = agent_doc_tmux_io::configured_tmux();
 
@@ -704,7 +702,7 @@ fn validate_file_claim(file: &Path) {
         .collect();
 
     if stale_keys.is_empty() {
-        return;
+        return Ok(());
     }
 
     // Remove stale entries and save
@@ -716,7 +714,24 @@ fn validate_file_claim(file: &Path) {
         );
         registry.remove(key);
     }
-    let _ = agent_doc_session_registry_io::save(&registry);
+    agent_doc_session_registry_io::save(&registry).with_context(|| {
+        format!(
+            "failed to save stale-claim registry cleanup for {}",
+            file.display()
+        )
+    })?;
+    for (key, pane) in stale_keys {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "session_registry_metadata_removed caller=claim reason=stale_file_claim file={} registry_key={} pane={}",
+                file.display(),
+                key,
+                pane,
+            ),
+        );
+    }
+    Ok(())
 }
 
 /// Check if a tmux window is alive by listing its panes.

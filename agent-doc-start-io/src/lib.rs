@@ -653,22 +653,112 @@ fn should_enforce_route_owned_queue_control(
     route_owned_start_blocked_by_queue_control(route_owned, admission)
 }
 
-fn validate_supervisor_reentry_actor(
-    canonical: &Path,
-    document_session_id: &str,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SupervisorReentryActorDecision {
+    Retain,
+    RepairClosed,
+    RepairPaneless,
+    RejectPaneMismatch,
+}
+
+fn supervisor_reentry_actor_decision(
     pane_id: &str,
+    record: &agent_doc_controller::actor::ActorRecord,
+) -> SupervisorReentryActorDecision {
+    if record.state == agent_doc_controller::actor::ActorState::Closed {
+        return SupervisorReentryActorDecision::RepairClosed;
+    }
+    if record.pane_id.is_empty() {
+        return SupervisorReentryActorDecision::RepairPaneless;
+    }
+    if record.pane_id == pane_id {
+        SupervisorReentryActorDecision::Retain
+    } else {
+        SupervisorReentryActorDecision::RejectPaneMismatch
+    }
+}
+
+struct SupervisorReentryActorInput<'a> {
+    canonical: &'a Path,
+    document_session_id: &'a str,
+    pane_id: &'a str,
+    pane_window: &'a str,
+    project_root: &'a Path,
+    harness: &'a str,
+    session_log: &'a mut Option<SessionLog>,
     record: agent_doc_controller::actor::ActorRecord,
+}
+
+fn recover_supervisor_reentry_actor(
+    input: SupervisorReentryActorInput<'_>,
 ) -> Result<agent_doc_controller::actor::ActorRecord> {
+    let SupervisorReentryActorInput {
+        canonical,
+        document_session_id,
+        pane_id,
+        pane_window,
+        project_root,
+        harness,
+        session_log,
+        record,
+    } = input;
     // A supervisor self-exec preserves the already-running child and therefore
     // the controller actor is the live session authority. The document's durable
     // `session:` metadata can legitimately lag that actor (for example after an
     // operator restores the document from HEAD while keeping the live session).
     // Requiring those two ids to match kills the replacement supervisor and
-    // strands the healthy child. The pane binding and non-closed actor state are
-    // the transport ownership proof; callers adopt `record.session_id` below.
-    if record.pane_id != pane_id || record.state == agent_doc_controller::actor::ActorState::Closed
-    {
-        anyhow::bail!(
+    // strands the healthy child. Exact active bindings are retained. A closed
+    // or pane-less row has relinquished transport ownership, so preserve-child
+    // re-entry repairs it through the controller under the actor's authoritative
+    // session. A different non-empty active pane remains a hard conflict.
+    let decision = supervisor_reentry_actor_decision(pane_id, &record);
+    match decision {
+        SupervisorReentryActorDecision::Retain => Ok(record),
+        SupervisorReentryActorDecision::RepairClosed
+        | SupervisorReentryActorDecision::RepairPaneless => {
+            let reason = match decision {
+                SupervisorReentryActorDecision::RepairClosed => "closed_actor",
+                SupervisorReentryActorDecision::RepairPaneless => "paneless_actor",
+                _ => unreachable!(),
+            };
+            let prior_generation = record.generation;
+            let repaired = start_controller_session(StartControllerSessionInput {
+                file: canonical,
+                canonical,
+                project_root,
+                session_id: &record.session_id,
+                pane_id,
+                pane_window,
+                start_generation: prior_generation.checked_add(1).with_context(|| {
+                    format!(
+                        "cannot repair supervisor reentry for {} at exhausted generation {}",
+                        canonical.display(),
+                        prior_generation
+                    )
+                })?,
+                harness: if record.harness.trim().is_empty() {
+                    harness
+                } else {
+                    &record.harness
+                },
+                session_log,
+            })?;
+            let message = format!(
+                "supervisor_reexec_actor_repaired file={} pane={} metadata_session={} authoritative_session={} prior_generation={} new_generation={} prior_state={} reason={} lifecycle=preserved",
+                canonical.display(),
+                pane_id,
+                document_session_id,
+                repaired.session_id,
+                prior_generation,
+                repaired.generation,
+                record.state.as_str(),
+                reason,
+            );
+            log_event(session_log, &message);
+            agent_doc_ops_log_io::log_op(canonical, &message);
+            Ok(repaired)
+        }
+        SupervisorReentryActorDecision::RejectPaneMismatch => anyhow::bail!(
             "cannot reenter supervisor for {}: document metadata session={} pane={}, authoritative session={} pane={} generation={} state={}",
             canonical.display(),
             document_session_id,
@@ -677,9 +767,8 @@ fn validate_supervisor_reentry_actor(
             record.pane_id,
             record.generation,
             record.state.as_str()
-        );
+        ),
     }
-    Ok(record)
 }
 
 #[derive(Debug)]
@@ -1477,7 +1566,16 @@ fn prepare_start_runtime_with_admission(
                 canonical.display()
             )
         })?;
-        let record = validate_supervisor_reentry_actor(&canonical, &session_id, &pane_id, record)?;
+        let record = recover_supervisor_reentry_actor(SupervisorReentryActorInput {
+            canonical: &canonical,
+            document_session_id: &session_id,
+            pane_id: &pane_id,
+            pane_window: &pane_window,
+            project_root: &project_root,
+            harness: &harness.binary,
+            session_log: &mut session_log,
+            record,
+        })?;
         if record.session_id != session_id {
             let metadata_session_id = std::mem::replace(&mut session_id, record.session_id.clone());
             let message = format!(
@@ -2603,20 +2701,12 @@ mod tests {
             agent_doc_controller::actor::ActorState::Busy,
         );
 
-        let retained = validate_supervisor_reentry_actor(
-            Path::new("/tmp/reentry.md"),
-            "session-a",
-            "%26",
-            record.clone(),
-        )
-        .unwrap();
-
-        assert_eq!(retained, record);
-        assert_eq!(retained.generation, 532);
         assert_eq!(
-            retained.state,
-            agent_doc_controller::actor::ActorState::Busy
+            supervisor_reentry_actor_decision("%26", &record),
+            SupervisorReentryActorDecision::Retain
         );
+        assert_eq!(record.generation, 532);
+        assert_eq!(record.state, agent_doc_controller::actor::ActorState::Busy);
     }
 
     #[test]
@@ -2628,44 +2718,50 @@ mod tests {
             agent_doc_controller::actor::ActorState::Busy,
         );
 
-        let retained = validate_supervisor_reentry_actor(
-            Path::new("/tmp/reentry.md"),
-            "restored-document-session",
-            "%26",
-            record.clone(),
-        )
-        .unwrap();
-
-        assert_eq!(retained, record);
-        assert_eq!(retained.session_id, "live-session");
+        assert_eq!(
+            supervisor_reentry_actor_decision("%26", &record),
+            SupervisorReentryActorDecision::Retain
+        );
+        assert_eq!(record.session_id, "live-session");
     }
 
     #[test]
-    fn surviving_child_reentry_rejects_pane_or_lifecycle_drift_without_replacement() {
-        for record in [
-            reentry_actor(
-                "session-a",
-                "%27",
-                532,
-                agent_doc_controller::actor::ActorState::Busy,
-            ),
-            reentry_actor(
-                "session-a",
-                "%26",
-                532,
-                agent_doc_controller::actor::ActorState::Closed,
-            ),
-        ] {
-            assert!(
-                validate_supervisor_reentry_actor(
-                    Path::new("/tmp/reentry.md"),
-                    "session-a",
-                    "%26",
-                    record,
-                )
-                .is_err()
-            );
-        }
+    fn surviving_child_reentry_repairs_closed_or_paneless_actor() {
+        let closed = reentry_actor(
+            "session-a",
+            "",
+            532,
+            agent_doc_controller::actor::ActorState::Closed,
+        );
+        assert_eq!(
+            supervisor_reentry_actor_decision("%26", &closed),
+            SupervisorReentryActorDecision::RepairClosed
+        );
+
+        let paneless = reentry_actor(
+            "session-a",
+            "",
+            532,
+            agent_doc_controller::actor::ActorState::Ready,
+        );
+        assert_eq!(
+            supervisor_reentry_actor_decision("%26", &paneless),
+            SupervisorReentryActorDecision::RepairPaneless
+        );
+    }
+
+    #[test]
+    fn surviving_child_reentry_rejects_another_active_pane() {
+        let record = reentry_actor(
+            "session-a",
+            "%27",
+            532,
+            agent_doc_controller::actor::ActorState::Busy,
+        );
+        assert_eq!(
+            supervisor_reentry_actor_decision("%26", &record),
+            SupervisorReentryActorDecision::RejectPaneMismatch
+        );
     }
 
     #[test]

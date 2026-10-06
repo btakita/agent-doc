@@ -40,14 +40,52 @@ fn enforce_selected_queue_response_contract(
         return Ok(());
     }
     enforce_queue_head_annotation_response_contract(current, response, flags)?;
-    let mut missing = agent_doc_queue::queue_closeout_guard::
-        selected_free_text_heads_missing_response_evidence_for_closeout(
-            baseline,
-            current,
-            response,
-            !flags.queue_completion_ids.is_empty(),
-        )?;
+    let explicit_id_completion = !flags.queue_completion_ids.is_empty();
+    let mut missing;
     if let Some(file) = file {
+        let cycle_state = agent_doc_cycle_state_io::load(file)?;
+        missing = if cycle_state
+            .as_ref()
+            .is_some_and(|state| state.queue_selection_preempted)
+        {
+            let state = cycle_state.as_ref().expect("checked above");
+            // `#qpromptpreemptguard`: preflight is the authority for whether this
+            // cycle selected a free-text queue prompt. A fresh exchange/chat
+            // prompt deliberately records an empty selection while leaving the
+            // prior transient `🚧` marker visible. Do not reinterpret that UI
+            // marker as work owed by the preempting response.
+            agent_doc_queue::queue_closeout_guard::
+                selected_free_text_prompts_missing_response_evidence_for_closeout(
+                    baseline,
+                    current,
+                    response,
+                    &state.selected_free_text_queue_heads,
+                    explicit_id_completion,
+                )?
+        } else {
+            // Legacy/direct callers without cycle state still use the visible
+            // selection marker as their only available witness.
+            let mut visible = agent_doc_queue::queue_closeout_guard::
+                selected_free_text_heads_missing_response_evidence_for_closeout(
+                    baseline,
+                    current,
+                    response,
+                    explicit_id_completion,
+                )?;
+            if let Some(state) = cycle_state.as_ref() {
+                visible.extend(
+                    agent_doc_queue::queue_closeout_guard::
+                        selected_free_text_prompts_missing_response_evidence_for_closeout(
+                            baseline,
+                            current,
+                            response,
+                            &state.selected_free_text_queue_heads,
+                            explicit_id_completion,
+                        )?,
+                );
+            }
+            visible
+        };
         // `#deferstrike`: a head an active worker claim holds (a subagent, or
         // the coordinator's own `coordinator:*` integration claim) belongs to
         // that worker. This cycle may have selected it before the claim landed;
@@ -57,23 +95,16 @@ fn enforce_selected_queue_response_contract(
         let claimed =
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
         missing.retain(|head| !claimed.claims(head));
-        let selected = agent_doc_cycle_state_io::load(file)?
-            .map(|state| state.selected_free_text_queue_heads)
-            .unwrap_or_default();
-        missing.extend(
-            agent_doc_queue::queue_closeout_guard::
-                selected_free_text_prompts_missing_response_evidence_for_closeout(
-                    baseline,
-                    current,
-                    response,
-                    &selected,
-                    !flags.queue_completion_ids.is_empty(),
-                )?
-                .into_iter()
-                .filter(|head| !claimed.claims(head)),
-        );
         missing.sort();
         missing.dedup();
+    } else {
+        missing = agent_doc_queue::queue_closeout_guard::
+            selected_free_text_heads_missing_response_evidence_for_closeout(
+                baseline,
+                current,
+                response,
+                explicit_id_completion,
+            )?;
     }
     // `#doneleadingdirective`: this closeout's `--done` of the id a head leads
     // with completes that head; the queue removal guard already accepts it.
@@ -3340,6 +3371,42 @@ mod tests {
             &flags,
         )
         .expect("a claimed head is owned by its worker, not by this cycle");
+    }
+
+    /// A fresh exchange/chat prompt preempts an active queue drain for this
+    /// cycle. Preflight records an empty durable selection but intentionally
+    /// leaves the transient marker visible for the queue to resume later.
+    #[test]
+    fn fresh_prompt_preemption_does_not_require_unselected_queue_head_evidence() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("agent-doc-bugs.md");
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Operator asks a fresh question.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 release + publish\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(&doc, &[]).unwrap();
+        agent_doc_cycle_state_io::record_queue_selection_preempted(&doc, true).unwrap();
+        let flags = WriteFlags {
+            strict_closeout: true,
+            commit_requested: true,
+            ..Default::default()
+        };
+
+        enforce_selected_queue_response_contract(
+            Some(&doc),
+            Some(current),
+            current,
+            "Answered the fresh operator question.",
+            &flags,
+        )
+        .expect("an unselected paused queue head is not owed by the preempting response");
     }
 
     #[test]

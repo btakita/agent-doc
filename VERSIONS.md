@@ -10,6 +10,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **Reusable preset queue heads survive archived done-ID collisions (GH #161).** Queue maintenance preserves a live
   registered preset name even when an archived item reused that ID, and dispatch consumes the settled post-maintenance
   projection so genuinely completed heads are not dispatched from stale content.
+- **Fresh operator prompts close independently of a paused queue head.** Preflight persists when exchange/chat work
+  preempted queue selection, so the strict write gate no longer mistakes a retained transient `🚧` marker for work
+  owed by that preempting response; legacy and durably selected queue-head safeguards remain fail-closed.
 
 ## 0.35.468
 

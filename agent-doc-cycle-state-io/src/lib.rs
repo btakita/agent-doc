@@ -314,6 +314,12 @@ pub struct CycleState {
     /// `> **Queue prompt:**` response echo.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_free_text_queue_heads: Vec<String>,
+    /// A fresh exchange/chat prompt preempted queue selection for this cycle.
+    /// This distinguishes an authoritative empty selection from legacy/direct
+    /// cycles that never recorded a durable selection and must still fall back
+    /// to the transient visible `🚧` marker.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub queue_selection_preempted: bool,
     /// `#chatprompt` (GH #125): operator prompts that reached the harness chat
     /// instead of the document and that this cycle's contract carried as its
     /// work (`chat_prompts`). Closeout warns when the committed document has no
@@ -1345,6 +1351,7 @@ pub fn start_preflight_with_task(
             .map(agent_doc_queue::queue_heads::active_free_text_queue_heads)
             .unwrap_or_default(),
         selected_free_text_queue_heads: Vec::new(),
+        queue_selection_preempted: false,
         // A re-entrant preflight of the same open cycle keeps the chat prompts
         // the first admission carried; the hook ledger was cleared by then.
         chat_prompts: reentrant
@@ -1422,6 +1429,22 @@ pub fn record_selected_free_text_queue_heads(
     }
     if state.selected_free_text_queue_heads != normalized {
         state.selected_free_text_queue_heads = normalized;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// Record whether operator-authored exchange/chat work preempted queue drain.
+pub fn record_queue_selection_preempted(
+    file: &Path,
+    preempted: bool,
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if state.queue_selection_preempted != preempted {
+        state.queue_selection_preempted = preempted;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -3479,6 +3502,7 @@ fn synthetic_state_with_id(
         active_queue_heads: Vec::new(),
         active_free_text_queue_heads: Vec::new(),
         selected_free_text_queue_heads: Vec::new(),
+        queue_selection_preempted: false,
         chat_prompts: Vec::new(),
         absorbed_steering_prompts: Vec::new(),
         semantic_merge_conflict_advisories: Vec::new(),

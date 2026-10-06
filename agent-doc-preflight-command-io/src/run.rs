@@ -2207,6 +2207,10 @@ fn run_with_options_to_writer_in_pass(
             file,
             &selected_free_text_queue_heads,
         )?;
+        agent_doc_cycle_state_io::record_queue_selection_preempted(
+            file,
+            exchange_prompt_preempts_queue,
+        )?;
     }
     // `#closeout-steering`: new subagent-intent queue lines the cycle must
     // dispatch (claimed ones excluded). Computed before the seed below so it

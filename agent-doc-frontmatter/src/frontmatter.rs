@@ -960,7 +960,8 @@ impl PromptPresets {
 
     /// `#presetshape` (GH #69 §1): operator-readable problems with declared
     /// presets. A structured entry is accepted when it carries a string
-    /// `prompt:` (the preset body); any other shape is preserved verbatim but
+    /// `prompt:` (the preset body) and may carry a string `runbook:` path; any
+    /// other shape is preserved verbatim but
     /// does not resolve. These are warnings, never parse errors -- one
     /// malformed preset must not make `mode` / `session-check` unable to read
     /// the whole document.
@@ -984,16 +985,61 @@ impl PromptPresets {
                 .into_iter()
                 .flat_map(|m| m.keys())
                 .filter_map(|k| k.as_str().map(str::to_string))
-                .filter(|k| k != "prompt")
+                .filter(|k| k != "prompt" && k != "runbook")
                 .collect();
             if !ignored.is_empty() {
                 out.push(format!(
-                    "prompt_presets.{key}: only `prompt` is used as the preset body; ignored field(s): {}",
+                    "prompt_presets.{key}: supported fields are `prompt` and `runbook`; ignored field(s): {}",
                     ignored.join(", ")
                 ));
             }
         }
         out
+    }
+
+    /// Project-relative runbook associated with a structured preset.
+    pub fn runbook(&self, key: &str) -> Option<&str> {
+        let PresetValue::Structured(raw) = self.entries.get(key)?.as_ref()? else {
+            return None;
+        };
+        raw.as_mapping()?
+            .get(serde_yaml::Value::from("runbook"))?
+            .as_str()
+    }
+
+    /// Associate an existing resolved preset with a project-relative runbook.
+    /// Scalar presets are promoted to the structured form without changing
+    /// their prompt body; unrelated structured fields are preserved.
+    pub fn set_runbook(&mut self, key: &str, runbook: String) -> anyhow::Result<()> {
+        let value = self
+            .entries
+            .get_mut(key)
+            .ok_or_else(|| anyhow::anyhow!("unknown prompt preset {key:?}"))?;
+        let current = value
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("prompt preset {key:?} has no value yet"))?;
+        let mut mapping = match current {
+            PresetValue::Text(prompt) => {
+                let mut mapping = serde_yaml::Mapping::new();
+                mapping.insert(
+                    serde_yaml::Value::from("prompt"),
+                    serde_yaml::Value::from(prompt),
+                );
+                mapping
+            }
+            PresetValue::Structured(serde_yaml::Value::Mapping(mapping)) => mapping,
+            PresetValue::Structured(other) => {
+                *value = Some(PresetValue::Structured(other));
+                anyhow::bail!("prompt preset {key:?} is not a mapping")
+            }
+        };
+        mapping.insert(
+            serde_yaml::Value::from("runbook"),
+            serde_yaml::Value::from(runbook),
+        );
+        *value = Some(PresetValue::Structured(serde_yaml::Value::Mapping(mapping)));
+        self.rebuild_resolved();
+        Ok(())
     }
 }
 
@@ -4222,6 +4268,37 @@ mod tests {
             written.contains("response"),
             "structured form kept: {written}"
         );
+    }
+
+    #[test]
+    fn structured_preset_runbook_is_metadata_and_scalar_promotion_preserves_prompt() {
+        let content = "---\npresets:\n  '#release': release + publish\n  '#review':\n    prompt: review carefully\n    runbook: runbooks/review.md\n---\nBody\n";
+        let (mut fm, body) = parse(content).unwrap();
+        assert_eq!(
+            fm.prompt_presets.runbook("#review"),
+            Some("runbooks/review.md")
+        );
+        assert!(fm.prompt_presets.diagnostics().is_empty());
+
+        fm.prompt_presets
+            .set_runbook("#release", "runbooks/release.md".into())
+            .unwrap();
+        assert_eq!(
+            fm.prompt_presets.get("#release").unwrap(),
+            "release + publish"
+        );
+        assert_eq!(
+            fm.prompt_presets.runbook("#release"),
+            Some("runbooks/release.md")
+        );
+
+        let written = write_preserving(content, &fm, body).unwrap();
+        assert!(
+            written.contains("presets:"),
+            "operator spelling preserved: {written}"
+        );
+        let (reparsed, _) = parse(&written).unwrap();
+        assert_eq!(reparsed.prompt_presets, fm.prompt_presets);
     }
 
     #[test]

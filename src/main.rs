@@ -92,6 +92,7 @@ mod read;
 mod reliable_sync_status_cmd;
 mod rename;
 mod reset;
+mod runbook;
 mod self_install;
 mod serve;
 mod session_actor_cmd;
@@ -3355,6 +3356,11 @@ enum Commands {
     #[command(name = "commands")]
     #[allow(clippy::enum_variant_names)]
     ListCommands,
+    /// Discover, read, and safely author project-local runbooks
+    Runbook {
+        #[command(subcommand)]
+        action: RunbookAction,
+    },
     /// Hook system for cross-session coordination
     Hook {
         #[command(subcommand)]
@@ -3435,6 +3441,41 @@ enum Commands {
     Admin {
         #[command(subcommand)]
         action: AdminAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum RunbookAction {
+    /// List project runbooks and their preset associations
+    List {
+        /// Session document used to resolve the project and preset associations
+        file: PathBuf,
+        /// Emit structured JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a runbook by preset ID, catalog name, or project-relative path
+    Show {
+        /// Session document used to resolve the project and preset associations
+        file: PathBuf,
+        /// Preset ID (#release), catalog name (release), or catalogued path
+        selector: String,
+        /// Emit structured JSON with metadata and content
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a non-overwriting project runbook scaffold
+    Create {
+        /// Session document used to resolve the project
+        file: PathBuf,
+        /// Lowercase kebab-case runbook name
+        name: String,
+        /// Existing prompt preset to associate with the new runbook
+        #[arg(long)]
+        preset: Option<String>,
+        /// One-line purpose shown in the runbook catalog
+        #[arg(long)]
+        description: Option<String>,
     },
 }
 
@@ -6146,6 +6187,20 @@ fn try_main() -> anyhow::Result<()> {
             &profile,
         ),
         Commands::ListCommands => commands::run(),
+        Commands::Runbook { action } => match action {
+            RunbookAction::List { file, json } => runbook::list(&file, json),
+            RunbookAction::Show {
+                file,
+                selector,
+                json,
+            } => runbook::show(&file, &selector, json),
+            RunbookAction::Create {
+                file,
+                name,
+                preset,
+                description,
+            } => runbook::create(&file, &name, preset.as_deref(), description.as_deref()),
+        },
         Commands::Session { action } => match action {
             Some(SessionAction::Set { name }) => session_cmd::set(&name),
             Some(SessionAction::Status { file }) => session_actor_cmd::status(&file),

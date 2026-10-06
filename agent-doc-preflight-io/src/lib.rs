@@ -14882,4 +14882,10 @@ pub struct PromptPresetExpansion {
     pub name: String,
     /// The preset body, verbatim.
     pub body: String,
+    /// Validated project-relative runbook path associated with the preset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runbook: Option<String>,
+    /// Imperative harness instruction emitted only when the preset is invoked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runbook_load_instruction: Option<String>,
 }

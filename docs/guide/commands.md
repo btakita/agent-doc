@@ -1,5 +1,15 @@
 # Commands
 
+## Project runbooks
+
+`agent-doc runbook list <FILE> [--json]` lists committed project procedures and
+their prompt-preset associations. `agent-doc runbook show <FILE>
+<#preset|catalog-name|runbooks/path.md> [--json]` loads one validated procedure. Author a new
+non-overwriting scaffold with `agent-doc runbook create <FILE> <kebab-name>
+[--preset <#id>] [--description <text>]`; association promotes a scalar preset
+to `{prompt, runbook}` while preserving its prompt. See
+[`runbooks/preset-runbooks.md`](../../runbooks/preset-runbooks.md).
+
 All commands are available through the `agent-doc` CLI.
 
 ## run

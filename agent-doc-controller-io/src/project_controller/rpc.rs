@@ -7901,19 +7901,12 @@ pub fn compact_document_via_controller(
     if compact_outcome_claims_head(&outcome) {
         eprintln!("{COMPACT_COMMIT_SCOPE_NOTE}");
     }
+    fail_if_compact_pending(&outcome)?;
     match &outcome {
         ControllerCompactDocumentOutcome::Committed => {}
-        ControllerCompactDocumentOutcome::RetainedPending {
-            continuation_id,
-            commit: pending_commit,
-        } => {
-            return fail_compact_pending(continuation_id, *pending_commit);
-        }
-        ControllerCompactDocumentOutcome::AlreadyPending {
-            continuation_id,
-            commit: pending_commit,
-        } => {
-            return fail_compact_pending(continuation_id, *pending_commit);
+        ControllerCompactDocumentOutcome::RetainedPending { .. }
+        | ControllerCompactDocumentOutcome::AlreadyPending { .. } => {
+            unreachable!("pending compact outcomes fail before success handling")
         }
         ControllerCompactDocumentOutcome::DeferredActiveTyping { .. } => {
             unreachable!("active typing is retried before compact outcome handling")
@@ -7939,20 +7932,41 @@ pub fn compact_document_via_controller(
     Ok(())
 }
 
+fn compact_retained_pending_note(continuation_id: &str, commit_requested: bool) -> String {
+    let completion = if commit_requested {
+        COMPACT_RETAINED_PENDING_NOTE
+            .strip_prefix("[compact] pending: this compact ")
+            .unwrap_or(COMPACT_RETAINED_PENDING_NOTE)
+    } else {
+        "is in editor delivery and will finish without committing after delivery settles; do not re-run Compact Exchange"
+    };
+    format!(
+        "[compact] pending: compact continuation {continuation_id} {completion} (commit_requested={commit_requested})"
+    )
+}
+
 fn compact_already_pending_note(continuation_id: &str, commit_requested: bool) -> String {
-    let retained_detail = COMPACT_RETAINED_PENDING_NOTE
+    let retained_detail = COMPACT_ALREADY_PENDING_NOTE
         .strip_prefix("[compact] pending: ")
-        .unwrap_or(COMPACT_RETAINED_PENDING_NOTE);
+        .unwrap_or(COMPACT_ALREADY_PENDING_NOTE);
     format!(
         "[compact] pending: existing continuation {continuation_id} already owns this document (commit_requested={commit_requested}); {retained_detail}"
     )
 }
 
-fn fail_compact_pending(continuation_id: &str, commit_requested: bool) -> Result<()> {
-    anyhow::bail!(
-        "{}",
-        compact_already_pending_note(continuation_id, commit_requested)
-    )
+fn fail_if_compact_pending(outcome: &ControllerCompactDocumentOutcome) -> Result<()> {
+    let note = match outcome {
+        ControllerCompactDocumentOutcome::RetainedPending {
+            continuation_id,
+            commit,
+        } => compact_retained_pending_note(continuation_id, *commit),
+        ControllerCompactDocumentOutcome::AlreadyPending {
+            continuation_id,
+            commit,
+        } => compact_already_pending_note(continuation_id, *commit),
+        _ => return Ok(()),
+    };
+    anyhow::bail!("{note}")
 }
 
 pub fn record_committed_baseline_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
@@ -29784,8 +29798,41 @@ mod tests {
     }
 
     #[test]
-    fn repeated_compact_reports_one_continuation_aware_pending_diagnostic() {
-        let note = compact_already_pending_note("compact-projection-123", true);
+    fn retained_compact_reports_own_delivery_without_rerun_guidance() {
+        let outcome = ControllerCompactDocumentOutcome::RetainedPending {
+            continuation_id: "compact-projection-own".to_string(),
+            commit: true,
+        };
+        let note = fail_if_compact_pending(&outcome).unwrap_err().to_string();
+
+        assert_eq!(note.matches("[compact] pending:").count(), 1);
+        assert_eq!(note.lines().count(), 1);
+        assert!(note.contains("compact continuation compact-projection-own"));
+        assert!(note.contains("commit_requested=true"));
+        assert!(note.contains("is in editor delivery"));
+        assert!(note.contains("will commit automatically"));
+        assert!(note.contains("do not re-run Compact Exchange"));
+        assert!(!note.contains("existing continuation"));
+        assert!(!note.contains("automatically releases stalled ownership"));
+    }
+
+    #[test]
+    fn retained_uncommitted_compact_does_not_promise_a_commit() {
+        let note = compact_retained_pending_note("compact-projection-own", false);
+
+        assert!(note.contains("commit_requested=false"));
+        assert!(note.contains("will finish without committing"));
+        assert!(note.contains("do not re-run Compact Exchange"));
+        assert!(!note.contains("will commit automatically"));
+    }
+
+    #[test]
+    fn repeated_compact_preserves_foreign_continuation_rerun_guidance() {
+        let outcome = ControllerCompactDocumentOutcome::AlreadyPending {
+            continuation_id: "compact-projection-123".to_string(),
+            commit: true,
+        };
+        let note = fail_if_compact_pending(&outcome).unwrap_err().to_string();
 
         assert_eq!(note.matches("[compact] pending:").count(), 1);
         assert_eq!(note.lines().count(), 1);
@@ -29795,7 +29842,7 @@ mod tests {
         assert!(note.contains("automatically releases stalled ownership after 30 seconds"));
         assert!(note.contains("re-run Compact Exchange"));
         assert!(note.contains("restart is not required"));
-        assert!(fail_compact_pending("compact-projection-123", true).is_err());
+        assert!(!note.contains("do not re-run Compact Exchange"));
     }
 
     #[test]

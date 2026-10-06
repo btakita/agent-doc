@@ -202,7 +202,8 @@ pub enum ControllerCompactDocumentOutcome {
 }
 
 pub const COMPACT_COMMIT_SCOPE_NOTE: &str = "[compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`";
-pub const COMPACT_RETAINED_PENDING_NOTE: &str = "[compact] pending: the compacted target is retained for editor delivery and is not yet committed. The controller automatically releases stalled ownership after 30 seconds; once released, re-run Compact Exchange. An editor restart is not required";
+pub const COMPACT_RETAINED_PENDING_NOTE: &str = "[compact] pending: this compact is in editor delivery and will commit automatically after delivery settles; do not re-run Compact Exchange";
+pub const COMPACT_ALREADY_PENDING_NOTE: &str = "[compact] pending: the compacted target is retained for editor delivery and is not yet committed. The controller automatically releases stalled ownership after 30 seconds; once released, re-run Compact Exchange. An editor restart is not required";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerTmuxLayoutSyncInvocation {

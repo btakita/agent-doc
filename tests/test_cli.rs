@@ -14412,11 +14412,14 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
         "any single tag must remain publishable on demand"
     );
     assert!(
-        pypi.contains("is not on PyPI after a successful publish job"),
-        "a publish that does not land on PyPI must fail loudly instead of drifting silently"
+        pypi.contains("--index-url https://pypi.org/simple")
+            && pypi.contains("for attempt in $(seq 1 30)")
+            && pypi.contains("not installable from PyPI's simple index after 10 minutes")
+            && !pypi.contains("/pypi/agent-doc/${version}/json"),
+        "publish verification must wait boundedly for the user-facing simple index instead of trusting earlier JSON propagation"
     );
     assert!(
-        pypi.contains("Verify a clean PyPI install fetches the pinned native release")
+        pypi.contains("Wait for a clean PyPI install to fetch the pinned native release")
             && pypi.contains("agent-doc --version"),
         "the publish verification must exercise the bootstrap-to-native handoff"
     );

@@ -321,6 +321,12 @@ race class instead of papering over each symptom.
   through the existing typing/digest FFI and never autonomously reconcile or
   write the document. A single watch authority removes the two-watchers/two-
   writers conflict the editor surfaces as a memory-vs-disk "File Cache Conflict".
+  Native event delivery is preferred, but a native `MaxFilesWatch` observation
+  moves the watcher and all of its registered paths to bounded polling. Linux
+  accounts inotify capacity per user, so moving the JetBrains JNA bindings to a
+  helper process cannot recover quota. Those bindings allocate no filesystem
+  watcher; process isolation is a separate crash/ABI design decision, not an
+  inotify recovery.
 - **Write provenance.** Every controller/session-actor disk write is stamped with
   a write-provenance generation id plus its `OpActor`, durably recorded alongside
   the write (provenance sidecar or extended live-buffer digest). This is enforced

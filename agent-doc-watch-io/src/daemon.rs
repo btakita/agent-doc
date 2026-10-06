@@ -76,11 +76,13 @@ use agent_doc_document::watch_projection::{
 };
 use agent_doc_document_realtime::watch_authority::{RawWatchEvent, WatchDelivery};
 use agent_doc_turn::cycle_phase_freshly_in_flight;
-use notify::{EventKind, RecursiveMode, Watcher};
+use notify::{EventKind, RecursiveMode};
 
 use agent_doc_config::Config;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_turn_executor::capture::{capture_delta, limit_capture_lines};
+
+use crate::{ResourceAwareWatcher, WatchBackend, WatchFallback};
 
 /// Default idle timeout before daemon auto-exits (seconds).
 const IDLE_TIMEOUT_SECS: u64 = 60;
@@ -382,12 +384,11 @@ fn run_event_loop(
     let idle_timeout = Duration::from_secs(IDLE_TIMEOUT_SECS);
     let (tx, rx) = mpsc::channel();
 
-    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res {
-            let _ = tx.send(event);
-        }
-    })
-    .context("failed to create file watcher")?;
+    let mut watcher = ResourceAwareWatcher::new(tx, Duration::from_millis(500))
+        .context("failed to create file watcher")?;
+    if watcher.backend() == WatchBackend::Polling {
+        eprintln!("[watch] native file-watch quota is exhausted; using bounded polling");
+    }
 
     // Discover files from sessions registry (with mode detection)
     let entries = discover_entries()?;
@@ -398,10 +399,13 @@ fn run_event_loop(
 
     for entry in &entries {
         match entry.mode {
-            DocMode::FileWatch => {
-                if let Err(e) = watcher.watch(&entry.path, RecursiveMode::NonRecursive) {
-                    eprintln!("Warning: could not watch {}: {}", entry.path.display(), e);
-                } else {
+            DocMode::FileWatch => match watcher.watch(&entry.path, RecursiveMode::NonRecursive) {
+                Ok(fallback) => {
+                    if fallback == WatchFallback::Activated {
+                        eprintln!(
+                            "[watch] native file-watch quota is exhausted; switched to bounded polling"
+                        );
+                    }
                     watched_files.push(entry.path.clone());
                     if let Err(e) = seed_node_snapshot(&entry.path, &mut node_snapshots) {
                         eprintln!(
@@ -411,7 +415,10 @@ fn run_event_loop(
                         );
                     }
                 }
-            }
+                Err(e) => {
+                    eprintln!("Warning: could not watch {}: {}", entry.path.display(), e)
+                }
+            },
             DocMode::StreamCapture => {
                 stream_states.insert(
                     entry.path.clone(),
@@ -423,17 +430,25 @@ fn run_event_loop(
                     },
                 );
                 if entry.reactive {
-                    if let Err(e) = watcher.watch(&entry.path, RecursiveMode::NonRecursive) {
-                        eprintln!("Warning: could not watch {}: {}", entry.path.display(), e);
-                    } else {
-                        watched_files.push(entry.path.clone());
-                        reactive_paths.insert(entry.path.clone());
-                        if let Err(e) = seed_node_snapshot(&entry.path, &mut node_snapshots) {
-                            eprintln!(
-                                "[watch] could not seed node-event snapshot for {}: {}",
-                                entry.path.display(),
-                                e
-                            );
+                    match watcher.watch(&entry.path, RecursiveMode::NonRecursive) {
+                        Ok(fallback) => {
+                            if fallback == WatchFallback::Activated {
+                                eprintln!(
+                                    "[watch] native file-watch quota is exhausted; switched to bounded polling"
+                                );
+                            }
+                            watched_files.push(entry.path.clone());
+                            reactive_paths.insert(entry.path.clone());
+                            if let Err(e) = seed_node_snapshot(&entry.path, &mut node_snapshots) {
+                                eprintln!(
+                                    "[watch] could not seed node-event snapshot for {}: {}",
+                                    entry.path.display(),
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: could not watch {}: {}", entry.path.display(), e)
                         }
                     }
                 }
@@ -468,9 +483,14 @@ fn run_event_loop(
 
     if let Some(ref cp) = config_toml_path
         && cp.exists()
-        && let Err(e) = watcher.watch(cp, RecursiveMode::NonRecursive)
     {
-        eprintln!("Warning: could not watch config {}: {}", cp.display(), e);
+        match watcher.watch(cp, RecursiveMode::NonRecursive) {
+            Ok(WatchFallback::Activated) => eprintln!(
+                "[watch] native file-watch quota is exhausted; switched to bounded polling"
+            ),
+            Ok(WatchFallback::Unchanged) => {}
+            Err(e) => eprintln!("Warning: could not watch config {}: {}", cp.display(), e),
+        }
     }
 
     let mut config_changed = false;
@@ -504,20 +524,28 @@ fn run_event_loop(
                 match entry.mode {
                     DocMode::FileWatch => {
                         if !watched_files.contains(&entry.path) {
-                            if let Err(e) = watcher.watch(&entry.path, RecursiveMode::NonRecursive)
-                            {
-                                eprintln!(
-                                    "Warning: could not watch {}: {}",
-                                    entry.path.display(),
-                                    e
-                                );
-                            } else {
-                                eprintln!("Now watching {}", entry.path.display());
-                                watched_files.push(entry.path.clone());
-                                if let Err(e) = seed_node_snapshot(&entry.path, &mut node_snapshots)
-                                {
+                            match watcher.watch(&entry.path, RecursiveMode::NonRecursive) {
+                                Ok(fallback) => {
+                                    if fallback == WatchFallback::Activated {
+                                        eprintln!(
+                                            "[watch] native file-watch quota is exhausted; switched to bounded polling"
+                                        );
+                                    }
+                                    eprintln!("Now watching {}", entry.path.display());
+                                    watched_files.push(entry.path.clone());
+                                    if let Err(e) =
+                                        seed_node_snapshot(&entry.path, &mut node_snapshots)
+                                    {
+                                        eprintln!(
+                                            "[watch] could not seed node-event snapshot for {}: {}",
+                                            entry.path.display(),
+                                            e
+                                        );
+                                    }
+                                }
+                                Err(e) => {
                                     eprintln!(
-                                        "[watch] could not seed node-event snapshot for {}: {}",
+                                        "Warning: could not watch {}: {}",
                                         entry.path.display(),
                                         e
                                     );
@@ -541,22 +569,31 @@ fn run_event_loop(
                         // Add reactive file-watch for stream-mode docs
                         if entry.reactive && !reactive_paths.contains(&entry.path) {
                             if !watched_files.contains(&entry.path) {
-                                if let Err(e) =
-                                    watcher.watch(&entry.path, RecursiveMode::NonRecursive)
-                                {
-                                    eprintln!(
-                                        "Warning: could not watch {}: {}",
-                                        entry.path.display(),
-                                        e
-                                    );
-                                } else {
-                                    eprintln!("Now watching {} (reactive)", entry.path.display());
-                                    watched_files.push(entry.path.clone());
-                                    if let Err(e) =
-                                        seed_node_snapshot(&entry.path, &mut node_snapshots)
-                                    {
+                                match watcher.watch(&entry.path, RecursiveMode::NonRecursive) {
+                                    Ok(fallback) => {
+                                        if fallback == WatchFallback::Activated {
+                                            eprintln!(
+                                                "[watch] native file-watch quota is exhausted; switched to bounded polling"
+                                            );
+                                        }
                                         eprintln!(
-                                            "[watch] could not seed node-event snapshot for {}: {}",
+                                            "Now watching {} (reactive)",
+                                            entry.path.display()
+                                        );
+                                        watched_files.push(entry.path.clone());
+                                        if let Err(e) =
+                                            seed_node_snapshot(&entry.path, &mut node_snapshots)
+                                        {
+                                            eprintln!(
+                                                "[watch] could not seed node-event snapshot for {}: {}",
+                                                entry.path.display(),
+                                                e
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "Warning: could not watch {}: {}",
                                             entry.path.display(),
                                             e
                                         );
@@ -624,7 +661,7 @@ fn run_event_loop(
 
         // Receive file-change events with timeout
         match rx.recv_timeout(Duration::from_millis(500)) {
-            Ok(event) => {
+            Ok(Ok(event)) => {
                 if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
                     for path in event.paths {
                         let canonical = path.canonicalize().unwrap_or(path);
@@ -644,6 +681,17 @@ fn run_event_loop(
                     }
                 }
             }
+            Ok(Err(error)) => match watcher.recover_from_event_error(&error) {
+                Ok(WatchFallback::Activated) => eprintln!(
+                    "[watch] native file-watch quota is exhausted; switched to bounded polling"
+                ),
+                Ok(WatchFallback::Unchanged) => {
+                    eprintln!("[watch] file watcher error: {error}")
+                }
+                Err(fallback_error) => eprintln!(
+                    "[watch] file watcher error: {error}; polling fallback failed: {fallback_error}"
+                ),
+            },
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
@@ -1085,30 +1133,15 @@ mod tests {
         std::fs::write(&path, "initial").unwrap();
 
         let (tx, rx) = mpsc::channel();
-        let mut watcher =
-            match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(event) = res {
-                    let _ = tx.send(event);
-                }
-            }) {
-                Ok(watcher) => watcher,
-                Err(err) if matches!(err.kind, notify::ErrorKind::MaxFilesWatch) => return,
-                Err(err) => panic!("failed to create test watcher: {err}"),
-            };
-
-        if let Err(err) = watcher.watch(&path, RecursiveMode::NonRecursive) {
-            if matches!(err.kind, notify::ErrorKind::MaxFilesWatch) {
-                return;
-            }
-            panic!("failed to watch test document: {err}");
-        }
+        let mut watcher = ResourceAwareWatcher::new(tx, Duration::from_millis(50)).unwrap();
+        watcher.watch(&path, RecursiveMode::NonRecursive).unwrap();
 
         // Give watcher time to initialize
         std::thread::sleep(Duration::from_millis(100));
 
         std::fs::write(&path, "modified").unwrap();
 
-        let event = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let event = rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
         assert!(!event.paths.is_empty());
     }
 }

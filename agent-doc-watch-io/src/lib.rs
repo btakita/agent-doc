@@ -13,10 +13,12 @@ use agent_doc_markdown_ast::events::DocumentNodeEvent;
 use agent_doc_state_backbone::{StateEvent, StateFact};
 
 pub mod daemon;
+mod resource_aware_watcher;
 
 pub use daemon::{
     WatchConfig, WatchDaemonEffects, cycle_freshly_in_flight, ensure_running, start, status, stop,
 };
+pub use resource_aware_watcher::{ResourceAwareWatcher, WatchBackend, WatchFallback};
 
 pub const PID_FILE: &str = ".agent-doc/watch.pid";
 

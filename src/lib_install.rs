@@ -316,7 +316,7 @@ pub(crate) fn run_paths(
     // private-socket hydration, atomic promotion, and predecessor RPC drain;
     // supervisors remain turn-boundary gated. Opt out with a falsey
     // AGENT_DOC_RECYCLE_ON_INSTALL.
-    auto_recycle_after_install();
+    crate::runtime_update::recycle_existing_runtimes_after_update("lib-install");
 
     // Proactively send the shared `reload_library` intent to editor adapters that
     // explicitly support safe hot reload. JetBrains uses a quiesce/drain/close
@@ -550,62 +550,6 @@ fn contains_ascii_symbol(haystack: &[u8], needle: &[u8]) -> bool {
         && haystack
             .windows(needle.len())
             .any(|window| window == needle)
-}
-
-/// `#autorecycle-on-install`: default-on resolution for auto-recycling running
-/// controllers after a `lib-install`. Falsey `AGENT_DOC_RECYCLE_ON_INSTALL`
-/// (`0`/`false`/`no`/`off`) opts out and restores the print-only hint.
-fn recycle_on_install_enabled() -> bool {
-    match std::env::var("AGENT_DOC_RECYCLE_ON_INSTALL") {
-        Ok(v) => !matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "0" | "false" | "no" | "off"
-        ),
-        Err(_) => true,
-    }
-}
-
-/// Mark every running controller and open supervisor to recycle onto the
-/// freshly-installed binary. Controllers promote a private replacement mid-turn
-/// and drain accepted RPCs on the predecessor; supervisors retain the live child
-/// until a true turn boundary.
-/// Best-effort: a recycle failure must never fail the install, so errors are
-/// logged (never swallowed silently) and the print-only hint is surfaced as a
-/// fallback. When opted out, only the hint is printed.
-fn auto_recycle_after_install() {
-    if !recycle_on_install_enabled() {
-        eprintln!(
-            "[lib-install] note: auto-recycle opted out (AGENT_DOC_RECYCLE_ON_INSTALL falsey) — running controllers still serve the prior binary; run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build"
-        );
-        return;
-    }
-    // `#installhandoff`: mark the document-owning supervisors first. Their
-    // durable per-document recycle requests are the recovery journal if a
-    // controller happens to cross its own exec boundary immediately afterward.
-    match agent_doc_controller_io::project_controller::recycle_supervisors_all_projects() {
-        Ok((marked, skipped)) => {
-            eprintln!(
-                "[lib-install] auto-recycle: {marked} open supervisor(s) marked to recycle at next idle boundary, {skipped} skipped"
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "[lib-install] warning: supervisor recycle fan-out failed ({e}) — open supervisors still serve the prior binary until they self-detect staleness"
-            );
-        }
-    }
-    match agent_doc_controller_io::project_controller::recycle_controllers_all_projects() {
-        Ok((recycled, skipped)) => {
-            eprintln!(
-                "[lib-install] auto-recycle: {recycled} controller(s) marked after supervisor handoff, {skipped} skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)"
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "[lib-install] warning: auto-recycle failed ({e}) — running controllers still serve the prior binary; run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build"
-            );
-        }
-    }
 }
 
 /// Whether this executable lives inside a Cargo build tree.
@@ -850,35 +794,6 @@ mod tests {
         assert!(older < current);
         assert!(current >= current);
         assert!(newer > current);
-    }
-
-    #[test]
-    fn recycle_on_install_default_on_and_opt_out_is_falsey() {
-        // #autorecycle-on-install: default-on, falsey env opts out. Serialize env
-        // mutation to avoid cross-test interference.
-        let prior = std::env::var("AGENT_DOC_RECYCLE_ON_INSTALL").ok();
-        unsafe { std::env::remove_var("AGENT_DOC_RECYCLE_ON_INSTALL") };
-        assert!(recycle_on_install_enabled(), "default must be ON");
-        for falsey in ["0", "false", "no", "off", "OFF", " False "] {
-            unsafe { std::env::set_var("AGENT_DOC_RECYCLE_ON_INSTALL", falsey) };
-            assert!(
-                !recycle_on_install_enabled(),
-                "falsey value {falsey:?} must opt out"
-            );
-        }
-        for truthy in ["1", "true", "yes", "on", "anything"] {
-            unsafe { std::env::set_var("AGENT_DOC_RECYCLE_ON_INSTALL", truthy) };
-            assert!(
-                recycle_on_install_enabled(),
-                "truthy/other value {truthy:?} stays ON"
-            );
-        }
-        unsafe {
-            match prior {
-                Some(v) => std::env::set_var("AGENT_DOC_RECYCLE_ON_INSTALL", v),
-                None => std::env::remove_var("AGENT_DOC_RECYCLE_ON_INSTALL"),
-            }
-        }
     }
 
     #[test]

@@ -93,6 +93,7 @@ mod reliable_sync_status_cmd;
 mod rename;
 mod reset;
 mod runbook;
+mod runtime_update;
 mod self_install;
 mod serve;
 mod session_actor_cmd;

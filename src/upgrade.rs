@@ -342,6 +342,7 @@ fn upgrade_binary(version: &str) -> Option<PathBuf> {
     match try_github_release_upgrade(version) {
         Ok(installed_exe) => {
             eprintln!("Successfully upgraded to v{version} via GitHub Releases.");
+            crate::runtime_update::recycle_existing_runtimes_after_update("upgrade");
             return Some(installed_exe);
         }
         Err(error) => eprintln!("GitHub binary upgrade failed: {error:#}"),
@@ -354,6 +355,7 @@ fn upgrade_binary(version: &str) -> Option<PathBuf> {
     {
         if let Some(installed_exe) = current_executable_reporting_version(version) {
             eprintln!("Successfully upgraded to v{version} via pip.");
+            crate::runtime_update::recycle_existing_runtimes_after_update("upgrade");
             return Some(installed_exe);
         }
         eprintln!(

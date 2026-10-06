@@ -25,6 +25,9 @@
 //! - Changed JetBrains packages attach a system-classloader upgrade bridge to every live IDE,
 //!   letting JetBrains unload, replace, and load the package through its dynamic-plugin API.
 //!   Direct filesystem replacement is used only when no live IDE owns that installation.
+//! - Every successful package replacement schedules all existing supervisors and controllers for
+//!   safe-boundary recycle. Plugin updates use the full controller fleet, including idle roots and
+//!   same-binary controllers, because their editor endpoints can still own the replaced package.
 //!
 //! ## Evals
 //! - install_unknown_editor: `install("emacs")` → Err containing "Unknown editor"
@@ -725,7 +728,7 @@ pub fn install(editor: &str) -> Result<()> {
 }
 
 pub fn install_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
-    match editor {
+    let result = match editor {
         "jetbrains" | "jb" | "idea" => {
             let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
             install_jetbrains(&release, plugins_dir)
@@ -738,7 +741,11 @@ pub fn install_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Res
             install_vscode(&release)
         }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
+    };
+    if result.is_ok() {
+        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-install");
     }
+    result
 }
 
 pub fn install_local(editor: &str) -> Result<()> {
@@ -746,7 +753,7 @@ pub fn install_local(editor: &str) -> Result<()> {
 }
 
 pub fn install_local_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
-    match editor {
+    let result = match editor {
         "jetbrains" | "jb" | "idea" => install_jetbrains_local(plugins_dir),
         "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
             if plugins_dir.is_some() {
@@ -755,7 +762,11 @@ pub fn install_local_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) 
             install_vscode_local()
         }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
+    };
+    if result.is_ok() {
+        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-install-local");
     }
+    result
 }
 
 fn find_local_build_dir() -> Result<PathBuf> {
@@ -819,10 +830,14 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
 /// `make install`: it updates all existing installations instead of choosing
 /// one arbitrary IDE and silently leaving the others stale.
 pub fn install_local_all_existing(editor: &str) -> Result<()> {
-    match editor {
+    let result = match editor {
         "jetbrains" | "jb" | "idea" => install_jetbrains_local_all_existing(),
         _ => bail!("--all-installed is currently supported only for JetBrains installs"),
+    };
+    if result.is_ok() {
+        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-install-local");
     }
+    result
 }
 
 fn install_jetbrains_local_all_existing() -> Result<()> {
@@ -2505,7 +2520,7 @@ pub fn update(editor: &str) -> Result<()> {
 }
 
 pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
-    match editor {
+    let result = match editor {
         "jetbrains" | "jb" | "idea" => {
             let dirs = jetbrains_plugin_dirs();
             let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
@@ -2529,7 +2544,11 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
             install_vscode(&release)
         }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
+    };
+    if result.is_ok() {
+        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-update");
     }
+    result
 }
 
 /// GH #114: which editor family a reconciled plugin target belongs to.
@@ -2835,6 +2854,15 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
         }
     }
 
+    if report
+        .targets
+        .iter()
+        .any(|target| target.outcome != PluginTargetOutcome::Unchanged)
+    {
+        // Recycle even when a later target failed: an earlier target may
+        // already have replaced a live plugin generation.
+        crate::runtime_update::recycle_existing_runtimes_after_update("plugin-update-all");
+    }
     if errors.is_empty() {
         Ok(report)
     } else {

@@ -148,6 +148,90 @@ Verification passed: focused regressions, package-wide Clippy, `make check-fast`
 > **Queue prompt:** #advance-reviews
 
 The five review gates were audited in a subagent. Two were stale gates and are now actionable backlog work: `#qsubattr5` still needs the real `subagents=3` dogfood proof, and `#drivecapturedsplice` still needs the stronger stale-replica race proof rather than weakening the verifier to accept a healthy path. Three remain genuinely gated: `#steergatemodelrerun` has 66 of the required 200 labelled rows, PyPI still has ample headroom while its support request awaits a human response, and Grok remains signed out. No review item was incorrectly marked complete. The semantic completion match for `#steergatemodelrerun` is a known false positive: it is the intentionally renamed successor to the accidentally reaped prior id.
+
+### Re: Response — v0.35.466 hot-update and recovery release
+
+> **Queue prompt:**
+>
+> do [#qsubattr5]
+>
+> do [#drivecapturedsplice]
+
+
+Released agent-doc v0.35.466 from commit `0c66a41cc`. The GitHub release, all four platform archives, both editor packages, checksum manifests, Homebrew bump, and PyPI publish completed successfully. GitHub issues #151 through #157 are fixed and closed.
+
+### Hot updates and retained recovery
+
+- Every install/update now schedules existing supervisors to re-exec at the next safe idle boundary and controllers to recycle after supervisor handoff. The full install exercised this path: 18 supervisors and the eligible controllers were marked automatically; a mid-cycle editor endpoint was deferred safely instead of being rejected.
+- Orphaned retained intents are retired after recycle. The earlier `roseshield.md` projection converged through document authority and committed as cycle `cycle-1791299889951`; nothing was resent, recaptured, or forced to disk.
+- IDEA was not deadlocked or out of memory. Its event thread was blocked by a hidden **File Cache Conflict** modal. Bringing that dialog forward and choosing **Keep Memory Changes** released the UI while preserving editor authority. The JetBrains plugin was then dynamically upgraded and verified live, so no restart was required. Restarting IDEA is safe after this response commits, though it is unnecessary.
+- The `sdk.md` harness could not resume the missing saved session ID, so its healthy supervisor started a fresh Codex turn. Its prior response was already committed; the session is now healthy and idle on actor generation 56.
+
+### Resolved GitHub queue heads
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/151
+
+Preset expansion satisfied: fix then closerelease.
+
+Implemented typed usage errors and valid choices for invalid read components in integrated commit `7015e2850`; the dogfood defect banner is suppressed for this user-error path. Regression and full release tests passed, v0.35.466 was published, and issue #151 was closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/152
+
+Preset expansion satisfied: fix then closerelease.
+
+Implemented glibc-over-stray-musl detection plus authoritative JetBrains/PATH install provenance in integrated commit `e1a1a2303`. Bootstrap and full release tests passed, v0.35.466 was published, and issue #152 was closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/153
+
+Preset expansion satisfied: fix then closerelease.
+
+Implemented live-supervisor-pane layout derivation for fresh controllers in integrated commit `c03f337be`, preventing restart-time one-column collapse. Focused and full release tests passed, v0.35.466 was published, and issue #153 was closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/154
+
+Preset expansion satisfied: fix then closerelease.
+
+Implemented retained-column protection for unknown manual layouts, Remote Dev client-session precedence, and fresh outside-window escalation generations in integrated commit `4c3fa0922`. JetBrains/controller and full release tests passed, v0.35.466 was published, and issue #154 was closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/155
+
+Preset expansion satisfied: fix then closerelease.
+
+Implemented controller-local asynchronous Run Agent Doc execution in integrated commit `0d92d4fab`, removing the self-RPC five-second deadline failure. Focused and full release tests passed, v0.35.466 was published, and issue #155 was closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/156
+
+Preset expansion satisfied: fix then closerelease.
+
+Implemented distinct retained-compact guidance in integrated commit `b780a7947`: delivery is underway, commits automatically, and must not be rerun; foreign pending retains its separate rerun guidance. Typed-outcome and full release tests passed, v0.35.466 was published, and issue #156 was closed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/157
+
+Preset expansion satisfied: fix then closerelease.
+
+Implemented immutable Remote Dev layout snapshot capture on the EDT and native folding off the EDT in integrated commit `b818399ed`, reconciled with the #154 authority rules. Merged JetBrains and full release tests passed, v0.35.466 was published, and issue #157 was closed.
+
+> **Queue prompt:** release + publish
+
+The v0.35.466 GitHub Release workflow completed successfully with all platform and editor assets plus checksums. The dependent PyPI build, publish, and verify jobs also completed successfully.
+
+### Verification and publication
+
+- `make check` passed: 9,591 Rust tests, 193 VS Code tests, JetBrains tests, cross-editor simulation, PyPI bootstrap tests, documentation/release audits, and all formal-model plus non-vacuity checks.
+- The required tmux integration suite passed.
+- `make install-full` installed agent-doc 0.35.466, native library 0.35.466, JetBrains plugin 0.2.501, and VS Code extension 0.2.80.
+- Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.466
+
+### Gated follow-ups
+
+- `#qsubattr5`: setup is complete on branch `qsubattr5-dogfood` at `de5a8aa7c0d5e879547d4e321d159b1eff840073`. It remains gated only for the next real operator-created multi-head batch, where distinct claims and `ops.log` must prove exactly-once dispatch and no inline drain.
+- `#drivecapturedsplice`: the safer recipe and regression coverage shipped, but the corrected live run stopped after reaching owner pane `%134` and before the retained marker/edit-two/verifier sequence. It remains gated until `verify-captured-splice-recovery` passes.
+
+> **Chat prompt (#chatprompt):** Idea seems to be stuck in with [Image #1]
+
+> **Chat prompt (#chatprompt):** Idea is unresponsive
+
+> **Chat prompt (#chatprompt):** sdk.md session crashed
 <!-- agent:boundary:38ce3b77 -->
 <!-- /agent:exchange -->
 
@@ -157,26 +241,27 @@ The five review gates were audited in a subagent. Two were stale gates and are n
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- do [#qsubattr5]
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/151
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/152
-- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/153
+- ~~do [#qsubattr5]~~
+- ~~do [#drivecapturedsplice]~~
+- #gh-fix https://github.com/btakita/agent-doc/issues/151
+- #gh-fix https://github.com/btakita/agent-doc/issues/152
+- #gh-fix https://github.com/btakita/agent-doc/issues/153
 - 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/154
-- #gh-fix https://github.com/btakita/agent-doc/issues/155
-- #gh-fix https://github.com/btakita/agent-doc/issues/156
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/155
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/156
 - #gh-fix https://github.com/btakita/agent-doc/issues/157
 - release + publish 
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md): keep the existing branch-specific verifier contract; update the xdotool captured-splice recipe to hold canonical delivery after the independent advance until edit two is typed, avoid the gitignored-scratch commit_refused path for the advance, rerun the live proof, and require verify-captured-splice-recovery to pass.
-- [ ] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md): add subagents=3 to tasks/software/tsift.md before its next real multi-head batch; then verify from queue claims and ops.log that every eligible head is dispatched exactly once and none drain inline.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
+- [/] 🚧 [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md). SETUP COMPLETE: tasks/software/tsift.md now has subagents=3 on branch qsubattr5-dogfood commit de5a8aa7c0d5e879547d4e321d159b1eff840073; gated pending the next real operator-created multi-head batch proof from distinct queue claims and ops.log that every eligible head dispatches exactly once and none drain inline.
 - [/] [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (66 as of 2026-10-06); src/agent-doc/scripts/steergate-model-eval --dataset currently exits insufficient_data. Then integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-06: 8.363 GiB of 10.0 GiB, 1.637 GiB headroom, 198 releases through 0.35.465, post-cutover mean 35.3 KiB, approximately 48,621 further releases fit; VERDICT headroom fine. The support issue remains open with only the github-actions bot comment and has not changed since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation. NEW BLOCKER 2026-09-30: grok 1.0.41 is now SIGNED OUT ('grok -p' -> 'Error: Not signed in'); operator runs 'grok login --device-code' (or sets XAI_API_KEY), and the free usage quota or the planned subscription must be active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed earlier; the last live MCP probe stopped at the usage limit before committed closeout. Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.

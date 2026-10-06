@@ -213,6 +213,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         include_str!("../runbooks/dynamic-context.md"),
     ),
     (
+        "preset-runbooks.md",
+        include_str!("../runbooks/preset-runbooks.md"),
+    ),
+    (
         "split-spec-files.md",
         include_str!("../runbooks/split-spec-files.md"),
     ),

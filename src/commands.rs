@@ -145,6 +145,21 @@ fn all_commands() -> Vec<CommandInfo> {
         "Display markdown outline with token counts",
     ));
     cmds.push(cmd(
+        "/agent-doc runbook list",
+        "<FILE> [--json]",
+        "List project runbooks and prompt-preset associations",
+    ));
+    cmds.push(cmd(
+        "/agent-doc runbook show",
+        "<FILE> <PRESET|PATH> [--json]",
+        "Load a catalogued project runbook",
+    ));
+    cmds.push(cmd(
+        "/agent-doc runbook create",
+        "<FILE> <NAME> [--preset <#ID>] [--description <TEXT>]",
+        "Safely scaffold and optionally associate a project runbook",
+    ));
+    cmds.push(cmd(
         "/agent-doc resync",
         "[FILE] [--fix]",
         "Validate the durable session registry globally or for one document; `--fix` aliases `fix`",

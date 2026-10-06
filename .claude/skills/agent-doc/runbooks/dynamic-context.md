@@ -9,6 +9,10 @@ runbooks or binary-generated preflight/plan output.
 - `SKILL.md` owns trigger wording, mandatory closeout boundaries, and the ordered
   cycle spine.
 - `runbooks/*.md` own branch-specific procedure detail.
+- Structured prompt presets may associate a `runbook:` path. Use
+  `agent-doc runbook list/show/create` and follow
+  [`preset-runbooks.md`](preset-runbooks.md); invoked presets emit a required-load
+  instruction instead of injecting every runbook into every turn.
 - `okf/*.md` owns durable concept definitions and vocabulary that should remain
   stable across prompt sessions.
 - `agent-doc preflight`, `agent-doc plan`, `tsift` envelopes, and session-memory

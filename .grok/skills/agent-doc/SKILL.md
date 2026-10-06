@@ -15,7 +15,7 @@ This shared hot path serves Claude Code, Codex, OpenCode, Cursor, and direct har
 
 ## Dynamic Context Map
 
-Use this SKILL.md as the hot-path router. Load linked files only when their branch is active: invocation and harness drift → [runbooks/harness-invocation.md](runbooks/harness-invocation.md); preflight planning → [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md); response and backlog updates → [runbooks/respond.md](runbooks/respond.md) plus [runbooks/pending-ops.md](runbooks/pending-ops.md); persistence and manual repair → [runbooks/persist-closeout.md](runbooks/persist-closeout.md) plus [runbooks/commit.md](runbooks/commit.md); context-authoring policy → [runbooks/dynamic-context.md](runbooks/dynamic-context.md); durable concept definitions and vocabulary → [okf/index.md](okf/index.md). Do not copy runbook or OKF detail back into this file unless it is required every cycle.
+Use this SKILL.md as the hot-path router. Load linked files only when their branch is active: invocation and harness drift → [runbooks/harness-invocation.md](runbooks/harness-invocation.md); preflight planning → [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md); response and backlog updates → [runbooks/respond.md](runbooks/respond.md) plus [runbooks/pending-ops.md](runbooks/pending-ops.md); persistence and manual repair → [runbooks/persist-closeout.md](runbooks/persist-closeout.md) plus [runbooks/commit.md](runbooks/commit.md); context-authoring policy → [runbooks/dynamic-context.md](runbooks/dynamic-context.md); preset-associated procedure discovery/authoring → [runbooks/preset-runbooks.md](runbooks/preset-runbooks.md); durable concept definitions and vocabulary → [okf/index.md](okf/index.md). Do not copy runbook or OKF detail back into this file unless it is required every cycle.
 
 ## Invocation
 
@@ -63,6 +63,8 @@ Detect subcommands before the normal workflow:
 ### 0b. Slash Commands
 
 Handle non-empty `slash_commands` or `builtin_commands` before responding. Claude Code invokes `slash_commands` via the `Skill` tool; other harnesses skip them. For `builtin_commands`, tell the user to run the command at the terminal. Trust preflight; do not re-validate fences or blockquotes. If `orchestration_request` is non-null, run `agent-doc orchestrate <FILE> --mode <orchestration_request.mode> --from-exchange` before manual response composition. If `prompt_presets_requested` is non-empty, read each preset body from `prompt_preset_expansions` in the same contract — preflight already resolved, validated, and expanded them. Do **not** route preset expansion through `orchestrate` (`#orchestratepresetexpand`): it never reads `prompt_presets` (alias `presets`) frontmatter, and it abandons the live `PreflightStarted` cycle this turn is sealed on.
+
+For each requested preset expansion carrying `runbook_load_instruction`, execute that required load before acting. The path is already project-contained and symlink-checked; do not substitute an unvalidated direct read. Use `agent-doc runbook list <FILE> --json` to navigate available project runbooks and `agent-doc runbook create` to author one. Full workflow: [runbooks/preset-runbooks.md](runbooks/preset-runbooks.md).
 
 ### 0c. Model Tier
 

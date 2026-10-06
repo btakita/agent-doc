@@ -166,6 +166,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "serde_yaml",
  "similar 3.1.1",
  "tempfile",
  "tiny_http",

@@ -40,13 +40,80 @@ use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_workflow::session_cycle::{compute_user_intent_prompt_changes, derive_turn_scope};
 use anyhow::Context;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 /// Injects the lazily reactive CRDT model as the diff's `current` source
 /// (#preflight-lazily-diff-feed). Lives here (not in `agent-doc-diff-io`)
 /// because the diff crate is a leaf beneath the relay crate and cannot depend
 /// on the reactive model without a dependency cycle.
 struct ReactiveLiveCurrentSource;
+
+fn resolve_preset_runbook(file: &Path, relative: &str) -> anyhow::Result<String> {
+    let relative_path = Path::new(relative);
+    if relative_path.is_absolute()
+        || relative_path.components().any(|part| {
+            matches!(
+                part,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        anyhow::bail!(
+            "prompt preset runbook must be project-relative and may not traverse parents: {relative}"
+        );
+    }
+    if !(relative_path.starts_with("runbooks")
+        || relative_path.starts_with(Path::new(".agent-doc/runbooks")))
+        || relative_path.extension().and_then(|value| value.to_str()) != Some("md")
+    {
+        anyhow::bail!(
+            "prompt preset runbook must be a Markdown file under runbooks/ or .agent-doc/runbooks/: {relative}"
+        );
+    }
+    let canonical_file = file
+        .canonicalize()
+        .with_context(|| format!("canonicalize session document {}", file.display()))?;
+    let root = agent_doc_fs::find_project_root(&canonical_file)
+        .with_context(|| format!("find project root for {}", canonical_file.display()))?
+        .canonicalize()?;
+    let runbook = root
+        .join(relative_path)
+        .canonicalize()
+        .with_context(|| format!("resolve prompt preset runbook {relative}"))?;
+    if !runbook.starts_with(&root) {
+        anyhow::bail!("prompt preset runbook escapes project root through a symlink: {relative}");
+    }
+    Ok(runbook
+        .strip_prefix(&root)
+        .unwrap_or(&runbook)
+        .to_string_lossy()
+        .replace('\\', "/"))
+}
+
+fn prompt_preset_expansion(
+    file: &Path,
+    name: &str,
+    body: &str,
+    presets: &frontmatter::PromptPresets,
+) -> anyhow::Result<agent_doc_preflight_io::PromptPresetExpansion> {
+    let (runbook, runbook_load_instruction) = match presets.runbook(name) {
+        Some(relative) => {
+            let resolved = resolve_preset_runbook(file, relative)?;
+            let instruction = format!(
+                "Required: load the runbook for preset {name} before acting: `agent-doc runbook show '{}' {name}` (resolved `{resolved}`).",
+                file.display()
+            );
+            (Some(resolved), Some(instruction))
+        }
+        None => (None, None),
+    };
+    Ok(agent_doc_preflight_io::PromptPresetExpansion {
+        name: name.to_string(),
+        body: body.to_string(),
+        runbook,
+        runbook_load_instruction,
+    })
+}
 
 impl agent_doc_diff_io::LiveCurrentSource for ReactiveLiveCurrentSource {
     fn live_current(&self, doc: &Path, disk: &str) -> Option<String> {
@@ -1661,17 +1728,18 @@ fn run_with_options_to_writer_in_pass(
     // `#orchestratepresetexpand`: ship the preset BODIES with the request so the
     // agent never needs a second command to expand them. The names are already
     // canonicalized and proven present by the `missing` bail above.
-    let prompt_preset_expansions = prompt_presets_requested
-        .iter()
-        .filter_map(|name| {
-            frontmatter_prompt_presets.get(name.as_str()).map(|body| {
-                agent_doc_preflight_io::PromptPresetExpansion {
-                    name: name.clone(),
-                    body: body.clone(),
-                }
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut prompt_preset_expansions = Vec::new();
+    for name in &prompt_presets_requested {
+        let Some(body) = frontmatter_prompt_presets.get(name.as_str()) else {
+            continue;
+        };
+        prompt_preset_expansions.push(prompt_preset_expansion(
+            file,
+            name,
+            body,
+            &frontmatter_prompt_presets,
+        )?);
+    }
     for warning in agent_doc_preflight_io::warnings::content_and_staleness_warnings(
         file,
         &model_source_content,
@@ -2888,6 +2956,47 @@ mod tests {
             Some("claude-code")
         );
         assert_eq!(PreflightInvocation::Direct.explicit_harness(), None);
+    }
+
+    #[test]
+    fn invoked_structured_preset_emits_required_safe_runbook_load() {
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir(temp.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir(temp.path().join("runbooks")).unwrap();
+        std::fs::write(temp.path().join("runbooks/release.md"), "# Release\n").unwrap();
+        let file = temp.path().join("session.md");
+        let content = "---\npresets:\n  '#release':\n    prompt: release + publish\n    runbook: runbooks/release.md\n---\nBody\n";
+        std::fs::write(&file, content).unwrap();
+        let (fm, _) = frontmatter::parse(content).unwrap();
+
+        let expansion = prompt_preset_expansion(
+            &file,
+            "#release",
+            fm.prompt_presets.get("#release").unwrap(),
+            &fm.prompt_presets,
+        )
+        .unwrap();
+        assert_eq!(expansion.runbook.as_deref(), Some("runbooks/release.md"));
+        let instruction = expansion.runbook_load_instruction.unwrap();
+        assert!(
+            instruction.starts_with("Required: load the runbook"),
+            "{instruction}"
+        );
+        assert!(
+            instruction.contains("agent-doc runbook show"),
+            "{instruction}"
+        );
+    }
+
+    #[test]
+    fn invoked_preset_rejects_runbook_parent_traversal() {
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir(temp.path().join(".agent-doc")).unwrap();
+        let file = temp.path().join("session.md");
+        std::fs::write(&file, "Body\n").unwrap();
+        let content = "---\npresets:\n  '#bad':\n    prompt: no\n    runbook: runbooks/../secret.md\n---\nBody\n";
+        let (fm, _) = frontmatter::parse(content).unwrap();
+        assert!(prompt_preset_expansion(&file, "#bad", "no", &fm.prompt_presets).is_err());
     }
 
     /// `#review-migrate-gated`: the nag must not push `agent:review` past its own

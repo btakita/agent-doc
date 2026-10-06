@@ -5200,7 +5200,7 @@ fn test_agent_doc_queue_owns_queue_prompt_echo_policy() {
         "codex_hook must call queue prompt echo policy through agent-doc-queue directly"
     );
     for required_snippet in [
-        "current_document_content(file, \"codex_stop_active_session_queue_head\")",
+        "current_document_content(file, \"codex_stop_active_session_prompt_or_queue_head\")",
         "current_document_content(file, \"codex_stop_repeated_queue_before_repair\")",
         "current_document_content(file, \"codex_stop_auto_close_before_repair\")",
         "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",

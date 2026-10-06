@@ -46,6 +46,24 @@ pub fn normalize_queue_prompt_text(text: &str) -> String {
     display_queue_prompt_text(text).to_ascii_lowercase()
 }
 
+/// Return the id from a head whose complete visible text is a bare `#id`.
+///
+/// Keep this narrower than the general id-directive grammar: explicit
+/// `do [#id]` and bracketed `[#id]` heads retain their directive semantics.
+fn bare_hash_reference_id(text: &str) -> Option<String> {
+    let text = text.trim().trim_start_matches('❯').trim();
+    let text = strip_priority_markers(text);
+    let id = text.strip_prefix('#')?;
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
+        return None;
+    }
+    Some(id.to_ascii_lowercase())
+}
+
 pub fn queue_prompt_text_matches(prompt_change: &str, queue_head: &str) -> bool {
     normalize_queue_prompt_text(prompt_change) == normalize_queue_prompt_text(queue_head)
 }
@@ -237,6 +255,19 @@ pub fn queue_prompt_text_is_queue_activation_trigger(text: &str) -> bool {
 /// NOT a queue activation trigger).
 pub fn queue_prompt_text_is_free_text(content: &str, text: &str) -> bool {
     let normalized = normalize_queue_prompt_text(text);
+    // GH #150: a bare `#id` with no open tracked-work owner is prose, not an
+    // id-backed directive. Treating every hash token as id-backed made an
+    // unknown token selectable while neither response closeout nor plain
+    // `queue consume` could strike it. Explicit `do [#id]` / `[#id]` shapes
+    // remain directives and the orphan-id escape hatch remains available.
+    if let Some(id) = bare_hash_reference_id(text) {
+        let normalized_id = agent_doc_element_backlog::backlog::normalize_pending_id(&id);
+        return !agent_doc_element_backlog::backlog::open_tracked_work_ids_in_content(content)
+            .iter()
+            .any(|open_id| {
+                agent_doc_element_backlog::backlog::normalize_pending_id(open_id) == normalized_id
+            });
+    }
     if let Some(ids) = crate::queue_directive::topic_resolves_to_only_id_directives(&normalized)
         .or_else(|| crate::queue_directive::explicit_do_directive_with_note_ids(&normalized))
     {
@@ -1169,7 +1200,7 @@ mod tests {
             content,
             "do [#fullboundary]"
         ));
-        assert!(!queue_prompt_text_is_free_text(content, "#orphanqhead"));
+        assert!(queue_prompt_text_is_free_text(content, "#orphanqhead"));
         assert!(!queue_prompt_text_is_free_text(content, "do queue"));
         assert!(queue_prompt_text_is_free_text(
             content,
@@ -1307,7 +1338,7 @@ mod tests {
             !active_queue_head_is_registered_preset(preset_and_tracked, "advance-review").unwrap()
         );
 
-        assert!(!queue_head_is_free_text_prompt(&active_queue_doc("#advance-review")).unwrap());
+        assert!(queue_head_is_free_text_prompt(&active_queue_doc("#advance-review")).unwrap());
         assert!(
             !active_queue_head_is_registered_preset(
                 &active_queue_doc("#advance-review"),
@@ -1315,6 +1346,17 @@ mod tests {
             )
             .unwrap()
         );
+
+        let unknown_but_open = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- #advance-review\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#advance-review] tracked directive\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert!(!queue_head_is_free_text_prompt(unknown_but_open).unwrap());
     }
 
     #[test]

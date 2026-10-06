@@ -125,7 +125,7 @@ The generated Claude Code, Codex, OpenCode, Cursor, and Grok skill surfaces, doc
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- #advance-reviews
+- 🚧 #advance-reviews
 <!-- /agent:queue -->
 
 

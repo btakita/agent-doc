@@ -49,8 +49,9 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
-- #gh-fix https://github.com/btakita/agent-doc/issues/148
-- release + publish
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/148
+- 🚧 #gh-fix https://github.com/btakita/agent-doc/issues/149
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 

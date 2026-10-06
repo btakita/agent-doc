@@ -606,7 +606,12 @@ Controller queue state is stored in SQLite rather than loose marker files:
 
 Actor inspection responses include the current queue head/control state and
 recent typed queue backpressure receipts, alongside dispatch/admin receipts and
-projection diagnostics.
+projection diagnostics. They also join reliable-sync editor liveness with the
+controller relay hub as `editor_replica`: `detached`, `attached`,
+`registration_missing`, `orphaned_replica`, or `membership_mismatch`, plus both
+counts and a remedy for unhealthy states. Actor `state=ready`, controller binary
+freshness, and `projection_lag=false` are not evidence that an open editor has a
+write-capable replica. Text output must show the same status and counts as JSON.
 
 Editor integrations use the same controller contract through the C ABI
 `agent_doc_admin_inspect_json`, `agent_doc_admin_queue_control_json`,

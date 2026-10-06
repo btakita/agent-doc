@@ -1201,6 +1201,19 @@ before routing; `saveAllDocuments()` is forbidden because it can synchronously
 wake an unrelated document's retained delivery and surface that projection failure as
 the selected document's compact result.
 
+Compact Exchange must also prove that its selected open editor owns a live CRDT
+replica before it routes. Every failed proof records an `editor_surface_event`
+with `surface=compact_exchange`, `action=replica_attach`, and a single-token
+`attach_refused_*` status, and the notification names the same causal reason plus
+an actionable remedy. A full IDE restart intentionally has no JVM-local settled
+shadow. When a controller asks that editor to reseed a retained projection, the
+plugin must deregister the provisional member and report
+`retained-reseed-missing-settled-shadow`; diagnostic formatting must not
+dereference the absent shadow or leave the provisional member flapping. The
+lossless recovery is to preserve/copy any operator-only text, detach the editor,
+repair against disk authority, and reopen it. Repeating the restart cannot
+manufacture the missing causal ancestor.
+
 JetBrains document-command failures retain the complete subprocess output in the
 IDE log, but the operator-facing notification must fit the small notification
 surface. A lint-gate failure is rendered as the attempted action, document basename

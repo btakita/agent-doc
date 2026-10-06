@@ -1066,6 +1066,7 @@ fn actor_inspection_view(
         queue_head: inspection.queue_head,
         queue_control: inspection.queue_control,
         queue_backpressure: inspection.queue_backpressure,
+        editor_replica: inspection.editor_replica,
         projection_lag: inspection.projection_lag,
         dispatch_attempts: inspection.dispatch_attempts,
         admin_operations: inspection.admin_operations,

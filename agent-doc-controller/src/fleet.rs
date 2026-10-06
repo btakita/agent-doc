@@ -1,7 +1,58 @@
 //! Pure fleet status and dashboard view model policy.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+/// Joined editor-liveness and relay-membership health for one document.
+///
+/// A live editor endpoint and a live CRDT relay member are distinct facts. An
+/// actor can therefore be `ready` while editor writes are impossible; admin
+/// inspection must expose that split instead of treating actor freshness as a
+/// replica-health proof.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EditorReplicaHealth {
+    pub status: String,
+    pub live_editors: usize,
+    pub live_replicas: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remedy: Option<String>,
+}
+
+/// Derive the operator-facing health projection from its two authoritative
+/// inputs: reliable-sync editor liveness and the controller relay hub.
+pub fn editor_replica_health(live_editors: usize, live_replicas: usize) -> EditorReplicaHealth {
+    let (status, remedy) = match (live_editors, live_replicas) {
+        (0, 0) => ("detached", None),
+        (editors, replicas) if editors == replicas => ("attached", None),
+        (_, 0) => (
+            "registration_missing",
+            Some(
+                "a live editor endpoint has no CRDT replica; retry the editor action and use its attach-refused cause and remedy"
+                    .to_string(),
+            ),
+        ),
+        (0, _) => (
+            "orphaned_replica",
+            Some(
+                "the relay still has a replica for an editor that is no longer live; recycle the project controller before retrying"
+                    .to_string(),
+            ),
+        ),
+        _ => (
+            "membership_mismatch",
+            Some(
+                "live editor endpoints and CRDT replica memberships disagree; inspect the editor attach-refused event before retrying"
+                    .to_string(),
+            ),
+        ),
+    };
+    EditorReplicaHealth {
+        status: status.to_string(),
+        live_editors,
+        live_replicas,
+        remedy,
+    }
+}
 
 /// One enumerated actor row (`admin list`).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -703,5 +754,29 @@ mod tests {
         let s = "αβγδεζ";
         let t = truncate(s, 3);
         assert_eq!(t, "αβ…");
+    }
+
+    #[test]
+    fn editor_replica_health_distinguishes_actor_readiness_from_attachment() {
+        let detached = editor_replica_health(0, 0);
+        assert_eq!(detached.status, "detached");
+        assert!(detached.remedy.is_none());
+
+        let attached = editor_replica_health(1, 1);
+        assert_eq!(attached.status, "attached");
+        assert!(attached.remedy.is_none());
+
+        let missing = editor_replica_health(1, 0);
+        assert_eq!(missing.status, "registration_missing");
+        assert!(
+            missing
+                .remedy
+                .as_deref()
+                .unwrap()
+                .contains("attach-refused")
+        );
+
+        assert_eq!(editor_replica_health(0, 1).status, "orphaned_replica");
+        assert_eq!(editor_replica_health(2, 1).status, "membership_mismatch");
     }
 }

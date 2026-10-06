@@ -8459,6 +8459,8 @@ pub struct ControllerActorInspection {
     pub queue_control: Option<QueueControlStatus>,
     #[serde(default)]
     pub queue_backpressure: Vec<QueueBackpressureStatus>,
+    #[serde(default)]
+    pub editor_replica: Option<agent_doc_controller::fleet::EditorReplicaHealth>,
     pub projection_lag: bool,
     pub dispatch_attempts: Vec<DispatchAttemptStatus>,
     pub admin_operations: Vec<AdminOperationStatus>,
@@ -14445,6 +14447,13 @@ mod tests {
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok);
         let inspection = envelope.data.unwrap();
+        let editor_replica = inspection
+            .editor_replica
+            .as_ref()
+            .expect("inspect_actor should join editor liveness with relay membership");
+        assert_eq!(editor_replica.status, "detached");
+        assert_eq!(editor_replica.live_editors, 0);
+        assert_eq!(editor_replica.live_replicas, 0);
         let freshness = inspection
             .freshness
             .as_ref()

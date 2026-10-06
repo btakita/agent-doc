@@ -46,6 +46,34 @@ class RetainedCanonicalOperatorTextTest {
                 canonicalText = "",
             ),
         )
+        assertEquals(
+            "retained-reseed-missing-settled-shadow",
+            retainedRegistrationHoldReasonUtil(
+                retainedReplicaReseedPending = true,
+                publishedShadow = null,
+            ),
+        )
+        assertEquals(
+            "ambiguous-retained-projection",
+            retainedRegistrationHoldReasonUtil(
+                retainedReplicaReseedPending = false,
+                publishedShadow = null,
+            ),
+        )
+    }
+
+    @Test
+    fun `missing restart shadow diagnostic never dereferences the absent ancestor`() {
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt",
+        ).toFile().readText()
+        val holdBranch = source
+            .substringAfter("RetainedRegistrationProjectionAction.HoldOperatorBuffer ->")
+            .substringBefore("RetainedRegistrationProjectionAction.DeferCanonicalProjection")
+
+        assertFalse(holdBranch.contains("publishedShadowAtRegistration!!"))
+        assertTrue(holdBranch.contains("retainedRegistrationHoldReasonUtil("))
+        assertTrue(holdBranch.indexOf("forwarder.deregister()") < holdBranch.indexOf("recordRegisterFailure("))
     }
 
     @Test

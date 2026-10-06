@@ -21643,6 +21643,13 @@ pub(crate) fn handle_inspect_actor(
         Some(document_id) => state_store::load_projection_diagnostics_from_db(&conn, document_id)?,
         None => Vec::new(),
     };
+    let editor_replica = document_id.as_deref().map(|document_id| {
+        let file = Path::new(document_id);
+        let live_editors =
+            agent_doc_crdt_relay_io::reliable_sync_editor_registrations_for_file(file).len();
+        let live_replicas = agent_doc_crdt_relay_io::live_replica_count_for_file(file);
+        agent_doc_controller::fleet::editor_replica_health(live_editors, live_replicas)
+    });
     let projection_lag = projection_diagnostics
         .iter()
         .any(|diagnostic| diagnostic.retry_status.as_deref() != Some("completed"));
@@ -21660,6 +21667,7 @@ pub(crate) fn handle_inspect_actor(
         queue_head,
         queue_control,
         queue_backpressure,
+        editor_replica,
         projection_lag,
         dispatch_attempts,
         admin_operations,

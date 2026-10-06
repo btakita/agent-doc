@@ -1166,7 +1166,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             var chars = -1
             try {
                 val text = editorText ?: tryReadDocumentText(document)
-                    ?: return@attach false
+                    ?: run {
+                        attachFailureReasons[filePath] = "editor-text-unavailable"
+                        return@attach false
+                    }
                 chars = text.length
                 // `#replicarefusalstorm` (the editor half). The controller refuses a
                 // non-agent-doc markdown file terminally and cheaply, and its comment
@@ -1252,9 +1255,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             } catch (e: TimeoutException) {
                 log.warn("[crdt-replica] open-document attach timed out for $filePath after ${CRDT_AWAIT_ATTACH_TIMEOUT_MS}ms (attach still running; receipt=deferred)")
                 onAwaitTimeout?.invoke()
+                if (forwarders[filePath]?.attached == true) return true
+                attachFailureReasons[filePath] = "attach-timeout-pending"
                 false
             } catch (e: Exception) {
                 log.debug("[crdt-replica] open-document attach failed for $filePath: ${e.message}")
+                attachFailureReasons[filePath] = "attach-worker-failed"
                 false
             }
         }
@@ -3256,21 +3262,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 }
 
                 RetainedRegistrationProjectionAction.HoldOperatorBuffer -> {
-                    // There are three distinct generations and no proven rebase:
-                    // the last published shadow, the live editor, and canonical.
-                    // Refuse this endpoint before the swap. A later refresh can
-                    // retry from a fresh cut, but this registration may not choose
-                    // one generation by overwriting another.
+                    // There is no proven rebase: either three distinct generations
+                    // exist, or an IDE restart discarded the settled shadow needed
+                    // to compare the live editor with the retained canonical. Refuse
+                    // before the swap; this registration may not choose a generation
+                    // by overwriting another.
                     log.warn(
                         "[crdt-replica] refusing ambiguous retained projection for ${File(filePath).name}; " +
                             "the live operator buffer was not derived from this canonical generation. " +
-                            "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
-                            "buffer_hash=${contentHash(bufferTextAtRegistration!!)} " +
+                            "shadow_hash=${publishedShadowAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                            "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
                             "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
                     )
                     forwarder.deregister()
                     retainedProjectionHoldPaths.add(filePath)
-                    recordRegisterFailure(filePath, "ambiguous-retained-projection")
+                    recordRegisterFailure(
+                        filePath,
+                        retainedRegistrationHoldReasonUtil(
+                            retainedReplicaReseedPending = forwarder.retainedReplicaReseedPending,
+                            publishedShadow = publishedShadowAtRegistration,
+                        ),
+                    )
                     return cached
                 }
 
@@ -3644,6 +3656,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     private fun recordRegisterFailure(filePath: String, reason: String = "controller-register") {
+        // Registration is the source of truth for operator-facing attach
+        // diagnostics. Retry state used to remember the backoff but discard the
+        // cause, so Compact Exchange could only say "could not be attached".
+        attachFailureReasons[filePath] = reason
         val now = System.currentTimeMillis()
         val projection =
             registerRetryProjections.compute(filePath) { _, previous ->
@@ -4799,6 +4815,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "No project controller is listening for that document's project root; start or recycle it."
             reason.contains("not_agent_doc_document") ->
                 "That file is not an agent-doc session document (no agent_doc_* frontmatter, no <!-- agent: markers)."
+            reason.contains("retained-reseed-missing-settled-shadow") ->
+                "The restarted editor has no settled ancestor from which it can safely seed the retained " +
+                    "controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair " +
+                    "<file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor."
+            reason.contains("ambiguous-retained-projection") ||
+                reason.contains("ambiguous-reregister-projection") ->
+                "The editor buffer and controller canonical have diverged from their last settled ancestor. " +
+                    "Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, " +
+                    "and reopen it."
+            reason.contains("attach-timeout-pending") ->
+                "Registration is still running; wait for the next editor status update before retrying."
+            reason.contains("native-ffi-unavailable") ->
+                "Run `agent-doc admin reload-lib`; if no native endpoint is delivered, restart the editor backend."
+            reason.contains("native-handoff-timeout") ->
+                "The native-generation handoff did not finish within the editor action budget. Wait for reload to " +
+                    "settle, then run `agent-doc admin reload-lib` once before retrying."
+            reason.contains("attach-exception") || reason.contains("attach-worker-failed") ->
+                "Inspect the IDE log and the `editor_surface_event` attach-refused entry in `.agent-doc/logs/ops.log`, " +
+                    "then repair the named cause before retrying."
+            reason.contains("unknown-attach-refusal") || reason.contains("controller-register") ->
+                "Run `agent-doc admin inspect <file> --json` and compare editor_replica.live_editors with live_replicas."
             else -> null
         }
 
@@ -4908,6 +4945,25 @@ internal enum class RetainedRegistrationProjectionAction {
      */
     MergeForward,
 }
+
+/**
+ * Name the causal proof missing from a retained-registration hold.
+ *
+ * A full editor restart intentionally loses the JVM-local settled shadow. The
+ * fresh controller reseed path must not dereference that absent shadow while
+ * formatting diagnostics (which previously threw after registration and left
+ * a transient member behind), and it deserves a different remedy from an
+ * ordinary three-generation conflict.
+ */
+internal fun retainedRegistrationHoldReasonUtil(
+    retainedReplicaReseedPending: Boolean,
+    publishedShadow: String?,
+): String =
+    if (retainedReplicaReseedPending && publishedShadow == null) {
+        "retained-reseed-missing-settled-shadow"
+    } else {
+        "ambiguous-retained-projection"
+    }
 
 internal fun retainedRegistrationProjectionActionForAttachUtil(
     deferCanonicalProjectionForPendingLocal: Boolean,

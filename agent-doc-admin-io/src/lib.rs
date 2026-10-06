@@ -51,6 +51,8 @@ pub struct ControllerActorInspectionView {
     pub queue_control: Option<QueueControlStatus>,
     #[serde(default)]
     pub queue_backpressure: Vec<QueueBackpressureStatus>,
+    #[serde(default)]
+    pub editor_replica: Option<agent_doc_controller::fleet::EditorReplicaHealth>,
     pub projection_lag: bool,
     pub dispatch_attempts: Vec<DispatchAttemptStatus>,
     pub admin_operations: Vec<AdminOperationStatus>,
@@ -277,8 +279,23 @@ pub fn inspect(
     if json {
         println!("{}", serde_json::to_string_pretty(&inspection)?);
     } else if let Some(record) = inspection.record.as_ref() {
+        let replica_status = inspection
+            .editor_replica
+            .as_ref()
+            .map(|health| health.status.as_str())
+            .unwrap_or("unknown");
+        let live_editors = inspection
+            .editor_replica
+            .as_ref()
+            .map(|health| health.live_editors)
+            .unwrap_or_default();
+        let live_replicas = inspection
+            .editor_replica
+            .as_ref()
+            .map(|health| health.live_replicas)
+            .unwrap_or_default();
         println!(
-            "{} [{}] pane={} gen={} state={} queue_control={} projection_lag={} freshness={}",
+            "{} [{}] pane={} gen={} state={} queue_control={} projection_lag={} editor_replica={} live_editors={} live_replicas={} freshness={}",
             inspection
                 .document_id
                 .as_deref()
@@ -293,8 +310,18 @@ pub fn inspect(
                 .map(|control| control.state.as_str())
                 .unwrap_or("none"),
             inspection.projection_lag,
+            replica_status,
+            live_editors,
+            live_replicas,
             controller_freshness_summary(inspection.freshness.as_ref())
         );
+        if let Some(remedy) = inspection
+            .editor_replica
+            .as_ref()
+            .and_then(|health| health.remedy.as_deref())
+        {
+            println!("  editor_replica_remedy={remedy}");
+        }
     } else {
         println!("No actor found for {}", inspection.target);
     }

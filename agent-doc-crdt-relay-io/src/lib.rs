@@ -260,6 +260,17 @@ pub fn reliable_sync_editor_registrations_for_file(
         .live_registrations(&document_hash)
 }
 
+/// Number of relay memberships currently attached to `file` in this controller.
+///
+/// This is deliberately observational: inspection must not allocate a hub or
+/// turn a detached document into CRDT authority merely by asking for health.
+pub fn live_replica_count_for_file(file: &Path) -> usize {
+    agent_doc_fs::document_state_hash(file)
+        .ok()
+        .and_then(|document_hash| hub_handle(&document_hash))
+        .map_or(0, |handle| handle.lock().live_count())
+}
+
 /// Resolve CRDT authority from the shared durable reliable-sync liveness plane.
 pub fn crdt_authority_for_file(file: &Path) -> CrdtAuthority {
     let routed_model_is_allocated = embedded_relay_route_is_registered_for_file(file)
@@ -7746,6 +7757,11 @@ mod tests {
             assert_eq!(hub.live_count(), 1, "the editor is attached");
         })
         .unwrap();
+        assert_eq!(
+            live_replica_count_for_file(&doc),
+            1,
+            "inspection observes the existing hub without changing it"
+        );
 
         // The OS proves the editor process is gone. No replacement ever
         // registers — that is the whole point.
@@ -7762,6 +7778,7 @@ mod tests {
             reaped[0].live_editors_after, 0,
             "the ghost was the last member, so disk authority is unblocked: {reaped:?}"
         );
+        assert_eq!(live_replica_count_for_file(&doc), 0);
         assert!(
             !replica_identity_registry_has_editor_pid(
                 &agent_doc_fs::document_state_hash(&doc).unwrap(),

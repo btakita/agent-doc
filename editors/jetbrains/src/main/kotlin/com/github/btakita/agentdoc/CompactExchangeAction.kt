@@ -63,6 +63,20 @@ class CompactExchangeAction : AnAction(), DumbAware {
                             editorText = editorText,
                             await = true,
                         )
+                    // Snapshot the cause on the same worker that observed the
+                    // refusal. A scheduled registration retry may otherwise
+                    // clear it before the EDT formats the notification.
+                    val attachFailureReason = if (attached) {
+                        null
+                    } else if (reloadReady) {
+                        CrdtReplicaManager.lastAttachFailureReason(file.path)
+                            ?: "unknown-attach-refusal"
+                    } else {
+                        "native-handoff-timeout"
+                    }
+                    if (attachFailureReason != null) {
+                        recordAttachRefusal(project.basePath, file.path, attachFailureReason)
+                    }
                     ApplicationManager.getApplication().invokeLater {
                         if (project.isDisposed) {
                             refresher.clearTransientStatus(file.path, statusToken)
@@ -75,12 +89,7 @@ class CompactExchangeAction : AnAction(), DumbAware {
                             // the controller, which is usually healthy and reports ready —
                             // observed twice on 2026-08-11, where the real cause was an IDE
                             // running a plugin generation older than the installed jar.
-                            val reason = if (reloadReady) {
-                                CrdtReplicaManager.lastAttachFailureReason(file.path)
-                            } else {
-                                "the native-generation handoff did not finish within " +
-                                    "${NativeReloadCoordinator.USER_ACTION_AWAIT_MS / 1_000} seconds"
-                            }
+                            val reason = attachFailureReason
                             val remedy = reason?.let { CrdtReplicaManager.attachFailureRemedy(it) }
                             TerminalUtil.notifyError(
                                 project,
@@ -118,7 +127,44 @@ class CompactExchangeAction : AnAction(), DumbAware {
         return ActionUpdateThread.BGT
     }
 
+    private fun recordAttachRefusal(projectRoot: String?, filePath: String, reason: String) {
+        if (projectRoot == null) {
+            log.warn("[compact] cannot record replica attach refusal: project root unavailable")
+            return
+        }
+        val lib = AgentDocLib.get()
+        if (lib == null) {
+            log.warn("[compact] cannot record replica attach refusal: native library unavailable; reason=$reason")
+            return
+        }
+        val status = "attach_refused_${attachFailureStatusToken(reason)}"
+        try {
+            if (!lib.agent_doc_record_editor_surface_event(
+                    projectRoot,
+                    "jetbrains",
+                    filePath,
+                    "compact_exchange",
+                    "replica_attach",
+                    "compact_exchange",
+                    null,
+                    status,
+                )) {
+                log.warn("[compact] native replica attach refusal event rejected: status=$status")
+            }
+        } catch (t: Throwable) {
+            log.warn("[compact] replica attach refusal event ABI failed: ${t.message}", t)
+        }
+    }
+
     private companion object {
         const val COMPACTING_EXCHANGE_LABEL = "⟳ agent-doc: Compacting Exchange"
     }
 }
+
+internal fun attachFailureStatusToken(reason: String): String =
+    reason
+        .substringBefore(':')
+        .lowercase()
+        .replace(Regex("[^a-z0-9_-]+"), "_")
+        .trim('_')
+        .ifEmpty { "unknown" }

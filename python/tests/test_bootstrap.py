@@ -29,6 +29,42 @@ def release_tar(binary: bytes = b"binary", library: bytes = b"library") -> bytes
 
 
 class BootstrapTests(unittest.TestCase):
+    @mock.patch.object(cli.Path, "glob")
+    @mock.patch.object(cli.platform, "libc_ver", return_value=("glibc", "2.31"))
+    def test_glibc_report_wins_over_stray_musl_loader(
+        self, _libc_ver: mock.Mock, glob: mock.Mock
+    ) -> None:
+        glob.return_value = iter([Path("/lib/ld-musl-x86_64.so.1")])
+
+        self.assertFalse(cli._is_musl())
+        glob.assert_not_called()
+
+    @mock.patch.object(cli.Path, "glob")
+    @mock.patch.object(cli.platform, "libc_ver", return_value=("", ""))
+    def test_musl_loader_is_only_a_fallback_when_libc_is_unknown(
+        self, _libc_ver: mock.Mock, glob: mock.Mock
+    ) -> None:
+        glob.return_value = iter([Path("/lib/ld-musl-x86_64.so.1")])
+
+        self.assertTrue(cli._is_musl())
+        glob.assert_called_once_with("ld-musl-*.so.1")
+
+    @mock.patch.object(cli.shutil, "which", return_value="/home/u/.local/bin/agent-doc")
+    @mock.patch.object(cli.os, "execv", side_effect=OSError("test stop"))
+    @mock.patch.object(cli, "ensure_installed", return_value=Path("/cache/agent-doc"))
+    def test_bootstrap_advertises_pypi_entrypoint_to_native_binary(
+        self, _installed: mock.Mock, execv: mock.Mock, _which: mock.Mock
+    ) -> None:
+        with mock.patch.object(cli.sys, "argv", ["agent-doc", "--version"]), mock.patch.dict(
+            os.environ, {}, clear=True
+        ), mock.patch("builtins.print"):
+            self.assertEqual(cli.main(), 1)
+            self.assertEqual(os.environ["AGENT_DOC_INSTALL_SOURCE"], "pypi")
+            self.assertEqual(
+                os.environ["AGENT_DOC_PYPI_ENTRYPOINT"], "/home/u/.local/bin/agent-doc"
+            )
+            execv.assert_called_once_with(Path("/cache/agent-doc"), ["/cache/agent-doc", "--version"])
+
     def test_release_target_covers_every_published_platform(self) -> None:
         cases = (
             ("Linux", "x86_64", False, "x86_64-unknown-linux-gnu"),

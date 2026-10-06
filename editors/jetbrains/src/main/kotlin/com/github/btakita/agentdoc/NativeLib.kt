@@ -25,6 +25,24 @@ internal fun libMtimeChanged(path: String, storedMtime: Long): Boolean {
     return currentMtime != storedMtime && currentMtime != 0L
 }
 
+internal fun nativeLoadFailureMessage(
+    error: Throwable,
+    libraryPath: String,
+    executablePath: String?,
+): String {
+    val detail = error.message ?: error::class.java.simpleName
+    val normalized = detail.lowercase()
+    val libcMismatch =
+        normalized.contains("invalid elf header") ||
+            normalized.contains("libc.so") ||
+            normalized.contains("musl")
+    val diagnosis = if (libcMismatch) "libc mismatch; " else ""
+    return "Failed to load libagent_doc ($diagnosis" +
+        "install=${executablePath ?: "<unknown>"}, library=$libraryPath): $detail. " +
+        "Ensure PATH resolves to a libc-compatible agent-doc install or remove the conflicting install; " +
+        "FFI will retry automatically. `agent-doc admin reload-lib` is unavailable until FFI loads."
+}
+
 internal enum class NativeReloadTransition {
     KeepCurrent,
     PublishReplacement,
@@ -1232,6 +1250,7 @@ interface AgentDocLib : Library {
         @Volatile private var initialLoadBlock = NativeInitialLoadBlock.None
         @Volatile private var initialLoadRetryAtNanos = 0L
         @Volatile private var loadedPath: String? = null
+        @Volatile private var resolvedExecutable: String? = null
         @Volatile private var loadedMtime: Long = 0L
         @Volatile private var failedReloadMtime: Long = 0L
         @Volatile private var currentLockFile: File? = null
@@ -1429,7 +1448,7 @@ interface AgentDocLib : Library {
                 generation.proxy
             } catch (error: Throwable) {
                 recordRetryableInitialLoadFailure(
-                    "Failed to load libagent_doc; FFI will retry: ${error.message}",
+                    nativeLoadFailureMessage(error, path, resolvedExecutable),
                 )
                 null
             }
@@ -1694,6 +1713,7 @@ interface AgentDocLib : Library {
                 val exitCode = process.waitFor()
                 val path = output.lineSequence().firstOrNull()?.trim()
                 if (exitCode == 0 && path != null && File(path).exists()) {
+                    resolvedExecutable = executable
                     return path
                 }
                 LOG.warn(

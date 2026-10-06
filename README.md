@@ -46,6 +46,14 @@ The PyPI package is a small, platform-independent bootstrap. On its first run it
 downloads the executable and FFI library for that exact package version from the
 matching GitHub Release, verifies the release's `SHA256SUMS`, and caches the two
 files under the user cache directory. Later runs work from that versioned cache.
+On Linux, an explicit libc result from Python selects the matching GNU or musl
+asset; an installed musl compatibility loader cannot override a detected glibc
+host.
+
+`agent-doc upgrade --auto` captures its original executable and installer type
+before the first replacement. Later polls keep upgrading that exact path even
+when the watcher's process image is shown as `(deleted)`, and standalone release
+installs never fall back to `pip`.
 
 The Rust workspace is an implementation detail: every agent-doc Cargo package is
 marked `publish = false`. New releases ship through GitHub Releases and PyPI;

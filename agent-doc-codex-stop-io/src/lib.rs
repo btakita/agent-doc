@@ -35,7 +35,7 @@
 //! - `stop_fails_closed_after_one_auto_continue`
 
 use agent_doc_codex_hook_io::{
-    SessionState, clear_state_across_roots, load_state_any, parked_session_state,
+    SessionState, clear_state_across_roots, load_state_any_with_timeout, parked_session_state,
     project_roots_for, prompt_writeback_debt, save_state_across_roots, tracking_roots,
 };
 #[cfg(test)]
@@ -200,6 +200,9 @@ fn stop_pane_identity(
 /// interactive status gate and must return a valid fail-closed response before
 /// the harness's outer timeout can discard its output.
 pub const STOP_HOOK_BUDGET_SECS: u64 = 45;
+/// Leave most of the Stop hook's budget for authoritative document inspection
+/// and a fail-closed response when SQLite is contended by a concurrent closeout.
+const STOP_HOOK_STATE_DB_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const STOP_HOOK_BUDGET_ENV: &str = "AGENT_DOC_CODEX_STOP_HOOK_BUDGET_SECS";
 #[cfg(test)]
 const STOP_HOOK_TEST_DELAY_MS_ENV: &str = "AGENT_DOC_CODEX_STOP_HOOK_TEST_DELAY_MS";
@@ -1024,7 +1027,7 @@ pub fn load_bound_session_for_stop(
     if roots.is_empty() {
         return Ok(None);
     }
-    load_state_any(&roots, session_id)
+    load_state_any_with_timeout(&roots, session_id, STOP_HOOK_STATE_DB_BUSY_TIMEOUT)
 }
 
 fn apply_stop(input: &StopInput) -> Result<StopResponse> {
@@ -1637,10 +1640,17 @@ fn document_queue_requests_clear(file: &Path) -> Result<bool> {
 
 fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
     stop_phase("active_session_prompt_or_queue_head");
-    if let Some(prompt) = agent_doc_session_check_io::unresolved_exchange_prompt(file)? {
+    // One authoritative materialization answers both questions. Calling the
+    // session-check file-level helper first used a separate realtime resolver,
+    // then `current_document_content` repeated the same controller/CRDT round
+    // trip for the queue. Under closeout contention those serial reads consumed
+    // the Stop hook's entire 45-second budget.
+    let content = current_document_content(file, "codex_stop_active_session_prompt_or_queue_head")?;
+    if let Some(prompt) =
+        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content)
+    {
         return Ok(Some(prompt));
     }
-    let content = current_document_content(file, "codex_stop_active_session_queue_head")?;
     Ok(first_active_queue_prompt_in_content(&content))
 }
 
@@ -3128,6 +3138,11 @@ mod tests {
 
     #[test]
     fn stop_hook_budget_override_is_positive_and_bounded_by_default() {
+        assert!(
+            STOP_HOOK_STATE_DB_BUSY_TIMEOUT
+                < std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS),
+            "exact-thread binding lookup must leave time for document inspection and a fail-closed response"
+        );
         assert_eq!(
             resolve_stop_hook_budget(None),
             std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS)

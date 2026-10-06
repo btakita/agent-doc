@@ -16451,8 +16451,10 @@ pub(crate) fn handle_request_locked(
             // is serving a stale binary. Reuse `controller_binary_stale` so the
             // client's existing one-retry reconnect loop promotes the fresh
             // binary — same rule as `dispatch` / Compact Exchange.
+            let stale_release = stale_client_may_release_closeout_owner(&request);
             if let Some(client_version) =
                 stale_mutating_client_binary(client_binary_version.as_deref())
+                && !stale_release
             {
                 agent_doc_ops_log_io::log_op(
                     &bootstrap_snapshot.project_root,
@@ -16466,6 +16468,21 @@ pub(crate) fn handle_request_locked(
                     "command_plane_submit refused: controller_binary_stale (running controller binary {} differs from caller {}; reconnect to promote the fresh binary)",
                     identity_version(),
                     client_version
+                );
+            }
+            if stale_mutating_client_binary(client_binary_version.as_deref()).is_some()
+                && stale_release
+            {
+                // `#closeoutreleaseversionskew`: the process that acquired a
+                // closeout owner can outlive an install/controller promotion.
+                // Releasing that exact `(cycle_id, owner_id)` capability is a
+                // narrowing operation, and the controller-side CAS still
+                // rejects every non-owner. Refusing it solely because the
+                // caller is the older binary strands the lease for five
+                // minutes and blocks Stop-hook/session-check recovery.
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap_snapshot.project_root,
+                    "command_plane_submit_allowed_client_binary_mismatch command=closeout_owner_release authority=capability_scoped_cas",
                 );
             }
             controller_envelope(handle_command_plane_submit(
@@ -16914,6 +16931,27 @@ fn document_turn_authority_stream_frame(
 
 fn stale_mutating_client_binary(client_version: Option<&str>) -> Option<&str> {
     client_version.filter(|version| *version != identity_version())
+}
+
+/// A closeout-owner release is safe across binary skew because it cannot grant
+/// authority or mutate document content: the live controller decodes the
+/// payload and releases only an exact `(cycle_id, owner_id)` capability it
+/// already issued. All other command-plane mutations retain the stale-binary
+/// refusal and promote/reconnect behavior.
+fn stale_client_may_release_closeout_owner(request: &ControllerRequest) -> bool {
+    use super::command_plane::{
+        CLOSEOUT_OWNER_RELEASE_NAME, NAMESPACE, decode_closeout_owner_release_payload,
+    };
+
+    let Some(submit_json) = request.diagnostic_payload.as_deref() else {
+        return false;
+    };
+    let Ok(submit) = serde_json::from_str::<lazily::CommandSubmit>(submit_json) else {
+        return false;
+    };
+    submit.namespace == NAMESPACE
+        && submit.name == CLOSEOUT_OWNER_RELEASE_NAME
+        && decode_closeout_owner_release_payload(&submit).is_ok()
 }
 
 pub(crate) fn controller_envelope<T: Serialize>(result: Result<T>) -> Result<String> {
@@ -38664,11 +38702,28 @@ mod tests {
             },
         )
         .unwrap();
-        let released: bool = serde_json::from_value::<bool>(
-            dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &release).unwrap(),
+        // The owner process may span an install: its CLI is then older than the
+        // promoted controller. The exact capability release must still cross
+        // the stale-binary gate, or its five-minute lease wedges repair and the
+        // Stop hook even though the foreground closeout already finished.
+        let request = ControllerRequest::command_plane_submit(
+            serde_json::to_string(&release).expect("encode release submit"),
+        );
+        let mut request_value = serde_json::to_value(request).unwrap();
+        request_value.as_object_mut().unwrap().insert(
+            "binary_version".to_string(),
+            serde_json::Value::String("0.0.0-older-owner".to_string()),
+        );
+        let mut should_stop = false;
+        let response = handle_request_locked(
+            &serde_json::to_string(&request_value).unwrap(),
+            &runtime,
+            &mut should_stop,
         )
         .unwrap();
-        assert!(released);
+        let released: ControllerEnvelope<bool> = serde_json::from_str(&response).unwrap();
+        assert!(released.ok, "stale owner release was refused: {response}");
+        assert_eq!(released.data, Some(true));
         let reclaimed = serde_json::from_value::<CloseoutOwnerClaimOutcome>(
             dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &claim_submit("owner-2"))
                 .unwrap(),

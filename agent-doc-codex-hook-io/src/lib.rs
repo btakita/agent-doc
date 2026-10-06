@@ -657,6 +657,24 @@ pub fn load_state_any(
     Ok(None)
 }
 
+/// Load exact-thread hook state with a caller-owned SQLite contention bound.
+///
+/// Lifecycle hooks have a smaller wall-clock budget than ordinary recovery.
+/// They must fail closed while leaving enough time to emit that decision, not
+/// inherit the state store's normal 30-second repair-oriented busy timeout.
+pub fn load_state_any_with_timeout(
+    roots: &[PathBuf],
+    session_id: &str,
+    busy_timeout: std::time::Duration,
+) -> Result<Option<(PathBuf, SessionState)>> {
+    for root in roots {
+        if let Some(state) = load_state_with_timeout(root, session_id, busy_timeout)? {
+            return Ok(Some((root.clone(), state)));
+        }
+    }
+    Ok(None)
+}
+
 /// Persist the admission receipt in the existing exact-thread hook envelope.
 /// A newer prompt supersedes this receipt; it must never inherit a stale refusal.
 pub fn record_preflight_admission(input: &UserPromptSubmitInput, admitted: bool) -> Result<()> {
@@ -701,6 +719,20 @@ pub fn save_state_across_roots(
 
 pub fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
     let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
+    agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+        &conn,
+        &session_state_key(session_id),
+    )?
+    .map(|content| serde_json::from_str(&content).context("parse Codex hook session state"))
+    .transpose()
+}
+
+pub fn load_state_with_timeout(
+    root: &Path,
+    session_id: &str,
+    busy_timeout: std::time::Duration,
+) -> Result<Option<SessionState>> {
+    let conn = agent_doc_sqlite::state_store::open_state_db_with_timeout(root, busy_timeout)?;
     agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
         &conn,
         &session_state_key(session_id),

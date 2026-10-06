@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.468
+
+- **Retained Compact Exchange delivery is an accepted asynchronous outcome.** When the initiating compact continuation
+  is already in editor delivery, the CLI prints the pending diagnostic and exits successfully while the durable worker
+  settles and commits it; a repeated or foreign pending request remains a nonzero do-not-rerun refusal.
+- **Watch liveness survives account-level inotify exhaustion.** The daemon and `steering --follow` preserve every
+  registration and switch from native notifications to bounded 500 ms content-aware polling only on
+  `MaxFilesWatch`, while unrelated watcher errors remain visible. Moving bindings to another process would not help
+  because Linux accounts watch quota per user.
+
 ## 0.35.467
 
 - **JetBrains native reload now reattaches every open editor replica (GH #158).** Reload handoff preserves the exact

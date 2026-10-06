@@ -1541,12 +1541,15 @@ mod tests {
     fn client_side_build_mismatch_names_the_listener_build_as_listener() {
         let client = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.35.429+new-client");
         let listener = IpcPeerIdentity::new(IPC_PROTOCOL_VERSION, "0.35.429+old-listener");
-        let expected = Err(IpcHandshakeError::BuildMismatch {
+        let expected_error = IpcHandshakeError::BuildMismatch {
             listener: "0.35.429+old-listener".to_string(),
             client: "0.35.429+new-client".to_string(),
-        });
+        };
         let ack = ipc_hello_ack_message(&listener).to_string();
-        assert_eq!(validate_ipc_hello_ack(&ack, &client), expected);
+        assert_eq!(
+            validate_ipc_hello_ack(&ack, &client),
+            Err(expected_error.clone())
+        );
         let rejection = serde_json::json!({
             "type": "receipt",
             "status": "rejected",
@@ -1554,9 +1557,12 @@ mod tests {
             "build_id": "0.35.429+old-listener",
         })
         .to_string();
-        assert_eq!(validate_ipc_hello_ack(&rejection, &client), expected);
         assert_eq!(
-            expected.unwrap_err().to_string(),
+            validate_ipc_hello_ack(&rejection, &client),
+            Err(expected_error.clone())
+        );
+        assert_eq!(
+            expected_error.to_string(),
             "IPC build mismatch: listener=0.35.429+old-listener, client=0.35.429+new-client"
         );
     }

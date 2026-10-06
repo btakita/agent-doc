@@ -73,7 +73,7 @@ fn resolve_preset_runbook(file: &Path, relative: &str) -> anyhow::Result<String>
     let canonical_file = file
         .canonicalize()
         .with_context(|| format!("canonicalize session document {}", file.display()))?;
-    let root = agent_doc_fs::find_project_root(&canonical_file)
+    let root = agent_doc_project_root_io::project_root_containing(&canonical_file)
         .with_context(|| format!("find project root for {}", canonical_file.display()))?
         .canonicalize()?;
     let runbook = root
@@ -2021,21 +2021,18 @@ fn run_with_options_to_writer_in_pass(
         .context("preflight effect graph did not reach its terminal projection")?;
 
     if !options.probe {
-        let mut checkpoint_prompt_targets = if exchange_prompt_preempts_queue
-            && diff_from_queue_head_only
-        {
-            Vec::new()
-        } else {
-            prompt_targets.clone()
-        };
+        let mut checkpoint_prompt_targets =
+            if exchange_prompt_preempts_queue && diff_from_queue_head_only {
+                Vec::new()
+            } else {
+                prompt_targets.clone()
+            };
         push_unique_strings(&mut checkpoint_prompt_targets, chat_prompts.clone());
         push_unique_strings(
             &mut checkpoint_prompt_targets,
             absorbed_steering_prompts.clone(),
         );
-        let checkpoint_queue_task_id = selected_directive_target_ids
-            .first()
-            .map(String::as_str);
+        let checkpoint_queue_task_id = selected_directive_target_ids.first().map(String::as_str);
         agent_doc_cycle_state_io::record_turn_checkpoint(
             file,
             &checkpoint_prompt_targets,
@@ -3770,7 +3767,10 @@ mod tests {
         )
         .unwrap();
         let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
-        assert_eq!(contract["queue_continuation_required"], false, "{contract:#}");
+        assert_eq!(
+            contract["queue_continuation_required"], false,
+            "{contract:#}"
+        );
         assert!(
             contract
                 .get("selected_queue_prompts")

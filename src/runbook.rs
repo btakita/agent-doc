@@ -200,7 +200,7 @@ fn document_context(
     let canonical = file
         .canonicalize()
         .with_context(|| format!("canonicalize session document {}", file.display()))?;
-    let root = agent_doc_fs::find_project_root(&canonical)
+    let root = agent_doc_project_root_io::project_root_containing(&canonical)
         .with_context(|| format!("find project root for {}", canonical.display()))?;
     let content = fs::read_to_string(&canonical)?;
     let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;

@@ -191,6 +191,23 @@ and published column counts. Every `pane_layout_projection` line carries
 `observed_panes=`; a generation that applies fewer columns than the retained
 layout it replaced also logs `pane_layout_projection_narrowed`.
 
+**Fresh-controller `ensure` basis (GH #153):** after a controller restart or
+handoff, the layout graph may be empty while several supervisor-owned panes are
+still live. Before a one-column `ensure` route may seed from itself, the
+controller surveys the real `agent-doc` tmux window. Session resolution keeps
+an explicit `tmux_session` pin authoritative, then uses a retained layout-effect
+pane, and finally uses the live pane IDs from non-closed registered supervisor
+actors. The survey accepts only positive, in-project document observations and
+preserves their physical pane order; remembered layout columns remain
+non-authoritative. Every eligible probe logs
+`controller_editor_route_merge_basis`: success is
+`source=live_tmux_observation reason=positive_observation` with
+`session_source=<tmux_session_pin|layout_effect_pane|registered_supervisor_pane>`
+and `columns=N`; fall-through is `source=none` with the explicit survey
+`reason=` and `session_source=`. Thus a missing pin or failed probe is
+diagnosable, while two registered live panes cannot be replaced by a fresh
+one-column seed.
+
 **Layout publisher arbitration (`layoutpublisherarbiter`, GH #120 asks 2-3):**
 the route publisher and `plugin_publication` both publish the one retained
 desired layout. They were applied last-writer-wins with the loser unlogged, so

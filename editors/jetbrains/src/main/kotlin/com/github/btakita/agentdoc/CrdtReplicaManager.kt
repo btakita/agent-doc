@@ -4827,7 +4827,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             reason.contains("attach-timeout-pending") ->
                 "Registration is still running; wait for the next editor status update before retrying."
             reason.contains("native-ffi-unavailable") ->
-                "Run `agent-doc admin reload-lib`; if no native endpoint is delivered, restart the editor backend."
+                "Inspect About Agent Doc or the IDE log for the executable and library that failed to load. " +
+                    "Fix or remove that incompatible install so PATH resolves to the intended agent-doc; the native " +
+                    "loader retries automatically. `agent-doc admin reload-lib` cannot reach this editor until FFI loads."
             reason.contains("native-handoff-timeout") ->
                 "The native-generation handoff did not finish within the editor action budget. Wait for reload to " +
                     "settle, then run `agent-doc admin reload-lib` once before retrying."

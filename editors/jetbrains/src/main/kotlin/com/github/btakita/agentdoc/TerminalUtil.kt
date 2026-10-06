@@ -1441,17 +1441,31 @@ object TerminalUtil {
     internal fun agentDocCandidates(
         basePath: String? = null,
         home: String? = System.getenv("HOME"),
+        pathValue: String? = System.getenv("PATH"),
     ): List<String> =
         listOfNotNull(
+            executableOnPath("agent-doc", pathValue),
             basePath?.let { "$it/.bin/agent-doc" },
             home?.let { "$it/bin/agent-doc" },
             home?.let { "$it/.local/bin/agent-doc" },
             home?.let { "$it/.cargo/bin/agent-doc" },
             "/usr/local/bin/agent-doc",
-        )
+        ).distinct()
+
+    internal fun executableOnPath(
+        name: String,
+        pathValue: String?,
+    ): String? =
+        pathValue
+            ?.split(java.io.File.pathSeparatorChar)
+            ?.asSequence()
+            ?.filter { it.isNotBlank() }
+            ?.map { java.io.File(it, name) }
+            ?.firstOrNull { it.canExecute() }
+            ?.absolutePath
 
     internal fun agentDocResolutionAttempts(basePath: String? = null): List<String> =
-        agentDocCandidates(basePath) + "agent-doc (PATH)"
+        agentDocCandidates(basePath) + "agent-doc (PATH fallback)"
 
     fun resolveAgentDoc(basePath: String? = null): String {
         for (path in agentDocCandidates(basePath)) {

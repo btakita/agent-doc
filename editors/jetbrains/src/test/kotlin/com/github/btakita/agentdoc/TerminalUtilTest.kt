@@ -1227,17 +1227,27 @@ class TerminalUtilTest {
     }
 
     @Test
-    fun `agent-doc executable candidates include cargo bin before PATH fallback`() {
-        assertEquals(
-            listOf(
-                "/workspace/.bin/agent-doc",
-                "/operator/bin/agent-doc",
-                "/operator/.local/bin/agent-doc",
-                "/operator/.cargo/bin/agent-doc",
-                "/usr/local/bin/agent-doc",
-            ),
-            TerminalUtil.agentDocCandidates("/workspace", "/operator"),
-        )
+    fun `agent-doc executable candidates honor PATH before fixed install locations`() {
+        val pathDir = Files.createTempDirectory("agent-doc-path")
+        val executable = pathDir.resolve("agent-doc")
+        Files.writeString(executable, "#!/bin/sh\n")
+        executable.toFile().setExecutable(true)
+        try {
+            assertEquals(
+                listOf(
+                    executable.toAbsolutePath().toString(),
+                    "/workspace/.bin/agent-doc",
+                    "/operator/bin/agent-doc",
+                    "/operator/.local/bin/agent-doc",
+                    "/operator/.cargo/bin/agent-doc",
+                    "/usr/local/bin/agent-doc",
+                ),
+                TerminalUtil.agentDocCandidates("/workspace", "/operator", pathDir.toString()),
+            )
+        } finally {
+            Files.deleteIfExists(executable)
+            Files.deleteIfExists(pathDir)
+        }
     }
 
     @Test

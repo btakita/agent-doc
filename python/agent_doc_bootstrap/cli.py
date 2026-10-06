@@ -31,8 +31,12 @@ class BootstrapError(RuntimeError):
 
 def _is_musl() -> bool:
     libc, _ = platform.libc_ver()
-    if libc.lower() == "musl":
-        return True
+    libc = libc.strip().lower()
+    if libc:
+        # An installed musl compatibility package may leave an ld-musl loader
+        # on an otherwise glibc host.  A positive libc_ver result describes the
+        # process ABI and therefore wins over filesystem heuristics.
+        return libc == "musl"
     return any(Path("/lib").glob("ld-musl-*.so.1"))
 
 
@@ -227,6 +231,8 @@ def main() -> int:
     try:
         binary = ensure_installed()
         argv = [str(binary), *sys.argv[1:]]
+        os.environ["AGENT_DOC_INSTALL_SOURCE"] = "pypi"
+        os.environ["AGENT_DOC_PYPI_ENTRYPOINT"] = shutil.which(sys.argv[0]) or sys.argv[0]
         if os.name == "nt":
             return subprocess.call(argv)
         os.execv(binary, argv)

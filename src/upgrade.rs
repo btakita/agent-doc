@@ -66,6 +66,54 @@ struct AutoUpgradeState {
     upgraded_exe: Option<PathBuf>,
 }
 
+/// The executable path and installer provenance captured before an upgrade can
+/// unlink the running image. Linux renders `/proc/self/exe` as `... (deleted)`
+/// after replacement, so an auto-upgrade watcher must never rediscover this on
+/// a later poll (GH #152).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UpgradeTarget {
+    executable: PathBuf,
+    pip_entrypoint: Option<PathBuf>,
+    installed_by_pip: bool,
+}
+
+impl UpgradeTarget {
+    fn capture() -> Result<Self> {
+        let executable = std::env::current_exe()
+            .and_then(|path| path.canonicalize())
+            .context("failed to resolve the current executable before upgrade")?;
+        Ok(Self::from_executable(
+            executable,
+            std::env::var("AGENT_DOC_INSTALL_SOURCE").ok().as_deref(),
+            std::env::var_os("AGENT_DOC_PYPI_ENTRYPOINT").map(PathBuf::from),
+        ))
+    }
+
+    fn from_executable(
+        executable: PathBuf,
+        advertised_source: Option<&str>,
+        pip_entrypoint: Option<PathBuf>,
+    ) -> Self {
+        let bootstrap_marker = executable
+            .parent()
+            .is_some_and(|directory| directory.join("SHA256").is_file());
+        let installed_by_pip = advertised_source == Some("pypi") || bootstrap_marker;
+        Self {
+            executable,
+            pip_entrypoint: installed_by_pip.then_some(pip_entrypoint).flatten(),
+            installed_by_pip,
+        }
+    }
+
+    fn pip_verification_executable(&self) -> Option<&Path> {
+        self.installed_by_pip.then(|| {
+            self.pip_entrypoint
+                .as_deref()
+                .unwrap_or(self.executable.as_path())
+        })
+    }
+}
+
 impl AutoUpgradeState {
     fn new(version: &str) -> Self {
         Self {
@@ -148,7 +196,8 @@ fn run_once() -> Result<()> {
     };
     let upgraded_exe = if version_is_newer(&latest, CURRENT_VERSION) {
         eprintln!("New version available: v{latest} (current: v{CURRENT_VERSION})");
-        let Some(installed_exe) = upgrade_binary(&latest) else {
+        let target = UpgradeTarget::capture()?;
+        let Some(installed_exe) = upgrade_binary(&latest, &target) else {
             // Never move plugins ahead of a binary that stayed behind.
             print_manual_upgrade_instructions();
             return Ok(());
@@ -282,11 +331,13 @@ fn reconcile_installed_plugins_once(
 fn run_auto(interval_seconds: u64) -> Result<()> {
     validate_auto_interval(interval_seconds)?;
     let _lock = acquire_auto_upgrade_lock()?;
+    // Capture once, before the first poll can replace this process's inode.
+    let target = UpgradeTarget::capture()?;
     let mut state = AutoUpgradeState::new(CURRENT_VERSION);
     eprintln!("Watching stable GitHub releases every {interval_seconds}s (Ctrl-C to stop).");
     loop {
         match fetch_latest_release_version() {
-            Ok(latest) => run_auto_cycle(&latest, &mut state),
+            Ok(latest) => run_auto_cycle(&latest, &mut state, &target),
             Err(error) => {
                 eprintln!("Auto-upgrade check failed: {error:#}. Retrying on the next poll.")
             }
@@ -295,14 +346,14 @@ fn run_auto(interval_seconds: u64) -> Result<()> {
     }
 }
 
-fn run_auto_cycle(latest: &str, state: &mut AutoUpgradeState) {
+fn run_auto_cycle(latest: &str, state: &mut AutoUpgradeState, target: &UpgradeTarget) {
     let plan = state.plan(latest);
     if plan.upgrade_binary {
         eprintln!(
             "New version available: v{latest} (effective: v{})",
             state.effective_version
         );
-        if let Some(installed_exe) = upgrade_binary(latest) {
+        if let Some(installed_exe) = upgrade_binary(latest, target) {
             // Replacing the executable does not update this running process's
             // compile-time version, so remember the effective version in memory.
             state.binary_upgraded(latest, installed_exe);
@@ -338,8 +389,8 @@ fn validate_auto_interval(interval_seconds: u64) -> Result<()> {
 /// Install `version` and return the exact executable path that now holds it
 /// (GH #113: the plugin reconcile is spawned from that path, never a PATH
 /// lookup that could resolve to a different install).
-fn upgrade_binary(version: &str) -> Option<PathBuf> {
-    match try_github_release_upgrade(version) {
+fn upgrade_binary(version: &str, target: &UpgradeTarget) -> Option<PathBuf> {
+    match try_github_release_upgrade(version, &target.executable) {
         Ok(installed_exe) => {
             eprintln!("Successfully upgraded to v{version} via GitHub Releases.");
             crate::runtime_update::recycle_existing_runtimes_after_update("upgrade");
@@ -347,19 +398,27 @@ fn upgrade_binary(version: &str) -> Option<PathBuf> {
         }
         Err(error) => eprintln!("GitHub binary upgrade failed: {error:#}"),
     }
+    let Some(verification_executable) = target.pip_verification_executable() else {
+        eprintln!(
+            "Refusing to fall back to pip: {} is a standalone install. Repair that install or run the manual release installer.",
+            target.executable.display(),
+        );
+        return None;
+    };
     eprintln!("Trying: pip install --upgrade {CRATE_NAME}");
     if std::process::Command::new("pip")
         .args(["install", "--upgrade", CRATE_NAME])
         .status()
         .is_ok_and(|status| status.success())
     {
-        if let Some(installed_exe) = current_executable_reporting_version(version) {
+        if let Some(installed_exe) = executable_reporting_version(verification_executable, version)
+        {
             eprintln!("Successfully upgraded to v{version} via pip.");
             crate::runtime_update::recycle_existing_runtimes_after_update("upgrade");
             return Some(installed_exe);
         }
         eprintln!(
-            "pip completed but the running executable path does not report v{version}; refusing to mark the upgrade complete"
+            "pip completed but the recorded PyPI executable does not report v{version}; refusing to mark the upgrade complete"
         );
     }
     None
@@ -369,16 +428,15 @@ fn version_from_cli_output(output: &str) -> Option<&str> {
     output.split_whitespace().last()
 }
 
-/// The current executable path, if running it reports exactly `expected`.
-fn current_executable_reporting_version(expected: &str) -> Option<PathBuf> {
-    let path = std::env::current_exe().ok()?;
-    let output = std::process::Command::new(&path)
+/// The supplied executable path, if running it reports exactly `expected`.
+fn executable_reporting_version(path: &Path, expected: &str) -> Option<PathBuf> {
+    let output = std::process::Command::new(path)
         .arg("--version")
         .output()
         .ok()
         .filter(|output| output.status.success())?;
     let stdout = String::from_utf8(output.stdout).ok()?;
-    (version_from_cli_output(&stdout) == Some(expected)).then_some(path)
+    (version_from_cli_output(&stdout) == Some(expected)).then(|| path.to_path_buf())
 }
 
 fn print_manual_upgrade_instructions() {
@@ -448,14 +506,11 @@ fn verify_release_archive(asset_name: &str, bytes: &[u8], manifest: &str) -> Res
     Ok(())
 }
 
-/// Replace the running executable's file with `version` and return its
-/// canonical path. The path is resolved BEFORE the replacement: on Linux,
-/// `current_exe()` afterwards names the unlinked old inode (`... (deleted)`).
-fn try_github_release_upgrade(version: &str) -> Result<PathBuf> {
+/// Replace the captured install path with `version` and return that same path.
+/// The caller resolves it once before any auto-upgrade poll can unlink the
+/// running image; this function never consults `/proc/self/exe` (GH #152).
+fn try_github_release_upgrade(version: &str, exe_path: &Path) -> Result<PathBuf> {
     let target = detect_target().context("no prebuilt archive for this platform")?;
-    let exe_path = std::env::current_exe()
-        .and_then(|path| path.canonicalize())
-        .context("failed to resolve the current executable")?;
     let archive_name = format!("{CRATE_NAME}-{target}.tar.gz");
     let archive_url = release_asset_url(version, &archive_name);
     let manifest_url = release_asset_url(version, "SHA256SUMS");
@@ -470,8 +525,8 @@ fn try_github_release_upgrade(version: &str) -> Result<PathBuf> {
     let manifest = std::str::from_utf8(&manifest_bytes).context("SHA256SUMS is not UTF-8")?;
     verify_release_archive(&archive_name, &archive_bytes, manifest)?;
 
-    install_release_archive(&archive_bytes, &exe_path, version)?;
-    Ok(exe_path)
+    install_release_archive(&archive_bytes, exe_path, version)?;
+    Ok(exe_path.to_path_buf())
 }
 
 /// Install a verified release archive beside `exe_path` (GH #132).
@@ -1028,6 +1083,45 @@ mod tests {
             Some("0.35.437")
         );
         assert_eq!(version_from_cli_output(""), None);
+    }
+
+    #[test]
+    fn auto_upgrade_target_survives_replaced_current_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join("agent-doc");
+        fs::write(&executable, "old image").unwrap();
+        let target = UpgradeTarget::from_executable(executable.clone(), None, None);
+
+        fs::rename(&executable, dir.path().join("agent-doc.deleted")).unwrap();
+
+        assert_eq!(target.executable, executable);
+        assert!(!target.executable.exists());
+        assert_eq!(target.pip_verification_executable(), None);
+    }
+
+    #[test]
+    fn only_pypi_bootstrap_installs_allow_pip_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_install = dir.path().join("0.35.464/x86_64-unknown-linux-gnu");
+        fs::create_dir_all(&cache_install).unwrap();
+        fs::write(cache_install.join("SHA256"), "digest\n").unwrap();
+        let executable = cache_install.join("agent-doc");
+        let entrypoint = dir.path().join("bin/agent-doc");
+        let target = UpgradeTarget::from_executable(executable, None, Some(entrypoint.clone()));
+
+        assert!(target.installed_by_pip);
+        assert_eq!(
+            target.pip_verification_executable(),
+            Some(entrypoint.as_path())
+        );
+
+        let standalone = UpgradeTarget::from_executable(
+            PathBuf::from("/home/u/.cargo/bin/agent-doc"),
+            None,
+            Some(entrypoint),
+        );
+        assert!(!standalone.installed_by_pip);
+        assert_eq!(standalone.pip_verification_executable(), None);
     }
 
     #[test]

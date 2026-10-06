@@ -7,6 +7,32 @@ import java.io.File
 class LibMtimeChangedTest {
 
     @Test
+    fun `native load failure names libc mismatch and supplying install`() {
+        val message =
+            nativeLoadFailureMessage(
+                UnsatisfiedLinkError("/lib/x86_64-linux-gnu/libc.so: invalid ELF header"),
+                "/home/u/.cache/agent-doc/musl/libagent_doc.so",
+                "/home/u/.local/bin/agent-doc",
+            )
+
+        assertTrue(message.contains("libc mismatch"))
+        assertTrue(message.contains("install=/home/u/.local/bin/agent-doc"))
+        assertTrue(message.contains("library=/home/u/.cache/agent-doc/musl/libagent_doc.so"))
+        assertTrue(message.contains("Ensure PATH resolves"))
+        assertTrue(message.contains("reload-lib` is unavailable"))
+    }
+
+    @Test
+    fun `initial FFI remedy does not prescribe its unreachable reload endpoint`() {
+        val remedy = CrdtReplicaManager.attachFailureRemedy("native-ffi-unavailable")!!
+
+        assertTrue(remedy.contains("Fix or remove that incompatible install"))
+        assertTrue(remedy.contains("retries automatically"))
+        assertTrue(remedy.contains("reload-lib` cannot reach this editor"))
+        assertFalse(remedy.startsWith("Run `agent-doc admin reload-lib`"))
+    }
+
+    @Test
     fun `returns false when mtime unchanged`() {
         val tmp = File.createTempFile("libagent_doc_test", ".so")
         try {

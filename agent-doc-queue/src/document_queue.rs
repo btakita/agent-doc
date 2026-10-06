@@ -1710,6 +1710,18 @@ fn entry_is_operator_authored(
         && entry_identity(entry).is_some_and(|identity| operator_authored.contains(&identity))
 }
 
+/// A visible in-progress marker is queue-lifecycle evidence that this prompt is
+/// the active head. Priority and dependency maintenance may order future work,
+/// but must never promote it over work the current turn is already executing.
+fn entry_is_in_progress(entry: &QueueEntry) -> bool {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+            agent_doc_document::queue_projection::has_in_progress_marker(&prompt.text)
+        }
+        _ => false,
+    }
+}
+
 /// True when the `priority` sort has nothing to rank `entry` by
 /// (`#queuerankless-anchor`): an unpinned prompt whose id is neither
 /// backlog-sourced nor present in the backlog rank. A bare `#release` preset
@@ -1800,6 +1812,7 @@ pub fn sort_prompts_by_priority_with_operator_authored(
     // filling the slots not held by an anchor.
     let is_anchored = |idx: usize| {
         entry_priority_tier(&prompts[idx]) == 0
+            || entry_is_in_progress(&prompts[idx])
             || entry_is_operator_authored(&prompts[idx], operator_authored)
             || is_free_text_prompt(&prompts[idx])
             || entry_has_no_priority_rank(&prompts[idx], rank, backlog_sourced)
@@ -1977,6 +1990,7 @@ pub fn sort_prompts_by_dag_with_operator_authored(
     }
     let is_anchored = |idx: usize| {
         entry_priority_tier(&prompts[idx]) == 0
+            || entry_is_in_progress(&prompts[idx])
             || entry_is_operator_authored(&prompts[idx], operator_authored)
             || is_free_text_prompt(&prompts[idx])
             || (!on_edge[idx] && entry_has_no_priority_rank(&prompts[idx], rank, backlog_sourced))
@@ -2087,7 +2101,13 @@ pub fn sort_prompts_by_dag_with_operator_authored(
         for (p, &i) in anchored.iter().enumerate() {
             pos[i] = p;
         }
-        let deps_ok = (0..n).all(|i| prereq[i].iter().all(|&j| pos[j] < pos[i]));
+        let deps_ok = (0..n).all(|i| {
+            prereq[i].iter().all(|&j| {
+                pos[j] < pos[i]
+                    || entry_is_in_progress(&prompts[i])
+                    || entry_is_in_progress(&prompts[j])
+            })
+        });
         if deps_ok { anchored } else { plain_order() }
     };
 
@@ -5078,6 +5098,58 @@ mod tests {
             render(&sorted),
             "- do [#b]\n- do [#manual]\n- do [#a]\n",
             "manual id-backed prompt keeps slot 1 without a visible pin"
+        );
+    }
+
+    #[test]
+    fn in_progress_head_is_position_locked_in_priority_sort() {
+        let entries = parse("- 🚧 do [#active]\n- do [#tail]\n- do [#sent]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("sent".to_string(), 0u8);
+        rank.insert("tail".to_string(), 1u8);
+        rank.insert("active".to_string(), 9u8);
+        let backlog: std::collections::HashSet<String> =
+            ["active".to_string(), "sent".to_string(), "tail".to_string()]
+                .into_iter()
+                .collect();
+        let sorted = sort_prompts_by_priority(&entries, &rank, &backlog)
+            .expect("future prompts reorder behind the active head");
+        assert_eq!(
+            render(&sorted),
+            "- 🚧 do [#active]\n- do [#sent]\n- do [#tail]\n",
+            "maintenance must never promote sent work over the active head"
+        );
+    }
+
+    #[test]
+    fn in_progress_head_outranks_new_dependency_order() {
+        let entries = parse("- 🚧 do [#active]\n- do [#tail]\n- do [#blocker]\n").unwrap();
+        let mut rank = std::collections::HashMap::new();
+        rank.insert("blocker".to_string(), 0u8);
+        rank.insert("active".to_string(), 9u8);
+        rank.insert("tail".to_string(), 5u8);
+        let mut deps: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        deps.insert("active".to_string(), vec!["blocker".to_string()]);
+        let backlog: std::collections::HashSet<String> = [
+            "active".to_string(),
+            "blocker".to_string(),
+            "tail".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        let sorted = sort_prompts_by_dag_with_operator_authored(
+            &entries,
+            &rank,
+            &deps,
+            &backlog,
+            &std::collections::HashSet::new(),
+        )
+        .expect("future prompts reorder behind the active head");
+        assert_eq!(
+            render(&sorted),
+            "- 🚧 do [#active]\n- do [#blocker]\n- do [#tail]\n",
+            "a dependency learned after dispatch cannot preempt active work"
         );
     }
 

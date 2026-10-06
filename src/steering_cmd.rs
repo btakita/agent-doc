@@ -60,7 +60,8 @@ pub fn run(file: &Path, json: bool, peek: bool, follow: bool) -> Result<()> {
 /// item held by the debounce is re-evaluated once its quiet period elapses
 /// (no further event will arrive for a settled document).
 fn follow_document(file: &Path) -> Result<()> {
-    use ::notify::{RecursiveMode, Watcher};
+    use ::notify::RecursiveMode;
+    use agent_doc_watch_io::{ResourceAwareWatcher, WatchBackend, WatchFallback};
 
     let canonical = file
         .canonicalize()
@@ -69,19 +70,18 @@ fn follow_document(file: &Path) -> Result<()> {
         .parent()
         .context("document has no parent directory")?
         .to_path_buf();
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
-    let target = canonical.clone();
-    let mut watcher =
-        ::notify::recommended_watcher(move |res: ::notify::Result<::notify::Event>| match res {
-            Ok(event) if event.paths.iter().any(|path| path == &target) => {
-                if tx.send(()).is_err() {
-                    eprintln!("[agent-doc] steering follow: receiver closed");
-                }
-            }
-            Ok(_) => {}
-            Err(err) => eprintln!("[agent-doc] steering follow watch error: {err}"),
-        })?;
-    watcher.watch(&parent, RecursiveMode::NonRecursive)?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = ResourceAwareWatcher::new(tx, Duration::from_millis(500))?;
+    if watcher.backend() == WatchBackend::Polling {
+        eprintln!(
+            "[agent-doc] steering follow: native file-watch quota is exhausted; using bounded polling"
+        );
+    }
+    if watcher.watch(&parent, RecursiveMode::NonRecursive)? == WatchFallback::Activated {
+        eprintln!(
+            "[agent-doc] steering follow: native file-watch quota is exhausted; switched to bounded polling"
+        );
+    }
     let mut pending = 0usize;
     loop {
         if let Some(report) = steering::observe(&canonical, CONSUMER_FOLLOW, true)? {
@@ -96,7 +96,20 @@ fn follow_document(file: &Path) -> Result<()> {
             Duration::from_secs(30)
         };
         match rx.recv_timeout(wait) {
-            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Ok(Ok(event)) => {
+                if !event.paths.iter().any(|path| path == &canonical) {
+                    continue;
+                }
+            }
+            Ok(Err(error)) => match watcher.recover_from_event_error(&error)? {
+                WatchFallback::Activated => eprintln!(
+                    "[agent-doc] steering follow: native file-watch quota is exhausted; switched to bounded polling"
+                ),
+                WatchFallback::Unchanged => {
+                    eprintln!("[agent-doc] steering follow watch error: {error}")
+                }
+            },
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 anyhow::bail!("steering follow: file watcher stopped")
             }

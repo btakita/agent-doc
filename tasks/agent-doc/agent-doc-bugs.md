@@ -86,6 +86,7 @@ Continued and verified the interrupted console handoff. The preceding `#releasef
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority -->
+- #advance-review
 <!-- /agent:queue -->
 
 

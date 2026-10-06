@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.465
+
+- **Prompt presets can now route agents through project runbooks.** Structured preset entries accept a safe
+  project-relative `runbook` association while scalar presets remain compatible. The new `agent-doc runbook
+  list|show|create` commands expose a bounded catalog to every harness, scaffold non-overwriting procedures, and
+  validate traversal, symlink, collision, and preset-association boundaries before loading or writing anything.
+- **Unowned bare-hash queue heads now close consistently (GH #150).** A bare `#token` with no matching preset or
+  open tracked-work owner is classified as free text across selection, response-echo striking, and `queue consume`;
+  explicit and owned id directives retain their lifecycle semantics.
+- **Release and publish verification is bounded and reproducible.** The release driver times and batches proof,
+  install, push, and tag phases, while PyPI verification waits on an exact clean install from the simple index
+  instead of racing JSON visibility ahead of package propagation.
+- **Public fixtures no longer expose private workspace identifiers.** Legacy examples in code, tests, specs,
+  formal models, and historical notes use neutral sample names, enforced by the repository denylist sweep.
+
 ## 0.35.464
 
 - **Restarted editor replicas now fail diagnostically instead of flapping invisibly (GH #149).** JetBrains retained-

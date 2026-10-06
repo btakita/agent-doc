@@ -62,13 +62,12 @@ pub(crate) fn recycle_existing_runtimes_after_update(surface: &str) {
     }
 }
 
+type RecycleResult = anyhow::Result<(usize, usize)>;
+
 fn recycle_fleet_with(
-    recycle_supervisors: impl FnOnce() -> anyhow::Result<(usize, usize)>,
-    recycle_controllers: impl FnOnce() -> anyhow::Result<(usize, usize)>,
-) -> (
-    anyhow::Result<(usize, usize)>,
-    anyhow::Result<(usize, usize)>,
-) {
+    recycle_supervisors: impl FnOnce() -> RecycleResult,
+    recycle_controllers: impl FnOnce() -> RecycleResult,
+) -> (RecycleResult, RecycleResult) {
     let supervisors = recycle_supervisors();
     let controllers = recycle_controllers();
     (supervisors, controllers)

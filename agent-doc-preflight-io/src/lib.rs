@@ -2493,6 +2493,12 @@ pub fn enforce_no_dropped_backlog(file: &Path, head_content: Option<&str>) -> Re
 /// The `queue_prompts` are only populated when the queue is active.
 #[derive(Debug, Default)]
 pub struct QueueState {
+    /// The coherent document projection from which this queue state was derived.
+    ///
+    /// Queue maintenance may rewrite the queue after preflight's initial diff
+    /// cut. Downstream queue policy must consume this settled projection rather
+    /// than reusing the stale pre-maintenance cut (GH #161).
+    pub authoritative_content: Option<String>,
     pub queue_prompts: Vec<String>,
     pub selected_queue_prompts: Vec<String>,
     pub queue_active: Option<bool>,
@@ -2854,6 +2860,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         && agent_doc_queue::document_queue::has_stop_fence_at_head(&activation.entries_after)
     {
         return Ok(QueueState {
+            authoritative_content: Some(content),
             queue_prompts: vec![],
             selected_queue_prompts: vec![],
             queue_active: Some(false),
@@ -2878,6 +2885,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after)
     {
         return Ok(QueueState {
+            authoritative_content: Some(content),
             queue_prompts: vec![],
             selected_queue_prompts: vec![],
             queue_active: None,
@@ -2983,6 +2991,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     };
 
     Ok(QueueState {
+        authoritative_content: Some(content),
         queue_prompts,
         selected_queue_prompts,
         queue_active: if activation.active {
@@ -4448,6 +4457,18 @@ pub fn run_queue_maintenance_with_coin_gate(
             eligible_ids.insert(id.clone());
         }
     }
+    // GH #161: prompt preset names are reusable commands, not durable work-item
+    // identities. An older `agent:done` row (including one in the done archive)
+    // may legitimately have the same id, but must not complete a live preset
+    // invocation. `head_id_is_registered_preset` preserves tracked-item
+    // precedence when an id intentionally names both a preset and open work.
+    eligible_ids.retain(|id| {
+        !done_ids.contains(id)
+            || !agent_doc_queue::queue_response::head_id_is_registered_preset(
+                &current_content,
+                id,
+            )
+    });
     // `activation.entries_after` already reflects start-fence consumption and
     // the duplicate-prompt collapse above, so it is the authoritative current
     // entry set for the strike pass in every branch.
@@ -4910,6 +4931,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 record_deferred_queue_head_state(file, &current_content, &head_text, "stop_fence")?;
             }
             return Ok(QueueState {
+                authoritative_content: Some(current_content),
                 queue_prompts: vec![],
                 selected_queue_prompts: vec![],
                 queue_active: Some(false),
@@ -4943,6 +4965,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 record_deferred_queue_head_state(file, &current_content, &head_text, &reason)?;
             }
             return Ok(QueueState {
+                authoritative_content: Some(current_content),
                 queue_prompts: vec![],
                 selected_queue_prompts: vec![],
                 queue_active: None,
@@ -5646,6 +5669,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     }
 
     Ok(QueueState {
+        authoritative_content: Some(current_content),
         queue_prompts,
         selected_queue_prompts: active_queue_prompt_texts,
         queue_active: if activation.active {
@@ -6844,6 +6868,114 @@ mod tests {
         assert!(ids.contains("archived2"));
         let ids_no_root = collect_agent_done_ids_with_root(&content, None);
         assert!(ids_no_root.is_empty());
+    }
+
+    /// GH #161: a prompt preset is a reusable command. An archived done row
+    /// with the same id must not strike the live invocation or make the claim
+    /// command advertised by preflight fail.
+    #[test]
+    fn archived_done_id_does_not_complete_registered_preset_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let archive_rel = "tasks/session.done.md";
+        let archive = dir.path().join(archive_rel);
+        std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        std::fs::write(&archive, "- [x] [#upgrade] Older completed upgrade\n").unwrap();
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "queue_active: true\n",
+                "prompt_presets:\n",
+                "  '#upgrade': Upgrade the sample application.\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — test\n\nAnswered.\n",
+                "<!-- agent:boundary:committed -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue preset=\"#subagents\" go -->\n",
+                "- #upgrade\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:done archive=\"{}\" -->\n",
+                "<!-- /agent:done -->\n"
+            ),
+            archive_rel
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(state.queue_prompts, vec!["#upgrade".to_string()]);
+        let authoritative = state.authoritative_content.as_deref().unwrap();
+        assert!(authoritative.contains("- #upgrade"), "{authoritative}");
+        assert_eq!(
+            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+                &doc,
+                authoritative,
+            )
+            .unwrap(),
+            vec!["#upgrade".to_string()],
+        );
+        agent_doc_queue_io::queue_claim::claim(&doc, "#upgrade", "subagent:test", 600)
+            .unwrap();
+    }
+
+    /// GH #161: downstream dispatch consumes maintenance's settled projection,
+    /// so a genuinely completed head cannot remain advertised from the earlier
+    /// diff cut after maintenance strikes it.
+    #[test]
+    fn queue_maintenance_returns_post_strike_authority_for_dispatch() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — test\n\nAnswered.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue preset=\"#subagents\" go -->\n",
+            "- do [#finished]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#finished] Completed earlier\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert_eq!(
+            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+                &doc, content,
+            )
+            .unwrap(),
+            vec!["do [#finished]".to_string()],
+        );
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let authoritative = state.authoritative_content.as_deref().unwrap();
+        assert!(
+            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+                &doc,
+                authoritative,
+            )
+            .unwrap()
+            .is_empty(),
+            "settled queue projection must not advertise the struck head: {authoritative}",
+        );
     }
 
     // `#px82` — the editor-authority failure is intermittent, so queue

@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.466
+
+- **Installed updates now recycle every live runtime automatically.** Binary, skill, and editor-plugin updates hand
+  existing supervisors and controllers onto the new build, while recycle recovery retires orphaned retained intents
+  instead of leaving editor projections permanently pending.
+- **Editor layout recovery is safe across restart and Remote Dev (GH #153, #154, #157).** Fresh controllers rebuild
+  multi-pane layout from live supervisor panes; JetBrains captures immutable Remote Dev evidence on the EDT, folds it
+  off-thread, refuses unknown exact-visible syncs, and forces the agent-doc window forward for outside-window focus.
+- **Runtime and route failures now preserve their real authority (GH #152, #155).** Packaged installs distinguish
+  glibc from musl and retain standalone provenance through upgrades, while asynchronous Run Agent Doc workers stay
+  controller-local instead of self-RPCing into the generic five-second deadline.
+- **CLI diagnostics now match durable outcomes (GH #151, #156).** Unknown `read --component` names are typed usage
+  errors with valid choices and no dogfood banner; caller-owned retained compacts say delivery will commit and must not
+  be rerun, while foreign pending compacts keep the bounded rerun guidance.
+- **Captured-splice live verification now preserves the stale-replica window.** The xdotool recipe advances through a
+  disposable commit boundary asynchronously, waits for retained delivery before edit two, and keeps the existing
+  branch-specific verifier as the final proof gate.
+
 ## 0.35.465
 
 - **Prompt presets can now route agents through project runbooks.** Structured preset entries accept a safe

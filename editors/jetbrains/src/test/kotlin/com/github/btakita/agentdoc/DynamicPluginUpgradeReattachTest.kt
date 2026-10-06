@@ -12,7 +12,7 @@ import java.nio.file.Paths
  * verdict.
  *
  * Measured 2026-09-26: `make install` exited 2 with "replacement plugin did not reclaim open
- * documents: dynamic plugin load did not reattach src/boost-client/tasks/monsterrodholders.md"
+ * documents: dynamic plugin load did not reattach src/sample-app/tasks/sampleorders.md"
  * while the immediate retry reported the package already byte-identical at 0.2.427 with no
  * restart required. The replacement bytes had converged and the new generation was live; only
  * the post-load assertion over one document from an unrelated open project had failed.
@@ -49,12 +49,12 @@ class DynamicPluginUpgradeReattachTest {
     fun `a pending document is named in the receipt instead of raising`() {
         val receipt = dynamicLoadReattachReceipt(
             nativeReloadReplicaRestartReport(
-                expectedPaths = listOf("/p/a.md", "/other/tasks/monsterrodholders.md"),
+                expectedPaths = listOf("/p/a.md", "/other/tasks/sampleorders.md"),
                 attachedPaths = listOf("/p/a.md"),
             ),
         )
 
-        assertEquals("documents=1/2:pending=/other/tasks/monsterrodholders.md", receipt)
+        assertEquals("documents=1/2:pending=/other/tasks/sampleorders.md", receipt)
     }
 
     /**

@@ -8,7 +8,7 @@
 //!   `git rev-parse --show-superproject-working-tree`, then takes every
 //!   `.gitmodules` path that exists and carries its own `.agent-doc/`. Each of
 //!   those roots becomes its own section, so `src/haiven-dev`,
-//!   `src/boost-client`, and `src/equityfundingsource-dev` group separately.
+//!   `src/sample-app`, and `src/sample-portal` group separately.
 //! - Document discovery per root is the durable session registry plus a bounded
 //!   filesystem scan that stops at nested submodule roots, so a document is
 //!   attributed to exactly one project.
@@ -483,12 +483,12 @@ mod tests {
             "[submodule \"src/haiven-dev\"]\n",
             "\tpath = src/haiven-dev\n",
             "\turl = git@github.com:btakita/haiven-dev.git\n",
-            "[submodule \"src/boost-client\"]\n",
-            "\tpath=src/boost-client\n",
-            "\turl = git@github.com:btakita/boost-client.git\n",
+            "[submodule \"src/sample-app\"]\n",
+            "\tpath=src/sample-app\n",
+            "\turl = git@github.com:example/sample-app.git\n",
             "# path = commented/out\n",
         ));
-        assert_eq!(paths, vec!["src/haiven-dev", "src/boost-client"]);
+        assert_eq!(paths, vec!["src/haiven-dev", "src/sample-app"]);
     }
 
     #[test]

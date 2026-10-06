@@ -1133,7 +1133,7 @@ pub fn run_with_options(
 /// inside the check, so `run_read_only_settling` never received an `Err` to
 /// classify: the `#scsettlewindow` (GH #60) re-sample was dead code on exactly
 /// the `write_applied` deferral it was written for. Observed 2026-09-30 on
-/// `monsterrodholders.md`: `respond` deferred, the one permitted `session-check`
+/// `sampleorders.md`: `respond` deferred, the one permitted `session-check`
 /// reported INTERRUPTED after 2.7s, the Codex loop stopped, and the retained
 /// intent committed 14s later.
 #[derive(Debug)]
@@ -1186,7 +1186,7 @@ pub fn try_run_with_options(
 }
 
 /// Default bound for [`run_read_only_settling`] (`#scsettlewindow`, GH #60).
-/// 45s, not 15s (`#scsettleexit`): the 2026-09-30 `monsterrodholders.md`
+/// 45s, not 15s (`#scsettleexit`): the 2026-09-30 `sampleorders.md`
 /// deferral committed ~17s after its single `session-check` began.
 pub const SESSION_CHECK_SETTLE_WINDOW_SECS: u64 = 45;
 /// Override for the settle window, in seconds; `0` samples once.

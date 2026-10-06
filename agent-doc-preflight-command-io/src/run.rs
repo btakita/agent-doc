@@ -3013,10 +3013,10 @@ mod tests {
 
     #[test]
     fn legacy_gated_nag_names_the_review_budget_tradeoff_instead_of_repeating_the_command() {
-        // The monsterrodholders shape: 20 legacy gated backlog items against 11
+        // The sampleorders shape: 20 legacy gated backlog items against 11
         // review items. Migrating takes review to 31, so the bare nag asks for a
         // state the same instruction surface forbids.
-        let message = legacy_gated_in_backlog_message(20, 11, "monsterrodholders.md");
+        let message = legacy_gated_in_backlog_message(20, 11, "sampleorders.md");
         assert!(
             message.contains("from 11 to 31"),
             "the warning must state the review count it would produce: {message}"

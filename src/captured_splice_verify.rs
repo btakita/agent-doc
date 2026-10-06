@@ -287,7 +287,9 @@ fn find_proving_triple(
     agreed: &[&&CaptureProof],
 ) -> Option<(SpliceRead, CaptureProof, SpliceRead)> {
     for proof in agreed {
-        let before = current_reads.iter().rfind(|read| read.index < proof.index)?;
+        let before = current_reads
+            .iter()
+            .rfind(|read| read.index < proof.index)?;
         let after = current_reads
             .iter()
             .find(|read| read.index > proof.index && read.text_hash != before.text_hash);
@@ -446,7 +448,7 @@ mod tests {
         assert!(err.contains("verify-op-capture"), "{err}");
     }
 
-    /// The live monsterrodholders / agent-doc-bugs shape: splice recoveries ran,
+    /// The live sampleorders / agent-doc-bugs shape: splice recoveries ran,
     /// but every one of them was refused a replica, so the blocker is upstream.
     #[test]
     fn splice_reads_that_never_saw_canonical_text_blame_the_replica() {

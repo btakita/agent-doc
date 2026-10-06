@@ -201,7 +201,7 @@ pub fn queue_skip_diagnostic_for_content(content: &str) -> Result<String> {
 /// `#queueidtypo`: an id-backed head whose id is not an active tracked item,
 /// where exactly one active tracked id is a near spelling of it.
 ///
-/// Observed 2026-09-30 on `monsterrodholders.md`: the operator queued
+/// Observed 2026-09-30 on `sampleorders.md`: the operator queued
 /// `do [#event-adapter-impl-tourne9yx]` for backlog item
 /// `#event-adapter-impl-tourneyx`. The kept-head diagnostic told the agent to
 /// `--done event-adapter-impl-tourne9yx`, which names nothing, so the head sat

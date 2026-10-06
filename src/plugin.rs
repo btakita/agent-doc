@@ -3546,12 +3546,12 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     fn a_pending_document_warns_and_names_it_without_failing_the_install() {
         let warning = jetbrains_upgrade_reattach_warning(
             3129637,
-            "ok:0.2.427:documents=1/2:pending=/repo/src/boost-client/tasks/monsterrodholders.md",
+            "ok:0.2.427:documents=1/2:pending=/repo/src/sample-app/tasks/sampleorders.md",
         )
         .expect("a pending document must be reported");
         assert!(warning.contains("3129637"), "{warning}");
         assert!(
-            warning.contains("/repo/src/boost-client/tasks/monsterrodholders.md"),
+            warning.contains("/repo/src/sample-app/tasks/sampleorders.md"),
             "the operator needs the exact pending document: {warning}"
         );
         assert!(

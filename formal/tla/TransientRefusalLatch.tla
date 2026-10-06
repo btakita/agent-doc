@@ -14,7 +14,7 @@ a single session on 2026-09-27, and they are not that bug: they are about what
 the CALLER does with a refusal, and each one ended with an agent correctly
 stopping on a refusal whose cause had already cleared or was about to.
 
-  1. `route_queue_activation` on `monsterrodholders.md`. The resolver refused
+  1. `route_queue_activation` on `sampleorders.md`. The resolver refused
      with `... missing_replica recovery exhausted and disk read authority is
      refused`. The caller's retry predicate matched only the `sync_pending`
      spelling of that one message, so the entire missing-replica family read as
@@ -35,7 +35,7 @@ stopping on a refusal whose cause had already cleared or was about to.
      and bails on the identical refusal. The budget is bounded, so a blind retry
      spends it on a provable no-op and then fails closed for good.
 
-  4. `monsterrodholders.md` and `devops.md` session-check INTERRUPTED: "the
+  4. `sampleorders.md` and `devops.md` session-check INTERRUPTED: "the
      controller owns the generation-fenced editor save", do not resubmit, patch,
      or force disk. True while something durable holds the write - but the
      holder named was the controller that had just crashed, and a dead holder

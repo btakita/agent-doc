@@ -14578,6 +14578,7 @@ mod tests {
     fn retained_compact_continuation_blocks_cycle_without_pending_document_write() {
         let continuation = agent_doc_state_backbone::DocumentCompactProjectionContinuation {
             continuation_id: "compact-projection-contracts-regression".to_string(),
+            retained_at_ms: 100,
             file: "/tmp/contracts.md".to_string(),
             live_content: "complete compact target".to_string(),
             committed_content: "complete compact target".to_string(),

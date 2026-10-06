@@ -377,6 +377,12 @@ pub enum StateFact {
     DocumentCompactProjectionRetained {
         document_hash: String,
         continuation_id: String,
+        /// Wall-clock ingress time used only to schedule the controller-owned
+        /// terminal deadline. Older retained facts deserialize as `0` and are
+        /// therefore expired immediately by a newer controller after one
+        /// failed completion attempt.
+        #[serde(default)]
+        retained_at_ms: u64,
         file: String,
         live_content: String,
         committed_content: String,
@@ -399,6 +405,15 @@ pub enum StateFact {
         document_hash: String,
         continuation_id: String,
         authoritative_hash: String,
+    },
+    /// Terminal deadline receipt for a retained compact that never reached the
+    /// authority+disk fixed point. Identity matching prevents an old timer from
+    /// clearing a newer continuation.
+    DocumentCompactProjectionTimedOut {
+        document_hash: String,
+        continuation_id: String,
+        retained_at_ms: u64,
+        deadline_ms: u64,
     },
     QueueHeadSelected {
         document_hash: String,
@@ -936,6 +951,7 @@ impl StateFact {
             | Self::DocumentCompactProjectionRetained { document_hash, .. }
             | Self::DocumentCompactProjectionSettled { document_hash, .. }
             | Self::DocumentCompactProjectionSuperseded { document_hash, .. }
+            | Self::DocumentCompactProjectionTimedOut { document_hash, .. }
             | Self::QueueHeadSelected { document_hash, .. }
             | Self::QueueHeadDeferred { document_hash, .. }
             | Self::QueueHeadCompleted { document_hash, .. }
@@ -1032,7 +1048,8 @@ impl StateFact {
             | Self::DocumentWriteConverged { .. }
             | Self::DocumentCompactProjectionRetained { .. }
             | Self::DocumentCompactProjectionSettled { .. }
-            | Self::DocumentCompactProjectionSuperseded { .. } => StateDomain::Document,
+            | Self::DocumentCompactProjectionSuperseded { .. }
+            | Self::DocumentCompactProjectionTimedOut { .. } => StateDomain::Document,
             Self::QueueHeadSelected { .. }
             | Self::QueueHeadDeferred { .. }
             | Self::QueueHeadCompleted { .. }
@@ -1103,6 +1120,9 @@ impl StateFact {
             Self::DocumentCompactProjectionSettled { .. } => "document_compact_projection_settled",
             Self::DocumentCompactProjectionSuperseded { .. } => {
                 "document_compact_projection_superseded"
+            }
+            Self::DocumentCompactProjectionTimedOut { .. } => {
+                "document_compact_projection_timed_out"
             }
             Self::QueueHeadSelected { .. } => "queue_head_selected",
             Self::QueueHeadDeferred { .. } => "queue_head_deferred",
@@ -1884,6 +1904,7 @@ impl DocumentStateProjection {
             }
             StateFact::DocumentCompactProjectionRetained {
                 continuation_id,
+                retained_at_ms,
                 file,
                 live_content,
                 committed_content,
@@ -1894,6 +1915,7 @@ impl DocumentStateProjection {
                 self.document.pending_compact_projection =
                     Some(DocumentCompactProjectionContinuation {
                         continuation_id: continuation_id.clone(),
+                        retained_at_ms: *retained_at_ms,
                         file: file.clone(),
                         live_content: live_content.clone(),
                         committed_content: committed_content.clone(),
@@ -1905,6 +1927,9 @@ impl DocumentStateProjection {
                 continuation_id, ..
             }
             | StateFact::DocumentCompactProjectionSuperseded {
+                continuation_id, ..
+            }
+            | StateFact::DocumentCompactProjectionTimedOut {
                 continuation_id, ..
             } => {
                 if self
@@ -3197,6 +3222,8 @@ pub struct DocumentWriteIntentProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentCompactProjectionContinuation {
     pub continuation_id: String,
+    #[serde(default)]
+    pub retained_at_ms: u64,
     pub file: String,
     pub live_content: String,
     pub committed_content: String,
@@ -6035,6 +6062,7 @@ mod tests {
         projection.apply_fact(&StateFact::DocumentCompactProjectionRetained {
             document_hash: document_hash.to_string(),
             continuation_id: "compact-current".to_string(),
+            retained_at_ms: 100,
             file: "/work/sample.md".to_string(),
             live_content: "retained live".to_string(),
             committed_content: "retained committed".to_string(),
@@ -6072,6 +6100,41 @@ mod tests {
     }
 
     #[test]
+    fn compact_timeout_retires_only_its_identity_matched_continuation() {
+        let document_hash = "doc-compact-timeout";
+        let mut projection = DocumentStateProjection::new(document_hash);
+        projection.apply_fact(&StateFact::DocumentCompactProjectionRetained {
+            document_hash: document_hash.to_string(),
+            continuation_id: "compact-current".to_string(),
+            retained_at_ms: 100,
+            file: "/work/sample.md".to_string(),
+            live_content: "retained live".to_string(),
+            committed_content: "retained committed".to_string(),
+            target_component: Some("exchange".to_string()),
+            commit: true,
+        });
+
+        projection.apply_fact(&StateFact::DocumentCompactProjectionTimedOut {
+            document_hash: document_hash.to_string(),
+            continuation_id: "compact-stale".to_string(),
+            retained_at_ms: 10,
+            deadline_ms: 20,
+        });
+        assert!(projection.document.pending_compact_projection.is_some());
+
+        let receipt = StateFact::DocumentCompactProjectionTimedOut {
+            document_hash: document_hash.to_string(),
+            continuation_id: "compact-current".to_string(),
+            retained_at_ms: 100,
+            deadline_ms: 150,
+        };
+        assert_eq!(receipt.domain(), StateDomain::Document);
+        assert_eq!(receipt.label(), "document_compact_projection_timed_out");
+        projection.apply_fact(&receipt);
+        assert!(projection.document.pending_compact_projection.is_none());
+    }
+
+    #[test]
     fn newer_response_capture_cancels_compact_target_without_that_response() {
         // Live sequence from tsift.md: compact A was retained while the editor
         // was disconnected, then closeout captured response B. A must not remain
@@ -6081,6 +6144,7 @@ mod tests {
         projection.apply_fact(&StateFact::DocumentCompactProjectionRetained {
             document_hash: document_hash.to_string(),
             continuation_id: "compact-generation-a".to_string(),
+            retained_at_ms: 100,
             file: "/work/tsift.md".to_string(),
             live_content: "## Exchange\n\nCompacted generation A.\n".to_string(),
             committed_content: "## Exchange\n\nCompacted generation A.\n".to_string(),
@@ -6123,6 +6187,7 @@ mod tests {
         projection.apply_fact(&StateFact::DocumentCompactProjectionRetained {
             document_hash: document_hash.to_string(),
             continuation_id: "compact-current".to_string(),
+            retained_at_ms: 100,
             file: "/work/session.md".to_string(),
             live_content: format!("## Exchange\n\n{response}"),
             committed_content: format!("## Exchange\n\n{response}"),

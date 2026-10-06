@@ -102,6 +102,10 @@ const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROLLER_IDLE_CLIENT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
 const SUPERVISOR_RECYCLE_SETTLE_WAIT: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const COMPACT_RETAINED_PROJECTION_DEADLINE: Duration = Duration::from_millis(50);
+#[cfg(not(test))]
+const COMPACT_RETAINED_PROJECTION_DEADLINE: Duration = Duration::from_secs(30);
 
 const STALE_PREPARING_CONTROLLER_SECS_ENV: &str = "AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS";
 
@@ -201,7 +205,7 @@ pub enum ControllerCompactDocumentOutcome {
 }
 
 pub const COMPACT_COMMIT_SCOPE_NOTE: &str = "[compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`";
-pub const COMPACT_RETAINED_PENDING_NOTE: &str = "[compact] pending: the compacted target is retained for editor delivery and is not yet committed. Do not retry Compact Exchange while this target is pending; if delivery remains pending, restart the editor so its agent-doc plugin reconnects";
+pub const COMPACT_RETAINED_PENDING_NOTE: &str = "[compact] pending: the compacted target is retained for editor delivery and is not yet committed. The controller automatically releases stalled ownership after 30 seconds; once released, re-run Compact Exchange. An editor restart is not required";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerTmuxLayoutSyncInvocation {
@@ -2452,6 +2456,7 @@ struct AnsweredFreeTextStrikeFailure {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControllerCompactProjectionCompletion {
     pub file: PathBuf,
+    pub continuation_id: String,
     pub live_content: String,
     pub committed_content: String,
     pub target_component: Option<String>,
@@ -2647,6 +2652,9 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         &self,
         invocation: ControllerCompactProjectionCompletion,
     ) -> Result<ControllerCompactProjectionCompletionOutcome> {
+        if invocation.target_component.as_deref() == Some("deferred-test") {
+            anyhow::bail!("test compact completion remains unconverged");
+        }
         if invocation.target_component.as_deref() == Some("superseded-test") {
             return Ok(ControllerCompactProjectionCompletionOutcome::Superseded {
                 authoritative_hash: "advanced-authority".to_string(),
@@ -4217,6 +4225,111 @@ enum DocumentEffectCommand {
 }
 
 impl RetainedWriteSettleSink {
+    /// Schedule the terminal clock edge for a compact completion attempt that
+    /// could not reach the authority+disk fixed point. The timer is an Effect
+    /// adapter only: when it fires, the current controller projection still
+    /// identity-checks the continuation before publishing the timeout receipt.
+    fn schedule_compact_timeout(&self, command: CompactResumeCommand) {
+        let retained_at_ms = command.continuation.retained_at_ms;
+        let now_ms = compact_projection_now_ms();
+        let deadline_window_ms = COMPACT_RETAINED_PROJECTION_DEADLINE
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64;
+        let deadline_ms = if retained_at_ms == 0 {
+            now_ms
+        } else {
+            retained_at_ms.saturating_add(deadline_window_ms)
+        };
+        // Persistence needs a wall-clock timestamp, but a backwards clock
+        // adjustment must not extend this controller's bounded wait.
+        let delay = Duration::from_millis(
+            deadline_ms
+                .saturating_sub(now_ms)
+                .min(deadline_window_ms),
+        );
+        let runtime = self.runtime.clone();
+        let project_root = self.project_root.clone();
+        let error_document_hash = command.document_hash.clone();
+        let error_continuation_id = command.continuation.continuation_id.clone();
+        let spawn = std::thread::Builder::new()
+            .name("agent-doc-compact-timeout".to_string())
+            .spawn(move || {
+                if !delay.is_zero() {
+                    std::thread::sleep(delay);
+                }
+                let Some(runtime) = runtime.upgrade() else {
+                    return;
+                };
+                let pending_matches = match runtime.document_state_projection(&command.document_hash)
+                {
+                    Ok(Some(projection)) => projection
+                        .document
+                        .pending_compact_projection
+                        .as_ref()
+                        .is_some_and(|pending| {
+                            pending.continuation_id == command.continuation.continuation_id
+                        }),
+                    Ok(None) => false,
+                    Err(error) => {
+                        agent_doc_ops_log_io::log_op(
+                            &project_root,
+                            &format!(
+                                "compact_projection_timeout_deferred document_hash={} continuation_id={} reason={error:#}",
+                                command.document_hash, command.continuation.continuation_id,
+                            ),
+                        );
+                        return;
+                    }
+                };
+                if !pending_matches {
+                    return;
+                }
+                let event = agent_doc_state_backbone::StateEvent::new(
+                    format!(
+                        "compact-projection-timed-out:{}:{}",
+                        command.document_hash, command.continuation.continuation_id,
+                    ),
+                    agent_doc_state_backbone::StateFact::DocumentCompactProjectionTimedOut {
+                        document_hash: command.document_hash.clone(),
+                        continuation_id: command.continuation.continuation_id.clone(),
+                        retained_at_ms,
+                        deadline_ms,
+                    },
+                );
+                if let Err(error) =
+                    runtime.append_apply_state_event_serialized(&project_root, &event)
+                {
+                    agent_doc_ops_log_io::log_op(
+                        &project_root,
+                        &format!(
+                            "compact_projection_timeout_receipt_failed document_hash={} continuation_id={} reason={error:#}",
+                            command.document_hash, command.continuation.continuation_id,
+                        ),
+                    );
+                    return;
+                }
+                agent_doc_ops_log_io::log_op(
+                    &project_root,
+                    &format!(
+                        "compact_projection_timed_out document_hash={} continuation_id={} retained_at_ms={} deadline_ms={} action=release_owner recovery=rerun_compact",
+                        command.document_hash,
+                        command.continuation.continuation_id,
+                        retained_at_ms,
+                        deadline_ms,
+                    ),
+                );
+            });
+        if let Err(error) = spawn {
+            agent_doc_ops_log_io::log_op(
+                &self.project_root,
+                &format!(
+                    "compact_projection_timeout_schedule_failed document_hash={} continuation_id={} reason={error}",
+                    error_document_hash, error_continuation_id,
+                ),
+            );
+        }
+    }
+
     /// Append + apply the convergence fact. Applying re-enters
     /// [`ControllerDocumentGraphs::set_projection`], which invalidates the
     /// verdict that triggered us; the rerun then sees `NoRetainedIntent` and
@@ -4540,6 +4653,7 @@ impl RetainedWriteSettleSink {
         }
         let invocation = ControllerCompactProjectionCompletion {
             file: PathBuf::from(&continuation.file),
+            continuation_id: continuation.continuation_id.clone(),
             live_content: continuation.live_content.clone(),
             committed_content: continuation.committed_content.clone(),
             target_component: continuation.target_component.clone(),
@@ -4809,6 +4923,9 @@ impl ControllerDocumentGraphs {
                                     &command.document_hash,
                                     &command.continuation,
                                 );
+                                if !applied {
+                                    worker_sink.schedule_compact_timeout(command.clone());
+                                }
                                 let Some(runtime) = worker_sink.runtime.upgrade() else {
                                     break;
                                 };
@@ -6388,6 +6505,13 @@ impl ControllerDocumentGraphs {
     }
 }
 
+fn compact_projection_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
+
 fn retained_transition_matches_intent(
     transition: &RetainedTransitionProjection,
     intent: &agent_doc_state_backbone::DocumentWriteIntentProjection,
@@ -6873,9 +6997,10 @@ fn compact_resume_signal_from_frontier(
         return None;
     }
     let frontier = frontier?;
-    if frontier.pending_write.is_some() {
-        return None;
-    }
+    // Emit the continuation even while its retained write is pending. The
+    // effect sink revalidates readiness and performs no projection I/O until
+    // `pending_write` clears, but a refused attempt schedules the independent
+    // terminal deadline so a missing delivery edge cannot wedge the document.
     frontier.pending_compact_projection.clone()
 }
 
@@ -17892,7 +18017,7 @@ agent:queue\n\
     }
 
     #[test]
-    fn compact_visible_receipt_keeps_native_save_live_until_write_settlement() {
+    fn compact_visible_receipt_keeps_native_save_live_while_timeout_is_armed() {
         let mut projection = retained_resume_projection("compact-visible-save");
         let target = "# Session\n\nCompacted exchange\n";
         let intent = projection.document.pending_write.as_mut().unwrap();
@@ -17903,6 +18028,7 @@ agent:queue\n\
         projection.document.pending_compact_projection = Some(
             agent_doc_state_backbone::DocumentCompactProjectionContinuation {
                 continuation_id: "compact-visible-save".to_string(),
+                retained_at_ms: 100,
                 file: "/work/session.md".to_string(),
                 live_content: target.to_string(),
                 committed_content: target.to_string(),
@@ -17931,7 +18057,12 @@ agent:queue\n\
         assert_eq!(save.content_hash, delivery.content_hash);
         assert_eq!(save.content_len, target.len());
         assert_eq!(save.delivery_version, 37);
-        assert!(compact_resume_signal(Some(&projection), 1).is_none());
+        assert_eq!(
+            compact_resume_signal(Some(&projection), 1)
+                .expect("retention must arm its terminal deadline before write settlement")
+                .continuation_id,
+            "compact-visible-save"
+        );
         projection.document.pending_write = None;
         assert!(
             retained_transition_state(Some(&projection), Some(&delivery), 1)
@@ -18193,6 +18324,7 @@ agent:queue\n\
             &agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
                 document_hash: projection.document_hash.clone(),
                 continuation_id: "compact-editor-cut".to_string(),
+                retained_at_ms: 100,
                 file: "/work/task.md".to_string(),
                 live_content: newer_compact_continuation.clone(),
                 committed_content: newer_compact_continuation,
@@ -18692,7 +18824,7 @@ revised operator request
     }
 
     #[test]
-    fn compact_resume_is_derived_only_after_the_retained_write_clears() {
+    fn compact_resume_arms_deadline_before_the_retained_write_clears() {
         let document_hash = "doc-compact-resume";
         let mut projection = agent_doc_state_backbone::DocumentStateProjection::new(document_hash);
         let deferred =
@@ -18702,6 +18834,7 @@ revised operator request
             &agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
                 document_hash: document_hash.to_string(),
                 continuation_id: "compact-continuation".to_string(),
+                retained_at_ms: 100,
                 file: "/work/task.md".to_string(),
                 live_content: "live compact target".to_string(),
                 committed_content: "committed compact target".to_string(),
@@ -18711,9 +18844,11 @@ revised operator request
         );
 
         assert!(compact_resume_signal(Some(&projection), 0).is_none());
-        assert!(
-            compact_resume_signal(Some(&projection), 1).is_none(),
-            "admission alone cannot run snapshot/commit before write convergence"
+        assert_eq!(
+            compact_resume_signal(Some(&projection), 1)
+                .expect("retained ownership must arm its bounded deadline")
+                .continuation_id,
+            "compact-continuation"
         );
 
         projection.apply_fact(
@@ -18740,6 +18875,7 @@ revised operator request
             &agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
                 document_hash: document_hash.to_string(),
                 continuation_id: "compact-continuation".to_string(),
+                retained_at_ms: 100,
                 file: "/work/task.md".to_string(),
                 live_content: "live compact target".to_string(),
                 committed_content: "committed compact target".to_string(),
@@ -18866,6 +19002,7 @@ revised operator request
             &agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
                 document_hash: document_hash.to_string(),
                 continuation_id: "compact-continuation".to_string(),
+                retained_at_ms: 100,
                 file: "/work/sample.md".to_string(),
                 live_content: "live compact target".to_string(),
                 committed_content: "committed compact target".to_string(),
@@ -18965,6 +19102,52 @@ revised operator request
     }
 
     #[test]
+    fn failed_compact_completion_times_out_and_releases_only_its_owner() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        let continuation_id = "compact-timeout";
+        let retained = agent_doc_state_backbone::StateEvent::new(
+            format!("{document_hash}:{continuation_id}"),
+            agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                document_hash: document_hash.clone(),
+                continuation_id: continuation_id.to_string(),
+                retained_at_ms: compact_projection_now_ms(),
+                file: file.to_string_lossy().into_owned(),
+                live_content: "retained compact target".to_string(),
+                committed_content: "retained compact target".to_string(),
+                target_component: Some("deferred-test".to_string()),
+                commit: true,
+            },
+        );
+        append_state_event(dir.path(), &retained).unwrap();
+        runtime.apply_state_event(&retained).unwrap();
+
+        let projection = wait_for_document_projection(
+            &runtime,
+            &document_hash,
+            |projection| projection.document.pending_compact_projection.is_none(),
+            "the bounded compact deadline did not release retained ownership",
+        );
+        assert!(projection.document.pending_compact_projection.is_none());
+        let timed_out = load_state_event_ledger(dir.path())
+            .unwrap()
+            .events()
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.fact,
+                    agent_doc_state_backbone::StateFact::DocumentCompactProjectionTimedOut {
+                        continuation_id: timed_out_id,
+                        ..
+                    } if timed_out_id == continuation_id
+                )
+            })
+            .count();
+        assert_eq!(timed_out, 1, "the deadline receipt is identity-fenced and idempotent");
+    }
+
+    #[test]
     fn exact_editor_projection_receipt_completes_retained_compact_once() {
         let dir = tempfile::TempDir::new().unwrap();
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
@@ -18985,6 +19168,7 @@ revised operator request
             agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
                 document_hash: document_hash.clone(),
                 continuation_id: continuation_id.to_string(),
+                retained_at_ms: compact_projection_now_ms(),
                 file: file.to_string_lossy().into_owned(),
                 live_content: target_content.to_string(),
                 committed_content: target_content.to_string(),
@@ -19075,6 +19259,7 @@ revised operator request
             agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
                 document_hash: document_hash.clone(),
                 continuation_id: continuation_id.to_string(),
+                retained_at_ms: compact_projection_now_ms(),
                 file: file.to_string_lossy().into_owned(),
                 live_content: "retained compact target".to_string(),
                 committed_content: "retained compact target".to_string(),

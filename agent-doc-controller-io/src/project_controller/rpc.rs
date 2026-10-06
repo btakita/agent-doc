@@ -7903,17 +7903,17 @@ pub fn compact_document_via_controller(
     }
     match &outcome {
         ControllerCompactDocumentOutcome::Committed => {}
-        ControllerCompactDocumentOutcome::RetainedPending { .. } => {
-            eprintln!("{COMPACT_RETAINED_PENDING_NOTE}");
+        ControllerCompactDocumentOutcome::RetainedPending {
+            continuation_id,
+            commit: pending_commit,
+        } => {
+            return fail_compact_pending(continuation_id, *pending_commit);
         }
         ControllerCompactDocumentOutcome::AlreadyPending {
             continuation_id,
             commit: pending_commit,
         } => {
-            eprintln!(
-                "{}",
-                compact_already_pending_note(continuation_id, *pending_commit)
-            );
+            return fail_compact_pending(continuation_id, *pending_commit);
         }
         ControllerCompactDocumentOutcome::DeferredActiveTyping { .. } => {
             unreachable!("active typing is retried before compact outcome handling")
@@ -7945,6 +7945,13 @@ fn compact_already_pending_note(continuation_id: &str, commit_requested: bool) -
         .unwrap_or(COMPACT_RETAINED_PENDING_NOTE);
     format!(
         "[compact] pending: existing continuation {continuation_id} already owns this document (commit_requested={commit_requested}); {retained_detail}"
+    )
+}
+
+fn fail_compact_pending(continuation_id: &str, commit_requested: bool) -> Result<()> {
+    anyhow::bail!(
+        "{}",
+        compact_already_pending_note(continuation_id, commit_requested)
     )
 }
 
@@ -29535,8 +29542,10 @@ mod tests {
         assert!(note.contains("existing continuation compact-projection-123"));
         assert!(note.contains("commit_requested=true"));
         assert!(note.contains("retained for editor delivery"));
-        assert!(note.contains("Do not retry Compact Exchange"));
-        assert!(note.contains("restart the editor"));
+        assert!(note.contains("automatically releases stalled ownership after 30 seconds"));
+        assert!(note.contains("re-run Compact Exchange"));
+        assert!(note.contains("restart is not required"));
+        assert!(fail_compact_pending("compact-projection-123", true).is_err());
     }
 
     #[test]
@@ -36131,6 +36140,7 @@ mod tests {
                 agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
                     document_hash: document_hash.clone(),
                     continuation_id: "compact-local".to_string(),
+                    retained_at_ms: 100,
                     file: dir.path().join("session.md").to_string_lossy().into_owned(),
                     live_content: "live".to_string(),
                     committed_content: "committed".to_string(),

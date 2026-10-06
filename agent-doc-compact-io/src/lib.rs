@@ -1149,6 +1149,10 @@ fn retain_compact_projection(
         agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
             document_hash,
             continuation_id: continuation_id.clone(),
+            retained_at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+                .unwrap_or(0),
             file: canonical.to_string_lossy().into_owned(),
             live_content: targets.live.clone(),
             committed_content: targets.committed.clone(),
@@ -1194,6 +1198,7 @@ fn publish_reactive_state_event(
 /// snapshot/commit, and returns the exact settled hash for the durable receipt.
 pub fn complete_retained_projection(
     file: &Path,
+    continuation_id: &str,
     live_content: &str,
     committed_content: &str,
     target_component: Option<&str>,
@@ -1316,8 +1321,9 @@ pub fn complete_retained_projection(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "compact_projection_completed file={} settled_hash={} committed_hash={} commit={} driver=state_projection_effect",
+                "compact_projection_completed file={} continuation_id={} settled_hash={} committed_hash={} commit={} driver=state_projection_effect",
                 file.display(),
+                continuation_id,
                 settled_hash,
                 agent_doc_hash::content_hash(&targets.committed),
                 commit,
@@ -6185,8 +6191,15 @@ mod tests {
         );
         fs::write(&file, live).unwrap();
 
-        let outcome =
-            complete_retained_projection(&file, live, live, Some("status"), false).unwrap();
+        let outcome = complete_retained_projection(
+            &file,
+            "compact-test-continuation",
+            live,
+            live,
+            Some("status"),
+            false,
+        )
+        .unwrap();
 
         assert_eq!(
             outcome,
@@ -6200,6 +6213,9 @@ mod tests {
                 .as_deref(),
             Some(live),
         );
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("compact_projection_completed file="));
+        assert!(ops_log.contains("continuation_id=compact-test-continuation"));
     }
 
     #[test]
@@ -6249,13 +6265,19 @@ mod tests {
         fs::write(&file, old).unwrap();
         record_compact_lazily_projection(&file, &compacted, false).unwrap();
 
-        let outcome =
-            complete_retained_projection(&file, &compacted, &compacted, Some("status"), false)
-                .unwrap_or_else(|error| {
-                    let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log"))
-                        .unwrap_or_default();
-                    panic!("retained completion failed: {error:#}\n{ops_log}")
-                });
+        let outcome = complete_retained_projection(
+            &file,
+            "compact-test-continuation",
+            &compacted,
+            &compacted,
+            Some("status"),
+            false,
+        )
+        .unwrap_or_else(|error| {
+            let ops_log =
+                fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+            panic!("retained completion failed: {error:#}\n{ops_log}")
+        });
 
         assert_eq!(
             outcome,
@@ -6299,9 +6321,15 @@ mod tests {
             retained.replace("*Compacted exchange.*", "Operator advanced exchange.");
         fs::write(&file, &authoritative).unwrap();
 
-        let outcome =
-            complete_retained_projection(&file, retained, retained, Some("exchange"), false)
-                .expect("settled same-exchange drift is a typed terminal outcome");
+        let outcome = complete_retained_projection(
+            &file,
+            "compact-test-continuation",
+            retained,
+            retained,
+            Some("exchange"),
+            false,
+        )
+        .expect("settled same-exchange drift is a typed terminal outcome");
 
         assert_eq!(
             outcome,

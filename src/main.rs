@@ -567,6 +567,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         agent_doc_document_realtime_io::with_controller_document_mutation(|| {
             agent_doc_compact_io::complete_retained_projection(
                 &invocation.file,
+                &invocation.continuation_id,
                 &invocation.live_content,
                 &invocation.committed_content,
                 invocation.target_component.as_deref(),

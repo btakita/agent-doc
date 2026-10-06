@@ -539,6 +539,13 @@ class SyncLayoutActionTest {
         )
         assertEquals(visible, SyncLayoutAction.buildSyncColumns(visible, null))
         assertEquals(
+            ExactVisibleSyncDecision.Publish(listOf(visible.first())),
+            SyncLayoutAction.exactVisibleSyncDecision(
+                listOf(visible.first()),
+                EditorLayout(listOf(LayoutColumn(listOf(visible.first())))),
+            ),
+        )
+        assertEquals(
             listOf(
                 "--col", "/repo/tasks/pmt2/mr/1109.md",
                 "--col", "/repo/tasks/agent-doc/agent-doc.md",
@@ -555,6 +562,17 @@ class SyncLayoutActionTest {
         assertEquals(
             emptyList<String>(),
             TerminalUtil.buildRouteLayoutArgs(emptyList(), null, null),
+        )
+    }
+
+    @Test
+    fun `unknown manual sync cannot collapse retained two columns to focused file`() {
+        val retainedColumns = listOf("/repo/tasks/a.md", "/repo/tasks/b.md")
+        val focusedOnly = listOf(retainedColumns.first())
+
+        assertEquals(
+            ExactVisibleSyncDecision.RefuseUnknownLayout,
+            SyncLayoutAction.exactVisibleSyncDecision(focusedOnly, editorLayout = null),
         )
     }
 

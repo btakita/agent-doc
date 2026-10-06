@@ -1178,6 +1178,13 @@ fn run_with_options_to_writer_in_pass(
             }
         }
     };
+    // Queue maintenance can strike or otherwise rewrite heads after the initial
+    // diff cut. Every downstream queue decision must observe the settled queue
+    // projection, while non-queue/parse-failure paths retain the admitted cut.
+    let queue_authoritative_content = queue_state
+        .authoritative_content
+        .as_deref()
+        .unwrap_or(&diff_result_with_current.current);
     warnings.extend(queue_state.warnings.clone());
     // #qconvbaseline: the queue maintenance above may converge the live editor
     // buffer to a corrected queue shape (auto-pins, backlog→queue mirrors, do-prompt
@@ -2189,7 +2196,7 @@ fn run_with_options_to_writer_in_pass(
                 .iter()
                 .filter(|prompt| {
                     agent_doc_queue::queue_response::queue_prompt_text_is_free_text(
-                        &diff_result_with_current.current,
+                        queue_authoritative_content,
                         prompt,
                     )
                 })
@@ -2208,7 +2215,7 @@ fn run_with_options_to_writer_in_pass(
         file,
         &agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(
             file,
-            &diff_result_with_current.current,
+            queue_authoritative_content,
         ),
     );
     if !queue_subagent_dispatch.is_empty() {

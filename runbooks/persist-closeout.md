@@ -31,6 +31,15 @@ metadata do not invalidate identical checked bytes. Do not pre-run either
 expensive suite merely because release is next. Do not rely on a pre-commit hook or waive red suites as
 "unrelated" or "flaky".
 
+For a release fed by subagent queue work, seal one batch before version
+projection: integrate every completed claimed fix ready at that boundary, keep
+still-running claims out of the batch, then run one version projection, one
+authoritative check, and one `install-full`. `make release` owns that single
+full-profile install after its tag/publish handoff and prints elapsed time plus
+an independent outcome for each phase. A completed tag/publish handoff remains
+completed if the later local install fails; repair the local install without
+cutting another release.
+
 Capture two independent proofs when the runner exposes a failure tally:
 
 1. Preserve the test command's exit status explicitly across pipes, tee, output

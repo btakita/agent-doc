@@ -14536,8 +14536,21 @@ fn test_developer_verification_is_tiered_cached_and_worktree_safe() {
             && makefile.contains("scripts/dev-check.py verify-tmux-ci")
             && makefile.contains("scripts/dev-check.py record-tmux-ci")
             && makefile.contains("release: release-check")
+            && makefile.contains("scripts/release-driver.py --version")
+            && makefile.contains("release-driver-self-test")
             && !makefile.contains("release: check"),
         "release must run cheap parity preflight before independently reusing matching full-check and tmux-ci proofs"
+    );
+    let release_driver =
+        fs::read_to_string(manifest_dir.join("scripts/release-driver.py")).unwrap();
+    assert!(
+        release_driver.contains("tag-publish-handoff")
+            && release_driver.contains("local-install-full")
+            && release_driver.contains(
+                "tag_publish_handoff=complete local_install_full={install.status}"
+            )
+            && release_driver.contains("elapsed={elapsed:.3f}s"),
+        "release must time and report publication independently from the one local full install"
     );
     assert!(
         makefile.contains("CARGO_INSTALL_BIN_DIR_ABS :=")

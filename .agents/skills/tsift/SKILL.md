@@ -3,9 +3,9 @@ name: tsift
 description: "Use tsift for token-efficient repository navigation, code search and reading, call graphs, diffs, logs, tests, session context, and workspace memory. TRIGGER: exploring or changing a codebase with tsift installed, or working on the tsift repo. SKIP: plain file-level glob, non-code web search. VERSION CHECK: compare `tsift --version` against tsift-version below before trusting any command text copied from this file."
 user-invocable: true
 argument-hint: "[query or symbol]"
-tsift-version: "0.1.101"
+tsift-version: "0.1.103"
 ---
-<!-- tsift:skill v=0.1.101 -->
+<!-- tsift:skill v=0.1.103 -->
 # tsift
 
 **Check the version first.** Run `tsift --version` and compare it to `tsift-version` in the frontmatter above. If the binary is newer, this file is stale: treat its command text as a hint, not a contract, and read the live surface from `tsift --help` / `<subcommand> --help`. `tsift init` refreshes this file and stamps both values from the installed binary, so a mismatch means the skill was never refreshed after an upgrade. `tsift audit` reports the same drift as an issue.

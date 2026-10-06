@@ -1,4 +1,4 @@
-<!-- tsift:code-navigation-runbook v=0.1.101 -->
+<!-- tsift:code-navigation-runbook v=0.1.103 -->
 # Code Navigation
 
 Managed by `tsift init` (versioned markers) — do not hand-edit between the markers; re-run `tsift init` to refresh. Text outside the markers is preserved.
@@ -9,7 +9,7 @@ This reference is the detail behind the repository-local tsift skill. `SKILL.md`
 
 Run `tsift status` from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. `tsift status` repairs the `.tsift/` index state it owns and never rewrites tracked files (`--no-fix` skips even that). If status reports stale or missing instructions, run `tsift init` to refresh the repository-local tsift skill and this reference; it names every tracked file it rewrites or moves. When the harness cannot perform write commands, ask the user to run the printed `run:` command instead.
 
-Codex projects can install a prompt-time auto-reindex hook with `tsift init --codex`; OpenCode projects can install per-project tsift command shortcuts with `tsift init --opencode`. `tsift init --harness <claude|codex|opencode|grok|all>` links the skill into a harness's own skill directory, so it loads without an `AGENTS.md` router — no harness scans `.agents/skills/` on its own.
+Codex projects can install a prompt-time auto-reindex hook with `tsift init --codex`; OpenCode projects can install per-project tsift command shortcuts with `tsift init --opencode`. `tsift init --harness <claude|codex|opencode|grok|all>` links the skill into a harness's own skill directory — in personal mode `~/.claude/skills`, `$CODEX_HOME/skills` (default `~/.codex/skills`), `$XDG_CONFIG_HOME/opencode/skills` (default `~/.config/opencode/skills`), and `$GROK_HOME/skills` (default `~/.grok/skills`). Claude Code needs the link: it never scans `.agents/skills/`. Codex, OpenCode, and Grok already discover `.agents/skills/` and `~/.agents/skills/` on their own, so a link for them is optional and only adds an entry the harness deduplicates by name.
 
 ## Version drift
 

@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.463
+
+- **Retained Compact Exchange projections now terminate with actionable recovery (GH #148).** The controller owns a
+  bounded 30-second deadline, records an identity-fenced terminal timeout that cannot clear a newer continuation,
+  returns a nonzero CLI result while a fresh or existing projection remains pending, and tells the operator to rerun
+  compact after timeout instead of restarting the IDE. Completion diagnostics now include the owning continuation ID,
+  while legacy retained facts expire safely after one failed completion attempt.
+
 ## 0.35.462
 
 - **Full installation now places the freshly built native library beside the installed binary.** `make install-full`

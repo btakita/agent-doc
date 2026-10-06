@@ -318,6 +318,19 @@ class SyncLayoutAction : AnAction(), DumbAware {
             }
 
         /**
+         * GH #154: exact-visible is structural authority, so an unreadable editor layout cannot
+         * be replaced by the focused-file fallback. That fallback is useful only for legacy
+         * command shapes without an exact-visible authority claim.
+         */
+        internal fun exactVisibleSyncDecision(
+            visibleMdFiles: List<String>,
+            editorLayout: EditorLayout?,
+        ): ExactVisibleSyncDecision =
+            editorLayout
+                ?.let { ExactVisibleSyncDecision.Publish(buildSyncColumns(visibleMdFiles, it)) }
+                ?: ExactVisibleSyncDecision.RefuseUnknownLayout
+
+        /**
          * `#recyclerestart` Q2 — decide whether a just-completed sync should re-run to
          * apply a layout that superseded it mid-flight. Re-run only when WE held the guard
          * (`heldGuard`) and a newer sync bumped the generation while we ran
@@ -407,6 +420,17 @@ class SyncLayoutAction : AnAction(), DumbAware {
                     ),
                 ),
         )
+        val exactVisibleColumns =
+            when (val decision = exactVisibleSyncDecision(visibleMdFiles, editorLayout)) {
+                is ExactVisibleSyncDecision.Publish -> decision.columns
+                ExactVisibleSyncDecision.RefuseUnknownLayout -> {
+                    val message =
+                        "Editor split could not be read; the retained tmux layout was not changed."
+                    LOG.warn("[sync] refusing exact-visible layout because editor columns are unknown")
+                    if (notify) TerminalUtil.notifyError(project, message)
+                    return
+                }
+            }
 
         if (!terminalPrepared && !noAutostart) {
             val relativeFocusedFile = java.io.File(projectRoot).toPath()
@@ -449,13 +473,9 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         }
                         return@Thread
                     }
-                    val columns = buildSyncColumns(
-                        visibleMdFiles,
-                        editorLayout,
-                    )
                     val receipt = CpRouteClient.submitSyncTmuxLayout(
                         projectRoot = projectRoot,
-                        columnsJson = GSON.toJson(columns),
+                        columnsJson = GSON.toJson(exactVisibleColumns),
                         window = null,
                         focus = focusedFile,
                         noAutostart = noAutostart,
@@ -464,7 +484,7 @@ class SyncLayoutAction : AnAction(), DumbAware {
                         columnOrder = syncColumnOrder(editorLayout),
                     )
                     if (receipt.exitCode != 0) {
-                        LOG.warn("[sync] Project Controller async submit failed projectRoot=$projectRoot focus=$focusedFile columns=$columns output=${receipt.output}")
+                        LOG.warn("[sync] Project Controller async submit failed projectRoot=$projectRoot focus=$focusedFile columns=$exactVisibleColumns output=${receipt.output}")
                         if (notify) {
                             TerminalUtil.notifyError(
                                 project,
@@ -504,6 +524,11 @@ class SyncLayoutAction : AnAction(), DumbAware {
  */
 data class LayoutColumn(val files: List<String>)
 data class EditorLayout(val columns: List<LayoutColumn>)
+
+internal sealed interface ExactVisibleSyncDecision {
+    data class Publish(val columns: List<String>) : ExactVisibleSyncDecision
+    data object RefuseUnknownLayout : ExactVisibleSyncDecision
+}
 
 /**
  * Detects the 2D columnar layout of .md files in the editor by grouping
@@ -585,7 +610,8 @@ object LayoutDetector {
         try {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
             val windows = managerEx.windows
-            if (windows.isEmpty()) {
+            val remoteClients = remoteClientSessionEditors(project, sessionDocumentPaths)
+            if (shouldUseRemoteClientLayout(windows.size, remoteClients.size)) {
                 // GH #97: backend-local FileEditorManager.selectedFiles is only the
                 // focused file in Remote Dev. JetBrains keeps the real per-frontend
                 // selections in client-scoped managers; this is the same service set
@@ -784,10 +810,22 @@ object LayoutDetector {
         )
     }
 
+    /** Remote client-session evidence outranks incidental backend-local editor windows (GH #154). */
+    internal fun shouldUseRemoteClientLayout(
+        backendWindowCount: Int,
+        remoteClientSessionCount: Int,
+    ): Boolean = when {
+        remoteClientSessionCount > 0 -> true
+        backendWindowCount == 0 -> false
+        else -> false
+    }
+
     private fun remoteClientSessionEditors(
         project: com.intellij.openapi.project.Project,
         sessionDocumentPaths: Set<String>?,
     ): List<RemoteClientSessionEditors> {
+        val remoteManagers = project.getServices(ClientFileEditorManager::class.java, ClientKind.REMOTE)
+        if (remoteManagers.isEmpty()) return emptyList()
         val isSession = { file: VirtualFile ->
             sessionDocumentPaths?.contains(file.path) ?: AgentDocSessionFiles.isSessionDocument(file)
         }
@@ -802,8 +840,8 @@ object LayoutDetector {
             LOG.debug("[layout-detect] editor tracker unavailable: ${e.message}")
             emptySet()
         }
-        return project.getServices(ClientFileEditorManager::class.java, ClientKind.REMOTE)
-            .mapIndexedNotNull { index, manager ->
+        return remoteManagers
+            .mapIndexed { index, manager ->
                 try {
                     val visible = manager.getAllEditors()
                         .filter { fileEditor ->
@@ -823,7 +861,13 @@ object LayoutDetector {
                     RemoteClientSessionEditors(visible = visible, selected = selected, open = open)
                 } catch (e: Exception) {
                     LOG.warn("[layout-detect] remote client $index selection unavailable", e)
-                    null
+                    // Preserve the session's presence: an unreadable remote client still means an
+                    // incidental backend-local window is not authoritative for frontend layout.
+                    RemoteClientSessionEditors(
+                        visible = emptyList(),
+                        selected = emptyList(),
+                        open = emptyList(),
+                    )
                 }
             }
     }
@@ -949,9 +993,16 @@ object LayoutDetector {
         remoteSelections: List<List<String>>,
         visibleSelections: List<List<String>> = emptyList(),
         reason: String = "no_unique_client_split_set",
+        windowCount: Int = 0,
     ) {
         logLayoutObservation(
-            unknownRemoteLayoutLine(focusedSessionFiles, remoteSelections, visibleSelections, reason),
+            unknownRemoteLayoutLine(
+                focusedSessionFiles,
+                remoteSelections,
+                visibleSelections,
+                reason,
+                windowCount,
+            ),
         )
     }
 
@@ -960,12 +1011,13 @@ object LayoutDetector {
         remoteSelections: List<List<String>>,
         visibleSelections: List<List<String>> = emptyList(),
         reason: String = "no_unique_client_split_set",
+        windowCount: Int = 0,
     ): String {
         fun render(perClient: List<List<String>>) = perClient.mapIndexed { index, files ->
             "$index:[${files.joinToString(",").ifEmpty { "<none>" }}]"
         }.joinToString(" ")
         val visible = if (visibleSelections.isEmpty()) "" else "visible=[${render(visibleSelections)}] "
-        return "[layout-detect] unknown windows=0 source=remote_client_selected_files " +
+        return "[layout-detect] unknown windows=$windowCount source=remote_client_selected_files " +
             "focused=[${focusedSessionFiles.joinToString(",").ifEmpty { "<none>" }}] " +
             "remote_clients=${remoteSelections.size} selections=[${render(remoteSelections)}] " +
             visible +

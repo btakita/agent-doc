@@ -22429,23 +22429,54 @@ fn escalate_focus_to_structural_layout(
     } else {
         1
     };
-    if let Err(error) = publish_pane_layout_desired_invocation(
+    let previous_generation = runtime
+        .pane_layout_desired()
+        .map(|desired| desired.generation);
+    let publication = focus_escalation_publication(reason);
+    let published = publish_pane_layout_desired_invocation(
         bootstrap,
         runtime,
         invocation,
         None,
-        PaneLayoutPublication::CoalesceIdentical,
+        publication,
         PaneLayoutClaim::from(PaneLayoutPublisher::Escalation).asserting(asserted_columns),
-    ) {
-        agent_doc_ops_log_io::log_op(
-            &bootstrap.project_root,
-            &format!(
-                "controller_editor_surface_focus_escalation_failed document={document} reason={reason} error={error:#}"
-            ),
-        );
-        return false;
+    );
+    match published {
+        Ok((desired, _)) => {
+            if publication == PaneLayoutPublication::CoalesceIdentical
+                && previous_generation == Some(desired.generation)
+            {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap.project_root,
+                    &format!(
+                        "controller_editor_surface_focus_escalation_coalesced document={document} reason={reason} generation={}",
+                        desired.generation
+                    ),
+                );
+            }
+        }
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "controller_editor_surface_focus_escalation_failed document={document} reason={reason} error={error:#}"
+                ),
+            );
+            return false;
+        }
     }
     true
+}
+
+/// An outside-window focus failure requires a new effect even when the retained columns and focus
+/// are byte-identical: the effect must select the `agent-doc` tmux window. Other focus retries may
+/// coalesce once the same structural intent is already retained.
+fn focus_escalation_publication(reason: &str) -> PaneLayoutPublication {
+    if reason == "outside_agent_doc_window" {
+        PaneLayoutPublication::FreshIntent
+    } else {
+        PaneLayoutPublication::CoalesceIdentical
+    }
 }
 
 fn record_editor_surface_focus_outcome(
@@ -30553,7 +30584,7 @@ mod tests {
     /// keeps that label, so the unchanged layout coalesces rather than minting
     /// a new generation per tab switch.
     #[test]
-    fn a_retained_layout_escalation_keeps_its_order_label_and_coalesces() {
+    fn a_retained_layout_escalation_coalesces_but_outside_window_mints_an_effect() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = test_bootstrap(&dir);
@@ -30602,6 +30633,25 @@ mod tests {
             runtime.pane_layout_desired().unwrap().generation,
             first.generation,
             "an identical retained escalation must coalesce"
+        );
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("controller_editor_surface_focus_escalation_coalesced document=")
+                && ops_log.contains("reason=actor_pane_not_visible"),
+            "coalescing must be observable: {ops_log}"
+        );
+
+        escalate_focus_to_structural_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            &ad,
+            &[],
+            "outside_agent_doc_window",
+        );
+        assert!(
+            runtime.pane_layout_desired().unwrap().generation > first.generation,
+            "an identical outside-window escalation must mint a generation so the effect selects the agent-doc window"
         );
     }
 

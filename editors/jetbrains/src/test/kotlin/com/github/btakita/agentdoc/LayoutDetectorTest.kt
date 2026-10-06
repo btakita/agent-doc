@@ -54,6 +54,22 @@ class LayoutDetectorTest {
     }
 
     @Test
+    fun `remote client session evidence wins over a backend source window`() {
+        assertTrue(
+            LayoutDetector.shouldUseRemoteClientLayout(
+                backendWindowCount = 1,
+                remoteClientSessionCount = 1,
+            ),
+        )
+        assertFalse(
+            LayoutDetector.shouldUseRemoteClientLayout(
+                backendWindowCount = 1,
+                remoteClientSessionCount = 0,
+            ),
+        )
+    }
+
+    @Test
     fun `buildColumnsFromSnapshots keeps screen order when focused window is listed first`() {
         val columns = LayoutDetector.buildColumnsFromSnapshots(
             listOf(

@@ -221,6 +221,11 @@ legitimately supersedes a route's layout by plane version, and a later explicit
 focus or Sync Tmux Layout on the evicted document must bring its pane back
 rather than leave it stashed with no `select-pane` and no error. Only an empty
 retained layout still skips (`cause=no_editor_columns`).
+An `outside_agent_doc_window` refusal always publishes a fresh structural effect generation even
+when its columns, order, and focus are identical to the retained escalation: selecting the
+`agent-doc` tmux window is itself the missing consequence. Other identical escalation reasons may
+coalesce; that branch writes `controller_editor_surface_focus_escalation_coalesced` with the
+document, reason, and retained generation so an inert publication is diagnosable (GH #154).
 - Realising a column is audited after tmux-router runs (GH #109). A column pane
 that moved windows (a stash → layout promotion), runs another document, or
 whose route-owned supervisor maps a superseded binary gets one

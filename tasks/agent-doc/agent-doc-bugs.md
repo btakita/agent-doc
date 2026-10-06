@@ -19,6 +19,7 @@ presets:
   '#subagents': 'run the remaining items in subagents'
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: go
 ---
 
 ## Status
@@ -333,7 +334,54 @@ The release has three separate credential paths:
 - Passage contains a clean modern-format token, but neither failed publish injected it. There is no ambient `CARGO_REGISTRY_TOKEN` in this shell.
 
 So my earlier summary was too broad: crates.io rejected the GitHub secret and Cargo credential, not the Passage value. I did not mutate either secret or attempt a publish with the Passage token because this prompt asked for diagnosis. The release path needs to set the GitHub repository secret from Passage and explicitly export the Passage value for any local publish; the actual publish will then prove whether that token has `publish-update` scope.
-<!-- agent:boundary:a0cc31de -->
+> **Chat prompt (#chatprompt):** Have we published yet?
+
+> **Chat prompt (#chatprompt):** publish the release if not
+
+> **Chat prompt (#chatprompt):** fix in a subagent: • Blocked by hook
+>   └ agent-doc Stop hook kept an active `agent:queue auto` moving for /home/brian/work/btakita/agent-loop/src/haiven-
+> dev/tasks/sdk.md. The next queue prompt is "Does https://github.com/haiven-dev/haiven-sdk/pull/99 fix a 401 issue with
+> the gh action? Please explain what is being fixed.". Continue THIS turn in-pane: answer that prompt in /home/brian/
+> work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md and persist with `agent-doc finalize /home/brian/work/btakita/
+> agent-loop/src/haiven-dev/tasks/sdk.md` (or `agent-doc write --commit /home/brian/work/btakita/agent-loop/src/haiven-
+> dev/tasks/sdk.md`). Do NOT run `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md` from this
+> pane — that re-invokes the owner pane and hits the recursive-direct-invocation deadlock guard, and do not send the
+> final answer yet.
+
+> **Chat prompt (#chatprompt):** Fix queue items in subagents
+
+> **Chat prompt (#chatprompt):** Fix in a subagent: Run Agent Doc on docs.md: pane %87 composer already holds an unsubmitted draft that is not this trigger; injecting would concatenate the two into one line. Submit or clear that draft in the pane, then re-run the trigger.
+
+> **Chat prompt (#chatprompt):** is the release published?
+
+### Re: v0.35.469 publication and subagent queue results — gpt-5 · 2026-10-06T19:05:02-04:00
+
+Yes. agent-doc v0.35.469 is published from exact verified commit `cbeeac4bfeb17e020351a01be7db1cf2e4652637`.
+
+- [GitHub Release v0.35.469](https://github.com/btakita/agent-doc/releases/tag/v0.35.469) is live with all four native archives, VSIX 0.2.80, JetBrains 0.2.502, `SHA256SUMS`, and `EDITOR-PACKAGES.sha256`. The release workflow succeeded, including Homebrew.
+- [PyPI agent-doc 0.35.469](https://pypi.org/project/agent-doc/0.35.469/) is live; its publish-and-verify workflow succeeded.
+- The exact candidate passed the authoritative release gate before tagging: 9,598 Rust tests, 193 VS Code tests, JetBrains/native coverage, tmux CI, and the formal/non-vacuity models.
+- tmux-router v0.3.22 was published first to crates.io and GitHub. The rejected token was the stale GitHub repository secret, not the modern Passage value. I synchronized the GitHub secret from Passage; the resulting publish succeeded. No second local install or redundant rebuild was run.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/160
+
+The independent #160 audit found the functional fix complete in v0.35.469. It verified tmux-router v0.3.22 registry writes no longer prune document/transition state, stale claim cleanup is caller-attributed, and closed/paneless child reentry re-registers at the next generation. The focused agent-doc and tmux-router tests passed; no additional patch was needed.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/161
+
+The independent #161 audit found the fix complete in v0.35.469. Archived done IDs no longer consume reusable preset heads, dispatch is derived from settled post-maintenance authority, and the exact archived-preset/claim regression passes. The focused and full preflight-io tests passed. One unrelated command-suite deadline test passed when rerun alone; no additional patch was needed.
+
+GH #162 produced a tested isolated fix at `d522734a9` for active-head preservation and steering consistency. Because v0.35.469 had already crossed its verified release boundary, that commit was deliberately not added after the tag; the #162 queue item remains open for the next integration/release batch.
+
+> **Queue prompt:** release + publish
+
+Publication is complete. Both `main` and tag `v0.35.469` resolve to `cbeeac4bfeb17e020351a01be7db1cf2e4652637`; the GitHub Release and PyPI workflows are green and their public artifacts were independently verified.
+
+The requested cross-document subagent checks also completed safely:
+
+- The PR #99 explanation was already committed in `sdk.md`, so the worker did not duplicate it or force the live owner cycle. PR #99 fixes the GitHub Actions HTTP 422 native-stack base-change failure—not a 401—by preserving the direct PR base, using `stack.base.sha` as the logical patch boundary, rebasing exactly, and pushing with force-with-lease.
+- Pane `%87` had already submitted its valuable `docs.md` draft intact. The intended `do [#closeassociatedhaiven]` turn is active in the correct owner pane, so the worker correctly did not clear the composer, send duplicate keys, or re-inject the trigger.
+<!-- agent:boundary:4776da79 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -342,6 +390,10 @@ So my earlier summary was too broad: crates.io rejected the GitHub secret and Ca
 ## Pending / Not Built
 
 <!-- agent:queue preset="#subagents #spec-test-build-install-commit-push" priority go -->
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/160~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/161~~ — auto-struck: answered this cycle (#ftstrike)
+- #gh-fix https://github.com/btakita/agent-doc/issues/162
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 
@@ -352,7 +404,6 @@ So my earlier summary was too broad: crates.io rejected the GitHub secret and Ca
 ## Review
 
 <!-- agent:review -->
-- [/] [#release469] [release] Publish tmux-router 0.3.22, then release agent-doc v0.35.469 from integrate/gh160-161-20261006. Awaiting operator authorization to sync Passage btak/CARGO_REGISTRY_TOKEN into the btakita/tmux-router GitHub Actions secret and inject it explicitly for the local publish; the existing GitHub secret is an invalid revoked-format token and ~/.cargo/credentials.toml is a different token that returned 403.
 - [/] [#drivecapturedsplice] [operator-verify] Captured-splice stale-replica live proof (plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md). Recipe and regression test shipped in v0.35.466; live proof remains gated because the corrected run reached owner pane %134 but stopped before the retained-delivery marker, edit two, and verifier completion. Rerun the recipe through verify-captured-splice-recovery and require it to pass.
 - [/] [#qsubattr5] [agent-doc] Queue subagents attribute, phase 5 (plan: tasks/agent-doc/plan-queue-subagents-attribute.md). SETUP COMPLETE: tasks/software/tsift.md now has subagents=3 on branch qsubattr5-dogfood commit de5a8aa7c0d5e879547d4e321d159b1eff840073; gated pending the next real operator-created multi-head batch proof from distinct queue claims and ops.log that every eligible head dispatches exactly once and none drain inline.
 - [/] [#steergatemodelrerun] [agent-doc] Rerun the steergatenamo model evaluation on real pause points. Gate: at least 200 labelled steering_gate_log rows with a text_tail (66 as of 2026-10-06); src/agent-doc/scripts/steergate-model-eval --dataset currently exits insufficient_data. Then integrate turnsense locally (ONNX via ort, lazily downloaded, opt-in) only if rules+perceptron+turnsense beats rules+perceptron on held-out log-loss; if close but short, fine-tune on the logged rows. Proxy results and decision: tasks/agent-doc/eval-steergatenamo.md

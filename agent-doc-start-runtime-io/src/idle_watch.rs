@@ -54,6 +54,7 @@ const ZERO_REPLICA_IDLE_WATCH_BACKOFF: std::time::Duration = std::time::Duration
 /// Throttling keeps that quiet while still reclaiming an orphan well inside a
 /// minute of it becoming eligible.
 const RECYCLE_CYCLE_OPEN_RECLAIM_TICK_INTERVAL: u32 = 30;
+const REEXEC_DOCUMENT_VALIDATION_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// `#reclaimliveturn`: may the open-cycle recycle deferral try to reclaim the
 /// empty preflight on this tick?
@@ -100,6 +101,14 @@ fn log_reexec_child_refusal(
 
 fn supervisor_may_reclaim_empty_preflight(attempt_tick: bool, harness_turn_live: bool) -> bool {
     attempt_tick && !harness_turn_live
+}
+
+/// A same-child `execve` reentry reparses the editor-authoritative document
+/// before it can adopt the preserved harness. Refuse the irreversible process
+/// swap while that document is transiently malformed; the current supervisor
+/// can keep serving the child and retry after the editor converges.
+fn validate_supervisor_reexec_document(content: &str) -> Result<()> {
+    agent_doc_frontmatter::frontmatter::parse(content).map(|_| ())
 }
 
 /// `#supstaleopencycle`: the `harness_turn_live=` value for an open-cycle
@@ -1615,6 +1624,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut reexec_child_refusal_logged: Option<
                 agent_doc_controller::recycle::ReexecPreserveChildRefusal,
             > = None;
+            // A malformed editor buffer is a transient reentry blocker, not
+            // authority to replace the still-serving supervisor. Log once per
+            // blocked interval and retry after the document becomes valid.
+            let mut reexec_document_invalid_logged = false;
+            let mut reexec_document_validation_retry_at: Option<std::time::Instant> = None;
             // `#supautoinstall`: dogfood auto-install rung that PRECEDES the recycle rung.
             // When this supervisor hosts an agent-doc session editing agent-doc's OWN
             // source and a finalize committed an edit, build+install at the idle boundary
@@ -4149,7 +4163,51 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if let Some(refusal) = reexec_child_refusal {
                     log_reexec_child_refusal(&mut session_log, &path, &shared, "stale_recycle", refusal, &mut reexec_child_refusal_logged);
                 }
+                let mut reexec_document_ready = true;
                 if do_recycle && reexec_child_refusal.is_none() {
+                    if reexec_document_validation_retry_at.is_some_and(|retry_at| now < retry_at) {
+                        reexec_document_ready = false;
+                    } else {
+                        let validation =
+                            agent_doc_document_realtime_io::try_resolve_current_document_content(
+                                &path,
+                                "idle_watch_supervisor_reexec_preflight",
+                            )
+                            .and_then(|content| validate_supervisor_reexec_document(&content));
+                        match validation {
+                            Ok(()) => {
+                                reexec_document_invalid_logged = false;
+                                reexec_document_validation_retry_at = None;
+                            }
+                            Err(err) => {
+                                reexec_document_ready = false;
+                                reexec_document_validation_retry_at =
+                                    Some(now + REEXEC_DOCUMENT_VALIDATION_RETRY);
+                                if !reexec_document_invalid_logged {
+                                    reexec_document_invalid_logged = true;
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "supervisor_reexec_deferred reason=reentry_document_invalid action=continue_current_binary error={err:#}"
+                                        ),
+                                    );
+                                    agent_doc_ops_log_io::log_op(
+                                        &path,
+                                        &format!(
+                                            "supervisor_reexec_deferred file={} pane={} reason=reentry_document_invalid action=continue_current_binary error={err:#}",
+                                            path.display(),
+                                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                if do_recycle
+                    && reexec_child_refusal.is_none()
+                    && reexec_document_ready
+                {
                     // `#ctlrecycle` R3 — hot-reload onto the fresh binary IN PLACE via
                     // `execve`, preserving the live harness child + tmux pane. Falls
                     // back to a clean exit (child restarts) if the in-place swap cannot
@@ -5435,6 +5493,21 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_supervisor_reexec_refuses_transiently_unterminated_frontmatter() {
+        let content = "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n9---\nBody\n";
+        let error = validate_supervisor_reexec_document(content).unwrap_err();
+
+        assert_eq!(format!("{error:#}"), "Unterminated frontmatter block");
+    }
+
+    #[test]
+    fn stale_supervisor_reexec_allows_valid_frontmatter() {
+        let content = "---\nagent_doc_session: session-api\nagent: codex\nqueue: go\n---\nBody\n";
+
+        validate_supervisor_reexec_document(content).unwrap();
+    }
 
     /// GH #98: foreground start owns the managed pane's tty. Diagnostics from
     /// idle watch belong in the structured event log, never that stderr stream.

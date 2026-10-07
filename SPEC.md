@@ -60,6 +60,18 @@
   re-provisions it on demand, so resurrecting it only undoes the kill. An
   unresolvable window fails closed. The skip is logged once per document and
   dead pid as `controller_supervisor_watchdog_skip reason=binding_not_live`.
+- A dead-supervisor cold start has no live process that can accept replacement
+  work. Its controller receipt therefore remains pending until the
+  editor-authoritative document validates and the successor start command is
+  submitted. A malformed live document or other cold-start failure returns a
+  synchronous failed replacement receipt; it must never appear first as an
+  accepted restart followed only by `background_failed`.
+- A stale supervisor must validate the editor-authoritative frontmatter before
+  replacing itself with a same-child `execve`. Transiently malformed document
+  text defers the hot reload while the current supervisor continues serving the
+  live harness; bounded retries may reload after the document becomes valid. It
+  must not strand the preserved child at a bare shell by failing during reentry
+  or poll editor authority on every idle-watch tick while the text stays invalid.
 - A deliberately terminated supervisor is not a crash (`#gh133sigterm`, GH #133
   follow-up). The supervisor's `SIGTERM` handler (and a requested self-kill)
   records a durable `supervisor_intentional_exit` marker in `state.db` naming its

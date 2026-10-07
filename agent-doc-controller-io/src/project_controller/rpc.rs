@@ -28608,6 +28608,27 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
     }
 }
 
+/// Finish a deferred replacement admission with the authoritative cold-start
+/// result. A dead supervisor has accepted nothing, so its replacement receipt
+/// cannot become successful until the controller has actually submitted the
+/// successor start command.
+fn complete_deferred_supervisor_replacement_admission<T>(
+    admission_sender: &std::sync::mpsc::SyncSender<Result<(), String>>,
+    result: Result<T>,
+) -> Result<T> {
+    match result {
+        Ok(value) => {
+            let _ = admission_sender.send(Ok(()));
+            Ok(value)
+        }
+        Err(err) => {
+            let message = format!("{err:#}");
+            let _ = admission_sender.send(Err(message));
+            Err(err)
+        }
+    }
+}
+
 #[cfg(not(any(test, feature = "test-support")))]
 fn drive_supervisor_replacement_background(
     work: SupervisorReplacementWork,
@@ -28643,11 +28664,13 @@ fn drive_supervisor_replacement_background(
             SupervisorReplacementIpcOutcome::ResponseTimedOut
         }
     };
-    match decide_supervisor_replacement_escalation(SupervisorReplacementEscalationFacts {
-        ipc_outcome,
-        force: work.force,
-        initial_host_stale,
-    }) {
+    let defer_admission_until_cold_start = match decide_supervisor_replacement_escalation(
+        SupervisorReplacementEscalationFacts {
+            ipc_outcome,
+            force: work.force,
+            initial_host_stale,
+        },
+    ) {
         SupervisorReplacementEscalation::AwaitAcceptedInPlace => {
             // The live supervisor owns the accepted request. A stale binary
             // deliberately waits for the active turn to drain before execve;
@@ -28689,10 +28712,12 @@ fn drive_supervisor_replacement_background(
                 );
                 return Ok(());
             }
+            false
         }
-        SupervisorReplacementEscalation::EscalateColdStart => {
-            let _ = admission_sender.send(Ok(()));
-        }
+        // No live supervisor accepted this request. Keep the foreground receipt
+        // pending until the replacement has passed editor-authoritative
+        // validation and its start command has actually been submitted.
+        SupervisorReplacementEscalation::EscalateColdStart => true,
         SupervisorReplacementEscalation::FailClosed => {
             let message = format!(
                 "live supervisor rejected the replacement request for {} and no force/stale-host evidence authorizes a destructive cold start",
@@ -28701,7 +28726,7 @@ fn drive_supervisor_replacement_background(
             let _ = admission_sender.send(Err(message.clone()));
             anyhow::bail!(message);
         }
-    }
+    };
 
     agent_doc_ops_log_io::log_op(
         &work.file,
@@ -28734,7 +28759,12 @@ fn drive_supervisor_replacement_background(
     // supervisor's SIGTERM handler (or self-kill) recorded, so a failed cold
     // start below still leaves the crash watchdog able to recover it.
     clear_replacement_intentional_exit(&work);
-    let pane = cold_start_supervisor_replacement(&work)?;
+    let cold_start_result = cold_start_supervisor_replacement(&work);
+    let pane = if defer_admission_until_cold_start {
+        complete_deferred_supervisor_replacement_admission(&admission_sender, cold_start_result)?
+    } else {
+        cold_start_result?
+    };
     agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(
@@ -39399,6 +39429,36 @@ mod tests {
             ops_log.contains("controller_supervisor_replacement_background_stub"),
             "test background stub marker missing:\n{ops_log}"
         );
+    }
+
+    #[test]
+    fn dead_supervisor_cold_start_failure_reaches_admission_caller() {
+        let (admission_sender, admission_receiver) = std::sync::mpsc::sync_channel(1);
+        let result = complete_deferred_supervisor_replacement_admission::<()>(
+            &admission_sender,
+            Err(anyhow::anyhow!("Unterminated frontmatter block")),
+        );
+
+        assert!(result.is_err());
+        let admission = admission_receiver.recv().unwrap();
+        assert_eq!(
+            admission.unwrap_err(),
+            "Unterminated frontmatter block",
+            "a failed dead-supervisor cold start must not publish false acceptance"
+        );
+    }
+
+    #[test]
+    fn dead_supervisor_cold_start_success_completes_admission() {
+        let (admission_sender, admission_receiver) = std::sync::mpsc::sync_channel(1);
+        let pane = complete_deferred_supervisor_replacement_admission(
+            &admission_sender,
+            Ok("%19".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(pane, "%19");
+        assert_eq!(admission_receiver.recv().unwrap(), Ok(()));
     }
 
     /// A plain controller recycle: no operator "Restart Agent" intent attached.

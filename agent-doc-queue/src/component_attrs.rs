@@ -58,12 +58,10 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                         component.name
                     ));
                 } else if crate::subagent_intent::is_queue_subagents_attr(key)
-                    && let Err(reason) =
-                        crate::subagent_intent::parse_queue_subagents_value(value)
+                    && let Err(reason) = crate::subagent_intent::parse_queue_subagents_value(value)
                 {
                     issues.push(format!(
-                        "`{key}={value}` on `agent:queue`: {reason} (use a bare `{key}` for the default cap of {})",
-                        crate::subagent_intent::DEFAULT_QUEUE_SUBAGENTS_CAP
+                        "`{key}={value}` on `agent:queue`: {reason} (use a bare `{key}` to dispatch every eligible head)"
                     ));
                 }
             } else if key == "queue" && matches!(component.name.as_str(), "backlog" | "pending") {
@@ -262,9 +260,12 @@ mod tests {
             );
         }
         let bad = "<!-- agent:queue subagents=0 -->\n- do [#a]\n<!-- /agent:queue -->\n";
-        let body = component_attr_warning(bad).expect("zero cap warns").message_body();
+        let body = component_attr_warning(bad)
+            .expect("zero cap warns")
+            .message_body();
         assert!(body.contains("subagents=0"), "{body}");
         assert!(body.contains("positive concurrency cap"), "{body}");
+        assert!(body.contains("every eligible head"), "{body}");
 
         let misplaced = "<!-- agent:backlog fan-out -->\n- [ ] [#a] x\n<!-- /agent:backlog -->\n";
         let body = component_attr_warning(misplaced)

@@ -100,8 +100,9 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
 
 /// The queue-level subagents attribute (`<!-- agent:queue subagents=N -->`)
 /// planned over the current queue against the raw claim ledger: which heads
-/// to dispatch now and which to hold (cap full, or an `after=` predecessor
-/// still queued). `None` when the attribute is absent or invalid.
+/// to dispatch now and which to hold (an explicit `=N` cap is full, or an
+/// `after=` predecessor is still queued). A bare attribute dispatches every
+/// eligible head. `None` when the attribute is absent or invalid.
 pub fn queue_attr_subagent_plan(
     file: &Path,
     content: &str,
@@ -417,5 +418,36 @@ mod tests {
             1,
             "only the [inline] head is drainable in the session"
         );
+    }
+
+    #[test]
+    fn bare_queue_attr_dispatches_all_eligible_heads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = attr_doc(
+            "subagents",
+            &[
+                "do [#a]",
+                "do [#b]",
+                "do [#c] [inline]",
+                "do [#d]",
+                "do [#e]",
+            ],
+        );
+        std::fs::write(&file, &content).unwrap();
+
+        let expected = vec![
+            "do [#a]".to_string(),
+            "do [#b]".to_string(),
+            "do [#d]".to_string(),
+            "do [#e]".to_string(),
+        ];
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            expected
+        );
+        let plan = queue_attr_subagent_plan(&file, &content).unwrap();
+        assert!(plan.held.is_empty(), "a bare attr has no capacity hold");
     }
 }

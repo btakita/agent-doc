@@ -629,6 +629,12 @@ without structural provenance retain the operator-owned protection.
   for that closeout owner. Sync may displace unrelated unwanted visible panes
   and may stash the open-cycle pane; blocking a different document's sync is
   not acceptable.
+- Stale-supervisor admission is atomic for safe-passive exact-visible layout.
+  If its gate removes any requested editor column, `sync --no-autostart`
+  preserves the current tmux layout rather than reconciling the non-stale
+  subset. The recycle-settled generation republishes the complete projection.
+  Full/manual sync may still realize a non-empty admitted remainder for
+  operator repair; if no requested columns remain, every mode preserves.
 - Test coverage for those pure ownership/cardinality decisions should live in
   deterministic `SimWorld` traces. Keep real tmux coverage only for the
   minimal smoke surface that proves pane/window movement, tmux-router detach,

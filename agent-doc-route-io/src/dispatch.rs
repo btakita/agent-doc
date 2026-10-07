@@ -1253,8 +1253,7 @@ pub struct DirectPaneDispatchOptions {
 mod tests {
     use super::*;
 
-    const TRIGGER: &str =
-        "/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md";
+    const TRIGGER: &str = "/agent-doc /workspace/sample-app/tasks/docs.md";
 
     fn claude_pane(prompt: &str) -> String {
         format!(
@@ -1262,7 +1261,7 @@ mod tests {
              ────────\n\
              {prompt}\n\
              ────────\n\
-               Fable 5.1 ctx:16% ~/src/haiven-dev main brian@host\n\
+               Sample 5.1 ctx:16% ~/src/sample-app main user@host\n\
                ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
         )
     }
@@ -1272,7 +1271,7 @@ mod tests {
         let harness = HarnessConfig::claude();
         let pane = claude_pane(&format!(
             "\x1b[39m❯\u{a0}\x1b[2m/agent-doc\x1b[0m \x1b[2m{}\x1b[0m",
-            "/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md"
+            "/workspace/sample-app/tasks/docs.md"
         ));
 
         assert_eq!(

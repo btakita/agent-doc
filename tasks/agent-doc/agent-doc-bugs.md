@@ -351,6 +351,14 @@ Verification and delivery are complete:
 - The final `make check` passed with no failures (`tart-dab74fac69`), including 9,641 tests, closeout/session simulations, editor parity, and TLA+.
 - The commits are pushed through `8d8b7480a` and installed locally as CLI/native `0.35.475`; the live editor endpoint deferred its native handoff until this safe cycle boundary.
 - Book and Pages checks are green; CI was still in progress at the required one-shot observation.
+
+### Re: release and publish status — gpt-6.1-sol · 2026-10-07T16:02:18-04:00
+
+> **Chat prompt (#chatprompt):** have we released + published?
+
+Yes for `v0.35.475`: it was published as a non-draft, non-prerelease GitHub Release on 2026-10-07 with the native archives, editor packages, and checksum assets, and PyPI currently reports `agent-doc 0.35.475` uploaded moments later.
+
+However, that release tag resolves to `f374e3f7d`. The subsequent fixes—including GH #174–#177, the layout/reopen/backlog changes, bare-subagent lint/replay repair, and the late selected preset closeout fix—are pushed to public `main` through `8d8b7480a` and installed locally, but have **not** been published in a newer tagged release or PyPI version.
 <!-- agent:boundary:d2a9ba1d -->
 <!-- /agent:exchange -->
 

@@ -16,6 +16,7 @@ agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.475
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.475" }
 agent-doc-element-registry = { path = "../agent-doc-element-registry", version = "0.35.475" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.475" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.475" }
 anyhow = "1"
 tagpath = { version = "0.12.3", default-features = false }
 

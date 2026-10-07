@@ -944,6 +944,60 @@ Duplicate replay should stay live.
     }
 
     #[test]
+    fn replay_canonicalization_commit_preserves_a_concurrent_operator_cut() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "### Re: retained topic — gpt-5\n\nRetained response.\n\n",
+            "### Re: intervening topic — gpt-5\n\nIntervening response.\n\n",
+            "### Re: retained topic — gpt-5\n\n",
+            "### Re: latest topic — gpt-5\n\nLatest response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue preset=\"#build\" priority go -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let repaired =
+            agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(
+                duplicated,
+            )
+            .expect("fixture must be a losslessly repairable replay");
+        th::commit_file(root, "session.md", duplicated, "add replayed session");
+        let doc = root.join("session.md");
+        let operator_cut = repaired.replace("preset=\"#build\"", "preset=\"#verify\"");
+        fs::write(&doc, &operator_cut).unwrap();
+
+        assert!(
+            commit_proven_response_replay_canonicalization(&doc)
+                .expect("the narrow repair commit must not absorb or reject a concurrent edit")
+        );
+
+        let session_head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&session_head.stdout), repaired);
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            operator_cut,
+            "the operator cut remains in the worktree for its own cycle"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
+            Some(repaired.as_str()),
+            "the committed repair, not the concurrent edit, becomes the baseline"
+        );
+    }
+
+    #[test]
     fn reposition_boundary_to_end_basic() {
         let content = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc123 -->\nUser prompt.\n<!-- /agent:exchange -->\n";
         let result = agent_doc_template::reposition_boundary_to_end(content);

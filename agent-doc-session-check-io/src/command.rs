@@ -2723,7 +2723,11 @@ fn response_replay_canonicalization_pending_commit(file: &Path) -> Result<bool> 
             &head,
             "session_check_response_replay_commit_proof_head",
         )?;
-    Ok(normalized.as_deref() == Some(current.as_str()))
+    // The commit boundary stages only this independently proven HEAD repair.
+    // Current authority may also contain a concurrent operator cut; requiring
+    // byte equality here would strand the safe repair after a process restart
+    // even though committing it cannot absorb or overwrite that operator work.
+    Ok(normalized.is_some_and(|candidate| candidate != head))
 }
 
 fn validate_integrity_after_captured_resume(
@@ -4885,6 +4889,65 @@ mod terminal_convergence_tests {
             .unwrap();
         assert!(repaired_commit.status.success());
         assert!(!response_replay_canonicalization_pending_commit(&file).unwrap());
+    }
+
+    #[test]
+    fn replay_commit_boundary_survives_a_concurrent_operator_cut() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "### Re: retained topic — gpt-5\n\nRetained response.\n\n",
+            "### Re: intervening topic — gpt-5\n\nIntervening response.\n\n",
+            "### Re: retained topic — gpt-5\n\n",
+            "### Re: latest topic — gpt-5\n\nLatest response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue preset=\"#build\" priority go -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let repaired =
+            agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(
+                duplicated,
+            )
+            .unwrap();
+        std::fs::write(&file, duplicated).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        let initial_commit = Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "replayed closeout", "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(initial_commit.status.success());
+        let operator_cut = repaired.replace("preset=\"#build\"", "preset=\"#verify\"");
+        std::fs::write(&file, operator_cut).unwrap();
+
+        assert!(
+            response_replay_canonicalization_pending_commit(&file).unwrap(),
+            "canonical HEAD repair remains pending even when current also has operator work"
+        );
     }
 
     #[test]

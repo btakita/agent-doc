@@ -1371,8 +1371,9 @@ pub fn commit_for_authority(file: &Path, force_disk: bool) -> Result<bool> {
 /// `session-check` already proved and projected through document authority.
 ///
 /// This path is intentionally narrower than the normal cycle commit:
-/// - `HEAD` must normalize through the lossless replay repair to the exact
-///   current authority/disk bytes;
+/// - `HEAD` must normalize through the lossless replay repair; concurrent
+///   operator bytes in current authority/disk are preserved outside that
+///   narrow commit instead of being mistaken for part of the repair;
 /// - the private-index transaction commits only the session document and
 ///   preserves every unrelated staged entry;
 /// - authority, disk, and `HEAD` are re-proven before the repaired baseline is
@@ -1440,22 +1441,34 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
             &head,
             "commit_response_replay_canonicalization_head",
         )?;
+    let normalized_head = normalized_head.ok_or_else(|| {
+        anyhow::anyhow!(
+            "refusing response-replay repair commit for {}: HEAD has no losslessly canonicalizable response replay",
+            file.display()
+        )
+    })?;
     anyhow::ensure!(
-        normalized_head.as_deref() == Some(authority.as_str()),
-        "refusing response-replay repair commit for {}: current bytes are not the exact lossless canonicalization of HEAD",
+        normalized_head != head,
+        "refusing response-replay repair commit for {}: HEAD replay normalization is a no-op",
         file.display()
     );
     let commit_surface =
-        agent_doc_git_io::transaction::normalize_session_document_content(&authority);
+        agent_doc_git_io::transaction::normalize_session_document_content(&normalized_head);
     anyhow::ensure!(
-        commit_surface == authority,
-        "refusing response-replay repair commit for {}: current bytes still contain transient commit artifacts",
+        commit_surface == normalized_head,
+        "refusing response-replay repair commit for {}: canonical HEAD repair still contains transient commit artifacts",
         file.display()
     );
 
     let mut attempts = 0u32;
     let commit_output = loop {
-        match stage_and_commit_exact_paths_once(&git_root, &resolved, Some(&authority), &[], &msg) {
+        match stage_and_commit_exact_paths_once(
+            &git_root,
+            &resolved,
+            Some(&normalized_head),
+            &[],
+            &msg,
+        ) {
             Ok(output) => break output,
             Err(CommitTransactionError::RetryableIndexLock { phase, detail }) if attempts < 3 => {
                 attempts += 1;
@@ -1510,14 +1523,14 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
     anyhow::ensure!(
         post_authority == authority
             && post_disk == authority
-            && post_head.as_deref() == Some(authority.as_str()),
-        "response-replay repair commit for {} did not retain exact authority/disk/HEAD convergence",
+            && post_head.as_deref() == Some(normalized_head.as_str()),
+        "response-replay repair commit for {} did not preserve authority/disk while committing the exact canonical HEAD repair",
         file.display()
     );
 
     agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
-        &authority,
+        &normalized_head,
         agent_doc_ops_log_io::log_op,
     )?;
     if in_submodule {
@@ -1526,8 +1539,9 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "response_replay_canonicalization_commit_settled file={} did_commit=true proof=head_normalizes_to_current",
-            file.display()
+            "response_replay_canonicalization_commit_settled file={} did_commit=true proof=head_lossless_canonicalization authority_preserved={}",
+            file.display(),
+            authority != normalized_head,
         ),
     );
     Ok(true)

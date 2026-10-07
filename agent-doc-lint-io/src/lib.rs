@@ -500,8 +500,31 @@ fn validate_boundary_markers(file: &Path, content: &str) -> Result<()> {
 fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec<LintFinding> {
     findings
         .into_iter()
-        .filter(|finding| !is_registry_known_unknown_component_finding(finding))
+        .filter(|finding| {
+            !is_registry_known_unknown_component_finding(finding)
+                && !is_queue_subagents_bare_flag_finding(finding)
+        })
         .collect()
+}
+
+/// Tagpath's generic attribute grammar predates the queue scheduler's
+/// `subagents`/`fan-out` flags. Reconcile that external finding at the adapter
+/// boundary through the queue domain's vocabulary; do not broadly forgive
+/// bare attributes, because value-bearing attributes still fail closed.
+fn is_queue_subagents_bare_flag_finding(finding: &LintFinding) -> bool {
+    if finding.rule != "agent-doc/malformed-attr" {
+        return false;
+    }
+    let mut quoted = finding.message.split('`');
+    let Some(attribute) = quoted.nth(1) else {
+        return false;
+    };
+    let Some(component) = quoted.nth(1) else {
+        return false;
+    };
+    component == "agent:queue"
+        && agent_doc_queue::subagent_intent::is_queue_subagents_attr(attribute)
+        && agent_doc_queue::subagent_intent::parse_queue_subagents_value("").is_ok()
 }
 
 fn is_registry_known_unknown_component_finding(finding: &LintFinding) -> bool {
@@ -942,6 +965,44 @@ operator-owned scratch state\n\
             "expected malformed-attr rule in error, got: {msg}"
         );
         assert!(msg.contains("INTERRUPTED"), "expected INTERRUPTED prefix");
+    }
+
+    #[test]
+    fn queue_subagent_capacity_flags_are_valid_bare_attributes() {
+        let dir = TempDir::new().unwrap();
+        for attribute in ["subagents", "fan-out"] {
+            let doc = format!(
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue {attribute} preset=\"#build\" priority go -->\n\
+                 - do [#a]\n\
+                 <!-- /agent:queue -->\n"
+            );
+            let file = write_doc(&dir, &format!("{attribute}.md"), &doc);
+            run(&file, None).unwrap_or_else(|error| {
+                panic!("bare queue flag `{attribute}` must pass lint: {error:#}")
+            });
+        }
+    }
+
+    #[test]
+    fn queue_attributes_that_require_values_still_fail_closed() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange -->\n\
+            prompt\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:queue preset priority go -->\n\
+            - do [#a]\n\
+            <!-- /agent:queue -->\n";
+        let file = write_doc(&dir, "missing-preset-value.md", doc);
+        let error = run(&file, None).expect_err("bare preset must remain invalid");
+        let message = format!("{error:#}");
+        assert!(message.contains("agent-doc/malformed-attr"), "{message}");
+        assert!(message.contains("attribute `preset`"), "{message}");
+        assert!(message.contains("missing `=value`"), "{message}");
     }
 
     #[test]
